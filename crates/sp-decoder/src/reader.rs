@@ -105,10 +105,10 @@ impl MediaReader {
                 .ReadSample(
                     VIDEO_STREAM,
                     0,
-                    &mut actual_stream_index,
-                    &mut flags,
-                    &mut timestamp_100ns,
-                    &mut sample,
+                    Some(&mut actual_stream_index as *mut _),
+                    Some(&mut flags as *mut _),
+                    Some(&mut timestamp_100ns as *mut _),
+                    Some(&mut sample as *mut _),
                 )
                 .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
         }
@@ -158,10 +158,10 @@ impl MediaReader {
                 .ReadSample(
                     AUDIO_STREAM,
                     0,
-                    &mut actual_stream_index,
-                    &mut flags,
-                    &mut timestamp_100ns,
-                    &mut sample,
+                    Some(&mut actual_stream_index as *mut _),
+                    Some(&mut flags as *mut _),
+                    Some(&mut timestamp_100ns as *mut _),
+                    Some(&mut sample as *mut _),
                 )
                 .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
         }
