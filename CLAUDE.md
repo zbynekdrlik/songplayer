@@ -1,3 +1,4 @@
+<!-- Global rules inherited from ~/.claude/CLAUDE.md (managed by airuleset) -->
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
@@ -80,15 +81,7 @@ cd src-tauri && cargo tauri build
 
 ## Branch Strategy
 
-- `dev` — all development work happens here
-- `main` — releases only; never commit directly to main
-- Create PR from `dev` to `main` when ready to release
-- After merge: delete dev, recreate as `dev` with next `-dev.N` version
-
-**CRITICAL for Claude:**
-- NEVER commit or push directly to `main`
-- NEVER merge PRs — only the user merges PRs
-- Always work on `dev` and create a PR for user review
+Two branches: `dev` + `main`. After merge: recreate `dev` with next `-dev.N` version.
 
 ## Version Management
 
