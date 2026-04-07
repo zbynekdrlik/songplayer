@@ -17,11 +17,20 @@ use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
 use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast, mpsc};
-use tracing::info;
+use tracing::{info, warn};
+
+use crate::downloader::tools::ToolPaths;
 
 // ---------------------------------------------------------------------------
 // Shared application state
 // ---------------------------------------------------------------------------
+
+/// A request to sync a playlist with its YouTube source.
+#[derive(Debug, Clone)]
+pub struct SyncRequest {
+    pub playlist_id: i64,
+    pub youtube_url: String,
+}
 
 /// Shared state passed to all Axum handlers and background workers.
 #[derive(Clone)]
@@ -31,6 +40,8 @@ pub struct AppState {
     pub engine_tx: mpsc::Sender<EngineCommand>,
     pub obs_state: Arc<RwLock<obs::ObsState>>,
     pub tools_status: Arc<RwLock<ToolsStatus>>,
+    pub tool_paths: Arc<RwLock<Option<ToolPaths>>>,
+    pub sync_tx: mpsc::Sender<SyncRequest>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -93,13 +104,13 @@ impl Default for ServerConfig {
 /// Orchestrates all subsystems:
 /// 1. SQLite pool + migrations
 /// 2. Broadcast channels for events
-/// 3. Tools manager (yt-dlp + FFmpeg)
-/// 4. Download worker
-/// 5. Reprocess worker
-/// 6. OBS WebSocket client
-/// 7. Resolume workers
-/// 8. Playback engine
-/// 9. Axum HTTP server
+/// 3. Shared state (incl. tool_paths + sync channel)
+/// 4. Tools manager (yt-dlp + FFmpeg)
+/// 5. Sync handler (playlist sync worker)
+/// 6. Reprocess worker
+/// 7. Engine command consumer
+/// 8. Axum HTTP server
+/// 9. Shutdown signal
 pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -117,6 +128,8 @@ pub async fn start(
     // 3. Shared state
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
     let tools_status = Arc::new(RwLock::new(ToolsStatus::default()));
+    let tool_paths: Arc<RwLock<Option<ToolPaths>>> = Arc::new(RwLock::new(None));
+    let (sync_tx, mut sync_rx) = mpsc::channel::<SyncRequest>(64);
 
     let state = AppState {
         pool: pool.clone(),
@@ -124,6 +137,8 @@ pub async fn start(
         engine_tx: engine_tx.clone(),
         obs_state: obs_state.clone(),
         tools_status: tools_status.clone(),
+        tool_paths: tool_paths.clone(),
+        sync_tx: sync_tx.clone(),
     };
 
     // 4. Tools manager
@@ -132,6 +147,7 @@ pub async fn start(
 
     let tools_status_clone = tools_status.clone();
     let tools_event_tx = event_tx.clone();
+    let tool_paths_clone = tool_paths.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -145,6 +161,8 @@ pub async fn start(
                     ffmpeg_available: true,
                     ytdlp_version: version,
                 });
+                // Store resolved tool paths for sync workers.
+                *tool_paths_clone.write().await = Some(paths);
                 info!("tools ready: yt-dlp and FFmpeg available");
             }
             Err(e) => {
@@ -153,7 +171,39 @@ pub async fn start(
         }
     });
 
-    // 5. Reprocess worker
+    // 5. Sync handler — receives SyncRequests and calls playlist::sync_playlist
+    let sync_pool = pool.clone();
+    let sync_tool_paths = tool_paths.clone();
+    tokio::spawn(async move {
+        while let Some(req) = sync_rx.recv().await {
+            let paths = sync_tool_paths.read().await;
+            let Some(ref tp) = *paths else {
+                warn!(
+                    playlist_id = req.playlist_id,
+                    "sync request received but tools not yet available, dropping"
+                );
+                continue;
+            };
+            let ytdlp = tp.ytdlp.clone();
+            drop(paths); // release read lock before awaiting sync
+
+            match playlist::sync_playlist(&sync_pool, req.playlist_id, &req.youtube_url, &ytdlp)
+                .await
+            {
+                Ok(new_count) => {
+                    info!(
+                        playlist_id = req.playlist_id,
+                        new_count, "playlist sync complete"
+                    );
+                }
+                Err(e) => {
+                    warn!(playlist_id = req.playlist_id, "playlist sync failed: {e}");
+                }
+            }
+        }
+    });
+
+    // 6. Reprocess worker
     let reprocess_providers: Arc<Vec<Box<dyn metadata::MetadataProvider>>> = Arc::new(vec![]);
     let reprocess_worker = reprocess::ReprocessWorker::new(
         pool.clone(),
@@ -162,7 +212,7 @@ pub async fn start(
     );
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
-    // 6. Engine command consumer (bridges API commands to the engine)
+    // 7. Engine command consumer (bridges API commands to the engine)
     let engine_event_tx = event_tx.clone();
     tokio::spawn(async move {
         while let Some(cmd) = engine_rx.recv().await {
@@ -192,7 +242,7 @@ pub async fn start(
         }
     });
 
-    // 7. Axum HTTP server
+    // 8. Axum HTTP server
     let router = api::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(port = config.port, "HTTP server listening");
@@ -205,7 +255,7 @@ pub async fn start(
         })
         .await?;
 
-    // 8. Signal all workers to stop
+    // 9. Signal all workers to stop
     let _ = shutdown_tx.send(());
     info!("server stopped");
 
@@ -262,12 +312,16 @@ mod tests {
         let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
         let tools_status = Arc::new(RwLock::new(ToolsStatus::default()));
 
+        let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
+
         let state = AppState {
             pool,
             event_tx,
             engine_tx,
             obs_state,
             tools_status,
+            tool_paths: Arc::new(RwLock::new(None)),
+            sync_tx,
         };
 
         // Verify the router can be built.
@@ -282,12 +336,16 @@ mod tests {
         let (event_tx, _) = broadcast::channel::<ServerMsg>(16);
         let (engine_tx, _) = mpsc::channel::<EngineCommand>(16);
 
+        let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
+
         let state = AppState {
             pool,
             event_tx,
             engine_tx,
             obs_state: Arc::new(RwLock::new(obs::ObsState::default())),
             tools_status: Arc::new(RwLock::new(ToolsStatus::default())),
+            tool_paths: Arc::new(RwLock::new(None)),
+            sync_tx,
         };
 
         // Verify clone works.

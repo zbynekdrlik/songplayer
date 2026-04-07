@@ -10,7 +10,7 @@ use tracing::warn;
 
 use sp_core::playback::PlaybackMode;
 
-use crate::{AppState, EngineCommand};
+use crate::{AppState, EngineCommand, SyncRequest};
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -283,14 +283,23 @@ pub async fn sync_playlist(
         .await;
 
     match row {
-        Ok(Some(_row)) => {
-            // Playlist sync would be triggered via a channel to the playlist sync worker.
-            // For now, return accepted.
-            (
-                StatusCode::ACCEPTED,
-                Json(serde_json::json!({"message": "sync queued"})),
-            )
-                .into_response()
+        Ok(Some(row)) => {
+            let youtube_url: String = row.get("youtube_url");
+            let req = SyncRequest {
+                playlist_id: id,
+                youtube_url,
+            };
+            match state.sync_tx.send(req).await {
+                Ok(_) => (
+                    StatusCode::ACCEPTED,
+                    Json(serde_json::json!({"message": "sync queued"})),
+                )
+                    .into_response(),
+                Err(e) => {
+                    warn!("failed to queue sync for playlist {id}: {e}");
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
         }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
@@ -535,12 +544,15 @@ mod tests {
         db::run_migrations(&pool).await.unwrap();
         let (event_tx, _) = broadcast::channel(16);
         let (engine_tx, _) = mpsc::channel(16);
+        let (sync_tx, _) = mpsc::channel(16);
         AppState {
             pool,
             event_tx,
             engine_tx,
             obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
             tools_status: Arc::new(RwLock::new(crate::ToolsStatus::default())),
+            tool_paths: Arc::new(RwLock::new(None)),
+            sync_tx,
         }
     }
 
