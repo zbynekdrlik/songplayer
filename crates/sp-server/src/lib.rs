@@ -257,7 +257,6 @@ pub async fn start(
         .unwrap_or_default();
     let gemini_model = db::models::get_setting(&pool, "gemini_model")
         .await?
-        .unwrap_or_else(|_| Some("gemini-2.0-flash".to_string()))
         .unwrap_or_else(|| "gemini-2.0-flash".to_string());
     let mut reprocess_provider_list: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
     if !gemini_key.is_empty() {
@@ -298,13 +297,13 @@ pub async fn start(
                 Some(cmd) = engine_rx.recv() => {
                     match cmd {
                         EngineCommand::Play { playlist_id } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::UserPlay).await;
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOn).await;
                         }
                         EngineCommand::Pause { playlist_id } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::UserPause).await;
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOff).await;
                         }
                         EngineCommand::Skip { playlist_id } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::UserSkip).await;
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::Skip).await;
                         }
                         EngineCommand::SetMode { playlist_id, mode } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
