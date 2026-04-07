@@ -1732,7 +1732,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.1.0-dev.1"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.1.0-dev.1"
+version = "0.1.0"
 dependencies = [
  "thiserror",
  "tracing",
@@ -1750,7 +1750,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.1.0-dev.1"
+version = "0.1.0"
 dependencies = [
  "libloading",
  "thiserror",
@@ -1759,7 +1759,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.1.0-dev.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
