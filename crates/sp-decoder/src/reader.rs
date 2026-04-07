@@ -8,12 +8,13 @@ use crate::error::DecoderError;
 use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
 
 use windows::Win32::Media::MediaFoundation::{
-    IMFMediaBuffer, IMFMediaType, IMFSourceReader, MF_API_VERSION, MF_MT_ALL_SAMPLES_INDEPENDENT,
-    MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
-    MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
-    MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video,
-    MFSTARTUP_NOSOCKET, MFStartup, MFVideoFormat_RGB32,
+    IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
+    MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS,
+    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+    MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float, MFCreateMediaType,
+    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
+    MFStartup, MFVideoFormat_RGB32,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
@@ -72,24 +73,15 @@ impl MediaReader {
                 .map_err(|_| DecoderError::NoStream("audio"))?;
         }
 
-        // Estimate duration by reading the first video frame's metadata.
-        // We skip PROPVARIANT-based GetPresentationAttribute to avoid
-        // complex COM union handling that varies across windows crate versions.
-        // Duration will be discovered during playback from the stream itself.
-        let duration_ms = 0;
-
-        debug!(
-            path = %path.display(),
-            "Opened media file"
-        );
+        debug!(path = %path.display(), "Opened media file");
 
         Ok(Self {
             reader,
-            duration_ms,
+            duration_ms: 0,
         })
     }
 
-    /// Duration of the media in milliseconds (0 if unknown).
+    /// Duration of the media in milliseconds (0 if unknown, updated during decode).
     pub fn duration_ms(&self) -> u64 {
         self.duration_ms
     }
@@ -103,21 +95,23 @@ impl MediaReader {
 
     /// Read the next decoded video frame, or `None` at end-of-stream.
     pub fn next_video_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
-        let mut flags = 0u32;
-        let mut timestamp_100ns = 0i64;
-        let mut actual_stream_index = 0u32;
+        let mut flags: u32 = 0;
+        let mut timestamp_100ns: i64 = 0;
+        let mut actual_stream_index: u32 = 0;
+        let mut sample: Option<IMFSample> = None;
 
-        let sample = unsafe {
+        unsafe {
             self.reader
                 .ReadSample(
                     VIDEO_STREAM,
                     0,
-                    Some(&mut actual_stream_index),
-                    Some(&mut flags),
-                    Some(&mut timestamp_100ns),
+                    &mut actual_stream_index,
+                    &mut flags,
+                    &mut timestamp_100ns,
+                    &mut sample,
                 )
-                .map_err(|e| DecoderError::ReadSample(e.to_string()))?
-        };
+                .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
+        }
 
         if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
             return Ok(None);
@@ -154,21 +148,23 @@ impl MediaReader {
 
     /// Read the next decoded audio chunk, or `None` at end-of-stream.
     pub fn next_audio_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
-        let mut flags = 0u32;
-        let mut timestamp_100ns = 0i64;
-        let mut actual_stream_index = 0u32;
+        let mut flags: u32 = 0;
+        let mut timestamp_100ns: i64 = 0;
+        let mut actual_stream_index: u32 = 0;
+        let mut sample: Option<IMFSample> = None;
 
-        let sample = unsafe {
+        unsafe {
             self.reader
                 .ReadSample(
                     AUDIO_STREAM,
                     0,
-                    Some(&mut actual_stream_index),
-                    Some(&mut flags),
-                    Some(&mut timestamp_100ns),
+                    &mut actual_stream_index,
+                    &mut flags,
+                    &mut timestamp_100ns,
+                    &mut sample,
                 )
-                .map_err(|e| DecoderError::ReadSample(e.to_string()))?
-        };
+                .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
+        }
 
         if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
             return Ok(None);
