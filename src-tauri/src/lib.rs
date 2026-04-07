@@ -31,10 +31,19 @@ pub fn run() {
     let server_data_dir = data_dir.clone();
     let server_shutdown = shutdown_tx.subscribe();
     runtime.spawn(async move {
+        // Look for dist/ next to the executable (NSIS install puts it there).
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+        let dist_dir = exe_dir
+            .map(|d| d.join("dist"))
+            .filter(|d| d.join("index.html").exists());
+
         let config = sp_server::ServerConfig {
             db_path: server_data_dir.join("songplayer.db"),
             cache_dir: server_data_dir.join("cache"),
             port: sp_core::config::DEFAULT_API_PORT,
+            dist_dir,
         };
         if let Err(e) = sp_server::start(config, server_shutdown).await {
             tracing::error!("Server error: {e}");

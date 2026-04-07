@@ -3,14 +3,19 @@
 pub mod routes;
 pub mod websocket;
 
+use std::path::PathBuf;
+
 use axum::Router;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::AppState;
 
 /// Build the Axum router with all API routes.
-pub fn router(state: AppState) -> Router {
-    Router::new()
+///
+/// If `dist_dir` is provided, serves the WASM frontend as a SPA fallback.
+pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
+    let mut app = Router::new()
         // Playlists
         .route(
             "/api/v1/playlists",
@@ -67,5 +72,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
         // Middleware
         .layer(CorsLayer::permissive())
-        .with_state(state)
+        .with_state(state);
+
+    // Serve WASM frontend as SPA if dist_dir is provided.
+    if let Some(dist) = dist_dir {
+        let index = dist.join("index.html");
+        app = app.fallback_service(ServeDir::new(&dist).fallback(ServeFile::new(index)));
+    }
+
+    app
 }

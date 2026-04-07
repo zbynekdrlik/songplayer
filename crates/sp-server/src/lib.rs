@@ -84,6 +84,8 @@ pub struct ServerConfig {
     pub db_path: PathBuf,
     pub cache_dir: PathBuf,
     pub port: u16,
+    /// Directory containing the WASM frontend (`dist/`). If set, serves static files.
+    pub dist_dir: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -92,6 +94,7 @@ impl Default for ServerConfig {
             db_path: PathBuf::from("songplayer.db"),
             cache_dir: PathBuf::from("cache"),
             port: sp_core::config::DEFAULT_API_PORT,
+            dist_dir: None,
         }
     }
 }
@@ -320,7 +323,7 @@ pub async fn start(
     });
 
     // 10. Axum HTTP server
-    let router = api::router(state);
+    let router = api::router(state, config.dist_dir);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(port = config.port, "HTTP server listening");
 
@@ -402,7 +405,7 @@ mod tests {
         };
 
         // Verify the router can be built.
-        let _router = api::router(state);
+        let _router = api::router(state, None);
     }
 
     #[tokio::test]

@@ -557,7 +557,7 @@ mod tests {
     }
 
     fn app(state: AppState) -> axum::Router {
-        crate::api::router(state)
+        crate::api::router(state, None)
     }
 
     #[tokio::test]
