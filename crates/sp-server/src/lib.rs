@@ -10,12 +10,13 @@ pub mod playlist;
 pub mod reprocess;
 pub mod resolume;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{info, warn};
 
@@ -105,12 +106,14 @@ impl Default for ServerConfig {
 /// 1. SQLite pool + migrations
 /// 2. Broadcast channels for events
 /// 3. Shared state (incl. tool_paths + sync channel)
-/// 4. Tools manager (yt-dlp + FFmpeg)
+/// 4. Tools manager (yt-dlp + FFmpeg) + download worker
 /// 5. Sync handler (playlist sync worker)
-/// 6. Reprocess worker
-/// 7. Engine command consumer
-/// 8. Axum HTTP server
-/// 9. Shutdown signal
+/// 6. OBS WebSocket client
+/// 7. Reprocess worker (with Gemini provider)
+/// 8. Resolume workers
+/// 9. Playback engine
+/// 10. Axum HTTP server
+/// 11. Shutdown signal
 pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -148,6 +151,9 @@ pub async fn start(
     let tools_status_clone = tools_status.clone();
     let tools_event_tx = event_tx.clone();
     let tool_paths_clone = tool_paths.clone();
+    let dl_pool = pool.clone();
+    let dl_cache_dir = config.cache_dir.clone();
+    let dl_shutdown_tx = shutdown_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -162,8 +168,20 @@ pub async fn start(
                     ytdlp_version: version,
                 });
                 // Store resolved tool paths for sync workers.
-                *tool_paths_clone.write().await = Some(paths);
+                *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
+
+                // Spawn download worker now that tools are available.
+                let (dl_event_tx, _) = broadcast::channel::<String>(64);
+                let dl_worker = downloader::DownloadWorker::new(
+                    dl_pool,
+                    paths,
+                    dl_cache_dir,
+                    vec![],
+                    dl_event_tx,
+                );
+                tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
+                info!("download worker started");
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -203,8 +221,50 @@ pub async fn start(
         }
     });
 
-    // 6. Reprocess worker
-    let reprocess_providers: Arc<Vec<Box<dyn metadata::MetadataProvider>>> = Arc::new(vec![]);
+    // 6. OBS WebSocket client
+    let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
+    let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
+        .await?
+        .unwrap_or_default();
+    if !obs_url.is_empty() {
+        let obs_password = db::models::get_setting(&pool, "obs_password")
+            .await?
+            .unwrap_or_default();
+        let obs_config = obs::ObsConfig {
+            url: obs_url,
+            password: if obs_password.is_empty() {
+                None
+            } else {
+                Some(obs_password)
+            },
+        };
+        let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
+        let _obs_client = obs::ObsClient::spawn(
+            obs_config,
+            ndi_sources,
+            obs_event_tx.clone(),
+            shutdown_tx.subscribe(),
+        );
+        info!("OBS WebSocket client started");
+    }
+
+    // 7. Reprocess worker (with Gemini provider if API key is configured)
+    let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
+        .await?
+        .unwrap_or_default();
+    let gemini_model = db::models::get_setting(&pool, "gemini_model")
+        .await?
+        .unwrap_or_else(|_| Some("gemini-2.0-flash".to_string()))
+        .unwrap_or_else(|| "gemini-2.0-flash".to_string());
+    let mut reprocess_provider_list: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
+    if !gemini_key.is_empty() {
+        reprocess_provider_list.push(Box::new(metadata::gemini::GeminiProvider::new(
+            gemini_key,
+            gemini_model,
+        )));
+    }
+    let reprocess_providers: Arc<Vec<Box<dyn metadata::MetadataProvider>>> =
+        Arc::new(reprocess_provider_list);
     let reprocess_worker = reprocess::ReprocessWorker::new(
         pool.clone(),
         reprocess_providers,
@@ -212,37 +272,54 @@ pub async fn start(
     );
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
-    // 7. Engine command consumer (bridges API commands to the engine)
-    let engine_event_tx = event_tx.clone();
+    // 8. Resolume workers (load enabled hosts from DB)
+    let resolume_rows =
+        sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_default();
+    let mut _resolume_registry = resolume::ResolumeRegistry::new();
+    for row in resolume_rows {
+        let host_id: i64 = row.get("id");
+        let host: String = row.get("host");
+        let port: i32 = row.get("port");
+        _resolume_registry.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
+    }
+
+    // 9. Playback engine (bridges API commands to the engine state machine)
+    let mut engine = playback::PlaybackEngine::new(pool.clone(), obs_event_tx);
+    let mut engine_shutdown = shutdown_tx.subscribe();
     tokio::spawn(async move {
-        while let Some(cmd) = engine_rx.recv().await {
-            match cmd {
-                EngineCommand::Play { playlist_id } => {
-                    info!(playlist_id, "play command received");
+        loop {
+            tokio::select! {
+                Some(cmd) = engine_rx.recv() => {
+                    match cmd {
+                        EngineCommand::Play { playlist_id } => {
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::UserPlay).await;
+                        }
+                        EngineCommand::Pause { playlist_id } => {
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::UserPause).await;
+                        }
+                        EngineCommand::Skip { playlist_id } => {
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::UserSkip).await;
+                        }
+                        EngineCommand::SetMode { playlist_id, mode } => {
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
+                        }
+                        EngineCommand::SceneChanged { playlist_id, on_program } => {
+                            engine.handle_scene_change(playlist_id, on_program).await;
+                        }
+                    }
                 }
-                EngineCommand::Pause { playlist_id } => {
-                    info!(playlist_id, "pause command received");
-                }
-                EngineCommand::Skip { playlist_id } => {
-                    info!(playlist_id, "skip command received");
-                }
-                EngineCommand::SetMode { playlist_id, mode } => {
-                    info!(playlist_id, ?mode, "set mode command received");
-                }
-                EngineCommand::SceneChanged {
-                    playlist_id,
-                    on_program,
-                } => {
-                    info!(playlist_id, on_program, "scene changed");
+                _ = engine_shutdown.recv() => {
+                    info!("engine command bridge shutting down");
+                    break;
                 }
             }
-            // The full playback engine integration happens when all pieces
-            // are wired together. For now, commands are logged.
-            let _ = &engine_event_tx;
         }
     });
 
-    // 8. Axum HTTP server
+    // 10. Axum HTTP server
     let router = api::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(port = config.port, "HTTP server listening");
@@ -255,7 +332,7 @@ pub async fn start(
         })
         .await?;
 
-    // 9. Signal all workers to stop
+    // 11. Signal all workers to stop
     let _ = shutdown_tx.send(());
     info!("server stopped");
 
