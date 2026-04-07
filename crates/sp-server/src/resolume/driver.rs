@@ -1,0 +1,412 @@
+//! Per-host Resolume Arena driver — connects to one Resolume instance
+//! and manages clip discovery and command handling.
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+use tokio::sync::{broadcast, mpsc};
+use tracing::{debug, info, warn};
+
+use crate::resolume::ResolumeCommand;
+use crate::resolume::handlers;
+
+/// Information about a discovered Resolume clip.
+#[derive(Debug, Clone)]
+pub struct ClipInfo {
+    pub clip_id: i64,
+    pub text_param_id: i64,
+}
+
+/// Per-host worker that communicates with a single Resolume Arena instance.
+pub struct HostDriver {
+    host: String,
+    port: u16,
+    client: reqwest::Client,
+    /// Maps clip token (e.g. `"#song-name-a"`) to clip info.
+    pub(crate) clip_mapping: HashMap<String, ClipInfo>,
+    /// Tracks which lane is active per playlist (`false` = A, `true` = B).
+    pub(crate) lane_state: HashMap<i64, bool>,
+}
+
+impl HostDriver {
+    pub fn new(host: String, port: u16) -> Self {
+        Self {
+            host,
+            port,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .expect("failed to build reqwest client"),
+            clip_mapping: HashMap::new(),
+            lane_state: HashMap::new(),
+        }
+    }
+
+    /// Main run loop: processes commands, periodically refreshes clip mapping,
+    /// and shuts down on signal.
+    pub async fn run(
+        mut self,
+        mut rx: mpsc::Receiver<ResolumeCommand>,
+        mut shutdown: broadcast::Receiver<()>,
+    ) {
+        // Initial mapping refresh.
+        if let Err(e) = self.refresh_mapping().await {
+            warn!(host = %self.host, %e, "initial clip mapping refresh failed");
+        }
+
+        let mut refresh_interval = tokio::time::interval(Duration::from_secs(10));
+
+        loop {
+            tokio::select! {
+                Some(cmd) = rx.recv() => {
+                    self.handle_command(cmd).await;
+                }
+                _ = refresh_interval.tick() => {
+                    if let Err(e) = self.refresh_mapping().await {
+                        debug!(host = %self.host, %e, "clip mapping refresh failed");
+                    }
+                }
+                _ = shutdown.recv() => {
+                    info!(host = %self.host, "Resolume driver shutting down");
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Handle a single command.
+    async fn handle_command(&mut self, cmd: ResolumeCommand) {
+        match cmd {
+            ResolumeCommand::UpdateTitle {
+                playlist_id,
+                song,
+                artist,
+            } => {
+                if let Err(e) = handlers::crossfade_title(self, playlist_id, &song, &artist).await {
+                    warn!(host = %self.host, playlist_id, %e, "crossfade_title failed");
+                }
+            }
+            ResolumeCommand::ClearTitle { playlist_id } => {
+                if let Err(e) = handlers::clear_title(self, playlist_id).await {
+                    warn!(host = %self.host, playlist_id, %e, "clear_title failed");
+                }
+            }
+            ResolumeCommand::RefreshMapping => {
+                if let Err(e) = self.refresh_mapping().await {
+                    warn!(host = %self.host, %e, "refresh_mapping failed");
+                }
+            }
+            ResolumeCommand::Shutdown => {
+                info!(host = %self.host, "received shutdown command");
+            }
+        }
+    }
+
+    /// Fetch composition JSON from Resolume and build clip mapping from
+    /// `#token` tags found in clip names.
+    ///
+    /// `GET /api/v1/composition`
+    pub(crate) async fn refresh_mapping(&mut self) -> Result<(), anyhow::Error> {
+        let url = format!("{}/api/v1/composition", self.base_url());
+        let resp = self.client.get(&url).send().await?;
+        let body: serde_json::Value = resp.json().await?;
+
+        let new_mapping = parse_composition(&body);
+        if new_mapping != self.clip_mapping {
+            info!(
+                host = %self.host,
+                clips = new_mapping.len(),
+                "updated Resolume clip mapping"
+            );
+            self.clip_mapping = new_mapping;
+        }
+
+        Ok(())
+    }
+
+    /// Base URL for the Resolume REST API.
+    pub(crate) fn base_url(&self) -> String {
+        format!("http://{}:{}", self.host, self.port)
+    }
+
+    /// Set text on a clip parameter.
+    ///
+    /// `PUT /api/v1/parameter/by-id/{param_id}`
+    pub(crate) async fn set_text(&self, param_id: i64, text: &str) -> Result<(), anyhow::Error> {
+        let url = format!("{}/api/v1/parameter/by-id/{param_id}", self.base_url());
+        self.client
+            .put(&url)
+            .json(&serde_json::json!({ "value": text }))
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    /// Trigger (connect) a clip.
+    ///
+    /// `POST /api/v1/composition/clips/by-id/{clip_id}/connect`
+    pub(crate) async fn trigger_clip(&self, clip_id: i64) -> Result<(), anyhow::Error> {
+        let url = format!(
+            "{}/api/v1/composition/clips/by-id/{clip_id}/connect",
+            self.base_url()
+        );
+        self.client.post(&url).send().await?;
+        Ok(())
+    }
+}
+
+/// Parse a Resolume composition JSON and extract clip tokens.
+///
+/// Scans `layers[].clips[].name.value` for words starting with `#`. Each
+/// token is mapped to the clip's ID and the `Text1` source parameter ID.
+pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, ClipInfo> {
+    let mut mapping = HashMap::new();
+
+    let layers = match composition["layers"].as_array() {
+        Some(l) => l,
+        None => return mapping,
+    };
+
+    for layer in layers {
+        let clips = match layer["clips"].as_array() {
+            Some(c) => c,
+            None => continue,
+        };
+
+        for clip in clips {
+            let clip_id = match clip["id"].as_i64() {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let name = match clip["name"]["value"].as_str() {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Extract #tokens from the name.
+            let tokens: Vec<&str> = name
+                .split_whitespace()
+                .filter(|w| w.starts_with('#'))
+                .collect();
+
+            if tokens.is_empty() {
+                continue;
+            }
+
+            // Find the Text1 source parameter ID.
+            let text_param_id = match clip["video"]["sourceparams"]["Text1"]["id"].as_i64() {
+                Some(id) => id,
+                None => continue,
+            };
+
+            for token in tokens {
+                mapping.insert(
+                    token.to_string(),
+                    ClipInfo {
+                        clip_id,
+                        text_param_id,
+                    },
+                );
+            }
+        }
+    }
+
+    mapping
+}
+
+// Implement PartialEq for ClipInfo so we can compare mappings.
+impl PartialEq for ClipInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.clip_id == other.clip_id && self.text_param_id == other.text_param_id
+    }
+}
+
+impl Eq for ClipInfo {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_composition() -> serde_json::Value {
+        serde_json::json!({
+            "layers": [
+                {
+                    "clips": [
+                        {
+                            "id": 100,
+                            "name": { "value": "Title #song-name-a" },
+                            "video": {
+                                "sourceparams": {
+                                    "Text1": { "id": 200, "valuetype": "ParamText" }
+                                }
+                            }
+                        },
+                        {
+                            "id": 101,
+                            "name": { "value": "Title #song-name-b" },
+                            "video": {
+                                "sourceparams": {
+                                    "Text1": { "id": 201, "valuetype": "ParamText" }
+                                }
+                            }
+                        },
+                        {
+                            "id": 102,
+                            "name": { "value": "Artist #artist-name-a" },
+                            "video": {
+                                "sourceparams": {
+                                    "Text1": { "id": 202, "valuetype": "ParamText" }
+                                }
+                            }
+                        },
+                        {
+                            "id": 103,
+                            "name": { "value": "Artist #artist-name-b" },
+                            "video": {
+                                "sourceparams": {
+                                    "Text1": { "id": 203, "valuetype": "ParamText" }
+                                }
+                            }
+                        },
+                        {
+                            "id": 104,
+                            "name": { "value": "Clear #song-clear" },
+                            "video": {
+                                "sourceparams": {
+                                    "Text1": { "id": 204, "valuetype": "ParamText" }
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        })
+    }
+
+    #[test]
+    fn clip_discovery_parses_tokens() {
+        let comp = sample_composition();
+        let mapping = parse_composition(&comp);
+
+        assert_eq!(mapping.len(), 5);
+
+        let song_a = &mapping["#song-name-a"];
+        assert_eq!(song_a.clip_id, 100);
+        assert_eq!(song_a.text_param_id, 200);
+
+        let song_b = &mapping["#song-name-b"];
+        assert_eq!(song_b.clip_id, 101);
+        assert_eq!(song_b.text_param_id, 201);
+
+        let artist_a = &mapping["#artist-name-a"];
+        assert_eq!(artist_a.clip_id, 102);
+        assert_eq!(artist_a.text_param_id, 202);
+
+        let artist_b = &mapping["#artist-name-b"];
+        assert_eq!(artist_b.clip_id, 103);
+        assert_eq!(artist_b.text_param_id, 203);
+
+        let clear = &mapping["#song-clear"];
+        assert_eq!(clear.clip_id, 104);
+        assert_eq!(clear.text_param_id, 204);
+    }
+
+    #[test]
+    fn clip_discovery_ignores_clips_without_tokens() {
+        let comp = serde_json::json!({
+            "layers": [{
+                "clips": [{
+                    "id": 1,
+                    "name": { "value": "No tokens here" },
+                    "video": {
+                        "sourceparams": {
+                            "Text1": { "id": 10, "valuetype": "ParamText" }
+                        }
+                    }
+                }]
+            }]
+        });
+
+        let mapping = parse_composition(&comp);
+        assert!(mapping.is_empty());
+    }
+
+    #[test]
+    fn clip_discovery_ignores_clips_without_text_param() {
+        let comp = serde_json::json!({
+            "layers": [{
+                "clips": [{
+                    "id": 1,
+                    "name": { "value": "Has #token" },
+                    "video": {
+                        "sourceparams": {}
+                    }
+                }]
+            }]
+        });
+
+        let mapping = parse_composition(&comp);
+        assert!(mapping.is_empty());
+    }
+
+    #[test]
+    fn clip_discovery_handles_multiple_tokens_per_clip() {
+        let comp = serde_json::json!({
+            "layers": [{
+                "clips": [{
+                    "id": 50,
+                    "name": { "value": "Multi #tag-one #tag-two" },
+                    "video": {
+                        "sourceparams": {
+                            "Text1": { "id": 500, "valuetype": "ParamText" }
+                        }
+                    }
+                }]
+            }]
+        });
+
+        let mapping = parse_composition(&comp);
+        assert_eq!(mapping.len(), 2);
+        assert_eq!(mapping["#tag-one"].clip_id, 50);
+        assert_eq!(mapping["#tag-two"].clip_id, 50);
+    }
+
+    #[test]
+    fn clip_discovery_empty_composition() {
+        let comp = serde_json::json!({});
+        let mapping = parse_composition(&comp);
+        assert!(mapping.is_empty());
+
+        let comp2 = serde_json::json!({ "layers": [] });
+        let mapping2 = parse_composition(&comp2);
+        assert!(mapping2.is_empty());
+    }
+
+    #[test]
+    fn host_driver_new() {
+        let driver = HostDriver::new("192.168.1.10".to_string(), 8080);
+        assert_eq!(driver.base_url(), "http://192.168.1.10:8080");
+        assert!(driver.clip_mapping.is_empty());
+        assert!(driver.lane_state.is_empty());
+    }
+
+    #[test]
+    fn lane_state_flip() {
+        let mut driver = HostDriver::new("localhost".to_string(), 8080);
+
+        // Default lane state for a new playlist is A (false).
+        assert_eq!(driver.lane_state.get(&1), None);
+
+        // Simulate flipping lane state.
+        let current = *driver.lane_state.get(&1).unwrap_or(&false);
+        assert!(!current); // Starts on A.
+
+        driver.lane_state.insert(1, !current);
+        assert_eq!(driver.lane_state[&1], true); // Now on B.
+
+        let current = driver.lane_state[&1];
+        driver.lane_state.insert(1, !current);
+        assert_eq!(driver.lane_state[&1], false); // Back to A.
+    }
+}

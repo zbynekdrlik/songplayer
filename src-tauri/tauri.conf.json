@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/config.schema.json",
+  "productName": "SongPlayer",
+  "version": "0.1.0",
+  "identifier": "media.newlevel.songplayer",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SongPlayer Dashboard",
+        "url": "http://127.0.0.1:8920",
+        "width": 1024,
+        "height": 768,
+        "visible": false,
+        "resizable": true,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}

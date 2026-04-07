@@ -1,0 +1,32 @@
+[package]
+name = "sp-tauri"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[[bin]]
+name = "SongPlayer"
+path = "src/main.rs"
+
+[lib]
+name = "sp_tauri_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+local-ip-address = "0.6"
+dirs = "6"
+sp-core = { path = "../crates/sp-core" }
+sp-server = { path = "../crates/sp-server" }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
