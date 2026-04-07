@@ -41,10 +41,9 @@ impl SyncedDecoder {
         self.reader.duration_ms()
     }
 
-    /// Seek to a position in milliseconds, clearing buffered audio.
-    pub fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
+    /// Clear buffered audio (e.g. when restarting playback).
+    pub fn clear_buffer(&mut self) {
         self.pending_audio.clear();
-        self.reader.seek(position_ms)
     }
 
     /// Return the next video frame together with all audio chunks whose

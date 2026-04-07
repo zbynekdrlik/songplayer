@@ -13,4 +13,5 @@ thiserror = { workspace = true }
 windows = { version = "0.58", features = [
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
+    "Win32_Foundation",
 ] }

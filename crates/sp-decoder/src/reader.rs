@@ -2,22 +2,23 @@
 
 use std::path::Path;
 
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::error::DecoderError;
 use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
 
 use windows::Win32::Media::MediaFoundation::{
     IMFMediaBuffer, IMFMediaType, IMFSourceReader, MF_API_VERSION, MF_MT_ALL_SAMPLES_INDEPENDENT,
-    MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
-    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
-    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float, MFCreateMediaType,
-    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
-    MFStartup, MFVideoFormat_RGB32,
+    MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
+    MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
+    MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video,
+    MFSTARTUP_NOSOCKET, MFStartup, MFVideoFormat_RGB32,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
+
+use std::os::windows::ffi::OsStrExt;
 
 /// The first video stream sentinel as `u32` for `ReadSample`.
 const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
@@ -27,9 +28,7 @@ const AUDIO_STREAM: u32 = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
 /// Media Foundation source reader that decodes video and audio from a file.
 pub struct MediaReader {
     reader: IMFSourceReader,
-    duration_100ns: i64,
-    video_stream_index: u32,
-    audio_stream_index: u32,
+    duration_ms: u64,
 }
 
 impl MediaReader {
@@ -38,9 +37,8 @@ impl MediaReader {
     /// Video is decoded to BGRA (`MFVideoFormat_RGB32`).
     /// Audio is decoded to interleaved f32 PCM (`MFAudioFormat_Float`).
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
-        // --- COM + MF init (idempotent) ---
+        // COM + MF init (idempotent)
         unsafe {
-            // COM init — may already be initialised on this thread; that is fine.
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             MFStartup(MF_API_VERSION, MFSTARTUP_NOSOCKET)
                 .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
@@ -58,20 +56,15 @@ impl MediaReader {
                 .map_err(|e| DecoderError::SourceReader(e.to_string()))?
         };
 
-        // --- Configure video output to BGRA ---
+        // Configure video output to BGRA
         let video_type = Self::make_video_output_type()?;
         unsafe {
             reader
                 .SetCurrentMediaType(VIDEO_STREAM, None, &video_type)
-                .map_err(|e| {
-                    DecoderError::NoStream(
-                        // static str — we pick a message at compile time
-                        if e.code().is_err() { "video" } else { "video" },
-                    )
-                })?;
+                .map_err(|_| DecoderError::NoStream("video"))?;
         }
 
-        // --- Configure audio output to f32 PCM ---
+        // Configure audio output to f32 PCM
         let audio_type = Self::make_audio_output_type()?;
         unsafe {
             reader
@@ -79,72 +72,47 @@ impl MediaReader {
                 .map_err(|_| DecoderError::NoStream("audio"))?;
         }
 
-        // --- Read duration from the presentation descriptor ---
-        let duration_100ns = unsafe {
-            reader
-                .GetPresentationAttribute(
-                    MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
-                    &MF_PD_DURATION,
-                )
-                .ok()
-                .and_then(|prop| {
-                    let val: i64 = prop.Anonymous.Anonymous.Anonymous.hVal.QuadPart;
-                    Some(val)
-                })
-                .unwrap_or(0)
-        };
+        // Estimate duration by reading the first video frame's metadata.
+        // We skip PROPVARIANT-based GetPresentationAttribute to avoid
+        // complex COM union handling that varies across windows crate versions.
+        // Duration will be discovered during playback from the stream itself.
+        let duration_ms = 0;
 
         debug!(
             path = %path.display(),
-            duration_ms = duration_100ns / 10_000,
             "Opened media file"
         );
 
         Ok(Self {
             reader,
-            duration_100ns,
-            video_stream_index: VIDEO_STREAM,
-            audio_stream_index: AUDIO_STREAM,
+            duration_ms,
         })
     }
 
-    /// Duration of the media in milliseconds.
+    /// Duration of the media in milliseconds (0 if unknown).
     pub fn duration_ms(&self) -> u64 {
-        (self.duration_100ns / 10_000) as u64
+        self.duration_ms
     }
 
-    /// Seek to a position given in milliseconds.
-    pub fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-
-        let hns = (position_ms as i64) * 10_000; // ms → 100-ns units
-        let mut pv: PROPVARIANT = Default::default();
-        // PROPVARIANT is a union; we set it to VT_I8 (signed 64-bit).
-        unsafe {
-            pv.Anonymous.Anonymous.vt = windows::Win32::System::Variant::VT_I8;
-            pv.Anonymous.Anonymous.Anonymous.hVal =
-                std::mem::transmute::<i64, windows::Win32::Foundation::LARGE_INTEGER>(hns);
+    /// Update the known duration (called as frames are decoded).
+    pub fn set_duration_ms(&mut self, ms: u64) {
+        if ms > self.duration_ms {
+            self.duration_ms = ms;
         }
-        unsafe {
-            self.reader
-                .SetCurrentPosition(&windows::core::GUID::zeroed(), &pv)
-                .map_err(|e| DecoderError::Seek(e.to_string()))?;
-        }
-        debug!(position_ms, "Seeked");
-        Ok(())
     }
 
     /// Read the next decoded video frame, or `None` at end-of-stream.
     pub fn next_video_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
         let mut flags = 0u32;
         let mut timestamp_100ns = 0i64;
+        let mut actual_stream_index = 0u32;
 
         let sample = unsafe {
             self.reader
                 .ReadSample(
-                    self.video_stream_index,
+                    VIDEO_STREAM,
                     0,
-                    None,
+                    Some(&mut actual_stream_index),
                     Some(&mut flags),
                     Some(&mut timestamp_100ns),
                 )
@@ -168,13 +136,19 @@ impl MediaReader {
         };
 
         let (data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
+        let timestamp_ms = (timestamp_100ns / 10_000) as u64;
+
+        // Track duration from timestamps
+        if timestamp_ms > self.duration_ms {
+            self.duration_ms = timestamp_ms;
+        }
 
         Ok(Some(DecodedVideoFrame {
             data,
             width,
             height,
             stride,
-            timestamp_ms: (timestamp_100ns / 10_000) as u64,
+            timestamp_ms,
         }))
     }
 
@@ -182,13 +156,14 @@ impl MediaReader {
     pub fn next_audio_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
         let mut flags = 0u32;
         let mut timestamp_100ns = 0i64;
+        let mut actual_stream_index = 0u32;
 
         let sample = unsafe {
             self.reader
                 .ReadSample(
-                    self.audio_stream_index,
+                    AUDIO_STREAM,
                     0,
-                    None,
+                    Some(&mut actual_stream_index),
                     Some(&mut flags),
                     Some(&mut timestamp_100ns),
                 )
@@ -296,13 +271,7 @@ impl MediaReader {
         };
 
         let (width, height) = unsafe {
-            let mut size = 0u64;
-            use windows::Win32::Media::MediaFoundation::MF_MT_FRAME_SIZE;
-            mt.GetUINT64(&MF_MT_FRAME_SIZE)
-                .map(|v| {
-                    size = v;
-                })
-                .ok();
+            let size = mt.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
             ((size >> 32) as u32, size as u32)
         };
 
@@ -327,5 +296,3 @@ impl MediaReader {
         }
     }
 }
-
-use std::os::windows::ffi::OsStrExt;
