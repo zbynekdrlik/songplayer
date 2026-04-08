@@ -346,8 +346,7 @@ jobs:
           fi
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
             --exclude-re 'ObsClient::spawn' \
-            --exclude-re '^replace start' \
-            --exclude-re 'in start$' \
+            --exclude-re ' start ' \
             --exclude-re 'download_video' \
             --exclude-re 'sync_playlist' \
             --exclude-re 'verify_executable' \
