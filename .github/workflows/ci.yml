@@ -632,7 +632,7 @@ jobs:
       - name: Wait for SongPlayer API (read + write)
         shell: powershell
         run: |
-          $maxRetries = 12
+          $maxRetries = 24
           $writeOk = $false
           for ($i = 1; $i -le $maxRetries; $i++) {
             try {
