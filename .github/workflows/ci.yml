@@ -403,22 +403,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for SongPlayer API
+      - name: Wait for SongPlayer API (read + write)
         shell: powershell
         run: |
-          $maxRetries = 6
+          $maxRetries = 12
+          $writeOk = $false
           for ($i = 1; $i -le $maxRetries; $i++) {
             try {
               $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
-              Write-Host "API ready: version=$($resp.version)"
-              exit 0
+              Write-Host "API responds: version=$($resp.version)"
+              # Also verify writes work (SQLite WAL recovery may delay writes)
+              $testBody = [System.Text.Encoding]::UTF8.GetBytes('{"_e2e_probe":"ok"}')
+              $wr = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $testBody -ContentType "application/json" -UseBasicParsing
+              if ($wr.StatusCode -eq 204) {
+                Write-Host "API ready: reads and writes working"
+                $writeOk = $true
+                break
+              }
             } catch {
-              Write-Host "Attempt $i/$maxRetries..."
-              Start-Sleep -Seconds 5
+              Write-Host "Attempt $i/$maxRetries - waiting 5s..."
             }
+            Start-Sleep -Seconds 5
           }
-          Write-Error "API not available"
-          exit 1
+          if (-not $writeOk) {
+            Write-Error "API writes not working after $maxRetries attempts"
+            exit 1
+          }
 
       - name: Seed settings
         shell: powershell
