@@ -432,7 +432,7 @@ jobs:
           }
           $body = $settings | ConvertTo-Json -Compress
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-          Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $bytes -ContentType "application/json; charset=utf-8"
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $bytes -ContentType "application/json" -UseBasicParsing | Out-Null
           Write-Host "Settings seeded"
 
           $current = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings"
@@ -465,8 +465,9 @@ jobs:
             }
             $body = $pl | ConvertTo-Json -Compress
             $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-            $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
-            Write-Host "Created playlist: $($resp.name) (id=$($resp.id))"
+            $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $bytes -ContentType "application/json" -UseBasicParsing
+            $created = $resp.Content | ConvertFrom-Json
+            Write-Host "Created playlist: $($created.name) (id=$($created.id))"
           }
 
           $all = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
