@@ -616,6 +616,17 @@ jobs:
             Write-Host "OK: OBS started and WebSocket listening on port 4455"
           }
 
+      - name: Restart SongPlayer (pick up OBS connection after OBS start)
+        shell: powershell
+        run: |
+          # SongPlayer may have been started before OBS and be in backoff.
+          # Restart it now that OBS is confirmed running so it connects immediately.
+          taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          Start-Sleep -Seconds 3
+          schtasks.exe /run /tn SongPlayer
+          Start-Sleep -Seconds 10
+          Write-Host "SongPlayer restarted"
+
       - name: Wait for SongPlayer API (read + write)
         shell: powershell
         run: |
