@@ -668,6 +668,7 @@ jobs:
             obs_websocket_url = "ws://localhost:4455"
             cache_dir = "C:\ProgramData\SongPlayer\cache"
             gemini_api_key = $env:GEMINI_API_KEY
+            gemini_model = "gemini-2.0-flash"
           }
           $body = $settings | ConvertTo-Json -Compress
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
@@ -686,20 +687,30 @@ jobs:
         shell: powershell
         run: |
           $playlists = @(
-            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; obs_text_source = "ytwarmup_title" },
-            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; obs_text_source = "ytpresence_title" },
-            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; obs_text_source = "ytslow_title" },
-            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; obs_text_source = "yt90s_title" },
-            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; obs_text_source = "ytworship_title" },
-            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; obs_text_source = "ytfast_title" }
+            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; obs_text_source = "ytwarmup_title"; ndi_output_name = "SP-warmup" },
+            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; obs_text_source = "ytpresence_title"; ndi_output_name = "SP-presence" },
+            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; obs_text_source = "ytslow_title"; ndi_output_name = "SP-slow" },
+            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; obs_text_source = "yt90s_title"; ndi_output_name = "SP-90s" },
+            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; obs_text_source = "ytworship_title"; ndi_output_name = "SP-worship" },
+            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; obs_text_source = "ytfast_title"; ndi_output_name = "SP-fast" }
           )
 
           $existing = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
-          $existingNames = $existing | ForEach-Object { $_.name }
+          $existingNames = @{}
+          foreach ($e in $existing) { $existingNames[$e.name] = $e }
 
           foreach ($pl in $playlists) {
-            if ($existingNames -contains $pl.name) {
-              Write-Host "Playlist '$($pl.name)' already exists - skipping"
+            if ($existingNames.ContainsKey($pl.name)) {
+              $existingPl = $existingNames[$pl.name]
+              # Update NDI output name if missing or different
+              if ($existingPl.ndi_output_name -ne $pl.ndi_output_name) {
+                $update = @{ ndi_output_name = $pl.ndi_output_name } | ConvertTo-Json -Compress
+                $updateBytes = [System.Text.Encoding]::UTF8.GetBytes($update)
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$($existingPl.id)" -Method Put -Body $updateBytes -ContentType "application/json" -UseBasicParsing | Out-Null
+                Write-Host "Updated NDI name for '$($pl.name)' to '$($pl.ndi_output_name)'"
+              } else {
+                Write-Host "Playlist '$($pl.name)' already exists with correct config - skipping"
+              }
               continue
             }
             $body = $pl | ConvertTo-Json -Compress
@@ -716,19 +727,41 @@ jobs:
           }
           Write-Host "OK: $($all.Count) playlists exist"
 
-      - name: Test playlist sync
+      - name: Sync all playlists and verify videos appear
         shell: powershell
         run: |
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
-          $first = $playlists[0]
-          Write-Host "Triggering sync for '$($first.name)' (id=$($first.id))..."
+          Write-Host "Syncing $($playlists.Count) playlists..."
 
-          $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$($first.id)/sync" -Method Post -UseBasicParsing
-          if ($resp.StatusCode -ne 202) {
-            Write-Error "FAIL: Expected 202 Accepted, got $($resp.StatusCode)"
+          foreach ($pl in $playlists) {
+            $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/sync" -Method Post -UseBasicParsing
+            if ($resp.StatusCode -ne 202) {
+              Write-Error "FAIL: Sync for '$($pl.name)' returned $($resp.StatusCode)"
+              exit 1
+            }
+            Write-Host "Sync queued: $($pl.name) (id=$($pl.id))"
+          }
+
+          # Wait for syncs to complete (yt-dlp --flat-playlist takes a few seconds each)
+          Write-Host "Waiting 60s for playlist syncs to complete..."
+          Start-Sleep -Seconds 60
+
+          # Verify at least some playlists have videos
+          $totalVideos = 0
+          $syncedPlaylists = 0
+          foreach ($pl in $playlists) {
+            $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
+            $count = $videos.Count
+            Write-Host "  $($pl.name): $count videos"
+            $totalVideos += $count
+            if ($count -gt 0) { $syncedPlaylists++ }
+          }
+
+          if ($syncedPlaylists -eq 0) {
+            Write-Error "FAIL: No playlists have any videos after sync. yt-dlp may be broken."
             exit 1
           }
-          Write-Host "OK: Sync accepted (202)"
+          Write-Host "OK: $syncedPlaylists playlists synced, $totalVideos total videos"
 
       - name: Verify OBS WebSocket connected
         shell: powershell
@@ -801,3 +834,31 @@ jobs:
             exit 1
           }
           Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"
+
+      - name: Verify download worker is processing
+        shell: powershell
+        run: |
+          # After sync, the download worker should start processing videos.
+          # Check that at least one video has been picked up (normalized=true or file exists).
+          # The worker processes one at a time with 5s polling, so wait up to 90s.
+          $maxWait = 90
+          $elapsed = 0
+          $found = $false
+          while ($elapsed -lt $maxWait) {
+            $cacheFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_temp*" -ErrorAction SilentlyContinue
+            $normalizedFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_normalized*" -ErrorAction SilentlyContinue
+            if ($cacheFiles.Count -gt 0 -or $normalizedFiles.Count -gt 0) {
+              Write-Host "OK: Download worker is active - found files in cache"
+              $cacheFiles | ForEach-Object { Write-Host "  downloading: $($_.Name) ($($_.Length) bytes)" }
+              $normalizedFiles | ForEach-Object { Write-Host "  completed: $($_.Name) ($($_.Length) bytes)" }
+              $found = $true
+              break
+            }
+            Start-Sleep -Seconds 10
+            $elapsed += 10
+            Write-Host "Waiting for download worker... ($elapsed/$maxWait s)"
+          }
+          if (-not $found) {
+            Write-Error "FAIL: Download worker did not produce any files after ${maxWait}s. Check yt-dlp/ffmpeg."
+            exit 1
+          }

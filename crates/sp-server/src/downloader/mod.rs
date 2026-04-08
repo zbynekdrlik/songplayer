@@ -172,20 +172,30 @@ impl DownloadWorker {
         let format_spec =
             format!("bestvideo[height<={MAX_RESOLUTION}]+bestaudio/best[height<={MAX_RESOLUTION}]");
 
-        let status = tokio::process::Command::new(&self.tools.ytdlp)
+        // yt-dlp needs to know where ffmpeg is for merging video+audio streams.
+        let ffmpeg_dir = self
+            .tools
+            .ffmpeg
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+
+        let child_output = tokio::process::Command::new(&self.tools.ytdlp)
             .args(["--progress", "--newline"])
             .args(["-f", &format_spec])
+            .args(["--ffmpeg-location"])
+            .arg(ffmpeg_dir)
             .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
             .args(["-o"])
             .arg(output)
             .arg(&url)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .status()
+            .output()
             .await?;
 
-        if !status.success() {
-            anyhow::bail!("yt-dlp exited with {status}");
+        if !child_output.status.success() {
+            let stderr = String::from_utf8_lossy(&child_output.stderr);
+            anyhow::bail!("yt-dlp exited with {}: {}", child_output.status, stderr);
         }
 
         Ok(())
