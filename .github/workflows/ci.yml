@@ -286,14 +286,12 @@ jobs:
 
       - name: Verify deploy job uses always() condition
         run: |
-          DEPLOY_CONDITION=$(grep -A3 "deploy-resolume:" .github/workflows/ci.yml | grep "if:" || true)
-          if [ -z "$DEPLOY_CONDITION" ]; then
-            echo "ERROR: deploy-resolume job missing 'if' condition"
-            exit 1
-          fi
-          if ! echo "$DEPLOY_CONDITION" | grep -q "always()"; then
-            echo "ERROR: deploy-resolume must use always() in condition"
-            echo "Found: $DEPLOY_CONDITION"
+          # Extract the full if: condition block (may span multiple lines with >-)
+          DEPLOY_BLOCK=$(grep -A10 "deploy-resolume:" .github/workflows/ci.yml | head -12)
+          if ! echo "$DEPLOY_BLOCK" | grep -q "always()"; then
+            echo "ERROR: deploy-resolume must use always() in its if: condition"
+            echo "Found:"
+            echo "$DEPLOY_BLOCK"
             exit 1
           fi
           echo "OK: deploy-resolume uses always() condition."
