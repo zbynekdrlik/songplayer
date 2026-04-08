@@ -33,11 +33,31 @@ impl ToolsManager {
             Self::make_executable(&ytdlp).await?;
         }
 
+        // Verify ffmpeg is a real executable (not a ZIP archive from a previous buggy download).
+        if ffmpeg.exists() && !Self::verify_executable(&ffmpeg).await {
+            tracing::warn!(
+                "ffmpeg at {} is not a valid executable, re-downloading",
+                ffmpeg.display()
+            );
+            let _ = tokio::fs::remove_file(&ffmpeg).await;
+        }
+
         if !ffmpeg.exists() {
             tracing::info!("downloading ffmpeg to {}", ffmpeg.display());
-            Self::download_file(ffmpeg_download_url(), &ffmpeg).await?;
-            #[cfg(unix)]
-            Self::make_executable(&ffmpeg).await?;
+            #[cfg(windows)]
+            {
+                // FFmpeg for Windows is distributed as a ZIP archive — download and
+                // extract the ffmpeg.exe binary from it.
+                let zip_path = self.tools_dir.join("ffmpeg.zip");
+                Self::download_file(ffmpeg_download_url(), &zip_path).await?;
+                Self::extract_ffmpeg_from_zip(&zip_path, &ffmpeg).await?;
+                let _ = tokio::fs::remove_file(&zip_path).await;
+            }
+            #[cfg(not(windows))]
+            {
+                Self::download_file(ffmpeg_download_url(), &ffmpeg).await?;
+                Self::make_executable(&ffmpeg).await?;
+            }
         }
 
         Ok(ToolPaths { ytdlp, ffmpeg })
@@ -77,6 +97,24 @@ impl ToolsManager {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    /// Verify a file is a real executable by checking its magic bytes.
+    /// On Windows: check for MZ (PE) header. On Unix: check for ELF header.
+    async fn verify_executable(path: &Path) -> bool {
+        let Ok(mut file) = tokio::fs::File::open(path).await else {
+            return false;
+        };
+        let mut buf = [0u8; 2];
+        use tokio::io::AsyncReadExt;
+        if file.read_exact(&mut buf).await.is_err() {
+            return false;
+        }
+        if cfg!(windows) {
+            buf == [b'M', b'Z'] // PE header
+        } else {
+            buf == [0x7F, b'E'] // ELF header
+        }
+    }
+
     /// Download a file from `url` to `dest`.
     async fn download_file(url: &str, dest: &Path) -> Result<(), anyhow::Error> {
         let response = reqwest::get(url).await?;
@@ -89,6 +127,36 @@ impl ToolsManager {
         tokio::fs::write(dest, &bytes).await?;
         tracing::info!("downloaded {} bytes to {}", bytes.len(), dest.display());
         Ok(())
+    }
+
+    /// Extract `ffmpeg.exe` from a downloaded ZIP archive.
+    ///
+    /// The BtbN FFmpeg builds contain a nested directory structure like:
+    /// `ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe`
+    /// We search for any file named `ffmpeg.exe` and extract it.
+    #[cfg(windows)]
+    async fn extract_ffmpeg_from_zip(zip_path: &Path, dest: &Path) -> Result<(), anyhow::Error> {
+        let zip_path = zip_path.to_path_buf();
+        let dest = dest.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let file = std::fs::File::open(&zip_path)?;
+            let mut archive = zip::ZipArchive::new(file)?;
+            for i in 0..archive.len() {
+                let mut entry = archive.by_index(i)?;
+                let name = entry.name().to_string();
+                if name.ends_with("/ffmpeg.exe") || name == "ffmpeg.exe" {
+                    let mut out = std::fs::File::create(&dest)?;
+                    std::io::copy(&mut entry, &mut out)?;
+                    tracing::info!(
+                        "extracted ffmpeg.exe from ZIP ({} bytes)",
+                        out.metadata()?.len()
+                    );
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("ffmpeg.exe not found in ZIP archive");
+        })
+        .await?
     }
 
     /// Set executable permission on Unix.
