@@ -227,7 +227,7 @@ jobs:
 
   deploy-resolume:
     name: Deploy to win-resolume
-    needs: [gate, build-tauri]
+    needs: [gate, build-tauri, build-wasm]
     if: >-
       always()
       && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
@@ -250,11 +250,19 @@ jobs:
           name: tauri-installer
           path: artifacts/tauri
 
+      - name: Download WASM frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: artifacts/dist
+
       - name: List artifacts
         shell: powershell
         run: |
           Write-Host "=== Tauri installer ==="
           Get-ChildItem artifacts/tauri/
+          Write-Host "=== WASM frontend ==="
+          Get-ChildItem artifacts/dist/ | Select-Object Name
 
       - name: Install WebView2 runtime
         shell: powershell
@@ -324,8 +332,15 @@ jobs:
           Write-Host "=== Verifying install ==="
           Get-ChildItem "$InstallDir\*.exe"
 
+          # Deploy WASM frontend for dashboard
+          Write-Host "=== Deploying WASM frontend ==="
+          $distTarget = "$InstallDir\dist"
+          Remove-Item -Path $distTarget -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "artifacts\dist" -Destination $distTarget -Recurse -Force
+          Write-Host "Dashboard files deployed to $distTarget"
+          Get-ChildItem $distTarget | Select-Object Name
+
           # Grant Resolume user write access to data directory (ProgramData defaults to read-only for Users)
-          $DataDir = "C:\ProgramData\SongPlayer"
           New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
           icacls $DataDir /grant "Resolume:(OI)(CI)F" /T
           Write-Host "=== Data directory permissions set ==="
@@ -419,9 +434,12 @@ jobs:
               $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
               Write-Host "API responds: version=$($resp.version)"
               # Also verify writes work (SQLite WAL recovery may delay writes)
-              $testBody = [System.Text.Encoding]::UTF8.GetBytes('{"_e2e_probe":"ok"}')
-              $wr = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $testBody -ContentType "application/json" -UseBasicParsing
-              if ($wr.StatusCode -eq 204) {
+              # Verify writes work by creating and deleting a test playlist
+              $createBody = [System.Text.Encoding]::UTF8.GetBytes('{"name":"_e2e_probe","youtube_url":"https://youtube.com/playlist?list=PLtest"}')
+              $cr = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $createBody -ContentType "application/json" -UseBasicParsing
+              if ($cr.StatusCode -eq 201) {
+                $probeId = ($cr.Content | ConvertFrom-Json).id
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$probeId" -Method Delete -UseBasicParsing | Out-Null
                 Write-Host "API ready: reads and writes working"
                 $writeOk = $true
                 break
@@ -522,13 +540,13 @@ jobs:
       - name: Verify dashboard loads
         shell: powershell
         run: |
-          try {
-            $resp = Invoke-WebRequest -Uri "http://localhost:8920/" -UseBasicParsing -TimeoutSec 10
-            if ($resp.StatusCode -eq 200 -and $resp.Content -match "wasm|songplayer") {
-              Write-Host "OK: Dashboard loads (WASM detected)"
-            } else {
-              Write-Host "WARN: Dashboard returned 200 but no WASM content detected"
-            }
-          } catch {
-            Write-Host "WARN: Dashboard not available (may need dist/ to be bundled)"
+          $resp = Invoke-WebRequest -Uri "http://localhost:8920/" -UseBasicParsing -TimeoutSec 10
+          if ($resp.StatusCode -ne 200) {
+            Write-Error "FAIL: Dashboard returned $($resp.StatusCode)"
+            exit 1
           }
+          if ($resp.Content -notmatch "wasm|songplayer") {
+            Write-Error "FAIL: Dashboard loaded but no WASM content detected"
+            exit 1
+          }
+          Write-Host "OK: Dashboard loads (WASM detected, $($resp.RawContentLength) bytes)"
