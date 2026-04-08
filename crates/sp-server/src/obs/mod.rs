@@ -70,10 +70,11 @@ impl ObsClient {
     pub fn spawn(
         config: ObsConfig,
         ndi_sources: NdiSourceMap,
+        shared_state: Arc<RwLock<ObsState>>,
         event_tx: broadcast::Sender<ObsEvent>,
         mut shutdown: broadcast::Receiver<()>,
     ) -> Self {
-        let state = Arc::new(RwLock::new(ObsState::default()));
+        let state = shared_state;
         let (cmd_tx, cmd_rx) = mpsc::channel::<ObsCommand>(64);
 
         let loop_state = Arc::clone(&state);

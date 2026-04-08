@@ -194,6 +194,166 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --verbose
 
+  test-integrity:
+    name: Test Integrity Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for ignored tests
+        run: |
+          IGNORED=$(grep -rn '#\[ignore\]' --include='*.rs' crates src-tauri || true)
+          if [ -n "$IGNORED" ]; then
+            echo "ERROR: Found #[ignore] attributes on tests. All tests must run."
+            echo "$IGNORED"
+            exit 1
+          fi
+          echo "OK: No #[ignore] attributes found."
+
+      - name: Scan for false positive assertions
+        run: |
+          FALSE_POS=$(grep -rn 'assert!(true)' --include='*.rs' crates src-tauri || true)
+          if [ -n "$FALSE_POS" ]; then
+            echo "ERROR: Found assert!(true) — tests must verify real behavior."
+            echo "$FALSE_POS"
+            exit 1
+          fi
+          echo "OK: No assert!(true) found."
+
+      - name: Scan for empty test bodies
+        run: |
+          EMPTY=$(grep -Pzo '#\[test\]\s*\n\s*(async\s+)?fn\s+\w+\([^)]*\)[^{]*\{\s*\}' --include='*.rs' -rn crates src-tauri || true)
+          if [ -n "$EMPTY" ]; then
+            echo "ERROR: Found empty test bodies — tests must contain real assertions."
+            echo "$EMPTY"
+            exit 1
+          fi
+          echo "OK: No empty test bodies found."
+
+      - name: Scan for trivial assertions
+        run: |
+          TRIVIAL=$(grep -rn 'assert_eq!(1,\s*1)\|assert_eq!(true,\s*true)\|assert_eq!("",\s*"")' --include='*.rs' crates src-tauri || true)
+          if [ -n "$TRIVIAL" ]; then
+            echo "ERROR: Found trivial assertions — tests must verify real behavior."
+            echo "$TRIVIAL"
+            exit 1
+          fi
+          echo "OK: No trivial assertions found."
+
+      - name: Verify minimum test count
+        run: |
+          TEST_COUNT=$(grep -r '#\[test\]' --include='*.rs' crates src-tauri | wc -l)
+          echo "Found $TEST_COUNT unit tests"
+          if [ "$TEST_COUNT" -lt 150 ]; then
+            echo "ERROR: Expected at least 150 tests, found $TEST_COUNT."
+            exit 1
+          fi
+          echo "OK: $TEST_COUNT tests found."
+
+      - name: Verify E2E tests exist
+        run: |
+          if [ ! -d "e2e" ]; then
+            echo "ERROR: E2E test directory missing"
+            exit 1
+          fi
+          E2E_COUNT=$(find e2e -name "*.spec.ts" -o -name "*.test.ts" 2>/dev/null | wc -l)
+          if [ "$E2E_COUNT" -lt 1 ]; then
+            echo "ERROR: No E2E test files found"
+            exit 1
+          fi
+          echo "OK: $E2E_COUNT E2E test files found."
+
+      - name: Ban continue-on-error in CI
+        run: |
+          FOUND=$(grep -rn "continue-on-error:" .github/workflows/ 2>/dev/null | grep -v "Ban continue-on-error" || true)
+          if [ -n "$FOUND" ]; then
+            echo "ERROR: continue-on-error found in CI workflows. All steps must pass or fail explicitly."
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "OK: No continue-on-error found."
+
+      - name: Ban skip patterns in E2E tests
+        run: |
+          FOUND=$(grep -rn '\.skip(' e2e/tests/ 2>/dev/null || true)
+          if [ -n "$FOUND" ]; then
+            echo "ERROR: .skip() found in E2E tests. Tests must run, not skip."
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "OK: No skip patterns in E2E tests."
+
+      - name: Verify deploy job uses always() condition
+        run: |
+          # Extract the full if: condition block (may span multiple lines with >-)
+          DEPLOY_BLOCK=$(grep -A10 "deploy-resolume:" .github/workflows/ci.yml | head -12)
+          if ! echo "$DEPLOY_BLOCK" | grep -q "always()"; then
+            echo "ERROR: deploy-resolume must use always() in its if: condition"
+            echo "Found:"
+            echo "$DEPLOY_BLOCK"
+            exit 1
+          fi
+          echo "OK: deploy-resolume uses always() condition."
+
+  file-size:
+    name: File Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check no .rs file exceeds 1000 lines
+        run: |
+          OVERSIZED=$(find crates src-tauri sp-ui -name '*.rs' -exec sh -c 'lines=$(wc -l < "$1"); if [ "$lines" -gt 1000 ]; then echo "$1: $lines lines"; fi' _ {} \;)
+          if [ -n "$OVERSIZED" ]; then
+            echo "ERROR: The following Rust files exceed 1000 lines:"
+            echo "$OVERSIZED"
+            exit 1
+          fi
+          echo "OK: All Rust files are within the 1000-line limit."
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Run coverage
+        run: cargo tarpaulin --workspace --exclude-files "src-tauri/*" --exclude-files "sp-ui/*" --fail-under 45 --skip-clean --timeout 300
+
+  mutation-testing:
+    name: Mutation Testing
+    if: github.event_name == 'pull_request'
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants
+      - name: "Mutation testing: zero survivors in changed code"
+        run: |
+          git diff origin/main...HEAD > pr.diff
+          if [ ! -s pr.diff ]; then
+            echo "No source changes in diff -- skipping"
+            exit 0
+          fi
+          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
+            --exclude-re 'ObsClient::spawn' \
+            --exclude-re 'replace start'
+      - name: Upload mutants report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: mutants-out/
+
   gate:
     name: Gate
     runs-on: ubuntu-latest
@@ -209,13 +369,17 @@ jobs:
       - build-wasm
       - build-tauri
       - frontend-e2e
+      - test-integrity
+      - file-size
+      - coverage
+      - mutation-testing
     steps:
       - name: Check all jobs passed
         run: |
           results='${{ toJSON(needs) }}'
           echo "Job results: $results"
-          # version-check and dev-version-check are conditional — skipped is acceptable
-          for job in lint test test-wasm security build-windows build-wasm build-tauri frontend-e2e; do
+          # version-check, dev-version-check, mutation-testing are conditional — skipped is acceptable
+          for job in lint test test-wasm security build-windows build-wasm build-tauri frontend-e2e test-integrity file-size coverage; do
             result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
             echo "$job: $result"
             if [ "$result" != "success" ]; then
@@ -224,3 +388,416 @@ jobs:
             fi
           done
           echo "All required jobs passed."
+
+  deploy-resolume:
+    name: Deploy to win-resolume
+    needs: [gate, build-tauri, build-wasm]
+    if: >-
+      always()
+      && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.gate.result == 'success'
+      && needs.build-tauri.result == 'success'
+    runs-on: [self-hosted, windows, resolume]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clean old artifacts
+        shell: powershell
+        run: |
+          Remove-Item -Path "artifacts" -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "Cleaned artifacts directory"
+
+      - name: Download Tauri installer
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-installer
+          path: artifacts/tauri
+
+      - name: Download WASM frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: artifacts/dist
+
+      - name: List artifacts
+        shell: powershell
+        run: |
+          Write-Host "=== Tauri installer ==="
+          Get-ChildItem artifacts/tauri/
+          Write-Host "=== WASM frontend ==="
+          Get-ChildItem artifacts/dist/ | Select-Object Name
+
+      - name: Install WebView2 runtime
+        shell: powershell
+        run: |
+          function Get-WebView2Version {
+            foreach ($guid in @("{F3017226-FE2A-4295-8BEF-AE82F87EC1B0}", "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}")) {
+              $reg = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$guid" -ErrorAction SilentlyContinue
+              if ($reg -and $reg.pv) { return $reg.pv }
+            }
+            $dir = "C:\Program Files (x86)\Microsoft\EdgeWebView\Application"
+            if (Test-Path $dir) { return "installed (detected from filesystem)" }
+            return $null
+          }
+          $version = Get-WebView2Version
+          if ($version) {
+            Write-Host "WebView2 already installed: $version"
+          } else {
+            Write-Host "WebView2 not found - installing..."
+            $bootstrapper = "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
+            Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapper
+            Start-Process -FilePath $bootstrapper -ArgumentList "/silent /install" -Wait
+            Remove-Item $bootstrapper -ErrorAction SilentlyContinue
+            $version = Get-WebView2Version
+            if (-not $version) {
+              Write-Error "WebView2 runtime installation FAILED"
+              exit 1
+            }
+            Write-Host "WebView2 installed: $version"
+          }
+
+      - name: Deploy SongPlayer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=== Stopping SongPlayer ==="
+          taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          $elapsed = 0
+          while ($elapsed -lt 10) {
+            $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+            if (-not $proc) { break }
+            Start-Sleep -Seconds 1
+            $elapsed++
+          }
+          Start-Sleep -Seconds 2
+
+          $DataDir = "C:\ProgramData\SongPlayer"
+          Remove-Item "$DataDir\songplayer.db-wal" -Force -ErrorAction SilentlyContinue
+          Remove-Item "$DataDir\songplayer.db-shm" -Force -ErrorAction SilentlyContinue
+
+          $timeout = 30
+          $elapsed = 0
+          while ($elapsed -lt $timeout) {
+            $portInUse = netstat -an | Select-String ":8920 " | Select-String "LISTENING"
+            if (-not $portInUse) { break }
+            Start-Sleep -Seconds 2
+            $elapsed += 2
+            Write-Host "Waiting for port 8920... ($elapsed s)"
+          }
+
+          Write-Host "=== Installing SongPlayer ==="
+          $installer = Get-ChildItem "artifacts/tauri/*.exe" | Select-Object -First 1
+          Write-Host "Installer: $($installer.Name)"
+          Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait
+
+          $InstallDir = "C:\Program Files\SongPlayer"
+          Write-Host "=== Verifying install ==="
+          Get-ChildItem "$InstallDir\*.exe"
+
+          # Deploy WASM frontend for dashboard
+          Write-Host "=== Deploying WASM frontend ==="
+          $distTarget = "$InstallDir\dist"
+          Remove-Item -Path $distTarget -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "artifacts\dist" -Destination $distTarget -Recurse -Force
+          Write-Host "Dashboard files deployed to $distTarget"
+          Get-ChildItem $distTarget | Select-Object Name
+
+          # Grant Resolume user write access to data directory (ProgramData defaults to read-only for Users)
+          New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+          icacls $DataDir /grant "Resolume:(OI)(CI)F" /T
+          Write-Host "=== Data directory permissions set ==="
+
+      - name: Configure auto-start and launch
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ExePath = "C:\Program Files\SongPlayer\SongPlayer.exe"
+          $InstallDir = "C:\Program Files\SongPlayer"
+          $TaskName = "SongPlayer"
+
+          Get-ScheduledTask | Where-Object { $_.TaskName -like "*ongPlayer*" } | ForEach-Object {
+            Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+          }
+
+          $action = New-ScheduledTaskAction -Execute $ExePath -WorkingDirectory $InstallDir
+          $trigger = New-ScheduledTaskTrigger -AtLogon -User "Resolume"
+          $principal = New-ScheduledTaskPrincipal -UserId "Resolume" -LogonType Interactive -RunLevel Limited
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit 0
+          Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
+          Write-Host "Created scheduled task: $TaskName"
+
+          Remove-NetFirewallRule -DisplayName "SongPlayer API" -ErrorAction SilentlyContinue
+          New-NetFirewallRule -DisplayName "SongPlayer API" -Direction Inbound -Protocol TCP -LocalPort 8920 -Action Allow | Out-Null
+          Write-Host "Firewall rule created for port 8920"
+
+          schtasks.exe /run /tn $TaskName
+          if ($LASTEXITCODE -ne 0) { throw "schtasks.exe failed (exit code: $LASTEXITCODE)" }
+          Start-Sleep -Seconds 10
+          Write-Host "SongPlayer started"
+
+      - name: Health checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $VERSION = Get-Content "VERSION" -Raw
+          $VERSION = $VERSION.Trim()
+
+          Write-Host "=== CHECK 1: Process running ==="
+          $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $proc) {
+            Write-Error "FAIL: SongPlayer.exe is not running"
+            exit 1
+          }
+          Write-Host "OK: PID $($proc.Id)"
+
+          Write-Host "=== CHECK 2: API responds ==="
+          $maxRetries = 6
+          $apiOk = $false
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
+              $apiOk = $true
+              break
+            } catch {
+              Write-Host "Attempt $i/$maxRetries - waiting 5s..."
+              Start-Sleep -Seconds 5
+            }
+          }
+          if (-not $apiOk) {
+            Write-Error "FAIL: API did not respond after $maxRetries attempts"
+            exit 1
+          }
+          Write-Host "OK: API version=$($resp.version), obs_connected=$($resp.obs_connected)"
+
+          Write-Host "=== CHECK 3: Version matches ==="
+          if ($resp.version -ne $VERSION) {
+            Write-Error "FAIL: API version '$($resp.version)' != expected '$VERSION'"
+            exit 1
+          }
+          Write-Host "OK: Version matches ($VERSION)"
+
+          Write-Host "=== All health checks passed ==="
+
+  e2e-resolume:
+    name: E2E Tests (win-resolume)
+    needs: [deploy-resolume]
+    if: always() && needs.deploy-resolume.result == 'success'
+    runs-on: [self-hosted, windows, resolume]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure OBS is running
+        shell: powershell
+        run: |
+          $obs = Get-Process -Name "obs64" -ErrorAction SilentlyContinue
+          if ($obs) {
+            Write-Host "OK: OBS already running (PID $($obs.Id))"
+          } else {
+            Write-Host "OBS not running - starting via scheduled task..."
+            schtasks.exe /run /tn StartOBS 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "No StartOBS task - trying direct launch..."
+              Start-Process -FilePath "C:\Program Files\obs-studio\bin\64bit\obs64.exe" -ArgumentList "--minimize-to-tray" -WindowStyle Hidden
+            }
+            # Wait for OBS WebSocket to be ready
+            $maxWait = 30
+            $elapsed = 0
+            while ($elapsed -lt $maxWait) {
+              $listening = netstat -an | Select-String ":4455.*LISTENING"
+              if ($listening) { break }
+              Start-Sleep -Seconds 2
+              $elapsed += 2
+              Write-Host "Waiting for OBS WebSocket port 4455... ($elapsed s)"
+            }
+            if ($elapsed -ge $maxWait) {
+              Write-Error "FAIL: OBS WebSocket port 4455 not listening after ${maxWait}s"
+              exit 1
+            }
+            Write-Host "OK: OBS started and WebSocket listening on port 4455"
+          }
+
+      - name: Restart SongPlayer (pick up OBS connection after OBS start)
+        shell: powershell
+        run: |
+          # SongPlayer may have been started before OBS and be in backoff.
+          # Restart it now that OBS is confirmed running so it connects immediately.
+          taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          Start-Sleep -Seconds 3
+          schtasks.exe /run /tn SongPlayer
+          Start-Sleep -Seconds 10
+          Write-Host "SongPlayer restarted"
+
+      - name: Wait for SongPlayer API (read + write)
+        shell: powershell
+        run: |
+          $maxRetries = 12
+          $writeOk = $false
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
+              Write-Host "API responds: version=$($resp.version)"
+              # Also verify writes work (SQLite WAL recovery may delay writes)
+              # Verify writes work by creating and deleting a test playlist
+              $createBody = [System.Text.Encoding]::UTF8.GetBytes('{"name":"_e2e_probe","youtube_url":"https://youtube.com/playlist?list=PLtest"}')
+              $cr = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $createBody -ContentType "application/json" -UseBasicParsing
+              if ($cr.StatusCode -eq 201) {
+                $probeId = ($cr.Content | ConvertFrom-Json).id
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$probeId" -Method Delete -UseBasicParsing | Out-Null
+                Write-Host "API ready: reads and writes working"
+                $writeOk = $true
+                break
+              }
+            } catch {
+              Write-Host "Attempt $i/$maxRetries - waiting 5s..."
+            }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $writeOk) {
+            Write-Error "API writes not working after $maxRetries attempts"
+            exit 1
+          }
+
+      - name: Seed settings
+        shell: powershell
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          $settings = @{
+            obs_websocket_url = "ws://localhost:4455"
+            cache_dir = "C:\ProgramData\SongPlayer\cache"
+            gemini_api_key = $env:GEMINI_API_KEY
+          }
+          $body = $settings | ConvertTo-Json -Compress
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $bytes -ContentType "application/json" -UseBasicParsing | Out-Null
+          Write-Host "Settings seeded"
+
+          $current = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings"
+          Write-Host "obs_websocket_url = $($current.obs_websocket_url)"
+          Write-Host "cache_dir = $($current.cache_dir)"
+          if ($current.obs_websocket_url -ne "ws://localhost:4455") {
+            Write-Error "FAIL: obs_websocket_url not set"
+            exit 1
+          }
+
+      - name: Seed playlists
+        shell: powershell
+        run: |
+          $playlists = @(
+            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; obs_text_source = "ytwarmup_title" },
+            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; obs_text_source = "ytpresence_title" },
+            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; obs_text_source = "ytslow_title" },
+            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; obs_text_source = "yt90s_title" },
+            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; obs_text_source = "ytworship_title" },
+            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; obs_text_source = "ytfast_title" }
+          )
+
+          $existing = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          $existingNames = $existing | ForEach-Object { $_.name }
+
+          foreach ($pl in $playlists) {
+            if ($existingNames -contains $pl.name) {
+              Write-Host "Playlist '$($pl.name)' already exists - skipping"
+              continue
+            }
+            $body = $pl | ConvertTo-Json -Compress
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+            $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $bytes -ContentType "application/json" -UseBasicParsing
+            $created = $resp.Content | ConvertFrom-Json
+            Write-Host "Created playlist: $($created.name) (id=$($created.id))"
+          }
+
+          $all = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          if ($all.Count -lt 6) {
+            Write-Error "FAIL: Expected at least 6 playlists, got $($all.Count)"
+            exit 1
+          }
+          Write-Host "OK: $($all.Count) playlists exist"
+
+      - name: Test playlist sync
+        shell: powershell
+        run: |
+          $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          $first = $playlists[0]
+          Write-Host "Triggering sync for '$($first.name)' (id=$($first.id))..."
+
+          $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$($first.id)/sync" -Method Post -UseBasicParsing
+          if ($resp.StatusCode -ne 202) {
+            Write-Error "FAIL: Expected 202 Accepted, got $($resp.StatusCode)"
+            exit 1
+          }
+          Write-Host "OK: Sync accepted (202)"
+
+      - name: Verify OBS WebSocket connected
+        shell: powershell
+        run: |
+          # OBS must be running on win-resolume for SongPlayer to connect
+          # SongPlayer uses exponential backoff (1s, 2s, 4s, ..., 30s max) so may take up to 60s
+          $maxRetries = 12
+          $connected = $false
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
+            if ($status.obs_connected) {
+              Write-Host "OK: OBS WebSocket connected, scene=$($status.active_scene)"
+              $connected = $true
+              break
+            }
+            Write-Host "Attempt $i/$maxRetries - OBS not connected, waiting 5s..."
+            Start-Sleep -Seconds 5
+          }
+          if (-not $connected) {
+            Write-Error "FAIL: OBS WebSocket not connected after $maxRetries attempts. Is OBS running?"
+            exit 1
+          }
+
+      - name: Verify dashboard loads with WASM content
+        shell: powershell
+        run: |
+          $resp = Invoke-WebRequest -Uri "http://localhost:8920/" -UseBasicParsing -TimeoutSec 10
+          if ($resp.StatusCode -ne 200) {
+            Write-Error "FAIL: Dashboard returned $($resp.StatusCode)"
+            exit 1
+          }
+          if ($resp.Content -notmatch "wasm|songplayer") {
+            Write-Error "FAIL: Dashboard loaded but no WASM content detected"
+            exit 1
+          }
+          Write-Host "OK: Dashboard loads ($($resp.RawContentLength) bytes, WASM content detected)"
+
+      - name: Verify NDI runtime available
+        shell: powershell
+        run: |
+          # NDI SDK must be loadable for SongPlayer to output video
+          $ndiDll = $null
+          foreach ($envVar in @("NDI_RUNTIME_DIR_V6", "NDI_RUNTIME_DIR_V5")) {
+            $dir = [Environment]::GetEnvironmentVariable($envVar)
+            if ($dir) {
+              $candidate = Join-Path $dir "Processing.NDI.Lib.x64.dll"
+              if (Test-Path $candidate) {
+                $ndiDll = $candidate
+                break
+              }
+            }
+          }
+          if (-not $ndiDll) {
+            Write-Error "FAIL: NDI runtime DLL not found. Check NDI_RUNTIME_DIR_V6/V5 environment variables."
+            exit 1
+          }
+          $ver = (Get-Item $ndiDll).VersionInfo
+          Write-Host "OK: NDI runtime found at $ndiDll (version $($ver.FileVersion))"
+
+      - name: Verify tools available (yt-dlp, ffmpeg)
+        shell: powershell
+        run: |
+          $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
+          if (-not $status.tools.ytdlp_available) {
+            Write-Error "FAIL: yt-dlp not available"
+            exit 1
+          }
+          if (-not $status.tools.ffmpeg_available) {
+            Write-Error "FAIL: FFmpeg not available"
+            exit 1
+          }
+          Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"

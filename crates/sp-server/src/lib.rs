@@ -245,6 +245,7 @@ pub async fn start(
         let _obs_client = obs::ObsClient::spawn(
             obs_config,
             ndi_sources,
+            obs_state.clone(),
             obs_event_tx.clone(),
             shutdown_tx.subscribe(),
         );
