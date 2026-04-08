@@ -194,6 +194,166 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --verbose
 
+  test-integrity:
+    name: Test Integrity Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for ignored tests
+        run: |
+          IGNORED=$(grep -rn '#\[ignore\]' --include='*.rs' crates src-tauri || true)
+          if [ -n "$IGNORED" ]; then
+            echo "ERROR: Found #[ignore] attributes on tests. All tests must run."
+            echo "$IGNORED"
+            exit 1
+          fi
+          echo "OK: No #[ignore] attributes found."
+
+      - name: Scan for false positive assertions
+        run: |
+          FALSE_POS=$(grep -rn 'assert!(true)' --include='*.rs' crates src-tauri || true)
+          if [ -n "$FALSE_POS" ]; then
+            echo "ERROR: Found assert!(true) — tests must verify real behavior."
+            echo "$FALSE_POS"
+            exit 1
+          fi
+          echo "OK: No assert!(true) found."
+
+      - name: Scan for empty test bodies
+        run: |
+          EMPTY=$(grep -Pzo '#\[test\]\s*\n\s*(async\s+)?fn\s+\w+\([^)]*\)[^{]*\{\s*\}' --include='*.rs' -rn crates src-tauri || true)
+          if [ -n "$EMPTY" ]; then
+            echo "ERROR: Found empty test bodies — tests must contain real assertions."
+            echo "$EMPTY"
+            exit 1
+          fi
+          echo "OK: No empty test bodies found."
+
+      - name: Scan for trivial assertions
+        run: |
+          TRIVIAL=$(grep -rn 'assert_eq!(1,\s*1)\|assert_eq!(true,\s*true)\|assert_eq!("",\s*"")' --include='*.rs' crates src-tauri || true)
+          if [ -n "$TRIVIAL" ]; then
+            echo "ERROR: Found trivial assertions — tests must verify real behavior."
+            echo "$TRIVIAL"
+            exit 1
+          fi
+          echo "OK: No trivial assertions found."
+
+      - name: Verify minimum test count
+        run: |
+          TEST_COUNT=$(grep -r '#\[test\]' --include='*.rs' crates src-tauri | wc -l)
+          echo "Found $TEST_COUNT unit tests"
+          if [ "$TEST_COUNT" -lt 150 ]; then
+            echo "ERROR: Expected at least 150 tests, found $TEST_COUNT."
+            exit 1
+          fi
+          echo "OK: $TEST_COUNT tests found."
+
+      - name: Verify E2E tests exist
+        run: |
+          if [ ! -d "e2e" ]; then
+            echo "ERROR: E2E test directory missing"
+            exit 1
+          fi
+          E2E_COUNT=$(find e2e -name "*.spec.ts" -o -name "*.test.ts" 2>/dev/null | wc -l)
+          if [ "$E2E_COUNT" -lt 1 ]; then
+            echo "ERROR: No E2E test files found"
+            exit 1
+          fi
+          echo "OK: $E2E_COUNT E2E test files found."
+
+      - name: Ban continue-on-error in CI
+        run: |
+          FOUND=$(grep -rn "continue-on-error:" .github/workflows/ 2>/dev/null | grep -v "Ban continue-on-error" || true)
+          if [ -n "$FOUND" ]; then
+            echo "ERROR: continue-on-error found in CI workflows. All steps must pass or fail explicitly."
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "OK: No continue-on-error found."
+
+      - name: Ban skip patterns in E2E tests
+        run: |
+          FOUND=$(grep -rn '\.skip(' e2e/tests/ 2>/dev/null || true)
+          if [ -n "$FOUND" ]; then
+            echo "ERROR: .skip() found in E2E tests. Tests must run, not skip."
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "OK: No skip patterns in E2E tests."
+
+      - name: Verify deploy job uses always() condition
+        run: |
+          DEPLOY_CONDITION=$(grep -A3 "deploy-resolume:" .github/workflows/ci.yml | grep "if:" || true)
+          if [ -z "$DEPLOY_CONDITION" ]; then
+            echo "ERROR: deploy-resolume job missing 'if' condition"
+            exit 1
+          fi
+          if ! echo "$DEPLOY_CONDITION" | grep -q "always()"; then
+            echo "ERROR: deploy-resolume must use always() in condition"
+            echo "Found: $DEPLOY_CONDITION"
+            exit 1
+          fi
+          echo "OK: deploy-resolume uses always() condition."
+
+  file-size:
+    name: File Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check no .rs file exceeds 1000 lines
+        run: |
+          OVERSIZED=$(find crates src-tauri sp-ui -name '*.rs' -exec sh -c 'lines=$(wc -l < "$1"); if [ "$lines" -gt 1000 ]; then echo "$1: $lines lines"; fi' _ {} \;)
+          if [ -n "$OVERSIZED" ]; then
+            echo "ERROR: The following Rust files exceed 1000 lines:"
+            echo "$OVERSIZED"
+            exit 1
+          fi
+          echo "OK: All Rust files are within the 1000-line limit."
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Run coverage
+        run: cargo tarpaulin --workspace --exclude-files "src-tauri/*" --exclude-files "sp-ui/*" --fail-under 50 --skip-clean --timeout 300
+
+  mutation-testing:
+    name: Mutation Testing
+    if: github.event_name == 'pull_request'
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants
+      - name: "Mutation testing: zero survivors in changed code"
+        run: |
+          git diff origin/main...HEAD > pr.diff
+          if [ ! -s pr.diff ]; then
+            echo "No source changes in diff -- skipping"
+            exit 0
+          fi
+          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out
+      - name: Upload mutants report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: mutants-out/
+
   gate:
     name: Gate
     runs-on: ubuntu-latest
@@ -209,13 +369,17 @@ jobs:
       - build-wasm
       - build-tauri
       - frontend-e2e
+      - test-integrity
+      - file-size
+      - coverage
+      - mutation-testing
     steps:
       - name: Check all jobs passed
         run: |
           results='${{ toJSON(needs) }}'
           echo "Job results: $results"
-          # version-check and dev-version-check are conditional — skipped is acceptable
-          for job in lint test test-wasm security build-windows build-wasm build-tauri frontend-e2e; do
+          # version-check, dev-version-check, mutation-testing are conditional — skipped is acceptable
+          for job in lint test test-wasm security build-windows build-wasm build-tauri frontend-e2e test-integrity file-size coverage; do
             result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
             echo "$job: $result"
             if [ "$result" != "success" ]; then
@@ -525,19 +689,28 @@ jobs:
           }
           Write-Host "OK: Sync accepted (202)"
 
-      - name: Test OBS connection
+      - name: Verify OBS WebSocket connected
         shell: powershell
         run: |
-          Start-Sleep -Seconds 5
-          $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
-          Write-Host "OBS connected: $($status.obs_connected)"
-          if ($status.obs_connected) {
-            Write-Host "OK: OBS WebSocket connected, scene=$($status.active_scene)"
-          } else {
-            Write-Host "WARN: OBS not connected yet (auto-reconnect will handle this)"
+          # OBS must be running on win-resolume for SongPlayer to connect
+          $maxRetries = 6
+          $connected = $false
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
+            if ($status.obs_connected) {
+              Write-Host "OK: OBS WebSocket connected, scene=$($status.active_scene)"
+              $connected = $true
+              break
+            }
+            Write-Host "Attempt $i/$maxRetries - OBS not connected, waiting 5s..."
+            Start-Sleep -Seconds 5
+          }
+          if (-not $connected) {
+            Write-Error "FAIL: OBS WebSocket not connected after $maxRetries attempts. Is OBS running?"
+            exit 1
           }
 
-      - name: Verify dashboard loads
+      - name: Verify dashboard loads with WASM content
         shell: powershell
         run: |
           $resp = Invoke-WebRequest -Uri "http://localhost:8920/" -UseBasicParsing -TimeoutSec 10
@@ -549,4 +722,40 @@ jobs:
             Write-Error "FAIL: Dashboard loaded but no WASM content detected"
             exit 1
           }
-          Write-Host "OK: Dashboard loads (WASM detected, $($resp.RawContentLength) bytes)"
+          Write-Host "OK: Dashboard loads ($($resp.RawContentLength) bytes, WASM content detected)"
+
+      - name: Verify NDI runtime available
+        shell: powershell
+        run: |
+          # NDI SDK must be loadable for SongPlayer to output video
+          $ndiDll = $null
+          foreach ($envVar in @("NDI_RUNTIME_DIR_V6", "NDI_RUNTIME_DIR_V5")) {
+            $dir = [Environment]::GetEnvironmentVariable($envVar)
+            if ($dir) {
+              $candidate = Join-Path $dir "Processing.NDI.Lib.x64.dll"
+              if (Test-Path $candidate) {
+                $ndiDll = $candidate
+                break
+              }
+            }
+          }
+          if (-not $ndiDll) {
+            Write-Error "FAIL: NDI runtime DLL not found. Check NDI_RUNTIME_DIR_V6/V5 environment variables."
+            exit 1
+          }
+          $ver = (Get-Item $ndiDll).VersionInfo
+          Write-Host "OK: NDI runtime found at $ndiDll (version $($ver.FileVersion))"
+
+      - name: Verify tools available (yt-dlp, ffmpeg)
+        shell: powershell
+        run: |
+          $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
+          if (-not $status.tools.ytdlp_available) {
+            Write-Error "FAIL: yt-dlp not available"
+            exit 1
+          }
+          if (-not $status.tools.ffmpeg_available) {
+            Write-Error "FAIL: FFmpeg not available"
+            exit 1
+          }
+          Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"
