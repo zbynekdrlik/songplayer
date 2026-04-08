@@ -184,7 +184,12 @@ impl DownloadWorker {
             .args(["-f", &format_spec])
             .args(["--ffmpeg-location"])
             .arg(ffmpeg_dir)
+            // Use node.js as JS runtime for YouTube extraction (deno is default but
+            // often not installed; node.js is available on win-resolume).
+            .args(["--js-runtimes", "node"])
             .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
+            // Force merge into MP4 container regardless of source format.
+            .args(["--merge-output-format", "mp4"])
             .args(["-o"])
             .arg(output)
             .arg(&url)
