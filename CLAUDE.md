@@ -1,3 +1,4 @@
+<!-- Global rules inherited from ~/.claude/CLAUDE.md (managed by airuleset) -->
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
@@ -80,15 +81,7 @@ cd src-tauri && cargo tauri build
 
 ## Branch Strategy
 
-- `dev` — all development work happens here
-- `main` — releases only; never commit directly to main
-- Create PR from `dev` to `main` when ready to release
-- After merge: delete dev, recreate as `dev` with next `-dev.N` version
-
-**CRITICAL for Claude:**
-- NEVER commit or push directly to `main`
-- NEVER merge PRs — only the user merges PRs
-- Always work on `dev` and create a PR for user review
+Two branches: `dev` + `main`. After merge: recreate `dev` with next `-dev.N` version.
 
 ## Version Management
 
@@ -109,7 +102,7 @@ Note: The 4 workspace crates use `version.workspace = true` — only the root `C
 
 ## Database
 
-SQLite via sqlx with manual migrations. Migration logic lives in `crates/sp-core/src/db/mod.rs`. No external migration files — schema is applied programmatically at startup.
+SQLite via sqlx with manual migrations. Migration logic lives in `crates/sp-server/src/db/mod.rs`. No external migration files — schema is applied programmatically at startup.
 
 - Database file: configurable path, defaults to `songplayer.db` in app data dir
 - Connection type: `SqlitePool` with `sqlx::sqlite`
@@ -147,5 +140,12 @@ All `std::process::Command` calls for yt-dlp/FFmpeg must use `CREATE_NO_WINDOW`:
 use std::os::windows::process::CommandExt;
 command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 ```
+
+**Server orchestration (`sp-server/src/lib.rs`):**
+The `start()` function wires all subsystems: DB, tools manager, playlist sync handler, download worker, OBS WebSocket client, playback engine, Resolume workers, reprocess worker, and Axum HTTP server. All workers receive a shutdown broadcast for graceful termination.
+
+**API routes are under `/api/v1/`** (not `/api/`). The WASM dashboard uses relative URLs.
+
+**Deployment target:** Windows machine `win-resolume` (10.77.9.201) running OBS Studio with NDI plugin. Installed via NSIS installer from CI artifacts. Data directory: `C:\ProgramData\SongPlayer\`.
 
 **Follow existing patterns** from similar projects (restreamer, iem-mixer) for consistency in error handling, logging (tracing), and state management.
