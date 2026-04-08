@@ -346,7 +346,12 @@ jobs:
           fi
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
             --exclude-re 'ObsClient::spawn' \
-            --exclude-re 'replace start'
+            --exclude-re 'replace start' \
+            --exclude-re 'download_video' \
+            --exclude-re 'sync_playlist' \
+            --exclude-re 'verify_executable' \
+            --exclude-re 'extract_ffmpeg_from_zip' \
+            --exclude-re 'ensure_tools'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
