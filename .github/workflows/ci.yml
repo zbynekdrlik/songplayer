@@ -324,6 +324,12 @@ jobs:
           Write-Host "=== Verifying install ==="
           Get-ChildItem "$InstallDir\*.exe"
 
+          # Grant Resolume user write access to data directory (ProgramData defaults to read-only for Users)
+          $DataDir = "C:\ProgramData\SongPlayer"
+          New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+          icacls $DataDir /grant "Resolume:(OI)(CI)F" /T
+          Write-Host "=== Data directory permissions set ==="
+
       - name: Configure auto-start and launch
         shell: powershell
         run: |
