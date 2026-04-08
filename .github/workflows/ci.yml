@@ -586,6 +586,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Ensure OBS is running
+        shell: powershell
+        run: |
+          $obs = Get-Process -Name "obs64" -ErrorAction SilentlyContinue
+          if ($obs) {
+            Write-Host "OK: OBS already running (PID $($obs.Id))"
+          } else {
+            Write-Host "OBS not running — starting via scheduled task..."
+            schtasks.exe /run /tn StartOBS 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "No StartOBS task — trying direct launch..."
+              Start-Process -FilePath "C:\Program Files\obs-studio\bin\64bit\obs64.exe" -ArgumentList "--minimize-to-tray" -WindowStyle Hidden
+            }
+            # Wait for OBS WebSocket to be ready
+            $maxWait = 30
+            $elapsed = 0
+            while ($elapsed -lt $maxWait) {
+              $listening = netstat -an | Select-String ":4455.*LISTENING"
+              if ($listening) { break }
+              Start-Sleep -Seconds 2
+              $elapsed += 2
+              Write-Host "Waiting for OBS WebSocket port 4455... ($elapsed s)"
+            }
+            if ($elapsed -ge $maxWait) {
+              Write-Error "FAIL: OBS WebSocket port 4455 not listening after ${maxWait}s"
+              exit 1
+            }
+            Write-Host "OK: OBS started and WebSocket listening on port 4455"
+          }
+
       - name: Wait for SongPlayer API (read + write)
         shell: powershell
         run: |
@@ -691,7 +721,8 @@ jobs:
         shell: powershell
         run: |
           # OBS must be running on win-resolume for SongPlayer to connect
-          $maxRetries = 6
+          # SongPlayer uses exponential backoff (1s, 2s, 4s, ..., 30s max) so may take up to 60s
+          $maxRetries = 12
           $connected = $false
           for ($i = 1; $i -le $maxRetries; $i++) {
             $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
