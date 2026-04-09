@@ -62,7 +62,11 @@ impl MediaReader {
         unsafe {
             reader
                 .SetCurrentMediaType(VIDEO_STREAM, None, &video_type)
-                .map_err(|_| DecoderError::NoStream("video"))?;
+                .map_err(|e| {
+                    DecoderError::NoStream(Box::leak(
+                        format!("video: SetCurrentMediaType failed: {e}").into_boxed_str(),
+                    ))
+                })?;
         }
 
         // Configure audio output to f32 PCM
@@ -70,7 +74,11 @@ impl MediaReader {
         unsafe {
             reader
                 .SetCurrentMediaType(AUDIO_STREAM, None, &audio_type)
-                .map_err(|_| DecoderError::NoStream("audio"))?;
+                .map_err(|e| {
+                    DecoderError::NoStream(Box::leak(
+                        format!("audio: SetCurrentMediaType failed: {e}").into_boxed_str(),
+                    ))
+                })?;
         }
 
         debug!(path = %path.display(), "Opened media file");
