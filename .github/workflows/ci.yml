@@ -698,6 +698,19 @@ jobs:
             exit 1
           }
 
+      - name: Seed Resolume host
+        shell: powershell
+        run: |
+          $hosts = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/resolume/hosts"
+          if ($hosts.Count -eq 0) {
+            $body = [System.Text.Encoding]::UTF8.GetBytes('{"label":"win-resolume","host":"127.0.0.1","port":8090}')
+            $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/resolume/hosts" -Method Post -Body $body -ContentType "application/json" -UseBasicParsing
+            $created = $resp.Content | ConvertFrom-Json
+            Write-Host "Created Resolume host: $($created.label) ($($created.host):$($created.port))"
+          } else {
+            Write-Host "Resolume host already exists: $($hosts[0].label)"
+          }
+
       - name: Seed playlists
         shell: powershell
         run: |
