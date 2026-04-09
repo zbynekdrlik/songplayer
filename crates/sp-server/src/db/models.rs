@@ -10,7 +10,8 @@ use sqlx::{Row, SqlitePool};
 /// Return all playlists where `is_active = 1`.
 pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, is_active FROM playlists WHERE is_active = 1 ORDER BY id",
+        "SELECT id, name, youtube_url, ndi_output_name, is_active
+         FROM playlists WHERE is_active = 1 ORDER BY id",
     )
     .fetch_all(pool)
     .await?;
@@ -21,6 +22,7 @@ pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sq
             id: r.get("id"),
             name: r.get("name"),
             youtube_url: r.get("youtube_url"),
+            ndi_output_name: r.get::<String, _>("ndi_output_name"),
             is_active: r.get::<i32, _>("is_active") != 0,
             ..Default::default()
         })
@@ -178,6 +180,36 @@ pub async fn get_unplayed_normalized_video_ids(
     .await?;
 
     Ok(rows.iter().map(|r| r.get("id")).collect())
+}
+
+/// Return the file_path for a video by its ID, or `None` if not normalized.
+pub async fn get_video_file_path(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query("SELECT file_path FROM videos WHERE id = ? AND normalized = 1")
+        .bind(video_id)
+        .fetch_optional(pool)
+        .await?;
+
+    Ok(row.and_then(|r| r.get("file_path")))
+}
+
+/// Return the song and artist for a video (for title display).
+pub async fn get_video_metadata(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let row = sqlx::query("SELECT song, artist FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_optional(pool)
+        .await?;
+
+    Ok(row.map(|r| {
+        let song: String = r.get::<Option<String>, _>("song").unwrap_or_default();
+        let artist: String = r.get::<Option<String>, _>("artist").unwrap_or_default();
+        (song, artist)
+    }))
 }
 
 /// Clear all play history for a playlist, allowing videos to be replayed.

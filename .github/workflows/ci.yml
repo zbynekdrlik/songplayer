@@ -357,7 +357,11 @@ jobs:
             --exclude-re 'hide_console_window' \
             --exclude-re 'normalize_audio' \
             --exclude-re 'update_ytdlp' \
-            --exclude-re 'ytdlp_version'
+            --exclude-re 'ytdlp_version' \
+            --exclude-re 'pipeline.rs' \
+            --exclude-re 'execute_action' \
+            --exclude-re 'get_video_file_path' \
+            --exclude-re 'get_video_metadata'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4

@@ -305,6 +305,21 @@ pub async fn start(
 
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(pool.clone(), obs_event_tx);
+
+    // Pre-create pipelines for all active playlists so NDI sources appear immediately.
+    let active_playlists = db::models::get_active_playlists(&pool)
+        .await
+        .unwrap_or_default();
+    for pl in &active_playlists {
+        if !pl.ndi_output_name.is_empty() {
+            engine.ensure_pipeline(pl.id, &pl.ndi_output_name);
+        }
+    }
+    info!(
+        count = active_playlists.len(),
+        "playback pipelines created for active playlists"
+    );
+
     let mut engine_shutdown = shutdown_tx.subscribe();
     tokio::spawn(async move {
         loop {
@@ -312,6 +327,8 @@ pub async fn start(
                 Some(cmd) = engine_rx.recv() => {
                     match cmd {
                         EngineCommand::Play { playlist_id } => {
+                            // Ensure state machine is ready: Idle -> WaitingForScene -> Playing.
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::VideosAvailable).await;
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOn).await;
                         }
                         EngineCommand::Pause { playlist_id } => {
@@ -324,6 +341,10 @@ pub async fn start(
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
                         }
                         EngineCommand::SceneChanged { playlist_id, on_program } => {
+                            // Also ensure VideosAvailable has been sent.
+                            if on_program {
+                                engine.handle_command(playlist_id, playback::state::PlayEvent::VideosAvailable).await;
+                            }
                             engine.handle_scene_change(playlist_id, on_program).await;
                         }
                     }

@@ -182,13 +182,37 @@ impl PlaybackEngine {
                 match VideoSelector::select_next(&self.pool, playlist_id, mode, current).await {
                     Ok(Some(video_id)) => {
                         debug!(playlist_id, video_id, "selected video");
-                        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                            pp.current_video_id = Some(video_id);
-                            pp.state = PlayState::Playing { video_id };
-                            pp.title_shown = false;
-                            // The actual file path lookup and Play command would
-                            // be sent here once the DB schema for file paths is
-                            // wired up.
+                        // Look up the file path from DB.
+                        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
+                            Ok(Some(file_path)) => {
+                                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                                    pp.current_video_id = Some(video_id);
+                                    pp.state = PlayState::Playing { video_id };
+                                    pp.title_shown = false;
+                                    info!(playlist_id, video_id, %file_path, "sent Play command");
+                                    pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+
+                                    // Record play in history.
+                                    if let Err(e) = crate::db::models::record_play(
+                                        &self.pool,
+                                        playlist_id,
+                                        video_id,
+                                    )
+                                    .await
+                                    {
+                                        warn!(playlist_id, video_id, %e, "failed to record play");
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                warn!(
+                                    playlist_id,
+                                    video_id, "video has no file_path (not normalized?)"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(playlist_id, video_id, %e, "failed to get video file_path");
+                            }
                         }
                     }
                     Ok(None) => {
@@ -202,9 +226,19 @@ impl PlaybackEngine {
 
             PlayAction::ReplayCurrent => {
                 if let Some(pp) = self.pipelines.get(&playlist_id) {
-                    if let Some(_video_id) = pp.current_video_id {
+                    if let Some(video_id) = pp.current_video_id {
                         debug!(playlist_id, "replaying current video");
-                        // Would send Play command with same file path.
+                        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
+                            Ok(Some(file_path)) => {
+                                pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+                            }
+                            Ok(None) => {
+                                warn!(playlist_id, video_id, "no file_path for replay");
+                            }
+                            Err(e) => {
+                                warn!(playlist_id, video_id, %e, "failed to get file_path for replay");
+                            }
+                        }
                     }
                 }
             }
