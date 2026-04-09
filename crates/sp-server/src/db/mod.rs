@@ -466,6 +466,11 @@ mod tests {
             .unwrap();
         let token: String = row.get("resolume_title_token");
         assert_eq!(token, "#warmup");
+
+        // Verify get_active_playlists returns the token
+        let playlists = models::get_active_playlists(&pool).await.unwrap();
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].resolume_title_token, "#warmup");
     }
 
     #[tokio::test]
