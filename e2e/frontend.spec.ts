@@ -66,7 +66,6 @@ test("settings endpoint returns data", async ({ request }) => {
   const resp = await request.get("/api/v1/settings");
   expect(resp.status()).toBe(200);
   const json = await resp.json();
-  expect(json.length).toBeGreaterThan(0);
-  expect(json[0]).toHaveProperty("key");
-  expect(json[0]).toHaveProperty("value");
+  expect(json).toHaveProperty("obs_websocket_url");
+  expect(json).toHaveProperty("gemini_model");
 });
