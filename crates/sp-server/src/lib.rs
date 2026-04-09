@@ -109,14 +109,15 @@ impl Default for ServerConfig {
 /// 1. SQLite pool + migrations
 /// 2. Broadcast channels for events
 /// 3. Shared state (incl. tool_paths + sync channel)
-/// 4. Tools manager (yt-dlp + FFmpeg) + download worker
-/// 5. Sync handler (playlist sync worker)
-/// 6. OBS WebSocket client
-/// 7. Reprocess worker (with Gemini provider)
-/// 8. Resolume workers
-/// 9. Playback engine
-/// 10. Axum HTTP server
-/// 11. Shutdown signal
+/// 4. Gemini settings (for download + reprocess workers)
+/// 5. Tools manager (yt-dlp + FFmpeg) + download worker
+/// 6. Sync handler (playlist sync worker)
+/// 7. OBS WebSocket client
+/// 8. Reprocess worker (with Gemini provider)
+/// 9. Resolume workers
+/// 10. Playback engine
+/// 11. Axum HTTP server
+/// 12. Shutdown signal
 pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -147,7 +148,15 @@ pub async fn start(
         sync_tx: sync_tx.clone(),
     };
 
-    // 4. Tools manager
+    // 4. Read Gemini settings (used by download worker + reprocess worker)
+    let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
+        .await?
+        .unwrap_or_default();
+    let gemini_model = db::models::get_setting(&pool, "gemini_model")
+        .await?
+        .unwrap_or_else(|| "gemini-2.0-flash".to_string());
+
+    // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");
     let tools_mgr = downloader::tools::ToolsManager::new(tools_dir);
 
@@ -157,6 +166,8 @@ pub async fn start(
     let dl_pool = pool.clone();
     let dl_cache_dir = config.cache_dir.clone();
     let dl_shutdown_tx = shutdown_tx.clone();
+    let dl_gemini_key = gemini_key.clone();
+    let dl_gemini_model = gemini_model.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -174,13 +185,22 @@ pub async fn start(
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
 
+                // Build metadata providers for the download worker.
+                let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
+                if !dl_gemini_key.is_empty() {
+                    dl_providers.push(Box::new(metadata::gemini::GeminiProvider::new(
+                        dl_gemini_key,
+                        dl_gemini_model,
+                    )));
+                }
+
                 // Spawn download worker now that tools are available.
                 let (dl_event_tx, _) = broadcast::channel::<String>(64);
                 let dl_worker = downloader::DownloadWorker::new(
                     dl_pool,
                     paths,
                     dl_cache_dir,
-                    vec![],
+                    dl_providers,
                     dl_event_tx,
                 );
                 tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
@@ -192,7 +212,7 @@ pub async fn start(
         }
     });
 
-    // 5. Sync handler — receives SyncRequests and calls playlist::sync_playlist
+    // 6. Sync handler — receives SyncRequests and calls playlist::sync_playlist
     let sync_pool = pool.clone();
     let sync_tool_paths = tool_paths.clone();
     tokio::spawn(async move {
@@ -224,7 +244,7 @@ pub async fn start(
         }
     });
 
-    // 6. OBS WebSocket client
+    // 7. OBS WebSocket client
     let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
     let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
         .await?
@@ -252,13 +272,7 @@ pub async fn start(
         info!("OBS WebSocket client started");
     }
 
-    // 7. Reprocess worker (with Gemini provider if API key is configured)
-    let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
-        .await?
-        .unwrap_or_default();
-    let gemini_model = db::models::get_setting(&pool, "gemini_model")
-        .await?
-        .unwrap_or_else(|| "gemini-2.0-flash".to_string());
+    // 8. Reprocess worker (with Gemini provider if API key is configured)
     let mut reprocess_provider_list: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
     if !gemini_key.is_empty() {
         reprocess_provider_list.push(Box::new(metadata::gemini::GeminiProvider::new(
@@ -275,7 +289,7 @@ pub async fn start(
     );
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
-    // 8. Resolume workers (load enabled hosts from DB)
+    // 9. Resolume workers (load enabled hosts from DB)
     let resolume_rows =
         sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
             .fetch_all(&pool)
@@ -289,7 +303,7 @@ pub async fn start(
         _resolume_registry.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
     }
 
-    // 9. Playback engine (bridges API commands to the engine state machine)
+    // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(pool.clone(), obs_event_tx);
     let mut engine_shutdown = shutdown_tx.subscribe();
     tokio::spawn(async move {
@@ -322,7 +336,7 @@ pub async fn start(
         }
     });
 
-    // 10. Axum HTTP server
+    // 11. Axum HTTP server
     let router = api::router(state, config.dist_dir);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(port = config.port, "HTTP server listening");
@@ -335,7 +349,7 @@ pub async fn start(
         })
         .await?;
 
-    // 11. Signal all workers to stop
+    // 12. Signal all workers to stop
     let _ = shutdown_tx.send(());
     info!("server stopped");
 

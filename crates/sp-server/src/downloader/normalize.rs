@@ -79,7 +79,8 @@ pub async fn normalize_audio(
 /// loudness values.  We find the last `{…}` block that contains `"input_i"`.
 fn extract_loudnorm_stats(stderr: &str) -> Option<LoudnormStats> {
     // Find the last JSON object in the output that contains loudnorm data.
-    let json_start = stderr.rfind("{\n")?;
+    // Handle both Unix (\n) and Windows (\r\n) line endings.
+    let json_start = stderr.rfind("{\r\n").or_else(|| stderr.rfind("{\n"))?;
     let json_end = stderr[json_start..].find('}')? + json_start + 1;
     let json_str = &stderr[json_start..json_end];
 
@@ -149,6 +150,14 @@ mod tests {
     #[test]
     fn parse_loudnorm_stats_no_json() {
         assert!(extract_loudnorm_stats("no json here at all").is_none());
+    }
+
+    #[test]
+    fn parse_loudnorm_stats_windows_line_endings() {
+        let win_output = "[Parsed_loudnorm_0 @ 0x562e9a5c0d80]\r\n{\r\n\t\"input_i\" : \"-24.12\",\r\n\t\"input_tp\" : \"-3.45\",\r\n\t\"input_lra\" : \"7.80\",\r\n\t\"input_thresh\" : \"-34.56\",\r\n\t\"output_i\" : \"-14.00\",\r\n\t\"output_tp\" : \"-1.00\",\r\n\t\"output_lra\" : \"6.50\",\r\n\t\"output_thresh\" : \"-24.44\",\r\n\t\"normalization_type\" : \"dynamic\",\r\n\t\"target_offset\" : \"0.12\"\r\n}\r\n";
+        let stats = extract_loudnorm_stats(win_output).unwrap();
+        assert_eq!(stats.input_i, "-24.12");
+        assert_eq!(stats.target_offset, "0.12");
     }
 
     #[test]

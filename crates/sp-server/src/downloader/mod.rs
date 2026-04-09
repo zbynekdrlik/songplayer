@@ -172,20 +172,35 @@ impl DownloadWorker {
         let format_spec =
             format!("bestvideo[height<={MAX_RESOLUTION}]+bestaudio/best[height<={MAX_RESOLUTION}]");
 
-        let status = tokio::process::Command::new(&self.tools.ytdlp)
+        // yt-dlp needs to know where ffmpeg is for merging video+audio streams.
+        let ffmpeg_dir = self
+            .tools
+            .ffmpeg
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+
+        let child_output = tokio::process::Command::new(&self.tools.ytdlp)
             .args(["--progress", "--newline"])
             .args(["-f", &format_spec])
+            .args(["--ffmpeg-location"])
+            .arg(ffmpeg_dir)
+            // Use node.js as JS runtime for YouTube extraction (deno is default but
+            // often not installed; node.js is available on win-resolume).
+            .args(["--js-runtimes", "node"])
             .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
+            // Force merge into MP4 container regardless of source format.
+            .args(["--merge-output-format", "mp4"])
             .args(["-o"])
             .arg(output)
             .arg(&url)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .status()
+            .output()
             .await?;
 
-        if !status.success() {
-            anyhow::bail!("yt-dlp exited with {status}");
+        if !child_output.status.success() {
+            let stderr = String::from_utf8_lossy(&child_output.stderr);
+            anyhow::bail!("yt-dlp exited with {}: {}", child_output.status, stderr);
         }
 
         Ok(())

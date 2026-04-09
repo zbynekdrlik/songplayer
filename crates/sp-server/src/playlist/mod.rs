@@ -18,6 +18,8 @@ pub async fn sync_playlist(
             "--flat-playlist",
             "--dump-json",
             "--no-warnings",
+            "--js-runtimes",
+            "node",
             youtube_url,
         ])
         .stdout(std::process::Stdio::piped())
