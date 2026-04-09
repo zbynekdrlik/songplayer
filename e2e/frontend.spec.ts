@@ -33,8 +33,8 @@ test("dashboard loads and shows title", async ({ page }) => {
 
 test("dashboard shows playlist cards", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("text=Worship")).toBeVisible({ timeout: 10000 });
-  await expect(page.locator("text=Background")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("heading", { name: "Background" })).toBeVisible();
 });
 
 test("settings tab navigates", async ({ page }) => {
