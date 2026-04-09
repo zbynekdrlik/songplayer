@@ -1,4 +1,4 @@
-//! A/B crossfade logic for Resolume title display.
+//! Resolume title show/hide with opacity fade.
 
 use std::time::Duration;
 
@@ -6,175 +6,142 @@ use tracing::debug;
 
 use crate::resolume::driver::HostDriver;
 
-/// Delay between setting text and triggering the clip, allowing Resolume
-/// to update the text texture before the clip goes live.
-const TRIGGER_DELAY_MS: u64 = 35;
+const TEXT_SETTLE_MS: u64 = 35;
+const FADE_DURATION_MS: u64 = 1000;
+const FADE_STEPS: u32 = 20;
 
-/// Update title with A/B crossfade.
-///
-/// 1. Determine inactive lane (opposite of current).
-/// 2. Set text on inactive lane clips (`#song-name-{lane}`, `#artist-name-{lane}`).
-/// 3. Wait `TRIGGER_DELAY_MS` for Resolume to process the text update.
-/// 4. Trigger (connect) the inactive lane clips.
-/// 5. Flip lane state.
-pub async fn crossfade_title(
+/// Format title text matching legacy Python behavior.
+pub fn format_title_text(song: &str, artist: &str, gemini_failed: bool) -> String {
+    let text = match (song.is_empty(), artist.is_empty()) {
+        (false, false) => format!("{song} - {artist}"),
+        (false, true) => song.to_string(),
+        (true, false) => artist.to_string(),
+        (true, true) => String::new(),
+    };
+    if !text.is_empty() && gemini_failed {
+        format!("{text} \u{26A0}")
+    } else {
+        text
+    }
+}
+
+/// Generate n evenly-spaced opacity values from step/n to 1.0.
+pub fn fade_steps(n: u32) -> Vec<f64> {
+    (1..=n).map(|i| i as f64 / n as f64).collect()
+}
+
+/// Show title: set text, wait for texture, fade opacity 0->1.
+pub async fn show_title(
     driver: &mut HostDriver,
-    playlist_id: i64,
+    resolume_title_token: &str,
     song: &str,
     artist: &str,
+    gemini_failed: bool,
 ) -> Result<(), anyhow::Error> {
-    let current_lane = *driver.lane_state.get(&playlist_id).unwrap_or(&false);
-    let inactive_lane = !current_lane;
-    let lane_suffix = if inactive_lane { "b" } else { "a" };
+    let clip = driver
+        .clip_mapping
+        .get(resolume_title_token)
+        .ok_or_else(|| anyhow::anyhow!("no clip found for token {resolume_title_token}"))?
+        .clone();
 
-    let song_token = format!("#song-name-{lane_suffix}");
-    let artist_token = format!("#artist-name-{lane_suffix}");
-
-    // Copy clip info to avoid borrow conflicts with &mut self methods.
-    let song_clip = driver.clip_mapping.get(&song_token).cloned();
-    let artist_clip = driver.clip_mapping.get(&artist_token).cloned();
-
-    // Step 1: Set text on inactive lane clips.
-    if let Some(ref clip) = song_clip {
-        driver.set_text(clip.text_param_id, song).await?;
-        debug!(token = %song_token, %song, "set song text");
+    let text = format_title_text(song, artist, gemini_failed);
+    if text.is_empty() {
+        return Ok(());
     }
 
-    if let Some(ref clip) = artist_clip {
-        driver.set_text(clip.text_param_id, artist).await?;
-        debug!(token = %artist_token, %artist, "set artist text");
+    driver.set_text(clip.text_param_id, &text).await?;
+    debug!(token = %resolume_title_token, %text, "set title text");
+
+    tokio::time::sleep(Duration::from_millis(TEXT_SETTLE_MS)).await;
+
+    let step_delay = Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64);
+    for opacity in fade_steps(FADE_STEPS) {
+        driver.set_clip_opacity(clip.clip_id, opacity).await?;
+        tokio::time::sleep(step_delay).await;
     }
 
-    // Step 2: Wait for Resolume to process text update.
-    tokio::time::sleep(Duration::from_millis(TRIGGER_DELAY_MS)).await;
-
-    // Step 3: Trigger inactive lane clips.
-    if let Some(ref clip) = song_clip {
-        driver.trigger_clip(clip.clip_id).await?;
-        debug!(token = %song_token, clip_id = clip.clip_id, "triggered song clip");
-    }
-
-    if let Some(ref clip) = artist_clip {
-        driver.trigger_clip(clip.clip_id).await?;
-        debug!(token = %artist_token, clip_id = clip.clip_id, "triggered artist clip");
-    }
-
-    // Step 4: Flip lane state.
-    driver.lane_state.insert(playlist_id, inactive_lane);
-    debug!(playlist_id, lane = %lane_suffix, "flipped lane state");
-
+    debug!(token = %resolume_title_token, "title fade-in complete");
     Ok(())
 }
 
-/// Clear title display by triggering the `#song-clear` clip.
-pub async fn clear_title(driver: &mut HostDriver, playlist_id: i64) -> Result<(), anyhow::Error> {
-    let clear_token = "#song-clear";
+/// Hide title: fade opacity 1->0, then clear text.
+pub async fn hide_title(
+    driver: &mut HostDriver,
+    resolume_title_token: &str,
+) -> Result<(), anyhow::Error> {
+    let clip = driver
+        .clip_mapping
+        .get(resolume_title_token)
+        .ok_or_else(|| anyhow::anyhow!("no clip found for token {resolume_title_token}"))?
+        .clone();
 
-    let clear_clip = driver.clip_mapping.get(clear_token).cloned();
-    if let Some(ref clip) = clear_clip {
-        driver.trigger_clip(clip.clip_id).await?;
-        debug!(playlist_id, clip_id = clip.clip_id, "triggered clear clip");
-    } else {
-        debug!(playlist_id, "no #song-clear clip found, skipping clear");
+    let step_delay = Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64);
+    let steps = fade_steps(FADE_STEPS);
+    for opacity in steps.iter().rev() {
+        driver.set_clip_opacity(clip.clip_id, *opacity).await?;
+        tokio::time::sleep(step_delay).await;
     }
+    driver.set_clip_opacity(clip.clip_id, 0.0).await?;
 
+    driver.set_text(clip.text_param_id, "").await?;
+
+    debug!(token = %resolume_title_token, "title fade-out complete");
     Ok(())
-}
-
-/// Returns the lane suffix for the inactive lane given the current state.
-fn _inactive_lane_suffix(current_is_b: bool) -> &'static str {
-    if current_is_b { "a" } else { "b" }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resolume::driver::ClipInfo;
 
     #[test]
-    fn trigger_delay_is_reasonable() {
-        // Sanity check: delay should be small but non-zero.
-        assert!(TRIGGER_DELAY_MS > 0);
-        assert!(TRIGGER_DELAY_MS < 1000);
-    }
-
-    #[test]
-    fn inactive_lane_suffix_logic() {
-        assert_eq!(_inactive_lane_suffix(false), "b");
-        assert_eq!(_inactive_lane_suffix(true), "a");
-    }
-
-    #[test]
-    fn crossfade_lane_state_toggles() {
-        // Verify the lane state logic without HTTP calls.
-        let mut driver = HostDriver::new("localhost".to_string(), 8080);
-        let playlist_id = 1;
-
-        // Initial state: no entry = A (false).
-        let current = *driver.lane_state.get(&playlist_id).unwrap_or(&false);
-        assert!(!current);
-
-        // After first crossfade, should be B (true).
-        let inactive = !current;
-        driver.lane_state.insert(playlist_id, inactive);
-        assert!(driver.lane_state[&playlist_id]);
-
-        // After second crossfade, should be A (false).
-        let current = driver.lane_state[&playlist_id];
-        let inactive = !current;
-        driver.lane_state.insert(playlist_id, inactive);
-        assert!(!driver.lane_state[&playlist_id]);
-    }
-
-    #[test]
-    fn crossfade_token_generation() {
-        // Verify the correct tokens are generated for each lane.
-        let current_lane = false; // A
-        let inactive_lane = !current_lane;
-        let suffix = if inactive_lane { "b" } else { "a" };
-
-        assert_eq!(format!("#song-name-{suffix}"), "#song-name-b");
-        assert_eq!(format!("#artist-name-{suffix}"), "#artist-name-b");
-
-        // Flip: now current is B.
-        let current_lane = true; // B
-        let inactive_lane = !current_lane;
-        let suffix = if inactive_lane { "b" } else { "a" };
-
-        assert_eq!(format!("#song-name-{suffix}"), "#song-name-a");
-        assert_eq!(format!("#artist-name-{suffix}"), "#artist-name-a");
-    }
-
-    #[test]
-    fn clear_title_uses_correct_token() {
-        // The clear token should always be #song-clear.
-        let driver = HostDriver::new("localhost".to_string(), 8080);
-        let clear_token = "#song-clear";
-        assert!(driver.clip_mapping.get(clear_token).is_none());
-
-        // With a mapping present, it should find it.
-        let mut driver = HostDriver::new("localhost".to_string(), 8080);
-        driver.clip_mapping.insert(
-            "#song-clear".to_string(),
-            ClipInfo {
-                clip_id: 104,
-                text_param_id: 204,
-            },
+    fn format_title_text_song_and_artist() {
+        assert_eq!(
+            format_title_text("My Song", "Artist", false),
+            "My Song - Artist"
         );
-        let clip = driver.clip_mapping.get(clear_token).unwrap();
-        assert_eq!(clip.clip_id, 104);
     }
 
     #[test]
-    fn multiple_playlists_independent_lanes() {
-        let mut driver = HostDriver::new("localhost".to_string(), 8080);
+    fn format_title_text_song_only() {
+        assert_eq!(format_title_text("My Song", "", false), "My Song");
+    }
 
-        // Playlist 1 on lane B.
-        driver.lane_state.insert(1, true);
-        // Playlist 2 still on default A.
-        let p2_lane = *driver.lane_state.get(&2).unwrap_or(&false);
+    #[test]
+    fn format_title_text_artist_only() {
+        assert_eq!(format_title_text("", "Artist", false), "Artist");
+    }
 
-        assert!(driver.lane_state[&1]);
-        assert!(!p2_lane);
+    #[test]
+    fn format_title_text_empty() {
+        assert_eq!(format_title_text("", "", false), "");
+    }
+
+    #[test]
+    fn format_title_text_gemini_failed() {
+        assert_eq!(
+            format_title_text("My Song", "Artist", true),
+            "My Song - Artist \u{26A0}"
+        );
+    }
+
+    #[test]
+    fn format_title_text_gemini_failed_empty_no_warning() {
+        assert_eq!(format_title_text("", "", true), "");
+    }
+
+    #[test]
+    fn fade_steps_20_steps_over_1s() {
+        let steps = fade_steps(20);
+        assert_eq!(steps.len(), 20);
+        assert!((steps[0] - 0.05).abs() < 0.001);
+        assert!((steps[19] - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn fade_steps_values_are_monotonically_increasing() {
+        let steps = fade_steps(20);
+        for i in 1..steps.len() {
+            assert!(steps[i] > steps[i - 1]);
+        }
     }
 }

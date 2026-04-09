@@ -302,7 +302,13 @@ pub async fn start(
         let host_id: i64 = row.get("id");
         let host: String = row.get("host");
         let port: i32 = row.get("port");
-        _resolume_registry.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
+        _resolume_registry.add_host(
+            host_id,
+            host,
+            port as u16,
+            pool.clone(),
+            shutdown_tx.subscribe(),
+        );
     }
 
     // 10. Playback engine (bridges API commands to the engine state machine)

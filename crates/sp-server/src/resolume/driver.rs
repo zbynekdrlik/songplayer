@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
+use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
@@ -58,10 +59,8 @@ pub struct HostDriver {
     host: String,
     port: u16,
     client: reqwest::Client,
-    /// Maps clip token (e.g. `"#song-name-a"`) to clip info.
+    /// Maps clip token (e.g. `"#spfast-title"`) to clip info.
     pub(crate) clip_mapping: HashMap<String, ClipInfo>,
-    /// Tracks which lane is active per playlist (`false` = A, `true` = B).
-    pub(crate) lane_state: HashMap<i64, bool>,
     /// Cached DNS resolution for hostname-based hosts.
     endpoint_cache: Option<ResolvedEndpoint>,
 }
@@ -76,7 +75,6 @@ impl HostDriver {
                 .build()
                 .expect("failed to build reqwest client"),
             clip_mapping: HashMap::new(),
-            lane_state: HashMap::new(),
             endpoint_cache: None,
         }
     }
@@ -85,9 +83,12 @@ impl HostDriver {
     /// and shuts down on signal.
     pub async fn run(
         mut self,
+        pool: SqlitePool,
         mut rx: mpsc::Receiver<ResolumeCommand>,
         mut shutdown: broadcast::Receiver<()>,
     ) {
+        let tokens = Self::load_tokens(&pool).await;
+
         // Initial mapping refresh.
         if let Err(e) = self.refresh_mapping().await {
             warn!(host = %self.host, %e, "initial clip mapping refresh failed");
@@ -98,7 +99,7 @@ impl HostDriver {
         loop {
             tokio::select! {
                 Some(cmd) = rx.recv() => {
-                    self.handle_command(cmd).await;
+                    self.handle_command(cmd, &tokens).await;
                 }
                 _ = refresh_interval.tick() => {
                     if let Err(e) = self.refresh_mapping().await {
@@ -113,21 +114,48 @@ impl HostDriver {
         }
     }
 
+    /// Load playlist-to-token mappings from the database.
+    async fn load_tokens(pool: &SqlitePool) -> HashMap<i64, String> {
+        let rows = sqlx::query(
+            "SELECT id, resolume_title_token FROM playlists WHERE resolume_title_token != '' AND is_active = 1",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        rows.iter()
+            .map(|r| {
+                use sqlx::Row;
+                (
+                    r.get::<i64, _>("id"),
+                    r.get::<String, _>("resolume_title_token"),
+                )
+            })
+            .collect()
+    }
+
     /// Handle a single command.
-    async fn handle_command(&mut self, cmd: ResolumeCommand) {
+    async fn handle_command(&mut self, cmd: ResolumeCommand, tokens: &HashMap<i64, String>) {
         match cmd {
-            ResolumeCommand::UpdateTitle {
+            ResolumeCommand::ShowTitle {
                 playlist_id,
                 song,
                 artist,
+                gemini_failed,
             } => {
-                if let Err(e) = handlers::crossfade_title(self, playlist_id, &song, &artist).await {
-                    warn!(host = %self.host, playlist_id, %e, "crossfade_title failed");
+                if let Some(token) = tokens.get(&playlist_id) {
+                    if let Err(e) =
+                        handlers::show_title(self, token, &song, &artist, gemini_failed).await
+                    {
+                        warn!(host = %self.host, playlist_id, %e, "show_title failed");
+                    }
                 }
             }
-            ResolumeCommand::ClearTitle { playlist_id } => {
-                if let Err(e) = handlers::clear_title(self, playlist_id).await {
-                    warn!(host = %self.host, playlist_id, %e, "clear_title failed");
+            ResolumeCommand::HideTitle { playlist_id } => {
+                if let Some(token) = tokens.get(&playlist_id) {
+                    if let Err(e) = handlers::hide_title(self, token).await {
+                        warn!(host = %self.host, playlist_id, %e, "hide_title failed");
+                    }
                 }
             }
             ResolumeCommand::RefreshMapping => {
@@ -225,17 +253,24 @@ impl HostDriver {
         Ok(())
     }
 
-    /// Trigger (connect) a clip.
+    /// Set the opacity of a clip.
     ///
-    /// `POST /api/v1/composition/clips/by-id/{clip_id}/connect`
-    pub(crate) async fn trigger_clip(&mut self, clip_id: i64) -> Result<(), anyhow::Error> {
+    /// `PUT /api/v1/composition/clips/by-id/{clip_id}`
+    pub(crate) async fn set_clip_opacity(
+        &mut self,
+        clip_id: i64,
+        opacity: f64,
+    ) -> Result<(), anyhow::Error> {
         let ep = self.endpoint().await?;
-        let url = format!(
-            "{}/api/v1/composition/clips/by-id/{clip_id}/connect",
-            ep.base_url
-        );
-        let req = self.client.post(&url);
-        self.apply_host_header(req, &ep).send().await?;
+        let url = format!("{}/api/v1/composition/clips/by-id/{clip_id}", ep.base_url);
+        let mut req = self
+            .client
+            .put(&url)
+            .json(&serde_json::json!({"video":{"opacity":{"value": opacity}}}));
+        if let Some(ref host) = ep.host_header {
+            req = req.header("Host", host);
+        }
+        req.send().await?.error_for_status()?;
         Ok(())
     }
 }
@@ -514,7 +549,6 @@ mod tests {
     fn host_driver_new() {
         let driver = HostDriver::new("192.168.1.10".to_string(), 8080);
         assert!(driver.clip_mapping.is_empty());
-        assert!(driver.lane_state.is_empty());
         assert!(driver.endpoint_cache.is_none());
     }
 
