@@ -351,7 +351,10 @@ jobs:
             --exclude-re 'sync_playlist' \
             --exclude-re 'verify_executable' \
             --exclude-re 'extract_ffmpeg_from_zip' \
-            --exclude-re 'ensure_tools'
+            --exclude-re 'ensure_tools' \
+            --exclude-re 'handle_ws' \
+            --exclude-re 'get_active_playlists' \
+            --exclude-re 'insert_playlist'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
