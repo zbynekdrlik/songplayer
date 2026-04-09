@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
-const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_V1)];
+const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2)];
 
 const MIGRATION_V1: &str = "
 CREATE TABLE playlists (
@@ -71,6 +71,10 @@ CREATE TABLE resolume_clip_mappings (
 );
 
 CREATE UNIQUE INDEX idx_clip_mappings_unique ON resolume_clip_mappings(host_id, playlist_id, clip_token);
+";
+
+const MIGRATION_V2: &str = "
+ALTER TABLE playlists ADD COLUMN resolume_title_token TEXT NOT NULL DEFAULT '';
 ";
 
 /// Create a connection pool backed by a file.
@@ -156,7 +160,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 1);
+        assert_eq!(ver, 2);
     }
 
     #[tokio::test]
@@ -165,7 +169,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 1);
+        assert_eq!(ver, 2);
     }
 
     #[tokio::test]
@@ -431,6 +435,37 @@ mod tests {
             meta,
             Some(("My Song".to_string(), "Artist Name".to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn migration_v2_adds_resolume_title_token() {
+        let pool = setup().await;
+
+        // Insert a playlist — resolume_title_token should default to ''
+        sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row = sqlx::query("SELECT resolume_title_token FROM playlists WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let token: String = row.get("resolume_title_token");
+        assert_eq!(token, "");
+
+        // Update the column and read back
+        sqlx::query("UPDATE playlists SET resolume_title_token = '#warmup' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row = sqlx::query("SELECT resolume_title_token FROM playlists WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let token: String = row.get("resolume_title_token");
+        assert_eq!(token, "#warmup");
     }
 
     #[tokio::test]

@@ -25,6 +25,8 @@ pub struct CreatePlaylistRequest {
     #[serde(default)]
     pub obs_text_source: Option<String>,
     #[serde(default)]
+    pub resolume_title_token: Option<String>,
+    #[serde(default)]
     pub playback_mode: Option<String>,
 }
 
@@ -34,6 +36,7 @@ pub struct UpdatePlaylistRequest {
     pub youtube_url: Option<String>,
     pub ndi_output_name: Option<String>,
     pub obs_text_source: Option<String>,
+    pub resolume_title_token: Option<String>,
     pub playback_mode: Option<String>,
     pub is_active: Option<bool>,
 }
@@ -83,7 +86,7 @@ pub struct ToolsStatusResponse {
 
 pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, obs_text_source, playback_mode, is_active, created_at, updated_at
+        "SELECT id, name, youtube_url, ndi_output_name, obs_text_source, resolume_title_token, playback_mode, is_active, created_at, updated_at
          FROM playlists ORDER BY id",
     )
     .fetch_all(&state.pool)
@@ -100,6 +103,7 @@ pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse 
                         "youtube_url": r.get::<String, _>("youtube_url"),
                         "ndi_output_name": r.get::<String, _>("ndi_output_name"),
                         "obs_text_source": r.get::<Option<String>, _>("obs_text_source"),
+                        "resolume_title_token": r.get::<String, _>("resolume_title_token"),
                         "playback_mode": r.get::<String, _>("playback_mode"),
                         "is_active": r.get::<i32, _>("is_active") != 0,
                         "created_at": r.get::<String, _>("created_at"),
@@ -121,17 +125,19 @@ pub async fn create_playlist(
     Json(body): Json<CreatePlaylistRequest>,
 ) -> impl IntoResponse {
     let ndi = body.ndi_output_name.as_deref().unwrap_or("");
+    let resolume_token = body.resolume_title_token.as_deref().unwrap_or("");
     let mode = body.playback_mode.as_deref().unwrap_or("continuous");
 
     let result = sqlx::query(
-        "INSERT INTO playlists (name, youtube_url, ndi_output_name, obs_text_source, playback_mode)
-         VALUES (?, ?, ?, ?, ?)
-         RETURNING id, name, youtube_url, ndi_output_name, obs_text_source, playback_mode, is_active",
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name, obs_text_source, resolume_title_token, playback_mode)
+         VALUES (?, ?, ?, ?, ?, ?)
+         RETURNING id, name, youtube_url, ndi_output_name, obs_text_source, resolume_title_token, playback_mode, is_active",
     )
     .bind(&body.name)
     .bind(&body.youtube_url)
     .bind(ndi)
     .bind(&body.obs_text_source)
+    .bind(resolume_token)
     .bind(mode)
     .fetch_one(&state.pool)
     .await;
@@ -145,6 +151,7 @@ pub async fn create_playlist(
                 "youtube_url": row.get::<String, _>("youtube_url"),
                 "ndi_output_name": row.get::<String, _>("ndi_output_name"),
                 "obs_text_source": row.get::<Option<String>, _>("obs_text_source"),
+                "resolume_title_token": row.get::<String, _>("resolume_title_token"),
                 "playback_mode": row.get::<String, _>("playback_mode"),
                 "is_active": row.get::<i32, _>("is_active") != 0,
             })),
@@ -159,7 +166,7 @@ pub async fn create_playlist(
 
 pub async fn get_playlist(State(state): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
     let result = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, obs_text_source, playback_mode, is_active, created_at, updated_at
+        "SELECT id, name, youtube_url, ndi_output_name, obs_text_source, resolume_title_token, playback_mode, is_active, created_at, updated_at
          FROM playlists WHERE id = ?",
     )
     .bind(id)
@@ -173,6 +180,7 @@ pub async fn get_playlist(State(state): State<AppState>, Path(id): Path<i64>) ->
             "youtube_url": row.get::<String, _>("youtube_url"),
             "ndi_output_name": row.get::<String, _>("ndi_output_name"),
             "obs_text_source": row.get::<Option<String>, _>("obs_text_source"),
+            "resolume_title_token": row.get::<String, _>("resolume_title_token"),
             "playback_mode": row.get::<String, _>("playback_mode"),
             "is_active": row.get::<i32, _>("is_active") != 0,
             "created_at": row.get::<String, _>("created_at"),
@@ -211,6 +219,10 @@ pub async fn update_playlist(
     if let Some(ref obs) = body.obs_text_source {
         sets.push("obs_text_source = ?");
         binds.push(obs.clone());
+    }
+    if let Some(ref token) = body.resolume_title_token {
+        sets.push("resolume_title_token = ?");
+        binds.push(token.clone());
     }
     if let Some(ref mode) = body.playback_mode {
         sets.push("playback_mode = ?");
