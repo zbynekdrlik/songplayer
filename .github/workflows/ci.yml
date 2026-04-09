@@ -735,7 +735,7 @@ jobs:
               }
               # Ensure resolume_title_token is set
               $tokenBody = [System.Text.Encoding]::UTF8.GetBytes("{`"resolume_title_token`":`"$($pl.resolume_title_token)`"}")
-              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$id" -Method Patch -Body $tokenBody -ContentType "application/json" -UseBasicParsing | Out-Null
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$id" -Method Put -Body $tokenBody -ContentType "application/json" -UseBasicParsing | Out-Null
               Write-Host "Set resolume_title_token for '$($pl.name)' to '$($pl.resolume_title_token)'"
               continue
             }
