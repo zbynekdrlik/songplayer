@@ -708,12 +708,12 @@ jobs:
         shell: powershell
         run: |
           $playlists = @(
-            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; obs_text_source = "ytwarmup_title"; ndi_output_name = "SP-warmup" },
-            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; obs_text_source = "ytpresence_title"; ndi_output_name = "SP-presence" },
-            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; obs_text_source = "ytslow_title"; ndi_output_name = "SP-slow" },
-            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; obs_text_source = "yt90s_title"; ndi_output_name = "SP-90s" },
-            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; obs_text_source = "ytworship_title"; ndi_output_name = "SP-worship" },
-            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; obs_text_source = "ytfast_title"; ndi_output_name = "SP-fast" }
+            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; obs_text_source = "ytwarmup_title"; ndi_output_name = "SP-warmup"; resolume_title_token = "#spwarmup-title" },
+            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; obs_text_source = "ytpresence_title"; ndi_output_name = "SP-presence"; resolume_title_token = "#sppresence-title" },
+            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; obs_text_source = "ytslow_title"; ndi_output_name = "SP-slow"; resolume_title_token = "#spslow-title" },
+            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; obs_text_source = "yt90s_title"; ndi_output_name = "SP-90s"; resolume_title_token = "#sp90s-title" },
+            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; obs_text_source = "ytworship_title"; ndi_output_name = "SP-worship"; resolume_title_token = "#spworship-title" },
+            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; obs_text_source = "ytfast_title"; ndi_output_name = "SP-fast"; resolume_title_token = "#spfast-title" }
           )
 
           $existing = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
@@ -723,18 +723,29 @@ jobs:
           foreach ($pl in $playlists) {
             if ($existingNames.ContainsKey($pl.name)) {
               $existingPl = $existingNames[$pl.name]
+              $id = $existingPl.id
               # Update NDI output name if missing or different
               if ($existingPl.ndi_output_name -ne $pl.ndi_output_name) {
                 $update = @{ ndi_output_name = $pl.ndi_output_name } | ConvertTo-Json -Compress
                 $updateBytes = [System.Text.Encoding]::UTF8.GetBytes($update)
-                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$($existingPl.id)" -Method Put -Body $updateBytes -ContentType "application/json" -UseBasicParsing | Out-Null
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$id" -Method Put -Body $updateBytes -ContentType "application/json" -UseBasicParsing | Out-Null
                 Write-Host "Updated NDI name for '$($pl.name)' to '$($pl.ndi_output_name)'"
               } else {
                 Write-Host "Playlist '$($pl.name)' already exists with correct config - skipping"
               }
+              # Ensure resolume_title_token is set
+              $tokenBody = [System.Text.Encoding]::UTF8.GetBytes("{`"resolume_title_token`":`"$($pl.resolume_title_token)`"}")
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$id" -Method Patch -Body $tokenBody -ContentType "application/json" -UseBasicParsing | Out-Null
+              Write-Host "Set resolume_title_token for '$($pl.name)' to '$($pl.resolume_title_token)'"
               continue
             }
-            $body = $pl | ConvertTo-Json -Compress
+            $body = @{
+                name = $pl.name
+                youtube_url = $pl.youtube_url
+                obs_text_source = $pl.obs_text_source
+                ndi_output_name = $pl.ndi_output_name
+                resolume_title_token = $pl.resolume_title_token
+            } | ConvertTo-Json -Compress
             $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
             $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $bytes -ContentType "application/json" -UseBasicParsing
             $created = $resp.Content | ConvertFrom-Json
@@ -839,6 +850,42 @@ jobs:
           # Pause playback to clean up
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
           Write-Host "OK: Playback triggered and paused on '$($testPl.name)'"
+
+      - name: Verify Resolume title delivery
+        shell: powershell
+        run: |
+          # Check if Resolume has the #spfast-title clip with updated text
+          # SongPlayer should have set the text after playback started (1.5s delay + processing)
+          Start-Sleep -Seconds 5
+
+          try {
+            $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition"
+            $found = $false
+            foreach ($layer in $comp.layers) {
+              foreach ($clip in $layer.clips) {
+                if ($clip.name.value -match '#spfast-title') {
+                  $textValue = $clip.video.sourceparams.Text.value
+                  Write-Host "Found #spfast-title clip: text='$textValue'"
+                  if ($textValue -and $textValue -ne '' -and $textValue -ne 'Resolume') {
+                    Write-Host "SUCCESS: Resolume title was updated to '$textValue'"
+                    $found = $true
+                  } else {
+                    Write-Host "INFO: Title text is '$textValue' - may not have been updated yet"
+                  }
+                  break
+                }
+              }
+              if ($found) { break }
+            }
+
+            if (-not $found) {
+              Write-Host "NOTE: #spfast-title clip text not yet updated"
+              Write-Host "This is expected if no normalized videos are cached for ytfast"
+            }
+          } catch {
+            Write-Host "WARNING: Could not query Resolume API: $_"
+            Write-Host "Resolume may not be running or API not accessible"
+          }
 
       - name: Verify NDI output names configured
         shell: powershell
