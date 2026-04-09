@@ -8,13 +8,13 @@ use crate::error::DecoderError;
 use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
 
 use windows::Win32::Media::MediaFoundation::{
-    IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
+    IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
     MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS,
     MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
-    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float, MFCreateMediaType,
-    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
-    MFStartup, MFVideoFormat_NV12,
+    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
+    MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio,
+    MFMediaType_Video, MFSTARTUP_NOSOCKET, MFStartup, MFVideoFormat_NV12,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
@@ -55,9 +55,22 @@ impl MediaReader {
             .chain(std::iter::once(0))
             .collect();
 
+        // Create attributes to enable hardware-accelerated transforms (AV1, VP9).
+        let attrs: IMFAttributes = unsafe {
+            MFCreateAttributes(1)
+                .map_err(|e| DecoderError::ComInit(format!("MFCreateAttributes: {e}")))?
+        };
+        unsafe {
+            attrs
+                .SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)
+                .map_err(|e| {
+                    DecoderError::ComInit(format!("SetUINT32 ENABLE_HARDWARE_TRANSFORMS: {e}"))
+                })?;
+        }
+
         debug!(path = %path.display(), "calling MFCreateSourceReaderFromURL");
         let reader: IMFSourceReader = unsafe {
-            MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), None)
+            MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), Some(&attrs))
                 .map_err(|e| DecoderError::SourceReader(e.to_string()))?
         };
         debug!("MFCreateSourceReaderFromURL succeeded");
