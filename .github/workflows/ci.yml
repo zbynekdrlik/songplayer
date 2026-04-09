@@ -345,23 +345,15 @@ jobs:
             exit 0
           fi
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
-            --exclude-re 'ObsClient::spawn' \
+            --exclude-re 'sp-decoder/' \
+            --exclude-re 'sp-ndi/' \
             --exclude-re 'sp-server/src/lib.rs' \
-            --exclude-re 'download_video' \
-            --exclude-re 'sync_playlist' \
-            --exclude-re 'verify_executable' \
-            --exclude-re 'extract_ffmpeg_from_zip' \
-            --exclude-re 'ensure_tools' \
-            --exclude-re 'handle_ws' \
-            --exclude-re 'db.models' \
-            --exclude-re 'hide_console_window' \
-            --exclude-re 'normalize_audio' \
-            --exclude-re 'update_ytdlp' \
-            --exclude-re 'ytdlp_version' \
-            --exclude-re 'pipeline.rs' \
-            --exclude-re 'execute_action' \
-            --exclude-re 'get_video_file_path' \
-            --exclude-re 'get_video_metadata'
+            --exclude-re 'sp-server/src/obs/' \
+            --exclude-re 'sp-server/src/playback/' \
+            --exclude-re 'sp-server/src/downloader/' \
+            --exclude-re 'sp-server/src/resolume/' \
+            --exclude-re 'sp-server/src/reprocess/' \
+            --exclude-re 'sp-server/src/api/websocket'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
