@@ -246,6 +246,7 @@ pub async fn start(
 
     // 7. OBS WebSocket client
     let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
+    let mut obs_cmd_tx: Option<tokio::sync::mpsc::Sender<obs::ObsCommand>> = None;
     let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
         .await?
         .unwrap_or_default();
@@ -262,13 +263,14 @@ pub async fn start(
             },
         };
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
-        let _obs_client = obs::ObsClient::spawn(
+        let obs_client = obs::ObsClient::spawn(
             obs_config,
             ndi_sources,
             obs_state.clone(),
             obs_event_tx.clone(),
             shutdown_tx.subscribe(),
         );
+        obs_cmd_tx = Some(obs_client.cmd_sender());
         info!("OBS WebSocket client started");
     }
 
@@ -304,7 +306,7 @@ pub async fn start(
     }
 
     // 10. Playback engine (bridges API commands to the engine state machine)
-    let mut engine = playback::PlaybackEngine::new(pool.clone(), obs_event_tx);
+    let mut engine = playback::PlaybackEngine::new(pool.clone(), obs_event_tx, obs_cmd_tx);
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)

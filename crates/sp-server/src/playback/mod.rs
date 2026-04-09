@@ -41,14 +41,20 @@ pub struct PlaybackEngine {
     /// Shared NDI backend — loaded once, shared across all pipeline threads.
     #[cfg(windows)]
     ndi_backend: Option<pipeline::SharedNdiBackend>,
-    /// Used for title show/hide updates (wired when title timing is complete).
+    /// For sending text source updates to OBS.
+    obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
+    /// Used for title show/hide updates.
     #[allow(dead_code)]
     obs_event_tx: broadcast::Sender<ObsEvent>,
 }
 
 impl PlaybackEngine {
     /// Create a new playback engine. Loads the NDI SDK once on Windows.
-    pub fn new(pool: SqlitePool, obs_event_tx: broadcast::Sender<ObsEvent>) -> Self {
+    pub fn new(
+        pool: SqlitePool,
+        obs_event_tx: broadcast::Sender<ObsEvent>,
+        obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
+    ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         #[cfg(windows)]
@@ -74,6 +80,7 @@ impl PlaybackEngine {
             event_tx,
             #[cfg(windows)]
             ndi_backend,
+            obs_cmd_tx,
             obs_event_tx,
         }
     }
@@ -116,17 +123,38 @@ impl PlaybackEngine {
         match &event {
             PipelineEvent::Started { duration_ms } => {
                 debug!(playlist_id, duration_ms, "video started");
-                // Title timing would be scheduled here via tokio::time::sleep.
+                // Show title 1.5s after start.
+                if let Some(pp) = self.pipelines.get(&playlist_id) {
+                    if let Some(video_id) = pp.current_video_id {
+                        let pool = self.pool.clone();
+                        let obs_cmd = self.obs_cmd_tx.clone();
+                        let pl_id = playlist_id;
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                            if let Some(cmd_tx) = obs_cmd {
+                                Self::show_title(&pool, &cmd_tx, pl_id, video_id).await;
+                            }
+                        });
+                    }
+                }
             }
             PipelineEvent::Position {
                 position_ms,
                 duration_ms,
             } => {
-                // Check if we should hide the title (3500ms before end).
+                // Hide title 3500ms before end.
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     if pp.title_shown && *duration_ms > 3500 && *position_ms > duration_ms - 3500 {
                         pp.title_shown = false;
                         debug!(playlist_id, "hiding title (near end)");
+                        if let Some(cmd_tx) = &self.obs_cmd_tx {
+                            let cmd_tx = cmd_tx.clone();
+                            let pool = self.pool.clone();
+                            let pl_id = playlist_id;
+                            tokio::spawn(async move {
+                                Self::clear_title(&pool, &cmd_tx, pl_id).await;
+                            });
+                        }
                     }
                 }
             }
@@ -139,6 +167,71 @@ impl PlaybackEngine {
                     .await;
             }
         }
+    }
+
+    /// Show title in OBS text source for a playlist's current video.
+    async fn show_title(
+        pool: &SqlitePool,
+        cmd_tx: &mpsc::Sender<crate::obs::ObsCommand>,
+        playlist_id: i64,
+        video_id: i64,
+    ) {
+        // Look up the OBS text source name for this playlist.
+        let source_name =
+            sqlx::query_scalar::<_, String>("SELECT obs_text_source FROM playlists WHERE id = ?")
+                .bind(playlist_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+
+        if source_name.is_empty() {
+            return;
+        }
+
+        // Get song + artist.
+        if let Ok(Some((song, artist))) =
+            crate::db::models::get_video_metadata(pool, video_id).await
+        {
+            let text = if artist.is_empty() {
+                song
+            } else {
+                format!("{song} - {artist}")
+            };
+            let _ = cmd_tx
+                .send(crate::obs::ObsCommand::SetTextSource { source_name, text })
+                .await;
+            info!(playlist_id, video_id, "title shown in OBS");
+        }
+    }
+
+    /// Clear the title text in OBS for a playlist.
+    async fn clear_title(
+        pool: &SqlitePool,
+        cmd_tx: &mpsc::Sender<crate::obs::ObsCommand>,
+        playlist_id: i64,
+    ) {
+        let source_name =
+            sqlx::query_scalar::<_, String>("SELECT obs_text_source FROM playlists WHERE id = ?")
+                .bind(playlist_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+
+        if source_name.is_empty() {
+            return;
+        }
+
+        let _ = cmd_tx
+            .send(crate::obs::ObsCommand::SetTextSource {
+                source_name,
+                text: String::new(),
+            })
+            .await;
+        debug!(playlist_id, "title cleared in OBS");
     }
 
     /// Handle a user command (skip, mode change, etc.).
@@ -316,7 +409,7 @@ mod tests {
         rt.block_on(async {
             let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
             let (obs_tx, _obs_rx) = broadcast::channel(16);
-            let engine = PlaybackEngine::new(pool, obs_tx);
+            let engine = PlaybackEngine::new(pool, obs_tx, None);
             assert!(engine.pipelines.is_empty());
         });
     }
@@ -331,7 +424,7 @@ mod tests {
         rt.block_on(async {
             let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
             let (obs_tx, _obs_rx) = broadcast::channel(16);
-            let mut engine = PlaybackEngine::new(pool, obs_tx);
+            let mut engine = PlaybackEngine::new(pool, obs_tx, None);
 
             engine.ensure_pipeline(1, "TestNDI");
             assert!(engine.pipelines.contains_key(&1));
@@ -352,7 +445,7 @@ mod tests {
         rt.block_on(async {
             let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
             let (obs_tx, _obs_rx) = broadcast::channel(16);
-            let mut engine = PlaybackEngine::new(pool, obs_tx);
+            let mut engine = PlaybackEngine::new(pool, obs_tx, None);
 
             engine.ensure_pipeline(1, "NDI-1");
             engine.ensure_pipeline(2, "NDI-2");

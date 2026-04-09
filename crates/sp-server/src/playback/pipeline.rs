@@ -352,6 +352,9 @@ fn decode_and_send(
 
     let mut last_position_report = Instant::now();
     let mut frame_count: u64 = 0;
+    let playback_start = Instant::now();
+    let mut pause_offset = std::time::Duration::ZERO;
+    let mut pause_start: Option<Instant> = None;
 
     loop {
         // Check for commands between frames (non-blocking).
@@ -361,10 +364,14 @@ fn decode_and_send(
             Ok(PipelineCommand::Play(new_path)) => return DecodeResult::NewPlay(new_path),
             Ok(PipelineCommand::Pause) => {
                 *paused = true;
+                pause_start = Some(Instant::now());
                 debug!(playlist_id, "paused during playback");
             }
             Ok(PipelineCommand::Resume) => {
                 *paused = false;
+                if let Some(ps) = pause_start.take() {
+                    pause_offset += ps.elapsed();
+                }
                 debug!(playlist_id, "resumed playback");
             }
             Err(TryRecvError::Empty) => {}
@@ -382,8 +389,13 @@ fn decode_and_send(
         let result = decoder.next_synced();
         match result {
             Ok(Some((video_frame, audio_frames))) => {
-                // Send video frame via NDI.
-                // NDI clock_video=true handles frame pacing.
+                // Frame pacing: wait until the frame's presentation time.
+                let frame_pts = std::time::Duration::from_millis(video_frame.timestamp_ms);
+                let elapsed = playback_start.elapsed() - pause_offset;
+                if frame_pts > elapsed {
+                    std::thread::sleep(frame_pts - elapsed);
+                }
+
                 let ndi_video = sp_ndi::VideoFrame {
                     data: video_frame.data,
                     width: video_frame.width,
