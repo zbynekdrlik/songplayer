@@ -870,3 +870,56 @@ jobs:
             Write-Error "FAIL: Download worker did not produce any files after ${maxWait}s. Check yt-dlp/ffmpeg."
             exit 1
           }
+
+      - name: Install Playwright for dashboard verification
+        shell: powershell
+        run: |
+          if (-not (Test-Path "C:\ProgramData\SongPlayer\e2e\node_modules")) {
+            New-Item -ItemType Directory -Force -Path "C:\ProgramData\SongPlayer\e2e" | Out-Null
+            Set-Location "C:\ProgramData\SongPlayer\e2e"
+            npm init -y 2>$null | Out-Null
+            npm install -D @playwright/test 2>&1 | Select-Object -Last 3
+            npx playwright install chromium 2>&1 | Select-Object -Last 3
+          } else {
+            Write-Host "Playwright already installed"
+          }
+
+      - name: Verify dashboard via Playwright
+        shell: powershell
+        run: |
+          $testFile = @'
+          const { test, expect } = require('@playwright/test');
+          test('dashboard shows playlists and OBS status', async ({ page }) => {
+            const errors = [];
+            page.on('console', msg => {
+              if (msg.type() === 'error') errors.push(msg.text());
+            });
+            await page.goto('http://localhost:8920/');
+            // Verify playlists are visible
+            await expect(page.getByRole('heading', { name: 'Playlists' })).toBeVisible({ timeout: 15000 });
+            // At least one playlist card should be visible
+            await expect(page.locator('.playlist-card').first()).toBeVisible({ timeout: 10000 });
+            // OBS status should NOT say Disconnected
+            const obsText = await page.locator('.obs-status').textContent();
+            expect(obsText).not.toContain('Disconnected');
+            // WebSocket should be connected
+            await expect(page.locator('text=WS')).toBeVisible();
+            // Zero console errors
+            expect(errors).toEqual([]);
+          });
+          test('settings page loads with fields', async ({ page }) => {
+            await page.goto('http://localhost:8920/');
+            await expect(page.locator('text=SongPlayer')).toBeVisible({ timeout: 15000 });
+            await page.click('text=Settings');
+            await expect(page.locator('text=OBS WebSocket')).toBeVisible({ timeout: 10000 });
+            await expect(page.locator('text=Google Gemini')).toBeVisible();
+          });
+          '@
+          Set-Location "C:\ProgramData\SongPlayer\e2e"
+          $testFile | Out-File -FilePath "deploy-dashboard.spec.js" -Encoding UTF8
+          npx playwright test deploy-dashboard.spec.js --reporter=list 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: Playwright dashboard verification failed"
+            exit 1
+          }
+          Write-Host "OK: Dashboard verified via Playwright"
