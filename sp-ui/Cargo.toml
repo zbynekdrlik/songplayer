@@ -2,7 +2,7 @@
 
 [package]
 name = "sp-ui"
-version = "0.7.0-dev.1"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"
