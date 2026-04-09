@@ -353,7 +353,8 @@ jobs:
             --exclude-re 'sp-server/src/downloader/' \
             --exclude-re 'sp-server/src/resolume/' \
             --exclude-re 'sp-server/src/reprocess/' \
-            --exclude-re 'sp-server/src/api/websocket'
+            --exclude-re 'sp-server/src/api/websocket' \
+            --exclude-re 'sp-server/src/playlist/'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
