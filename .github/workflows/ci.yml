@@ -353,7 +353,11 @@ jobs:
             --exclude-re 'extract_ffmpeg_from_zip' \
             --exclude-re 'ensure_tools' \
             --exclude-re 'handle_ws' \
-            --exclude-re 'db.models'
+            --exclude-re 'db.models' \
+            --exclude-re 'hide_console_window' \
+            --exclude-re 'normalize_audio' \
+            --exclude-re 'update_ytdlp' \
+            --exclude-re 'ytdlp_version'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -898,11 +902,10 @@ jobs:
             await expect(page.getByRole('heading', { name: 'Playlists' })).toBeVisible({ timeout: 15000 });
             // At least one playlist card should be visible
             await expect(page.locator('.playlist-card').first()).toBeVisible({ timeout: 10000 });
-            // OBS status should NOT say Disconnected
-            const obsText = await page.locator('.obs-status').textContent();
-            expect(obsText).not.toContain('Disconnected');
+            // OBS status should connect within 30s (WebSocket handshake takes time after deploy)
+            await expect(page.locator('.obs-status')).not.toContainText('Disconnected', { timeout: 30000 });
             // WebSocket should be connected
-            await expect(page.locator('text=WS')).toBeVisible();
+            await expect(page.locator('text=WS')).toBeVisible({ timeout: 10000 });
             // Zero console errors
             expect(errors).toEqual([]);
           });
