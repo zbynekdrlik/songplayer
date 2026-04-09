@@ -86,10 +86,10 @@ pub fn ResolumeHosts() -> impl IntoView {
                             let hid = host.id;
                             view! {
                                 <tr>
-                                    <td>{host.name.clone()}</td>
-                                    <td>{host.ip.clone()}</td>
+                                    <td>{host.label.clone()}</td>
+                                    <td>{host.host.clone()}</td>
                                     <td>{host.port}</td>
-                                    <td>{if host.enabled { "Yes" } else { "No" }}</td>
+                                    <td>{if host.is_enabled { "Yes" } else { "No" }}</td>
                                     <td>
                                         <button class="delete-btn" on:click=move |_| on_delete(hid)>
                                             "Delete"

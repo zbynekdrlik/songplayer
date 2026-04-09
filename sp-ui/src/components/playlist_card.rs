@@ -16,7 +16,7 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
         <div class="playlist-card">
             <div class="card-header">
                 <h3>{playlist.name.clone()}</h3>
-                <span class="playlist-id">{playlist.youtube_playlist_id.clone()}</span>
+                <span class="playlist-id">{playlist.ndi_output_name.clone()}</span>
             </div>
 
             <div class="now-playing">

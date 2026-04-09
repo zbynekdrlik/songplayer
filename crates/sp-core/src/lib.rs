@@ -138,9 +138,14 @@ mod tests {
     fn playlist_serde_roundtrip() {
         let p = models::Playlist {
             id: 1,
-            youtube_playlist_id: "PLxyz".into(),
             name: "Test".into(),
-            enabled: true,
+            youtube_url: "https://youtube.com/playlist?list=PLxyz".into(),
+            ndi_output_name: "SP-test".into(),
+            obs_text_source: None,
+            playback_mode: "continuous".into(),
+            is_active: true,
+            created_at: None,
+            updated_at: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: models::Playlist = serde_json::from_str(&json).unwrap();

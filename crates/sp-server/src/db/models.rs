@@ -20,8 +20,9 @@ pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sq
         .map(|r| Playlist {
             id: r.get("id"),
             name: r.get("name"),
-            youtube_playlist_id: r.get("youtube_url"),
-            enabled: r.get::<i32, _>("is_active") != 0,
+            youtube_url: r.get("youtube_url"),
+            is_active: r.get::<i32, _>("is_active") != 0,
+            ..Default::default()
         })
         .collect())
 }
@@ -43,8 +44,9 @@ pub async fn insert_playlist(
     Ok(Playlist {
         id: row.get("id"),
         name: row.get("name"),
-        youtube_playlist_id: row.get("youtube_url"),
-        enabled: row.get::<i32, _>("is_active") != 0,
+        youtube_url: row.get("youtube_url"),
+        is_active: row.get::<i32, _>("is_active") != 0,
+        ..Default::default()
     })
 }
 

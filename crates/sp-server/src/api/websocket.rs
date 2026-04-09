@@ -26,6 +26,29 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
 
     info!("WebSocket client connected");
 
+    // Send initial state snapshot so the dashboard doesn't show stale data.
+    {
+        let obs = state.obs_state.read().await;
+        let obs_status = ServerMsg::ObsStatus {
+            connected: obs.connected,
+            active_scene: obs.current_scene.clone(),
+        };
+        if let Ok(json) = serde_json::to_string(&obs_status) {
+            let _ = write.send(Message::Text(json.into())).await;
+        }
+    }
+    {
+        let ts = state.tools_status.read().await;
+        let tools_msg = ServerMsg::ToolsStatus {
+            ytdlp_available: ts.ytdlp_available,
+            ffmpeg_available: ts.ffmpeg_available,
+            ytdlp_version: ts.ytdlp_version.clone(),
+        };
+        if let Ok(json) = serde_json::to_string(&tools_msg) {
+            let _ = write.send(Message::Text(json.into())).await;
+        }
+    }
+
     loop {
         tokio::select! {
             // Client -> Server
