@@ -22,7 +22,8 @@ pub enum NDIlib_send_instance_t {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FourCCVideoType {
     /// BGRA 8-bit per channel (NDI default for sending).
-    BGRA = 0x4147_5242, // 'BGRX' in little-endian = "ARGB" reversed
+    /// FourCC('B','G','R','A') = 0x41524742
+    BGRA = 0x4152_4742,
 }
 
 /// Audio FourCC format identifiers.

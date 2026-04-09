@@ -39,7 +39,7 @@ pub struct DashboardStore {
     pub obs_scene: RwSignal<Option<String>>,
     pub ws_connected: RwSignal<bool>,
     pub errors: RwSignal<Vec<String>>,
-    pub settings: RwSignal<Vec<Setting>>,
+    pub settings: RwSignal<HashMap<String, String>>,
     pub resolume_hosts: RwSignal<Vec<ResolumeHost>>,
 }
 
@@ -53,7 +53,7 @@ impl DashboardStore {
             obs_scene: RwSignal::new(None),
             ws_connected: RwSignal::new(false),
             errors: RwSignal::new(vec![]),
-            settings: RwSignal::new(vec![]),
+            settings: RwSignal::new(HashMap::new()),
             resolume_hosts: RwSignal::new(vec![]),
         }
     }

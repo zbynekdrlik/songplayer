@@ -125,8 +125,8 @@ impl NdiBackend for RealNdiBackend {
         let create_desc = NDIlib_send_create_t {
             p_ndi_name: c_name.as_ptr(),
             p_groups: ptr::null(),
-            clock_video: true,
-            clock_audio: true,
+            clock_video: false,
+            clock_audio: false,
         };
 
         let ptr = unsafe { (self.lib.send_create)(&create_desc) };

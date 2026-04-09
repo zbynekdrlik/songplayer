@@ -19,15 +19,25 @@ app.use(express.static(distPath));
 const playlists = [
   {
     id: 1,
-    youtube_playlist_id: "PLtest1",
     name: "Worship",
-    enabled: true,
+    youtube_url: "https://youtube.com/playlist?list=PLtest1",
+    ndi_output_name: "SP-worship",
+    obs_text_source: "worship_title",
+    playback_mode: "continuous",
+    is_active: true,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
   },
   {
     id: 2,
-    youtube_playlist_id: "PLtest2",
     name: "Background",
-    enabled: true,
+    youtube_url: "https://youtube.com/playlist?list=PLtest2",
+    ndi_output_name: "SP-background",
+    obs_text_source: "background_title",
+    playback_mode: "continuous",
+    is_active: true,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
   },
 ];
 
@@ -52,13 +62,13 @@ const videos = [
   },
 ];
 
-const settings = [
-  { key: "obs_websocket_url", value: "ws://127.0.0.1:4455" },
-  { key: "obs_websocket_password", value: "" },
-  { key: "gemini_api_key", value: "" },
-  { key: "gemini_model", value: "gemini-2.5-flash" },
-  { key: "cache_dir", value: "./cache" },
-];
+const settings = {
+  obs_websocket_url: "ws://127.0.0.1:4455",
+  obs_websocket_password: "",
+  gemini_api_key: "",
+  gemini_model: "gemini-2.5-flash",
+  cache_dir: "./cache",
+};
 
 const resolumeHosts = [];
 let nextResolumeId = 1;
@@ -124,22 +134,9 @@ app.get("/api/v1/settings", (_req, res) => {
   res.json(settings);
 });
 
-app.put("/api/v1/settings/:key", (req, res) => {
-  const idx = settings.findIndex((s) => s.key === req.params.key);
-  if (idx >= 0) {
-    settings[idx] = req.body;
-    res.json(settings[idx]);
-  } else {
-    const s = { key: req.params.key, value: req.body.value };
-    settings.push(s);
-    res.json(s);
-  }
-});
-
 app.patch("/api/v1/settings", (req, res) => {
   for (const [key, value] of Object.entries(req.body)) {
-    const idx = settings.findIndex((s) => s.key === key);
-    if (idx >= 0) settings[idx].value = value;
+    settings[key] = value;
   }
   res.json(settings);
 });

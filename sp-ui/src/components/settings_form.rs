@@ -1,18 +1,18 @@
 //! Settings form for OBS, Gemini, and cache configuration.
 
+use std::collections::HashMap;
+
 use leptos::prelude::*;
 use sp_core::config;
-use sp_core::models::Setting;
 
 use crate::api;
 use crate::store::DashboardStore;
 
 /// Helper: find a setting value or return a default.
-fn setting_value(settings: &[Setting], key: &str, default: &str) -> String {
+fn setting_value(settings: &HashMap<String, String>, key: &str, default: &str) -> String {
     settings
-        .iter()
-        .find(|s| s.key == key)
-        .map(|s| s.value.clone())
+        .get(key)
+        .cloned()
         .unwrap_or_else(|| default.to_string())
 }
 
@@ -55,45 +55,40 @@ pub fn SettingsForm() -> impl IntoView {
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
-        let settings = vec![
-            Setting {
-                key: config::SETTING_OBS_WEBSOCKET_URL.into(),
-                value: obs_url.get(),
-            },
-            Setting {
-                key: config::SETTING_OBS_WEBSOCKET_PASSWORD.into(),
-                value: obs_password.get(),
-            },
-            Setting {
-                key: config::SETTING_GEMINI_API_KEY.into(),
-                value: gemini_key.get(),
-            },
-            Setting {
-                key: config::SETTING_GEMINI_MODEL.into(),
-                value: gemini_model.get(),
-            },
-            Setting {
-                key: config::SETTING_CACHE_DIR.into(),
-                value: cache_dir.get(),
-            },
-        ];
+        let mut settings = HashMap::new();
+        settings.insert(
+            config::SETTING_OBS_WEBSOCKET_URL.to_string(),
+            obs_url.get(),
+        );
+        settings.insert(
+            config::SETTING_OBS_WEBSOCKET_PASSWORD.to_string(),
+            obs_password.get(),
+        );
+        settings.insert(
+            config::SETTING_GEMINI_API_KEY.to_string(),
+            gemini_key.get(),
+        );
+        settings.insert(
+            config::SETTING_GEMINI_MODEL.to_string(),
+            gemini_model.get(),
+        );
+        settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
 
         leptos::task::spawn_local(async move {
             save_status.set("Saving...".into());
-            let mut ok = true;
-            for s in &settings {
-                if api::put_json::<Setting, Setting>(&format!("/api/v1/settings/{}", s.key), s)
-                    .await
-                    .is_err()
-                {
-                    ok = false;
+            match api::patch_json::<HashMap<String, String>, HashMap<String, String>>(
+                "/api/v1/settings",
+                &settings,
+            )
+            .await
+            {
+                Ok(_) => {
+                    save_status.set("Saved".into());
+                    store.settings.set(settings);
                 }
-            }
-            if ok {
-                save_status.set("Saved".into());
-                store.settings.set(settings);
-            } else {
-                save_status.set("Error saving some settings".into());
+                Err(_) => {
+                    save_status.set("Error saving settings".into());
+                }
             }
         });
     };

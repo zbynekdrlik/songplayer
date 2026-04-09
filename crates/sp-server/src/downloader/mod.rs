@@ -11,6 +11,18 @@ use std::path::PathBuf;
 use tokio::sync::broadcast;
 use tools::ToolPaths;
 
+/// Apply platform-specific flags to hide console windows on Windows.
+/// All subprocess calls (yt-dlp, ffmpeg) must use this to avoid flashing
+/// cmd windows on the desktop.
+pub fn hide_console_window(cmd: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let _ = cmd; // suppress unused warning on non-Windows
+}
+
 /// Maximum video resolution height for downloads.
 const MAX_RESOLUTION: u32 = 1440;
 
@@ -179,24 +191,21 @@ impl DownloadWorker {
             .parent()
             .unwrap_or(std::path::Path::new("."));
 
-        let child_output = tokio::process::Command::new(&self.tools.ytdlp)
-            .args(["--progress", "--newline"])
+        let mut cmd = tokio::process::Command::new(&self.tools.ytdlp);
+        cmd.args(["--progress", "--newline"])
             .args(["-f", &format_spec])
             .args(["--ffmpeg-location"])
             .arg(ffmpeg_dir)
-            // Use node.js as JS runtime for YouTube extraction (deno is default but
-            // often not installed; node.js is available on win-resolume).
             .args(["--js-runtimes", "node"])
             .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
-            // Force merge into MP4 container regardless of source format.
             .args(["--merge-output-format", "mp4"])
             .args(["-o"])
             .arg(output)
             .arg(&url)
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .await?;
+            .stderr(std::process::Stdio::piped());
+        hide_console_window(&mut cmd);
+        let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
             let stderr = String::from_utf8_lossy(&child_output.stderr);

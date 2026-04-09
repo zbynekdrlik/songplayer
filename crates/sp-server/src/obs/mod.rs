@@ -75,7 +75,7 @@ impl ObsClient {
         mut shutdown: broadcast::Receiver<()>,
     ) -> Self {
         let state = shared_state;
-        let (cmd_tx, cmd_rx) = mpsc::channel::<ObsCommand>(64);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<ObsCommand>(64);
 
         let loop_state = Arc::clone(&state);
         let loop_event_tx = event_tx.clone();
@@ -94,7 +94,7 @@ impl ObsClient {
                         &ndi_sources,
                         &loop_state,
                         &loop_event_tx,
-                        &cmd_rx,
+                        &mut cmd_rx,
                     ) => {
                         match result {
                             Ok(()) => {
@@ -127,6 +127,11 @@ impl ObsClient {
     }
 
     /// Update a text source in OBS.
+    /// Get a clone of the command sender for use by other components.
+    pub fn cmd_sender(&self) -> mpsc::Sender<ObsCommand> {
+        self.cmd_tx.clone()
+    }
+
     pub async fn set_text(&self, source_name: &str, text: &str) -> Result<(), anyhow::Error> {
         self.cmd_tx
             .send(ObsCommand::SetTextSource {
@@ -160,7 +165,7 @@ async fn connect_and_run(
     ndi_sources: &NdiSourceMap,
     state: &Arc<RwLock<ObsState>>,
     event_tx: &broadcast::Sender<ObsEvent>,
-    _cmd_rx: &mpsc::Receiver<ObsCommand>,
+    cmd_rx: &mut mpsc::Receiver<ObsCommand>,
 ) -> Result<(), anyhow::Error> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(&config.url).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -245,10 +250,16 @@ async fn connect_and_run(
                     Some(Err(e)) => return Err(e.into()),
                 }
             }
-            // cmd_rx is borrowed immutably in the outer fn signature so we
-            // cannot recv here directly; commands are handled via a separate
-            // mechanism when needed. For now the set_text path sends via the
-            // channel but we poll it in a non-blocking way.
+            Some(cmd) = cmd_rx.recv() => {
+                match cmd {
+                    ObsCommand::SetTextSource { source_name, text } => {
+                        let req_id = uuid::Uuid::new_v4().to_string();
+                        let req = text::set_text_request(&req_id, &source_name, &text);
+                        write.send(Message::Text(req.to_string().into())).await?;
+                        debug!(source_name, "sent SetTextSource to OBS");
+                    }
+                }
+            }
         }
     }
 }

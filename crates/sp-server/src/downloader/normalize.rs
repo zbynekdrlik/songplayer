@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use super::hide_console_window;
+
 /// Statistics extracted from FFmpeg's first-pass loudnorm analysis.
 #[derive(Debug, Clone)]
 struct LoudnormStats {
@@ -21,8 +23,8 @@ pub async fn normalize_audio(
     output: &Path,
 ) -> Result<(), anyhow::Error> {
     // Pass 1: measure loudness stats.
-    let pass1 = tokio::process::Command::new(ffmpeg)
-        .args(["-i"])
+    let mut cmd1 = tokio::process::Command::new(ffmpeg);
+    cmd1.args(["-i"])
         .arg(input)
         .args([
             "-af",
@@ -32,9 +34,9 @@ pub async fn normalize_audio(
         ])
         .arg(null_output())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await?;
+        .stderr(std::process::Stdio::piped());
+    hide_console_window(&mut cmd1);
+    let pass1 = cmd1.output().await?;
 
     if !pass1.status.success() {
         let stderr = String::from_utf8_lossy(&pass1.stderr);
@@ -53,16 +55,16 @@ pub async fn normalize_audio(
         stats.input_i, stats.input_tp, stats.input_lra, stats.input_thresh, stats.target_offset,
     );
 
-    let pass2 = tokio::process::Command::new(ffmpeg)
-        .args(["-i"])
+    let mut cmd2 = tokio::process::Command::new(ffmpeg);
+    cmd2.args(["-i"])
         .arg(input)
         .args(["-af", &af_filter])
         .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-y"])
         .arg(output)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await?;
+        .stderr(std::process::Stdio::piped());
+    hide_console_window(&mut cmd2);
+    let pass2 = cmd2.output().await?;
 
     if !pass2.status.success() {
         let stderr = String::from_utf8_lossy(&pass2.stderr);

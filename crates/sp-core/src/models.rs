@@ -3,12 +3,23 @@
 use serde::{Deserialize, Serialize};
 
 /// A YouTube playlist being tracked.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Playlist {
     pub id: i64,
-    pub youtube_playlist_id: String,
     pub name: String,
-    pub enabled: bool,
+    pub youtube_url: String,
+    #[serde(default)]
+    pub ndi_output_name: String,
+    #[serde(default)]
+    pub obs_text_source: Option<String>,
+    #[serde(default)]
+    pub playback_mode: String,
+    #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 /// A single video within a playlist.
@@ -46,10 +57,14 @@ pub struct Setting {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResolumeHost {
     pub id: i64,
-    pub name: String,
-    pub ip: String,
+    #[serde(default)]
+    pub label: String,
+    pub host: String,
     pub port: u16,
-    pub enabled: bool,
+    #[serde(default)]
+    pub is_enabled: bool,
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 /// Maps a playlist to a specific Resolume clip slot.

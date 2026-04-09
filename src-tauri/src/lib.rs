@@ -111,8 +111,20 @@ fn setup_logging() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,sp_server=debug"));
 
+    // Log to file so we can diagnose issues on win-resolume.
+    let log_dir = data_directory();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("songplayer.log");
+
+    let file_layer = if let Ok(file) = std::fs::File::create(&log_path) {
+        Some(fmt::layer().with_target(true).with_writer(std::sync::Mutex::new(file)))
+    } else {
+        None
+    };
+
     tracing_subscriber::registry()
         .with(filter)
         .with(fmt::layer().with_target(true))
+        .with(file_layer)
         .init();
 }

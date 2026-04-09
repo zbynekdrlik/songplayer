@@ -138,9 +138,14 @@ mod tests {
     fn playlist_serde_roundtrip() {
         let p = models::Playlist {
             id: 1,
-            youtube_playlist_id: "PLxyz".into(),
             name: "Test".into(),
-            enabled: true,
+            youtube_url: "https://youtube.com/playlist?list=PLxyz".into(),
+            ndi_output_name: "SP-test".into(),
+            obs_text_source: None,
+            playback_mode: "continuous".into(),
+            is_active: true,
+            created_at: None,
+            updated_at: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: models::Playlist = serde_json::from_str(&json).unwrap();
@@ -194,10 +199,11 @@ mod tests {
     fn resolume_host_serde_roundtrip() {
         let h = models::ResolumeHost {
             id: 1,
-            name: "Main".into(),
-            ip: "192.168.1.10".into(),
+            label: "Main".into(),
+            host: "192.168.1.10".into(),
             port: 7000,
-            enabled: true,
+            is_enabled: true,
+            created_at: None,
         };
         let json = serde_json::to_string(&h).unwrap();
         let back: models::ResolumeHost = serde_json::from_str(&json).unwrap();

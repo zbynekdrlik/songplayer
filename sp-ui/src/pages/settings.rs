@@ -1,7 +1,7 @@
 //! Settings page with OBS, Resolume, and Gemini configuration.
 
 use leptos::prelude::*;
-use sp_core::models::Setting;
+use std::collections::HashMap;
 
 use crate::api;
 use crate::components::{resolume_hosts, settings_form};
@@ -14,7 +14,7 @@ pub fn SettingsPage() -> impl IntoView {
     // Load settings on mount.
     let _load = Effect::new(move |_| {
         leptos::task::spawn_local(async move {
-            if let Ok(settings) = api::get::<Vec<Setting>>("/api/v1/settings").await {
+            if let Ok(settings) = api::get::<HashMap<String, String>>("/api/v1/settings").await {
                 store.settings.set(settings);
             }
         });

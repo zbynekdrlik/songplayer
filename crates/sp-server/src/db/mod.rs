@@ -322,12 +322,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(playlist.name, "Worship");
-        assert!(playlist.enabled);
+        assert_eq!(playlist.youtube_url, "https://yt.com/pl1");
+        assert!(playlist.is_active);
 
-        // Get active playlists
+        // Get active playlists — verify all fields are populated
         let active = models::get_active_playlists(&pool).await.unwrap();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, playlist.id);
+        assert_eq!(active[0].name, "Worship");
+        assert_eq!(active[0].youtube_url, "https://yt.com/pl1");
+        assert!(active[0].is_active);
 
         // Upsert video
         let video = models::upsert_video(&pool, playlist.id, "abc123", Some("My Song"))
@@ -369,5 +373,77 @@ mod tests {
             .unwrap();
         assert_eq!(unplayed.len(), 1);
         assert_eq!(unplayed[0], "def456");
+    }
+
+    #[tokio::test]
+    async fn get_video_file_path_returns_none_for_unnormalized() {
+        let pool = setup().await;
+
+        sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id) VALUES (1, 'vid1')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Not normalized → should return None.
+        let path = models::get_video_file_path(&pool, 1).await.unwrap();
+        assert!(path.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_video_file_path_returns_path_for_normalized() {
+        let pool = setup().await;
+
+        sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id, normalized, file_path) VALUES (1, 'vid1', 1, '/cache/song.mp4')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let path = models::get_video_file_path(&pool, 1).await.unwrap();
+        assert_eq!(path, Some("/cache/song.mp4".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_video_metadata_returns_song_and_artist() {
+        let pool = setup().await;
+
+        sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id, song, artist) VALUES (1, 'vid1', 'My Song', 'Artist Name')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let meta = models::get_video_metadata(&pool, 1).await.unwrap();
+        assert_eq!(
+            meta,
+            Some(("My Song".to_string(), "Artist Name".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_active_playlists_includes_ndi_name() {
+        let pool = setup().await;
+
+        sqlx::query("INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('P', 'url', 'SP-test')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let playlists = models::get_active_playlists(&pool).await.unwrap();
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].ndi_output_name, "SP-test");
     }
 }
