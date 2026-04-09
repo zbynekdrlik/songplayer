@@ -908,8 +908,8 @@ jobs:
             await expect(page.locator('.playlist-card').first()).toBeVisible({ timeout: 10000 });
             // OBS status should connect within 30s (WebSocket handshake takes time after deploy)
             await expect(page.locator('.obs-status')).not.toContainText('Disconnected', { timeout: 30000 });
-            // WebSocket should be connected
-            await expect(page.locator('text=WS')).toBeVisible({ timeout: 10000 });
+            // WebSocket indicator should be visible
+            await expect(page.locator('.ws-indicator')).toBeVisible({ timeout: 10000 });
             // Zero console errors
             expect(errors).toEqual([]);
           });
