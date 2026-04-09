@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn fourcc_video_bgra_value() {
-        assert_eq!(FourCCVideoType::BGRA as u32, 0x4147_5242);
+        assert_eq!(FourCCVideoType::BGRA as u32, 0x4152_4742);
     }
 
     #[test]
