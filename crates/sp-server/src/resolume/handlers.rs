@@ -30,13 +30,17 @@ pub async fn crossfade_title(
     let song_token = format!("#song-name-{lane_suffix}");
     let artist_token = format!("#artist-name-{lane_suffix}");
 
+    // Copy clip info to avoid borrow conflicts with &mut self methods.
+    let song_clip = driver.clip_mapping.get(&song_token).cloned();
+    let artist_clip = driver.clip_mapping.get(&artist_token).cloned();
+
     // Step 1: Set text on inactive lane clips.
-    if let Some(clip) = driver.clip_mapping.get(&song_token) {
+    if let Some(ref clip) = song_clip {
         driver.set_text(clip.text_param_id, song).await?;
         debug!(token = %song_token, %song, "set song text");
     }
 
-    if let Some(clip) = driver.clip_mapping.get(&artist_token) {
+    if let Some(ref clip) = artist_clip {
         driver.set_text(clip.text_param_id, artist).await?;
         debug!(token = %artist_token, %artist, "set artist text");
     }
@@ -45,12 +49,12 @@ pub async fn crossfade_title(
     tokio::time::sleep(Duration::from_millis(TRIGGER_DELAY_MS)).await;
 
     // Step 3: Trigger inactive lane clips.
-    if let Some(clip) = driver.clip_mapping.get(&song_token) {
+    if let Some(ref clip) = song_clip {
         driver.trigger_clip(clip.clip_id).await?;
         debug!(token = %song_token, clip_id = clip.clip_id, "triggered song clip");
     }
 
-    if let Some(clip) = driver.clip_mapping.get(&artist_token) {
+    if let Some(ref clip) = artist_clip {
         driver.trigger_clip(clip.clip_id).await?;
         debug!(token = %artist_token, clip_id = clip.clip_id, "triggered artist clip");
     }
@@ -66,7 +70,8 @@ pub async fn crossfade_title(
 pub async fn clear_title(driver: &mut HostDriver, playlist_id: i64) -> Result<(), anyhow::Error> {
     let clear_token = "#song-clear";
 
-    if let Some(clip) = driver.clip_mapping.get(clear_token) {
+    let clear_clip = driver.clip_mapping.get(clear_token).cloned();
+    if let Some(ref clip) = clear_clip {
         driver.trigger_clip(clip.clip_id).await?;
         debug!(playlist_id, clip_id = clip.clip_id, "triggered clear clip");
     } else {
