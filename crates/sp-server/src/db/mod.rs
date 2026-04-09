@@ -322,12 +322,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(playlist.name, "Worship");
+        assert_eq!(playlist.youtube_url, "https://yt.com/pl1");
         assert!(playlist.is_active);
 
-        // Get active playlists
+        // Get active playlists — verify all fields are populated
         let active = models::get_active_playlists(&pool).await.unwrap();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, playlist.id);
+        assert_eq!(active[0].name, "Worship");
+        assert_eq!(active[0].youtube_url, "https://yt.com/pl1");
+        assert!(active[0].is_active);
 
         // Upsert video
         let video = models::upsert_video(&pool, playlist.id, "abc123", Some("My Song"))
