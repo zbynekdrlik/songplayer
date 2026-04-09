@@ -40,10 +40,12 @@ impl MediaReader {
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
         // COM + MF init (idempotent)
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+            debug!(hr = ?hr, "CoInitializeEx result");
             MFStartup(MF_API_VERSION, MFSTARTUP_NOSOCKET)
                 .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
         }
+        debug!("MFStartup succeeded");
 
         // Build a wide-string path for MF.
         let wide_path: Vec<u16> = path
@@ -52,12 +54,15 @@ impl MediaReader {
             .chain(std::iter::once(0))
             .collect();
 
+        debug!(path = %path.display(), "calling MFCreateSourceReaderFromURL");
         let reader: IMFSourceReader = unsafe {
             MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), None)
                 .map_err(|e| DecoderError::SourceReader(e.to_string()))?
         };
+        debug!("MFCreateSourceReaderFromURL succeeded");
 
-        // Configure video output to BGRA
+        // Configure video output to NV12
+        debug!("setting video output type to NV12");
         let video_type = Self::make_video_output_type()?;
         unsafe {
             reader
@@ -68,8 +73,10 @@ impl MediaReader {
                     ))
                 })?;
         }
+        debug!("video output type set successfully");
 
         // Configure audio output to f32 PCM
+        debug!("setting audio output type");
         let audio_type = Self::make_audio_output_type()?;
         unsafe {
             reader
@@ -80,8 +87,9 @@ impl MediaReader {
                     ))
                 })?;
         }
+        debug!("audio output type set successfully");
 
-        debug!(path = %path.display(), "Opened media file");
+        debug!(path = %path.display(), "media file opened successfully");
 
         Ok(Self {
             reader,
