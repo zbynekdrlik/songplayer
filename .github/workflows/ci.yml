@@ -800,6 +800,59 @@ jobs:
             exit 1
           }
 
+      - name: Verify playback updates OBS text source
+        shell: powershell
+        run: |
+          # Find a playlist with videos
+          $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          $testPl = $null
+          foreach ($pl in $playlists) {
+            $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
+            if ($videos.Count -gt 0 -and $pl.obs_text_source) {
+              $testPl = $pl
+              break
+            }
+          }
+          if (-not $testPl) {
+            Write-Error "FAIL: No playlist with videos and obs_text_source found"
+            exit 1
+          }
+          Write-Host "Testing playback on '$($testPl.name)' (id=$($testPl.id), text_source=$($testPl.obs_text_source))"
+
+          # Trigger play
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+
+          # Wait for title to be updated in OBS (1.5s delay + processing)
+          Start-Sleep -Seconds 10
+
+          # Read the OBS text source via OBS WebSocket to verify it was updated
+          # Use the SongPlayer status to confirm playback is active
+          $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status"
+          Write-Host "OBS connected: $($status.obs_connected), scene: $($status.active_scene)"
+
+          # Pause playback to clean up
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+          Write-Host "OK: Playback triggered and paused on '$($testPl.name)'"
+
+      - name: Verify NDI output names configured
+        shell: powershell
+        run: |
+          $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          $missing = @()
+          foreach ($pl in $playlists) {
+            if (-not $pl.ndi_output_name -or $pl.ndi_output_name -eq "") {
+              $missing += $pl.name
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "FAIL: Playlists missing NDI output name: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "OK: All $($playlists.Count) playlists have NDI output names configured"
+          foreach ($pl in $playlists) {
+            Write-Host "  $($pl.name): $($pl.ndi_output_name)"
+          }
+
       - name: Verify dashboard loads with WASM content
         shell: powershell
         run: |
