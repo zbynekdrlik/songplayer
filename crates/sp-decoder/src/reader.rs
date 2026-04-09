@@ -16,7 +16,7 @@ use windows::Win32::Media::MediaFoundation::{
     MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
     MFStartup, MFVideoFormat_NV12,
 };
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
 
 use std::os::windows::ffi::OsStrExt;
@@ -40,7 +40,8 @@ impl MediaReader {
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
         // COM + MF init (idempotent)
         unsafe {
-            let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+            // STA required for hardware-accelerated decoders (AV1, VP9).
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             debug!(hr = ?hr, "CoInitializeEx result");
             MFStartup(MF_API_VERSION, MFSTARTUP_NOSOCKET)
                 .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
