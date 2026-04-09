@@ -13,19 +13,19 @@ pub async fn sync_playlist(
     youtube_url: &str,
     ytdlp_path: &Path,
 ) -> Result<usize, anyhow::Error> {
-    let output = tokio::process::Command::new(ytdlp_path)
-        .args([
-            "--flat-playlist",
-            "--dump-json",
-            "--no-warnings",
-            "--js-runtimes",
-            "node",
-            youtube_url,
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .await?;
+    let mut cmd = tokio::process::Command::new(ytdlp_path);
+    cmd.args([
+        "--flat-playlist",
+        "--dump-json",
+        "--no-warnings",
+        "--js-runtimes",
+        "node",
+        youtube_url,
+    ])
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::null());
+    crate::downloader::hide_console_window(&mut cmd);
+    let output = cmd.output().await?;
 
     if !output.status.success() {
         anyhow::bail!(

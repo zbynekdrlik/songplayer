@@ -68,10 +68,10 @@ impl ToolsManager {
         let ytdlp = self.tools_dir.join(ytdlp_filename());
         anyhow::ensure!(ytdlp.exists(), "yt-dlp not found at {}", ytdlp.display());
 
-        let output = tokio::process::Command::new(&ytdlp)
-            .arg("--update")
-            .output()
-            .await?;
+        let mut cmd = tokio::process::Command::new(&ytdlp);
+        cmd.arg("--update");
+        super::hide_console_window(&mut cmd);
+        let output = cmd.output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -84,10 +84,10 @@ impl ToolsManager {
 
     /// Get the yt-dlp version string.
     pub async fn ytdlp_version(&self, ytdlp: &Path) -> Result<String, anyhow::Error> {
-        let output = tokio::process::Command::new(ytdlp)
-            .arg("--version")
-            .output()
-            .await?;
+        let mut cmd = tokio::process::Command::new(ytdlp);
+        cmd.arg("--version");
+        super::hide_console_window(&mut cmd);
+        let output = cmd.output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
