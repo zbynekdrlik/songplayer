@@ -55,15 +55,46 @@ pub struct PlaybackPipeline {
     handle: Option<thread::JoinHandle<()>>,
 }
 
+/// Shared NDI backend handle (Windows only). Wraps the loaded NDI SDK so
+/// multiple pipeline threads can create senders without re-initializing.
+#[cfg(windows)]
+pub type SharedNdiBackend = std::sync::Arc<sp_ndi::RealNdiBackend>;
+
 impl PlaybackPipeline {
     /// Spawn the decode-to-NDI loop on a dedicated OS thread.
     ///
     /// * `ndi_name` — NDI source name for this pipeline.
+    /// * `ndi_backend` — shared NDI backend (Windows only, `None` on other platforms).
     /// * `event_tx` — channel for sending events back to the async engine.
     /// * `playlist_id` — used to tag events so the engine knows which playlist
     ///   they belong to.
+    #[cfg(windows)]
     pub fn spawn(
         ndi_name: String,
+        ndi_backend: Option<SharedNdiBackend>,
+        event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+        playlist_id: i64,
+    ) -> Self {
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+
+        let handle = thread::Builder::new()
+            .name(format!("pipeline-{playlist_id}"))
+            .spawn(move || {
+                run_loop(cmd_rx, &ndi_name, ndi_backend, event_tx, playlist_id);
+            })
+            .expect("failed to spawn pipeline thread");
+
+        Self {
+            cmd_tx,
+            handle: Some(handle),
+        }
+    }
+
+    /// Spawn the decode-to-NDI loop on a dedicated OS thread (non-Windows stub).
+    #[cfg(not(windows))]
+    pub fn spawn(
+        ndi_name: String,
+        _ndi_backend: Option<()>,
         event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
         playlist_id: i64,
     ) -> Self {
@@ -105,11 +136,8 @@ impl Drop for PlaybackPipeline {
     }
 }
 
-/// Main loop for the pipeline thread.
-///
-/// On Windows this initialises NDI and the decoder, then enters a frame loop.
-/// On non-Windows it simply waits for commands and reports errors for Play
-/// commands (since Media Foundation is not available).
+/// Main loop for the pipeline thread (non-Windows).
+#[cfg(not(windows))]
 fn run_loop(
     cmd_rx: Receiver<PipelineCommand>,
     ndi_name: &str,
@@ -117,17 +145,21 @@ fn run_loop(
     playlist_id: i64,
 ) {
     info!(ndi_name, playlist_id, "pipeline thread started");
+    run_loop_stub(cmd_rx, ndi_name, event_tx, playlist_id);
+    info!(playlist_id, "pipeline thread exited");
+}
 
-    #[cfg(windows)]
-    {
-        run_loop_windows(cmd_rx, ndi_name, event_tx, playlist_id);
-    }
-
-    #[cfg(not(windows))]
-    {
-        run_loop_stub(cmd_rx, ndi_name, event_tx, playlist_id);
-    }
-
+/// Main loop for the pipeline thread (Windows).
+#[cfg(windows)]
+fn run_loop(
+    cmd_rx: Receiver<PipelineCommand>,
+    ndi_name: &str,
+    ndi_backend: Option<SharedNdiBackend>,
+    event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    playlist_id: i64,
+) {
+    info!(ndi_name, playlist_id, "pipeline thread started");
+    run_loop_windows(cmd_rx, ndi_name, ndi_backend, event_tx, playlist_id);
     info!(playlist_id, "pipeline thread exited");
 }
 
@@ -170,28 +202,26 @@ fn run_loop_stub(
 fn run_loop_windows(
     cmd_rx: Receiver<PipelineCommand>,
     ndi_name: &str,
+    ndi_backend: Option<SharedNdiBackend>,
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
 ) {
-    use sp_ndi::{AudioFrame, NdiLib, NdiSender, RealNdiBackend, VideoFrame};
-    use std::sync::Arc;
+    use sp_ndi::NdiSender;
 
-    // Load NDI SDK and create sender.
-    let ndi_lib = match NdiLib::load() {
-        Ok(lib) => Arc::new(lib),
-        Err(e) => {
-            error!(%e, "failed to load NDI SDK");
+    // Use the shared NDI backend (loaded once by the engine).
+    let backend = match ndi_backend {
+        Some(b) => b,
+        None => {
+            error!("no NDI backend provided");
             let _ = event_tx.send((
                 playlist_id,
-                PipelineEvent::Error(format!("Failed to load NDI SDK: {e}")),
+                PipelineEvent::Error("NDI SDK not available".into()),
             ));
-            // Fall back to stub loop — still accept commands but can't play.
             wait_for_shutdown(&cmd_rx, playlist_id);
             return;
         }
     };
 
-    let backend = Arc::new(RealNdiBackend::new(ndi_lib));
     let sender = match NdiSender::new(backend, ndi_name) {
         Ok(s) => s,
         Err(e) => {
@@ -442,7 +472,7 @@ mod tests {
     #[test]
     fn pipeline_spawn_and_shutdown() {
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let pipeline = PlaybackPipeline::spawn("test-ndi".into(), event_tx, 1);
+        let pipeline = PlaybackPipeline::spawn("test-ndi".into(), None, event_tx, 1);
         pipeline.shutdown();
         // If we get here, the thread joined successfully.
     }
@@ -451,7 +481,7 @@ mod tests {
     fn pipeline_drop_sends_shutdown() {
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         {
-            let _pipeline = PlaybackPipeline::spawn("test-drop".into(), event_tx, 2);
+            let _pipeline = PlaybackPipeline::spawn("test-drop".into(), None, event_tx, 2);
             // Pipeline dropped here — Drop impl should send Shutdown and join.
         }
         // If we get here without hanging, the Drop worked correctly.
@@ -460,7 +490,7 @@ mod tests {
     #[test]
     fn pipeline_send_command_before_shutdown() {
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let pipeline = PlaybackPipeline::spawn("test-cmd".into(), event_tx, 3);
+        let pipeline = PlaybackPipeline::spawn("test-cmd".into(), None, event_tx, 3);
         pipeline.send(PipelineCommand::Stop);
         pipeline.send(PipelineCommand::Pause);
         pipeline.send(PipelineCommand::Resume);
@@ -470,7 +500,7 @@ mod tests {
     #[test]
     fn pipeline_play_emits_event_on_non_windows() {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let pipeline = PlaybackPipeline::spawn("test-play".into(), event_tx, 4);
+        let pipeline = PlaybackPipeline::spawn("test-play".into(), None, event_tx, 4);
 
         pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/test.mp4")));
         // Give the thread a moment to process.

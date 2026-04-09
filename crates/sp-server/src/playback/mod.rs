@@ -38,30 +38,59 @@ pub struct PlaybackEngine {
     pipelines: HashMap<i64, PlaylistPipeline>,
     event_rx: mpsc::UnboundedReceiver<(i64, PipelineEvent)>,
     event_tx: mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    /// Shared NDI backend — loaded once, shared across all pipeline threads.
+    #[cfg(windows)]
+    ndi_backend: Option<pipeline::SharedNdiBackend>,
     /// Used for title show/hide updates (wired when title timing is complete).
     #[allow(dead_code)]
     obs_event_tx: broadcast::Sender<ObsEvent>,
 }
 
 impl PlaybackEngine {
-    /// Create a new playback engine.
+    /// Create a new playback engine. Loads the NDI SDK once on Windows.
     pub fn new(pool: SqlitePool, obs_event_tx: broadcast::Sender<ObsEvent>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+        #[cfg(windows)]
+        let ndi_backend = {
+            use sp_ndi::{NdiLib, RealNdiBackend};
+            use std::sync::Arc;
+            match NdiLib::load() {
+                Ok(lib) => {
+                    info!("NDI SDK loaded successfully for playback engine");
+                    Some(Arc::new(RealNdiBackend::new(Arc::new(lib))))
+                }
+                Err(e) => {
+                    warn!(%e, "NDI SDK not available — playback will not output NDI");
+                    None
+                }
+            }
+        };
+
         Self {
             pool,
             pipelines: HashMap::new(),
             event_rx,
             event_tx,
+            #[cfg(windows)]
+            ndi_backend,
             obs_event_tx,
         }
     }
 
     /// Ensure a pipeline exists for the given playlist, creating one if needed.
     pub fn ensure_pipeline(&mut self, playlist_id: i64, ndi_name: &str) {
+        let event_tx = self.event_tx.clone();
+
+        #[cfg(windows)]
+        let ndi_backend = self.ndi_backend.clone();
+        #[cfg(not(windows))]
+        let ndi_backend: Option<()> = None;
+
         self.pipelines.entry(playlist_id).or_insert_with(|| {
             info!(playlist_id, ndi_name, "creating playback pipeline");
             let pipeline =
-                PlaybackPipeline::spawn(ndi_name.to_string(), self.event_tx.clone(), playlist_id);
+                PlaybackPipeline::spawn(ndi_name.to_string(), ndi_backend, event_tx, playlist_id);
             PlaylistPipeline {
                 pipeline,
                 state: PlayState::Idle,

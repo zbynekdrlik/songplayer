@@ -181,8 +181,14 @@ impl DownloadWorker {
         output: &std::path::Path,
     ) -> Result<(), anyhow::Error> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
-        let format_spec =
-            format!("bestvideo[height<={MAX_RESOLUTION}]+bestaudio/best[height<={MAX_RESOLUTION}]");
+        // Prefer H.264 (avc1) which Windows Media Foundation always supports.
+        // AV1/VP9 require optional codec extensions. Fall back to any codec if
+        // H.264 is unavailable for the requested resolution.
+        let format_spec = format!(
+            "bestvideo[height<={MAX_RESOLUTION}][vcodec^=avc1]+bestaudio/\
+             bestvideo[height<={MAX_RESOLUTION}]+bestaudio/\
+             best[height<={MAX_RESOLUTION}]"
+        );
 
         // yt-dlp needs to know where ffmpeg is for merging video+audio streams.
         let ffmpeg_dir = self
