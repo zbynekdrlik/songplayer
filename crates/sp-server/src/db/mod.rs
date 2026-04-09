@@ -322,7 +322,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(playlist.name, "Worship");
-        assert!(playlist.enabled);
+        assert!(playlist.is_active);
 
         // Get active playlists
         let active = models::get_active_playlists(&pool).await.unwrap();

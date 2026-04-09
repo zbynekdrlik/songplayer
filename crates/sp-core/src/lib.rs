@@ -199,10 +199,11 @@ mod tests {
     fn resolume_host_serde_roundtrip() {
         let h = models::ResolumeHost {
             id: 1,
-            name: "Main".into(),
-            ip: "192.168.1.10".into(),
+            label: "Main".into(),
+            host: "192.168.1.10".into(),
             port: 7000,
-            enabled: true,
+            is_enabled: true,
+            created_at: None,
         };
         let json = serde_json::to_string(&h).unwrap();
         let back: models::ResolumeHost = serde_json::from_str(&json).unwrap();
