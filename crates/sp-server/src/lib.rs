@@ -326,10 +326,10 @@ pub async fn start(
     tokio::spawn(async move {
         loop {
             tokio::select! {
+                // Handle API commands (play, pause, skip, etc.)
                 Some(cmd) = engine_rx.recv() => {
                     match cmd {
                         EngineCommand::Play { playlist_id } => {
-                            // Ensure state machine is ready: Idle -> WaitingForScene -> Playing.
                             engine.handle_command(playlist_id, playback::state::PlayEvent::VideosAvailable).await;
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOn).await;
                         }
@@ -343,13 +343,16 @@ pub async fn start(
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
                         }
                         EngineCommand::SceneChanged { playlist_id, on_program } => {
-                            // Also ensure VideosAvailable has been sent.
                             if on_program {
                                 engine.handle_command(playlist_id, playback::state::PlayEvent::VideosAvailable).await;
                             }
                             engine.handle_scene_change(playlist_id, on_program).await;
                         }
                     }
+                }
+                // Handle pipeline events (started, position, ended, error)
+                Some((playlist_id, event)) = engine.recv_pipeline_event() => {
+                    engine.handle_pipeline_event(playlist_id, event).await;
                 }
                 _ = engine_shutdown.recv() => {
                     info!("engine command bridge shutting down");

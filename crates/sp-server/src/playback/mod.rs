@@ -108,6 +108,11 @@ impl PlaybackEngine {
         });
     }
 
+    /// Receive the next pipeline event (for use in external select! loops).
+    pub async fn recv_pipeline_event(&mut self) -> Option<(i64, PipelineEvent)> {
+        self.event_rx.recv().await
+    }
+
     /// Handle a scene change from the OBS module.
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
         let event = if on_program {
