@@ -56,10 +56,13 @@ impl MediaReader {
             .collect();
 
         // Create attributes to enable hardware-accelerated transforms (AV1, VP9).
-        let attrs: IMFAttributes = unsafe {
-            MFCreateAttributes(1)
-                .map_err(|e| DecoderError::ComInit(format!("MFCreateAttributes: {e}")))?
-        };
+        let mut attrs: Option<IMFAttributes> = None;
+        unsafe {
+            MFCreateAttributes(&mut attrs, 1)
+                .map_err(|e| DecoderError::ComInit(format!("MFCreateAttributes: {e}")))?;
+        }
+        let attrs = attrs
+            .ok_or_else(|| DecoderError::ComInit("MFCreateAttributes returned null".into()))?;
         unsafe {
             attrs
                 .SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)
