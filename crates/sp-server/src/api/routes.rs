@@ -557,6 +557,7 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let (engine_tx, _) = mpsc::channel(16);
         let (sync_tx, _) = mpsc::channel(16);
+        let (resolume_tx, _) = mpsc::channel(16);
         AppState {
             pool,
             event_tx,
@@ -565,6 +566,7 @@ mod tests {
             tools_status: Arc::new(RwLock::new(crate::ToolsStatus::default())),
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
+            resolume_tx,
         }
     }
 

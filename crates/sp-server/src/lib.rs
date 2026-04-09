@@ -43,6 +43,7 @@ pub struct AppState {
     pub tools_status: Arc<RwLock<ToolsStatus>>,
     pub tool_paths: Arc<RwLock<Option<ToolPaths>>>,
     pub sync_tx: mpsc::Sender<SyncRequest>,
+    pub resolume_tx: mpsc::Sender<resolume::ResolumeCommand>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -137,6 +138,7 @@ pub async fn start(
     let tools_status = Arc::new(RwLock::new(ToolsStatus::default()));
     let tool_paths: Arc<RwLock<Option<ToolPaths>>> = Arc::new(RwLock::new(None));
     let (sync_tx, mut sync_rx) = mpsc::channel::<SyncRequest>(64);
+    let (resolume_cmd_tx, mut resolume_cmd_rx) = mpsc::channel::<resolume::ResolumeCommand>(64);
 
     let state = AppState {
         pool: pool.clone(),
@@ -146,6 +148,7 @@ pub async fn start(
         tools_status: tools_status.clone(),
         tool_paths: tool_paths.clone(),
         sync_tx: sync_tx.clone(),
+        resolume_tx: resolume_cmd_tx.clone(),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -297,12 +300,12 @@ pub async fn start(
             .fetch_all(&pool)
             .await
             .unwrap_or_default();
-    let mut _resolume_registry = resolume::ResolumeRegistry::new();
+    let mut resolume_registry = resolume::ResolumeRegistry::new();
     for row in resolume_rows {
         let host_id: i64 = row.get("id");
         let host: String = row.get("host");
         let port: i32 = row.get("port");
-        _resolume_registry.add_host(
+        resolume_registry.add_host(
             host_id,
             host,
             port as u16,
@@ -310,9 +313,19 @@ pub async fn start(
             shutdown_tx.subscribe(),
         );
     }
+    // Forward commands from the shared channel to all host workers.
+    let resolume_senders = resolume_registry.host_senders();
+    tokio::spawn(async move {
+        while let Some(cmd) = resolume_cmd_rx.recv().await {
+            for tx in &resolume_senders {
+                let _ = tx.try_send(cmd.clone());
+            }
+        }
+    });
 
     // 10. Playback engine (bridges API commands to the engine state machine)
-    let mut engine = playback::PlaybackEngine::new(pool.clone(), obs_event_tx, obs_cmd_tx);
+    let mut engine =
+        playback::PlaybackEngine::new(pool.clone(), obs_event_tx, obs_cmd_tx, resolume_cmd_tx);
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)
@@ -439,6 +452,7 @@ mod tests {
         let tools_status = Arc::new(RwLock::new(ToolsStatus::default()));
 
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
+        let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
         let state = AppState {
             pool,
@@ -448,6 +462,7 @@ mod tests {
             tools_status,
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
+            resolume_tx,
         };
 
         // Verify the router can be built.
@@ -463,6 +478,7 @@ mod tests {
         let (engine_tx, _) = mpsc::channel::<EngineCommand>(16);
 
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
+        let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
         let state = AppState {
             pool,
@@ -472,6 +488,7 @@ mod tests {
             tools_status: Arc::new(RwLock::new(ToolsStatus::default())),
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
+            resolume_tx,
         };
 
         // Verify clone works.
