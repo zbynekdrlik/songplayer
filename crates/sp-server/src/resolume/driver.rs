@@ -155,10 +155,26 @@ impl HostDriver {
     }
 }
 
+/// Extract the text parameter ID from a clip by scanning `video.sourceparams`
+/// for the entry with `"valuetype": "ParamText"`.
+///
+/// Resolume Arena versions use different key names (`Text`, `Text1`, etc.)
+/// so we cannot rely on a fixed key — instead we match on `valuetype`.
+fn extract_text_param_id(clip: &serde_json::Value) -> Option<i64> {
+    let params = clip["video"]["sourceparams"].as_object()?;
+    for (_key, param) in params {
+        if param["valuetype"].as_str() == Some("ParamText") {
+            return param["id"].as_i64();
+        }
+    }
+    None
+}
+
 /// Parse a Resolume composition JSON and extract clip tokens.
 ///
 /// Scans `layers[].clips[].name.value` for words starting with `#`. Each
-/// token is mapped to the clip's ID and the `Text1` source parameter ID.
+/// token is mapped to the clip's ID and the text source parameter ID
+/// (found by scanning `sourceparams` for `valuetype == "ParamText"`).
 pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, ClipInfo> {
     let mut mapping = HashMap::new();
 
@@ -194,8 +210,8 @@ pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, Cli
                 continue;
             }
 
-            // Find the Text1 source parameter ID.
-            let text_param_id = match clip["video"]["sourceparams"]["Text1"]["id"].as_i64() {
+            // Find the text source parameter ID by valuetype scan.
+            let text_param_id = match extract_text_param_id(clip) {
                 Some(id) => id,
                 None => continue,
             };
@@ -238,7 +254,7 @@ mod tests {
                             "name": { "value": "Title #song-name-a" },
                             "video": {
                                 "sourceparams": {
-                                    "Text1": { "id": 200, "valuetype": "ParamText" }
+                                    "Text": { "id": 200, "valuetype": "ParamText" }
                                 }
                             }
                         },
@@ -247,7 +263,7 @@ mod tests {
                             "name": { "value": "Title #song-name-b" },
                             "video": {
                                 "sourceparams": {
-                                    "Text1": { "id": 201, "valuetype": "ParamText" }
+                                    "Text": { "id": 201, "valuetype": "ParamText" }
                                 }
                             }
                         },
@@ -256,7 +272,7 @@ mod tests {
                             "name": { "value": "Artist #artist-name-a" },
                             "video": {
                                 "sourceparams": {
-                                    "Text1": { "id": 202, "valuetype": "ParamText" }
+                                    "Text": { "id": 202, "valuetype": "ParamText" }
                                 }
                             }
                         },
@@ -265,7 +281,7 @@ mod tests {
                             "name": { "value": "Artist #artist-name-b" },
                             "video": {
                                 "sourceparams": {
-                                    "Text1": { "id": 203, "valuetype": "ParamText" }
+                                    "Text": { "id": 203, "valuetype": "ParamText" }
                                 }
                             }
                         },
@@ -274,7 +290,7 @@ mod tests {
                             "name": { "value": "Clear #song-clear" },
                             "video": {
                                 "sourceparams": {
-                                    "Text1": { "id": 204, "valuetype": "ParamText" }
+                                    "Text": { "id": 204, "valuetype": "ParamText" }
                                 }
                             }
                         }
@@ -321,7 +337,7 @@ mod tests {
                     "name": { "value": "No tokens here" },
                     "video": {
                         "sourceparams": {
-                            "Text1": { "id": 10, "valuetype": "ParamText" }
+                            "Text": { "id": 10, "valuetype": "ParamText" }
                         }
                     }
                 }]
@@ -359,7 +375,7 @@ mod tests {
                     "name": { "value": "Multi #tag-one #tag-two" },
                     "video": {
                         "sourceparams": {
-                            "Text1": { "id": 500, "valuetype": "ParamText" }
+                            "Text": { "id": 500, "valuetype": "ParamText" }
                         }
                     }
                 }]
@@ -381,6 +397,32 @@ mod tests {
         let comp2 = serde_json::json!({ "layers": [] });
         let mapping2 = parse_composition(&comp2);
         assert!(mapping2.is_empty());
+    }
+
+    #[test]
+    fn clip_discovery_uses_param_text_valuetype() {
+        let comp = serde_json::json!({
+            "layers": [{
+                "clips": [{
+                    "id": 1683810383769_i64,
+                    "name": { "value": "#spfast-title" },
+                    "video": {
+                        "sourceparams": {
+                            "Text": {
+                                "id": 1775761488634_i64,
+                                "valuetype": "ParamText",
+                                "value": "Hello"
+                            }
+                        }
+                    }
+                }]
+            }]
+        });
+        let mapping = parse_composition(&comp);
+        assert_eq!(mapping.len(), 1);
+        let clip = &mapping["#spfast-title"];
+        assert_eq!(clip.clip_id, 1683810383769);
+        assert_eq!(clip.text_param_id, 1775761488634);
     }
 
     #[test]
