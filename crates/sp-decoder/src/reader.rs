@@ -14,7 +14,7 @@ use windows::Win32::Media::MediaFoundation::{
     MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
     MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float, MFCreateMediaType,
     MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
-    MFStartup, MFVideoFormat_RGB32,
+    MFStartup, MFVideoFormat_NV12,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
@@ -137,7 +137,7 @@ impl MediaReader {
                 .map_err(|e| DecoderError::BufferLock(e.to_string()))?
         };
 
-        let (data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
+        let (nv12_data, width, height) = Self::lock_video_buffer(&buffer, &self.reader)?;
         let timestamp_ms = (timestamp_100ns / 10_000) as u64;
 
         // Track duration from timestamps
@@ -145,8 +145,12 @@ impl MediaReader {
             self.duration_ms = timestamp_ms;
         }
 
+        // Convert NV12 → BGRA for NDI output.
+        let bgra = nv12_to_bgra(&nv12_data, width, height);
+        let stride = width * 4;
+
         Ok(Some(DecodedVideoFrame {
-            data,
+            data: bgra,
             width,
             height,
             stride,
@@ -217,7 +221,10 @@ impl MediaReader {
                 MFCreateMediaType().map_err(|e| DecoderError::ComInit(e.to_string()))?;
             mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                 .map_err(|e| DecoderError::ComInit(e.to_string()))?;
-            mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)
+            // Request NV12 output — the native format for most hardware decoders.
+            // We convert NV12→BGRA after reading the sample.
+            // RGB32 is rejected by some decoders that only support NV12/YUY2.
+            mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
                 .map_err(|e| DecoderError::ComInit(e.to_string()))?;
             Ok(mt)
         }
@@ -259,12 +266,11 @@ impl MediaReader {
         }
     }
 
-    /// Lock a video buffer and also return width/height/stride from the
-    /// current output media type.
+    /// Lock a video buffer and return raw NV12 data + dimensions.
     fn lock_video_buffer(
         buffer: &IMFMediaBuffer,
         reader: &IMFSourceReader,
-    ) -> Result<(Vec<u8>, u32, u32, u32), DecoderError> {
+    ) -> Result<(Vec<u8>, u32, u32), DecoderError> {
         let (data, _len) = Self::lock_buffer_raw(buffer)?;
 
         // Read width/height from the negotiated output type.
@@ -279,9 +285,7 @@ impl MediaReader {
             ((size >> 32) as u32, size as u32)
         };
 
-        let stride = width * 4; // BGRA = 4 bytes per pixel
-
-        Ok((data, width, height, stride))
+        Ok((data, width, height))
     }
 
     /// Read channels + sample_rate from the current audio output type.
@@ -299,4 +303,38 @@ impl MediaReader {
             Ok((channels, sample_rate))
         }
     }
+}
+
+/// Convert NV12 pixel data to BGRA.
+///
+/// NV12 layout: `height` rows of Y (stride = width), then `height/2` rows of
+/// interleaved UV (stride = width).  Total size = width * height * 3/2.
+fn nv12_to_bgra(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let w = width as usize;
+    let h = height as usize;
+    let mut bgra = vec![0u8; w * h * 4];
+    let y_plane = &nv12[..w * h];
+    let uv_plane = &nv12[w * h..];
+
+    for row in 0..h {
+        for col in 0..w {
+            let y = y_plane[row * w + col] as f32;
+            let uv_row = row / 2;
+            let uv_col = (col / 2) * 2;
+            let u = uv_plane[uv_row * w + uv_col] as f32 - 128.0;
+            let v = uv_plane[uv_row * w + uv_col + 1] as f32 - 128.0;
+
+            // BT.601 YUV→RGB
+            let r = (y + 1.402 * v).clamp(0.0, 255.0) as u8;
+            let g = (y - 0.344136 * u - 0.714136 * v).clamp(0.0, 255.0) as u8;
+            let b = (y + 1.772 * u).clamp(0.0, 255.0) as u8;
+
+            let idx = (row * w + col) * 4;
+            bgra[idx] = b;
+            bgra[idx + 1] = g;
+            bgra[idx + 2] = r;
+            bgra[idx + 3] = 255;
+        }
+    }
+    bgra
 }
