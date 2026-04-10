@@ -168,7 +168,7 @@ async fn set_text_all(
     clips: &[ClipInfo],
     text: &str,
 ) -> Result<(), anyhow::Error> {
-    let mut futs = FuturesUnordered::new();
+    let futs = FuturesUnordered::new();
     for clip in clips {
         futs.push(driver.set_text(clip.text_param_id, text));
     }
@@ -180,7 +180,7 @@ async fn set_opacity_all(
     clips: &[ClipInfo],
     opacity: f64,
 ) -> Result<(), anyhow::Error> {
-    let mut futs = FuturesUnordered::new();
+    let futs = FuturesUnordered::new();
     for clip in clips {
         futs.push(driver.set_clip_opacity(clip.clip_id, opacity));
     }
