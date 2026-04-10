@@ -17,7 +17,7 @@ pub enum PixelFormat {
 
 /// Metadata describing the video stream of an opened media file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct VideoStreamInfo {
     /// Width in pixels.
     pub width: u32,

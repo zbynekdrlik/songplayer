@@ -10,8 +10,8 @@ use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
 use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
     MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS,
-    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
-    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
+    MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
     MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
     MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio,
     MFMediaType_Video, MFSTARTUP_NOSOCKET, MFStartup, MFVideoFormat_NV12,
@@ -30,6 +30,10 @@ const AUDIO_STREAM: u32 = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
 pub struct MediaReader {
     reader: IMFSourceReader,
     duration_ms: u64,
+    video_width: u32,
+    video_height: u32,
+    frame_rate_num: u32,
+    frame_rate_den: u32,
 }
 
 impl MediaReader {
@@ -108,15 +112,55 @@ impl MediaReader {
 
         debug!(path = %path.display(), "media file opened successfully");
 
+        // Read back the negotiated video type so we know the real frame size
+        // and frame rate for the NDI sender.
+        let negotiated_video: IMFMediaType = unsafe {
+            reader
+                .GetCurrentMediaType(VIDEO_STREAM)
+                .map_err(|e| DecoderError::ReadSample(format!("GetCurrentMediaType video: {e}")))?
+        };
+        let (video_width, video_height) = unsafe {
+            let size = negotiated_video.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
+            ((size >> 32) as u32, size as u32)
+        };
+        let (frame_rate_num, frame_rate_den) = unsafe {
+            match negotiated_video.GetUINT64(&MF_MT_FRAME_RATE) {
+                Ok(packed) => ((packed >> 32) as u32, packed as u32),
+                Err(_) => {
+                    tracing::warn!("MF_MT_FRAME_RATE unavailable; falling back to 30000/1001");
+                    (30000, 1001)
+                }
+            }
+        };
+        debug!(
+            video_width,
+            video_height, frame_rate_num, frame_rate_den, "negotiated video media type"
+        );
+
         Ok(Self {
             reader,
             duration_ms: 0,
+            video_width,
+            video_height,
+            frame_rate_num,
+            frame_rate_den,
         })
     }
 
     /// Duration of the media in milliseconds (0 if unknown, updated during decode).
     pub fn duration_ms(&self) -> u64 {
         self.duration_ms
+    }
+
+    /// Video stream metadata from the negotiated media type.
+    pub fn video_info(&self) -> crate::types::VideoStreamInfo {
+        crate::types::VideoStreamInfo {
+            width: self.video_width,
+            height: self.video_height,
+            pixel_format: crate::types::PixelFormat::Nv12,
+            frame_rate_num: self.frame_rate_num,
+            frame_rate_den: self.frame_rate_den,
+        }
     }
 
     /// Update the known duration (called as frames are decoded).
