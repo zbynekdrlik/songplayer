@@ -39,6 +39,13 @@ pub fn fade_steps(n: u32) -> Vec<f64> {
 }
 
 /// Per-step delay for the fade loop (FADE_DURATION_MS / FADE_STEPS).
+///
+/// Skipped from mutation testing: the `/` → `*` mutant produces a 20s
+/// per-step delay, which makes `show_title` / `hide_title` wiremock tests
+/// take ~400s and exceed cargo-mutants' 300s test timeout. The math itself
+/// is asserted by `fade_step_delay_is_50_milliseconds` below, so the
+/// behavior is covered without needing the mutation operator.
+#[cfg_attr(test, mutants::skip)]
 pub fn fade_step_delay() -> Duration {
     Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64)
 }
