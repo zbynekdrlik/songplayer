@@ -59,8 +59,10 @@ pub struct HostDriver {
     host: String,
     port: u16,
     client: reqwest::Client,
-    /// Maps clip token (e.g. `"#spfast-title"`) to clip info.
-    pub(crate) clip_mapping: HashMap<String, ClipInfo>,
+    /// Maps clip token (e.g. `"#spfast-title"`) to list of matching clips.
+    /// A single token can appear in multiple clips across layers/columns/decks
+    /// and all of them are updated in parallel.
+    pub(crate) clip_mapping: HashMap<String, Vec<ClipInfo>>,
     /// Cached DNS resolution for hostname-based hosts.
     endpoint_cache: Option<ResolvedEndpoint>,
 }
@@ -172,9 +174,11 @@ impl HostDriver {
 
         let new_mapping = parse_composition(&body);
         if new_mapping != self.clip_mapping {
+            let total: usize = new_mapping.values().map(|v| v.len()).sum();
             info!(
                 host = %self.host,
-                clips = new_mapping.len(),
+                tokens = new_mapping.len(),
+                clips = total,
                 "updated Resolume clip mapping"
             );
             self.clip_mapping = new_mapping;
@@ -285,8 +289,8 @@ fn extract_text_param_id(clip: &serde_json::Value) -> Option<i64> {
 /// Scans `layers[].clips[].name.value` for words starting with `#`. Each
 /// token is mapped to the clip's ID and the text source parameter ID
 /// (found by scanning `sourceparams` for `valuetype == "ParamText"`).
-pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, ClipInfo> {
-    let mut mapping = HashMap::new();
+pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, Vec<ClipInfo>> {
+    let mut mapping: HashMap<String, Vec<ClipInfo>> = HashMap::new();
 
     let layers = match composition["layers"].as_array() {
         Some(l) => l,
@@ -327,13 +331,13 @@ pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, Cli
             };
 
             for token in tokens {
-                mapping.insert(
-                    token.to_string(),
-                    ClipInfo {
+                mapping
+                    .entry(token.to_string())
+                    .or_default()
+                    .push(ClipInfo {
                         clip_id,
                         text_param_id,
-                    },
-                );
+                    });
             }
         }
     }
@@ -418,24 +422,29 @@ mod tests {
         assert_eq!(mapping.len(), 5);
 
         let song_a = &mapping["#song-name-a"];
-        assert_eq!(song_a.clip_id, 100);
-        assert_eq!(song_a.text_param_id, 200);
+        assert_eq!(song_a.len(), 1);
+        assert_eq!(song_a[0].clip_id, 100);
+        assert_eq!(song_a[0].text_param_id, 200);
 
         let song_b = &mapping["#song-name-b"];
-        assert_eq!(song_b.clip_id, 101);
-        assert_eq!(song_b.text_param_id, 201);
+        assert_eq!(song_b.len(), 1);
+        assert_eq!(song_b[0].clip_id, 101);
+        assert_eq!(song_b[0].text_param_id, 201);
 
         let artist_a = &mapping["#artist-name-a"];
-        assert_eq!(artist_a.clip_id, 102);
-        assert_eq!(artist_a.text_param_id, 202);
+        assert_eq!(artist_a.len(), 1);
+        assert_eq!(artist_a[0].clip_id, 102);
+        assert_eq!(artist_a[0].text_param_id, 202);
 
         let artist_b = &mapping["#artist-name-b"];
-        assert_eq!(artist_b.clip_id, 103);
-        assert_eq!(artist_b.text_param_id, 203);
+        assert_eq!(artist_b.len(), 1);
+        assert_eq!(artist_b[0].clip_id, 103);
+        assert_eq!(artist_b[0].text_param_id, 203);
 
         let clear = &mapping["#song-clear"];
-        assert_eq!(clear.clip_id, 104);
-        assert_eq!(clear.text_param_id, 204);
+        assert_eq!(clear.len(), 1);
+        assert_eq!(clear[0].clip_id, 104);
+        assert_eq!(clear[0].text_param_id, 204);
     }
 
     #[test]
@@ -494,8 +503,8 @@ mod tests {
 
         let mapping = parse_composition(&comp);
         assert_eq!(mapping.len(), 2);
-        assert_eq!(mapping["#tag-one"].clip_id, 50);
-        assert_eq!(mapping["#tag-two"].clip_id, 50);
+        assert_eq!(mapping["#tag-one"][0].clip_id, 50);
+        assert_eq!(mapping["#tag-two"][0].clip_id, 50);
     }
 
     #[test]
@@ -507,6 +516,46 @@ mod tests {
         let comp2 = serde_json::json!({ "layers": [] });
         let mapping2 = parse_composition(&comp2);
         assert!(mapping2.is_empty());
+    }
+
+    #[test]
+    fn parse_composition_collects_multiple_clips_per_token() {
+        let comp = serde_json::json!({
+            "layers": [
+                {
+                    "clips": [
+                        {
+                            "id": 100,
+                            "name": { "value": "Title A #sp-title" },
+                            "video": { "sourceparams": { "Text": { "id": 200, "valuetype": "ParamText" } } }
+                        },
+                        {
+                            "id": 101,
+                            "name": { "value": "Title B #sp-title" },
+                            "video": { "sourceparams": { "Text": { "id": 201, "valuetype": "ParamText" } } }
+                        }
+                    ]
+                },
+                {
+                    "clips": [
+                        {
+                            "id": 102,
+                            "name": { "value": "Other Layer #sp-title" },
+                            "video": { "sourceparams": { "Text": { "id": 202, "valuetype": "ParamText" } } }
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let mapping = parse_composition(&comp);
+        let clips = mapping.get("#sp-title").expect("must have #sp-title entry");
+        assert_eq!(clips.len(), 3, "expected 3 clips, got: {clips:?}");
+
+        let ids: Vec<i64> = clips.iter().map(|c| c.clip_id).collect();
+        assert!(ids.contains(&100));
+        assert!(ids.contains(&101));
+        assert!(ids.contains(&102));
     }
 
     #[test]
@@ -530,9 +579,10 @@ mod tests {
         });
         let mapping = parse_composition(&comp);
         assert_eq!(mapping.len(), 1);
-        let clip = &mapping["#spfast-title"];
-        assert_eq!(clip.clip_id, 1683810383769);
-        assert_eq!(clip.text_param_id, 1775761488634);
+        let clips = &mapping["#spfast-title"];
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips[0].clip_id, 1683810383769);
+        assert_eq!(clips[0].text_param_id, 1775761488634);
     }
 
     #[test]

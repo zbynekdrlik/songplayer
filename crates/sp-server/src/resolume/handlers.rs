@@ -41,6 +41,7 @@ pub async fn show_title(
     let clip = driver
         .clip_mapping
         .get(resolume_title_token)
+        .and_then(|v| v.first())
         .ok_or_else(|| anyhow::anyhow!("no clip found for token {resolume_title_token}"))?
         .clone();
 
@@ -72,6 +73,7 @@ pub async fn hide_title(
     let clip = driver
         .clip_mapping
         .get(resolume_title_token)
+        .and_then(|v| v.first())
         .ok_or_else(|| anyhow::anyhow!("no clip found for token {resolume_title_token}"))?
         .clone();
 
