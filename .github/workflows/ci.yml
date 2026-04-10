@@ -359,22 +359,22 @@ jobs:
             exit 0
           fi
           # Exclusions:
-          # - sp-decoder/, sp-ndi/: Windows-only (Media Foundation, NDI SDK), can't test on Linux runner
           # - sp-server/src/lib.rs: orchestration glue, integration-tested only
           # - sp-server/src/obs/: requires live OBS WebSocket, integration-tested only
-          # - sp-server/src/playback/pipeline.rs: cfg(windows) decode loop, untestable on Linux
           # - sp-server/src/downloader/: shells out to yt-dlp, integration-tested only
           # - sp-server/src/reprocess/: requires live Gemini API
           # - sp-server/src/api/websocket: WS upgrade flow, integration-tested
           # - sp-server/src/playlist/: shells out to yt-dlp
           # NOTE: sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
           # NOTE: sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
+          # NOTE: sp-ndi/, sp-decoder/, and sp-server/src/playback/pipeline.rs are NOT
+          # excluded — covered by MockNdiBackend unit tests in sp-ndi + FrameSubmitter
+          # cross-platform tests in sp-server/playback/submitter.rs. The Windows-gated
+          # decoder code in sp-decoder/reader.rs is skipped by cargo-mutants on Linux
+          # automatically (cfg(windows) functions aren't compiled in the mutation build).
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
-            --exclude-re 'sp-decoder/' \
-            --exclude-re 'sp-ndi/' \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
-            --exclude-re 'sp-server/src/playback/pipeline\.rs' \
             --exclude-re 'sp-server/src/downloader/' \
             --exclude-re 'sp-server/src/reprocess/' \
             --exclude-re 'sp-server/src/api/websocket' \
