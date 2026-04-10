@@ -251,42 +251,53 @@ fn run_loop_windows(
             }
 
             Ok(PipelineCommand::Play(path)) => {
-                info!(?path, playlist_id, "starting playback");
-                paused = false;
+                // Inner loop: decode current file; on NewPlay, restart decode
+                // with the new file. Breaks out to outer loop on Ended/Stopped/Error;
+                // returns true on Shutdown to signal outer loop to exit.
+                let mut current_path = path;
+                let shutdown_requested = loop {
+                    info!(?current_path, playlist_id, "starting playback");
+                    paused = false;
 
-                // Decode loop — runs until video ends, Stop, or Shutdown.
-                match decode_and_send(&cmd_rx, &sender, &path, &event_tx, playlist_id, &mut paused)
-                {
-                    DecodeResult::Ended => {
-                        info!(playlist_id, "video ended naturally");
-                        send_black_frame(&sender, 1920, 1080);
-                        let _ = event_tx.send((playlist_id, PipelineEvent::Ended));
+                    match decode_and_send(
+                        &cmd_rx,
+                        &sender,
+                        &current_path,
+                        &event_tx,
+                        playlist_id,
+                        &mut paused,
+                    ) {
+                        DecodeResult::Ended => {
+                            info!(playlist_id, "video ended naturally");
+                            send_black_frame(&sender, 1920, 1080);
+                            let _ = event_tx.send((playlist_id, PipelineEvent::Ended));
+                            break false;
+                        }
+                        DecodeResult::Stopped => {
+                            info!(playlist_id, "playback stopped");
+                            send_black_frame(&sender, 1920, 1080);
+                            break false;
+                        }
+                        DecodeResult::Shutdown => {
+                            info!(playlist_id, "shutdown during playback");
+                            break true;
+                        }
+                        DecodeResult::NewPlay(new_path) => {
+                            info!(?new_path, playlist_id, "switching to new video");
+                            current_path = new_path;
+                            continue;
+                        }
+                        DecodeResult::Error(msg) => {
+                            error!(playlist_id, %msg, "decode error");
+                            send_black_frame(&sender, 1920, 1080);
+                            let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));
+                            break false;
+                        }
                     }
-                    DecodeResult::Stopped => {
-                        info!(playlist_id, "playback stopped");
-                        send_black_frame(&sender, 1920, 1080);
-                    }
-                    DecodeResult::Shutdown => {
-                        info!(playlist_id, "shutdown during playback");
-                        break;
-                    }
-                    DecodeResult::NewPlay(new_path) => {
-                        // Immediately start playing the new file (re-enter loop).
-                        info!(?new_path, playlist_id, "switching to new video");
-                        // Push the Play command back so the outer loop picks it up.
-                        let _ = cmd_rx.try_recv(); // drain any stale
-                        // We need to handle this inline — recursion is messy.
-                        // The outer loop will receive the next command.
-                        // For now, we re-enter by sending ourselves a Play.
-                        // Actually, the simplest approach: just continue the outer
-                        // loop — the caller will send a new Play command.
-                        send_black_frame(&sender, 1920, 1080);
-                    }
-                    DecodeResult::Error(msg) => {
-                        error!(playlist_id, %msg, "decode error");
-                        send_black_frame(&sender, 1920, 1080);
-                        let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));
-                    }
+                };
+
+                if shutdown_requested {
+                    break;
                 }
             }
 
