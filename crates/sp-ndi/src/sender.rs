@@ -97,11 +97,16 @@ pub trait NdiBackend: Send + Sync {
         data: &[u8],
     );
 
-    /// Schedule a video frame for asynchronous send. The caller MUST keep the
-    /// `data` buffer alive until the next call to `send_video_async`,
-    /// `send_video`, `send_video_flush`, or `send_destroy`.
+    /// Schedule a video frame for asynchronous send.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep `data` valid until the next synchronising call on
+    /// this sender — another `send_video_async`, a `send_video`,
+    /// `send_video_flush`, or `send_destroy`. If the buffer is freed before
+    /// that point, the NDI SDK will dereference freed memory (UB).
     #[allow(clippy::too_many_arguments)]
-    fn send_video_async(
+    unsafe fn send_video_async(
         &self,
         handle: usize,
         four_cc: FourCCVideoType,
@@ -266,7 +271,7 @@ impl NdiBackend for RealNdiBackend {
         }
     }
 
-    fn send_video_async(
+    unsafe fn send_video_async(
         &self,
         handle: usize,
         four_cc: FourCCVideoType,
@@ -331,7 +336,7 @@ impl NdiBackend for RealNdiBackend {
             timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
             four_cc: FourCCAudioType::FLTP,
             p_data: state.audio_scratch.as_ptr(),
-            channel_stride_in_bytes: samples_per_channel * 4,
+            channel_stride_in_bytes: samples_per_channel * std::mem::size_of::<f32>() as i32,
             p_metadata: ptr::null(),
             timestamp: 0,
         };
@@ -378,6 +383,12 @@ impl<B: NdiBackend> NdiSender<B> {
     /// Create a sender with explicit clocking flags. For single-threaded
     /// video+audio submission, `clock_video=true, clock_audio=false` is the
     /// SDK-recommended configuration.
+    ///
+    /// Do NOT set both `clock_video` and `clock_audio` to `true` from a
+    /// single submission thread: each clocked send blocks until the wall clock
+    /// reaches the frame's natural time, and the two streams would dead-clock
+    /// each other. Use both-true only when video and audio are submitted from
+    /// separate threads.
     pub fn new_with_clocking(
         backend: Arc<B>,
         name: &str,
@@ -406,23 +417,31 @@ impl<B: NdiBackend> NdiSender<B> {
         );
     }
 
-    /// Schedule a video frame for async send. The caller must keep the frame
-    /// buffer alive until the next async/sync/flush/drop call.
-    pub fn send_video_async(&self, frame: &VideoFrame) {
+    /// Schedule a video frame for async send.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep `frame.data` alive until the next synchronising
+    /// call on this sender — another `send_video_async`, a `send_video`,
+    /// `send_video_flush`, or when the sender is dropped. If the buffer is
+    /// freed before that point, the NDI SDK will dereference freed memory (UB).
+    pub unsafe fn send_video_async(&self, frame: &VideoFrame) {
         let four_cc = match frame.pixel_format {
             PixelFormat::Bgra => FourCCVideoType::BGRA,
             PixelFormat::Nv12 => FourCCVideoType::NV12,
         };
-        self.backend.send_video_async(
-            self.handle,
-            four_cc,
-            frame.width as i32,
-            frame.height as i32,
-            frame.stride as i32,
-            frame.frame_rate_n,
-            frame.frame_rate_d,
-            &frame.data,
-        );
+        unsafe {
+            self.backend.send_video_async(
+                self.handle,
+                four_cc,
+                frame.width as i32,
+                frame.height as i32,
+                frame.stride as i32,
+                frame.frame_rate_n,
+                frame.frame_rate_d,
+                &frame.data,
+            );
+        }
     }
 
     /// Release any pending async frame. Must be called before dropping the
@@ -542,7 +561,7 @@ pub mod test_util {
             ));
         }
 
-        fn send_video_async(
+        unsafe fn send_video_async(
             &self,
             handle: usize,
             four_cc: FourCCVideoType,
@@ -631,12 +650,57 @@ mod tests {
             frame_rate_d: 1,
             pixel_format: PixelFormat::Nv12,
         };
-        sender.send_video_async(&frame);
+        // SAFETY: `frame` outlives this call and a flush happens on drop.
+        unsafe { sender.send_video_async(&frame) };
         let calls = backend.calls();
         assert_eq!(
             calls[1],
             "send_video_async(42,NV12,1920x1080,stride=1920,30/1)"
         );
+    }
+
+    #[test]
+    fn async_round_trip_records_async_async_flush_in_order() {
+        // This exercises the double-buffer pattern Task 10's FrameSubmitter relies
+        // on: two async sends in sequence (the second acts as the sync point that
+        // releases the first's buffer), followed by an explicit flush that releases
+        // the second's buffer. The mock records all three calls in the exact order.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new(backend.clone(), "R").unwrap();
+
+        let frame_a = VideoFrame {
+            data: vec![0u8; 4 * 2 * 3 / 2],
+            width: 4,
+            height: 2,
+            stride: 4,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            pixel_format: PixelFormat::Nv12,
+        };
+        let frame_b = VideoFrame {
+            data: vec![0u8; 4 * 2 * 3 / 2],
+            width: 4,
+            height: 2,
+            stride: 4,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            pixel_format: PixelFormat::Nv12,
+        };
+
+        // SAFETY: the buffers in `frame_a` and `frame_b` outlive every call below,
+        // and a flush releases the SDK's last retained pointer before they drop.
+        unsafe {
+            sender.send_video_async(&frame_a);
+            sender.send_video_async(&frame_b);
+        }
+        sender.send_video_flush();
+
+        let calls = backend.calls();
+        // create, async_a, async_b, flush — skipping the later drop flush+destroy
+        assert_eq!(calls[0], "send_create_with_clocking(R,false,false)");
+        assert_eq!(calls[1], "send_video_async(42,NV12,4x2,stride=4,30/1)");
+        assert_eq!(calls[2], "send_video_async(42,NV12,4x2,stride=4,30/1)");
+        assert_eq!(calls[3], "send_video_flush(42)");
     }
 
     #[test]
