@@ -1,17 +1,19 @@
-//! Resolume title show/hide with opacity fade.
+//! Resolume title show/hide with parallel multi-clip opacity fade.
 
 use std::time::Duration;
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use tracing::debug;
 
 use crate::resolume::TITLE_TOKEN;
-use crate::resolume::driver::HostDriver;
+use crate::resolume::driver::{ClipInfo, HostDriver};
 
 const TEXT_SETTLE_MS: u64 = 35;
 const FADE_DURATION_MS: u64 = 1000;
 const FADE_STEPS: u32 = 20;
 
-/// Format title text matching legacy Python behavior.
+/// Format title text matching legacy Python behavior — clean `Song - Artist`.
+/// No warning indicator (gemini_failed is no longer surfaced in titles).
 pub fn format_title_text(song: &str, artist: &str) -> String {
     match (song.is_empty(), artist.is_empty()) {
         (false, false) => format!("{song} - {artist}"),
@@ -21,64 +23,121 @@ pub fn format_title_text(song: &str, artist: &str) -> String {
     }
 }
 
-/// Generate n evenly-spaced opacity values from step/n to 1.0.
+/// Generate `n` evenly-spaced opacity values from `step/n` to `1.0`.
 pub fn fade_steps(n: u32) -> Vec<f64> {
     (1..=n).map(|i| i as f64 / n as f64).collect()
 }
 
-/// Show title: set text, wait for texture, fade opacity 0->1.
+/// Show title across all `#sp-title` clips in parallel.
 pub async fn show_title(
     driver: &mut HostDriver,
     song: &str,
     artist: &str,
 ) -> Result<(), anyhow::Error> {
-    let clip = driver
-        .clip_mapping
-        .get(TITLE_TOKEN)
-        .and_then(|v| v.first())
-        .ok_or_else(|| anyhow::anyhow!("no clip found for token {TITLE_TOKEN}"))?
-        .clone();
+    let clips: Vec<ClipInfo> = match driver.clip_mapping.get(TITLE_TOKEN) {
+        Some(v) if !v.is_empty() => v.clone(),
+        _ => {
+            debug!(
+                token = TITLE_TOKEN,
+                "no Resolume clips found, skipping show_title"
+            );
+            return Ok(());
+        }
+    };
 
     let text = format_title_text(song, artist);
     if text.is_empty() {
         return Ok(());
     }
 
-    driver.set_text(clip.text_param_id, &text).await?;
-    debug!(token = %TITLE_TOKEN, %text, "set title text");
+    driver.ensure_endpoint().await?;
+    let driver_ref: &HostDriver = driver;
+
+    set_text_all(driver_ref, &clips, &text).await?;
+    debug!(
+        token = TITLE_TOKEN,
+        count = clips.len(),
+        %text,
+        "set title text on all clips"
+    );
 
     tokio::time::sleep(Duration::from_millis(TEXT_SETTLE_MS)).await;
 
     let step_delay = Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64);
     for opacity in fade_steps(FADE_STEPS) {
-        driver.set_clip_opacity(clip.clip_id, opacity).await?;
+        set_opacity_all(driver_ref, &clips, opacity).await?;
         tokio::time::sleep(step_delay).await;
     }
 
-    debug!(token = %TITLE_TOKEN, "title fade-in complete");
+    debug!(
+        token = TITLE_TOKEN,
+        count = clips.len(),
+        "title fade-in complete"
+    );
     Ok(())
 }
 
-/// Hide title: fade opacity 1->0, then clear text.
+/// Hide title across all `#sp-title` clips in parallel.
 pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
-    let clip = driver
-        .clip_mapping
-        .get(TITLE_TOKEN)
-        .and_then(|v| v.first())
-        .ok_or_else(|| anyhow::anyhow!("no clip found for token {TITLE_TOKEN}"))?
-        .clone();
+    let clips: Vec<ClipInfo> = match driver.clip_mapping.get(TITLE_TOKEN) {
+        Some(v) if !v.is_empty() => v.clone(),
+        _ => {
+            debug!(
+                token = TITLE_TOKEN,
+                "no Resolume clips found, skipping hide_title"
+            );
+            return Ok(());
+        }
+    };
+
+    driver.ensure_endpoint().await?;
+    let driver_ref: &HostDriver = driver;
 
     let step_delay = Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64);
-    let steps = fade_steps(FADE_STEPS);
+    let steps: Vec<f64> = fade_steps(FADE_STEPS);
     for opacity in steps.iter().rev() {
-        driver.set_clip_opacity(clip.clip_id, *opacity).await?;
+        set_opacity_all(driver_ref, &clips, *opacity).await?;
         tokio::time::sleep(step_delay).await;
     }
-    driver.set_clip_opacity(clip.clip_id, 0.0).await?;
+    set_opacity_all(driver_ref, &clips, 0.0).await?;
 
-    driver.set_text(clip.text_param_id, "").await?;
+    set_text_all(driver_ref, &clips, "").await?;
 
-    debug!(token = %TITLE_TOKEN, "title fade-out complete");
+    debug!(
+        token = TITLE_TOKEN,
+        count = clips.len(),
+        "title fade-out complete"
+    );
+    Ok(())
+}
+
+async fn set_text_all(
+    driver: &HostDriver,
+    clips: &[ClipInfo],
+    text: &str,
+) -> Result<(), anyhow::Error> {
+    let mut futs = FuturesUnordered::new();
+    for clip in clips {
+        futs.push(driver.set_text(clip.text_param_id, text));
+    }
+    while let Some(res) = futs.next().await {
+        res?;
+    }
+    Ok(())
+}
+
+async fn set_opacity_all(
+    driver: &HostDriver,
+    clips: &[ClipInfo],
+    opacity: f64,
+) -> Result<(), anyhow::Error> {
+    let mut futs = FuturesUnordered::new();
+    for clip in clips {
+        futs.push(driver.set_clip_opacity(clip.clip_id, opacity));
+    }
+    while let Some(res) = futs.next().await {
+        res?;
+    }
     Ok(())
 }
 
