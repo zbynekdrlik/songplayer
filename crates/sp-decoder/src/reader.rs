@@ -180,6 +180,7 @@ impl MediaReader {
             height,
             stride,
             timestamp_ms,
+            pixel_format: crate::types::PixelFormat::Nv12,
         }))
     }
 

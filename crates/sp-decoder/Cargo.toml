@@ -15,3 +15,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Com",
     "Win32_Foundation",
 ] }
+
+[dev-dependencies]
+# Placeholder crate that defines the `mutants::skip` attribute as a no-op,
+# letting cargo-mutants exclude specific functions from mutation testing.
+mutants = "0.0.3"

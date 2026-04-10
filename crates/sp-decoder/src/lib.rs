@@ -15,7 +15,7 @@ mod reader;
 mod sync;
 
 pub use error::DecoderError;
-pub use types::{DecodedAudioFrame, DecodedVideoFrame};
+pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat};
 
 #[cfg(windows)]
 pub use reader::MediaReader;
