@@ -13,6 +13,8 @@ pub mod types;
 // Re-export key public types for convenience.
 pub use error::NdiError;
 pub use ndi_sdk::NdiLib;
+#[cfg(any(test, feature = "test-util"))]
+pub use sender::test_util;
 pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
 pub use types::{
     FRAME_FORMAT_PROGRESSIVE, FourCCAudioType, FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE,

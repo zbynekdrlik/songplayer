@@ -5,7 +5,16 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# Exposes the in-process `MockNdiBackend` for downstream test crates.
+test-util = []
+
 [dependencies]
 libloading = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# Placeholder crate that defines the `mutants::skip` attribute as a no-op,
+# letting cargo-mutants exclude specific functions from mutation testing.
+mutants = "0.0.3"
