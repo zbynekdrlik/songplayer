@@ -305,13 +305,7 @@ pub async fn start(
         let host_id: i64 = row.get("id");
         let host: String = row.get("host");
         let port: i32 = row.get("port");
-        resolume_registry.add_host(
-            host_id,
-            host,
-            port as u16,
-            pool.clone(),
-            shutdown_tx.subscribe(),
-        );
+        resolume_registry.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
     }
     // Forward commands from the shared channel to all host workers.
     let resolume_senders = resolume_registry.host_senders();

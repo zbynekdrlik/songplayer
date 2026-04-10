@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
@@ -85,13 +84,9 @@ impl HostDriver {
     /// and shuts down on signal.
     pub async fn run(
         mut self,
-        pool: SqlitePool,
         mut rx: mpsc::Receiver<ResolumeCommand>,
         mut shutdown: broadcast::Receiver<()>,
     ) {
-        let tokens = Self::load_tokens(&pool).await;
-
-        // Initial mapping refresh.
         if let Err(e) = self.refresh_mapping().await {
             warn!(host = %self.host, %e, "initial clip mapping refresh failed");
         }
@@ -101,7 +96,7 @@ impl HostDriver {
         loop {
             tokio::select! {
                 Some(cmd) = rx.recv() => {
-                    self.handle_command(cmd, &tokens).await;
+                    self.handle_command(cmd).await;
                 }
                 _ = refresh_interval.tick() => {
                     if let Err(e) = self.refresh_mapping().await {
@@ -116,39 +111,18 @@ impl HostDriver {
         }
     }
 
-    /// Load playlist-to-token mappings from the database.
-    async fn load_tokens(pool: &SqlitePool) -> HashMap<i64, String> {
-        let rows = sqlx::query(
-            "SELECT id, resolume_title_token FROM playlists WHERE resolume_title_token != '' AND is_active = 1",
-        )
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-
-        rows.iter()
-            .map(|r| {
-                use sqlx::Row;
-                (
-                    r.get::<i64, _>("id"),
-                    r.get::<String, _>("resolume_title_token"),
-                )
-            })
-            .collect()
-    }
-
     /// Handle a single command.
-    async fn handle_command(&mut self, cmd: ResolumeCommand, _tokens: &HashMap<i64, String>) {
+    async fn handle_command(&mut self, cmd: ResolumeCommand) {
         match cmd {
             ResolumeCommand::ShowTitle { song, artist } => {
-                // Stub: real implementation in Task 6.
-                warn!(host = %self.host, %song, %artist, "ShowTitle stub - not yet implemented");
-                let _ =
-                    handlers::show_title(self, crate::resolume::TITLE_TOKEN, &song, &artist, false)
-                        .await;
+                if let Err(e) = handlers::show_title(self, &song, &artist).await {
+                    warn!(host = %self.host, %e, "show_title failed");
+                }
             }
             ResolumeCommand::HideTitle => {
-                warn!(host = %self.host, "HideTitle stub - not yet implemented");
-                let _ = handlers::hide_title(self, crate::resolume::TITLE_TOKEN).await;
+                if let Err(e) = handlers::hide_title(self).await {
+                    warn!(host = %self.host, %e, "hide_title failed");
+                }
             }
             ResolumeCommand::RefreshMapping => {
                 if let Err(e) = self.refresh_mapping().await {

@@ -5,7 +5,6 @@ pub mod handlers;
 
 use std::collections::HashMap;
 
-use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 
@@ -47,14 +46,13 @@ impl ResolumeRegistry {
         host_id: i64,
         host: String,
         port: u16,
-        pool: SqlitePool,
         shutdown: broadcast::Receiver<()>,
     ) {
         let (tx, rx) = mpsc::channel::<ResolumeCommand>(64);
         let driver = HostDriver::new(host.clone(), port);
 
         tokio::spawn(async move {
-            driver.run(pool, rx, shutdown).await;
+            driver.run(rx, shutdown).await;
         });
 
         info!(host_id, %host, port, "added Resolume host worker");
@@ -120,24 +118,11 @@ mod tests {
 
     #[tokio::test]
     async fn registry_add_remove() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
         let mut registry = ResolumeRegistry::new();
 
-        registry.add_host(
-            1,
-            "192.168.1.10".to_string(),
-            8080,
-            pool.clone(),
-            shutdown_tx.subscribe(),
-        );
-        registry.add_host(
-            2,
-            "192.168.1.11".to_string(),
-            8080,
-            pool.clone(),
-            shutdown_tx.subscribe(),
-        );
+        registry.add_host(1, "192.168.1.10".to_string(), 8080, shutdown_tx.subscribe());
+        registry.add_host(2, "192.168.1.11".to_string(), 8080, shutdown_tx.subscribe());
 
         assert_eq!(registry.hosts.len(), 2);
         assert!(registry.hosts.contains_key(&1));
@@ -166,17 +151,10 @@ mod tests {
 
     #[tokio::test]
     async fn registry_send_to_existing_host() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
         let mut registry = ResolumeRegistry::new();
 
-        registry.add_host(
-            1,
-            "127.0.0.1".to_string(),
-            8080,
-            pool.clone(),
-            shutdown_tx.subscribe(),
-        );
+        registry.add_host(1, "127.0.0.1".to_string(), 8080, shutdown_tx.subscribe());
 
         let result = registry.send(1, ResolumeCommand::RefreshMapping).await;
         assert!(result.is_ok());
@@ -186,24 +164,11 @@ mod tests {
 
     #[tokio::test]
     async fn registry_broadcast_sends_to_all() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
         let mut registry = ResolumeRegistry::new();
 
-        registry.add_host(
-            1,
-            "127.0.0.1".to_string(),
-            8080,
-            pool.clone(),
-            shutdown_tx.subscribe(),
-        );
-        registry.add_host(
-            2,
-            "127.0.0.1".to_string(),
-            8081,
-            pool.clone(),
-            shutdown_tx.subscribe(),
-        );
+        registry.add_host(1, "127.0.0.1".to_string(), 8080, shutdown_tx.subscribe());
+        registry.add_host(2, "127.0.0.1".to_string(), 8081, shutdown_tx.subscribe());
 
         // Broadcast should not panic or error even with no real Resolume server.
         registry.broadcast(ResolumeCommand::RefreshMapping).await;
