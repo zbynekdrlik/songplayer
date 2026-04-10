@@ -20,21 +20,25 @@ use crate::playlist::selector::VideoSelector;
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
 
-/// Helper: fetch song, artist, gemini_failed for a video.
+/// OBS text source name used for the fallback title display (in the
+/// CG OVERLAY scene). Must match the source name in OBS exactly.
+const OBS_TITLE_SOURCE: &str = "#sp-title";
+
+/// Helper: fetch song, artist for a video.
 async fn get_video_title_info(
     pool: &SqlitePool,
     video_id: i64,
-) -> Result<Option<(String, String, bool)>, sqlx::Error> {
-    let row = sqlx::query("SELECT song, artist, gemini_failed FROM videos WHERE id = ?")
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let row = sqlx::query("SELECT song, artist FROM videos WHERE id = ?")
         .bind(video_id)
         .fetch_optional(pool)
         .await?;
+
     Ok(row.map(|r| {
         use sqlx::Row;
         let song: String = r.get::<Option<String>, _>("song").unwrap_or_default();
         let artist: String = r.get::<Option<String>, _>("artist").unwrap_or_default();
-        let gemini_failed: bool = r.get::<i32, _>("gemini_failed") != 0;
-        (song, artist, gemini_failed)
+        (song, artist)
     }))
 }
 
@@ -150,85 +154,72 @@ impl PlaybackEngine {
                 debug!(playlist_id, duration_ms, "video started");
                 if let Some(pp) = self.pipelines.get(&playlist_id) {
                     if let Some(video_id) = pp.current_video_id {
-                        // Title show after 1.5s
+                        // Title show after 1.5s.
                         let pool = self.pool.clone();
                         let obs_cmd = self.obs_cmd_tx.clone();
                         let resolume_tx = self.resolume_tx.clone();
                         let pl_id = playlist_id;
+                        let dur = *duration_ms;
+
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                            if let Ok(Some((song, artist, _gemini_failed))) =
+                            if let Ok(Some((song, artist))) =
                                 get_video_title_info(&pool, video_id).await
                             {
-                                // OBS title
+                                // Format the displayed text once for OBS.
+                                let text = if artist.is_empty() {
+                                    song.clone()
+                                } else if song.is_empty() {
+                                    artist.clone()
+                                } else {
+                                    format!("{song} - {artist}")
+                                };
+
+                                // OBS fallback (single hardcoded source name).
                                 if let Some(cmd_tx) = obs_cmd {
-                                    let text = if artist.is_empty() {
-                                        song.clone()
-                                    } else {
-                                        format!("{song} - {artist}")
-                                    };
-                                    let source_name = sqlx::query_scalar::<_, String>(
-                                        "SELECT obs_text_source FROM playlists WHERE id = ?",
-                                    )
-                                    .bind(pl_id)
-                                    .fetch_optional(&pool)
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                    .unwrap_or_default();
-                                    if !source_name.is_empty() {
-                                        let _ = cmd_tx
-                                            .send(crate::obs::ObsCommand::SetTextSource {
-                                                source_name,
-                                                text,
-                                            })
-                                            .await;
-                                    }
+                                    let _ = cmd_tx
+                                        .send(crate::obs::ObsCommand::SetTextSource {
+                                            source_name: OBS_TITLE_SOURCE.to_string(),
+                                            text,
+                                        })
+                                        .await;
                                 }
-                                // Resolume title
+
+                                // Resolume — registry broadcasts to all hosts; driver targets all #sp-title clips.
                                 let _ = resolume_tx
                                     .send(crate::resolume::ResolumeCommand::ShowTitle {
                                         song,
                                         artist,
                                     })
                                     .await;
+
+                                info!(playlist_id = pl_id, video_id, "title shown");
                             }
                         });
 
-                        // Title hide 3.5s before end
-                        let dur = *duration_ms;
+                        // Title hide 3.5s before end.
                         if dur > 5000 {
-                            let pool = self.pool.clone();
                             let obs_cmd = self.obs_cmd_tx.clone();
                             let resolume_tx = self.resolume_tx.clone();
                             let pl_id = playlist_id;
+                            let hide_at = dur - 3500;
                             tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_millis(dur - 3500))
-                                    .await;
-                                // OBS clear
+                                tokio::time::sleep(std::time::Duration::from_millis(hide_at)).await;
+
                                 if let Some(cmd_tx) = obs_cmd {
-                                    let source_name = sqlx::query_scalar::<_, String>(
-                                        "SELECT obs_text_source FROM playlists WHERE id = ?",
-                                    )
-                                    .bind(pl_id)
-                                    .fetch_optional(&pool)
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                    .unwrap_or_default();
-                                    if !source_name.is_empty() {
-                                        let _ = cmd_tx
-                                            .send(crate::obs::ObsCommand::SetTextSource {
-                                                source_name,
-                                                text: String::new(),
-                                            })
-                                            .await;
-                                    }
+                                    let _ = cmd_tx
+                                        .send(crate::obs::ObsCommand::SetTextSource {
+                                            source_name: OBS_TITLE_SOURCE.to_string(),
+                                            text: String::new(),
+                                        })
+                                        .await;
                                 }
-                                // Resolume hide
+
                                 let _ = resolume_tx
                                     .send(crate::resolume::ResolumeCommand::HideTitle)
                                     .await;
+
+                                debug!(playlist_id = pl_id, "title hidden");
                             });
                         }
                     }
