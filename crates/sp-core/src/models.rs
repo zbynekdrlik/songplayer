@@ -11,10 +11,6 @@ pub struct Playlist {
     #[serde(default)]
     pub ndi_output_name: String,
     #[serde(default)]
-    pub obs_text_source: Option<String>,
-    #[serde(default)]
-    pub resolume_title_token: String,
-    #[serde(default)]
     pub playback_mode: String,
     #[serde(default)]
     pub is_active: bool,

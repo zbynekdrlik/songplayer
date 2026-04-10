@@ -10,7 +10,7 @@ use sqlx::{Row, SqlitePool};
 /// Return all playlists where `is_active = 1`.
 pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, resolume_title_token, is_active
+        "SELECT id, name, youtube_url, ndi_output_name, is_active
          FROM playlists WHERE is_active = 1 ORDER BY id",
     )
     .fetch_all(pool)
@@ -23,7 +23,6 @@ pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sq
             name: r.get("name"),
             youtube_url: r.get("youtube_url"),
             ndi_output_name: r.get::<String, _>("ndi_output_name"),
-            resolume_title_token: r.get::<String, _>("resolume_title_token"),
             is_active: r.get::<i32, _>("is_active") != 0,
             ..Default::default()
         })
