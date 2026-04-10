@@ -358,14 +358,24 @@ jobs:
             echo "No source changes in diff -- skipping"
             exit 0
           fi
+          # Exclusions:
+          # - sp-decoder/, sp-ndi/: Windows-only (Media Foundation, NDI SDK), can't test on Linux runner
+          # - sp-server/src/lib.rs: orchestration glue, integration-tested only
+          # - sp-server/src/obs/: requires live OBS WebSocket, integration-tested only
+          # - sp-server/src/playback/pipeline.rs: cfg(windows) decode loop, untestable on Linux
+          # - sp-server/src/downloader/: shells out to yt-dlp, integration-tested only
+          # - sp-server/src/reprocess/: requires live Gemini API
+          # - sp-server/src/api/websocket: WS upgrade flow, integration-tested
+          # - sp-server/src/playlist/: shells out to yt-dlp
+          # NOTE: sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
+          # NOTE: sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
             --exclude-re 'sp-decoder/' \
             --exclude-re 'sp-ndi/' \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
-            --exclude-re 'sp-server/src/playback/' \
+            --exclude-re 'sp-server/src/playback/pipeline\.rs' \
             --exclude-re 'sp-server/src/downloader/' \
-            --exclude-re 'sp-server/src/resolume/' \
             --exclude-re 'sp-server/src/reprocess/' \
             --exclude-re 'sp-server/src/api/websocket' \
             --exclude-re 'sp-server/src/playlist/'
@@ -862,33 +872,84 @@ jobs:
       - name: Verify Resolume title delivery
         shell: powershell
         run: |
+          # Check if Resolume API is reachable. If not, the operator hasn't
+          # started Resolume — log INFO and skip (do not fail CI on operator
+          # environment issues).
+          try {
+            $null = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/product" -TimeoutSec 5
+          } catch {
+            Write-Host "INFO: Resolume Arena REST API not reachable on 127.0.0.1:8090 - skipping Resolume verification"
+            Write-Host "  ($_)"
+            exit 0
+          }
+
+          # Find a playlist with videos and trigger playback.
+          $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          $testPl = $null
+          foreach ($pl in $playlists) {
+            $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
+            if ($videos.Count -gt 0) {
+              $testPl = $pl
+              break
+            }
+          }
+          if (-not $testPl) {
+            Write-Error "FAIL: No playlist with videos found for Resolume verification"
+            exit 1
+          }
+          Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+
+          # Wait long enough for title to show: 1.5s show delay + 1s fade-in + buffer.
           Start-Sleep -Seconds 5
 
-          try {
-            $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition"
-            $titleClips = @()
-            foreach ($layer in $comp.layers) {
-              foreach ($clip in $layer.clips) {
-                if ($clip.name.value -match '#sp-title') {
-                  $titleClips += [pscustomobject]@{
-                    Name = $clip.name.value
-                    Text = $clip.video.sourceparams.Text.value
-                  }
+          # Query Resolume composition for #sp-title clips.
+          $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+          $titleClips = @()
+          foreach ($layer in $comp.layers) {
+            foreach ($clip in $layer.clips) {
+              if ($clip.name.value -match '#sp-title') {
+                $titleClips += [pscustomobject]@{
+                  Name = $clip.name.value
+                  Text = $clip.video.sourceparams.Text.value
+                  Opacity = $clip.video.opacity.value
                 }
               }
             }
-
-            Write-Host "Found $($titleClips.Count) #sp-title clips in Resolume composition"
-            foreach ($c in $titleClips) {
-              Write-Host "  $($c.Name) -> '$($c.Text)'"
-            }
-
-            if ($titleClips.Count -eq 0) {
-              Write-Host "INFO: no #sp-title clips configured in Resolume yet (operator must create them)"
-            }
-          } catch {
-            Write-Host "WARNING: Could not query Resolume API: $_"
           }
+
+          Write-Host "Found $($titleClips.Count) #sp-title clips in Resolume composition:"
+          foreach ($c in $titleClips) {
+            Write-Host "  $($c.Name) -> text='$($c.Text)' opacity=$($c.Opacity)"
+          }
+
+          # Cleanup: pause playback before assertions so we always release the player.
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+
+          if ($titleClips.Count -eq 0) {
+            # Resolume is reachable but has no #sp-title clips configured.
+            # Operator must create them - this is a configuration issue, not a code bug.
+            Write-Host "INFO: Resolume is reachable but has zero #sp-title clips."
+            Write-Host "      Operator must create at least one clip with '#sp-title' in its name."
+            exit 0
+          }
+
+          # ASSERT: every #sp-title clip must have non-empty text after playback.
+          # If text is empty, SongPlayer's show_title path is broken.
+          $emptyClips = $titleClips | Where-Object { -not $_.Text -or $_.Text.Trim() -eq '' }
+          if ($emptyClips.Count -gt 0) {
+            Write-Error "FAIL: $($emptyClips.Count) of $($titleClips.Count) #sp-title clips have empty text after playback. SongPlayer is not pushing titles to Resolume."
+            exit 1
+          }
+
+          # ASSERT: also check the warning indicator is gone.
+          $withWarning = $titleClips | Where-Object { $_.Text -match [char]0x26A0 }
+          if ($withWarning.Count -gt 0) {
+            Write-Error "FAIL: $($withWarning.Count) clips contain the legacy warning indicator (U+26A0). The redesign should have removed it."
+            exit 1
+          }
+
+          Write-Host "OK: All $($titleClips.Count) #sp-title clips have non-empty, clean title text."
 
       - name: Verify NDI output names configured
         shell: powershell

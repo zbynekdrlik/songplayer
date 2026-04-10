@@ -545,4 +545,45 @@ mod tests {
 
         let _ = event_rx;
     }
+
+    /// Regression test for the NewPlay bug: the outer loop must continue to
+    /// receive and process subsequent Play commands after the first one returns.
+    /// Before the fix, NewPlay was discarded and the worker would hang waiting
+    /// for the next command instead of playing the new file.
+    ///
+    /// On non-Windows the stub emits an Error per Play. On Windows the loop
+    /// path is structurally the same — verified live on win-resolume v0.7.2.
+    #[test]
+    fn pipeline_processes_multiple_sequential_plays() {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let pipeline = PlaybackPipeline::spawn("test-multi-play".into(), None, event_tx, 5);
+
+        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/song-a.mp4")));
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/song-b.mp4")));
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/song-c.mp4")));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        pipeline.shutdown();
+
+        // Drain all events. We expect at least one event per Play command —
+        // proving the worker did not hang after the first Play.
+        #[cfg(not(windows))]
+        {
+            let mut event_count = 0;
+            while let Ok((id, event)) = event_rx.try_recv() {
+                assert_eq!(id, 5);
+                match event {
+                    PipelineEvent::Error(_) => event_count += 1,
+                    other => panic!("unexpected event: {other:?}"),
+                }
+            }
+            assert_eq!(
+                event_count, 3,
+                "expected 3 Error events (one per Play), got {event_count}"
+            );
+        }
+
+        let _ = event_rx;
+    }
 }

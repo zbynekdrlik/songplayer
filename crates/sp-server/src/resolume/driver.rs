@@ -143,7 +143,7 @@ impl HostDriver {
         let ep = self.endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
-        let resp = self.apply_host_header(req, &ep).send().await?;
+        let resp = Self::apply_host_header(req, &ep).send().await?;
         let body: serde_json::Value = resp.json().await?;
 
         let new_mapping = parse_composition(&body);
@@ -202,14 +202,18 @@ impl HostDriver {
         Ok(ep)
     }
 
-    /// Build a request with the Host header set if needed.
+    /// Build a request with the `Host` header set if the endpoint requires it.
+    ///
+    /// Uses the typed `reqwest::header::HOST` constant which reqwest/hyper
+    /// treats as a replacement for the auto-generated Host header derived from
+    /// the URL authority. Passing the header as a raw string `"Host"` would
+    /// append rather than replace, leading to undefined behavior.
     fn apply_host_header(
-        &self,
         builder: reqwest::RequestBuilder,
         ep: &ResolvedEndpoint,
     ) -> reqwest::RequestBuilder {
         if let Some(ref host) = ep.host_header {
-            builder.header("Host", host)
+            builder.header(reqwest::header::HOST, host)
         } else {
             builder
         }
@@ -227,14 +231,14 @@ impl HostDriver {
             .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))?
             .clone();
         let url = format!("{}/api/v1/parameter/by-id/{param_id}", ep.base_url);
-        let mut req = self
+        let req = self
             .client
             .put(&url)
             .json(&serde_json::json!({ "value": text }));
-        if let Some(ref host) = ep.host_header {
-            req = req.header("Host", host);
-        }
-        req.send().await?.error_for_status()?;
+        Self::apply_host_header(req, &ep)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(())
     }
 
@@ -254,14 +258,14 @@ impl HostDriver {
             .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))?
             .clone();
         let url = format!("{}/api/v1/composition/clips/by-id/{clip_id}", ep.base_url);
-        let mut req = self
+        let req = self
             .client
             .put(&url)
             .json(&serde_json::json!({"video":{"opacity":{"value": opacity}}}));
-        if let Some(ref host) = ep.host_header {
-            req = req.header("Host", host);
-        }
-        req.send().await?.error_for_status()?;
+        Self::apply_host_header(req, &ep)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(())
     }
 }
@@ -617,5 +621,41 @@ mod tests {
         let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
         // Freshly created endpoint should not be expired.
         assert!(!ep.is_expired());
+    }
+
+    #[test]
+    fn resolved_endpoint_expires_after_ttl() {
+        // Manually construct an endpoint with a backdated `resolved_at` to
+        // simulate TTL expiry without sleeping for 5 minutes.
+        let ep = ResolvedEndpoint {
+            base_url: "http://192.168.1.10:8090".into(),
+            host_header: None,
+            resolved_at: Instant::now() - Duration::from_secs(301),
+        };
+        assert!(
+            ep.is_expired(),
+            "endpoint resolved 301s ago should be expired (TTL=300s)"
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_endpoint_returns_none_until_ensure_endpoint_called() {
+        let driver = HostDriver::new("127.0.0.1".to_string(), 1);
+        assert!(
+            driver.cached_endpoint().is_none(),
+            "no endpoint cached before ensure_endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_endpoint_populates_cache_for_ip_literal() {
+        let mut driver = HostDriver::new("127.0.0.1".to_string(), 8090);
+        driver.ensure_endpoint().await.unwrap();
+        let cached = driver.cached_endpoint().expect("endpoint should be cached");
+        assert_eq!(cached.base_url, "http://127.0.0.1:8090");
+        assert!(
+            cached.host_header.is_none(),
+            "IP literal should not need a Host header override"
+        );
     }
 }

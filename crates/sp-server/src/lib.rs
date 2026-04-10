@@ -298,8 +298,7 @@ pub async fn start(
     let resolume_rows =
         sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
             .fetch_all(&pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     let mut resolume_registry = resolume::ResolumeRegistry::new();
     for row in resolume_rows {
         let host_id: i64 = row.get("id");
@@ -308,11 +307,15 @@ pub async fn start(
         resolume_registry.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
     }
     // Forward commands from the shared channel to all host workers.
+    // Uses try_send to avoid blocking the broadcast loop on a slow Resolume host;
+    // dropped messages are logged at debug level for observability.
     let resolume_senders = resolume_registry.host_senders();
     tokio::spawn(async move {
         while let Some(cmd) = resolume_cmd_rx.recv().await {
             for tx in &resolume_senders {
-                let _ = tx.try_send(cmd.clone());
+                if let Err(e) = tx.try_send(cmd.clone()) {
+                    tracing::debug!(%e, "Resolume command dropped (channel full or closed)");
+                }
             }
         }
     });

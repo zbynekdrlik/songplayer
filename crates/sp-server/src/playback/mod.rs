@@ -48,6 +48,25 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
+    /// Abort handle for the in-flight title-show timer (1.5s after Started).
+    /// Cancelled when a new video starts so a stale timer from the previous
+    /// video can't fire mid-song after a skip.
+    title_show_abort: Option<tokio::task::AbortHandle>,
+    /// Abort handle for the in-flight title-hide timer (3.5s before end).
+    title_hide_abort: Option<tokio::task::AbortHandle>,
+}
+
+impl PlaylistPipeline {
+    /// Cancel any pending title timers (called before spawning new ones on
+    /// each `Started` event).
+    fn cancel_title_timers(&mut self) {
+        if let Some(h) = self.title_show_abort.take() {
+            h.abort();
+        }
+        if let Some(h) = self.title_hide_abort.take() {
+            h.abort();
+        }
+    }
 }
 
 /// Central playback orchestrator.
@@ -128,6 +147,8 @@ impl PlaybackEngine {
                 state: PlayState::Idle,
                 mode: PlaybackMode::default(),
                 current_video_id: None,
+                title_show_abort: None,
+                title_hide_abort: None,
             }
         });
     }
@@ -152,75 +173,91 @@ impl PlaybackEngine {
         match &event {
             PipelineEvent::Started { duration_ms } => {
                 debug!(playlist_id, duration_ms, "video started");
-                if let Some(pp) = self.pipelines.get(&playlist_id) {
-                    if let Some(video_id) = pp.current_video_id {
-                        // Title show after 1.5s.
-                        let pool = self.pool.clone();
+                let dur = *duration_ms;
+
+                // Cancel any pending title timers from a previous video on this
+                // playlist. Without this, a stale hide_title from a skipped 4-min
+                // song would fire 3.5s before that song's natural end during the
+                // next song, clearing the title mid-playback.
+                let video_id_opt = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.cancel_title_timers();
+                    pp.current_video_id
+                } else {
+                    None
+                };
+
+                if let Some(video_id) = video_id_opt {
+                    // Title show after 1.5s.
+                    let pool = self.pool.clone();
+                    let obs_cmd = self.obs_cmd_tx.clone();
+                    let resolume_tx = self.resolume_tx.clone();
+                    let pl_id = playlist_id;
+
+                    let show_handle = tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        if let Ok(Some((song, artist))) =
+                            get_video_title_info(&pool, video_id).await
+                        {
+                            // Format the displayed text once for OBS.
+                            let text = if artist.is_empty() {
+                                song.clone()
+                            } else if song.is_empty() {
+                                artist.clone()
+                            } else {
+                                format!("{song} - {artist}")
+                            };
+
+                            // OBS fallback (single hardcoded source name).
+                            if let Some(cmd_tx) = obs_cmd {
+                                let _ = cmd_tx
+                                    .send(crate::obs::ObsCommand::SetTextSource {
+                                        source_name: OBS_TITLE_SOURCE.to_string(),
+                                        text,
+                                    })
+                                    .await;
+                            }
+
+                            // Resolume — registry broadcasts to all hosts; driver targets all #sp-title clips.
+                            let _ = resolume_tx
+                                .send(crate::resolume::ResolumeCommand::ShowTitle { song, artist })
+                                .await;
+
+                            info!(playlist_id = pl_id, video_id, "title shown");
+                        }
+                    });
+
+                    // Store the show abort handle.
+                    if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                        pp.title_show_abort = Some(show_handle.abort_handle());
+                    }
+
+                    // Title hide 3.5s before end (only if duration is known and long enough).
+                    if dur > 5000 {
                         let obs_cmd = self.obs_cmd_tx.clone();
                         let resolume_tx = self.resolume_tx.clone();
                         let pl_id = playlist_id;
-                        let dur = *duration_ms;
+                        let hide_at = dur - 3500;
+                        let hide_handle = tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(hide_at)).await;
 
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                            if let Ok(Some((song, artist))) =
-                                get_video_title_info(&pool, video_id).await
-                            {
-                                // Format the displayed text once for OBS.
-                                let text = if artist.is_empty() {
-                                    song.clone()
-                                } else if song.is_empty() {
-                                    artist.clone()
-                                } else {
-                                    format!("{song} - {artist}")
-                                };
-
-                                // OBS fallback (single hardcoded source name).
-                                if let Some(cmd_tx) = obs_cmd {
-                                    let _ = cmd_tx
-                                        .send(crate::obs::ObsCommand::SetTextSource {
-                                            source_name: OBS_TITLE_SOURCE.to_string(),
-                                            text,
-                                        })
-                                        .await;
-                                }
-
-                                // Resolume — registry broadcasts to all hosts; driver targets all #sp-title clips.
-                                let _ = resolume_tx
-                                    .send(crate::resolume::ResolumeCommand::ShowTitle {
-                                        song,
-                                        artist,
+                            if let Some(cmd_tx) = obs_cmd {
+                                let _ = cmd_tx
+                                    .send(crate::obs::ObsCommand::SetTextSource {
+                                        source_name: OBS_TITLE_SOURCE.to_string(),
+                                        text: String::new(),
                                     })
                                     .await;
-
-                                info!(playlist_id = pl_id, video_id, "title shown");
                             }
+
+                            let _ = resolume_tx
+                                .send(crate::resolume::ResolumeCommand::HideTitle)
+                                .await;
+
+                            debug!(playlist_id = pl_id, "title hidden");
                         });
 
-                        // Title hide 3.5s before end.
-                        if dur > 5000 {
-                            let obs_cmd = self.obs_cmd_tx.clone();
-                            let resolume_tx = self.resolume_tx.clone();
-                            let pl_id = playlist_id;
-                            let hide_at = dur - 3500;
-                            tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_millis(hide_at)).await;
-
-                                if let Some(cmd_tx) = obs_cmd {
-                                    let _ = cmd_tx
-                                        .send(crate::obs::ObsCommand::SetTextSource {
-                                            source_name: OBS_TITLE_SOURCE.to_string(),
-                                            text: String::new(),
-                                        })
-                                        .await;
-                                }
-
-                                let _ = resolume_tx
-                                    .send(crate::resolume::ResolumeCommand::HideTitle)
-                                    .await;
-
-                                debug!(playlist_id = pl_id, "title hidden");
-                            });
+                        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                            pp.title_hide_abort = Some(hide_handle.abort_handle());
                         }
                     }
                 }
@@ -230,10 +267,16 @@ impl PlaybackEngine {
                 // (spawned in the Started handler above).
             }
             PipelineEvent::Ended => {
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.cancel_title_timers();
+                }
                 self.apply_event(playlist_id, PlayEvent::VideoEnded).await;
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.cancel_title_timers();
+                }
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
@@ -458,6 +501,56 @@ mod tests {
             engine.ensure_pipeline(1, "NDI-1");
             engine.ensure_pipeline(2, "NDI-2");
             assert_eq!(engine.pipelines.len(), 2);
+        });
+    }
+
+    /// Regression test for stale title-timer bug: when a video is skipped,
+    /// the previous video's title-show/hide timers must be cancelled so they
+    /// don't fire mid-song during the next video.
+    #[test]
+    fn cancel_title_timers_aborts_pending_handles() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            // Spawn a long-running task and grab its abort handle.
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+            let task = tokio::spawn(async move {
+                let _ = started_tx.send(());
+                // This sleep represents the 1.5s/N seconds title timer.
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                "should not reach here"
+            });
+            // Wait for the task to actually start.
+            started_rx.await.unwrap();
+
+            let mut pp = PlaylistPipeline {
+                pipeline: PlaybackPipeline::spawn(
+                    "test".to_string(),
+                    None,
+                    mpsc::unbounded_channel().0,
+                    1,
+                ),
+                state: PlayState::Idle,
+                mode: PlaybackMode::default(),
+                current_video_id: None,
+                title_show_abort: Some(task.abort_handle()),
+                title_hide_abort: None,
+            };
+
+            assert!(pp.title_show_abort.is_some());
+            pp.cancel_title_timers();
+            assert!(pp.title_show_abort.is_none());
+
+            // Verify the underlying task was actually aborted.
+            let result = task.await;
+            assert!(
+                result.is_err(),
+                "task should have been aborted, got: {result:?}"
+            );
+            assert!(result.unwrap_err().is_cancelled());
         });
     }
 }
