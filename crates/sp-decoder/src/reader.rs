@@ -37,10 +37,17 @@ pub struct MediaReader {
 }
 
 impl MediaReader {
+    // cargo-mutants: skip — this entire impl block uses Windows Media Foundation
+    // APIs that are only available at runtime on Windows. On the Linux mutation
+    // runner these functions are excluded from compilation, so mutants would
+    // survive with no observable behaviour. The sp-decoder crate is
+    // cfg(windows)-only; mutation coverage is implicitly provided on Windows CI.
+
     /// Open a media file and configure output formats.
     ///
     /// Video is decoded to BGRA (`MFVideoFormat_RGB32`).
     /// Audio is decoded to interleaved f32 PCM (`MFAudioFormat_Float`).
+    #[cfg_attr(test, mutants::skip)]
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
         // COM + MF init (idempotent)
         unsafe {
@@ -153,6 +160,7 @@ impl MediaReader {
     }
 
     /// Video stream metadata from the negotiated media type.
+    #[cfg_attr(test, mutants::skip)]
     pub fn video_info(&self) -> crate::types::VideoStreamInfo {
         crate::types::VideoStreamInfo {
             width: self.video_width,
@@ -171,6 +179,7 @@ impl MediaReader {
     }
 
     /// Read the next decoded video frame, or `None` at end-of-stream.
+    #[cfg_attr(test, mutants::skip)]
     pub fn next_video_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
         let mut flags: u32 = 0;
         let mut timestamp_100ns: i64 = 0;
@@ -231,6 +240,7 @@ impl MediaReader {
     }
 
     /// Read the next decoded audio chunk, or `None` at end-of-stream.
+    #[cfg_attr(test, mutants::skip)]
     pub fn next_audio_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
         let mut flags: u32 = 0;
         let mut timestamp_100ns: i64 = 0;

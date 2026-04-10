@@ -42,6 +42,7 @@ impl SyncedDecoder {
     }
 
     /// Video stream metadata forwarded from the underlying reader.
+    #[cfg_attr(test, mutants::skip)]
     pub fn video_info(&self) -> crate::types::VideoStreamInfo {
         self.reader.video_info()
     }

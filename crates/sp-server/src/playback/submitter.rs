@@ -198,9 +198,12 @@ mod tests {
             .iter()
             .position(|c| c == "send_video_flush(42)")
             .unwrap();
+        // Assert the exact call string including the stride value — this kills the
+        // `stride: width * 4` mutants (+4 would give 1924, /4 would give 480,
+        // both would not match the expected 7680).
         let idx_black = calls
             .iter()
-            .position(|c| c.starts_with("send_video(42,BGRA,1920x1080"))
+            .position(|c| c == "send_video(42,BGRA,1920x1080,stride=7680,30/1)")
             .unwrap();
         assert!(idx_async < idx_flush);
         assert!(idx_flush < idx_black);

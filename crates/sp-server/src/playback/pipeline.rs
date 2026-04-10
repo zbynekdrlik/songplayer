@@ -200,7 +200,15 @@ fn run_loop_stub(
 }
 
 /// Windows decode-to-NDI loop.
+///
+/// cargo-mutants: skip — this function drives the real MF + NDI SDK decode
+/// loop which depends on live Windows runtime state (Media Foundation COM
+/// objects, NDI SDK function pointers). On the Linux mutation runner neither
+/// stack is available, so mutations survive with no observable effect. The
+/// cross-platform call-ordering logic is covered by FrameSubmitter's unit
+/// tests in submitter.rs which the mutation runner does exercise.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 fn run_loop_windows(
     cmd_rx: Receiver<PipelineCommand>,
     ndi_name: &str,
@@ -343,6 +351,7 @@ enum DecodeResult {
 ///
 /// Returns when the video ends or a Stop/Shutdown/Play command is received.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 fn decode_and_send(
     cmd_rx: &Receiver<PipelineCommand>,
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,

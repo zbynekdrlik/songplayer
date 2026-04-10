@@ -66,11 +66,6 @@ pub struct Tally {
 
 /// Abstraction over the NDI SDK for testing.
 pub trait NdiBackend: Send + Sync {
-    /// Create a sender with the default (no clocking) flags. Convenience wrapper.
-    fn send_create(&self, name: &str) -> Result<usize, NdiError> {
-        self.send_create_with_clocking(name, false, false)
-    }
-
     /// Create a sender with explicit `clock_video` / `clock_audio` flags.
     fn send_create_with_clocking(
         &self,
@@ -199,6 +194,12 @@ impl RealNdiBackend {
 }
 
 impl NdiBackend for RealNdiBackend {
+    // cargo-mutants: skip — these methods dereference NDI SDK function pointers
+    // that are only loaded when the real NDI runtime is installed. On the Linux
+    // mutation runner the calls cannot be exercised, so mutants would survive
+    // without observable behaviour. The NdiSender + NdiBackend contract is tested
+    // via MockNdiBackend which the mutation runner handles correctly.
+    #[cfg_attr(test, mutants::skip)]
     fn send_create_with_clocking(
         &self,
         name: &str,
@@ -233,6 +234,7 @@ impl NdiBackend for RealNdiBackend {
         Ok(id)
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_destroy(&self, handle: usize) {
         if let Some(state) = self.handles.lock().unwrap().remove(&handle) {
             debug!("Destroying NDI sender handle {handle}");
@@ -242,6 +244,7 @@ impl NdiBackend for RealNdiBackend {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_video(
         &self,
         handle: usize,
@@ -271,6 +274,7 @@ impl NdiBackend for RealNdiBackend {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     unsafe fn send_video_async(
         &self,
         handle: usize,
@@ -300,6 +304,7 @@ impl NdiBackend for RealNdiBackend {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_video_flush(&self, handle: usize) {
         let handles = self.handles.lock().unwrap();
         let Some(state) = handles.get(&handle) else {
@@ -310,6 +315,7 @@ impl NdiBackend for RealNdiBackend {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_audio(
         &self,
         handle: usize,
@@ -346,6 +352,7 @@ impl NdiBackend for RealNdiBackend {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)> {
         let handles = self.handles.lock().unwrap();
         let state = handles.get(&handle)?;
