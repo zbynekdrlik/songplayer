@@ -37,14 +37,24 @@ impl ResolvedEndpoint {
         }
     }
 
+    /// Return `true` if the endpoint should be re-resolved.
+    ///
     /// `>` vs `>=` is functionally equivalent here because the boundary
     /// case `elapsed() == RESOLUTION_TTL` cannot be observed: any test that
-    /// constructs `resolved_at = Instant::now() - TTL` and immediately calls
-    /// `elapsed()` always sees elapsed > TTL by some nanoseconds. Skipping
-    /// the operator mutation since it cannot meaningfully change behavior.
+    /// uses `Instant::now()` sees time advance by at least a few nanoseconds
+    /// between construction and comparison, making the operator mutation
+    /// impossible to distinguish at runtime.
     #[cfg_attr(test, mutants::skip)]
     fn is_expired(&self) -> bool {
-        self.resolved_at.elapsed() > RESOLUTION_TTL
+        self.is_expired_at(Instant::now())
+    }
+
+    /// Pure function form of `is_expired` — takes an explicit `now` parameter
+    /// so tests can construct synthetic "future" clocks without subtracting
+    /// a large duration from `Instant::now()` (which underflows on Windows
+    /// CI runners where the monotonic clock starts near zero).
+    fn is_expired_at(&self, now: Instant) -> bool {
+        now.duration_since(self.resolved_at) > RESOLUTION_TTL
     }
 }
 
@@ -635,40 +645,38 @@ mod tests {
         assert!(!ep.is_expired());
     }
 
-    /// Backdating an `Instant` requires the platform's monotonic clock to
-    /// have run for at least `RESOLUTION_TTL` since boot. On Linux CI runners
-    /// this is always true (system uptime > 5min). On Windows CI runners,
-    /// QueryPerformanceCounter starts near zero on a fresh boot, so
-    /// `Instant::now() - Duration::from_secs(301)` underflows and panics.
-    /// These tests are gated to unix to keep the assertion meaningful while
-    /// avoiding the Windows clock-underflow issue.
-    #[cfg(unix)]
+    /// Verify TTL expiry using a synthetic future `now`. This avoids the
+    /// Windows `Instant::now() - Duration` underflow problem by going
+    /// forward in time rather than backward.
     #[test]
     fn resolved_endpoint_expires_after_ttl() {
-        let ep = ResolvedEndpoint {
-            base_url: "http://192.168.1.10:8090".into(),
-            host_header: None,
-            resolved_at: Instant::now() - Duration::from_secs(301),
-        };
+        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
+        let future = ep.resolved_at + Duration::from_secs(301);
         assert!(
-            ep.is_expired(),
-            "endpoint resolved 301s ago should be expired (TTL=300s)"
+            ep.is_expired_at(future),
+            "endpoint aged 301s should be expired (TTL=300s)"
         );
     }
 
-    /// Boundary test for `is_expired`. See note above re: cfg(unix).
-    #[cfg(unix)]
+    /// Boundary test: just under TTL is NOT expired.
     #[test]
-    fn resolved_endpoint_at_exact_ttl_boundary_is_not_expired() {
-        // Backdate to exactly TTL - 1ms (just before the boundary).
-        let ep = ResolvedEndpoint {
-            base_url: "http://192.168.1.10:8090".into(),
-            host_header: None,
-            resolved_at: Instant::now() - (RESOLUTION_TTL - Duration::from_millis(1)),
-        };
+    fn resolved_endpoint_just_under_ttl_is_not_expired() {
+        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
+        let future = ep.resolved_at + (RESOLUTION_TTL - Duration::from_millis(1));
         assert!(
-            !ep.is_expired(),
+            !ep.is_expired_at(future),
             "endpoint just under TTL should not be expired"
+        );
+    }
+
+    /// Boundary test: just over TTL IS expired.
+    #[test]
+    fn resolved_endpoint_just_over_ttl_is_expired() {
+        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
+        let future = ep.resolved_at + (RESOLUTION_TTL + Duration::from_millis(1));
+        assert!(
+            ep.is_expired_at(future),
+            "endpoint just over TTL should be expired"
         );
     }
 

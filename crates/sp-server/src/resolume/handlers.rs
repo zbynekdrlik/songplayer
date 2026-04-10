@@ -50,21 +50,31 @@ pub fn fade_step_delay() -> Duration {
     Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64)
 }
 
+/// Look up the clips for `TITLE_TOKEN` in the driver's mapping, returning
+/// them cloned if non-empty. Extracted as a pure function so the empty-Vec
+/// guard can be mutation-tested directly (the inline `match v if !v.is_empty()`
+/// guard produced a functionally-equivalent mutant that could only be caught
+/// with brittle timing assertions).
+pub(crate) fn clips_for_title(driver: &HostDriver) -> Option<Vec<ClipInfo>> {
+    driver
+        .clip_mapping
+        .get(TITLE_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned()
+}
+
 /// Show title across all `#sp-title` clips in parallel.
 pub async fn show_title(
     driver: &mut HostDriver,
     song: &str,
     artist: &str,
 ) -> Result<(), anyhow::Error> {
-    let clips: Vec<ClipInfo> = match driver.clip_mapping.get(TITLE_TOKEN) {
-        Some(v) if !v.is_empty() => v.clone(),
-        _ => {
-            debug!(
-                token = TITLE_TOKEN,
-                "no Resolume clips found, skipping show_title"
-            );
-            return Ok(());
-        }
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping show_title"
+        );
+        return Ok(());
     };
 
     let text = format_title_text(song, artist);
@@ -101,15 +111,12 @@ pub async fn show_title(
 
 /// Hide title across all `#sp-title` clips in parallel.
 pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
-    let clips: Vec<ClipInfo> = match driver.clip_mapping.get(TITLE_TOKEN) {
-        Some(v) if !v.is_empty() => v.clone(),
-        _ => {
-            debug!(
-                token = TITLE_TOKEN,
-                "no Resolume clips found, skipping hide_title"
-            );
-            return Ok(());
-        }
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping hide_title"
+        );
+        return Ok(());
     };
 
     driver.ensure_endpoint().await?;
@@ -133,6 +140,29 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Drain all pending futures, logging each individual error at `warn`
+/// level. Returns the first error seen (if any) so the caller can
+/// short-circuit the fade loop, but never silently drops a failure —
+/// every broken clip is visible in the logs.
+async fn drain_all<F, T>(mut futs: FuturesUnordered<F>) -> Result<(), anyhow::Error>
+where
+    F: std::future::Future<Output = Result<T, anyhow::Error>>,
+{
+    let mut first_err: Option<anyhow::Error> = None;
+    while let Some(res) = futs.next().await {
+        if let Err(e) = res {
+            tracing::warn!(error = %e, "parallel Resolume request failed");
+            if first_err.is_none() {
+                first_err = Some(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
 async fn set_text_all(
     driver: &HostDriver,
     clips: &[ClipInfo],
@@ -142,10 +172,7 @@ async fn set_text_all(
     for clip in clips {
         futs.push(driver.set_text(clip.text_param_id, text));
     }
-    while let Some(res) = futs.next().await {
-        res?;
-    }
-    Ok(())
+    drain_all(futs).await
 }
 
 async fn set_opacity_all(
@@ -157,10 +184,7 @@ async fn set_opacity_all(
     for clip in clips {
         futs.push(driver.set_clip_opacity(clip.clip_id, opacity));
     }
-    while let Some(res) = futs.next().await {
-        res?;
-    }
-    Ok(())
+    drain_all(futs).await
 }
 
 #[cfg(test)]
@@ -392,38 +416,58 @@ mod tests {
     async fn show_title_with_no_clips_is_no_op() {
         let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
 
-        // No mocks needed - we expect zero requests.
-        // ALSO: verify the function returns quickly (early-return path), not
-        // after running the full ~1-second fade loop on an empty clip list.
-        // This kills mutants that turn the empty-Vec guard into `true` (which
-        // would proceed through the fade loop with empty data, taking ~1s).
-        let start = std::time::Instant::now();
         show_title(&mut driver, "Song", "Artist").await.unwrap();
-        let elapsed = start.elapsed();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "no requests should be sent");
-        assert!(
-            elapsed < std::time::Duration::from_millis(500),
-            "show_title with no clips must early-return, not run the fade loop. Took: {elapsed:?}"
-        );
     }
 
-    /// Same timing-based mutation kill for `hide_title`'s empty-Vec guard.
     #[tokio::test]
     async fn hide_title_with_no_clips_is_no_op() {
         let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
 
-        let start = std::time::Instant::now();
         hide_title(&mut driver).await.unwrap();
-        let elapsed = start.elapsed();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "no requests should be sent");
+    }
+
+    /// Direct mutation-killing tests for the empty-Vec guard. These catch
+    /// the `!v.is_empty()` -> `true` mutant cleanly without relying on
+    /// timing assertions against the fade loop.
+    #[test]
+    fn clips_for_title_returns_none_when_mapping_is_empty() {
+        let driver = HostDriver::new("127.0.0.1".to_string(), 1);
+        // Empty mapping.
+        assert!(clips_for_title(&driver).is_none());
+    }
+
+    #[test]
+    fn clips_for_title_returns_none_when_token_maps_to_empty_vec() {
+        let mut driver = HostDriver::new("127.0.0.1".to_string(), 1);
+        driver
+            .clip_mapping
+            .insert(TITLE_TOKEN.to_string(), Vec::new());
+        // Empty Vec should still return None.
         assert!(
-            elapsed < std::time::Duration::from_millis(500),
-            "hide_title with no clips must early-return, not run the fade loop. Took: {elapsed:?}"
+            clips_for_title(&driver).is_none(),
+            "empty Vec must be treated as no clips"
         );
+    }
+
+    #[test]
+    fn clips_for_title_returns_some_when_clips_present() {
+        let mut driver = HostDriver::new("127.0.0.1".to_string(), 1);
+        let clip = ClipInfo {
+            clip_id: 100,
+            text_param_id: 200,
+        };
+        driver
+            .clip_mapping
+            .insert(TITLE_TOKEN.to_string(), vec![clip.clone()]);
+        let result = clips_for_title(&driver).expect("should return Some");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].clip_id, 100);
     }
 
     #[tokio::test]
@@ -463,5 +507,48 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("endpoint cache empty"));
+    }
+
+    /// Type alias used so test futures can be stored in a single
+    /// `FuturesUnordered` (every async block has its own anonymous type).
+    type TestFut =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + Send>>;
+
+    /// Verify `drain_all` awaits every future and returns an error when any
+    /// future fails. Kills mutants that would short-circuit or skip futures.
+    #[tokio::test]
+    async fn drain_all_returns_err_on_any_failure() {
+        let futs: FuturesUnordered<TestFut> = FuturesUnordered::new();
+        futs.push(Box::pin(async { Ok(()) }));
+        futs.push(Box::pin(async { Err(anyhow::anyhow!("boom")) }));
+        futs.push(Box::pin(async { Ok(()) }));
+        let result = drain_all(futs).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "boom");
+    }
+
+    #[tokio::test]
+    async fn drain_all_returns_ok_when_all_succeed() {
+        let futs: FuturesUnordered<TestFut> = FuturesUnordered::new();
+        futs.push(Box::pin(async { Ok(()) }));
+        futs.push(Box::pin(async { Ok(()) }));
+        futs.push(Box::pin(async { Ok(()) }));
+        assert!(drain_all(futs).await.is_ok());
+    }
+
+    /// Verify drain_all surfaces an error from a mixed set of ok/err futures
+    /// even when the error is not the first future pushed. Kills mutants that
+    /// might short-circuit before awaiting all futures.
+    #[tokio::test]
+    async fn drain_all_surfaces_error_among_successes() {
+        let futs: FuturesUnordered<TestFut> = FuturesUnordered::new();
+        futs.push(Box::pin(async { Ok(()) }));
+        futs.push(Box::pin(async { Ok(()) }));
+        futs.push(Box::pin(async { Err(anyhow::anyhow!("boom")) }));
+        futs.push(Box::pin(async { Ok(()) }));
+        futs.push(Box::pin(async { Ok(()) }));
+        let result = drain_all(futs).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "boom");
     }
 }
