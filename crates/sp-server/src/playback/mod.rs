@@ -157,7 +157,7 @@ impl PlaybackEngine {
                         let pl_id = playlist_id;
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                            if let Ok(Some((song, artist, gemini_failed))) =
+                            if let Ok(Some((song, artist, _gemini_failed))) =
                                 get_video_title_info(&pool, video_id).await
                             {
                                 // OBS title
@@ -188,10 +188,8 @@ impl PlaybackEngine {
                                 // Resolume title
                                 let _ = resolume_tx
                                     .send(crate::resolume::ResolumeCommand::ShowTitle {
-                                        playlist_id: pl_id,
                                         song,
                                         artist,
-                                        gemini_failed,
                                     })
                                     .await;
                             }
@@ -229,9 +227,7 @@ impl PlaybackEngine {
                                 }
                                 // Resolume hide
                                 let _ = resolume_tx
-                                    .send(crate::resolume::ResolumeCommand::HideTitle {
-                                        playlist_id: pl_id,
-                                    })
+                                    .send(crate::resolume::ResolumeCommand::HideTitle)
                                     .await;
                             });
                         }

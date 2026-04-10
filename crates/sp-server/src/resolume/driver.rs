@@ -135,28 +135,18 @@ impl HostDriver {
     }
 
     /// Handle a single command.
-    async fn handle_command(&mut self, cmd: ResolumeCommand, tokens: &HashMap<i64, String>) {
+    async fn handle_command(&mut self, cmd: ResolumeCommand, _tokens: &HashMap<i64, String>) {
         match cmd {
-            ResolumeCommand::ShowTitle {
-                playlist_id,
-                song,
-                artist,
-                gemini_failed,
-            } => {
-                if let Some(token) = tokens.get(&playlist_id) {
-                    if let Err(e) =
-                        handlers::show_title(self, token, &song, &artist, gemini_failed).await
-                    {
-                        warn!(host = %self.host, playlist_id, %e, "show_title failed");
-                    }
-                }
+            ResolumeCommand::ShowTitle { song, artist } => {
+                // Stub: real implementation in Task 6.
+                warn!(host = %self.host, %song, %artist, "ShowTitle stub - not yet implemented");
+                let _ =
+                    handlers::show_title(self, crate::resolume::TITLE_TOKEN, &song, &artist, false)
+                        .await;
             }
-            ResolumeCommand::HideTitle { playlist_id } => {
-                if let Some(token) = tokens.get(&playlist_id) {
-                    if let Err(e) = handlers::hide_title(self, token).await {
-                        warn!(host = %self.host, playlist_id, %e, "hide_title failed");
-                    }
-                }
+            ResolumeCommand::HideTitle => {
+                warn!(host = %self.host, "HideTitle stub - not yet implemented");
+                let _ = handlers::hide_title(self, crate::resolume::TITLE_TOKEN).await;
             }
             ResolumeCommand::RefreshMapping => {
                 if let Err(e) = self.refresh_mapping().await {

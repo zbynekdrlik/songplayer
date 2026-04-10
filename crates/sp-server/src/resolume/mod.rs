@@ -11,19 +11,20 @@ use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
 
+/// The single Resolume clip tag used for title delivery.
+/// Any Resolume clip whose name contains this tag becomes a title target.
+pub const TITLE_TOKEN: &str = "#sp-title";
+
 /// Commands sent to per-host Resolume workers.
 #[derive(Debug, Clone)]
 pub enum ResolumeCommand {
-    ShowTitle {
-        playlist_id: i64,
-        song: String,
-        artist: String,
-        gemini_failed: bool,
-    },
-    HideTitle {
-        playlist_id: i64,
-    },
+    /// Show a song title (set text + fade in) on all `#sp-title` clips.
+    ShowTitle { song: String, artist: String },
+    /// Hide the title (fade out + clear text) on all `#sp-title` clips.
+    HideTitle,
+    /// Force a refresh of the clip mapping cache.
     RefreshMapping,
+    /// Stop the worker.
     Shutdown,
 }
 
