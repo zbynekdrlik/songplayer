@@ -38,13 +38,8 @@ impl ResolvedEndpoint {
     }
 
     /// Return `true` if the endpoint should be re-resolved.
-    ///
-    /// `>` vs `>=` is functionally equivalent here because the boundary
-    /// case `elapsed() == RESOLUTION_TTL` cannot be observed: any test that
-    /// uses `Instant::now()` sees time advance by at least a few nanoseconds
-    /// between construction and comparison, making the operator mutation
-    /// impossible to distinguish at runtime.
-    #[cfg_attr(test, mutants::skip)]
+    /// Thin wrapper around `is_expired_at(Instant::now())`; the boundary
+    /// semantics are tested directly on `is_expired_at` with synthetic clocks.
     fn is_expired(&self) -> bool {
         self.is_expired_at(Instant::now())
     }
@@ -666,6 +661,20 @@ mod tests {
         assert!(
             !ep.is_expired_at(future),
             "endpoint just under TTL should not be expired"
+        );
+    }
+
+    /// Boundary test: exactly at TTL is NOT expired (strict-greater semantics).
+    /// This is the only test that distinguishes `>` from `>=` in is_expired_at —
+    /// the `is_expired_at(now)` refactor lets us construct the boundary exactly,
+    /// which `Instant::now()`-based tests could not.
+    #[test]
+    fn resolved_endpoint_at_exactly_ttl_is_not_expired() {
+        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
+        let exact_ttl = ep.resolved_at + RESOLUTION_TTL;
+        assert!(
+            !ep.is_expired_at(exact_ttl),
+            "endpoint at exactly TTL boundary must NOT be expired (>, not >=)"
         );
     }
 
