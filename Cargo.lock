@@ -1185,6 +1185,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mutants"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1863,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1872,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "thiserror",
  "tracing",
@@ -1881,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "libloading",
  "thiserror",
@@ -1890,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1899,6 +1905,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "futures",
+ "mutants",
  "rand 0.8.5",
  "regex",
  "reqwest",

@@ -175,4 +175,32 @@ mod tests {
 
         let _ = shutdown_tx.send(());
     }
+
+    /// Verifies host_senders returns ALL registered host channels (not an empty Vec).
+    /// Kills the `host_senders -> vec![]` mutant.
+    #[tokio::test]
+    async fn host_senders_returns_all_registered_hosts() {
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let mut registry = ResolumeRegistry::new();
+
+        let empty = registry.host_senders();
+        assert_eq!(empty.len(), 0, "empty registry should have zero senders");
+
+        registry.add_host(1, "127.0.0.1".to_string(), 8080, shutdown_tx.subscribe());
+        let one = registry.host_senders();
+        assert_eq!(one.len(), 1, "one host should yield one sender");
+
+        registry.add_host(2, "127.0.0.1".to_string(), 8081, shutdown_tx.subscribe());
+        registry.add_host(3, "127.0.0.1".to_string(), 8082, shutdown_tx.subscribe());
+        let three = registry.host_senders();
+        assert_eq!(three.len(), 3, "three hosts should yield three senders");
+
+        // Verify the returned senders actually work — try_send should succeed
+        // (the worker has a 64-buffer mpsc).
+        for tx in &three {
+            assert!(tx.try_send(ResolumeCommand::RefreshMapping).is_ok());
+        }
+
+        let _ = shutdown_tx.send(());
+    }
 }

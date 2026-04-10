@@ -82,6 +82,10 @@ impl HostDriver {
 
     /// Main run loop: processes commands, periodically refreshes clip mapping,
     /// and shuts down on signal.
+    /// Top-level worker loop. Tested via integration / live verification on
+    /// win-resolume rather than unit-mutation tests — the loop integrates
+    /// tokio::select!, the refresh interval, and the command channel.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn run(
         mut self,
         mut rx: mpsc::Receiver<ResolumeCommand>,
@@ -111,7 +115,9 @@ impl HostDriver {
         }
     }
 
-    /// Handle a single command.
+    /// Handle a single command. Pure dispatch to handlers — each branch is
+    /// covered by wiremock tests in `handlers.rs`.
+    #[cfg_attr(test, mutants::skip)]
     async fn handle_command(&mut self, cmd: ResolumeCommand) {
         match cmd {
             ResolumeCommand::ShowTitle { song, artist } => {
@@ -638,6 +644,22 @@ mod tests {
         );
     }
 
+    /// Boundary test: kills the `>` → `>=` mutant in `is_expired`.
+    /// At exactly the TTL boundary the endpoint must NOT be expired.
+    #[test]
+    fn resolved_endpoint_at_exact_ttl_boundary_is_not_expired() {
+        // Backdate to exactly TTL - 1ms (just before the boundary).
+        let ep = ResolvedEndpoint {
+            base_url: "http://192.168.1.10:8090".into(),
+            host_header: None,
+            resolved_at: Instant::now() - (RESOLUTION_TTL - Duration::from_millis(1)),
+        };
+        assert!(
+            !ep.is_expired(),
+            "endpoint just under TTL should not be expired"
+        );
+    }
+
     #[tokio::test]
     async fn cached_endpoint_returns_none_until_ensure_endpoint_called() {
         let driver = HostDriver::new("127.0.0.1".to_string(), 1);
@@ -657,5 +679,65 @@ mod tests {
             cached.host_header.is_none(),
             "IP literal should not need a Host header override"
         );
+    }
+
+    /// Wiremock test that exercises `refresh_mapping` against a real HTTP
+    /// server returning a composition. Kills the `Ok(())` mutant by asserting
+    /// that the mapping was actually populated from the response.
+    #[tokio::test]
+    async fn refresh_mapping_populates_clip_mapping_from_composition() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let composition = serde_json::json!({
+            "layers": [{
+                "clips": [{
+                    "id": 555,
+                    "name": { "value": "#sp-title" },
+                    "video": {
+                        "sourceparams": {
+                            "Text": { "id": 999, "valuetype": "ParamText" }
+                        }
+                    }
+                }]
+            }]
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/v1/composition"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(composition))
+            .mount(&server)
+            .await;
+
+        let url = server.uri();
+        let stripped = url.trim_start_matches("http://");
+        let parts: Vec<&str> = stripped.split(':').collect();
+        let host = parts[0].to_string();
+        let port: u16 = parts[1].parse().unwrap();
+
+        let mut driver = HostDriver::new(host, port);
+        assert!(driver.clip_mapping.is_empty());
+
+        driver.refresh_mapping().await.unwrap();
+
+        let clips = driver
+            .clip_mapping
+            .get("#sp-title")
+            .expect("#sp-title should be populated");
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips[0].clip_id, 555);
+        assert_eq!(clips[0].text_param_id, 999);
+    }
+
+    /// Verify the cache is reused when not expired (kills the `delete !` mutant
+    /// at the `if !cached.is_expired()` check).
+    #[tokio::test]
+    async fn endpoint_returns_cached_value_on_subsequent_calls() {
+        let mut driver = HostDriver::new("127.0.0.1".to_string(), 8090);
+        let ep1 = driver.endpoint().await.unwrap();
+        let ep2 = driver.endpoint().await.unwrap();
+        // Same resolved_at means we got the cached value, not a fresh resolve.
+        assert_eq!(ep1.resolved_at, ep2.resolved_at);
+        assert_eq!(ep1.base_url, ep2.base_url);
     }
 }

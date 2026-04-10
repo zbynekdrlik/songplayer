@@ -169,6 +169,13 @@ impl PlaybackEngine {
     }
 
     /// Handle an event emitted by a pipeline thread.
+    ///
+    /// This is the top-level orchestration entry point — it dispatches on
+    /// pipeline events and spawns title-show / title-hide timer tasks. Unit
+    /// testing it requires a full DB + OBS + Resolume harness; the
+    /// individual concerns (timer cancellation, title formatting, get_video_title_info)
+    /// have dedicated unit tests below.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
         match &event {
             PipelineEvent::Started { duration_ms } => {
@@ -337,6 +344,11 @@ impl PlaybackEngine {
     }
 
     /// Execute a [`PlayAction`] produced by the state machine.
+    ///
+    /// Top-level orchestration that touches the DB, video selector, and
+    /// pipeline thread. Tested via integration / live verification on
+    /// win-resolume rather than unit-mutation tests.
+    #[cfg_attr(test, mutants::skip)]
     async fn execute_action(&mut self, playlist_id: i64, action: PlayAction) {
         match action {
             PlayAction::SelectAndPlay => {
@@ -552,5 +564,52 @@ mod tests {
             );
             assert!(result.unwrap_err().is_cancelled());
         });
+    }
+
+    /// Verify get_video_title_info returns the actual song+artist from the DB.
+    /// Kills mutants that replace the function body with constants.
+    #[tokio::test]
+    async fn get_video_title_info_returns_song_and_artist() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id, song, artist) VALUES (42, 1, 'abc', 'My Song', 'Artist Name')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = get_video_title_info(&pool, 42).await.unwrap();
+        assert_eq!(
+            result,
+            Some(("My Song".to_string(), "Artist Name".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_video_title_info_returns_none_for_missing_video() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let result = get_video_title_info(&pool, 999).await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn get_video_title_info_handles_null_song_and_artist() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (42, 1, 'abc')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let result = get_video_title_info(&pool, 42).await.unwrap();
+        assert_eq!(result, Some((String::new(), String::new())));
     }
 }

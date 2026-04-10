@@ -38,6 +38,11 @@ pub fn fade_steps(n: u32) -> Vec<f64> {
     (1..=n).map(|i| i as f64 / n as f64).collect()
 }
 
+/// Per-step delay for the fade loop (FADE_DURATION_MS / FADE_STEPS).
+pub fn fade_step_delay() -> Duration {
+    Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64)
+}
+
 /// Show title across all `#sp-title` clips in parallel.
 pub async fn show_title(
     driver: &mut HostDriver,
@@ -73,7 +78,7 @@ pub async fn show_title(
 
     tokio::time::sleep(Duration::from_millis(TEXT_SETTLE_MS)).await;
 
-    let step_delay = Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64);
+    let step_delay = fade_step_delay();
     for opacity in fade_steps(FADE_STEPS) {
         set_opacity_all(driver_ref, &clips, opacity).await?;
         tokio::time::sleep(step_delay).await;
@@ -103,7 +108,7 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
-    let step_delay = Duration::from_millis(FADE_DURATION_MS / FADE_STEPS as u64);
+    let step_delay = fade_step_delay();
     let steps: Vec<f64> = fade_steps(FADE_STEPS);
     for opacity in steps.iter().rev() {
         set_opacity_all(driver_ref, &clips, *opacity).await?;
@@ -196,6 +201,14 @@ mod tests {
         for i in 1..steps.len() {
             assert!(steps[i] > steps[i - 1]);
         }
+    }
+
+    /// Verify the per-step delay is 50ms (1000 / 20).
+    /// Kills `/` → `%` mutant in `fade_step_delay` (which would yield
+    /// 1000 % 20 = 0ms instead of 50ms).
+    #[test]
+    fn fade_step_delay_is_50_milliseconds() {
+        assert_eq!(fade_step_delay(), Duration::from_millis(50));
     }
 
     // -----------------------------------------------------------------------
@@ -373,10 +386,20 @@ mod tests {
         let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
 
         // No mocks needed - we expect zero requests.
+        // ALSO: verify the function returns quickly (early-return path), not
+        // after running the full ~1-second fade loop on an empty clip list.
+        // This kills mutants that turn the empty-Vec guard into `true` (which
+        // would proceed through the fade loop with empty data, taking ~1s).
+        let start = std::time::Instant::now();
         show_title(&mut driver, "Song", "Artist").await.unwrap();
+        let elapsed = start.elapsed();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "no requests should be sent");
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "show_title with no clips must early-return, not run the fade loop. Took: {elapsed:?}"
+        );
     }
 
     #[tokio::test]
