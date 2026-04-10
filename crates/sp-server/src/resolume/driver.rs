@@ -635,10 +635,16 @@ mod tests {
         assert!(!ep.is_expired());
     }
 
+    /// Backdating an `Instant` requires the platform's monotonic clock to
+    /// have run for at least `RESOLUTION_TTL` since boot. On Linux CI runners
+    /// this is always true (system uptime > 5min). On Windows CI runners,
+    /// QueryPerformanceCounter starts near zero on a fresh boot, so
+    /// `Instant::now() - Duration::from_secs(301)` underflows and panics.
+    /// These tests are gated to unix to keep the assertion meaningful while
+    /// avoiding the Windows clock-underflow issue.
+    #[cfg(unix)]
     #[test]
     fn resolved_endpoint_expires_after_ttl() {
-        // Manually construct an endpoint with a backdated `resolved_at` to
-        // simulate TTL expiry without sleeping for 5 minutes.
         let ep = ResolvedEndpoint {
             base_url: "http://192.168.1.10:8090".into(),
             host_header: None,
@@ -650,8 +656,8 @@ mod tests {
         );
     }
 
-    /// Boundary test: kills the `>` → `>=` mutant in `is_expired`.
-    /// At exactly the TTL boundary the endpoint must NOT be expired.
+    /// Boundary test for `is_expired`. See note above re: cfg(unix).
+    #[cfg(unix)]
     #[test]
     fn resolved_endpoint_at_exact_ttl_boundary_is_not_expired() {
         // Backdate to exactly TTL - 1ms (just before the boundary).
