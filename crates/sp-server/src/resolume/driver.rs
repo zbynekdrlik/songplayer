@@ -38,8 +38,15 @@ impl ResolvedEndpoint {
     }
 
     /// Return `true` if the endpoint should be re-resolved.
-    /// Thin wrapper around `is_expired_at(Instant::now())`; the boundary
-    /// semantics are tested directly on `is_expired_at` with synthetic clocks.
+    ///
+    /// Thin wrapper around `is_expired_at(Instant::now())`. Skipped from
+    /// mutation testing because every observable behavior of this wrapper
+    /// is already covered by `is_expired_at` tests (which use synthetic
+    /// clocks to hit the `>` boundary exactly). A `-> false` mutant on
+    /// this wrapper cannot be caught without waiting `RESOLUTION_TTL`
+    /// real-time seconds or backdating `resolved_at` (which underflows
+    /// Windows' monotonic clock on freshly booted CI runners).
+    #[cfg_attr(test, mutants::skip)]
     fn is_expired(&self) -> bool {
         self.is_expired_at(Instant::now())
     }
