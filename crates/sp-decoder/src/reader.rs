@@ -214,12 +214,14 @@ impl MediaReader {
             self.duration_ms = timestamp_ms;
         }
 
-        // Convert NV12 → BGRA for NDI output.
-        let bgra = nv12_to_bgra(&nv12_data, width, height);
-        let stride = width * 4;
+        // NV12 passthrough: the raw buffer is Y plane (height × width bytes)
+        // plus interleaved UV plane (height/2 × width bytes). NDI accepts NV12
+        // natively via NDIlib_FourCC_video_type_NV12. Stride = Y-plane row
+        // bytes = width.
+        let stride = width;
 
         Ok(Some(DecodedVideoFrame {
-            data: bgra,
+            data: nv12_data,
             width,
             height,
             stride,
@@ -373,38 +375,4 @@ impl MediaReader {
             Ok((channels, sample_rate))
         }
     }
-}
-
-/// Convert NV12 pixel data to BGRA.
-///
-/// NV12 layout: `height` rows of Y (stride = width), then `height/2` rows of
-/// interleaved UV (stride = width).  Total size = width * height * 3/2.
-fn nv12_to_bgra(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let w = width as usize;
-    let h = height as usize;
-    let mut bgra = vec![0u8; w * h * 4];
-    let y_plane = &nv12[..w * h];
-    let uv_plane = &nv12[w * h..];
-
-    for row in 0..h {
-        for col in 0..w {
-            let y = y_plane[row * w + col] as f32;
-            let uv_row = row / 2;
-            let uv_col = (col / 2) * 2;
-            let u = uv_plane[uv_row * w + uv_col] as f32 - 128.0;
-            let v = uv_plane[uv_row * w + uv_col + 1] as f32 - 128.0;
-
-            // BT.601 YUV→RGB
-            let r = (y + 1.402 * v).clamp(0.0, 255.0) as u8;
-            let g = (y - 0.344136 * u - 0.714136 * v).clamp(0.0, 255.0) as u8;
-            let b = (y + 1.772 * u).clamp(0.0, 255.0) as u8;
-
-            let idx = (row * w + col) * 4;
-            bgra[idx] = b;
-            bgra[idx + 1] = g;
-            bgra[idx + 2] = r;
-            bgra[idx + 3] = 255;
-        }
-    }
-    bgra
 }
