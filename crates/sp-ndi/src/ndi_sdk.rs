@@ -47,6 +47,8 @@ pub struct NdiLib {
     pub(crate) send_create: FnSendCreate,
     pub(crate) send_destroy: FnSendDestroy,
     pub(crate) send_send_video_v2: FnSendVideoV2,
+    // Used from Task 5 onward (async video send + flush path).
+    #[allow(dead_code)]
     pub(crate) send_send_video_async_v2: FnSendVideoAsyncV2,
     pub(crate) send_send_audio_v3: FnSendAudioV3,
     pub(crate) send_get_tally: FnSendGetTally,
