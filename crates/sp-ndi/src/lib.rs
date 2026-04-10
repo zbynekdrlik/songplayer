@@ -4,6 +4,7 @@
 //! over NDI. The NDI shared library is loaded at runtime via `libloading`,
 //! so the crate compiles on any platform without the NDI SDK installed.
 
+pub mod deinterleave;
 pub mod error;
 pub mod ndi_sdk;
 pub mod sender;
