@@ -58,7 +58,7 @@ pub struct HostDriver {
     host: String,
     port: u16,
     client: reqwest::Client,
-    /// Maps clip token (e.g. `"#spfast-title"`) to list of matching clips.
+    /// Maps clip token (e.g. `"#sp-title"`) to list of matching clips.
     /// A single token can appear in multiple clips across layers/columns/decks
     /// and all of them are updated in parallel.
     pub(crate) clip_mapping: HashMap<String, Vec<ClipInfo>>,
@@ -561,7 +561,7 @@ mod tests {
             "layers": [{
                 "clips": [{
                     "id": 1683810383769_i64,
-                    "name": { "value": "#spfast-title" },
+                    "name": { "value": "#sp-title" },
                     "video": {
                         "sourceparams": {
                             "Text": {
@@ -576,7 +576,7 @@ mod tests {
         });
         let mapping = parse_composition(&comp);
         assert_eq!(mapping.len(), 1);
-        let clips = &mapping["#spfast-title"];
+        let clips = &mapping["#sp-title"];
         assert_eq!(clips.len(), 1);
         assert_eq!(clips[0].clip_id, 1683810383769);
         assert_eq!(clips[0].text_param_id, 1775761488634);
