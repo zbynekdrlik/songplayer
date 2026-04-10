@@ -15,6 +15,7 @@ pub use ndi_sdk::NdiLib;
 pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
 pub use types::{
     FRAME_FORMAT_PROGRESSIVE, FourCCAudioType, FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE,
+    PixelFormat,
 };
 
 #[cfg(test)]
@@ -47,13 +48,29 @@ mod tests {
     }
 
     #[test]
-    fn fourcc_video_bgra_value() {
+    fn fourcc_video_bgra_value_and_bytes() {
         assert_eq!(FourCCVideoType::BGRA as u32, 0x4152_4742);
+        let bytes = (FourCCVideoType::BGRA as u32).to_le_bytes();
+        assert_eq!(&bytes, b"BGRA");
     }
 
     #[test]
-    fn fourcc_audio_flt_interleaved_value() {
-        assert_eq!(FourCCAudioType::FltInterleaved as u32, 0x0000_0001);
+    fn fourcc_video_nv12_value_and_bytes() {
+        assert_eq!(FourCCVideoType::NV12 as u32, 0x3231_564E);
+        let bytes = (FourCCVideoType::NV12 as u32).to_le_bytes();
+        assert_eq!(&bytes, b"NV12");
+    }
+
+    #[test]
+    fn fourcc_audio_fltp_value_and_bytes() {
+        assert_eq!(FourCCAudioType::FLTP as u32, 0x7054_4C46);
+        let bytes = (FourCCAudioType::FLTP as u32).to_le_bytes();
+        assert_eq!(&bytes, b"FLTp");
+    }
+
+    #[test]
+    fn pixel_format_variants_are_distinct() {
+        assert_ne!(types::PixelFormat::Bgra, types::PixelFormat::Nv12);
     }
 
     #[test]

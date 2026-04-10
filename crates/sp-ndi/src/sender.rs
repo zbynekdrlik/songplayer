@@ -202,7 +202,7 @@ impl NdiBackend for RealNdiBackend {
             no_channels: channels,
             no_samples: samples,
             timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
-            four_cc: FourCCAudioType::FltInterleaved,
+            four_cc: FourCCAudioType::FLTP,
             p_data: data.as_ptr(),
             channel_stride_in_bytes: 0, // interleaved — no per-channel stride
             p_metadata: ptr::null(),

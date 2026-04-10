@@ -18,20 +18,42 @@ pub enum NDIlib_send_instance_t {}
 // ---------------------------------------------------------------------------
 
 /// Video FourCC pixel format identifiers.
+///
+/// Values are `NDI_LIB_FOURCC(ch0,ch1,ch2,ch3) = ch0 | (ch1<<8) | (ch2<<16) | (ch3<<24)`
+/// so on little-endian the bytes in memory literally spell the ASCII chars.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FourCCVideoType {
-    /// BGRA 8-bit per channel (NDI default for sending).
-    /// FourCC('B','G','R','A') = 0x41524742
+    /// BGRA 8-bit per channel. `'B','G','R','A'`.
     BGRA = 0x4152_4742,
+    /// NV12 planar luma + interleaved chroma (semi-planar). `'N','V','1','2'`.
+    NV12 = 0x3231_564E,
 }
 
 /// Audio FourCC format identifiers.
+///
+/// Only FLTP is defined by the NDI SDK v6. See `NDIlib_FourCC_audio_type_e`
+/// in `Processing.NDI.structs.h`.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FourCCAudioType {
-    /// 32-bit float interleaved audio.
-    FltInterleaved = 0x0000_0001,
+    /// Planar 32-bit float. `'F','L','T','p'`.
+    /// Must specify `channel_stride_in_bytes = no_samples * 4`.
+    FLTP = 0x7054_4C46,
+}
+
+/// High-level pixel format tag on `sp_ndi::VideoFrame`.
+///
+/// Used by callers to tell the NDI sender which FourCC and stride semantics
+/// to apply to the raw bytes in the frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelFormat {
+    /// BGRA 8-bit per channel, `stride = width * 4`.
+    Bgra,
+    /// NV12 semi-planar, `stride = y_plane_row_bytes` (usually `= width`).
+    /// Data layout: Y plane of `height` rows, then UV plane of `height/2` rows.
+    /// Total bytes: `width * height * 3 / 2`.
+    Nv12,
 }
 
 // ---------------------------------------------------------------------------
