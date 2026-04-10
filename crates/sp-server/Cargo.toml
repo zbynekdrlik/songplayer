@@ -40,3 +40,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 tempfile = "3.27.0"
 tower = "0.5"
+wiremock = "0.6"
+tokio = { version = "1", features = ["full", "test-util"] }
+# Placeholder crate that defines the `mutants::skip` attribute as a no-op,
+# letting cargo-mutants exclude specific functions from mutation testing.
+mutants = "0.0.3"

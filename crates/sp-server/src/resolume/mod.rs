@@ -1,4 +1,4 @@
-//! Resolume Arena integration with per-host workers and A/B crossfade.
+//! Resolume Arena integration with per-host workers and opacity-fade titles.
 
 pub mod driver;
 pub mod handlers;
@@ -10,18 +10,20 @@ use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
 
+/// The single Resolume clip tag used for title delivery.
+/// Any Resolume clip whose name contains this tag becomes a title target.
+pub const TITLE_TOKEN: &str = "#sp-title";
+
 /// Commands sent to per-host Resolume workers.
 #[derive(Debug, Clone)]
 pub enum ResolumeCommand {
-    UpdateTitle {
-        playlist_id: i64,
-        song: String,
-        artist: String,
-    },
-    ClearTitle {
-        playlist_id: i64,
-    },
+    /// Show a song title (set text + fade in) on all `#sp-title` clips.
+    ShowTitle { song: String, artist: String },
+    /// Hide the title (fade out + clear text) on all `#sp-title` clips.
+    HideTitle,
+    /// Force a refresh of the clip mapping cache.
     RefreshMapping,
+    /// Stop the worker.
     Shutdown,
 }
 
@@ -84,6 +86,11 @@ impl ResolumeRegistry {
                 warn!(host_id, %e, "failed to send broadcast to Resolume host");
             }
         }
+    }
+
+    /// Return senders for all registered hosts.
+    pub fn host_senders(&self) -> Vec<mpsc::Sender<ResolumeCommand>> {
+        self.hosts.values().cloned().collect()
     }
 }
 
@@ -165,6 +172,34 @@ mod tests {
 
         // Broadcast should not panic or error even with no real Resolume server.
         registry.broadcast(ResolumeCommand::RefreshMapping).await;
+
+        let _ = shutdown_tx.send(());
+    }
+
+    /// Verifies host_senders returns ALL registered host channels (not an empty Vec).
+    /// Kills the `host_senders -> vec![]` mutant.
+    #[tokio::test]
+    async fn host_senders_returns_all_registered_hosts() {
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let mut registry = ResolumeRegistry::new();
+
+        let empty = registry.host_senders();
+        assert_eq!(empty.len(), 0, "empty registry should have zero senders");
+
+        registry.add_host(1, "127.0.0.1".to_string(), 8080, shutdown_tx.subscribe());
+        let one = registry.host_senders();
+        assert_eq!(one.len(), 1, "one host should yield one sender");
+
+        registry.add_host(2, "127.0.0.1".to_string(), 8081, shutdown_tx.subscribe());
+        registry.add_host(3, "127.0.0.1".to_string(), 8082, shutdown_tx.subscribe());
+        let three = registry.host_senders();
+        assert_eq!(three.len(), 3, "three hosts should yield three senders");
+
+        // Verify the returned senders actually work — try_send should succeed
+        // (the worker has a 64-buffer mpsc).
+        for tx in &three {
+            assert!(tx.try_send(ResolumeCommand::RefreshMapping).is_ok());
+        }
 
         let _ = shutdown_tx.send(());
     }

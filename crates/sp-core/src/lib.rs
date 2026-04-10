@@ -141,7 +141,6 @@ mod tests {
             name: "Test".into(),
             youtube_url: "https://youtube.com/playlist?list=PLxyz".into(),
             ndi_output_name: "SP-test".into(),
-            obs_text_source: None,
             playback_mode: "continuous".into(),
             is_active: true,
             created_at: None,

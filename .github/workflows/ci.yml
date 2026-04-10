@@ -32,20 +32,34 @@ jobs:
           echo "OK: VERSION '$VERSION' is a release version."
 
   dev-version-check:
-    name: Dev Version Check (push to dev must be dev version)
+    name: Dev Version Check (push to dev must be dev or release version)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     steps:
       - uses: actions/checkout@v4
-      - name: Check VERSION contains -dev
+        with:
+          fetch-depth: 0
+      - name: Check VERSION is valid semver and strictly ahead of main
         run: |
           VERSION=$(cat VERSION)
-          echo "VERSION=$VERSION"
-          if ! echo "$VERSION" | grep -q '\-dev'; then
-            echo "ERROR: VERSION '$VERSION' does not contain '-dev'. Dev branch must use a dev version (e.g. 0.1.0-dev.1)."
+          echo "dev VERSION=$VERSION"
+          # Accept either X.Y.Z-dev.N (normal dev work) or X.Y.Z (release prep).
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-dev\.[0-9]+)?$'; then
+            echo "ERROR: VERSION '$VERSION' is not a valid semver (expected X.Y.Z or X.Y.Z-dev.N)."
             exit 1
           fi
-          echo "OK: VERSION '$VERSION' is a dev version."
+          # Ensure dev is strictly ahead of main.
+          git fetch origin main --depth=1
+          MAIN_VERSION=$(git show origin/main:VERSION 2>/dev/null | tr -d '[:space:]' || echo "0.0.0")
+          echo "main VERSION=$MAIN_VERSION"
+          # Strip -dev suffix for comparison (sort -V treats them as earlier, which we want).
+          # Use sort -V to determine if dev > main.
+          HIGHER=$(printf '%s\n%s\n' "$MAIN_VERSION" "$VERSION" | sort -V | tail -1)
+          if [ "$HIGHER" != "$VERSION" ] || [ "$VERSION" = "$MAIN_VERSION" ]; then
+            echo "ERROR: dev VERSION '$VERSION' must be strictly higher than main VERSION '$MAIN_VERSION'."
+            exit 1
+          fi
+          echo "OK: VERSION '$VERSION' is valid and ahead of main '$MAIN_VERSION'."
 
   lint:
     name: Lint
@@ -344,14 +358,24 @@ jobs:
             echo "No source changes in diff -- skipping"
             exit 0
           fi
+          # Exclusions:
+          # - sp-decoder/, sp-ndi/: Windows-only (Media Foundation, NDI SDK), can't test on Linux runner
+          # - sp-server/src/lib.rs: orchestration glue, integration-tested only
+          # - sp-server/src/obs/: requires live OBS WebSocket, integration-tested only
+          # - sp-server/src/playback/pipeline.rs: cfg(windows) decode loop, untestable on Linux
+          # - sp-server/src/downloader/: shells out to yt-dlp, integration-tested only
+          # - sp-server/src/reprocess/: requires live Gemini API
+          # - sp-server/src/api/websocket: WS upgrade flow, integration-tested
+          # - sp-server/src/playlist/: shells out to yt-dlp
+          # NOTE: sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
+          # NOTE: sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
             --exclude-re 'sp-decoder/' \
             --exclude-re 'sp-ndi/' \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
-            --exclude-re 'sp-server/src/playback/' \
+            --exclude-re 'sp-server/src/playback/pipeline\.rs' \
             --exclude-re 'sp-server/src/downloader/' \
-            --exclude-re 'sp-server/src/resolume/' \
             --exclude-re 'sp-server/src/reprocess/' \
             --exclude-re 'sp-server/src/api/websocket' \
             --exclude-re 'sp-server/src/playlist/'
@@ -708,12 +732,12 @@ jobs:
         shell: powershell
         run: |
           $playlists = @(
-            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; obs_text_source = "ytwarmup_title"; ndi_output_name = "SP-warmup" },
-            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; obs_text_source = "ytpresence_title"; ndi_output_name = "SP-presence" },
-            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; obs_text_source = "ytslow_title"; ndi_output_name = "SP-slow" },
-            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; obs_text_source = "yt90s_title"; ndi_output_name = "SP-90s" },
-            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; obs_text_source = "ytworship_title"; ndi_output_name = "SP-worship" },
-            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; obs_text_source = "ytfast_title"; ndi_output_name = "SP-fast" }
+            @{ name = "ytwarmup";    youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE"; ndi_output_name = "SP-warmup" },
+            @{ name = "ytpresence";  youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveAZ9YDY4ALy9iGxQVrkGRl"; ndi_output_name = "SP-presence" },
+            @{ name = "ytslow";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758Bvd9c7dKV-ZZFQ1jg30ahHFq"; ndi_output_name = "SP-slow" },
+            @{ name = "yt90s";       youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17"; ndi_output_name = "SP-90s" },
+            @{ name = "ytworship";   youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG"; ndi_output_name = "SP-worship" },
+            @{ name = "ytfast";      youtube_url = "https://www.youtube.com/playlist?list=PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U"; ndi_output_name = "SP-fast" }
           )
 
           $existing = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
@@ -723,18 +747,23 @@ jobs:
           foreach ($pl in $playlists) {
             if ($existingNames.ContainsKey($pl.name)) {
               $existingPl = $existingNames[$pl.name]
+              $id = $existingPl.id
               # Update NDI output name if missing or different
               if ($existingPl.ndi_output_name -ne $pl.ndi_output_name) {
                 $update = @{ ndi_output_name = $pl.ndi_output_name } | ConvertTo-Json -Compress
                 $updateBytes = [System.Text.Encoding]::UTF8.GetBytes($update)
-                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$($existingPl.id)" -Method Put -Body $updateBytes -ContentType "application/json" -UseBasicParsing | Out-Null
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists/$id" -Method Put -Body $updateBytes -ContentType "application/json" -UseBasicParsing | Out-Null
                 Write-Host "Updated NDI name for '$($pl.name)' to '$($pl.ndi_output_name)'"
               } else {
                 Write-Host "Playlist '$($pl.name)' already exists with correct config - skipping"
               }
               continue
             }
-            $body = $pl | ConvertTo-Json -Compress
+            $body = @{
+                name = $pl.name
+                youtube_url = $pl.youtube_url
+                ndi_output_name = $pl.ndi_output_name
+            } | ConvertTo-Json -Compress
             $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
             $resp = Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playlists" -Method Post -Body $bytes -ContentType "application/json" -UseBasicParsing
             $created = $resp.Content | ConvertFrom-Json
@@ -814,16 +843,16 @@ jobs:
           $testPl = $null
           foreach ($pl in $playlists) {
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
-            if ($videos.Count -gt 0 -and $pl.obs_text_source) {
+            if ($videos.Count -gt 0) {
               $testPl = $pl
               break
             }
           }
           if (-not $testPl) {
-            Write-Error "FAIL: No playlist with videos and obs_text_source found"
+            Write-Error "FAIL: No playlist with videos found"
             exit 1
           }
-          Write-Host "Testing playback on '$($testPl.name)' (id=$($testPl.id), text_source=$($testPl.obs_text_source))"
+          Write-Host "Testing playback on '$($testPl.name)' (id=$($testPl.id))"
 
           # Trigger play
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
@@ -839,6 +868,88 @@ jobs:
           # Pause playback to clean up
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
           Write-Host "OK: Playback triggered and paused on '$($testPl.name)'"
+
+      - name: Verify Resolume title delivery
+        shell: powershell
+        run: |
+          # Check if Resolume API is reachable. If not, the operator hasn't
+          # started Resolume — log INFO and skip (do not fail CI on operator
+          # environment issues).
+          try {
+            $null = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/product" -TimeoutSec 5
+          } catch {
+            Write-Host "INFO: Resolume Arena REST API not reachable on 127.0.0.1:8090 - skipping Resolume verification"
+            Write-Host "  ($_)"
+            exit 0
+          }
+
+          # Find a playlist with videos and trigger playback.
+          $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
+          $testPl = $null
+          foreach ($pl in $playlists) {
+            $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
+            if ($videos.Count -gt 0) {
+              $testPl = $pl
+              break
+            }
+          }
+          if (-not $testPl) {
+            Write-Error "FAIL: No playlist with videos found for Resolume verification"
+            exit 1
+          }
+          Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+
+          # Wait long enough for title to show: 1.5s show delay + 1s fade-in + buffer.
+          Start-Sleep -Seconds 5
+
+          # Query Resolume composition for #sp-title clips.
+          $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+          $titleClips = @()
+          foreach ($layer in $comp.layers) {
+            foreach ($clip in $layer.clips) {
+              if ($clip.name.value -match '#sp-title') {
+                $titleClips += [pscustomobject]@{
+                  Name = $clip.name.value
+                  Text = $clip.video.sourceparams.Text.value
+                  Opacity = $clip.video.opacity.value
+                }
+              }
+            }
+          }
+
+          Write-Host "Found $($titleClips.Count) #sp-title clips in Resolume composition:"
+          foreach ($c in $titleClips) {
+            Write-Host "  $($c.Name) -> text='$($c.Text)' opacity=$($c.Opacity)"
+          }
+
+          # Cleanup: pause playback before assertions so we always release the player.
+          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+
+          if ($titleClips.Count -eq 0) {
+            # Resolume is reachable but has no #sp-title clips configured.
+            # Operator must create them - this is a configuration issue, not a code bug.
+            Write-Host "INFO: Resolume is reachable but has zero #sp-title clips."
+            Write-Host "      Operator must create at least one clip with '#sp-title' in its name."
+            exit 0
+          }
+
+          # ASSERT: every #sp-title clip must have non-empty text after playback.
+          # If text is empty, SongPlayer's show_title path is broken.
+          $emptyClips = $titleClips | Where-Object { -not $_.Text -or $_.Text.Trim() -eq '' }
+          if ($emptyClips.Count -gt 0) {
+            Write-Error "FAIL: $($emptyClips.Count) of $($titleClips.Count) #sp-title clips have empty text after playback. SongPlayer is not pushing titles to Resolume."
+            exit 1
+          }
+
+          # ASSERT: also check the warning indicator is gone.
+          $withWarning = $titleClips | Where-Object { $_.Text -match [char]0x26A0 }
+          if ($withWarning.Count -gt 0) {
+            Write-Error "FAIL: $($withWarning.Count) clips contain the legacy warning indicator (U+26A0). The redesign should have removed it."
+            exit 1
+          }
+
+          Write-Host "OK: All $($titleClips.Count) #sp-title clips have non-empty, clean title text."
 
       - name: Verify NDI output names configured
         shell: powershell

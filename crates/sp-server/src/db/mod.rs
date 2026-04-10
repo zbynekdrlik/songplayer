@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
-const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_V1)];
+const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3)];
 
 const MIGRATION_V1: &str = "
 CREATE TABLE playlists (
@@ -71,6 +71,15 @@ CREATE TABLE resolume_clip_mappings (
 );
 
 CREATE UNIQUE INDEX idx_clip_mappings_unique ON resolume_clip_mappings(host_id, playlist_id, clip_token);
+";
+
+const MIGRATION_V2: &str = "
+ALTER TABLE playlists ADD COLUMN resolume_title_token TEXT NOT NULL DEFAULT '';
+";
+
+const MIGRATION_V3: &str = "
+ALTER TABLE playlists DROP COLUMN obs_text_source;
+ALTER TABLE playlists DROP COLUMN resolume_title_token;
 ";
 
 /// Create a connection pool backed by a file.
@@ -156,7 +165,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 1);
+        assert_eq!(ver, 3);
     }
 
     #[tokio::test]
@@ -165,7 +174,27 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 1);
+        assert_eq!(ver, 3);
+    }
+
+    #[tokio::test]
+    async fn migration_v3_drops_per_playlist_title_columns() {
+        let pool = setup().await;
+        let cols: Vec<String> = sqlx::query("PRAGMA table_info(playlists)")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get::<String, _>("name"))
+            .collect();
+        assert!(
+            !cols.contains(&"obs_text_source".to_string()),
+            "obs_text_source column should be dropped, columns: {cols:?}"
+        );
+        assert!(
+            !cols.contains(&"resolume_title_token".to_string()),
+            "resolume_title_token column should be dropped, columns: {cols:?}"
+        );
     }
 
     #[tokio::test]
