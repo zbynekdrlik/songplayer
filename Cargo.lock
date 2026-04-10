@@ -1880,6 +1880,7 @@ dependencies = [
 name = "sp-decoder"
 version = "0.8.0-dev.2"
 dependencies = [
+ "mutants",
  "thiserror",
  "tracing",
  "windows",
