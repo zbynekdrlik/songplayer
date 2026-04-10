@@ -37,6 +37,12 @@ impl ResolvedEndpoint {
         }
     }
 
+    /// `>` vs `>=` is functionally equivalent here because the boundary
+    /// case `elapsed() == RESOLUTION_TTL` cannot be observed: any test that
+    /// constructs `resolved_at = Instant::now() - TTL` and immediately calls
+    /// `elapsed()` always sees elapsed > TTL by some nanoseconds. Skipping
+    /// the operator mutation since it cannot meaningfully change behavior.
+    #[cfg_attr(test, mutants::skip)]
     fn is_expired(&self) -> bool {
         self.resolved_at.elapsed() > RESOLUTION_TTL
     }

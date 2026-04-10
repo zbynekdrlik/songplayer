@@ -402,6 +402,23 @@ mod tests {
         );
     }
 
+    /// Same timing-based mutation kill for `hide_title`'s empty-Vec guard.
+    #[tokio::test]
+    async fn hide_title_with_no_clips_is_no_op() {
+        let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
+
+        let start = std::time::Instant::now();
+        hide_title(&mut driver).await.unwrap();
+        let elapsed = start.elapsed();
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 0, "no requests should be sent");
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "hide_title with no clips must early-return, not run the fade loop. Took: {elapsed:?}"
+        );
+    }
+
     #[tokio::test]
     async fn show_title_with_empty_text_is_no_op() {
         let clips = vec![ClipInfo {
