@@ -187,20 +187,14 @@ impl MediaStream for MediaFoundationVideoReader {
         self.duration_ms
     }
 
-    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-        use windows::Win32::System::Variant::VT_I8;
-
-        let ticks: i64 = (position_ms as i64) * 10_000;
-        let mut pv: PROPVARIANT = PROPVARIANT::default();
-        unsafe {
-            (*pv.as_raw()).Anonymous.Anonymous.vt = VT_I8.0 as u16;
-            (*pv.as_raw()).Anonymous.Anonymous.Anonymous.hVal = ticks.into();
-            self.reader
-                .SetCurrentPosition(&windows::core::GUID::zeroed(), &pv)
-                .map_err(|e| DecoderError::Seek(e.to_string()))?;
-        }
-        Ok(())
+    fn seek(&mut self, _position_ms: u64) -> Result<(), DecoderError> {
+        // Seek not yet wired for the video reader — the playback pipeline
+        // does not currently expose scrubbing, so no caller exercises this
+        // path. When dashboard scrubbing is added, this will need a real
+        // MF SetCurrentPosition implementation via PROPVARIANT.
+        Err(DecoderError::Seek(
+            "MediaFoundationVideoReader::seek not yet implemented".into(),
+        ))
     }
 }
 
