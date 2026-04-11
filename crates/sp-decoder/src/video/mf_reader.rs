@@ -206,31 +206,47 @@ impl MediaStream for MediaFoundationVideoReader {
 impl VideoStream for MediaFoundationVideoReader {
     #[cfg_attr(test, mutants::skip)]
     fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
-        let mut flags: u32 = 0;
-        let mut timestamp_100ns: i64 = 0;
-        let mut actual_stream_index: u32 = 0;
-        let mut sample: Option<IMFSample> = None;
+        // When hardware transforms are enabled, `ReadSample` is permitted to
+        // return `S_OK` with a null sample while the decoder is still
+        // draining pre-roll frames — the caller must keep calling until a
+        // sample comes out or the end-of-stream flag is set. Cap the retry
+        // count so a broken source can't spin forever.
+        const MAX_NULL_RETRIES: usize = 64;
 
-        unsafe {
-            self.reader
-                .ReadSample(
-                    VIDEO_STREAM,
-                    0,
-                    Some(&mut actual_stream_index as *mut _),
-                    Some(&mut flags as *mut _),
-                    Some(&mut timestamp_100ns as *mut _),
-                    Some(&mut sample as *mut _),
-                )
-                .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
-        }
+        let mut null_retries = 0_usize;
+        let (sample, timestamp_100ns) = loop {
+            let mut flags: u32 = 0;
+            let mut timestamp_100ns: i64 = 0;
+            let mut actual_stream_index: u32 = 0;
+            let mut sample: Option<IMFSample> = None;
 
-        if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
-            return Ok(None);
-        }
+            unsafe {
+                self.reader
+                    .ReadSample(
+                        VIDEO_STREAM,
+                        0,
+                        Some(&mut actual_stream_index as *mut _),
+                        Some(&mut flags as *mut _),
+                        Some(&mut timestamp_100ns as *mut _),
+                        Some(&mut sample as *mut _),
+                    )
+                    .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
+            }
 
-        let sample = match sample {
-            Some(s) => s,
-            None => return Ok(None),
+            if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                return Ok(None);
+            }
+
+            if let Some(s) = sample {
+                break (s, timestamp_100ns);
+            }
+
+            null_retries += 1;
+            if null_retries >= MAX_NULL_RETRIES {
+                return Err(DecoderError::ReadSample(format!(
+                    "ReadSample returned null without EOS {MAX_NULL_RETRIES} times"
+                )));
+            }
         };
 
         let buffer: IMFMediaBuffer = unsafe {
