@@ -15,6 +15,8 @@ use tracing::{info, warn};
 
 // Used in cfg(windows) blocks:
 #[cfg(windows)]
+use crate::playback::submitter::FrameSubmitter;
+#[cfg(windows)]
 use crossbeam_channel::TryRecvError;
 #[cfg(windows)]
 use std::time::Instant;
@@ -198,7 +200,15 @@ fn run_loop_stub(
 }
 
 /// Windows decode-to-NDI loop.
+///
+/// cargo-mutants: skip — this function drives the real MF + NDI SDK decode
+/// loop which depends on live Windows runtime state (Media Foundation COM
+/// objects, NDI SDK function pointers). On the Linux mutation runner neither
+/// stack is available, so mutations survive with no observable effect. The
+/// cross-platform call-ordering logic is covered by FrameSubmitter's unit
+/// tests in submitter.rs which the mutation runner does exercise.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 fn run_loop_windows(
     cmd_rx: Receiver<PipelineCommand>,
     ndi_name: &str,
@@ -206,9 +216,6 @@ fn run_loop_windows(
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
 ) {
-    use sp_ndi::NdiSender;
-
-    // Use the shared NDI backend (loaded once by the engine).
     let backend = match ndi_backend {
         Some(b) => b,
         None => {
@@ -222,7 +229,10 @@ fn run_loop_windows(
         }
     };
 
-    let sender = match NdiSender::new(backend, ndi_name) {
+    // clock_video = true lets NDI pace `send_video_async` on its internal
+    // high-resolution clock. clock_audio stays false because we submit both
+    // streams from a single thread; clocking both would deadlock on startup.
+    let sender = match sp_ndi::NdiSender::new_with_clocking(backend, ndi_name, true, false) {
         Ok(s) => s,
         Err(e) => {
             error!(%e, "failed to create NDI sender");
@@ -235,10 +245,13 @@ fn run_loop_windows(
         }
     };
 
-    info!(ndi_name, "NDI sender created, waiting for Play command");
+    info!(ndi_name, "NDI sender created with clock_video=true");
 
-    // Send initial black frame so the NDI source appears immediately.
-    send_black_frame(&sender, 1920, 1080);
+    // Initial black frame so the NDI source is visible immediately with a
+    // sane default frame rate. The FrameSubmitter's frame rate is updated
+    // per-file via `set_frame_rate` when real playback starts.
+    let mut submitter = FrameSubmitter::new(sender, 30, 1);
+    submitter.send_black_bgra(1920, 1080);
 
     let mut paused = false;
 
@@ -247,6 +260,7 @@ fn run_loop_windows(
         match cmd_rx.recv() {
             Ok(PipelineCommand::Shutdown) | Err(_) => {
                 info!(playlist_id, "pipeline thread shutting down");
+                submitter.flush();
                 break;
             }
 
@@ -261,7 +275,7 @@ fn run_loop_windows(
 
                     match decode_and_send(
                         &cmd_rx,
-                        &sender,
+                        &mut submitter,
                         &current_path,
                         &event_tx,
                         playlist_id,
@@ -269,17 +283,18 @@ fn run_loop_windows(
                     ) {
                         DecodeResult::Ended => {
                             info!(playlist_id, "video ended naturally");
-                            send_black_frame(&sender, 1920, 1080);
+                            submitter.send_black_bgra(1920, 1080);
                             let _ = event_tx.send((playlist_id, PipelineEvent::Ended));
                             break false;
                         }
                         DecodeResult::Stopped => {
                             info!(playlist_id, "playback stopped");
-                            send_black_frame(&sender, 1920, 1080);
+                            submitter.send_black_bgra(1920, 1080);
                             break false;
                         }
                         DecodeResult::Shutdown => {
                             info!(playlist_id, "shutdown during playback");
+                            submitter.flush();
                             break true;
                         }
                         DecodeResult::NewPlay(new_path) => {
@@ -289,7 +304,7 @@ fn run_loop_windows(
                         }
                         DecodeResult::Error(msg) => {
                             error!(playlist_id, %msg, "decode error");
-                            send_black_frame(&sender, 1920, 1080);
+                            submitter.send_black_bgra(1920, 1080);
                             let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));
                             break false;
                         }
@@ -310,7 +325,7 @@ fn run_loop_windows(
                 debug!(playlist_id, "resumed (no active playback)");
             }
             Ok(PipelineCommand::Stop) => {
-                send_black_frame(&sender, 1920, 1080);
+                submitter.send_black_bgra(1920, 1080);
                 debug!(playlist_id, "stopped (no active playback)");
             }
         }
@@ -336,9 +351,10 @@ enum DecodeResult {
 ///
 /// Returns when the video ends or a Stop/Shutdown/Play command is received.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 fn decode_and_send(
     cmd_rx: &Receiver<PipelineCommand>,
-    sender: &sp_ndi::NdiSender<sp_ndi::RealNdiBackend>,
+    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
     path: &std::path::Path,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
@@ -353,6 +369,10 @@ fn decode_and_send(
         }
     };
 
+    // Apply the file's real frame rate to the submitter so NDI paces correctly.
+    let info = decoder.video_info();
+    submitter.set_frame_rate(info.frame_rate_num as i32, info.frame_rate_den as i32);
+
     // Report start. Duration may be 0 initially — it gets refined as we decode.
     let _ = event_tx.send((
         playlist_id,
@@ -363,78 +383,74 @@ fn decode_and_send(
 
     let mut last_position_report = Instant::now();
     let mut frame_count: u64 = 0;
-    let playback_start = Instant::now();
-    let mut pause_offset = std::time::Duration::ZERO;
-    let mut pause_start: Option<Instant> = None;
 
     loop {
         // Check for commands between frames (non-blocking).
         match cmd_rx.try_recv() {
-            Ok(PipelineCommand::Shutdown) => return DecodeResult::Shutdown,
-            Ok(PipelineCommand::Stop) => return DecodeResult::Stopped,
-            Ok(PipelineCommand::Play(new_path)) => return DecodeResult::NewPlay(new_path),
+            Ok(PipelineCommand::Shutdown) => {
+                submitter.flush();
+                return DecodeResult::Shutdown;
+            }
+            Ok(PipelineCommand::Stop) => {
+                submitter.flush();
+                return DecodeResult::Stopped;
+            }
+            Ok(PipelineCommand::Play(new_path)) => {
+                submitter.flush();
+                return DecodeResult::NewPlay(new_path);
+            }
             Ok(PipelineCommand::Pause) => {
                 *paused = true;
-                pause_start = Some(Instant::now());
                 debug!(playlist_id, "paused during playback");
             }
             Ok(PipelineCommand::Resume) => {
                 *paused = false;
-                if let Some(ps) = pause_start.take() {
-                    pause_offset += ps.elapsed();
-                }
                 debug!(playlist_id, "resumed playback");
             }
             Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => return DecodeResult::Shutdown,
+            Err(TryRecvError::Disconnected) => {
+                submitter.flush();
+                return DecodeResult::Shutdown;
+            }
         }
 
-        // If paused, send black frames at ~10fps and keep checking commands.
+        // If paused, send BGRA black at ~10 fps via the sync path.
         if *paused {
-            send_black_frame(sender, 1920, 1080);
+            submitter.send_black_bgra(1920, 1080);
             std::thread::sleep(std::time::Duration::from_millis(100));
             continue;
         }
 
-        // Decode next synced frame.
-        let result = decoder.next_synced();
-        match result {
+        // Decode the next synced frame.
+        match decoder.next_synced() {
             Ok(Some((video_frame, audio_frames))) => {
-                // Frame pacing: wait until the frame's presentation time.
-                let frame_pts = std::time::Duration::from_millis(video_frame.timestamp_ms);
-                let elapsed = playback_start.elapsed() - pause_offset;
-                if frame_pts > elapsed {
-                    std::thread::sleep(frame_pts - elapsed);
-                }
-
-                let ndi_video = sp_ndi::VideoFrame {
-                    data: video_frame.data,
-                    width: video_frame.width,
-                    height: video_frame.height,
-                    stride: video_frame.stride,
-                    frame_rate_n: 30000,
-                    frame_rate_d: 1001,
-                };
-                sender.send_video(&ndi_video);
-
-                // Send all audio chunks for this video frame.
-                for af in &audio_frames {
-                    let ndi_audio = sp_ndi::AudioFrame {
-                        data: af.data.clone(),
+                // Convert audio chunks to sp_ndi::AudioFrame.
+                let ndi_audio: Vec<sp_ndi::AudioFrame> = audio_frames
+                    .into_iter()
+                    .map(|af| sp_ndi::AudioFrame {
+                        data: af.data,
                         channels: af.channels,
                         sample_rate: af.sample_rate,
-                    };
-                    sender.send_audio(&ndi_audio);
-                }
+                    })
+                    .collect();
+
+                let timestamp_ms = video_frame.timestamp_ms;
+                submitter.submit_nv12(
+                    video_frame.width,
+                    video_frame.height,
+                    video_frame.stride,
+                    video_frame.data,
+                    &ndi_audio,
+                );
 
                 frame_count += 1;
 
-                // Report position every 500ms.
+                // Report position every 500 ms.
                 if last_position_report.elapsed() >= std::time::Duration::from_millis(500) {
                     let _ = event_tx.send((
                         playlist_id,
                         PipelineEvent::Position {
-                            position_ms: video_frame.timestamp_ms,
+                            position_ms: timestamp_ms,
                             duration_ms: decoder.duration_ms(),
                         },
                     ));
@@ -444,28 +460,15 @@ fn decode_and_send(
             Ok(None) => {
                 // End of stream.
                 info!(playlist_id, frame_count, "video decode complete");
+                submitter.flush();
                 return DecodeResult::Ended;
             }
             Err(e) => {
+                submitter.flush();
                 return DecodeResult::Error(format!("Decode error at frame {frame_count}: {e}"));
             }
         }
     }
-}
-
-/// Send a black BGRA frame to keep the NDI source visible.
-#[cfg(windows)]
-fn send_black_frame(sender: &sp_ndi::NdiSender<sp_ndi::RealNdiBackend>, width: u32, height: u32) {
-    let data = vec![0u8; (width * height * 4) as usize];
-    let frame = sp_ndi::VideoFrame {
-        data,
-        width,
-        height,
-        stride: width * 4,
-        frame_rate_n: 30000,
-        frame_rate_d: 1001,
-    };
-    sender.send_video(&frame);
 }
 
 /// Wait for Shutdown command (used when NDI failed to load).

@@ -8,12 +8,13 @@ use std::sync::{Arc, Mutex};
 
 use tracing::{debug, info};
 
+use crate::deinterleave::deinterleave;
 use crate::error::NdiError;
 use crate::ndi_sdk::NdiLib;
 use crate::types::{
     FRAME_FORMAT_PROGRESSIVE, FourCCAudioType, FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE,
     NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_tally_t,
-    NDIlib_video_frame_v2_t,
+    NDIlib_video_frame_v2_t, PixelFormat,
 };
 
 // ---------------------------------------------------------------------------
@@ -23,24 +24,28 @@ use crate::types::{
 /// A video frame ready to send over NDI.
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
-    /// BGRA pixel data.
+    /// Raw pixel data in the layout required by `pixel_format`.
     pub data: Vec<u8>,
     /// Width in pixels.
     pub width: u32,
     /// Height in pixels.
     pub height: u32,
-    /// Bytes per scan line (usually `width * 4` for BGRA).
+    /// Bytes per scan line. For BGRA: `width * 4`. For NV12: Y-plane row bytes
+    /// (usually `width`).
     pub stride: u32,
-    /// Frame rate numerator.
+    /// Frame rate numerator (e.g. 30 for 30 fps, 30000 for 29.97).
     pub frame_rate_n: i32,
-    /// Frame rate denominator.
+    /// Frame rate denominator (e.g. 1 for 30 fps, 1001 for 29.97).
     pub frame_rate_d: i32,
+    /// Pixel format. Determines the FourCC sent to NDI and the stride semantic.
+    pub pixel_format: PixelFormat,
 }
 
-/// An audio frame ready to send over NDI.
+/// An audio frame ready to send over NDI. Data is interleaved f32 PCM — the
+/// sender converts to planar FLTP internally.
 #[derive(Debug, Clone)]
 pub struct AudioFrame {
-    /// Interleaved float samples.
+    /// Interleaved float samples `[c0_s0, c1_s0, …, c0_s1, c1_s1, …]`.
     pub data: Vec<f32>,
     /// Number of audio channels.
     pub channels: u32,
@@ -61,15 +66,24 @@ pub struct Tally {
 
 /// Abstraction over the NDI SDK for testing.
 pub trait NdiBackend: Send + Sync {
-    /// Create a new sender instance. Returns an opaque handle ID.
-    fn send_create(&self, name: &str) -> Result<usize, NdiError>;
+    /// Create a sender with explicit `clock_video` / `clock_audio` flags.
+    fn send_create_with_clocking(
+        &self,
+        name: &str,
+        clock_video: bool,
+        clock_audio: bool,
+    ) -> Result<usize, NdiError>;
+
     /// Destroy a sender instance.
     fn send_destroy(&self, handle: usize);
-    /// Send a video frame.
+
+    /// Send a video frame synchronously (blocks if the sender was created with
+    /// `clock_video = true`).
     #[allow(clippy::too_many_arguments)]
     fn send_video(
         &self,
         handle: usize,
+        four_cc: FourCCVideoType,
         width: i32,
         height: i32,
         stride: i32,
@@ -77,15 +91,43 @@ pub trait NdiBackend: Send + Sync {
         frame_rate_d: i32,
         data: &[u8],
     );
-    /// Send an audio frame.
+
+    /// Schedule a video frame for asynchronous send.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep `data` valid until the next synchronising call on
+    /// this sender — another `send_video_async`, a `send_video`,
+    /// `send_video_flush`, or `send_destroy`. If the buffer is freed before
+    /// that point, the NDI SDK will dereference freed memory (UB).
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn send_video_async(
+        &self,
+        handle: usize,
+        four_cc: FourCCVideoType,
+        width: i32,
+        height: i32,
+        stride: i32,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        data: &[u8],
+    );
+
+    /// Flush the last async frame by calling `send_send_video_async_v2(NULL)`.
+    /// After this returns, the previous frame's buffer may be freed.
+    fn send_video_flush(&self, handle: usize);
+
+    /// Send an audio frame. The backend is responsible for converting the
+    /// interleaved float input into the planar FLTP layout NDI requires.
     fn send_audio(
         &self,
         handle: usize,
         sample_rate: i32,
         channels: i32,
-        samples: i32,
-        data: &[f32],
+        samples_per_channel: i32,
+        interleaved: &[f32],
     );
+
     /// Query tally state. Returns `None` if the timeout expired with no change.
     fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)>;
 }
@@ -94,16 +136,24 @@ pub trait NdiBackend: Send + Sync {
 // Real backend (wraps NdiLib)
 // ---------------------------------------------------------------------------
 
+/// Per-handle state kept by the real backend.
+struct RealHandleState {
+    ptr: *mut NDIlib_send_instance_t,
+    /// Planar audio scratch buffer — reused to avoid per-frame allocation.
+    audio_scratch: Vec<f32>,
+}
+
+// SAFETY: the raw NDI pointer is only touched through NDI SDK calls which are
+// thread-safe per sender instance. The scratch Vec is a plain owned buffer.
+unsafe impl Send for RealHandleState {}
+
 /// Production [`NdiBackend`] backed by the real NDI SDK via [`NdiLib`].
 pub struct RealNdiBackend {
     lib: Arc<NdiLib>,
     next_id: AtomicUsize,
-    /// Map of handle ID → raw NDI sender pointer.
-    handles: Mutex<HashMap<usize, *mut NDIlib_send_instance_t>>,
+    handles: Mutex<HashMap<usize, RealHandleState>>,
 }
 
-// SAFETY: The raw pointers in `handles` are only dereferenced through NDI SDK
-// calls which are thread-safe per-instance. The Mutex serialises map access.
 unsafe impl Send for RealNdiBackend {}
 unsafe impl Sync for RealNdiBackend {}
 
@@ -116,17 +166,53 @@ impl RealNdiBackend {
             handles: Mutex::new(HashMap::new()),
         }
     }
+
+    fn build_video_frame(
+        four_cc: FourCCVideoType,
+        width: i32,
+        height: i32,
+        stride: i32,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        data: *const u8,
+    ) -> NDIlib_video_frame_v2_t {
+        NDIlib_video_frame_v2_t {
+            xres: width,
+            yres: height,
+            four_cc,
+            frame_rate_n,
+            frame_rate_d,
+            picture_aspect_ratio: 0.0,
+            frame_format_type: FRAME_FORMAT_PROGRESSIVE,
+            timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
+            p_data: data,
+            line_stride_in_bytes: stride,
+            p_metadata: ptr::null(),
+            timestamp: 0,
+        }
+    }
 }
 
 impl NdiBackend for RealNdiBackend {
-    fn send_create(&self, name: &str) -> Result<usize, NdiError> {
+    // cargo-mutants: skip — these methods dereference NDI SDK function pointers
+    // that are only loaded when the real NDI runtime is installed. On the Linux
+    // mutation runner the calls cannot be exercised, so mutants would survive
+    // without observable behaviour. The NdiSender + NdiBackend contract is tested
+    // via MockNdiBackend which the mutation runner handles correctly.
+    #[cfg_attr(test, mutants::skip)]
+    fn send_create_with_clocking(
+        &self,
+        name: &str,
+        clock_video: bool,
+        clock_audio: bool,
+    ) -> Result<usize, NdiError> {
         let c_name = CString::new(name).map_err(|_| NdiError::InitFailed)?;
 
         let create_desc = NDIlib_send_create_t {
             p_ndi_name: c_name.as_ptr(),
             p_groups: ptr::null(),
-            clock_video: false,
-            clock_audio: false,
+            clock_video,
+            clock_audio,
         };
 
         let ptr = unsafe { (self.lib.send_create)(&create_desc) };
@@ -135,23 +221,34 @@ impl NdiBackend for RealNdiBackend {
         }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.handles.lock().unwrap().insert(id, ptr);
-        info!("Created NDI sender '{name}' with handle {id}");
+        self.handles.lock().unwrap().insert(
+            id,
+            RealHandleState {
+                ptr,
+                audio_scratch: Vec::new(),
+            },
+        );
+        info!(
+            "Created NDI sender '{name}' handle={id} clock_video={clock_video} clock_audio={clock_audio}"
+        );
         Ok(id)
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_destroy(&self, handle: usize) {
-        if let Some(ptr) = self.handles.lock().unwrap().remove(&handle) {
+        if let Some(state) = self.handles.lock().unwrap().remove(&handle) {
             debug!("Destroying NDI sender handle {handle}");
             unsafe {
-                (self.lib.send_destroy)(ptr);
+                (self.lib.send_destroy)(state.ptr);
             }
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_video(
         &self,
         handle: usize,
+        four_cc: FourCCVideoType,
         width: i32,
         height: i32,
         stride: i32,
@@ -160,66 +257,108 @@ impl NdiBackend for RealNdiBackend {
         data: &[u8],
     ) {
         let handles = self.handles.lock().unwrap();
-        let Some(&ptr) = handles.get(&handle) else {
+        let Some(state) = handles.get(&handle) else {
             return;
         };
-
-        let frame = NDIlib_video_frame_v2_t {
-            xres: width,
-            yres: height,
-            four_cc: FourCCVideoType::BGRA,
+        let frame = Self::build_video_frame(
+            four_cc,
+            width,
+            height,
+            stride,
             frame_rate_n,
             frame_rate_d,
-            picture_aspect_ratio: 0.0,
-            frame_format_type: FRAME_FORMAT_PROGRESSIVE,
-            timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
-            p_data: data.as_ptr(),
-            line_stride_in_bytes: stride,
-            p_metadata: ptr::null(),
-            timestamp: 0,
-        };
-
+            data.as_ptr(),
+        );
         unsafe {
-            (self.lib.send_send_video_v2)(ptr, &frame);
+            (self.lib.send_send_video_v2)(state.ptr, &frame);
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
+    unsafe fn send_video_async(
+        &self,
+        handle: usize,
+        four_cc: FourCCVideoType,
+        width: i32,
+        height: i32,
+        stride: i32,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        data: &[u8],
+    ) {
+        let handles = self.handles.lock().unwrap();
+        let Some(state) = handles.get(&handle) else {
+            return;
+        };
+        let frame = Self::build_video_frame(
+            four_cc,
+            width,
+            height,
+            stride,
+            frame_rate_n,
+            frame_rate_d,
+            data.as_ptr(),
+        );
+        unsafe {
+            (self.lib.send_send_video_async_v2)(state.ptr, &frame);
+        }
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn send_video_flush(&self, handle: usize) {
+        let handles = self.handles.lock().unwrap();
+        let Some(state) = handles.get(&handle) else {
+            return;
+        };
+        unsafe {
+            (self.lib.send_send_video_async_v2)(state.ptr, ptr::null());
+        }
+    }
+
+    #[cfg_attr(test, mutants::skip)]
     fn send_audio(
         &self,
         handle: usize,
         sample_rate: i32,
         channels: i32,
-        samples: i32,
-        data: &[f32],
+        samples_per_channel: i32,
+        interleaved: &[f32],
     ) {
-        let handles = self.handles.lock().unwrap();
-        let Some(&ptr) = handles.get(&handle) else {
+        if channels <= 0 || samples_per_channel <= 0 || interleaved.is_empty() {
+            return;
+        }
+        let mut handles = self.handles.lock().unwrap();
+        let Some(state) = handles.get_mut(&handle) else {
             return;
         };
+
+        // Deinterleave into the per-sender scratch buffer.
+        deinterleave(interleaved, channels as usize, &mut state.audio_scratch);
 
         let frame = NDIlib_audio_frame_v3_t {
             sample_rate,
             no_channels: channels,
-            no_samples: samples,
+            no_samples: samples_per_channel,
             timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
-            four_cc: FourCCAudioType::FltInterleaved,
-            p_data: data.as_ptr(),
-            channel_stride_in_bytes: 0, // interleaved — no per-channel stride
+            four_cc: FourCCAudioType::FLTP,
+            p_data: state.audio_scratch.as_ptr(),
+            channel_stride_in_bytes: samples_per_channel * std::mem::size_of::<f32>() as i32,
             p_metadata: ptr::null(),
             timestamp: 0,
         };
 
         unsafe {
-            (self.lib.send_send_audio_v3)(ptr, &frame);
+            (self.lib.send_send_audio_v3)(state.ptr, &frame);
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)> {
         let handles = self.handles.lock().unwrap();
-        let ptr = *handles.get(&handle)?;
+        let state = handles.get(&handle)?;
 
         let mut tally = NDIlib_tally_t::default();
-        let changed = unsafe { (self.lib.send_get_tally)(ptr, &mut tally, timeout_ms) };
+        let changed = unsafe { (self.lib.send_get_tally)(state.ptr, &mut tally, timeout_ms) };
         if changed {
             Some((tally.on_program, tally.on_preview))
         } else {
@@ -235,23 +374,42 @@ impl NdiBackend for RealNdiBackend {
 /// High-level NDI sender.
 ///
 /// Generic over `B: NdiBackend` so tests can inject a mock.
-/// On [`Drop`], the underlying sender instance is destroyed.
+/// On [`Drop`], the sender flushes any pending async frame and destroys the
+/// underlying NDI instance.
 pub struct NdiSender<B: NdiBackend> {
     backend: Arc<B>,
     handle: usize,
 }
 
 impl<B: NdiBackend> NdiSender<B> {
-    /// Create a new NDI sender with the given source name.
-    pub fn new(backend: Arc<B>, name: &str) -> Result<Self, NdiError> {
-        let handle = backend.send_create(name)?;
+    /// Create a sender with explicit clocking flags. For single-threaded
+    /// video+audio submission, `clock_video=true, clock_audio=false` is the
+    /// SDK-recommended configuration.
+    ///
+    /// Do NOT set both `clock_video` and `clock_audio` to `true` from a
+    /// single submission thread: each clocked send blocks until the wall clock
+    /// reaches the frame's natural time, and the two streams would dead-clock
+    /// each other. Use both-true only when video and audio are submitted from
+    /// separate threads.
+    pub fn new_with_clocking(
+        backend: Arc<B>,
+        name: &str,
+        clock_video: bool,
+        clock_audio: bool,
+    ) -> Result<Self, NdiError> {
+        let handle = backend.send_create_with_clocking(name, clock_video, clock_audio)?;
         Ok(Self { backend, handle })
     }
 
-    /// Send a video frame.
+    /// Send a video frame synchronously.
     pub fn send_video(&self, frame: &VideoFrame) {
+        let four_cc = match frame.pixel_format {
+            PixelFormat::Bgra => FourCCVideoType::BGRA,
+            PixelFormat::Nv12 => FourCCVideoType::NV12,
+        };
         self.backend.send_video(
             self.handle,
+            four_cc,
             frame.width as i32,
             frame.height as i32,
             frame.stride as i32,
@@ -261,13 +419,45 @@ impl<B: NdiBackend> NdiSender<B> {
         );
     }
 
+    /// Schedule a video frame for async send.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep `frame.data` alive until the next synchronising
+    /// call on this sender — another `send_video_async`, a `send_video`,
+    /// `send_video_flush`, or when the sender is dropped. If the buffer is
+    /// freed before that point, the NDI SDK will dereference freed memory (UB).
+    pub unsafe fn send_video_async(&self, frame: &VideoFrame) {
+        let four_cc = match frame.pixel_format {
+            PixelFormat::Bgra => FourCCVideoType::BGRA,
+            PixelFormat::Nv12 => FourCCVideoType::NV12,
+        };
+        unsafe {
+            self.backend.send_video_async(
+                self.handle,
+                four_cc,
+                frame.width as i32,
+                frame.height as i32,
+                frame.stride as i32,
+                frame.frame_rate_n,
+                frame.frame_rate_d,
+                &frame.data,
+            );
+        }
+    }
+
+    /// Release any pending async frame. Must be called before dropping the
+    /// buffer of the last async frame.
+    pub fn send_video_flush(&self) {
+        self.backend.send_video_flush(self.handle);
+    }
+
     /// Send an audio frame.
     pub fn send_audio(&self, frame: &AudioFrame) {
-        let samples_per_channel = if frame.channels > 0 {
-            frame.data.len() as i32 / frame.channels as i32
-        } else {
-            0
-        };
+        if frame.channels == 0 {
+            return;
+        }
+        let samples_per_channel = frame.data.len() as i32 / frame.channels as i32;
         self.backend.send_audio(
             self.handle,
             frame.sample_rate as i32,
@@ -295,42 +485,58 @@ impl<B: NdiBackend> NdiSender<B> {
 
 impl<B: NdiBackend> Drop for NdiSender<B> {
     fn drop(&mut self) {
+        // Flush any pending async frame before destroying — guarantees the SDK
+        // has released its pointer to our last buffer.
+        self.backend.send_video_flush(self.handle);
         self.backend.send_destroy(self.handle);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Mock backend — exposed under the `test-util` feature for downstream tests.
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util {
     use super::*;
     use std::sync::Mutex as StdMutex;
 
     /// A mock backend that records every call for assertion.
     #[derive(Default)]
-    struct MockNdiBackend {
+    pub struct MockNdiBackend {
         calls: StdMutex<Vec<String>>,
         tally_response: StdMutex<Option<(bool, bool)>>,
+        last_audio_planar: StdMutex<Vec<f32>>,
     }
 
     impl MockNdiBackend {
-        fn calls(&self) -> Vec<String> {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn calls(&self) -> Vec<String> {
             self.calls.lock().unwrap().clone()
         }
 
-        fn set_tally(&self, on_program: bool, on_preview: bool) {
+        pub fn last_audio_planar(&self) -> Vec<f32> {
+            self.last_audio_planar.lock().unwrap().clone()
+        }
+
+        pub fn set_tally(&self, on_program: bool, on_preview: bool) {
             *self.tally_response.lock().unwrap() = Some((on_program, on_preview));
         }
     }
 
     impl NdiBackend for MockNdiBackend {
-        fn send_create(&self, name: &str) -> Result<usize, NdiError> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(format!("send_create({name})"));
+        fn send_create_with_clocking(
+            &self,
+            name: &str,
+            clock_video: bool,
+            clock_audio: bool,
+        ) -> Result<usize, NdiError> {
+            self.calls.lock().unwrap().push(format!(
+                "send_create_with_clocking({name},{clock_video},{clock_audio})"
+            ));
             Ok(42)
         }
 
@@ -344,6 +550,7 @@ mod tests {
         fn send_video(
             &self,
             handle: usize,
+            four_cc: FourCCVideoType,
             width: i32,
             height: i32,
             stride: i32,
@@ -352,8 +559,31 @@ mod tests {
             _data: &[u8],
         ) {
             self.calls.lock().unwrap().push(format!(
-                "send_video({handle}, {width}x{height}, stride={stride}, {frame_rate_n}/{frame_rate_d})"
+                "send_video({handle},{four_cc:?},{width}x{height},stride={stride},{frame_rate_n}/{frame_rate_d})"
             ));
+        }
+
+        unsafe fn send_video_async(
+            &self,
+            handle: usize,
+            four_cc: FourCCVideoType,
+            width: i32,
+            height: i32,
+            stride: i32,
+            frame_rate_n: i32,
+            frame_rate_d: i32,
+            _data: &[u8],
+        ) {
+            self.calls.lock().unwrap().push(format!(
+                "send_video_async({handle},{four_cc:?},{width}x{height},stride={stride},{frame_rate_n}/{frame_rate_d})"
+            ));
+        }
+
+        fn send_video_flush(&self, handle: usize) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("send_video_flush({handle})"));
         }
 
         fn send_audio(
@@ -361,113 +591,213 @@ mod tests {
             handle: usize,
             sample_rate: i32,
             channels: i32,
-            samples: i32,
-            _data: &[f32],
+            samples_per_channel: i32,
+            interleaved: &[f32],
         ) {
             self.calls.lock().unwrap().push(format!(
-                "send_audio({handle}, sr={sample_rate}, ch={channels}, smp={samples})"
+                "send_audio({handle},sr={sample_rate},ch={channels},spc={samples_per_channel})"
             ));
+            // Record the planar form for tests that want to verify layout.
+            let mut scratch = Vec::new();
+            crate::deinterleave::deinterleave(interleaved, channels as usize, &mut scratch);
+            *self.last_audio_planar.lock().unwrap() = scratch;
         }
 
         fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)> {
             self.calls
                 .lock()
                 .unwrap()
-                .push(format!("send_get_tally({handle}, {timeout_ms})"));
+                .push(format!("send_get_tally({handle},{timeout_ms})"));
             *self.tally_response.lock().unwrap()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_util::MockNdiBackend;
 
     #[test]
-    fn sender_new_calls_backend_create() {
-        let backend = Arc::new(MockNdiBackend::default());
-        let _sender = NdiSender::new(backend.clone(), "TestSrc").unwrap();
-        assert_eq!(backend.calls(), vec!["send_create(TestSrc)"]);
+    fn new_with_clocking_defaults_false_false() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let _s = NdiSender::new_with_clocking(backend.clone(), "X", false, false).unwrap();
+        let calls = backend.calls();
+        assert_eq!(calls[0], "send_create_with_clocking(X,false,false)");
     }
 
     #[test]
-    fn sender_send_video_forwards_dimensions() {
-        let backend = Arc::new(MockNdiBackend::default());
-        let sender = NdiSender::new(backend.clone(), "V").unwrap();
+    fn new_with_clocking_forwards_flags() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let _s = NdiSender::new_with_clocking(backend.clone(), "Y", true, false).unwrap();
+        let calls = backend.calls();
+        assert_eq!(calls[0], "send_create_with_clocking(Y,true,false)");
+    }
+
+    #[test]
+    fn send_video_async_records_nv12_fourcc_and_size() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "V", false, false).unwrap();
 
         let frame = VideoFrame {
-            data: vec![0u8; 1920 * 1080 * 4],
+            data: vec![0u8; 1920 * 1080 * 3 / 2],
             width: 1920,
             height: 1080,
-            stride: 1920 * 4,
-            frame_rate_n: 30000,
-            frame_rate_d: 1001,
+            stride: 1920,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            pixel_format: PixelFormat::Nv12,
         };
-        sender.send_video(&frame);
-
+        // SAFETY: `frame` outlives this call and a flush happens on drop.
+        unsafe { sender.send_video_async(&frame) };
         let calls = backend.calls();
-        assert_eq!(calls.len(), 2); // create + send_video
         assert_eq!(
             calls[1],
-            "send_video(42, 1920x1080, stride=7680, 30000/1001)"
+            "send_video_async(42,NV12,1920x1080,stride=1920,30/1)"
         );
     }
 
     #[test]
-    fn sender_send_audio_computes_samples_per_channel() {
-        let backend = Arc::new(MockNdiBackend::default());
-        let sender = NdiSender::new(backend.clone(), "A").unwrap();
+    fn async_round_trip_records_async_async_flush_in_order() {
+        // This exercises the double-buffer pattern Task 10's FrameSubmitter relies
+        // on: two async sends in sequence (the second acts as the sync point that
+        // releases the first's buffer), followed by an explicit flush that releases
+        // the second's buffer. The mock records all three calls in the exact order.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "R", false, false).unwrap();
 
-        // 2 channels, 480 total samples → 240 per channel
+        let frame_a = VideoFrame {
+            data: vec![0u8; 4 * 2 * 3 / 2],
+            width: 4,
+            height: 2,
+            stride: 4,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            pixel_format: PixelFormat::Nv12,
+        };
+        let frame_b = VideoFrame {
+            data: vec![0u8; 4 * 2 * 3 / 2],
+            width: 4,
+            height: 2,
+            stride: 4,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            pixel_format: PixelFormat::Nv12,
+        };
+
+        // SAFETY: the buffers in `frame_a` and `frame_b` outlive every call below,
+        // and a flush releases the SDK's last retained pointer before they drop.
+        unsafe {
+            sender.send_video_async(&frame_a);
+            sender.send_video_async(&frame_b);
+        }
+        sender.send_video_flush();
+
+        let calls = backend.calls();
+        // create, async_a, async_b, flush — skipping the later drop flush+destroy
+        assert_eq!(calls[0], "send_create_with_clocking(R,false,false)");
+        assert_eq!(calls[1], "send_video_async(42,NV12,4x2,stride=4,30/1)");
+        assert_eq!(calls[2], "send_video_async(42,NV12,4x2,stride=4,30/1)");
+        assert_eq!(calls[3], "send_video_flush(42)");
+    }
+
+    #[test]
+    fn send_video_records_bgra_fourcc() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "B", false, false).unwrap();
+        let frame = VideoFrame {
+            data: vec![0u8; 4],
+            width: 1,
+            height: 1,
+            stride: 4,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            pixel_format: PixelFormat::Bgra,
+        };
+        sender.send_video(&frame);
+        let calls = backend.calls();
+        assert_eq!(calls[1], "send_video(42,BGRA,1x1,stride=4,30/1)");
+    }
+
+    #[test]
+    fn send_audio_records_samples_and_planarises() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "A", false, false).unwrap();
+
+        // 2ch interleaved, 4 samples/ch → 8 floats
         let frame = AudioFrame {
-            data: vec![0.0f32; 480],
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
             channels: 2,
             sample_rate: 48000,
         };
         sender.send_audio(&frame);
 
         let calls = backend.calls();
-        assert_eq!(calls[1], "send_audio(42, sr=48000, ch=2, smp=240)");
+        assert_eq!(calls[1], "send_audio(42,sr=48000,ch=2,spc=4)");
+
+        // Planar: [1,3,5,7, 2,4,6,8]
+        assert_eq!(
+            backend.last_audio_planar(),
+            vec![1.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0, 8.0]
+        );
     }
 
     #[test]
-    fn sender_drop_calls_destroy() {
-        let backend = Arc::new(MockNdiBackend::default());
+    fn send_video_flush_is_recorded() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "F", false, false).unwrap();
+        sender.send_video_flush();
+        let calls = backend.calls();
+        assert_eq!(calls.last().unwrap(), "send_video_flush(42)");
+    }
+
+    #[test]
+    fn sender_drop_flushes_then_destroys() {
+        let backend = Arc::new(MockNdiBackend::new());
         {
-            let _sender = NdiSender::new(backend.clone(), "D").unwrap();
-            // sender dropped here
+            let _s = NdiSender::new_with_clocking(backend.clone(), "D", false, false).unwrap();
         }
         let calls = backend.calls();
-        assert_eq!(calls.last().unwrap(), "send_destroy(42)");
+        // create, then on drop: flush, then destroy
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0], "send_create_with_clocking(D,false,false)");
+        assert_eq!(calls[1], "send_video_flush(42)");
+        assert_eq!(calls[2], "send_destroy(42)");
     }
 
     #[test]
-    fn sender_get_tally_returns_none_when_no_change() {
-        let backend = Arc::new(MockNdiBackend::default());
-        let sender = NdiSender::new(backend.clone(), "T").unwrap();
-
-        assert!(sender.get_tally(100).is_none());
+    fn send_audio_zero_channels_is_noop() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Z", false, false).unwrap();
+        let frame = AudioFrame {
+            data: vec![1.0, 2.0],
+            channels: 0,
+            sample_rate: 48000,
+        };
+        sender.send_audio(&frame);
+        // Only create + drop-flush + destroy — no send_audio recorded.
+        let calls = backend.calls();
+        assert!(calls.iter().all(|c| !c.starts_with("send_audio")));
     }
 
     #[test]
-    fn sender_get_tally_returns_values() {
-        let backend = Arc::new(MockNdiBackend::default());
+    fn get_tally_returns_recorded_value() {
+        let backend = Arc::new(MockNdiBackend::new());
         backend.set_tally(true, false);
-        let sender = NdiSender::new(backend.clone(), "T").unwrap();
-
+        let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
         let tally = sender.get_tally(100).unwrap();
         assert!(tally.on_program);
         assert!(!tally.on_preview);
     }
 
     #[test]
-    fn sender_get_tally_both_true() {
-        let backend = Arc::new(MockNdiBackend::default());
-        backend.set_tally(true, true);
-        let sender = NdiSender::new(backend.clone(), "T").unwrap();
-
-        let tally = sender.get_tally(0).unwrap();
-        assert_eq!(
-            tally,
-            Tally {
-                on_program: true,
-                on_preview: true
-            }
-        );
+    fn get_tally_returns_none_by_default() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
+        assert!(sender.get_tally(0).is_none());
     }
 }

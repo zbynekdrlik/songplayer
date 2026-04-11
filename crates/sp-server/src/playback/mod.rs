@@ -6,6 +6,7 @@
 
 pub mod pipeline;
 pub mod state;
+pub mod submitter;
 
 use std::collections::HashMap;
 

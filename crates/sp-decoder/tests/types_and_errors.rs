@@ -1,6 +1,6 @@
 //! Tests for the cross-platform types and error module.
 
-use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError};
+use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, PixelFormat};
 
 // ---------------------------------------------------------------------------
 // DecoderError Display tests
@@ -67,6 +67,7 @@ fn video_frame_fields() {
         height: 1080,
         stride: 1920 * 4,
         timestamp_ms: 42,
+        pixel_format: PixelFormat::Nv12,
     };
     assert_eq!(frame.width, 1920);
     assert_eq!(frame.height, 1080);
@@ -83,6 +84,7 @@ fn video_frame_clone() {
         height: 2,
         stride: 8,
         timestamp_ms: 100,
+        pixel_format: PixelFormat::Nv12,
     };
     let cloned = frame.clone();
     assert_eq!(cloned.data, frame.data);
@@ -97,6 +99,7 @@ fn video_frame_debug() {
         height: 0,
         stride: 0,
         timestamp_ms: 0,
+        pixel_format: PixelFormat::Nv12,
     };
     let dbg = format!("{frame:?}");
     assert!(dbg.contains("DecodedVideoFrame"));

@@ -23,6 +23,8 @@ type FnSendCreate =
 type FnSendDestroy = unsafe extern "C" fn(*mut NDIlib_send_instance_t);
 type FnSendVideoV2 =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *const NDIlib_video_frame_v2_t);
+type FnSendVideoAsyncV2 =
+    unsafe extern "C" fn(*mut NDIlib_send_instance_t, *const NDIlib_video_frame_v2_t);
 type FnSendAudioV3 =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *const NDIlib_audio_frame_v3_t);
 type FnSendGetTally =
@@ -45,6 +47,7 @@ pub struct NdiLib {
     pub(crate) send_create: FnSendCreate,
     pub(crate) send_destroy: FnSendDestroy,
     pub(crate) send_send_video_v2: FnSendVideoV2,
+    pub(crate) send_send_video_async_v2: FnSendVideoAsyncV2,
     pub(crate) send_send_audio_v3: FnSendAudioV3,
     pub(crate) send_get_tally: FnSendGetTally,
 }
@@ -77,6 +80,10 @@ impl NdiLib {
             let send_destroy = Self::resolve::<FnSendDestroy>(&library, b"NDIlib_send_destroy\0")?;
             let send_send_video_v2 =
                 Self::resolve::<FnSendVideoV2>(&library, b"NDIlib_send_send_video_v2\0")?;
+            let send_send_video_async_v2 = Self::resolve::<FnSendVideoAsyncV2>(
+                &library,
+                b"NDIlib_send_send_video_async_v2\0",
+            )?;
             let send_send_audio_v3 =
                 Self::resolve::<FnSendAudioV3>(&library, b"NDIlib_send_send_audio_v3\0")?;
             let send_get_tally =
@@ -97,6 +104,7 @@ impl NdiLib {
                 send_create,
                 send_destroy,
                 send_send_video_v2,
+                send_send_video_async_v2,
                 send_send_audio_v3,
                 send_get_tally,
             })

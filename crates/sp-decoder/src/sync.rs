@@ -41,6 +41,12 @@ impl SyncedDecoder {
         self.reader.duration_ms()
     }
 
+    /// Video stream metadata forwarded from the underlying reader.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn video_info(&self) -> crate::types::VideoStreamInfo {
+        self.reader.video_info()
+    }
+
     /// Clear buffered audio (e.g. when restarting playback).
     pub fn clear_buffer(&mut self) {
         self.pending_audio.clear();
