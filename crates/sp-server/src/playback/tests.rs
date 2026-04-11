@@ -556,16 +556,17 @@ async fn handle_previous_pops_history_and_plays() {
         .execute(&pool)
         .await
         .unwrap();
-    // Seed videos 10, 11, 12 with valid normalized file paths so
-    // handle_previous can successfully look them up.
+    // Seed videos 10, 11, 12 with valid normalized sidecar paths so
+    // handle_previous can successfully look them up via get_song_paths.
     for vid in [10_i64, 11, 12] {
         sqlx::query(
-            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path) \
-             VALUES (?, 1, ?, 1, ?)",
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+             VALUES (?, 1, ?, 1, ?, ?)",
         )
         .bind(vid)
         .bind(format!("yt{vid}"))
-        .bind(format!("/tmp/video_{vid}.mp4"))
+        .bind(format!("/tmp/video_{vid}_video.mp4"))
+        .bind(format!("/tmp/video_{vid}_audio.flac"))
         .execute(&pool)
         .await
         .unwrap();

@@ -237,38 +237,6 @@ pub fn is_valid_video_id(s: &str) -> bool {
     VIDEO_ID_RE.is_match(s)
 }
 
-// ---------------------------------------------------------------------------
-// Deprecated shims — kept until Task 10 removes all call sites.
-// ---------------------------------------------------------------------------
-
-/// Deprecated shim for the legacy `normalized_filename` used by the
-/// downloader and reprocess worker. New code must call [`video_filename`]
-/// or [`audio_filename`] directly. Removed in Task 10.
-#[deprecated = "use video_filename or audio_filename"]
-#[allow(dead_code)]
-pub fn normalized_filename(
-    song: &str,
-    artist: &str,
-    video_id: &str,
-    gemini_failed: bool,
-) -> String {
-    // Returns the audio filename for back-compat — legacy call sites will
-    // be updated in Task 10 to emit both sidecars.
-    audio_filename(song, artist, video_id, gemini_failed)
-}
-
-/// Deprecated shim for the legacy `CachedVideo` type. New code must use
-/// [`CachedSong`]. Removed in Task 10.
-#[allow(dead_code)]
-#[deprecated = "use CachedSong"]
-pub struct CachedVideo {
-    pub video_id: String,
-    pub file_path: PathBuf,
-    pub song: String,
-    pub artist: String,
-    pub gemini_failed: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

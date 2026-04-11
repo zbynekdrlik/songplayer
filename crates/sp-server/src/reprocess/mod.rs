@@ -57,6 +57,7 @@ struct ReprocessRow {
     youtube_id: String,
     title: String,
     file_path: String,
+    audio_file_path: Option<String>,
 }
 
 /// Outcome of attempting to reprocess a single video.
@@ -205,7 +206,9 @@ impl ReprocessWorker {
     /// Query videos with gemini_failed = 1 AND normalized = 1.
     async fn fetch_gemini_failed(&self) -> Result<Vec<ReprocessRow>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, youtube_id, COALESCE(title, '') AS title, COALESCE(file_path, '') AS file_path
+            "SELECT id, youtube_id, COALESCE(title, '') AS title,
+                    COALESCE(file_path, '') AS file_path,
+                    audio_file_path
              FROM videos
              WHERE gemini_failed = 1 AND normalized = 1
              ORDER BY id",
@@ -220,6 +223,7 @@ impl ReprocessWorker {
                 youtube_id: r.get("youtube_id"),
                 title: r.get("title"),
                 file_path: r.get("file_path"),
+                audio_file_path: r.get::<Option<String>, _>("audio_file_path"),
             })
             .collect())
     }
@@ -260,54 +264,79 @@ impl ReprocessWorker {
         // start from stage 0 again.
         self.per_video_backoff.remove(&row.id);
 
-        // Rename file: replace _gf suffix if present.
-        let new_file_path = if row.file_path.contains("_gf.mp4") {
-            #[allow(deprecated)]
-            let new_name = crate::downloader::cache::normalized_filename(
-                &meta.song,
-                &meta.artist,
-                &row.youtube_id,
-                false,
-            );
-            let new_path = self.cache_dir.join(&new_name);
+        // Rename BOTH sidecars on successful metadata upgrade — strip the _gf marker.
+        let cache_dir = &self.cache_dir;
+        let new_video_name = crate::downloader::cache::video_filename(
+            &meta.song,
+            &meta.artist,
+            &row.youtube_id,
+            false,
+        );
+        let new_audio_name = crate::downloader::cache::audio_filename(
+            &meta.song,
+            &meta.artist,
+            &row.youtube_id,
+            false,
+        );
+        let new_video_path = cache_dir.join(&new_video_name);
+        let new_audio_path = cache_dir.join(&new_audio_name);
 
-            if !row.file_path.is_empty() {
-                let old_path = std::path::Path::new(&row.file_path);
-                if old_path.exists() {
-                    if let Err(e) = tokio::fs::rename(old_path, &new_path).await {
+        let new_video_str: String = if !row.file_path.is_empty() {
+            let old_v = std::path::Path::new(&row.file_path);
+            if old_v.exists() {
+                match tokio::fs::rename(old_v, &new_video_path).await {
+                    Ok(()) => new_video_path.to_string_lossy().into_owned(),
+                    Err(e) => {
                         warn!(
                             video_id = %row.youtube_id,
                             old = %row.file_path,
-                            new = %new_path.display(),
-                            "rename failed: {e}"
+                            new = %new_video_path.display(),
+                            "video rename failed: {e}"
                         );
-                        // Continue with DB update even if rename fails —
-                        // the old path still works.
                         row.file_path.clone()
-                    } else {
-                        new_path.to_string_lossy().into_owned()
                     }
-                } else {
-                    new_path.to_string_lossy().into_owned()
                 }
             } else {
-                row.file_path.clone()
+                new_video_path.to_string_lossy().into_owned()
             }
         } else {
             row.file_path.clone()
         };
 
-        // Update DB.
+        let new_audio_str: String = if let Some(old_audio_str) = row.audio_file_path.as_ref() {
+            let old_a = std::path::Path::new(old_audio_str);
+            if old_a.exists() {
+                match tokio::fs::rename(old_a, &new_audio_path).await {
+                    Ok(()) => new_audio_path.to_string_lossy().into_owned(),
+                    Err(e) => {
+                        warn!(
+                            video_id = %row.youtube_id,
+                            old = %old_audio_str,
+                            new = %new_audio_path.display(),
+                            "audio rename failed: {e}"
+                        );
+                        old_audio_str.clone()
+                    }
+                }
+            } else {
+                new_audio_path.to_string_lossy().into_owned()
+            }
+        } else {
+            String::new()
+        };
+
+        // Update DB with both paths.
         sqlx::query(
             "UPDATE videos
              SET song = ?, artist = ?, metadata_source = ?,
-                 gemini_failed = 0, file_path = ?
+                 gemini_failed = 0, file_path = ?, audio_file_path = ?
              WHERE id = ?",
         )
         .bind(&meta.song)
         .bind(&meta.artist)
         .bind(meta.source.as_str())
-        .bind(&new_file_path)
+        .bind(&new_video_str)
+        .bind(&new_audio_str)
         .bind(row.id)
         .execute(&self.pool)
         .await?;

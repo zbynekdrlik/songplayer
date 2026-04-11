@@ -394,16 +394,20 @@ impl PlaybackEngine {
             return;
         };
 
-        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
-            Ok(Some(file_path)) => {
+        match crate::db::models::get_song_paths(&self.pool, video_id).await {
+            Ok(Some((video_path, audio_path))) => {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.current_video_id = Some(video_id);
                     pp.state = PlayState::Playing { video_id };
                     info!(
                         playlist_id,
-                        video_id, %file_path, "Previous → replaying video from history"
+                        video_id, %video_path, %audio_path,
+                        "Previous → replaying song from history"
                     );
-                    pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+                    pp.pipeline.send(PipelineCommand::Play {
+                        video: video_path.into(),
+                        audio: audio_path.into(),
+                    });
 
                     // Broadcast the state change so the dashboard updates.
                     let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
@@ -416,13 +420,13 @@ impl PlaybackEngine {
             Ok(None) => {
                 warn!(
                     playlist_id,
-                    video_id, "Previous: history entry has no file_path"
+                    video_id, "Previous: history entry has no paths"
                 );
             }
             Err(e) => {
                 warn!(
                     playlist_id,
-                    video_id, %e, "Previous: failed to get file_path"
+                    video_id, %e, "Previous: failed to get paths"
                 );
             }
         }
@@ -590,14 +594,12 @@ impl PlaybackEngine {
                 match VideoSelector::select_next(&self.pool, playlist_id, mode, current).await {
                     Ok(Some(video_id)) => {
                         debug!(playlist_id, video_id, "selected video");
-                        // Look up the file path from DB.
-                        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
-                            Ok(Some(file_path)) => {
+                        match crate::db::models::get_song_paths(&self.pool, video_id).await {
+                            Ok(Some((video_path, audio_path))) => {
                                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                                     // Push the previous video to the
                                     // per-playlist history stack before
-                                    // overwriting `current_video_id`, so the
-                                    // Previous button can replay it.
+                                    // overwriting `current_video_id`.
                                     if let Some(prev) = pp.current_video_id {
                                         pp.history.push_back(prev);
                                         while pp.history.len() > PREVIOUS_HISTORY_CAPACITY {
@@ -606,10 +608,16 @@ impl PlaybackEngine {
                                     }
                                     pp.current_video_id = Some(video_id);
                                     pp.state = PlayState::Playing { video_id };
-                                    info!(playlist_id, video_id, %file_path, "sent Play command");
-                                    pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+                                    info!(
+                                        playlist_id, video_id,
+                                        %video_path, %audio_path,
+                                        "sent Play command"
+                                    );
+                                    pp.pipeline.send(PipelineCommand::Play {
+                                        video: video_path.into(),
+                                        audio: audio_path.into(),
+                                    });
 
-                                    // Record play in history.
                                     if let Err(e) = crate::db::models::record_play(
                                         &self.pool,
                                         playlist_id,
@@ -624,11 +632,11 @@ impl PlaybackEngine {
                             Ok(None) => {
                                 warn!(
                                     playlist_id,
-                                    video_id, "video has no file_path (not normalized?)"
+                                    video_id, "video has no sidecar paths (not normalized?)"
                                 );
                             }
                             Err(e) => {
-                                warn!(playlist_id, video_id, %e, "failed to get video file_path");
+                                warn!(playlist_id, video_id, %e, "failed to get song paths");
                             }
                         }
                     }
@@ -645,15 +653,18 @@ impl PlaybackEngine {
                 if let Some(pp) = self.pipelines.get(&playlist_id) {
                     if let Some(video_id) = pp.current_video_id {
                         debug!(playlist_id, "replaying current video");
-                        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
-                            Ok(Some(file_path)) => {
-                                pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+                        match crate::db::models::get_song_paths(&self.pool, video_id).await {
+                            Ok(Some((video_path, audio_path))) => {
+                                pp.pipeline.send(PipelineCommand::Play {
+                                    video: video_path.into(),
+                                    audio: audio_path.into(),
+                                });
                             }
                             Ok(None) => {
-                                warn!(playlist_id, video_id, "no file_path for replay");
+                                warn!(playlist_id, video_id, "no song paths for replay");
                             }
                             Err(e) => {
-                                warn!(playlist_id, video_id, %e, "failed to get file_path for replay");
+                                warn!(playlist_id, video_id, %e, "failed to get song paths for replay");
                             }
                         }
                     }
