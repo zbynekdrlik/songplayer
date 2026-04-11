@@ -352,6 +352,17 @@ pub async fn skip(
     StatusCode::NO_CONTENT
 }
 
+pub async fn previous(
+    State(state): State<AppState>,
+    Path(playlist_id): Path<i64>,
+) -> impl IntoResponse {
+    let _ = state
+        .engine_tx
+        .send(EngineCommand::Previous { playlist_id })
+        .await;
+    StatusCode::NO_CONTENT
+}
+
 pub async fn set_mode(
     State(state): State<AppState>,
     Path(playlist_id): Path<i64>,
@@ -824,6 +835,57 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn playback_previous_returns_no_content() {
+        let state = test_state().await;
+        let app = app(state);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/playback/1/previous")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Regression for issue #8: the dashboard used to POST to
+    /// `/api/v1/control` which does not exist on the server, returning 405
+    /// from the static-file fallback router. The dashboard now uses the
+    /// path-based endpoints; this test asserts that the bogus legacy path
+    /// is still NOT handled, which prevents accidental re-introduction.
+    #[tokio::test]
+    async fn legacy_control_path_is_not_handled() {
+        let state = test_state().await;
+        let app = app(state);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"type":"Play","data":{"playlist_id":1}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Without a static-file fallback in this test (None dist_dir), the
+        // router's default behaviour for an unknown path is 404. Either 404
+        // or 405 is acceptable — what matters is that the path is NOT a
+        // successful 2xx, i.e. the dashboard MUST NOT rely on it.
+        assert!(
+            !resp.status().is_success(),
+            "/api/v1/control must not be a valid playback endpoint"
+        );
     }
 
     #[tokio::test]

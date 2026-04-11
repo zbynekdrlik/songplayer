@@ -65,6 +65,12 @@ pub enum EngineCommand {
     Skip {
         playlist_id: i64,
     },
+    /// Go back to the previous track. Currently treated as a Skip —
+    /// true history tracking requires a per-playlist play-history stack
+    /// which has not been implemented yet.
+    Previous {
+        playlist_id: i64,
+    },
     SetMode {
         playlist_id: i64,
         mode: PlaybackMode,
@@ -468,6 +474,13 @@ pub async fn start(
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOff).await;
                         }
                         EngineCommand::Skip { playlist_id } => {
+                            engine.handle_command(playlist_id, playback::state::PlayEvent::Skip).await;
+                        }
+                        EngineCommand::Previous { playlist_id } => {
+                            // TODO: real previous-track history stack. Until
+                            // that exists, Previous re-uses the Skip transition
+                            // so clicking Prev advances to another randomly
+                            // selected track (matches Skip behaviour).
                             engine.handle_command(playlist_id, playback::state::PlayEvent::Skip).await;
                         }
                         EngineCommand::SetMode { playlist_id, mode } => {
