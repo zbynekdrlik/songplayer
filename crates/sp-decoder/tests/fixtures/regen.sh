@@ -17,12 +17,18 @@ ffmpeg -y \
   -c:a flac -compression_level 5 \
   silent_3s.flac
 
-# 32x32 black H.264 video, exactly 3.000 seconds, no audio track.
-# yuv420p and x264 baseline keep the file tiny (~3 KB) and ensure Media
-# Foundation on Windows can open it without any codec pack.
+# 160x120 testsrc2 H.264 video, exactly 3.000 seconds, no audio track.
+#
+# The original intent was a 32x32 all-black fixture (smaller file) but
+# Media Foundation's H.264 decoder returned end-of-stream immediately on
+# such a tiny all-zero source — either a minimum-size constraint inside
+# the hardware transform or an optimisation that folds constant-colour
+# frames away. testsrc2 at 160x120 produces a real coloured test pattern
+# that MF decodes normally. The filename is kept as `black_3s.mp4` for
+# history; the test fixture is no longer black, only silent and tiny.
 ffmpeg -y \
-  -f lavfi -i "color=c=black:s=32x32:d=3:r=30" \
-  -c:v libx264 -profile:v baseline -pix_fmt yuv420p \
+  -f lavfi -i "testsrc2=s=160x120:d=3:r=30" \
+  -c:v libx264 -pix_fmt yuv420p \
   -an \
   black_3s.mp4
 

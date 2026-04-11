@@ -27,8 +27,8 @@ fn mf_video_reader_reports_nonzero_size() {
         .join("fixtures")
         .join("black_3s.mp4");
     let reader = MediaFoundationVideoReader::open(&fixture).expect("open");
-    assert_eq!(reader.width(), 32);
-    assert_eq!(reader.height(), 32);
+    assert_eq!(reader.width(), 160);
+    assert_eq!(reader.height(), 120);
     let (num, den) = reader.frame_rate();
     assert!(num > 0 && den > 0);
 }
