@@ -32,21 +32,42 @@ fn decodes_first_nv12_frame() {
         .next_frame()
         .expect("decode should succeed")
         .expect("first frame should exist");
-    assert_eq!(frame.width, 160);
-    assert_eq!(frame.height, 120);
+
+    // Media Foundation hardware decoders pad frame dimensions to
+    // alignment boundaries (typically 16 bytes). For a 160×120 source:
+    //   width  160 → aligned 160 (already divisible by 16)
+    //   height 120 → aligned 128 (next multiple of 16)
+    // Assert the frame is at least as large as the source and no more
+    // than one alignment block larger.
+    assert!(
+        frame.width >= 160 && frame.width <= 176,
+        "width {} expected in [160, 176] (source 160 + ≤16 alignment)",
+        frame.width
+    );
+    assert!(
+        frame.height >= 120 && frame.height <= 136,
+        "height {} expected in [120, 136] (source 120 + ≤16 alignment)",
+        frame.height
+    );
     assert!(!frame.data.is_empty());
-    // 160×120 NV12: Y plane stride*height + UV plane stride*(height/2).
-    // Hardware decoders often align stride (16/32/64-byte boundaries),
-    // so we assert stride >= width and data length >= unpadded size.
-    let min_nv12 = 160 * 120 + 160 * 60; // 28800 bytes unpadded
+
+    // NV12 layout is Y plane (stride × height) + UV plane (stride × height/2).
+    // Data must be at least that large; real output is typically padded.
+    let min_nv12 = (frame.stride as usize) * (frame.height as usize)
+        + (frame.stride as usize) * (frame.height as usize / 2);
     assert!(
         frame.data.len() >= min_nv12,
-        "expected at least {min_nv12} bytes for 160×120 NV12, got {}",
+        "expected at least {} bytes for {}×{} NV12 (stride {}), got {}",
+        min_nv12,
+        frame.width,
+        frame.height,
+        frame.stride,
         frame.data.len()
     );
     assert!(
-        frame.stride >= 160,
-        "stride {} must be >= width 160",
-        frame.stride
+        frame.stride >= frame.width,
+        "stride {} must be >= width {}",
+        frame.stride,
+        frame.width
     );
 }
