@@ -195,6 +195,56 @@ pub async fn get_video_file_path(
     Ok(row.and_then(|r| r.get("file_path")))
 }
 
+/// Update a video row with both sidecar paths after a successful download.
+pub async fn mark_video_processed_pair(
+    pool: &SqlitePool,
+    video_db_id: i64,
+    song: &str,
+    artist: &str,
+    metadata_source: &str,
+    gemini_failed: bool,
+    video_path: &str,
+    audio_path: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos
+         SET song = ?, artist = ?, metadata_source = ?,
+             gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1
+         WHERE id = ?",
+    )
+    .bind(song)
+    .bind(artist)
+    .bind(metadata_source)
+    .bind(gemini_failed as i32)
+    .bind(video_path)
+    .bind(audio_path)
+    .bind(video_db_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Return both sidecar paths for a normalized video, or `None`.
+pub async fn get_song_paths(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT file_path, audio_file_path FROM videos WHERE id = ? AND normalized = 1",
+    )
+    .bind(video_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| {
+        let v: Option<String> = r.get("file_path");
+        let a: Option<String> = r.get("audio_file_path");
+        match (v, a) {
+            (Some(vp), Some(ap)) => Some((vp, ap)),
+            _ => None,
+        }
+    }))
+}
+
 /// Return the song and artist for a video (for title display).
 pub async fn get_video_metadata(
     pool: &SqlitePool,
