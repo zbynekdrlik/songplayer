@@ -1,5 +1,6 @@
-//! FFmpeg 2-pass loudnorm audio normalization (-14 LUFS).
+//! FFmpeg 2-pass loudnorm audio normalization (-14 LUFS) with FLAC output.
 
+use std::ffi::OsString;
 use std::path::Path;
 
 use super::hide_console_window;
@@ -14,17 +15,19 @@ struct LoudnormStats {
     target_offset: String,
 }
 
-/// Normalize audio to -14 LUFS using FFmpeg 2-pass loudnorm.
+/// Normalize audio to -14 LUFS and write a FLAC sidecar.
 ///
-/// Video stream is copied (`-c:v copy`), audio re-encoded to AAC 192k.
+/// `input` must be an audio-only file (whatever yt-dlp produced — usually
+/// `.opus`, sometimes `.webm` or `.m4a`). `output` will be written as a
+/// native FLAC container.
 pub async fn normalize_audio(
     ffmpeg: &Path,
     input: &Path,
     output: &Path,
 ) -> Result<(), anyhow::Error> {
-    // Pass 1: measure loudness stats.
+    // Pass 1 — loudnorm analysis.
     let mut cmd1 = tokio::process::Command::new(ffmpeg);
-    cmd1.args(["-i"])
+    cmd1.arg("-i")
         .arg(input)
         .args([
             "-af",
@@ -47,7 +50,6 @@ pub async fn normalize_audio(
     let stats = extract_loudnorm_stats(&stderr)
         .ok_or_else(|| anyhow::anyhow!("failed to parse loudnorm stats from ffmpeg output"))?;
 
-    // Pass 2: apply measured values.
     let af_filter = format!(
         "loudnorm=I=-14:TP=-1:LRA=11:\
          measured_I={}:measured_TP={}:measured_LRA={}:\
@@ -55,12 +57,10 @@ pub async fn normalize_audio(
         stats.input_i, stats.input_tp, stats.input_lra, stats.input_thresh, stats.target_offset,
     );
 
+    // Pass 2 — apply measured values, write FLAC.
+    let args = build_pass2_args(&af_filter, input, output);
     let mut cmd2 = tokio::process::Command::new(ffmpeg);
-    cmd2.args(["-i"])
-        .arg(input)
-        .args(["-af", &af_filter])
-        .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-y"])
-        .arg(output)
+    cmd2.args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     hide_console_window(&mut cmd2);
@@ -73,6 +73,25 @@ pub async fn normalize_audio(
 
     tracing::info!("normalized {} -> {}", input.display(), output.display());
     Ok(())
+}
+
+/// Build the FFmpeg pass-2 argument list.
+///
+/// Pulled out of `normalize_audio` so it can be asserted against in unit
+/// tests without spawning a subprocess.
+pub(crate) fn build_pass2_args(af_filter: &str, input: &Path, output: &Path) -> Vec<OsString> {
+    let mut args: Vec<OsString> = Vec::new();
+    args.push("-i".into());
+    args.push(input.as_os_str().to_os_string());
+    args.push("-af".into());
+    args.push(af_filter.into());
+    args.push("-c:a".into());
+    args.push("flac".into());
+    args.push("-compression_level".into());
+    args.push("5".into());
+    args.push("-y".into());
+    args.push(output.as_os_str().to_os_string());
+    args
 }
 
 /// Extract loudnorm statistics JSON from FFmpeg stderr output.
@@ -145,7 +164,6 @@ mod tests {
     "input_tp" : "-3.45"
 }
 "#;
-        // Missing required fields → None.
         assert!(extract_loudnorm_stats(bad_json).is_none());
     }
 
@@ -166,5 +184,36 @@ mod tests {
     fn null_output_is_valid() {
         let dev = null_output();
         assert!(!dev.is_empty());
+    }
+
+    #[test]
+    fn pass2_args_request_flac_codec() {
+        let filter = "loudnorm=I=-14:TP=-1:LRA=11:measured_I=-20";
+        let args = build_pass2_args(
+            filter,
+            std::path::Path::new("in.opus"),
+            std::path::Path::new("out.flac"),
+        );
+        assert!(
+            args.iter().any(|a| a == "flac"),
+            "flac codec missing: {args:?}"
+        );
+        assert!(args.iter().any(|a| a == "-c:a"), "-c:a missing: {args:?}");
+        assert!(
+            args.iter().any(|a| a == "-compression_level"),
+            "compression_level missing: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a == "aac"),
+            "aac must not appear: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a == "192k"),
+            "192k must not appear: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a == "-c:v"),
+            "-c:v must not appear for audio-only normalize: {args:?}"
+        );
     }
 }
