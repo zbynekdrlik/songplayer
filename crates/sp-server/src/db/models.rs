@@ -196,6 +196,7 @@ pub async fn get_video_file_path(
 }
 
 /// Update a video row with both sidecar paths after a successful download.
+#[allow(clippy::too_many_arguments)]
 pub async fn mark_video_processed_pair(
     pool: &SqlitePool,
     video_db_id: i64,

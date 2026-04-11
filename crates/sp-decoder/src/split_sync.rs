@@ -152,17 +152,12 @@ impl SplitSyncedDecoder {
             }
         }
 
-        loop {
-            match self.audio.next_samples()? {
-                Some(af) => {
-                    if af.timestamp_ms <= deadline {
-                        audio_frames.push(af);
-                    } else {
-                        self.pending_audio.push_back(af);
-                        break;
-                    }
-                }
-                None => break,
+        while let Some(af) = self.audio.next_samples()? {
+            if af.timestamp_ms <= deadline {
+                audio_frames.push(af);
+            } else {
+                self.pending_audio.push_back(af);
+                break;
             }
         }
 

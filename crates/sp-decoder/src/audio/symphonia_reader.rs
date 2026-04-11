@@ -79,7 +79,7 @@ impl SymphoniaAudioReader {
         let duration_ms = match (codec_params.n_frames, codec_params.time_base) {
             (Some(n_frames), Some(tb)) => {
                 let t = tb.calc_time(n_frames);
-                (t.seconds as u64) * 1_000 + ((t.frac * 1_000.0) as u64)
+                t.seconds * 1_000 + ((t.frac * 1_000.0) as u64)
             }
             _ => 0,
         };

@@ -80,18 +80,18 @@ pub async fn normalize_audio(
 /// Pulled out of `normalize_audio` so it can be asserted against in unit
 /// tests without spawning a subprocess.
 pub(crate) fn build_pass2_args(af_filter: &str, input: &Path, output: &Path) -> Vec<OsString> {
-    let mut args: Vec<OsString> = Vec::new();
-    args.push("-i".into());
-    args.push(input.as_os_str().to_os_string());
-    args.push("-af".into());
-    args.push(af_filter.into());
-    args.push("-c:a".into());
-    args.push("flac".into());
-    args.push("-compression_level".into());
-    args.push("5".into());
-    args.push("-y".into());
-    args.push(output.as_os_str().to_os_string());
-    args
+    vec![
+        "-i".into(),
+        input.as_os_str().to_os_string(),
+        "-af".into(),
+        af_filter.into(),
+        "-c:a".into(),
+        "flac".into(),
+        "-compression_level".into(),
+        "5".into(),
+        "-y".into(),
+        output.as_os_str().to_os_string(),
+    ]
 }
 
 /// Extract loudnorm statistics JSON from FFmpeg stderr output.
