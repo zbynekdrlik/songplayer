@@ -3,7 +3,8 @@
 
 use std::fs;
 
-use sp_server::startup::self_heal_cache;
+use sp_server::SyncRequest;
+use sp_server::startup::{self_heal_cache, startup_sync_active_playlists};
 use sqlx::Row;
 
 #[tokio::test]
@@ -94,4 +95,74 @@ async fn self_heal_keeps_complete_pairs_and_links_to_db() {
     assert_eq!(normalized, 1, "row must be marked normalized after re-link");
     assert!(file_path.is_some() && file_path.unwrap().ends_with("_video.mp4"));
     assert!(audio_path.is_some() && audio_path.unwrap().ends_with("_audio.flac"));
+}
+
+#[tokio::test]
+async fn startup_sync_enqueues_one_request_per_active_playlist() {
+    let pool = sp_server::db::create_memory_pool().await.unwrap();
+    sp_server::db::run_migrations(&pool).await.unwrap();
+
+    // Two active playlists and one inactive.
+    sqlx::query(
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name, is_active)
+         VALUES ('ytfast', 'https://yt.com/pl1', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name, is_active)
+         VALUES ('ytslow', 'https://yt.com/pl2', 'SP-slow', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name, is_active)
+         VALUES ('inactive', 'https://yt.com/pl3', 'SP-off', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<SyncRequest>(16);
+    startup_sync_active_playlists(&pool, &tx).await.unwrap();
+    drop(tx);
+
+    let mut received: Vec<SyncRequest> = Vec::new();
+    while let Some(req) = rx.recv().await {
+        received.push(req);
+    }
+
+    // Only the two active playlists must have been enqueued.
+    assert_eq!(
+        received.len(),
+        2,
+        "expected 2 SyncRequests for 2 active playlists"
+    );
+    let urls: Vec<String> = received.iter().map(|r| r.youtube_url.clone()).collect();
+    assert!(urls.contains(&"https://yt.com/pl1".to_string()));
+    assert!(urls.contains(&"https://yt.com/pl2".to_string()));
+    assert!(!urls.contains(&"https://yt.com/pl3".to_string()));
+}
+
+#[tokio::test]
+async fn startup_sync_is_noop_when_no_active_playlists() {
+    let pool = sp_server::db::create_memory_pool().await.unwrap();
+    sp_server::db::run_migrations(&pool).await.unwrap();
+
+    // All playlists inactive.
+    sqlx::query(
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name, is_active)
+         VALUES ('off1', 'https://yt.com/x', 'SP-x', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<SyncRequest>(8);
+    startup_sync_active_playlists(&pool, &tx).await.unwrap();
+    drop(tx);
+
+    assert!(rx.recv().await.is_none(), "no SyncRequests expected");
 }
