@@ -23,6 +23,8 @@ pub mod stream;
 mod reader;
 #[cfg(windows)]
 mod sync;
+#[cfg(windows)]
+pub mod video;
 
 pub use audio::SymphoniaAudioReader;
 pub use error::DecoderError;
@@ -33,3 +35,5 @@ pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamIn
 pub use reader::MediaReader;
 #[cfg(windows)]
 pub use sync::SyncedDecoder;
+#[cfg(windows)]
+pub use video::MediaFoundationVideoReader;
