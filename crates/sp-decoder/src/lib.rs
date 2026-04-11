@@ -17,6 +17,7 @@ mod error;
 mod types;
 
 pub mod audio;
+pub mod split_sync;
 pub mod stream;
 
 #[cfg(windows)]
@@ -28,6 +29,7 @@ pub mod video;
 
 pub use audio::SymphoniaAudioReader;
 pub use error::DecoderError;
+pub use split_sync::SplitSyncedDecoder;
 pub use stream::{AudioStream, MediaStream, VideoStream};
 pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamInfo};
 
