@@ -9,8 +9,10 @@ pub mod state;
 pub mod submitter;
 
 use std::collections::HashMap;
+use std::time::Instant;
 
-use sp_core::playback::PlaybackMode;
+use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
+use sp_core::ws::ServerMsg;
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -24,6 +26,21 @@ use state::{PlayAction, PlayEvent, PlayState};
 /// OBS text source name used for the fallback title display (in the
 /// CG OVERLAY scene). Must match the source name in OBS exactly.
 const OBS_TITLE_SOURCE: &str = "#sp-title";
+
+/// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
+/// Keeps the WebSocket from flooding the dashboard on high-frequency
+/// `PipelineEvent::Position` events.
+const POSITION_BROADCAST_INTERVAL_MS: u64 = 500;
+
+/// Map the internal server-side [`PlayState`] to the wire-level
+/// [`sp_core::playback::PlaybackState`] used by the dashboard.
+fn play_state_to_ws(state: &PlayState) -> WsPlaybackState {
+    match state {
+        PlayState::Idle => WsPlaybackState::Idle,
+        PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
+        PlayState::Playing { .. } => WsPlaybackState::Playing,
+    }
+}
 
 /// Helper: fetch song, artist for a video.
 async fn get_video_title_info(
@@ -55,6 +72,15 @@ struct PlaylistPipeline {
     title_show_abort: Option<tokio::task::AbortHandle>,
     /// Abort handle for the in-flight title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
+    /// Cached song/artist/duration from the current video, so `Position`
+    /// events can re-broadcast `NowPlaying` without re-querying the DB
+    /// on every update.
+    cached_song: String,
+    cached_artist: String,
+    cached_duration_ms: u64,
+    /// Timestamp of the last `NowPlaying` broadcast — used to throttle
+    /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
+    last_now_playing_broadcast: Option<Instant>,
 }
 
 impl PlaylistPipeline {
@@ -89,6 +115,9 @@ pub struct PlaybackEngine {
     obs_event_tx: broadcast::Sender<ObsEvent>,
     /// For sending title show/hide commands to Resolume hosts.
     resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
+    /// WebSocket broadcast — forwards `NowPlaying` and `PlaybackStateChanged`
+    /// messages to the dashboard.
+    ws_event_tx: broadcast::Sender<ServerMsg>,
 }
 
 impl PlaybackEngine {
@@ -98,6 +127,7 @@ impl PlaybackEngine {
         obs_event_tx: broadcast::Sender<ObsEvent>,
         obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
+        ws_event_tx: broadcast::Sender<ServerMsg>,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -127,6 +157,7 @@ impl PlaybackEngine {
             obs_cmd_tx,
             obs_event_tx,
             resolume_tx,
+            ws_event_tx,
         }
     }
 
@@ -150,6 +181,10 @@ impl PlaybackEngine {
                 current_video_id: None,
                 title_show_abort: None,
                 title_hide_abort: None,
+                cached_song: String::new(),
+                cached_artist: String::new(),
+                cached_duration_ms: 0,
+                last_now_playing_broadcast: None,
             }
         });
     }
@@ -178,6 +213,22 @@ impl PlaybackEngine {
     /// have dedicated unit tests below.
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
+        // Fetch + broadcast NowPlaying / position updates BEFORE the existing
+        // timer logic so the dashboard stays fresh.
+        match &event {
+            PipelineEvent::Started { duration_ms } => {
+                self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
+                    .await;
+            }
+            PipelineEvent::Position {
+                position_ms,
+                duration_ms,
+            } => {
+                self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
+            }
+            PipelineEvent::Ended | PipelineEvent::Error(_) => {}
+        }
+
         match &event {
             PipelineEvent::Started { duration_ms } => {
                 debug!(playlist_id, duration_ms, "video started");
@@ -336,12 +387,110 @@ impl PlaybackEngine {
 
         let mode = pp.mode;
         let old_state = pp.state.clone();
-        let (new_state, action) = old_state.transition(event, mode);
-        pp.state = new_state;
+        let (new_state, action) = old_state.clone().transition(event, mode);
+        pp.state = new_state.clone();
 
         if let Some(action) = action {
             self.execute_action(playlist_id, action).await;
         }
+
+        // After the action (which may itself mutate the state to Playing),
+        // broadcast the final state if it differs from the pre-transition state.
+        let final_state = self
+            .pipelines
+            .get(&playlist_id)
+            .map(|pp| pp.state.clone())
+            .unwrap_or(new_state);
+        if old_state != final_state {
+            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                playlist_id,
+                state: play_state_to_ws(&final_state),
+                mode,
+            });
+        }
+    }
+
+    /// Cache the video's song/artist/duration and broadcast `NowPlaying`
+    /// with `position_ms: 0`. Called when a pipeline reports a `Started`
+    /// event (i.e. playback just began).
+    async fn broadcast_now_playing_on_start(&mut self, playlist_id: i64, duration_ms: u64) {
+        let video_id = match self
+            .pipelines
+            .get(&playlist_id)
+            .and_then(|pp| pp.current_video_id)
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        let (song, artist) = match get_video_title_info(&self.pool, video_id).await {
+            Ok(Some(pair)) => pair,
+            _ => (String::new(), String::new()),
+        };
+
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.cached_song = song.clone();
+            pp.cached_artist = artist.clone();
+            pp.cached_duration_ms = duration_ms;
+            pp.last_now_playing_broadcast = Some(Instant::now());
+        }
+
+        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+            playlist_id,
+            video_id,
+            song,
+            artist,
+            position_ms: 0,
+            duration_ms,
+        });
+    }
+
+    /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
+    ///
+    /// Skips the broadcast if less than
+    /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
+    /// broadcast for the same playlist.
+    fn maybe_broadcast_position_update(
+        &mut self,
+        playlist_id: i64,
+        position_ms: u64,
+        duration_ms: u64,
+    ) {
+        let pp = match self.pipelines.get_mut(&playlist_id) {
+            Some(pp) => pp,
+            None => return,
+        };
+
+        let now = Instant::now();
+        let should_send = match pp.last_now_playing_broadcast {
+            Some(t) => now.duration_since(t).as_millis() as u64 >= POSITION_BROADCAST_INTERVAL_MS,
+            None => true,
+        };
+        if !should_send {
+            return;
+        }
+        pp.last_now_playing_broadcast = Some(now);
+
+        let video_id = match pp.current_video_id {
+            Some(id) => id,
+            None => return,
+        };
+        let song = pp.cached_song.clone();
+        let artist = pp.cached_artist.clone();
+        let dur = if duration_ms > 0 {
+            duration_ms
+        } else {
+            pp.cached_duration_ms
+        };
+
+        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+            playlist_id,
+            video_id,
+            song,
+            artist,
+            position_ms,
+            duration_ms: dur,
+        });
     }
 
     /// Execute a [`PlayAction`] produced by the state machine.
@@ -471,7 +620,8 @@ mod tests {
             let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
             let (obs_tx, _obs_rx) = broadcast::channel(16);
             let (resolume_tx, _) = mpsc::channel(16);
-            let engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx);
+            let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+            let engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
             assert!(engine.pipelines.is_empty());
         });
     }
@@ -487,7 +637,8 @@ mod tests {
             let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
             let (obs_tx, _obs_rx) = broadcast::channel(16);
             let (resolume_tx, _) = mpsc::channel(16);
-            let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx);
+            let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+            let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
 
             engine.ensure_pipeline(1, "TestNDI");
             assert!(engine.pipelines.contains_key(&1));
@@ -509,7 +660,8 @@ mod tests {
             let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
             let (obs_tx, _obs_rx) = broadcast::channel(16);
             let (resolume_tx, _) = mpsc::channel(16);
-            let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx);
+            let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+            let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
 
             engine.ensure_pipeline(1, "NDI-1");
             engine.ensure_pipeline(2, "NDI-2");
@@ -551,6 +703,10 @@ mod tests {
                 current_video_id: None,
                 title_show_abort: Some(task.abort_handle()),
                 title_hide_abort: None,
+                cached_song: String::new(),
+                cached_artist: String::new(),
+                cached_duration_ms: 0,
+                last_now_playing_broadcast: None,
             };
 
             assert!(pp.title_show_abort.is_some());
@@ -612,5 +768,163 @@ mod tests {
             .unwrap();
         let result = get_video_title_info(&pool, 42).await.unwrap();
         assert_eq!(result, Some((String::new(), String::new())));
+    }
+
+    /// Regression for issue #9: a pipeline `Started` event must produce a
+    /// `ServerMsg::NowPlaying` broadcast with song/artist/duration pulled
+    /// from the DB. Before the fix, the engine had no `ws_event_tx` and
+    /// nothing ever reached the dashboard.
+    #[tokio::test]
+    async fn pipeline_started_event_broadcasts_now_playing() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
+             VALUES (1, 'P', 'url', 'SP-p')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist) \
+             VALUES (42, 1, 'abc123', 'Test Song', 'Test Artist')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (obs_tx, _) = broadcast::channel(16);
+        let (resolume_tx, _) = mpsc::channel(16);
+        let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
+        let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+        engine.ensure_pipeline(1, "SP-p");
+
+        // Simulate a video having been selected (so current_video_id is set).
+        if let Some(pp) = engine.pipelines.get_mut(&1) {
+            pp.current_video_id = Some(42);
+        }
+
+        engine
+            .handle_pipeline_event(
+                1,
+                PipelineEvent::Started {
+                    duration_ms: 180_000,
+                },
+            )
+            .await;
+
+        // The first message on ws_rx should be our NowPlaying.
+        // (PlaybackStateChanged may follow, but NowPlaying must be present.)
+        let mut saw_now_playing = false;
+        for _ in 0..4 {
+            match tokio::time::timeout(std::time::Duration::from_millis(500), ws_rx.recv()).await {
+                Ok(Ok(ServerMsg::NowPlaying {
+                    playlist_id,
+                    video_id,
+                    song,
+                    artist,
+                    position_ms,
+                    duration_ms,
+                })) => {
+                    assert_eq!(playlist_id, 1);
+                    assert_eq!(video_id, 42);
+                    assert_eq!(song, "Test Song");
+                    assert_eq!(artist, "Test Artist");
+                    assert_eq!(position_ms, 0);
+                    assert_eq!(duration_ms, 180_000);
+                    saw_now_playing = true;
+                    break;
+                }
+                Ok(Ok(_other)) => continue,
+                Ok(Err(_)) => break,
+                Err(_) => break,
+            }
+        }
+        assert!(saw_now_playing, "expected a NowPlaying broadcast");
+    }
+
+    /// Fast-firing `Position` events must not flood the broadcast channel:
+    /// only one `NowPlaying` should be sent per `POSITION_BROADCAST_INTERVAL_MS`.
+    #[tokio::test(start_paused = true)]
+    async fn position_events_are_throttled() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
+             VALUES (1, 'P', 'url', 'SP-p')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist) \
+             VALUES (42, 1, 'abc123', 'Song', 'Artist')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (obs_tx, _) = broadcast::channel(16);
+        let (resolume_tx, _) = mpsc::channel(16);
+        let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
+        let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+        engine.ensure_pipeline(1, "SP-p");
+        if let Some(pp) = engine.pipelines.get_mut(&1) {
+            pp.current_video_id = Some(42);
+        }
+
+        engine
+            .handle_pipeline_event(
+                1,
+                PipelineEvent::Started {
+                    duration_ms: 180_000,
+                },
+            )
+            .await;
+
+        // Drain messages produced by Started (NowPlaying + possibly PlaybackStateChanged).
+        while ws_rx.try_recv().is_ok() {}
+
+        // Fire 10 Position events in quick succession.
+        for i in 1..=10u64 {
+            engine
+                .handle_pipeline_event(
+                    1,
+                    PipelineEvent::Position {
+                        position_ms: i * 10,
+                        duration_ms: 180_000,
+                    },
+                )
+                .await;
+        }
+
+        // With throttling (500ms interval) and virtual time NOT yet advanced,
+        // the only broadcast that should have been produced is the initial
+        // one on Started (already drained). Zero additional NowPlaying.
+        assert!(
+            ws_rx.try_recv().is_err(),
+            "no NowPlaying should leak while within the 500ms throttle window"
+        );
+
+        // Advance virtual time 600ms and fire once more — should produce one message.
+        tokio::time::advance(std::time::Duration::from_millis(600)).await;
+        engine
+            .handle_pipeline_event(
+                1,
+                PipelineEvent::Position {
+                    position_ms: 700,
+                    duration_ms: 180_000,
+                },
+            )
+            .await;
+
+        match ws_rx.try_recv() {
+            Ok(ServerMsg::NowPlaying { position_ms, .. }) => {
+                assert_eq!(position_ms, 700);
+            }
+            other => panic!("expected NowPlaying after throttle window, got {other:?}"),
+        }
     }
 }
