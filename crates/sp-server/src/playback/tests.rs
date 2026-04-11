@@ -280,6 +280,70 @@ fn should_send_position_update_boundary_checks() {
     assert!(should_send_position_update(u64::MAX));
 }
 
+/// The `duration_ms > 0 ? duration_ms : cached_duration_ms` fallback in
+/// `maybe_broadcast_position_update` must use the incoming value when
+/// non-zero and fall back to the cached value when zero.
+///
+/// Kills the `> 0` → `== 0`, `< 0`, `>= 0` mutants:
+/// - `== 0`: would flip the branches; expected behavior changes at both
+///   zero and non-zero inputs.
+/// - `< 0`: u64 never < 0 → always false → always uses cached. Caught
+///   when we pass a non-zero value and expect it to propagate.
+/// - `>= 0`: u64 always >= 0 → always true → always uses incoming.
+///   Caught when we pass 0 and expect the cached fallback.
+#[tokio::test]
+async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
+    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(1, "TestNDI");
+    if let Some(pp) = engine.pipelines.get_mut(&1) {
+        pp.current_video_id = Some(7);
+        pp.cached_song = "song".into();
+        pp.cached_artist = "artist".into();
+        pp.cached_duration_ms = 180_000;
+        // Leaving last_now_playing_broadcast = None so the throttle
+        // helper always returns true for this test — we are exercising
+        // the duration-fallback branch specifically, not the throttle.
+        pp.last_now_playing_broadcast = None;
+    }
+
+    // Case A: duration_ms = 0 → must use cached 180_000.
+    engine.maybe_broadcast_position_update(1, 100, 0);
+    match ws_rx.try_recv() {
+        Ok(ServerMsg::NowPlaying {
+            position_ms: 100,
+            duration_ms: 180_000,
+            ..
+        }) => {}
+        other => panic!("zero input duration_ms must fall back to cached 180_000, got {other:?}"),
+    }
+
+    // Reset last-broadcast so the throttle helper lets the next call through.
+    if let Some(pp) = engine.pipelines.get_mut(&1) {
+        pp.last_now_playing_broadcast = None;
+    }
+
+    // Case B: duration_ms = 120_000 (non-zero) → must use 120_000.
+    engine.maybe_broadcast_position_update(1, 200, 120_000);
+    match ws_rx.try_recv() {
+        Ok(ServerMsg::NowPlaying {
+            position_ms: 200,
+            duration_ms: 120_000,
+            ..
+        }) => {}
+        other => panic!("non-zero input duration_ms must propagate to broadcast, got {other:?}"),
+    }
+}
+
 /// Direct test of `apply_event` — kills the `-> ()` mutant (whole
 /// function replaced with no-op) and the `!=` → `==` mutant (which
 /// would flip the broadcast guard so transitions silently stop firing).
