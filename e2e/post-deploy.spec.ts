@@ -213,9 +213,19 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   /**
    * Zero browser console errors/warnings. Runs last so it observes the
    * state after all other tests have interacted with the dashboard.
+   *
+   * The allow list matches the one in `frontend.spec.ts` — notably the
+   * Chrome SRI preload warning (crbug.com/981419) which is an upstream
+   * browser issue, not a SongPlayer bug.
    */
   test("browser console has no errors or warnings during dashboard use", async ({ page }) => {
-    const allowed = [/favicon/i, /WebSocket connection/i, /\bwasm\b.*instantiate/i];
+    const allowed = [
+      /favicon/i,
+      /WebSocket connection/i,
+      /\bwasm\b.*instantiate/i,
+      /module specifier/i,
+      /integrity.*attribute.*ignored/i, // Chrome SRI preload warning, crbug.com/981419
+    ];
     const messages: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error" || msg.type() === "warning") {
