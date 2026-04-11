@@ -846,7 +846,11 @@ mod tests {
 
     /// Fast-firing `Position` events must not flood the broadcast channel:
     /// only one `NowPlaying` should be sent per `POSITION_BROADCAST_INTERVAL_MS`.
-    #[tokio::test(start_paused = true)]
+    ///
+    /// Uses real time (not `tokio::time::pause`) because the sqlite pool
+    /// setup before the throttle check relies on real I/O which blocks
+    /// indefinitely under a paused timer.
+    #[tokio::test]
     async fn position_events_are_throttled() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
@@ -900,16 +904,18 @@ mod tests {
                 .await;
         }
 
-        // With throttling (500ms interval) and virtual time NOT yet advanced,
-        // the only broadcast that should have been produced is the initial
-        // one on Started (already drained). Zero additional NowPlaying.
+        // Within the 500ms throttle window (10 rapid events fired in a few
+        // microseconds), the only broadcast that should have been produced
+        // is the initial one on Started (already drained). Zero additional
+        // NowPlaying should be visible yet.
         assert!(
             ws_rx.try_recv().is_err(),
             "no NowPlaying should leak while within the 500ms throttle window"
         );
 
-        // Advance virtual time 600ms and fire once more — should produce one message.
-        tokio::time::advance(std::time::Duration::from_millis(600)).await;
+        // Sleep past the throttle window and fire once more — should
+        // produce exactly one additional broadcast.
+        tokio::time::sleep(std::time::Duration::from_millis(550)).await;
         engine
             .handle_pipeline_event(
                 1,
