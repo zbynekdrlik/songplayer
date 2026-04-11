@@ -116,6 +116,7 @@ impl DownloadWorker {
             crate::metadata::get_metadata(&self.providers, &row.youtube_id, &row.title).await;
 
         // Step 3: Normalize audio.
+        #[allow(deprecated)]
         let out_name = cache::normalized_filename(
             &meta.song,
             &meta.artist,

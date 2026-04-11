@@ -262,6 +262,7 @@ impl ReprocessWorker {
 
         // Rename file: replace _gf suffix if present.
         let new_file_path = if row.file_path.contains("_gf.mp4") {
+            #[allow(deprecated)]
             let new_name = crate::downloader::cache::normalized_filename(
                 &meta.song,
                 &meta.artist,
