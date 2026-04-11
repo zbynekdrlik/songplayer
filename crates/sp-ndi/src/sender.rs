@@ -382,11 +382,6 @@ pub struct NdiSender<B: NdiBackend> {
 }
 
 impl<B: NdiBackend> NdiSender<B> {
-    /// Create a sender with no clocking (backwards-compatible default).
-    pub fn new(backend: Arc<B>, name: &str) -> Result<Self, NdiError> {
-        Self::new_with_clocking(backend, name, false, false)
-    }
-
     /// Create a sender with explicit clocking flags. For single-threaded
     /// video+audio submission, `clock_video=true, clock_audio=false` is the
     /// SDK-recommended configuration.
@@ -628,9 +623,9 @@ mod tests {
     use test_util::MockNdiBackend;
 
     #[test]
-    fn new_uses_no_clocking_by_default() {
+    fn new_with_clocking_defaults_false_false() {
         let backend = Arc::new(MockNdiBackend::new());
-        let _s = NdiSender::new(backend.clone(), "X").unwrap();
+        let _s = NdiSender::new_with_clocking(backend.clone(), "X", false, false).unwrap();
         let calls = backend.calls();
         assert_eq!(calls[0], "send_create_with_clocking(X,false,false)");
     }
@@ -646,7 +641,7 @@ mod tests {
     #[test]
     fn send_video_async_records_nv12_fourcc_and_size() {
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "V").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "V", false, false).unwrap();
 
         let frame = VideoFrame {
             data: vec![0u8; 1920 * 1080 * 3 / 2],
@@ -673,7 +668,7 @@ mod tests {
         // releases the first's buffer), followed by an explicit flush that releases
         // the second's buffer. The mock records all three calls in the exact order.
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "R").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "R", false, false).unwrap();
 
         let frame_a = VideoFrame {
             data: vec![0u8; 4 * 2 * 3 / 2],
@@ -713,7 +708,7 @@ mod tests {
     #[test]
     fn send_video_records_bgra_fourcc() {
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "B").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "B", false, false).unwrap();
         let frame = VideoFrame {
             data: vec![0u8; 4],
             width: 1,
@@ -731,7 +726,7 @@ mod tests {
     #[test]
     fn send_audio_records_samples_and_planarises() {
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "A").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "A", false, false).unwrap();
 
         // 2ch interleaved, 4 samples/ch → 8 floats
         let frame = AudioFrame {
@@ -754,7 +749,7 @@ mod tests {
     #[test]
     fn send_video_flush_is_recorded() {
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "F").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "F", false, false).unwrap();
         sender.send_video_flush();
         let calls = backend.calls();
         assert_eq!(calls.last().unwrap(), "send_video_flush(42)");
@@ -764,7 +759,7 @@ mod tests {
     fn sender_drop_flushes_then_destroys() {
         let backend = Arc::new(MockNdiBackend::new());
         {
-            let _s = NdiSender::new(backend.clone(), "D").unwrap();
+            let _s = NdiSender::new_with_clocking(backend.clone(), "D", false, false).unwrap();
         }
         let calls = backend.calls();
         // create, then on drop: flush, then destroy
@@ -777,7 +772,7 @@ mod tests {
     #[test]
     fn send_audio_zero_channels_is_noop() {
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "Z").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Z", false, false).unwrap();
         let frame = AudioFrame {
             data: vec![1.0, 2.0],
             channels: 0,
@@ -793,7 +788,7 @@ mod tests {
     fn get_tally_returns_recorded_value() {
         let backend = Arc::new(MockNdiBackend::new());
         backend.set_tally(true, false);
-        let sender = NdiSender::new(backend.clone(), "T").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
         let tally = sender.get_tally(100).unwrap();
         assert!(tally.on_program);
         assert!(!tally.on_preview);
@@ -802,7 +797,7 @@ mod tests {
     #[test]
     fn get_tally_returns_none_by_default() {
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new(backend.clone(), "T").unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
         assert!(sender.get_tally(0).is_none());
     }
 }

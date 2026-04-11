@@ -19,7 +19,18 @@ use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat, VideoFrame};
 
 /// Owns an `NdiSender` plus the previous frame's buffer for the async
 /// double-buffer pattern.
+///
+/// **SAFETY-CRITICAL:** the field declaration order is load-bearing.
+/// `sender` MUST be declared before `prev_frame` so that on `Drop` Rust
+/// destroys the sender first (which calls `NdiSender::Drop` →
+/// `send_video_flush` → releases NDI's retained pointer to
+/// `prev_frame`'s bytes), THEN drops `prev_frame`, freeing the `Vec<u8>`
+/// only after NDI has confirmed it no longer needs it. Reversing the
+/// order would drop the `Vec<u8>` while NDI still held a pointer to it —
+/// silent use-after-free in the SDK. See `NdiSender::Drop` in
+/// `crates/sp-ndi/src/sender.rs`.
 pub struct FrameSubmitter<B: NdiBackend> {
+    // NOTE: do not reorder these fields — see the SAFETY-CRITICAL note above.
     sender: NdiSender<B>,
     /// Keeps the previous async frame's `Vec<u8>` alive until NDI releases
     /// its pointer (which happens when the next submit / flush call fires).
@@ -41,9 +52,23 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
     /// Update the frame rate used for subsequent submissions. Call this when
     /// a new file is opened and its real frame rate is known.
+    ///
+    /// Defensive: if either value is non-positive (malformed MF media type),
+    /// falls back to 30000/1001 with a warning rather than handing NDI a
+    /// division-by-zero frame rate.
     pub fn set_frame_rate(&mut self, num: i32, den: i32) {
-        self.frame_rate_n = num;
-        self.frame_rate_d = den;
+        if num > 0 && den > 0 {
+            self.frame_rate_n = num;
+            self.frame_rate_d = den;
+        } else {
+            tracing::warn!(
+                num,
+                den,
+                "invalid frame rate received, falling back to 30000/1001"
+            );
+            self.frame_rate_n = 30_000;
+            self.frame_rate_d = 1_001;
+        }
     }
 
     /// Submit one decoded frame tuple: all audio chunks first, then video
@@ -254,5 +279,67 @@ mod tests {
         assert_eq!(async_calls.len(), 2);
         assert!(async_calls[0].contains("30/1"));
         assert!(async_calls[1].contains("60/1"));
+    }
+
+    #[test]
+    fn set_frame_rate_rejects_zero_denominator() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Z", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        sub.set_frame_rate(60, 0); // malformed — should fall back
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        let calls = backend.calls();
+        // The submitted frame must carry the fallback rate, not 60/0.
+        assert!(
+            calls.iter().any(|c| c.contains("30000/1001")),
+            "expected fallback 30000/1001 in calls: {calls:#?}"
+        );
+    }
+
+    #[test]
+    fn set_frame_rate_rejects_zero_numerator() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Z2", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        sub.set_frame_rate(0, 1);
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        let calls = backend.calls();
+        assert!(
+            calls.iter().any(|c| c.contains("30000/1001")),
+            "expected fallback 30000/1001 in calls: {calls:#?}"
+        );
+    }
+
+    #[test]
+    fn multi_frame_submission_records_five_async_calls_in_order() {
+        // Exercises the prev_frame holdover across multiple submits: each
+        // send_video_async is a synchronising event that releases the
+        // previous frame's pointer, so the submitter should be willing to
+        // accept N sequential submits without leaking buffers or crashing.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Seq", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+        for i in 0..5 {
+            // Distinct Vec each time so any UAF would corrupt the assertion.
+            let data = vec![i as u8; 4 * 2 * 3 / 2];
+            sub.submit_nv12(4, 2, 4, data, &[]);
+        }
+
+        let async_calls: Vec<_> = backend
+            .calls()
+            .into_iter()
+            .filter(|c| c.starts_with("send_video_async"))
+            .collect();
+        assert_eq!(
+            async_calls.len(),
+            5,
+            "expected 5 async sends, got {}: {async_calls:#?}",
+            async_calls.len()
+        );
+        // prev_frame must be Some (the last frame's buffer, held for the next sync event).
+        assert!(sub.prev_frame.is_some());
+        sub.flush();
+        assert!(sub.prev_frame.is_none());
     }
 }

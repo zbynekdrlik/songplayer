@@ -10,11 +10,12 @@ use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
 use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
     MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS,
-    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
-    MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
-    MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio,
-    MFMediaType_Video, MFSTARTUP_NOSOCKET, MFStartup, MFVideoFormat_NV12,
+    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
+    MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+    MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float, MFCreateAttributes, MFCreateMediaType,
+    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
+    MFStartup, MFVideoFormat_NV12,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
@@ -45,7 +46,8 @@ impl MediaReader {
 
     /// Open a media file and configure output formats.
     ///
-    /// Video is decoded to BGRA (`MFVideoFormat_RGB32`).
+    /// Video is decoded to NV12 (`MFVideoFormat_NV12`) and passed through to
+    /// callers without intermediate color conversion.
     /// Audio is decoded to interleaved f32 PCM (`MFAudioFormat_Float`).
     #[cfg_attr(test, mutants::skip)]
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
@@ -215,7 +217,7 @@ impl MediaReader {
                 .map_err(|e| DecoderError::BufferLock(e.to_string()))?
         };
 
-        let (nv12_data, width, height) = Self::lock_video_buffer(&buffer, &self.reader)?;
+        let (nv12_data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
         let timestamp_ms = (timestamp_100ns / 10_000) as u64;
 
         // Track duration from timestamps
@@ -223,11 +225,12 @@ impl MediaReader {
             self.duration_ms = timestamp_ms;
         }
 
-        // NV12 passthrough: the raw buffer is Y plane (height × width bytes)
-        // plus interleaved UV plane (height/2 × width bytes). NDI accepts NV12
-        // natively via NDIlib_FourCC_video_type_NV12. Stride = Y-plane row
-        // bytes = width.
-        let stride = width;
+        // NV12 passthrough: the raw buffer is Y plane (height × stride bytes)
+        // plus interleaved UV plane (height/2 × stride bytes). NDI accepts NV12
+        // natively via NDIlib_FourCC_video_type_NV12. Stride is the Y-plane row
+        // stride as negotiated with Media Foundation — hardware decoders often
+        // pad to 16/32/64-byte alignment, which is why we read MF_MT_DEFAULT_STRIDE
+        // rather than assuming stride == width.
 
         Ok(Some(DecodedVideoFrame {
             data: nv12_data,
@@ -303,9 +306,9 @@ impl MediaReader {
                 MFCreateMediaType().map_err(|e| DecoderError::ComInit(e.to_string()))?;
             mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                 .map_err(|e| DecoderError::ComInit(e.to_string()))?;
-            // Request NV12 output — the native format for most hardware decoders.
-            // We convert NV12→BGRA after reading the sample.
-            // RGB32 is rejected by some decoders that only support NV12/YUY2.
+            // Request NV12 output — the native format for most hardware decoders,
+            // and the FourCC NDI accepts directly. No color conversion happens
+            // after the sample is read.
             mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
                 .map_err(|e| DecoderError::ComInit(e.to_string()))?;
             Ok(mt)
@@ -348,14 +351,14 @@ impl MediaReader {
         }
     }
 
-    /// Lock a video buffer and return raw NV12 data + dimensions.
+    /// Lock a video buffer and return raw NV12 data + dimensions + Y-plane stride.
     fn lock_video_buffer(
         buffer: &IMFMediaBuffer,
         reader: &IMFSourceReader,
-    ) -> Result<(Vec<u8>, u32, u32), DecoderError> {
+    ) -> Result<(Vec<u8>, u32, u32, u32), DecoderError> {
         let (data, _len) = Self::lock_buffer_raw(buffer)?;
 
-        // Read width/height from the negotiated output type.
+        // Read width/height/stride from the negotiated output type.
         let mt: IMFMediaType = unsafe {
             reader
                 .GetCurrentMediaType(VIDEO_STREAM)
@@ -367,7 +370,28 @@ impl MediaReader {
             ((size >> 32) as u32, size as u32)
         };
 
-        Ok((data, width, height))
+        let stride = unsafe {
+            let stride_raw: i32 = match mt.GetUINT32(&MF_MT_DEFAULT_STRIDE) {
+                Ok(s) => s as i32,
+                Err(_) => {
+                    tracing::warn!(
+                        "MF_MT_DEFAULT_STRIDE unavailable; falling back to width={width}"
+                    );
+                    width as i32
+                }
+            };
+            // Y-plane stride is always positive for NV12 MF output; a negative
+            // value would mean a bottom-up image which NV12 from MF never is.
+            // Abs-guard defensively and fall back to width if MF reports 0 or a
+            // value smaller than width.
+            if stride_raw > 0 && (stride_raw as u32) >= width {
+                stride_raw as u32
+            } else {
+                width
+            }
+        };
+
+        Ok((data, width, height, stride))
     }
 
     /// Read channels + sample_rate from the current audio output type.
