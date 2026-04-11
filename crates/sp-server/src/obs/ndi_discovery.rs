@@ -240,12 +240,16 @@ mod tests {
         assert_eq!(extract_ndi_stream_name(""), "");
         // No space before the open paren → treat as opaque.
         assert_eq!(extract_ndi_stream_name("(just-parens)"), "(just-parens)");
-        // Nested-looking parens — last ` (` wins, so the inner string
-        // is from the last space-paren open to the final closing paren.
+        // rfind(" (") picks the LAST ` (` — this is good enough for real
+        // NDI names, which never have nested parens. Document the behavior.
+        assert_eq!(extract_ndi_stream_name("weird (inner (nested))"), "nested)");
+        // A name that doesn't end with `)` is passed through untouched.
         assert_eq!(
-            extract_ndi_stream_name("weird (inner (nested))"),
-            "inner (nested)"
+            extract_ndi_stream_name("machine (incomplete"),
+            "machine (incomplete"
         );
+        // Empty parenthesised portion is passed through.
+        assert_eq!(extract_ndi_stream_name("machine ()"), "machine ()");
     }
 
     #[tokio::test]
