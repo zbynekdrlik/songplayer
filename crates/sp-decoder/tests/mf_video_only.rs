@@ -35,4 +35,11 @@ fn decodes_first_nv12_frame() {
     assert_eq!(frame.width, 32);
     assert_eq!(frame.height, 32);
     assert!(!frame.data.is_empty());
+    // 32×32 NV12: 32*32 Y plane + 32*16 UV plane = 1024 + 512 = 1536 bytes.
+    assert_eq!(
+        frame.data.len(),
+        1536,
+        "expected exactly 1536 bytes for 32×32 NV12 (Y + UV), got {}",
+        frame.data.len()
+    );
 }

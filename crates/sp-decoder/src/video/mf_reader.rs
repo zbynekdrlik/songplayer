@@ -100,7 +100,12 @@ impl MediaFoundationVideoReader {
         let (frame_rate_num, frame_rate_den) = unsafe {
             match negotiated_video.GetUINT64(&MF_MT_FRAME_RATE) {
                 Ok(packed) => ((packed >> 32) as u32, packed as u32),
-                Err(_) => (30000, 1001),
+                Err(e) => {
+                    tracing::warn!(
+                        "MF_MT_FRAME_RATE unavailable: {e}; falling back to 30000/1001 (29.97 fps)"
+                    );
+                    (30000, 1001)
+                }
             }
         };
 
