@@ -10,7 +10,7 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: ".",
-  testMatch: "post-deploy.spec.ts",
+  testMatch: /post-deploy.*\.spec\.ts$/,
   timeout: 90_000,
   retries: 0,
   workers: 1,
