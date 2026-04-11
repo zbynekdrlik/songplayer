@@ -299,7 +299,14 @@ impl MediaReader {
     }
 
     // ---- private helpers -----------------------------------------------
+    //
+    // cargo-mutants: every helper below is skipped for the same reason as
+    // the public `open`/`next_video_frame`/`next_audio_samples` functions.
+    // They call into Windows Media Foundation and the Linux mutation runner
+    // cannot compile cfg(windows) code, so mutations trivially "survive".
+    // Covered end-to-end by live verification on win-resolume.
 
+    #[cfg_attr(test, mutants::skip)]
     fn make_video_output_type() -> Result<IMFMediaType, DecoderError> {
         unsafe {
             let mt: IMFMediaType =
@@ -315,6 +322,7 @@ impl MediaReader {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn make_audio_output_type() -> Result<IMFMediaType, DecoderError> {
         unsafe {
             let mt: IMFMediaType =
@@ -332,6 +340,7 @@ impl MediaReader {
     }
 
     /// Lock an `IMFMediaBuffer`, copy its contents, and unlock.
+    #[cfg_attr(test, mutants::skip)]
     fn lock_buffer_raw(buffer: &IMFMediaBuffer) -> Result<(Vec<u8>, u32), DecoderError> {
         unsafe {
             let mut ptr = std::ptr::null_mut();
@@ -352,6 +361,7 @@ impl MediaReader {
     }
 
     /// Lock a video buffer and return raw NV12 data + dimensions + Y-plane stride.
+    #[cfg_attr(test, mutants::skip)]
     fn lock_video_buffer(
         buffer: &IMFMediaBuffer,
         reader: &IMFSourceReader,
@@ -395,6 +405,7 @@ impl MediaReader {
     }
 
     /// Read channels + sample_rate from the current audio output type.
+    #[cfg_attr(test, mutants::skip)]
     fn audio_format_info(reader: &IMFSourceReader) -> Result<(u32, u32), DecoderError> {
         let mt: IMFMediaType = unsafe {
             reader
