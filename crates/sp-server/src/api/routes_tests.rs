@@ -380,6 +380,8 @@ async fn status_json_shape() {
     assert!(!json.obs_connected);
     assert!(!json.tools.ytdlp_available);
     assert!(!json.tools.ffmpeg_available);
+    // Fresh state → no playlists active on program yet.
+    assert!(json.active_playlist_ids.is_empty());
 }
 
 /// Playlist CRUD must signal the OBS client to rebuild its NDI source

@@ -63,6 +63,13 @@ pub struct StatusResponse {
     pub version: String,
     pub obs_connected: bool,
     pub active_scene: Option<String>,
+    /// Playlists whose NDI source is matched in the current OBS program
+    /// scene by [`scene::check_scene_items`]. Populated only after the
+    /// `ndi_sources` map has been rebuilt from the DB + OBS input
+    /// settings — an empty list here on a known-good scene is the
+    /// symptom of issue #11 and is what the post-deploy tests assert
+    /// against.
+    pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,
     pub playlist_count: i64,
 }
@@ -429,10 +436,14 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         .map(|r| r.get::<i64, _>("c"))
         .unwrap_or(0);
 
+    let mut active_playlist_ids: Vec<i64> = obs.active_playlist_ids.iter().copied().collect();
+    active_playlist_ids.sort_unstable();
+
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected: obs.connected,
         active_scene: obs.current_scene.clone(),
+        active_playlist_ids,
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,

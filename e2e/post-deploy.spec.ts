@@ -161,49 +161,77 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
   /**
    * Issue #11 — scene-driven playback.
-   * Switching OBS to `sp-fast` must, within 5 s, cause SongPlayer to
-   * report `active_scene=sp-fast`. Before the fix, the ndi_sources map
-   * was empty so scene changes never reached the engine.
    *
-   * Required environment (deployment responsibility, not test config):
-   * OBS must have an `sp-fast` scene containing an NDI source whose
-   * ndi_source_name setting is `SP-fast`. If missing, this test fails
-   * hard — no skip, per the never-skip-CI-tests rule.
+   * Switching OBS to `sp-fast` must cause SongPlayer to match the
+   * scene's NDI source against the ytfast playlist. This is what the
+   * original bug broke: `ndi_sources` was an empty HashMap so every
+   * scene-item lookup returned None, and scene-driven playback never
+   * fired.
+   *
+   * Strong assertion: after the scene switch, `/api/v1/status` must
+   * report `active_playlist_ids` CONTAINING the ytfast playlist's id.
+   * This field is populated from `obs_state.active_playlist_ids`,
+   * which is the exact output of `check_scene_items` against the
+   * rebuilt map — so a stale or empty map is directly observable.
+   *
+   * A weaker assertion using `active_scene` alone would pass even
+   * before the fix, because `obs_state.current_scene` is set from the
+   * raw OBS event regardless of the NDI match.
+   *
+   * Required environment: OBS must have an `sp-fast` scene containing
+   * an NDI source whose `ndi_source_name` setting is `SP-fast`. If
+   * missing, the test fails hard (no skip).
    */
   test("switching OBS to sp-fast scene triggers ytfast playback", async ({ request }) => {
     expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
 
-    await findPlaylistId(request, FAST_PLAYLIST_NAME); // fails if missing
+    const fastId = await findPlaylistId(request, FAST_PLAYLIST_NAME);
     const scenes = await obs!.listScenes();
     expect(
       scenes.includes(FAST_SCENE_NAME),
       `deployed OBS must have an "${FAST_SCENE_NAME}" scene with an NDI source subscribed to "SP-fast"`,
     ).toBe(true);
 
-    // Reset to a non-sp scene first.
+    // Reset to a non-sp scene first so we observe the transition to
+    // sp-fast, not a no-op.
     const nonSp = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
     await obs!.switchScene(nonSp);
     await new Promise((r) => setTimeout(r, 500));
 
+    // Verify baseline: ytfast should NOT be in active_playlist_ids
+    // while the non-sp scene is on program. This kills any "always
+    // returns sp-fast" mutation in the status handler.
+    const baseline = await (await request.get("/api/v1/status")).json();
+    expect(
+      (baseline.active_playlist_ids as number[]).includes(fastId),
+      `ytfast (id=${fastId}) must NOT be in active_playlist_ids while the non-sp scene "${nonSp}" is on program; got ${JSON.stringify(baseline.active_playlist_ids)}`,
+    ).toBe(false);
+
     // Switch to sp-fast.
     await obs!.switchScene(FAST_SCENE_NAME);
 
-    // Poll the SongPlayer status until active_scene matches, proving
-    // SongPlayer saw the scene change AND the ndi_sources map correctly
-    // matched the scene items to the ytfast playlist.
+    // Poll the SongPlayer status until active_playlist_ids contains
+    // ytfast. This is the strong assertion: it only becomes true when
+    // the rebuild populated the NDI map AND check_scene_items matched
+    // the scene-item source name against it. Before the fix, this
+    // would stay empty forever.
     const deadline = Date.now() + 5_000;
-    let sawActive = false;
+    let matched = false;
+    let lastStatus: { active_scene?: string; active_playlist_ids?: number[] } = {};
     while (Date.now() < deadline) {
-      const status = await (await request.get("/api/v1/status")).json();
-      if (status.active_scene === FAST_SCENE_NAME) {
-        sawActive = true;
+      lastStatus = await (await request.get("/api/v1/status")).json();
+      if (
+        lastStatus.active_scene === FAST_SCENE_NAME &&
+        (lastStatus.active_playlist_ids as number[]).includes(fastId)
+      ) {
+        matched = true;
         break;
       }
       await new Promise((r) => setTimeout(r, 200));
     }
     expect(
-      sawActive,
-      "SongPlayer did not report active_scene=sp-fast within 5s after OBS scene change",
+      matched,
+      `within 5s of switching OBS to "${FAST_SCENE_NAME}", /api/v1/status must report active_scene="${FAST_SCENE_NAME}" AND active_playlist_ids containing ${fastId}; last status: ${JSON.stringify(lastStatus)}`,
     ).toBe(true);
 
     // Cleanup: switch away.
