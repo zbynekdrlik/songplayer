@@ -74,16 +74,54 @@ pub async fn rebuild_ndi_source_map(
             }
         };
 
-        if let Some(&playlist_id) = by_ndi_name.get(&sender_name) {
+        // The NDI plugin stores the full network-visible name, e.g.
+        // `"RESOLUME-SNV (SP-fast)"` — machine hostname + the stream name
+        // in parentheses. Extract the stream portion so we can match
+        // against the playlist's `ndi_output_name` which is just the
+        // bare stream name SongPlayer gave to its NdiLib sender.
+        let stream_name = extract_ndi_stream_name(&sender_name);
+
+        if let Some(&playlist_id) = by_ndi_name.get(stream_name) {
             debug!(
-                "rebuild_ndi_source_map: '{input_name}' → playlist {playlist_id} (NDI sender '{sender_name}')"
+                "rebuild_ndi_source_map: '{input_name}' → playlist {playlist_id} (NDI sender '{sender_name}', stream '{stream_name}')"
             );
             map.insert(input_name, playlist_id);
+        } else {
+            debug!(
+                "rebuild_ndi_source_map: no playlist matches NDI sender '{sender_name}' (stream '{stream_name}')"
+            );
         }
     }
 
     info!(count = map.len(), "rebuilt NDI source map from OBS + DB");
     map
+}
+
+/// Extract the stream portion from an NDI network name.
+///
+/// NDI network names follow the format `"MACHINE (stream)"` where the
+/// machine hostname is outside the parentheses and the stream name
+/// SongPlayer gave to its NdiLib sender is inside. If the input has no
+/// parenthesised suffix, it is returned verbatim.
+///
+/// Examples:
+/// - `"RESOLUME-SNV (SP-fast)"` → `"SP-fast"`
+/// - `"machine (name with spaces)"` → `"name with spaces"`
+/// - `"SP-fast"` → `"SP-fast"` (no parentheses — return as-is)
+/// - `"weird (name (with) parens)"` → `"name (with) parens"` (last `(` wins)
+pub(crate) fn extract_ndi_stream_name(full: &str) -> &str {
+    // Find the last `" ("` open-paren preceded by a space, and require
+    // the string to end with `)`. Fall back to the raw name.
+    if full.ends_with(')') {
+        if let Some(open) = full.rfind(" (") {
+            let inner_start = open + 2;
+            let inner_end = full.len() - 1;
+            if inner_end > inner_start {
+                return &full[inner_start..inner_end];
+            }
+        }
+    }
+    full
 }
 
 /// Load the `{ndi_output_name → playlist_id}` map for all active playlists.
@@ -179,6 +217,36 @@ async fn wait_for_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_ndi_stream_name_strips_machine_prefix() {
+        assert_eq!(extract_ndi_stream_name("RESOLUME-SNV (SP-fast)"), "SP-fast");
+        assert_eq!(extract_ndi_stream_name("WIN-BOX (SP-warmup)"), "SP-warmup");
+        assert_eq!(
+            extract_ndi_stream_name("dev-machine-1 (stream with spaces)"),
+            "stream with spaces"
+        );
+    }
+
+    #[test]
+    fn extract_ndi_stream_name_passes_through_bare_names() {
+        // Already bare — return as-is.
+        assert_eq!(extract_ndi_stream_name("SP-fast"), "SP-fast");
+        assert_eq!(extract_ndi_stream_name("no-parens"), "no-parens");
+    }
+
+    #[test]
+    fn extract_ndi_stream_name_handles_empty_and_weird_inputs() {
+        assert_eq!(extract_ndi_stream_name(""), "");
+        // No space before the open paren → treat as opaque.
+        assert_eq!(extract_ndi_stream_name("(just-parens)"), "(just-parens)");
+        // Nested-looking parens — last ` (` wins, so the inner string
+        // is from the last space-paren open to the final closing paren.
+        assert_eq!(
+            extract_ndi_stream_name("weird (inner (nested))"),
+            "inner (nested)"
+        );
+    }
 
     #[tokio::test]
     async fn load_playlist_ndi_names_returns_active_with_non_empty_output() {

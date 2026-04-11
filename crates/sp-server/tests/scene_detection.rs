@@ -36,7 +36,10 @@ async fn scene_change_to_sp_fast_marks_playlist_7_active() {
 
     // 2. Configure FakeObsServer so it exposes:
     //    - An input `sp-fast_video` of kind `ndi_source`
-    //    - That input's settings contain `ndi_source_name: "SP-fast"`
+    //    - That input's settings contain the NDI plugin's full
+    //      network-visible name: `"RESOLUME-SNV (SP-fast)"` (machine
+    //      hostname + `(stream)` suffix — matching what a real OBS NDI
+    //      receiver sees on the wire).
     //    - A scene `sp-fast` containing `sp-fast_video` as an item
     let mut fake_state = FakeObsState::default();
     fake_state
@@ -44,7 +47,7 @@ async fn scene_change_to_sp_fast_marks_playlist_7_active() {
         .insert("sp-fast_video".into(), "ndi_source".into());
     fake_state.input_settings.insert(
         "sp-fast_video".into(),
-        serde_json::json!({ "ndi_source_name": "SP-fast" }),
+        serde_json::json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
     );
     fake_state.scene_items.insert(
         "sp-fast".into(),
@@ -164,7 +167,7 @@ async fn scene_change_to_scene_without_ndi_source_yields_empty_active() {
         .insert("sp-fast_video".into(), "ndi_source".into());
     fake_state.input_settings.insert(
         "sp-fast_video".into(),
-        serde_json::json!({ "ndi_source_name": "SP-fast" }),
+        serde_json::json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
     );
     // Scene `Break` has only a non-NDI source.
     fake_state.scene_items.insert(
