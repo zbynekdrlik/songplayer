@@ -132,18 +132,23 @@ pub async fn create_playlist(
     .await;
 
     match result {
-        Ok(row) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "id": row.get::<i64, _>("id"),
-                "name": row.get::<String, _>("name"),
-                "youtube_url": row.get::<String, _>("youtube_url"),
-                "ndi_output_name": row.get::<String, _>("ndi_output_name"),
-                "playback_mode": row.get::<String, _>("playback_mode"),
-                "is_active": row.get::<i32, _>("is_active") != 0,
-            })),
-        )
-            .into_response(),
+        Ok(row) => {
+            // Trigger a scene-detection rebuild so the new playlist can be
+            // matched against OBS NDI inputs immediately.
+            let _ = state.obs_rebuild_tx.send(());
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "id": row.get::<i64, _>("id"),
+                    "name": row.get::<String, _>("name"),
+                    "youtube_url": row.get::<String, _>("youtube_url"),
+                    "ndi_output_name": row.get::<String, _>("ndi_output_name"),
+                    "playback_mode": row.get::<String, _>("playback_mode"),
+                    "is_active": row.get::<i32, _>("is_active") != 0,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             warn!("create_playlist error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -228,6 +233,7 @@ pub async fn update_playlist(
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                let _ = state.obs_rebuild_tx.send(());
                 StatusCode::NO_CONTENT.into_response()
             }
         }
@@ -251,6 +257,7 @@ pub async fn delete_playlist(
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                let _ = state.obs_rebuild_tx.send(());
                 StatusCode::NO_CONTENT.into_response()
             }
         }
@@ -535,6 +542,7 @@ mod tests {
         let (engine_tx, _) = mpsc::channel(16);
         let (sync_tx, _) = mpsc::channel(16);
         let (resolume_tx, _) = mpsc::channel(16);
+        let (obs_rebuild_tx, _) = broadcast::channel(4);
         AppState {
             pool,
             event_tx,
@@ -544,6 +552,7 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
+            obs_rebuild_tx,
         }
     }
 
@@ -840,5 +849,117 @@ mod tests {
         assert!(!json.obs_connected);
         assert!(!json.tools.ytdlp_available);
         assert!(!json.tools.ffmpeg_available);
+    }
+
+    /// Playlist CRUD must signal the OBS client to rebuild its NDI source
+    /// map — otherwise newly-added playlists never get scene-matched.
+    #[tokio::test]
+    async fn create_playlist_sends_obs_rebuild_signal() {
+        let state = test_state().await;
+        let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
+        let app = app(state);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/playlists")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "name": "New",
+                            "youtube_url": "https://youtube.com/playlist?list=PLnew",
+                            "ndi_output_name": "SP-new"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        // Rebuild signal must arrive within 200 ms.
+        tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
+            .await
+            .expect("rebuild signal should arrive within 200ms")
+            .expect("rebuild channel should still be open");
+    }
+
+    #[tokio::test]
+    async fn update_playlist_sends_obs_rebuild_signal() {
+        let state = test_state().await;
+
+        // Seed a playlist directly via the pool (bypass the create path so
+        // the signal under test is the update signal).
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
+             VALUES (1, 'orig', 'u', 'SP-orig')",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
+        let app = app(state);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/playlists/1")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "ndi_output_name": "SP-renamed"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
+            .await
+            .expect("rebuild signal should arrive within 200ms")
+            .expect("rebuild channel should still be open");
+    }
+
+    #[tokio::test]
+    async fn delete_playlist_sends_obs_rebuild_signal() {
+        let state = test_state().await;
+
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
+             VALUES (1, 'd', 'u', 'SP-d')",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
+        let app = app(state);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/v1/playlists/1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
+            .await
+            .expect("rebuild signal should arrive within 200ms")
+            .expect("rebuild channel should still be open");
     }
 }

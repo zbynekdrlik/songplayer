@@ -44,6 +44,9 @@ pub struct AppState {
     pub tool_paths: Arc<RwLock<Option<ToolPaths>>>,
     pub sync_tx: mpsc::Sender<SyncRequest>,
     pub resolume_tx: mpsc::Sender<resolume::ResolumeCommand>,
+    /// Signal — sent by playlist CRUD handlers so the OBS client can rebuild
+    /// its NDI source map.
+    pub obs_rebuild_tx: broadcast::Sender<()>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -74,6 +77,90 @@ pub struct ToolsStatus {
     pub ytdlp_available: bool,
     pub ffmpeg_available: bool,
     pub ytdlp_version: Option<String>,
+}
+
+/// Pure diff: compute the per-playlist engine commands that should follow
+/// from an OBS `SceneChanged` event, given the previously-active set.
+///
+/// Returns a list of `(playlist_id, on_program)` tuples. Extracted from
+/// the bridge task so it can be unit-tested exhaustively without touching
+/// Tokio channels.
+pub(crate) fn diff_scene_changes(
+    previous: &std::collections::HashSet<i64>,
+    current: &std::collections::HashSet<i64>,
+) -> Vec<(i64, bool)> {
+    let mut out = Vec::new();
+    // Playlists that just became active.
+    let mut newly_on: Vec<i64> = current.difference(previous).copied().collect();
+    newly_on.sort_unstable();
+    for pid in newly_on {
+        out.push((pid, true));
+    }
+    // Playlists that just left the program scene.
+    let mut newly_off: Vec<i64> = previous.difference(current).copied().collect();
+    newly_off.sort_unstable();
+    for pid in newly_off {
+        out.push((pid, false));
+    }
+    out
+}
+
+/// Bridge task body — consumes `ObsEvent::SceneChanged` and
+/// `ObsEvent::Disconnected` broadcasts and dispatches per-playlist
+/// `EngineCommand::SceneChanged` messages to the playback engine.
+async fn run_obs_engine_bridge(
+    mut obs_event_rx: broadcast::Receiver<obs::ObsEvent>,
+    engine_tx: mpsc::Sender<EngineCommand>,
+    mut shutdown: broadcast::Receiver<()>,
+) {
+    use std::collections::HashSet;
+    use tracing::debug;
+
+    let mut previous: HashSet<i64> = HashSet::new();
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => {
+                debug!("OBS→engine scene bridge shutting down");
+                break;
+            }
+            event = obs_event_rx.recv() => {
+                let evt = match event {
+                    Ok(e) => e,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("OBS→engine bridge lagged by {n} events");
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                match evt {
+                    obs::ObsEvent::SceneChanged { active_playlist_ids, .. } => {
+                        let diffs = diff_scene_changes(&previous, &active_playlist_ids);
+                        for (playlist_id, on_program) in diffs {
+                            let _ = engine_tx
+                                .send(EngineCommand::SceneChanged { playlist_id, on_program })
+                                .await;
+                        }
+                        previous = active_playlist_ids;
+                    }
+                    obs::ObsEvent::Disconnected => {
+                        // On disconnect, mark all previously-active playlists as off
+                        // so the pipelines stop playback instead of continuing into
+                        // the void.
+                        for &pid in &previous {
+                            let _ = engine_tx
+                                .send(EngineCommand::SceneChanged {
+                                    playlist_id: pid,
+                                    on_program: false,
+                                })
+                                .await;
+                        }
+                        previous.clear();
+                    }
+                    obs::ObsEvent::Connected => {}
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +219,8 @@ pub async fn start(
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let (event_tx, _) = broadcast::channel::<ServerMsg>(256);
     let (engine_tx, mut engine_rx) = mpsc::channel::<EngineCommand>(64);
+    // Rebuild signal from playlist CRUD → OBS client.
+    let (obs_rebuild_tx, _) = broadcast::channel::<()>(16);
 
     // 3. Shared state
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
@@ -149,6 +238,7 @@ pub async fn start(
         tool_paths: tool_paths.clone(),
         sync_tx: sync_tx.clone(),
         resolume_tx: resolume_cmd_tx.clone(),
+        obs_rebuild_tx: obs_rebuild_tx.clone(),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -268,13 +358,33 @@ pub async fn start(
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
         let obs_client = obs::ObsClient::spawn(
             obs_config,
+            pool.clone(),
             ndi_sources,
             obs_state.clone(),
             obs_event_tx.clone(),
+            obs_rebuild_tx.subscribe(),
             shutdown_tx.subscribe(),
         );
         obs_cmd_tx = Some(obs_client.cmd_sender());
         info!("OBS WebSocket client started");
+    }
+
+    // Bridge: convert OBS scene-change events to per-playlist EngineCommands.
+    //
+    // The OBS client broadcasts `ObsEvent::SceneChanged { active_playlist_ids }`
+    // every time the program scene changes. For the playback engine, we need
+    // to turn that set diff into per-playlist `SceneChanged { playlist_id,
+    // on_program }` messages so each pipeline state machine sees the right
+    // transition.
+    {
+        let obs_event_rx = obs_event_tx.subscribe();
+        let bridge_engine_tx = engine_tx.clone();
+        let bridge_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(run_obs_engine_bridge(
+            obs_event_rx,
+            bridge_engine_tx,
+            bridge_shutdown,
+        ));
     }
 
     // 8. Reprocess worker (with Gemini provider if API key is configured)
@@ -451,6 +561,7 @@ mod tests {
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
+        let (obs_rebuild_tx, _) = broadcast::channel::<()>(4);
         let state = AppState {
             pool,
             event_tx,
@@ -460,10 +571,178 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
+            obs_rebuild_tx,
         };
 
         // Verify the router can be built.
         let _router = api::router(state, None);
+    }
+
+    // ---------------------------------------------------------------------
+    // diff_scene_changes + run_obs_engine_bridge tests
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn diff_scene_changes_empty_to_empty_produces_nothing() {
+        let prev = std::collections::HashSet::new();
+        let curr = std::collections::HashSet::new();
+        assert!(diff_scene_changes(&prev, &curr).is_empty());
+    }
+
+    #[test]
+    fn diff_scene_changes_same_set_produces_nothing() {
+        let prev: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
+        let curr: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
+        assert!(diff_scene_changes(&prev, &curr).is_empty());
+    }
+
+    #[test]
+    fn diff_scene_changes_add_produces_on_program_true() {
+        let prev = std::collections::HashSet::new();
+        let curr: std::collections::HashSet<i64> = [7].into_iter().collect();
+        let diffs = diff_scene_changes(&prev, &curr);
+        assert_eq!(diffs, vec![(7, true)]);
+    }
+
+    #[test]
+    fn diff_scene_changes_remove_produces_on_program_false() {
+        let prev: std::collections::HashSet<i64> = [7].into_iter().collect();
+        let curr = std::collections::HashSet::new();
+        let diffs = diff_scene_changes(&prev, &curr);
+        assert_eq!(diffs, vec![(7, false)]);
+    }
+
+    #[test]
+    fn diff_scene_changes_swap_produces_off_then_on_for_different_ids() {
+        // Previous had {2}, current has {7} — expect 7 on, 2 off.
+        let prev: std::collections::HashSet<i64> = [2].into_iter().collect();
+        let curr: std::collections::HashSet<i64> = [7].into_iter().collect();
+        let diffs = diff_scene_changes(&prev, &curr);
+        assert_eq!(diffs.len(), 2);
+        assert!(diffs.contains(&(7, true)));
+        assert!(diffs.contains(&(2, false)));
+    }
+
+    #[test]
+    fn diff_scene_changes_partial_overlap() {
+        // Previous {1, 2, 3}, current {2, 3, 4} — 4 on, 1 off.
+        let prev: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
+        let curr: std::collections::HashSet<i64> = [2, 3, 4].into_iter().collect();
+        let diffs = diff_scene_changes(&prev, &curr);
+        assert_eq!(diffs.len(), 2);
+        assert!(diffs.contains(&(4, true)));
+        assert!(diffs.contains(&(1, false)));
+        // Must NOT re-emit for 2 or 3.
+        assert!(!diffs.iter().any(|(pid, _)| *pid == 2));
+        assert!(!diffs.iter().any(|(pid, _)| *pid == 3));
+    }
+
+    #[tokio::test]
+    async fn obs_engine_bridge_forwards_scene_changed_as_engine_commands() {
+        use std::collections::HashSet;
+
+        let (obs_event_tx, obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+        let (engine_tx, mut engine_rx) = mpsc::channel::<EngineCommand>(16);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
+
+        tokio::spawn(run_obs_engine_bridge(obs_event_rx, engine_tx, shutdown_rx));
+
+        // First event: playlist 7 becomes active.
+        let mut active: HashSet<i64> = HashSet::new();
+        active.insert(7);
+        obs_event_tx
+            .send(obs::ObsEvent::SceneChanged {
+                scene_name: "sp-fast".into(),
+                active_playlist_ids: active,
+            })
+            .unwrap();
+
+        // Expect a SceneChanged{7, true} on engine_rx.
+        let cmd = tokio::time::timeout(std::time::Duration::from_millis(500), engine_rx.recv())
+            .await
+            .expect("engine command within 500ms")
+            .expect("engine channel still open");
+        match cmd {
+            EngineCommand::SceneChanged {
+                playlist_id: 7,
+                on_program: true,
+            } => {}
+            other => panic!("expected SceneChanged{{7, true}}, got {other:?}"),
+        }
+
+        // Next event: playlist 7 goes off program (scene switch to empty).
+        obs_event_tx
+            .send(obs::ObsEvent::SceneChanged {
+                scene_name: "Break".into(),
+                active_playlist_ids: HashSet::new(),
+            })
+            .unwrap();
+
+        let cmd = tokio::time::timeout(std::time::Duration::from_millis(500), engine_rx.recv())
+            .await
+            .expect("engine command within 500ms")
+            .expect("engine channel still open");
+        match cmd {
+            EngineCommand::SceneChanged {
+                playlist_id: 7,
+                on_program: false,
+            } => {}
+            other => panic!("expected SceneChanged{{7, false}}, got {other:?}"),
+        }
+
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn obs_engine_bridge_disconnect_marks_all_previously_active_off() {
+        use std::collections::HashSet;
+
+        let (obs_event_tx, obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+        let (engine_tx, mut engine_rx) = mpsc::channel::<EngineCommand>(16);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
+
+        tokio::spawn(run_obs_engine_bridge(obs_event_rx, engine_tx, shutdown_rx));
+
+        // First: activate playlists 2 and 7.
+        let mut active: HashSet<i64> = HashSet::new();
+        active.insert(2);
+        active.insert(7);
+        obs_event_tx
+            .send(obs::ObsEvent::SceneChanged {
+                scene_name: "multi".into(),
+                active_playlist_ids: active,
+            })
+            .unwrap();
+
+        // Drain the two "on" commands.
+        for _ in 0..2 {
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(200), engine_rx.recv())
+                .await
+                .unwrap();
+        }
+
+        // Now disconnect.
+        obs_event_tx.send(obs::ObsEvent::Disconnected).unwrap();
+
+        // Expect two "off" commands for playlists 2 and 7 (order not important).
+        let mut off_ids: Vec<i64> = Vec::new();
+        for _ in 0..2 {
+            let cmd = tokio::time::timeout(std::time::Duration::from_millis(500), engine_rx.recv())
+                .await
+                .expect("off command within 500ms")
+                .expect("engine channel still open");
+            match cmd {
+                EngineCommand::SceneChanged {
+                    playlist_id,
+                    on_program: false,
+                } => off_ids.push(playlist_id),
+                other => panic!("expected SceneChanged off, got {other:?}"),
+            }
+        }
+        off_ids.sort();
+        assert_eq!(off_ids, vec![2, 7]);
+
+        let _ = shutdown_tx.send(());
     }
 
     #[tokio::test]
@@ -476,6 +755,7 @@ mod tests {
 
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
+        let (obs_rebuild_tx, _) = broadcast::channel::<()>(4);
 
         let state = AppState {
             pool,
@@ -486,6 +766,7 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
+            obs_rebuild_tx,
         };
 
         // Verify clone works.
