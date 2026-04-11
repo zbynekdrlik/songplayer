@@ -30,4 +30,16 @@ pub enum DecoderError {
     /// Locking the media buffer failed.
     #[error("Buffer lock failed: {0}")]
     BufferLock(String),
+
+    /// I/O failure opening or reading a file.
+    #[error("I/O failure: {0}")]
+    Io(String),
+
+    /// Decoder-side failure (Symphonia or MF codec error).
+    #[error("Decode failure: {0}")]
+    Decode(String),
+
+    /// Video and audio sidecars disagree on duration / format.
+    #[error("Video/audio mismatch: {0}")]
+    Mismatch(String),
 }
