@@ -19,4 +19,4 @@ windows = { version = "0.58", features = [
 [dev-dependencies]
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
-mutants = "0.0.3"
+mutants = "0.0.4"

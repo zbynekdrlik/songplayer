@@ -101,19 +101,33 @@ pub async fn rebuild_ndi_source_map(
 ///
 /// NDI network names follow the format `"MACHINE (stream)"` where the
 /// machine hostname is outside the parentheses and the stream name
-/// SongPlayer gave to its NdiLib sender is inside. If the input has no
-/// parenthesised suffix, it is returned verbatim.
+/// SongPlayer gave to its NdiLib sender is inside. This function returns
+/// the slice between the **first** ` (` and the final `)`, so nested
+/// parentheses inside the stream name are preserved.
+///
+/// If the input has no `" ("` delimiter or does not end with `)`, it is
+/// returned verbatim.
+///
+/// # NDI network name format
+///
+/// The official NDI SDK formats source names as `"<machine> (<stream>)"`
+/// where `<machine>` is the host that owns the sender and `<stream>` is
+/// the human-readable name the sender passed to `NDIlib_send_create`.
+/// OBS's NDI input plugin stores this exact string in its
+/// `ndi_source_name` input setting. Matching against the bare `<stream>`
+/// part is therefore required to link an OBS NDI input back to a
+/// SongPlayer playlist whose `ndi_output_name` is just the stream label.
 ///
 /// Examples:
 /// - `"RESOLUME-SNV (SP-fast)"` → `"SP-fast"`
 /// - `"machine (name with spaces)"` → `"name with spaces"`
 /// - `"SP-fast"` → `"SP-fast"` (no parentheses — return as-is)
-/// - `"weird (name (with) parens)"` → `"name (with) parens"` (last `(` wins)
+/// - `"weird (inner (nested))"` → `"inner (nested)"` (first `(` wins)
 pub(crate) fn extract_ndi_stream_name(full: &str) -> &str {
-    // Find the last `" ("` open-paren preceded by a space, and require
-    // the string to end with `)`. Fall back to the raw name.
+    // Find the first `" ("` delimiter; require the string to end with
+    // `)`. Fall back to the raw name for any shape we don't recognise.
     if full.ends_with(')') {
-        if let Some(open) = full.rfind(" (") {
+        if let Some(open) = full.find(" (") {
             let inner_start = open + 2;
             let inner_end = full.len() - 1;
             if inner_end > inner_start {
@@ -240,9 +254,12 @@ mod tests {
         assert_eq!(extract_ndi_stream_name(""), "");
         // No space before the open paren → treat as opaque.
         assert_eq!(extract_ndi_stream_name("(just-parens)"), "(just-parens)");
-        // rfind(" (") picks the LAST ` (` — this is good enough for real
-        // NDI names, which never have nested parens. Document the behavior.
-        assert_eq!(extract_ndi_stream_name("weird (inner (nested))"), "nested)");
+        // find(" (") picks the FIRST ` (` so nested parens inside the
+        // stream name are preserved, e.g. an SDK-generated fixup.
+        assert_eq!(
+            extract_ndi_stream_name("weird (inner (nested))"),
+            "inner (nested)"
+        );
         // A name that doesn't end with `)` is passed through untouched.
         assert_eq!(
             extract_ndi_stream_name("machine (incomplete"),

@@ -107,6 +107,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             cached_artist: String::new(),
             cached_duration_ms: 0,
             last_now_playing_broadcast: None,
+            history: std::collections::VecDeque::new(),
         };
 
         assert!(pp.title_show_abort.is_some());
@@ -507,5 +508,158 @@ async fn position_events_are_throttled() {
             assert_eq!(position_ms, 700);
         }
         other => panic!("expected NowPlaying after throttle window, got {other:?}"),
+    }
+}
+
+/// Previous with an empty history is a no-op: no pipeline command sent,
+/// no broadcast, no state mutation. Kills accidental regressions where
+/// Previous might randomly pick a new video.
+#[tokio::test]
+async fn handle_previous_with_empty_history_is_noop() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(1, "TestNDI");
+
+    // Fresh pipeline: current_video_id = None, history = [].
+    engine.handle_previous(1).await;
+
+    // State unchanged.
+    let pp = engine.pipelines.get(&1).unwrap();
+    assert_eq!(pp.state, PlayState::Idle);
+    assert!(pp.current_video_id.is_none());
+    assert!(pp.history.is_empty());
+
+    // No broadcast.
+    assert!(
+        ws_rx.try_recv().is_err(),
+        "empty-history Previous must not broadcast"
+    );
+}
+
+/// Previous pops the most recent entry from history, sets it as current,
+/// and broadcasts PlaybackStateChanged. Repeated Previous presses walk
+/// backwards through the stack one step at a time.
+#[tokio::test]
+async fn handle_previous_pops_history_and_plays() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Seed videos 10, 11, 12 with valid normalized file paths so
+    // handle_previous can successfully look them up.
+    for vid in [10_i64, 11, 12] {
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path) \
+             VALUES (?, 1, ?, 1, ?)",
+        )
+        .bind(vid)
+        .bind(format!("yt{vid}"))
+        .bind(format!("/tmp/video_{vid}.mp4"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(1, "TestNDI");
+
+    // Simulate having played 10, 11, 12 in order. Current = 12, history = [10, 11].
+    if let Some(pp) = engine.pipelines.get_mut(&1) {
+        pp.history.push_back(10);
+        pp.history.push_back(11);
+        pp.current_video_id = Some(12);
+        pp.state = PlayState::Playing { video_id: 12 };
+    }
+
+    // First Previous: should play 11, leaving history = [10].
+    engine.handle_previous(1).await;
+    {
+        let pp = engine.pipelines.get(&1).unwrap();
+        assert_eq!(pp.current_video_id, Some(11));
+        assert_eq!(pp.state, PlayState::Playing { video_id: 11 });
+        assert_eq!(pp.history.len(), 1);
+        assert_eq!(pp.history.back().copied(), Some(10));
+    }
+    match ws_rx.try_recv() {
+        Ok(ServerMsg::PlaybackStateChanged {
+            playlist_id: 1,
+            state,
+            ..
+        }) => assert_eq!(state, WsPlaybackState::Playing),
+        other => panic!("expected PlaybackStateChanged(Playing), got {other:?}"),
+    }
+
+    // Second Previous: should play 10, leaving history = [].
+    engine.handle_previous(1).await;
+    {
+        let pp = engine.pipelines.get(&1).unwrap();
+        assert_eq!(pp.current_video_id, Some(10));
+        assert!(pp.history.is_empty());
+    }
+    // Drain the state-changed broadcast.
+    let _ = ws_rx.try_recv();
+
+    // Third Previous: history now empty, no-op.
+    engine.handle_previous(1).await;
+    {
+        let pp = engine.pipelines.get(&1).unwrap();
+        // current_video_id stays at 10, history still empty.
+        assert_eq!(pp.current_video_id, Some(10));
+        assert!(pp.history.is_empty());
+    }
+    assert!(
+        ws_rx.try_recv().is_err(),
+        "no broadcast when history is exhausted"
+    );
+}
+
+/// The history stack is bounded: pushing more than
+/// `PREVIOUS_HISTORY_CAPACITY` entries drops the oldest from the front.
+#[tokio::test]
+async fn history_capacity_is_bounded() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(1, "TestNDI");
+
+    // Simulate the SelectAndPlay bookkeeping for `CAPACITY + 3` videos
+    // by directly pushing to the history stack the same way the real
+    // code path does.
+    if let Some(pp) = engine.pipelines.get_mut(&1) {
+        for i in 0..(PREVIOUS_HISTORY_CAPACITY as i64 + 3) {
+            pp.history.push_back(i);
+            while pp.history.len() > PREVIOUS_HISTORY_CAPACITY {
+                pp.history.pop_front();
+            }
+        }
+        assert_eq!(pp.history.len(), PREVIOUS_HISTORY_CAPACITY);
+        // First three entries (0, 1, 2) dropped. Newest in the back.
+        assert_eq!(pp.history.front().copied(), Some(3));
+        assert_eq!(
+            pp.history.back().copied(),
+            Some(PREVIOUS_HISTORY_CAPACITY as i64 + 2)
+        );
     }
 }

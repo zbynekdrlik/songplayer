@@ -8,7 +8,7 @@ pub mod pipeline;
 pub mod state;
 pub mod submitter;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
@@ -31,6 +31,12 @@ const OBS_TITLE_SOURCE: &str = "#sp-title";
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
 /// `PipelineEvent::Position` events.
 const POSITION_BROADCAST_INTERVAL_MS: u64 = 500;
+
+/// Maximum number of past videos tracked per playlist for the Previous
+/// button. Bounded to keep memory O(1) per playlist — older entries are
+/// dropped from the front when the capacity is exceeded. 50 is plenty
+/// for human navigation.
+const PREVIOUS_HISTORY_CAPACITY: usize = 50;
 
 /// Pure predicate: may we send a `NowPlaying` update given the elapsed
 /// milliseconds since the last one for this playlist?
@@ -92,6 +98,10 @@ struct PlaylistPipeline {
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
     last_now_playing_broadcast: Option<Instant>,
+    /// Stack of previously-played `video_id`s, most recent last. Pushed
+    /// when a new video is selected (via `SelectAndPlay`); popped by
+    /// `handle_previous`. Bounded to [`PREVIOUS_HISTORY_CAPACITY`].
+    history: VecDeque<i64>,
 }
 
 impl PlaylistPipeline {
@@ -196,6 +206,7 @@ impl PlaybackEngine {
                 cached_artist: String::new(),
                 cached_duration_ms: 0,
                 last_now_playing_broadcast: None,
+                history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
             }
         });
     }
@@ -224,31 +235,21 @@ impl PlaybackEngine {
     /// have dedicated unit tests below.
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
-        // Fetch + broadcast NowPlaying / position updates BEFORE the existing
-        // timer logic so the dashboard stays fresh.
         match &event {
             PipelineEvent::Started { duration_ms } => {
+                // 1) Broadcast NowPlaying to the dashboard first so it
+                //    switches from "Nothing playing" immediately.
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
                     .await;
-            }
-            PipelineEvent::Position {
-                position_ms,
-                duration_ms,
-            } => {
-                self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
-            }
-            PipelineEvent::Ended | PipelineEvent::Error(_) => {}
-        }
 
-        match &event {
-            PipelineEvent::Started { duration_ms } => {
                 debug!(playlist_id, duration_ms, "video started");
                 let dur = *duration_ms;
 
-                // Cancel any pending title timers from a previous video on this
-                // playlist. Without this, a stale hide_title from a skipped 4-min
-                // song would fire 3.5s before that song's natural end during the
-                // next song, clearing the title mid-playback.
+                // 2) Cancel any pending title timers from a previous video on
+                //    this playlist. Without this, a stale hide_title from a
+                //    skipped 4-min song would fire 3.5s before that song's
+                //    natural end during the next song, clearing the title
+                //    mid-playback.
                 let video_id_opt = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
                     pp.current_video_id
@@ -332,9 +333,15 @@ impl PlaybackEngine {
                     }
                 }
             }
-            PipelineEvent::Position { .. } => {
-                // Position events are tracked but title hide is now timer-based
-                // (spawned in the Started handler above).
+            PipelineEvent::Position {
+                position_ms,
+                duration_ms,
+            } => {
+                // Throttled re-broadcast of NowPlaying with the updated
+                // position. Title hide is timer-based (spawned in the
+                // Started handler above) so no position-driven hide work
+                // happens here.
+                self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
@@ -362,6 +369,63 @@ impl PlaybackEngine {
             }
         }
         self.apply_event(playlist_id, cmd).await;
+    }
+
+    /// Handle the Previous-track command: pop the most recent entry from
+    /// the per-playlist history stack and send the pipeline a `Play`
+    /// command for that video.
+    ///
+    /// If the history is empty (fresh startup or too many Previous
+    /// presses), the command is a no-op. Calling `Previous` does NOT
+    /// re-push the current video, so pressing it repeatedly walks
+    /// backwards through the stack one step at a time.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn handle_previous(&mut self, playlist_id: i64) {
+        let prev_video_id = match self.pipelines.get_mut(&playlist_id) {
+            Some(pp) => pp.history.pop_back(),
+            None => {
+                warn!(playlist_id, "Previous: no pipeline for playlist");
+                return;
+            }
+        };
+
+        let Some(video_id) = prev_video_id else {
+            debug!(playlist_id, "Previous: history empty, ignoring");
+            return;
+        };
+
+        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
+            Ok(Some(file_path)) => {
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.current_video_id = Some(video_id);
+                    pp.state = PlayState::Playing { video_id };
+                    info!(
+                        playlist_id,
+                        video_id, %file_path, "Previous → replaying video from history"
+                    );
+                    pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+
+                    // Broadcast the state change so the dashboard updates.
+                    let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                        playlist_id,
+                        state: WsPlaybackState::Playing,
+                        mode: pp.mode,
+                    });
+                }
+            }
+            Ok(None) => {
+                warn!(
+                    playlist_id,
+                    video_id, "Previous: history entry has no file_path"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    playlist_id,
+                    video_id, %e, "Previous: failed to get file_path"
+                );
+            }
+        }
     }
 
     /// Run the engine event loop until shutdown.
@@ -530,6 +594,16 @@ impl PlaybackEngine {
                         match crate::db::models::get_video_file_path(&self.pool, video_id).await {
                             Ok(Some(file_path)) => {
                                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                                    // Push the previous video to the
+                                    // per-playlist history stack before
+                                    // overwriting `current_video_id`, so the
+                                    // Previous button can replay it.
+                                    if let Some(prev) = pp.current_video_id {
+                                        pp.history.push_back(prev);
+                                        while pp.history.len() > PREVIOUS_HISTORY_CAPACITY {
+                                            pp.history.pop_front();
+                                        }
+                                    }
                                     pp.current_video_id = Some(video_id);
                                     pp.state = PlayState::Playing { video_id };
                                     info!(playlist_id, video_id, %file_path, "sent Play command");

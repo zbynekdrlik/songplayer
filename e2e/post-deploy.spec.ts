@@ -239,6 +239,73 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Full-chain end-to-end test for issue #11 + #9 combined.
+   *
+   * 1. Non-sp scene on OBS program, ytfast paused.
+   * 2. Open the dashboard in Playwright; ytfast card shows "Nothing playing".
+   * 3. Switch OBS program scene to `sp-fast` via obs-websocket-js.
+   * 4. Within 15 seconds the ytfast card must transition to `.np-info`.
+   *
+   * This exercises the entire chain:
+   *   OBS scene change → SongPlayer OBS client → check_scene_items
+   *   → active_playlist_ids populated → OBS→engine bridge
+   *   → EngineCommand::SceneChanged → state machine
+   *   → SelectAndPlay → PipelineEvent::Started
+   *   → NowPlaying broadcast → dashboard WebSocket → card update.
+   *
+   * Any link in the chain breaking makes this test fail. The earlier
+   * tests cover each segment in isolation; this one proves they compose.
+   */
+  test("full chain: OBS scene switch updates dashboard ytfast card", async ({
+    page,
+    request,
+  }) => {
+    expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
+
+    const fastId = await findPlaylistId(request, FAST_PLAYLIST_NAME);
+    const scenes = await obs!.listScenes();
+    expect(
+      scenes.includes(FAST_SCENE_NAME),
+      `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
+    ).toBe(true);
+
+    // Baseline: park on a non-sp scene and pause ytfast so the card
+    // starts from the "Nothing playing" state.
+    const nonSp = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
+    await obs!.switchScene(nonSp);
+    await request.post(`/api/v1/playback/${fastId}/pause`);
+    await new Promise((r) => setTimeout(r, 500));
+
+    await page.goto("/");
+    await expect(page.locator(".playlist-card").first()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const fastCard = page
+      .locator(".playlist-card")
+      .filter({ hasText: FAST_PLAYLIST_NAME });
+    await expect(fastCard).toBeVisible();
+
+    // Switch OBS to sp-fast — this must kick off the full chain.
+    await obs!.switchScene(FAST_SCENE_NAME);
+
+    // The dashboard card must show .np-info within 15s. That proves:
+    //  - Scene detection matched (ndi_sources populated correctly)
+    //  - OBS→engine bridge dispatched SceneChanged to the engine
+    //  - Engine state machine advanced into Playing
+    //  - Pipeline started decoding and emitted Started
+    //  - NowPlaying reached the dashboard WebSocket
+    //  - Dashboard rendered .np-info
+    await expect(fastCard.locator(".np-info")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Cleanup: switch back to the non-sp scene.
+    await obs!.switchScene(nonSp);
+    await request.post(`/api/v1/playback/${fastId}/pause`);
+  });
+
+  /**
    * Zero browser console errors/warnings. Runs last so it observes the
    * state after all other tests have interacted with the dashboard.
    *

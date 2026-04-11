@@ -65,9 +65,9 @@ pub enum EngineCommand {
     Skip {
         playlist_id: i64,
     },
-    /// Go back to the previous track. Currently treated as a Skip —
-    /// true history tracking requires a per-playlist play-history stack
-    /// which has not been implemented yet.
+    /// Go back to the previous track. Pops the most recent entry off
+    /// the per-playlist history stack maintained by `PlaybackEngine`
+    /// and plays it. No-op if the history is empty.
     Previous {
         playlist_id: i64,
     },
@@ -162,7 +162,15 @@ async fn run_obs_engine_bridge(
                         }
                         previous.clear();
                     }
-                    obs::ObsEvent::Connected => {}
+                    obs::ObsEvent::Connected => {
+                        // No-op: a fresh connect is always followed by a
+                        // CurrentProgramSceneChanged event (either the initial
+                        // GetCurrentProgramScene response or the next real
+                        // scene switch), which will compute the correct active
+                        // set and dispatch per-playlist SceneChanged commands
+                        // from the `previous` diff above. Doing work here
+                        // would race that event.
+                    }
                 }
             }
         }
@@ -477,11 +485,11 @@ pub async fn start(
                             engine.handle_command(playlist_id, playback::state::PlayEvent::Skip).await;
                         }
                         EngineCommand::Previous { playlist_id } => {
-                            // TODO: real previous-track history stack. Until
-                            // that exists, Previous re-uses the Skip transition
-                            // so clicking Prev advances to another randomly
-                            // selected track (matches Skip behaviour).
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::Skip).await;
+                            // Pops one entry off the per-playlist history
+                            // stack and plays it. See
+                            // `PlaybackEngine::handle_previous` for the
+                            // full contract.
+                            engine.handle_previous(playlist_id).await;
                         }
                         EngineCommand::SetMode { playlist_id, mode } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;

@@ -125,6 +125,9 @@ SQLite via sqlx with manual migrations. Migration logic lives in `crates/sp-serv
 - `sp-ndi` loads `Processing.NDI.Lib.x64.dll` at runtime via `libloading`
 - Gracefully degrades if NDI is not installed
 
+**NDI network name format (scene detection):**
+NDI sources on the network are advertised as `"MACHINE (stream)"` — the machine hostname that owns the sender, a space, then the stream name in parentheses. When OBS adds an NDI source, its `ndi_source_name` input setting stores this full string (e.g. `"RESOLUME-SNV (SP-fast)"`). SongPlayer's playlist `ndi_output_name` is just the bare stream part (`"SP-fast"`), so `crates/sp-server/src/obs/ndi_discovery.rs::extract_ndi_stream_name` strips the `MACHINE ` prefix before matching. Anyone touching the scene-detection path must preserve this split — otherwise the map built in `rebuild_ndi_source_map` will never match real OBS inputs.
+
 **Circular import avoidance:**
 Use local imports inside functions when needed to break cycles:
 ```rust
