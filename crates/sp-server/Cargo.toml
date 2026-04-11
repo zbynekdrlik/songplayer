@@ -44,5 +44,5 @@ wiremock = "0.6"
 tokio = { version = "1", features = ["full", "test-util"] }
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
-mutants = "0.0.3"
+mutants = "0.0.4"
 sp-ndi = { path = "../sp-ndi", features = ["test-util"] }

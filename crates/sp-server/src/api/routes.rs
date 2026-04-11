@@ -63,6 +63,13 @@ pub struct StatusResponse {
     pub version: String,
     pub obs_connected: bool,
     pub active_scene: Option<String>,
+    /// Playlists whose NDI source is matched in the current OBS program
+    /// scene by [`scene::check_scene_items`]. Populated only after the
+    /// `ndi_sources` map has been rebuilt from the DB + OBS input
+    /// settings — an empty list here on a known-good scene is the
+    /// symptom of issue #11 and is what the post-deploy tests assert
+    /// against.
+    pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,
     pub playlist_count: i64,
 }
@@ -132,18 +139,23 @@ pub async fn create_playlist(
     .await;
 
     match result {
-        Ok(row) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "id": row.get::<i64, _>("id"),
-                "name": row.get::<String, _>("name"),
-                "youtube_url": row.get::<String, _>("youtube_url"),
-                "ndi_output_name": row.get::<String, _>("ndi_output_name"),
-                "playback_mode": row.get::<String, _>("playback_mode"),
-                "is_active": row.get::<i32, _>("is_active") != 0,
-            })),
-        )
-            .into_response(),
+        Ok(row) => {
+            // Trigger a scene-detection rebuild so the new playlist can be
+            // matched against OBS NDI inputs immediately.
+            let _ = state.obs_rebuild_tx.send(());
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "id": row.get::<i64, _>("id"),
+                    "name": row.get::<String, _>("name"),
+                    "youtube_url": row.get::<String, _>("youtube_url"),
+                    "ndi_output_name": row.get::<String, _>("ndi_output_name"),
+                    "playback_mode": row.get::<String, _>("playback_mode"),
+                    "is_active": row.get::<i32, _>("is_active") != 0,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             warn!("create_playlist error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -228,6 +240,7 @@ pub async fn update_playlist(
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                let _ = state.obs_rebuild_tx.send(());
                 StatusCode::NO_CONTENT.into_response()
             }
         }
@@ -251,6 +264,7 @@ pub async fn delete_playlist(
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                let _ = state.obs_rebuild_tx.send(());
                 StatusCode::NO_CONTENT.into_response()
             }
         }
@@ -345,6 +359,17 @@ pub async fn skip(
     StatusCode::NO_CONTENT
 }
 
+pub async fn previous(
+    State(state): State<AppState>,
+    Path(playlist_id): Path<i64>,
+) -> impl IntoResponse {
+    let _ = state
+        .engine_tx
+        .send(EngineCommand::Previous { playlist_id })
+        .await;
+    StatusCode::NO_CONTENT
+}
+
 pub async fn set_mode(
     State(state): State<AppState>,
     Path(playlist_id): Path<i64>,
@@ -411,10 +436,14 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         .map(|r| r.get::<i64, _>("c"))
         .unwrap_or(0);
 
+    let mut active_playlist_ids: Vec<i64> = obs.active_playlist_ids.iter().copied().collect();
+    active_playlist_ids.sort_unstable();
+
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected: obs.connected,
         active_scene: obs.current_scene.clone(),
+        active_playlist_ids,
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,
@@ -519,326 +548,5 @@ pub async fn delete_resolume_host(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db;
-    use axum::body::Body;
-    use axum::http::Request;
-    use std::sync::Arc;
-    use tokio::sync::{RwLock, broadcast, mpsc};
-    use tower::ServiceExt;
-
-    async fn test_state() -> AppState {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
-        let (event_tx, _) = broadcast::channel(16);
-        let (engine_tx, _) = mpsc::channel(16);
-        let (sync_tx, _) = mpsc::channel(16);
-        let (resolume_tx, _) = mpsc::channel(16);
-        AppState {
-            pool,
-            event_tx,
-            engine_tx,
-            obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
-            tools_status: Arc::new(RwLock::new(crate::ToolsStatus::default())),
-            tool_paths: Arc::new(RwLock::new(None)),
-            sync_tx,
-            resolume_tx,
-        }
-    }
-
-    fn app(state: AppState) -> axum::Router {
-        crate::api::router(state, None)
-    }
-
-    #[tokio::test]
-    async fn status_returns_200() {
-        let state = test_state().await;
-        let app = app(state);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/status")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json["version"].is_string());
-        assert_eq!(json["obs_connected"], false);
-        assert_eq!(json["playlist_count"], 0);
-    }
-
-    #[tokio::test]
-    async fn create_and_list_playlists() {
-        let state = test_state().await;
-        let app = app(state);
-
-        // Create
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/playlists")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_string(&serde_json::json!({
-                            "name": "Test",
-                            "youtube_url": "https://youtube.com/playlist?list=PLtest"
-                        }))
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::CREATED);
-
-        // List
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/playlists")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let json: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json.len(), 1);
-        assert_eq!(json[0]["name"], "Test");
-    }
-
-    #[tokio::test]
-    async fn get_playlist_not_found() {
-        let state = test_state().await;
-        let app = app(state);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/playlists/999")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn delete_playlist_not_found() {
-        let state = test_state().await;
-        let app = app(state);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/api/v1/playlists/999")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn settings_get_empty() {
-        let state = test_state().await;
-        let app = app(state);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/settings")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json.is_object());
-    }
-
-    #[tokio::test]
-    async fn settings_patch_and_get() {
-        let state = test_state().await;
-        let app = app(state);
-
-        // Patch
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/settings")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_string(&serde_json::json!({
-                            "obs_websocket_url": "ws://10.0.0.1:4455",
-                            "cache_dir": "/tmp/cache"
-                        }))
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-        // Get
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/settings")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["obs_websocket_url"], "ws://10.0.0.1:4455");
-        assert_eq!(json["cache_dir"], "/tmp/cache");
-    }
-
-    #[tokio::test]
-    async fn resolume_hosts_crud() {
-        let state = test_state().await;
-        let app = app(state);
-
-        // Add host
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/resolume/hosts")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_string(&serde_json::json!({
-                            "label": "Main Resolume",
-                            "host": "192.168.1.10",
-                            "port": 8090
-                        }))
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::CREATED);
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let host_id = created["id"].as_i64().unwrap();
-
-        // List hosts
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/resolume/hosts")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let hosts: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
-        assert_eq!(hosts.len(), 1);
-
-        // Delete host
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri(&format!("/api/v1/resolume/hosts/{host_id}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-    }
-
-    #[tokio::test]
-    async fn playback_play_returns_no_content() {
-        let state = test_state().await;
-        let app = app(state);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/playback/1/play")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-    }
-
-    #[tokio::test]
-    async fn status_json_shape() {
-        let state = test_state().await;
-        let app = app(state);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/status")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let json: StatusResponse = serde_json::from_slice(&body).unwrap();
-        assert!(!json.version.is_empty());
-        assert!(!json.obs_connected);
-        assert!(!json.tools.ytdlp_available);
-        assert!(!json.tools.ffmpeg_available);
-    }
-}
+#[path = "routes_tests.rs"]
+mod tests;

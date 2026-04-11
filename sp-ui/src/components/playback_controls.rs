@@ -1,42 +1,61 @@
 //! Play / Pause / Skip / Previous buttons and mode selector.
 //!
-//! Sends [`ClientMsg`] commands over the REST API (the WebSocket write-half
-//! is read-only for now; commands go through POST endpoints).
+//! Dispatches commands to the path-based REST endpoints exposed by
+//! `sp-server`. Each click calls the matching `/api/v1/playback/{id}/{action}`
+//! (or `/api/v1/playlists/{id}/sync`) endpoint directly — there is
+//! deliberately no `/api/v1/control` umbrella route on the server.
 
 use leptos::prelude::*;
+use serde::Serialize;
 use sp_core::playback::PlaybackMode;
-use sp_core::ws::ClientMsg;
 
 use crate::api;
+
+#[derive(Serialize)]
+struct SetModeBody {
+    mode: String,
+}
 
 #[component]
 pub fn PlaybackControls(playlist_id: i64) -> impl IntoView {
     let pid = playlist_id;
 
-    let send_cmd = move |msg: ClientMsg| {
+    let on_play = move |_| {
         leptos::task::spawn_local(async move {
-            let _ = api::post_json::<ClientMsg, serde_json::Value>("/api/v1/control", &msg).await;
+            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/play")).await;
         });
     };
-
-    let on_play = move |_| send_cmd(ClientMsg::Play { playlist_id: pid });
-    let on_pause = move |_| send_cmd(ClientMsg::Pause { playlist_id: pid });
-    let on_skip = move |_| send_cmd(ClientMsg::Skip { playlist_id: pid });
+    let on_pause = move |_| {
+        leptos::task::spawn_local(async move {
+            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/pause")).await;
+        });
+    };
+    let on_skip = move |_| {
+        leptos::task::spawn_local(async move {
+            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/skip")).await;
+        });
+    };
     let on_prev = move |_| {
-        send_cmd(ClientMsg::Previous { playlist_id: pid });
+        leptos::task::spawn_local(async move {
+            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/previous")).await;
+        });
     };
 
     let on_mode = move |ev: leptos::ev::Event| {
         let val = event_target_value(&ev);
         let mode = PlaybackMode::from_str_lossy(&val);
-        send_cmd(ClientMsg::SetMode {
-            playlist_id: pid,
-            mode,
+        let body = SetModeBody {
+            mode: mode.as_str().to_string(),
+        };
+        leptos::task::spawn_local(async move {
+            let _ = api::put_json_empty(&format!("/api/v1/playback/{pid}/mode"), &body).await;
         });
     };
 
     let on_sync = move |_| {
-        send_cmd(ClientMsg::SyncPlaylist { playlist_id: pid });
+        leptos::task::spawn_local(async move {
+            let _ = api::post_empty(&format!("/api/v1/playlists/{pid}/sync")).await;
+        });
     };
 
     view! {

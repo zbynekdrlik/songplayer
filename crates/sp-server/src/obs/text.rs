@@ -40,6 +40,30 @@ pub fn get_scene_items_request(request_id: &str, scene_name: &str) -> serde_json
     })
 }
 
+/// Build a `GetInputList` request filtered to NDI source inputs.
+pub fn get_input_list_request(request_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "GetInputList",
+            "requestId": request_id,
+            "requestData": { "inputKind": "ndi_source" }
+        }
+    })
+}
+
+/// Build a `GetInputSettings` request for a specific input.
+pub fn get_input_settings_request(request_id: &str, input_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "GetInputSettings",
+            "requestId": request_id,
+            "requestData": { "inputName": input_name }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +116,24 @@ mod tests {
         assert_eq!(req["d"]["requestType"], "GetSceneItemList");
         assert_eq!(req["d"]["requestId"], "items-req-1");
         assert_eq!(req["d"]["requestData"]["sceneName"], "Main Scene");
+    }
+
+    #[test]
+    fn test_get_input_list_request_structure() {
+        let req = get_input_list_request("inputs-req-1");
+        assert_eq!(req["op"], 6);
+        assert_eq!(req["d"]["requestType"], "GetInputList");
+        assert_eq!(req["d"]["requestId"], "inputs-req-1");
+        assert_eq!(req["d"]["requestData"]["inputKind"], "ndi_source");
+    }
+
+    #[test]
+    fn test_get_input_settings_request_structure() {
+        let req = get_input_settings_request("settings-req-1", "sp-fast_video");
+        assert_eq!(req["op"], 6);
+        assert_eq!(req["d"]["requestType"], "GetInputSettings");
+        assert_eq!(req["d"]["requestId"], "settings-req-1");
+        assert_eq!(req["d"]["requestData"]["inputName"], "sp-fast_video");
     }
 
     #[test]

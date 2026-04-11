@@ -1,5 +1,6 @@
 //! OBS WebSocket v5 client with scene detection and text source control.
 
+pub mod ndi_discovery;
 pub mod scene;
 pub mod text;
 
@@ -11,12 +12,14 @@ use base64::Engine;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
+use sqlx::SqlitePool;
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
+use crate::obs::ndi_discovery::rebuild_ndi_source_map;
 use crate::obs::scene::check_scene_items;
 use crate::obs::text::get_current_scene_request;
 
@@ -67,11 +70,17 @@ impl ObsClient {
     /// Spawn the OBS WebSocket connection loop as a background task.
     ///
     /// Returns a client handle for sending commands and reading state.
+    ///
+    /// `pool` is used to rebuild the NDI source map from active playlists
+    /// after each (re)connect. `rebuild_rx` delivers explicit rebuild
+    /// requests — e.g. from playlist CRUD handlers.
     pub fn spawn(
         config: ObsConfig,
+        pool: SqlitePool,
         ndi_sources: NdiSourceMap,
         shared_state: Arc<RwLock<ObsState>>,
         event_tx: broadcast::Sender<ObsEvent>,
+        mut rebuild_rx: broadcast::Receiver<()>,
         mut shutdown: broadcast::Receiver<()>,
     ) -> Self {
         let state = shared_state;
@@ -91,10 +100,12 @@ impl ObsClient {
                     }
                     result = connect_and_run(
                         &config,
+                        &pool,
                         &ndi_sources,
                         &loop_state,
                         &loop_event_tx,
                         &mut cmd_rx,
+                        &mut rebuild_rx,
                     ) => {
                         match result {
                             Ok(()) => {
@@ -162,10 +173,12 @@ pub fn compute_auth(password: &str, challenge: &str, salt: &str) -> String {
 /// Main connection loop: connect, authenticate, handle messages.
 async fn connect_and_run(
     config: &ObsConfig,
+    pool: &SqlitePool,
     ndi_sources: &NdiSourceMap,
     state: &Arc<RwLock<ObsState>>,
     event_tx: &broadcast::Sender<ObsEvent>,
     cmd_rx: &mut mpsc::Receiver<ObsCommand>,
+    rebuild_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(&config.url).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -221,6 +234,15 @@ async fn connect_and_run(
     }
     let _ = event_tx.send(ObsEvent::Connected);
 
+    // Rebuild the NDI source map from the DB + OBS inputs before we start
+    // listening for scene-change events, so the very first scene lookup
+    // already knows which OBS input names correspond to which playlists.
+    let new_map = rebuild_ndi_source_map(&mut write, &mut read, pool).await;
+    {
+        let mut guard = ndi_sources.write().await;
+        *guard = new_map;
+    }
+
     // Fetch initial scene.
     let request_id = uuid::Uuid::new_v4().to_string();
     let req = get_current_scene_request(&request_id);
@@ -257,6 +279,30 @@ async fn connect_and_run(
                         let req = text::set_text_request(&req_id, &source_name, &text);
                         write.send(Message::Text(req.to_string().into())).await?;
                         debug!(source_name, "sent SetTextSource to OBS");
+                    }
+                }
+            }
+            rebuild_result = rebuild_rx.recv() => {
+                match rebuild_result {
+                    Ok(()) => {
+                        debug!("received rebuild signal, refreshing NDI source map");
+                        let new_map =
+                            rebuild_ndi_source_map(&mut write, &mut read, pool).await;
+                        let mut guard = ndi_sources.write().await;
+                        *guard = new_map;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(
+                            "rebuild signal channel lagged by {n} messages, \
+                             refreshing NDI source map once"
+                        );
+                        let new_map =
+                            rebuild_ndi_source_map(&mut write, &mut read, pool).await;
+                        let mut guard = ndi_sources.write().await;
+                        *guard = new_map;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        // Channel closed — ignore, the shutdown path will catch it.
                     }
                 }
             }

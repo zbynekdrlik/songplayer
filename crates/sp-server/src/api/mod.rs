@@ -49,6 +49,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::post(routes::skip),
         )
         .route(
+            "/api/v1/playback/{playlist_id}/previous",
+            axum::routing::post(routes::previous),
+        )
+        .route(
             "/api/v1/playback/{playlist_id}/mode",
             axum::routing::put(routes::set_mode),
         )

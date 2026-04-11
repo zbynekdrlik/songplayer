@@ -8,9 +8,11 @@ pub mod pipeline;
 pub mod state;
 pub mod submitter;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
-use sp_core::playback::PlaybackMode;
+use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
+use sp_core::ws::ServerMsg;
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -24,6 +26,38 @@ use state::{PlayAction, PlayEvent, PlayState};
 /// OBS text source name used for the fallback title display (in the
 /// CG OVERLAY scene). Must match the source name in OBS exactly.
 const OBS_TITLE_SOURCE: &str = "#sp-title";
+
+/// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
+/// Keeps the WebSocket from flooding the dashboard on high-frequency
+/// `PipelineEvent::Position` events.
+const POSITION_BROADCAST_INTERVAL_MS: u64 = 500;
+
+/// Maximum number of past videos tracked per playlist for the Previous
+/// button. Bounded to keep memory O(1) per playlist — older entries are
+/// dropped from the front when the capacity is exceeded. 50 is plenty
+/// for human navigation.
+const PREVIOUS_HISTORY_CAPACITY: usize = 50;
+
+/// Pure predicate: may we send a `NowPlaying` update given the elapsed
+/// milliseconds since the last one for this playlist?
+///
+/// Extracted so it can be unit-tested at exact boundary values (499 /
+/// 500 / 501). Testing the parent method against real `Instant::now()`
+/// under coverage tooling is racy; testing this pure function is not.
+#[inline]
+fn should_send_position_update(elapsed_ms: u64) -> bool {
+    elapsed_ms >= POSITION_BROADCAST_INTERVAL_MS
+}
+
+/// Map the internal server-side [`PlayState`] to the wire-level
+/// [`sp_core::playback::PlaybackState`] used by the dashboard.
+fn play_state_to_ws(state: &PlayState) -> WsPlaybackState {
+    match state {
+        PlayState::Idle => WsPlaybackState::Idle,
+        PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
+        PlayState::Playing { .. } => WsPlaybackState::Playing,
+    }
+}
 
 /// Helper: fetch song, artist for a video.
 async fn get_video_title_info(
@@ -55,6 +89,19 @@ struct PlaylistPipeline {
     title_show_abort: Option<tokio::task::AbortHandle>,
     /// Abort handle for the in-flight title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
+    /// Cached song/artist/duration from the current video, so `Position`
+    /// events can re-broadcast `NowPlaying` without re-querying the DB
+    /// on every update.
+    cached_song: String,
+    cached_artist: String,
+    cached_duration_ms: u64,
+    /// Timestamp of the last `NowPlaying` broadcast — used to throttle
+    /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
+    last_now_playing_broadcast: Option<Instant>,
+    /// Stack of previously-played `video_id`s, most recent last. Pushed
+    /// when a new video is selected (via `SelectAndPlay`); popped by
+    /// `handle_previous`. Bounded to [`PREVIOUS_HISTORY_CAPACITY`].
+    history: VecDeque<i64>,
 }
 
 impl PlaylistPipeline {
@@ -89,6 +136,9 @@ pub struct PlaybackEngine {
     obs_event_tx: broadcast::Sender<ObsEvent>,
     /// For sending title show/hide commands to Resolume hosts.
     resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
+    /// WebSocket broadcast — forwards `NowPlaying` and `PlaybackStateChanged`
+    /// messages to the dashboard.
+    ws_event_tx: broadcast::Sender<ServerMsg>,
 }
 
 impl PlaybackEngine {
@@ -98,6 +148,7 @@ impl PlaybackEngine {
         obs_event_tx: broadcast::Sender<ObsEvent>,
         obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
+        ws_event_tx: broadcast::Sender<ServerMsg>,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -127,6 +178,7 @@ impl PlaybackEngine {
             obs_cmd_tx,
             obs_event_tx,
             resolume_tx,
+            ws_event_tx,
         }
     }
 
@@ -150,6 +202,11 @@ impl PlaybackEngine {
                 current_video_id: None,
                 title_show_abort: None,
                 title_hide_abort: None,
+                cached_song: String::new(),
+                cached_artist: String::new(),
+                cached_duration_ms: 0,
+                last_now_playing_broadcast: None,
+                history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
             }
         });
     }
@@ -180,13 +237,19 @@ impl PlaybackEngine {
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
         match &event {
             PipelineEvent::Started { duration_ms } => {
+                // 1) Broadcast NowPlaying to the dashboard first so it
+                //    switches from "Nothing playing" immediately.
+                self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
+                    .await;
+
                 debug!(playlist_id, duration_ms, "video started");
                 let dur = *duration_ms;
 
-                // Cancel any pending title timers from a previous video on this
-                // playlist. Without this, a stale hide_title from a skipped 4-min
-                // song would fire 3.5s before that song's natural end during the
-                // next song, clearing the title mid-playback.
+                // 2) Cancel any pending title timers from a previous video on
+                //    this playlist. Without this, a stale hide_title from a
+                //    skipped 4-min song would fire 3.5s before that song's
+                //    natural end during the next song, clearing the title
+                //    mid-playback.
                 let video_id_opt = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
                     pp.current_video_id
@@ -270,9 +333,15 @@ impl PlaybackEngine {
                     }
                 }
             }
-            PipelineEvent::Position { .. } => {
-                // Position events are tracked but title hide is now timer-based
-                // (spawned in the Started handler above).
+            PipelineEvent::Position {
+                position_ms,
+                duration_ms,
+            } => {
+                // Throttled re-broadcast of NowPlaying with the updated
+                // position. Title hide is timer-based (spawned in the
+                // Started handler above) so no position-driven hide work
+                // happens here.
+                self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
@@ -300,6 +369,63 @@ impl PlaybackEngine {
             }
         }
         self.apply_event(playlist_id, cmd).await;
+    }
+
+    /// Handle the Previous-track command: pop the most recent entry from
+    /// the per-playlist history stack and send the pipeline a `Play`
+    /// command for that video.
+    ///
+    /// If the history is empty (fresh startup or too many Previous
+    /// presses), the command is a no-op. Calling `Previous` does NOT
+    /// re-push the current video, so pressing it repeatedly walks
+    /// backwards through the stack one step at a time.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn handle_previous(&mut self, playlist_id: i64) {
+        let prev_video_id = match self.pipelines.get_mut(&playlist_id) {
+            Some(pp) => pp.history.pop_back(),
+            None => {
+                warn!(playlist_id, "Previous: no pipeline for playlist");
+                return;
+            }
+        };
+
+        let Some(video_id) = prev_video_id else {
+            debug!(playlist_id, "Previous: history empty, ignoring");
+            return;
+        };
+
+        match crate::db::models::get_video_file_path(&self.pool, video_id).await {
+            Ok(Some(file_path)) => {
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.current_video_id = Some(video_id);
+                    pp.state = PlayState::Playing { video_id };
+                    info!(
+                        playlist_id,
+                        video_id, %file_path, "Previous → replaying video from history"
+                    );
+                    pp.pipeline.send(PipelineCommand::Play(file_path.into()));
+
+                    // Broadcast the state change so the dashboard updates.
+                    let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                        playlist_id,
+                        state: WsPlaybackState::Playing,
+                        mode: pp.mode,
+                    });
+                }
+            }
+            Ok(None) => {
+                warn!(
+                    playlist_id,
+                    video_id, "Previous: history entry has no file_path"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    playlist_id,
+                    video_id, %e, "Previous: failed to get file_path"
+                );
+            }
+        }
     }
 
     /// Run the engine event loop until shutdown.
@@ -336,12 +462,110 @@ impl PlaybackEngine {
 
         let mode = pp.mode;
         let old_state = pp.state.clone();
-        let (new_state, action) = old_state.transition(event, mode);
-        pp.state = new_state;
+        let (new_state, action) = old_state.clone().transition(event, mode);
+        pp.state = new_state.clone();
 
         if let Some(action) = action {
             self.execute_action(playlist_id, action).await;
         }
+
+        // After the action (which may itself mutate the state to Playing),
+        // broadcast the final state if it differs from the pre-transition state.
+        let final_state = self
+            .pipelines
+            .get(&playlist_id)
+            .map(|pp| pp.state.clone())
+            .unwrap_or(new_state);
+        if old_state != final_state {
+            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                playlist_id,
+                state: play_state_to_ws(&final_state),
+                mode,
+            });
+        }
+    }
+
+    /// Cache the video's song/artist/duration and broadcast `NowPlaying`
+    /// with `position_ms: 0`. Called when a pipeline reports a `Started`
+    /// event (i.e. playback just began).
+    async fn broadcast_now_playing_on_start(&mut self, playlist_id: i64, duration_ms: u64) {
+        let video_id = match self
+            .pipelines
+            .get(&playlist_id)
+            .and_then(|pp| pp.current_video_id)
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        let (song, artist) = match get_video_title_info(&self.pool, video_id).await {
+            Ok(Some(pair)) => pair,
+            _ => (String::new(), String::new()),
+        };
+
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.cached_song = song.clone();
+            pp.cached_artist = artist.clone();
+            pp.cached_duration_ms = duration_ms;
+            pp.last_now_playing_broadcast = Some(Instant::now());
+        }
+
+        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+            playlist_id,
+            video_id,
+            song,
+            artist,
+            position_ms: 0,
+            duration_ms,
+        });
+    }
+
+    /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
+    ///
+    /// Skips the broadcast if less than
+    /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
+    /// broadcast for the same playlist.
+    fn maybe_broadcast_position_update(
+        &mut self,
+        playlist_id: i64,
+        position_ms: u64,
+        duration_ms: u64,
+    ) {
+        let pp = match self.pipelines.get_mut(&playlist_id) {
+            Some(pp) => pp,
+            None => return,
+        };
+
+        let now = Instant::now();
+        let should_send = match pp.last_now_playing_broadcast {
+            Some(t) => should_send_position_update(now.duration_since(t).as_millis() as u64),
+            None => true,
+        };
+        if !should_send {
+            return;
+        }
+        pp.last_now_playing_broadcast = Some(now);
+
+        let video_id = match pp.current_video_id {
+            Some(id) => id,
+            None => return,
+        };
+        let song = pp.cached_song.clone();
+        let artist = pp.cached_artist.clone();
+        let dur = if duration_ms > 0 {
+            duration_ms
+        } else {
+            pp.cached_duration_ms
+        };
+
+        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+            playlist_id,
+            video_id,
+            song,
+            artist,
+            position_ms,
+            duration_ms: dur,
+        });
     }
 
     /// Execute a [`PlayAction`] produced by the state machine.
@@ -370,6 +594,16 @@ impl PlaybackEngine {
                         match crate::db::models::get_video_file_path(&self.pool, video_id).await {
                             Ok(Some(file_path)) => {
                                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                                    // Push the previous video to the
+                                    // per-playlist history stack before
+                                    // overwriting `current_video_id`, so the
+                                    // Previous button can replay it.
+                                    if let Some(prev) = pp.current_video_id {
+                                        pp.history.push_back(prev);
+                                        while pp.history.len() > PREVIOUS_HISTORY_CAPACITY {
+                                            pp.history.pop_front();
+                                        }
+                                    }
                                     pp.current_video_id = Some(video_id);
                                     pp.state = PlayState::Playing { video_id };
                                     info!(playlist_id, video_id, %file_path, "sent Play command");
@@ -455,162 +689,5 @@ impl PlaybackEngine {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn engine_construction() {
-        // Verify the engine can be constructed without panicking.
-        // We use a fake pool — the engine doesn't touch the DB at construction.
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        rt.block_on(async {
-            let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-            let (obs_tx, _obs_rx) = broadcast::channel(16);
-            let (resolume_tx, _) = mpsc::channel(16);
-            let engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx);
-            assert!(engine.pipelines.is_empty());
-        });
-    }
-
-    #[test]
-    fn engine_ensure_pipeline_creates_entry() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        rt.block_on(async {
-            let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-            let (obs_tx, _obs_rx) = broadcast::channel(16);
-            let (resolume_tx, _) = mpsc::channel(16);
-            let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx);
-
-            engine.ensure_pipeline(1, "TestNDI");
-            assert!(engine.pipelines.contains_key(&1));
-
-            // Calling again should not create a second pipeline.
-            engine.ensure_pipeline(1, "TestNDI");
-            assert_eq!(engine.pipelines.len(), 1);
-        });
-    }
-
-    #[test]
-    fn engine_ensure_pipeline_multiple_playlists() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        rt.block_on(async {
-            let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-            let (obs_tx, _obs_rx) = broadcast::channel(16);
-            let (resolume_tx, _) = mpsc::channel(16);
-            let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx);
-
-            engine.ensure_pipeline(1, "NDI-1");
-            engine.ensure_pipeline(2, "NDI-2");
-            assert_eq!(engine.pipelines.len(), 2);
-        });
-    }
-
-    /// Regression test for stale title-timer bug: when a video is skipped,
-    /// the previous video's title-show/hide timers must be cancelled so they
-    /// don't fire mid-song during the next video.
-    #[test]
-    fn cancel_title_timers_aborts_pending_handles() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        rt.block_on(async {
-            // Spawn a long-running task and grab its abort handle.
-            let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
-            let task = tokio::spawn(async move {
-                let _ = started_tx.send(());
-                // This sleep represents the 1.5s/N seconds title timer.
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                "should not reach here"
-            });
-            // Wait for the task to actually start.
-            started_rx.await.unwrap();
-
-            let mut pp = PlaylistPipeline {
-                pipeline: PlaybackPipeline::spawn(
-                    "test".to_string(),
-                    None,
-                    mpsc::unbounded_channel().0,
-                    1,
-                ),
-                state: PlayState::Idle,
-                mode: PlaybackMode::default(),
-                current_video_id: None,
-                title_show_abort: Some(task.abort_handle()),
-                title_hide_abort: None,
-            };
-
-            assert!(pp.title_show_abort.is_some());
-            pp.cancel_title_timers();
-            assert!(pp.title_show_abort.is_none());
-
-            // Verify the underlying task was actually aborted.
-            let result = task.await;
-            assert!(
-                result.is_err(),
-                "task should have been aborted, got: {result:?}"
-            );
-            assert!(result.unwrap_err().is_cancelled());
-        });
-    }
-
-    /// Verify get_video_title_info returns the actual song+artist from the DB.
-    /// Kills mutants that replace the function body with constants.
-    #[tokio::test]
-    async fn get_video_title_info_returns_song_and_artist() {
-        let pool = crate::db::create_memory_pool().await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-
-        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id, song, artist) VALUES (42, 1, 'abc', 'My Song', 'Artist Name')")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let result = get_video_title_info(&pool, 42).await.unwrap();
-        assert_eq!(
-            result,
-            Some(("My Song".to_string(), "Artist Name".to_string()))
-        );
-    }
-
-    #[tokio::test]
-    async fn get_video_title_info_returns_none_for_missing_video() {
-        let pool = crate::db::create_memory_pool().await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        let result = get_video_title_info(&pool, 999).await.unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[tokio::test]
-    async fn get_video_title_info_handles_null_song_and_artist() {
-        let pool = crate::db::create_memory_pool().await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (42, 1, 'abc')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        let result = get_video_title_info(&pool, 42).await.unwrap();
-        assert_eq!(result, Some((String::new(), String::new())));
-    }
-}
+#[path = "tests.rs"]
+mod tests;

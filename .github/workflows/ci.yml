@@ -1099,3 +1099,37 @@ jobs:
             exit 1
           }
           Write-Host "OK: Dashboard verified via Playwright"
+
+      - name: Feature-level Playwright (post-deploy spec)
+        shell: powershell
+        env:
+          SONGPLAYER_URL: http://localhost:8920
+          OBS_WS_URL: ws://localhost:4455
+        run: |
+          # Runs the committed e2e/post-deploy.spec.ts against the
+          # deployed SongPlayer + OBS. This suite exercises the click
+          # through the dashboard Play button, the NowPlaying
+          # broadcast, and scene-driven playback — the workflows that
+          # would have caught issues #8, #9, and #11 before shipping.
+          Set-Location $env:GITHUB_WORKSPACE\e2e
+          npm ci 2>&1 | Select-Object -Last 5
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: npm ci failed"
+            exit 1
+          }
+          npx playwright install chromium 2>&1 | Select-Object -Last 3
+          npx playwright test --config=post-deploy.config.ts --reporter=list 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: post-deploy Playwright suite failed"
+            exit 1
+          }
+          Write-Host "OK: post-deploy feature-level Playwright passed"
+
+      - name: Upload post-deploy Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deploy-playwright-report
+          path: e2e/post-deploy-report/
+          retention-days: 7
+          if-no-files-found: ignore

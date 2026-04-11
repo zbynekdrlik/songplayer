@@ -79,3 +79,32 @@ pub async fn delete(path: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// POST `path` with no request body and discard the response body.
+///
+/// Used for playback control endpoints (`/api/v1/playback/{id}/{action}`)
+/// that reply with `204 No Content`.
+pub async fn post_empty(path: &str) -> Result<(), String> {
+    let resp = Request::post(path).send().await.map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("POST {} → {}", path, resp.status()));
+    }
+    Ok(())
+}
+
+/// PUT JSON to `path` and discard the response body.
+///
+/// Used for playback mode updates and similar write endpoints that
+/// reply with `204 No Content`.
+pub async fn put_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
+    let resp = Request::put(path)
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("PUT {} → {}", path, resp.status()));
+    }
+    Ok(())
+}

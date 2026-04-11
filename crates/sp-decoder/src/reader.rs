@@ -11,11 +11,11 @@ use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
     MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS,
     MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
-    MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+    MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
     MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float, MFCreateAttributes, MFCreateMediaType,
-    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_NOSOCKET,
-    MFStartup, MFVideoFormat_NV12,
+    MF_SOURCE_READER_MEDIASOURCE, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
+    MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio,
+    MFMediaType_Video, MFSTARTUP_NOSOCKET, MFStartup, MFVideoFormat_NV12,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
@@ -146,9 +146,43 @@ impl MediaReader {
             video_height, frame_rate_num, frame_rate_den, "negotiated video media type"
         );
 
+        // Read the total presentation duration from the source (not per-stream).
+        // MF_SOURCE_READER_MEDIASOURCE is the sentinel for source-level
+        // attributes; MF_PD_DURATION returns a VT_UI8 PROPVARIANT carrying
+        // 100-nanosecond units which we convert to milliseconds.
+        //
+        // Before this fix, `duration_ms` stayed 0 at open time and was only
+        // updated as frames decoded — which meant `PipelineEvent::Started`
+        // always fired with `duration_ms: 0`, breaking the title-hide
+        // 3.5s-before-end timer and the dashboard progress bar.
+        let initial_duration_ms: u64 = unsafe {
+            match reader
+                .GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION)
+            {
+                Ok(pv) => match u64::try_from(&pv) {
+                    Ok(ticks_100ns) => ticks_100ns / 10_000,
+                    Err(e) => {
+                        tracing::warn!(
+                            "MF_PD_DURATION PROPVARIANT conversion to u64 failed: {e}; \
+                             duration will be 0 until frames are decoded"
+                        );
+                        0
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "MF_PD_DURATION unavailable at open: {e}; \
+                         duration will be 0 until frames are decoded"
+                    );
+                    0
+                }
+            }
+        };
+        debug!(initial_duration_ms, "read MF_PD_DURATION at open");
+
         Ok(Self {
             reader,
-            duration_ms: 0,
+            duration_ms: initial_duration_ms,
             video_width,
             video_height,
             frame_rate_num,
