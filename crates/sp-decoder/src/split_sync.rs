@@ -16,6 +16,12 @@ pub const DEFAULT_TOLERANCE_MS: u64 = 40;
 /// [`SplitSyncedDecoder::new`] warns.
 pub const DURATION_MISMATCH_WARN_MS: u64 = 100;
 
+/// Pure predicate extracted so unit tests can exercise the `>`
+/// comparison at the 100ms boundary without capturing tracing output.
+pub(crate) fn is_duration_mismatch(v_dur: u64, a_dur: u64) -> bool {
+    v_dur.abs_diff(a_dur) > DURATION_MISMATCH_WARN_MS
+}
+
 /// Cross-platform split-file A/V sync driver.
 ///
 /// Takes a video and audio reader behind trait objects and pairs each video
@@ -32,6 +38,8 @@ pub struct SplitSyncedDecoder {
 }
 
 impl std::fmt::Debug for SplitSyncedDecoder {
+    // Debug output is diagnostic-only — never compared for correctness.
+    #[cfg_attr(test, mutants::skip)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SplitSyncedDecoder")
             .field("tolerance_ms", &self.tolerance_ms)
@@ -78,7 +86,7 @@ impl SplitSyncedDecoder {
 
         let v_dur = video.duration_ms();
         let a_dur = audio.duration_ms();
-        if v_dur.abs_diff(a_dur) > DURATION_MISMATCH_WARN_MS {
+        if is_duration_mismatch(v_dur, a_dur) {
             tracing::warn!(
                 v_dur,
                 a_dur,
@@ -427,5 +435,249 @@ mod tests {
             1,
             "seek must forward to audio reader"
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Mutation-killing tests — each asserts one narrow property so a
+    // mutant that breaks that property is caught by a specific test.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn rejects_zero_width_only() {
+        // Width 0, height non-zero. Kills the `||` -> `&&` mutant in
+        // the dimension validation (with `&&`, only-width-zero passes).
+        struct W0;
+        impl MediaStream for W0 {
+            fn duration_ms(&self) -> u64 {
+                1000
+            }
+            fn seek(&mut self, _: u64) -> Result<(), DecoderError> {
+                Ok(())
+            }
+        }
+        impl VideoStream for W0 {
+            fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+                Ok(None)
+            }
+            fn width(&self) -> u32 {
+                0
+            }
+            fn height(&self) -> u32 {
+                120
+            }
+            fn frame_rate(&self) -> (u32, u32) {
+                (30, 1)
+            }
+        }
+        let v: Box<dyn VideoStream> = Box::new(W0);
+        let a = Box::new(MockAudio::new(&[], 1000));
+        let err = SplitSyncedDecoder::new(v, a).unwrap_err();
+        assert!(matches!(err, DecoderError::Mismatch(_)));
+    }
+
+    #[test]
+    fn rejects_zero_height_only() {
+        // Height 0, width non-zero.
+        struct H0;
+        impl MediaStream for H0 {
+            fn duration_ms(&self) -> u64 {
+                1000
+            }
+            fn seek(&mut self, _: u64) -> Result<(), DecoderError> {
+                Ok(())
+            }
+        }
+        impl VideoStream for H0 {
+            fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+                Ok(None)
+            }
+            fn width(&self) -> u32 {
+                160
+            }
+            fn height(&self) -> u32 {
+                0
+            }
+            fn frame_rate(&self) -> (u32, u32) {
+                (30, 1)
+            }
+        }
+        let v: Box<dyn VideoStream> = Box::new(H0);
+        let a = Box::new(MockAudio::new(&[], 1000));
+        let err = SplitSyncedDecoder::new(v, a).unwrap_err();
+        assert!(matches!(err, DecoderError::Mismatch(_)));
+    }
+
+    #[test]
+    fn rejects_zero_channels() {
+        // Kills the channels range check: `!(1..=2).contains(&0)` is true.
+        struct Ch0;
+        impl MediaStream for Ch0 {
+            fn duration_ms(&self) -> u64 {
+                1000
+            }
+            fn seek(&mut self, _: u64) -> Result<(), DecoderError> {
+                Ok(())
+            }
+        }
+        impl AudioStream for Ch0 {
+            fn next_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
+                Ok(None)
+            }
+            fn sample_rate(&self) -> u32 {
+                48_000
+            }
+            fn channels(&self) -> u16 {
+                0
+            }
+        }
+        let v = Box::new(MockVideo::new(&[0, 33]));
+        let a: Box<dyn AudioStream> = Box::new(Ch0);
+        let err = SplitSyncedDecoder::new(v, a).unwrap_err();
+        assert!(matches!(err, DecoderError::Mismatch(_)));
+    }
+
+    #[test]
+    fn rejects_three_channels() {
+        // Upper bound of the channels range check (5.1 surround not allowed).
+        struct Ch3;
+        impl MediaStream for Ch3 {
+            fn duration_ms(&self) -> u64 {
+                1000
+            }
+            fn seek(&mut self, _: u64) -> Result<(), DecoderError> {
+                Ok(())
+            }
+        }
+        impl AudioStream for Ch3 {
+            fn next_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
+                Ok(None)
+            }
+            fn sample_rate(&self) -> u32 {
+                48_000
+            }
+            fn channels(&self) -> u16 {
+                3
+            }
+        }
+        let v = Box::new(MockVideo::new(&[0, 33]));
+        let a: Box<dyn AudioStream> = Box::new(Ch3);
+        let err = SplitSyncedDecoder::new(v, a).unwrap_err();
+        assert!(matches!(err, DecoderError::Mismatch(_)));
+    }
+
+    #[test]
+    fn accepts_mono_audio() {
+        // Lower bound of the channels range (mono = 1 is allowed).
+        struct Mono;
+        impl MediaStream for Mono {
+            fn duration_ms(&self) -> u64 {
+                1000
+            }
+            fn seek(&mut self, _: u64) -> Result<(), DecoderError> {
+                Ok(())
+            }
+        }
+        impl AudioStream for Mono {
+            fn next_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
+                Ok(None)
+            }
+            fn sample_rate(&self) -> u32 {
+                48_000
+            }
+            fn channels(&self) -> u16 {
+                1
+            }
+        }
+        let v = Box::new(MockVideo::new(&[0, 33]));
+        let a: Box<dyn AudioStream> = Box::new(Mono);
+        SplitSyncedDecoder::new(v, a).expect("mono must be accepted");
+    }
+
+    #[test]
+    fn is_duration_mismatch_exact_boundary_is_not_mismatch() {
+        // 100ms difference is the exact boundary — must NOT trigger mismatch.
+        assert!(!is_duration_mismatch(1000, 1100));
+        assert!(!is_duration_mismatch(1100, 1000));
+    }
+
+    #[test]
+    fn is_duration_mismatch_one_above_boundary_is_mismatch() {
+        // 101ms > 100ms — must trigger mismatch.
+        assert!(is_duration_mismatch(1000, 1101));
+        assert!(is_duration_mismatch(1101, 1000));
+    }
+
+    #[test]
+    fn is_duration_mismatch_zero_diff_is_not_mismatch() {
+        assert!(!is_duration_mismatch(1000, 1000));
+    }
+
+    #[test]
+    fn accessors_forward_to_underlying_readers() {
+        // Kills mutants that replace width/height/frame_rate/duration_ms
+        // with 0/1/default by asserting each accessor returns the exact
+        // mock-configured value.
+        struct W160H120;
+        impl MediaStream for W160H120 {
+            fn duration_ms(&self) -> u64 {
+                2500
+            }
+            fn seek(&mut self, _: u64) -> Result<(), DecoderError> {
+                Ok(())
+            }
+        }
+        impl VideoStream for W160H120 {
+            fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+                Ok(None)
+            }
+            fn width(&self) -> u32 {
+                160
+            }
+            fn height(&self) -> u32 {
+                120
+            }
+            fn frame_rate(&self) -> (u32, u32) {
+                (24_000, 1001)
+            }
+        }
+        let v: Box<dyn VideoStream> = Box::new(W160H120);
+        let a = Box::new(MockAudio::new(&[], 2500));
+        let dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        assert_eq!(dec.width(), 160);
+        assert_eq!(dec.height(), 120);
+        assert_eq!(dec.frame_rate(), (24_000, 1001));
+        assert_eq!(dec.duration_ms(), 2500);
+    }
+
+    #[test]
+    fn clear_buffer_empties_pending_audio() {
+        // Fill pending_audio by pulling a frame, then call clear_buffer
+        // and verify the queue is empty.
+        let v = Box::new(MockVideo::new(&[0]));
+        let a = Box::new(MockAudio::new(&[500], 1000));
+        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        // Pull frame 0: deadline = 40, audio at 500 stays pending.
+        let _ = dec.next_synced().unwrap().unwrap();
+        assert_eq!(
+            dec.pending_audio.len(),
+            1,
+            "expected 1 pending audio chunk after first frame"
+        );
+
+        dec.clear_buffer();
+        assert!(dec.pending_audio.is_empty());
+    }
+
+    #[test]
+    fn with_tolerance_honors_custom_value() {
+        // Custom tolerance 200ms lets audio at 150 pair with frame 0.
+        let v = Box::new(MockVideo::new(&[0]));
+        let a = Box::new(MockAudio::new(&[150], 300));
+        let mut dec = SplitSyncedDecoder::with_tolerance(v, a, 200).unwrap();
+        let (_f, frames) = dec.next_synced().unwrap().unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].timestamp_ms, 150);
     }
 }

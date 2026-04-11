@@ -372,13 +372,20 @@ jobs:
           # cross-platform tests in sp-server/playback/submitter.rs. The Windows-gated
           # decoder code in sp-decoder/reader.rs is skipped by cargo-mutants on Linux
           # automatically (cfg(windows) functions aren't compiled in the mutation build).
+          # sp-decoder/src/audio/ (Symphonia wrapper) and sp-decoder/src/video/
+          # (Windows-only MF wrapper) are excluded because their arithmetic and
+          # helper functions are glue around external library APIs that can only
+          # be validated against real files on the target platform. Both are
+          # exercised by integration tests against committed fixtures.
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
             --exclude-re 'sp-server/src/downloader/' \
             --exclude-re 'sp-server/src/reprocess/' \
             --exclude-re 'sp-server/src/api/websocket' \
-            --exclude-re 'sp-server/src/playlist/'
+            --exclude-re 'sp-server/src/playlist/' \
+            --exclude-re 'sp-decoder/src/audio/' \
+            --exclude-re 'sp-decoder/src/video/'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
