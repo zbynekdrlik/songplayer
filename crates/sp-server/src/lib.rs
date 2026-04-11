@@ -9,6 +9,7 @@ pub mod playback;
 pub mod playlist;
 pub mod reprocess;
 pub mod resolume;
+pub mod startup;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -249,6 +250,12 @@ pub async fn start(
     db::run_migrations(&pool).await?;
     info!("database ready");
 
+    // Self-heal cache: delete legacy single-mp4s, delete orphans,
+    // re-link complete pairs. Non-fatal on error.
+    if let Err(e) = startup::self_heal_cache(&pool, &config.cache_dir).await {
+        tracing::warn!("self-heal cache failed (non-fatal): {e}");
+    }
+
     // 2. Channels
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let (event_tx, _) = broadcast::channel::<ServerMsg>(256);
@@ -338,6 +345,12 @@ pub async fn start(
             }
         }
     });
+
+    // Startup sync (legacy parity): fire a one-shot SyncRequest per active
+    // playlist so the download worker has fresh video IDs to process.
+    if let Err(e) = startup::startup_sync_active_playlists(&pool, &sync_tx).await {
+        tracing::warn!("startup sync enqueue failed: {e}");
+    }
 
     // 6. Sync handler — receives SyncRequests and calls playlist::sync_playlist
     let sync_pool = pool.clone();
