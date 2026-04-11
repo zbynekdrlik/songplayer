@@ -8,7 +8,12 @@ use std::str::FromStr;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
-const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3)];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (1, MIGRATION_V1),
+    (2, MIGRATION_V2),
+    (3, MIGRATION_V3),
+    (4, MIGRATION_V4),
+];
 
 const MIGRATION_V1: &str = "
 CREATE TABLE playlists (
@@ -80,6 +85,11 @@ ALTER TABLE playlists ADD COLUMN resolume_title_token TEXT NOT NULL DEFAULT '';
 const MIGRATION_V3: &str = "
 ALTER TABLE playlists DROP COLUMN obs_text_source;
 ALTER TABLE playlists DROP COLUMN resolume_title_token;
+";
+
+const MIGRATION_V4: &str = "
+ALTER TABLE videos ADD COLUMN audio_file_path TEXT;
+UPDATE videos SET normalized = 0;
 ";
 
 /// Create a connection pool backed by a file.
@@ -165,7 +175,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
     }
 
     #[tokio::test]
@@ -174,7 +184,77 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
+    }
+
+    #[tokio::test]
+    async fn migration_v4_adds_audio_file_path_column() {
+        let pool = setup().await;
+        let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get::<String, _>("name"))
+            .collect();
+        assert!(
+            cols.contains(&"audio_file_path".to_string()),
+            "audio_file_path column should exist, columns: {cols:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_v4_resets_all_normalized_rows() {
+        let pool = create_memory_pool().await.unwrap();
+        // Apply V1 + V2 + V3 manually so we can seed data before V4.
+        for &(version, sql) in &MIGRATIONS[..3] {
+            // Ensure schema_version table exists so the INSERT below works.
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            let mut tx = pool.begin().await.unwrap();
+            for stmt in sql.split(';') {
+                let s = stmt.trim();
+                if !s.is_empty() {
+                    sqlx::query(s).execute(&mut *tx).await.unwrap();
+                }
+            }
+            sqlx::query("INSERT INTO schema_version (version) VALUES (?)")
+                .bind(version)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
+        // Seed a playlist and a normalized video.
+        sqlx::query(
+            "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id, normalized, file_path) VALUES (1, 'abc', 1, '/tmp/foo.mp4')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Now apply V4.
+        run_migrations(&pool).await.unwrap();
+
+        // Row's normalized must have been reset to 0.
+        let n: i64 = sqlx::query("SELECT normalized FROM videos WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("normalized");
+        assert_eq!(n, 0, "V4 must reset normalized=0 for every existing row");
     }
 
     #[tokio::test]
