@@ -85,29 +85,49 @@ pub struct ToolsStatus {
     pub ytdlp_version: Option<String>,
 }
 
-/// Pure diff: compute the per-playlist engine commands that should follow
-/// from an OBS `SceneChanged` event, given the previously-active set.
+/// Pure helper: compute the per-playlist engine commands that should
+/// follow from an OBS `SceneChanged` event, given the previously-active
+/// set.
 ///
-/// Returns a list of `(playlist_id, on_program)` tuples. Extracted from
-/// the bridge task so it can be unit-tested exhaustively without touching
-/// Tokio channels.
-pub(crate) fn diff_scene_changes(
+/// For every playlist that was active before and is not active now,
+/// emit `(pid, false)`. For every playlist that IS active now, emit
+/// `(pid, true)` — **unconditionally**, even if it was already active
+/// in the previous set. The `true` commands are idempotent at the
+/// state machine level (`(Playing, SceneOn)` falls through to the
+/// default no-op arm), so re-emitting them is safe.
+///
+/// Why unconditional on `true`: the engine state can be mutated
+/// out-of-band — e.g. a REST `/pause` call transitions `Playing →
+/// WaitingForScene` without the bridge seeing an OBS event. If the
+/// bridge then naively diffed against its own tracked `previous` set,
+/// a subsequent identical scene event (same scene, same active set)
+/// would produce an empty diff and the engine would stay stuck in
+/// `WaitingForScene` forever. Re-emitting `on_program: true` lets the
+/// `(WaitingForScene, SceneOn) → SelectAndPlay` transition fire and
+/// playback resumes. This behaviour is exercised by the
+/// `bridge_re_emits_scene_on_after_external_state_change` test.
+pub(crate) fn scene_change_commands(
     previous: &std::collections::HashSet<i64>,
     current: &std::collections::HashSet<i64>,
 ) -> Vec<(i64, bool)> {
     let mut out = Vec::new();
-    // Playlists that just became active.
-    let mut newly_on: Vec<i64> = current.difference(previous).copied().collect();
-    newly_on.sort_unstable();
-    for pid in newly_on {
-        out.push((pid, true));
-    }
+
     // Playlists that just left the program scene.
     let mut newly_off: Vec<i64> = previous.difference(current).copied().collect();
     newly_off.sort_unstable();
     for pid in newly_off {
         out.push((pid, false));
     }
+
+    // ALL currently-active playlists get `true` — idempotent at the
+    // state machine level, but required so that a WaitingForScene
+    // state (from an out-of-band pause) gets re-kicked.
+    let mut all_on: Vec<i64> = current.iter().copied().collect();
+    all_on.sort_unstable();
+    for pid in all_on {
+        out.push((pid, true));
+    }
+
     out
 }
 
@@ -140,8 +160,8 @@ async fn run_obs_engine_bridge(
                 };
                 match evt {
                     obs::ObsEvent::SceneChanged { active_playlist_ids, .. } => {
-                        let diffs = diff_scene_changes(&previous, &active_playlist_ids);
-                        for (playlist_id, on_program) in diffs {
+                        let cmds = scene_change_commands(&previous, &active_playlist_ids);
+                        for (playlist_id, on_program) in cmds {
                             let _ = engine_tx
                                 .send(EngineCommand::SceneChanged { playlist_id, on_program })
                                 .await;
@@ -605,62 +625,63 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // diff_scene_changes + run_obs_engine_bridge tests
+    // scene_change_commands + run_obs_engine_bridge tests
     // ---------------------------------------------------------------------
 
     #[test]
-    fn diff_scene_changes_empty_to_empty_produces_nothing() {
+    fn scene_change_commands_empty_to_empty_produces_nothing() {
         let prev = std::collections::HashSet::new();
         let curr = std::collections::HashSet::new();
-        assert!(diff_scene_changes(&prev, &curr).is_empty());
+        assert!(scene_change_commands(&prev, &curr).is_empty());
     }
 
     #[test]
-    fn diff_scene_changes_same_set_produces_nothing() {
+    fn scene_change_commands_same_set_re_emits_all_on_program_true() {
+        // Same set on both sides: we still re-emit `on` for all current
+        // playlists. This is the critical behaviour that makes scene
+        // re-activation work after an out-of-band state mutation.
         let prev: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
         let curr: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
-        assert!(diff_scene_changes(&prev, &curr).is_empty());
+        let cmds = scene_change_commands(&prev, &curr);
+        assert_eq!(cmds, vec![(1, true), (2, true), (3, true)]);
     }
 
     #[test]
-    fn diff_scene_changes_add_produces_on_program_true() {
+    fn scene_change_commands_add_produces_on_program_true() {
         let prev = std::collections::HashSet::new();
         let curr: std::collections::HashSet<i64> = [7].into_iter().collect();
-        let diffs = diff_scene_changes(&prev, &curr);
-        assert_eq!(diffs, vec![(7, true)]);
+        let cmds = scene_change_commands(&prev, &curr);
+        assert_eq!(cmds, vec![(7, true)]);
     }
 
     #[test]
-    fn diff_scene_changes_remove_produces_on_program_false() {
+    fn scene_change_commands_remove_produces_on_program_false() {
         let prev: std::collections::HashSet<i64> = [7].into_iter().collect();
         let curr = std::collections::HashSet::new();
-        let diffs = diff_scene_changes(&prev, &curr);
-        assert_eq!(diffs, vec![(7, false)]);
+        let cmds = scene_change_commands(&prev, &curr);
+        assert_eq!(cmds, vec![(7, false)]);
     }
 
     #[test]
-    fn diff_scene_changes_swap_produces_off_then_on_for_different_ids() {
-        // Previous had {2}, current has {7} — expect 7 on, 2 off.
+    fn scene_change_commands_swap_emits_off_then_on_for_different_ids() {
+        // Previous had {2}, current has {7} — expect 2 off, then 7 on.
         let prev: std::collections::HashSet<i64> = [2].into_iter().collect();
         let curr: std::collections::HashSet<i64> = [7].into_iter().collect();
-        let diffs = diff_scene_changes(&prev, &curr);
-        assert_eq!(diffs.len(), 2);
-        assert!(diffs.contains(&(7, true)));
-        assert!(diffs.contains(&(2, false)));
+        let cmds = scene_change_commands(&prev, &curr);
+        // Offs come before ons so the state machine transitions to
+        // WaitingForScene before the new scene kicks in.
+        assert_eq!(cmds, vec![(2, false), (7, true)]);
     }
 
     #[test]
-    fn diff_scene_changes_partial_overlap() {
-        // Previous {1, 2, 3}, current {2, 3, 4} — 4 on, 1 off.
+    fn scene_change_commands_partial_overlap() {
+        // Previous {1, 2, 3}, current {2, 3, 4}:
+        //   - Off: 1
+        //   - On: 2, 3, 4  (all currently-active get re-emitted)
         let prev: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
         let curr: std::collections::HashSet<i64> = [2, 3, 4].into_iter().collect();
-        let diffs = diff_scene_changes(&prev, &curr);
-        assert_eq!(diffs.len(), 2);
-        assert!(diffs.contains(&(4, true)));
-        assert!(diffs.contains(&(1, false)));
-        // Must NOT re-emit for 2 or 3.
-        assert!(!diffs.iter().any(|(pid, _)| *pid == 2));
-        assert!(!diffs.iter().any(|(pid, _)| *pid == 3));
+        let cmds = scene_change_commands(&prev, &curr);
+        assert_eq!(cmds, vec![(1, false), (2, true), (3, true), (4, true)]);
     }
 
     #[tokio::test]
@@ -715,6 +736,80 @@ mod tests {
             } => {}
             other => panic!("expected SceneChanged{{7, false}}, got {other:?}"),
         }
+
+        let _ = shutdown_tx.send(());
+    }
+
+    /// Regression: when the engine state is mutated out-of-band (e.g.
+    /// via a REST `/pause`) and then the SAME scene event fires again,
+    /// the bridge must still re-emit `SceneChanged { on_program: true }`
+    /// so the state machine re-enters `SelectAndPlay`.
+    ///
+    /// Before the fix, `run_obs_engine_bridge` diffed against its own
+    /// tracked `previous` set and suppressed identical-scene events,
+    /// leaving the engine stuck in `WaitingForScene` indefinitely.
+    /// This was caught by the failing combined post-deploy test which
+    /// paused ytfast via REST after scene detection had already fired.
+    #[tokio::test]
+    async fn bridge_re_emits_scene_on_after_external_state_change() {
+        use std::collections::HashSet;
+
+        let (obs_event_tx, obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+        let (engine_tx, mut engine_rx) = mpsc::channel::<EngineCommand>(16);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
+
+        tokio::spawn(run_obs_engine_bridge(obs_event_rx, engine_tx, shutdown_rx));
+
+        // First scene event: playlist 7 becomes active.
+        let active: HashSet<i64> = [7].into_iter().collect();
+        obs_event_tx
+            .send(obs::ObsEvent::SceneChanged {
+                scene_name: "sp-fast".into(),
+                active_playlist_ids: active.clone(),
+            })
+            .unwrap();
+
+        // Drain the first SceneChanged(7, true).
+        let cmd = tokio::time::timeout(std::time::Duration::from_millis(500), engine_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            cmd,
+            EngineCommand::SceneChanged {
+                playlist_id: 7,
+                on_program: true
+            }
+        ));
+
+        // --- Out-of-band state mutation (simulated REST /pause): nothing
+        // flows through the bridge, the engine state machine transitions
+        // to WaitingForScene on its own. The bridge's internal `previous`
+        // set is unchanged and still equals {7}.
+
+        // Second scene event: SAME active set. A naive diff bridge would
+        // send nothing. The fixed bridge MUST re-emit SceneChanged(7, true).
+        obs_event_tx
+            .send(obs::ObsEvent::SceneChanged {
+                scene_name: "sp-fast".into(),
+                active_playlist_ids: active,
+            })
+            .unwrap();
+
+        let cmd = tokio::time::timeout(std::time::Duration::from_millis(500), engine_rx.recv())
+            .await
+            .expect("bridge must re-emit on an identical-scene event")
+            .unwrap();
+        assert!(
+            matches!(
+                cmd,
+                EngineCommand::SceneChanged {
+                    playlist_id: 7,
+                    on_program: true
+                }
+            ),
+            "expected re-emitted SceneChanged{{7, true}}, got {cmd:?}"
+        );
 
         let _ = shutdown_tx.send(());
     }
