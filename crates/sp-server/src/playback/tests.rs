@@ -260,73 +260,24 @@ fn play_state_to_ws_maps_all_variants() {
     );
 }
 
-/// Boundary test for `maybe_broadcast_position_update` — kills the
-/// `>=` → `<`, `==`, `>` mutants by manipulating the stored
-/// `last_now_playing_broadcast` directly instead of relying on real
-/// time.
-///
-/// Three exact boundary points exercise the comparison:
-/// - 499 ms elapsed: must NOT broadcast (within throttle window)
-/// - 500 ms elapsed: must broadcast (`>=` boundary)
-/// - 501 ms elapsed: must broadcast (beyond the boundary)
-#[tokio::test]
-async fn maybe_broadcast_position_update_boundary_checks() {
-    let pool = crate::db::create_memory_pool().await.unwrap();
-    crate::db::run_migrations(&pool).await.unwrap();
-
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    let (obs_tx, _) = broadcast::channel(16);
-    let (resolume_tx, _) = mpsc::channel(16);
-    let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
-    engine.ensure_pipeline(1, "TestNDI");
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
-        pp.current_video_id = Some(7);
-        pp.cached_song = "song".into();
-        pp.cached_artist = "artist".into();
-        pp.cached_duration_ms = 180_000;
-    }
-
-    // 1) 499 ms elapsed → within throttle window → no broadcast
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
-        pp.last_now_playing_broadcast =
-            Some(Instant::now() - std::time::Duration::from_millis(499));
-    }
-    engine.maybe_broadcast_position_update(1, 100, 180_000);
-    assert!(
-        ws_rx.try_recv().is_err(),
-        "at 499ms elapsed, no broadcast should be sent (`>=` false)"
-    );
-
-    // 2) 500 ms elapsed → boundary → broadcast (because `>=`)
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
-        pp.last_now_playing_broadcast =
-            Some(Instant::now() - std::time::Duration::from_millis(500));
-    }
-    engine.maybe_broadcast_position_update(1, 200, 180_000);
-    match ws_rx.try_recv() {
-        Ok(ServerMsg::NowPlaying {
-            position_ms: 200, ..
-        }) => {}
-        other => panic!("at 500ms elapsed, expected NowPlaying(pos=200), got {other:?}"),
-    }
-
-    // 3) 501 ms elapsed → beyond the boundary → broadcast
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
-        pp.last_now_playing_broadcast =
-            Some(Instant::now() - std::time::Duration::from_millis(501));
-    }
-    engine.maybe_broadcast_position_update(1, 300, 180_000);
-    match ws_rx.try_recv() {
-        Ok(ServerMsg::NowPlaying {
-            position_ms: 300, ..
-        }) => {}
-        other => panic!("at 501ms elapsed, expected NowPlaying(pos=300), got {other:?}"),
-    }
+/// Boundary test for the pure throttle predicate `should_send_position_update`.
+/// Kills the `>=` → `<`, `==`, `>` mutants at exact boundary values —
+/// something the parent method cannot test reliably under coverage
+/// tooling because `Instant::now()` races against the test setup.
+#[test]
+fn should_send_position_update_boundary_checks() {
+    // Throttle window is 500 ms.
+    // 0 ms elapsed → within window → no send.
+    assert!(!should_send_position_update(0));
+    // 499 ms elapsed → within window → no send. Kills the `<` mutant.
+    assert!(!should_send_position_update(499));
+    // 500 ms elapsed → boundary → send (because `>=`). Kills the `>`
+    // mutant (which would require strict greater-than).
+    assert!(should_send_position_update(500));
+    // 501 ms elapsed → beyond window → send. Kills the `==` mutant.
+    assert!(should_send_position_update(501));
+    // Large values always send.
+    assert!(should_send_position_update(u64::MAX));
 }
 
 /// Direct test of `apply_event` — kills the `-> ()` mutant (whole

@@ -32,6 +32,17 @@ const OBS_TITLE_SOURCE: &str = "#sp-title";
 /// `PipelineEvent::Position` events.
 const POSITION_BROADCAST_INTERVAL_MS: u64 = 500;
 
+/// Pure predicate: may we send a `NowPlaying` update given the elapsed
+/// milliseconds since the last one for this playlist?
+///
+/// Extracted so it can be unit-tested at exact boundary values (499 /
+/// 500 / 501). Testing the parent method against real `Instant::now()`
+/// under coverage tooling is racy; testing this pure function is not.
+#[inline]
+fn should_send_position_update(elapsed_ms: u64) -> bool {
+    elapsed_ms >= POSITION_BROADCAST_INTERVAL_MS
+}
+
 /// Map the internal server-side [`PlayState`] to the wire-level
 /// [`sp_core::playback::PlaybackState`] used by the dashboard.
 fn play_state_to_ws(state: &PlayState) -> WsPlaybackState {
@@ -463,7 +474,7 @@ impl PlaybackEngine {
 
         let now = Instant::now();
         let should_send = match pp.last_now_playing_broadcast {
-            Some(t) => now.duration_since(t).as_millis() as u64 >= POSITION_BROADCAST_INTERVAL_MS,
+            Some(t) => should_send_position_update(now.duration_since(t).as_millis() as u64),
             None => true,
         };
         if !should_send {
