@@ -191,7 +191,7 @@ mod tests {
         duration_ms: u64,
         width: u32,
         height: u32,
-        seek_calls: std::cell::Cell<u64>,
+        seek_calls: std::sync::Arc<std::sync::atomic::AtomicU64>,
     }
 
     impl MockVideo {
@@ -213,8 +213,12 @@ mod tests {
                 duration_ms,
                 width: 2,
                 height: 2,
-                seek_calls: std::cell::Cell::new(0),
+                seek_calls: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             }
+        }
+
+        fn seek_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU64> {
+            std::sync::Arc::clone(&self.seek_calls)
         }
     }
 
@@ -223,7 +227,8 @@ mod tests {
             self.duration_ms
         }
         fn seek(&mut self, _ms: u64) -> Result<(), DecoderError> {
-            self.seek_calls.set(self.seek_calls.get() + 1);
+            self.seek_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
     }
@@ -247,7 +252,7 @@ mod tests {
     struct MockAudio {
         chunks: VecDeque<DecodedAudioFrame>,
         duration_ms: u64,
-        seek_calls: std::cell::Cell<u64>,
+        seek_calls: std::sync::Arc<std::sync::atomic::AtomicU64>,
     }
 
     impl MockAudio {
@@ -264,8 +269,12 @@ mod tests {
             Self {
                 chunks,
                 duration_ms,
-                seek_calls: std::cell::Cell::new(0),
+                seek_calls: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             }
+        }
+
+        fn seek_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU64> {
+            std::sync::Arc::clone(&self.seek_calls)
         }
     }
 
@@ -274,7 +283,8 @@ mod tests {
             self.duration_ms
         }
         fn seek(&mut self, _ms: u64) -> Result<(), DecoderError> {
-            self.seek_calls.set(self.seek_calls.get() + 1);
+            self.seek_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
     }
@@ -397,15 +407,30 @@ mod tests {
 
     #[test]
     fn seek_clears_pending_and_forwards_to_both() {
-        let v = Box::new(MockVideo::new(&[0, 50]));
-        let a = Box::new(MockAudio::new(&[200, 500], 1000));
-        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+        let mock_v = MockVideo::new(&[0, 50]);
+        let mock_a = MockAudio::new(&[200, 500], 1000);
+        let v_counter = mock_v.seek_counter();
+        let a_counter = mock_a.seek_counter();
+
+        let mut dec = SplitSyncedDecoder::new(Box::new(mock_v), Box::new(mock_a)).unwrap();
 
         // Pull one frame first so pending_audio fills.
         let _ = dec.next_synced().unwrap().unwrap();
 
         dec.seek(500).unwrap();
-        // Pending is cleared.
-        assert!(dec.pending_audio.is_empty());
+        assert!(
+            dec.pending_audio.is_empty(),
+            "pending_audio must be cleared after seek"
+        );
+        assert_eq!(
+            v_counter.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "seek must forward to video reader"
+        );
+        assert_eq!(
+            a_counter.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "seek must forward to audio reader"
+        );
     }
 }
