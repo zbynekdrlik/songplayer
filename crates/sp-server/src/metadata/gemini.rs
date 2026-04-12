@@ -118,6 +118,108 @@ impl GeminiProvider {
         })
     }
 
+    /// Build the second-pass cleaning prompt. No search needed — just formatting.
+    fn build_clean_body(&self, song: &str, artist: &str) -> Value {
+        let prompt = format!(
+            "I have a song title and artist extracted from YouTube. Clean them for LED wall display.\n\
+             \n\
+             Song: \"{song}\"\n\
+             Artist: \"{artist}\"\n\
+             \n\
+             CLEANING RULES:\n\
+             1. ARTIST: Return ONLY the primary/main artist or band. Remove ALL secondary artists \
+                after \"&\", \"x\", \"feat.\", \"ft.\", \",\", \"and\", \"con\", \"with\". Examples:\n\
+                - \"Elevation Worship & Chandler Moore\" → \"Elevation Worship\"\n\
+                - \"Maverick City Music x UPPERROOM\" → \"Maverick City Music\"\n\
+                - \"CityHill Worship & M. Sergeev\" → \"CityHill Worship\"\n\
+                - \"SEU Worship, R. Stewart, G. Shuffitt\" → \"SEU Worship\"\n\
+                - Single artists stay as-is: \"Planetshakers\", \"P. Barrett\", \"TAYA\"\n\
+                - If one name is a well-known worship label/ministry (Bethel Music, Hillsong, Maverick City Music) \
+                  and the other is an individual person, prefer the label/ministry as the primary artist.\n\
+             2. SONG: Remove parenthetical subtitles/descriptions. Keep only the main song name:\n\
+                - \"No One Like The Lord (We Crown You)\" → \"No One Like The Lord\"\n\
+                - \"Home (Here In Your Presence)\" → \"Home\"\n\
+                - But keep \"/\" medley titles: \"Faithful Then / Faithful Now\" stays\n\
+             3. Remove language suffixes from artist names: \"Español\", \"Espanol\", \"Musica\" → drop them\n\
+             4. Preserve original casing (lowercase \"planetboom\", uppercase \"TAYA\", etc.)\n\
+             \n\
+             Return JSON: {{\"song\": \"cleaned song\", \"artist\": \"cleaned artist\"}}"
+        );
+
+        serde_json::json!({
+            "system_instruction": {
+                "parts": [{"text": "You are a JSON API. Return only valid JSON."}]
+            },
+            "contents": [
+                {"role": "user", "parts": [{"text": prompt}]}
+            ],
+            "generationConfig": {
+                "temperature": 0.0,
+                "candidateCount": 1
+            }
+        })
+    }
+
+    /// Second pass: clean the extracted song/artist for display.
+    async fn clean_for_display(
+        &self,
+        song: &str,
+        artist: &str,
+    ) -> Result<(String, String), MetadataError> {
+        let body = self.build_clean_body(song, artist);
+        let url = self.endpoint();
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            // If rate-limited on the cleaning pass, just return the uncleaned values
+            tracing::debug!("clean_for_display rate-limited, returning uncleaned");
+            return Ok((song.to_string(), artist.to_string()));
+        }
+
+        if !resp.status().is_success() {
+            return Ok((song.to_string(), artist.to_string()));
+        }
+
+        let response_body: Value = resp
+            .json()
+            .await
+            .map_err(|e| MetadataError::InvalidResponse(e.to_string()))?;
+
+        let text = response_body
+            .pointer("/candidates/0/content/parts/0/text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        match extract_json(text) {
+            Ok(json_str) => {
+                if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
+                    let clean_song = parsed
+                        .get("song")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| song.to_string());
+                    let clean_artist = parsed
+                        .get("artist")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_else(|| artist.to_string());
+                    return Ok((clean_song, clean_artist));
+                }
+            }
+            Err(_) => {}
+        }
+
+        Ok((song.to_string(), artist.to_string()))
+    }
+
     /// Parse a Gemini API response into `VideoMetadata`.
     fn parse_response(text: &str) -> Result<VideoMetadata, MetadataError> {
         let json_str = extract_json(text)?;
@@ -228,7 +330,22 @@ impl MetadataProvider for GeminiProvider {
                     )
                 })?;
 
-            return Self::parse_response(text);
+            let mut meta = Self::parse_response(text)?;
+
+            // Second pass: clean for display (strip collabs, subtitles)
+            if !meta.song.is_empty() {
+                match self.clean_for_display(&meta.song, &meta.artist).await {
+                    Ok((clean_song, clean_artist)) => {
+                        meta.song = clean_song;
+                        meta.artist = clean_artist;
+                    }
+                    Err(e) => {
+                        tracing::debug!("clean_for_display failed, keeping raw: {e}");
+                    }
+                }
+            }
+
+            return Ok(meta);
         }
 
         Err(last_err)
