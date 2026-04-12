@@ -57,6 +57,38 @@ static TRAILING_JUNK_RE: LazyLock<Regex> =
 ///
 /// Tries two patterns in order (pipe-separated, then dash-separated).
 /// Falls back to returning the full title as the song with "Unknown Artist".
+/// Normalize exotic delimiters to standard `|` or `-` before parsing.
+///
+/// Converts `//`, `||`, em-dash (`—`), and en-dash (`–`) to standard
+/// delimiters so the existing pipe/dash regexes can match them.
+/// Only the first exotic delimiter is kept; trailing segments are dropped.
+fn normalize_title(title: &str) -> String {
+    // Split on // — keep first two parts only (song | artist), drop the rest
+    let s = if let Some(pos) = title.find("//") {
+        let (left, right) = title.split_at(pos);
+        let right = &right[2..]; // skip the "//"
+        // Drop anything after a second "//"
+        let right = right.split("//").next().unwrap_or(right);
+        format!("{} | {}", left.trim(), right.trim())
+    } else {
+        title.to_string()
+    };
+
+    // Split on || — keep first two parts only
+    let s = if let Some(pos) = s.find("||") {
+        let (left, right) = s.split_at(pos);
+        let right = &right[2..];
+        let right = right.split("||").next().unwrap_or(right);
+        format!("{} | {}", left.trim(), right.trim())
+    } else {
+        s
+    };
+
+    // Em-dash and en-dash act as song|artist (not artist-song), so normalize to pipe
+    let s = s.replace(" — ", " | ").replace(" – ", " | ");
+    s
+}
+
 pub fn parse_title(title: &str) -> VideoMetadata {
     let title = title.trim();
     if title.is_empty() {
@@ -67,6 +99,8 @@ pub fn parse_title(title: &str) -> VideoMetadata {
             gemini_failed: false,
         };
     }
+
+    let title = &normalize_title(title);
 
     // Pattern 1: "Song | Artist" (artist_first = false)
     if let Some(caps) = PIPE_RE.captures(title) {
@@ -315,5 +349,33 @@ mod tests {
             clean_song_title("Song (Remix) feat. Artist Official Video"),
             "Song"
         );
+    }
+
+    #[test]
+    fn double_slash_delimiter_parsed_as_pipe() {
+        let m = parse_title("Lamb of God // Church of the City // Worship Together Session");
+        assert_eq!(m.song, "Lamb of God");
+        assert_eq!(m.artist, "Church of the City");
+    }
+
+    #[test]
+    fn double_pipe_delimiter_parsed() {
+        let m = parse_title("Joy || IBC LIVE 2025");
+        assert_eq!(m.song, "Joy");
+        assert_eq!(m.artist, "IBC");
+    }
+
+    #[test]
+    fn em_dash_delimiter_parsed_as_dash() {
+        let m = parse_title("Shelter In — VOUS Worship");
+        assert_eq!(m.song, "Shelter In");
+        assert_eq!(m.artist, "VOUS Worship");
+    }
+
+    #[test]
+    fn en_dash_delimiter_parsed_as_dash() {
+        let m = parse_title("IMAGEN – Genock Gabriel");
+        assert_eq!(m.song, "IMAGEN");
+        assert_eq!(m.artist, "Genock Gabriel");
     }
 }
