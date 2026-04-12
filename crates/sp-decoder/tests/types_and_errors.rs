@@ -20,7 +20,7 @@ fn error_display_source_reader() {
 
 #[test]
 fn error_display_no_stream() {
-    let e = DecoderError::NoStream("video");
+    let e = DecoderError::NoStream("video".into());
     assert_eq!(e.to_string(), "No video stream available");
 }
 
@@ -28,12 +28,6 @@ fn error_display_no_stream() {
 fn error_display_read_sample() {
     let e = DecoderError::ReadSample("hr=0x80004005".into());
     assert_eq!(e.to_string(), "Sample read failed: hr=0x80004005");
-}
-
-#[test]
-fn error_display_end_of_stream() {
-    let e = DecoderError::EndOfStream;
-    assert_eq!(e.to_string(), "End of stream");
 }
 
 #[test]

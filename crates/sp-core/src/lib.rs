@@ -329,7 +329,8 @@ mod tests {
     fn config_defaults_are_sensible() {
         assert_eq!(config::DEFAULT_API_PORT, 8920);
         assert_eq!(config::DEFAULT_MAX_RESOLUTION, 1440);
-        assert!(!config::VERSION.is_empty());
+        // config::VERSION comes from env!("CARGO_PKG_VERSION") so it is
+        // guaranteed non-empty at compile time — no runtime check needed.
         assert!(config::DEFAULT_OBS_WEBSOCKET_URL.starts_with("ws://"));
     }
 }

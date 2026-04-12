@@ -9,6 +9,7 @@ pub mod playback;
 pub mod playlist;
 pub mod reprocess;
 pub mod resolume;
+pub mod startup;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -249,6 +250,12 @@ pub async fn start(
     db::run_migrations(&pool).await?;
     info!("database ready");
 
+    // Self-heal cache: delete legacy single-mp4s, delete orphans,
+    // re-link complete pairs. Non-fatal on error.
+    if let Err(e) = startup::self_heal_cache(&pool, &config.cache_dir).await {
+        tracing::warn!("self-heal cache failed (non-fatal): {e}");
+    }
+
     // 2. Channels
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let (event_tx, _) = broadcast::channel::<ServerMsg>(256);
@@ -287,6 +294,14 @@ pub async fn start(
     let tools_dir = config.cache_dir.join("tools");
     let tools_mgr = downloader::tools::ToolsManager::new(tools_dir);
 
+    // Download worker broadcast channel. Hoisted out of the tools-setup
+    // task so the engine can subscribe before tools become ready — that
+    // way the engine never misses a `processed:<id>` event, which is
+    // how a freshly-normalized video rewakes pipelines parked in
+    // WaitingForScene after the 0.11 FLAC migration reset the cache.
+    let (dl_event_tx, _dl_event_rx_placeholder) = broadcast::channel::<String>(64);
+    let dl_event_tx_for_worker = dl_event_tx.clone();
+
     let tools_status_clone = tools_status.clone();
     let tools_event_tx = event_tx.clone();
     let tool_paths_clone = tool_paths.clone();
@@ -295,6 +310,8 @@ pub async fn start(
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_gemini_key = gemini_key.clone();
     let dl_gemini_model = gemini_model.clone();
+    let startup_sync_pool = pool.clone();
+    let startup_sync_tx = sync_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -308,11 +325,18 @@ pub async fn start(
                     ffmpeg_available: true,
                     ytdlp_version: version,
                 });
-                // Store resolved tool paths for sync workers.
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
 
-                // Build metadata providers for the download worker.
+                // Startup sync fires AFTER tools are ready so the sync
+                // worker doesn't silently drop the requests.
+                if let Err(e) =
+                    startup::startup_sync_active_playlists(&startup_sync_pool, &startup_sync_tx)
+                        .await
+                {
+                    tracing::warn!("startup sync enqueue failed: {e}");
+                }
+
                 let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
                 if !dl_gemini_key.is_empty() {
                     dl_providers.push(Box::new(metadata::gemini::GeminiProvider::new(
@@ -321,14 +345,12 @@ pub async fn start(
                     )));
                 }
 
-                // Spawn download worker now that tools are available.
-                let (dl_event_tx, _) = broadcast::channel::<String>(64);
                 let dl_worker = downloader::DownloadWorker::new(
                     dl_pool,
                     paths,
                     dl_cache_dir,
                     dl_providers,
-                    dl_event_tx,
+                    dl_event_tx_for_worker,
                 );
                 tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                 info!("download worker started");
@@ -371,8 +393,29 @@ pub async fn start(
         }
     });
 
-    // 7. OBS WebSocket client
+    // 7. OBS WebSocket client + OBS→engine bridge
+    //
+    // The bridge subscribes to obs_event_tx BEFORE the OBS client spawns.
+    // On a fast LAN the OBS client can connect, authenticate, rebuild the
+    // NDI source map, and broadcast the initial SceneChanged event in
+    // under 50 ms — fast enough to beat a subscription that happens after
+    // the spawn. Subscribing first guarantees the bridge never misses the
+    // initial scene detection, which is what triggers auto-play on startup.
     let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
+
+    // Bridge: subscribe BEFORE the OBS client spawns so the initial
+    // SceneChanged event is never lost to a subscription race.
+    {
+        let obs_event_rx = obs_event_tx.subscribe();
+        let bridge_engine_tx = engine_tx.clone();
+        let bridge_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(run_obs_engine_bridge(
+            obs_event_rx,
+            bridge_engine_tx,
+            bridge_shutdown,
+        ));
+    }
+
     let mut obs_cmd_tx: Option<tokio::sync::mpsc::Sender<obs::ObsCommand>> = None;
     let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
         .await?
@@ -401,24 +444,6 @@ pub async fn start(
         );
         obs_cmd_tx = Some(obs_client.cmd_sender());
         info!("OBS WebSocket client started");
-    }
-
-    // Bridge: convert OBS scene-change events to per-playlist EngineCommands.
-    //
-    // The OBS client broadcasts `ObsEvent::SceneChanged { active_playlist_ids }`
-    // every time the program scene changes. For the playback engine, we need
-    // to turn that set diff into per-playlist `SceneChanged { playlist_id,
-    // on_program }` messages so each pipeline state machine sees the right
-    // transition.
-    {
-        let obs_event_rx = obs_event_tx.subscribe();
-        let bridge_engine_tx = engine_tx.clone();
-        let bridge_shutdown = shutdown_tx.subscribe();
-        tokio::spawn(run_obs_engine_bridge(
-            obs_event_rx,
-            bridge_engine_tx,
-            bridge_shutdown,
-        ));
     }
 
     // 8. Reprocess worker (with Gemini provider if API key is configured)
@@ -487,6 +512,13 @@ pub async fn start(
         "playback pipelines created for active playlists"
     );
 
+    // Engine subscribes to the download worker's broadcast so that
+    // `processed:<youtube_id>` events can rewake pipelines stuck in
+    // `WaitingForScene`. Subscribing BEFORE spawning the engine loop
+    // guarantees no event is missed between tools-ready and first
+    // processed video.
+    let mut dl_event_rx = dl_event_tx.subscribe();
+
     let mut engine_shutdown = shutdown_tx.subscribe();
     tokio::spawn(async move {
         loop {
@@ -495,8 +527,12 @@ pub async fn start(
                 Some(cmd) = engine_rx.recv() => {
                     match cmd {
                         EngineCommand::Play { playlist_id } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::VideosAvailable).await;
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOn).await;
+                            // Manual Play from the dashboard: mirror the
+                            // scene-active path so the engine state
+                            // machine gets the same VideosAvailable +
+                            // SceneOn sequence that handle_scene_change
+                            // now performs internally.
+                            engine.handle_scene_change(playlist_id, true).await;
                         }
                         EngineCommand::Pause { playlist_id } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOff).await;
@@ -515,9 +551,10 @@ pub async fn start(
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
                         }
                         EngineCommand::SceneChanged { playlist_id, on_program } => {
-                            if on_program {
-                                engine.handle_command(playlist_id, playback::state::PlayEvent::VideosAvailable).await;
-                            }
+                            // VideosAvailable + SceneOn (on program) or
+                            // SceneOff (off program) are folded into
+                            // handle_scene_change so every caller goes
+                            // through the same sequence.
                             engine.handle_scene_change(playlist_id, on_program).await;
                         }
                     }
@@ -525,6 +562,14 @@ pub async fn start(
                 // Handle pipeline events (started, position, ended, error)
                 Some((playlist_id, event)) = engine.recv_pipeline_event() => {
                     engine.handle_pipeline_event(playlist_id, event).await;
+                }
+                // Handle download worker broadcasts. The message format
+                // is `<kind>:<youtube_id>` where kind is `downloading`
+                // or `processed`. Only `processed` rewakes pipelines.
+                Ok(msg) = dl_event_rx.recv() => {
+                    if let Some(youtube_id) = msg.strip_prefix("processed:") {
+                        engine.on_video_processed(youtube_id).await;
+                    }
                 }
                 _ = engine_shutdown.recv() => {
                     info!("engine command bridge shutting down");

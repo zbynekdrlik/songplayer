@@ -195,6 +195,63 @@ pub async fn get_video_file_path(
     Ok(row.and_then(|r| r.get("file_path")))
 }
 
+/// Update a video row with both sidecar paths after a successful download.
+#[allow(clippy::too_many_arguments)]
+pub async fn mark_video_processed_pair(
+    pool: &SqlitePool,
+    video_db_id: i64,
+    song: &str,
+    artist: &str,
+    metadata_source: &str,
+    gemini_failed: bool,
+    video_path: &str,
+    audio_path: &str,
+) -> Result<(), sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE videos
+         SET song = ?, artist = ?, metadata_source = ?,
+             gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1
+         WHERE id = ?",
+    )
+    .bind(song)
+    .bind(artist)
+    .bind(metadata_source)
+    .bind(gemini_failed as i32)
+    .bind(video_path)
+    .bind(audio_path)
+    .bind(video_db_id)
+    .execute(pool)
+    .await?;
+    debug_assert_eq!(
+        result.rows_affected(),
+        1,
+        "mark_video_processed_pair: expected 1 row affected for id={video_db_id}, got {}",
+        result.rows_affected()
+    );
+    Ok(())
+}
+
+/// Return both sidecar paths for a normalized video, or `None`.
+pub async fn get_song_paths(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT file_path, audio_file_path FROM videos WHERE id = ? AND normalized = 1",
+    )
+    .bind(video_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| {
+        let v: Option<String> = r.get("file_path");
+        let a: Option<String> = r.get("audio_file_path");
+        match (v, a) {
+            (Some(vp), Some(ap)) => Some((vp, ap)),
+            _ => None,
+        }
+    }))
+}
+
 /// Return the song and artist for a video (for title display).
 pub async fn get_video_metadata(
     pool: &SqlitePool,
@@ -246,4 +303,161 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+
+    async fn setup_with_video() -> (SqlitePool, i64) {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Insert an unnormalized video row; the tests will mark it processed.
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, normalized) VALUES (1, 'yt123', 't', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = sqlx::query("SELECT id FROM videos WHERE youtube_id = 'yt123'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let id: i64 = row.get("id");
+        (pool, id)
+    }
+
+    #[tokio::test]
+    async fn mark_video_processed_pair_writes_both_sidecar_paths() {
+        let (pool, id) = setup_with_video().await;
+
+        mark_video_processed_pair(
+            &pool,
+            id,
+            "Amazing Grace",
+            "Chris Tomlin",
+            "gemini",
+            false,
+            "/cache/S_A_yt12345678_normalized_video.mp4",
+            "/cache/S_A_yt12345678_normalized_audio.flac",
+        )
+        .await
+        .unwrap();
+
+        let row = sqlx::query(
+            "SELECT song, artist, metadata_source, gemini_failed, file_path, audio_file_path, normalized
+             FROM videos WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.get::<String, _>("song"), "Amazing Grace");
+        assert_eq!(row.get::<String, _>("artist"), "Chris Tomlin");
+        assert_eq!(row.get::<String, _>("metadata_source"), "gemini");
+        assert_eq!(row.get::<i64, _>("gemini_failed"), 0);
+        assert_eq!(
+            row.get::<String, _>("file_path"),
+            "/cache/S_A_yt12345678_normalized_video.mp4"
+        );
+        assert_eq!(
+            row.get::<String, _>("audio_file_path"),
+            "/cache/S_A_yt12345678_normalized_audio.flac"
+        );
+        assert_eq!(row.get::<i64, _>("normalized"), 1);
+    }
+
+    #[tokio::test]
+    async fn mark_video_processed_pair_stores_gemini_failed_flag() {
+        let (pool, id) = setup_with_video().await;
+        mark_video_processed_pair(
+            &pool,
+            id,
+            "S",
+            "A",
+            "parser",
+            true,
+            "/cache/v.mp4",
+            "/cache/a.flac",
+        )
+        .await
+        .unwrap();
+        let gf: i64 = sqlx::query("SELECT gemini_failed FROM videos WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("gemini_failed");
+        assert_eq!(gf, 1);
+    }
+
+    #[tokio::test]
+    async fn get_song_paths_returns_both_when_normalized() {
+        let (pool, id) = setup_with_video().await;
+        mark_video_processed_pair(
+            &pool,
+            id,
+            "S",
+            "A",
+            "parser",
+            false,
+            "/cache/video-path.mp4",
+            "/cache/audio-path.flac",
+        )
+        .await
+        .unwrap();
+
+        let result = get_song_paths(&pool, id).await.unwrap();
+        assert_eq!(
+            result,
+            Some((
+                "/cache/video-path.mp4".to_string(),
+                "/cache/audio-path.flac".to_string()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_song_paths_returns_none_when_unnormalized() {
+        let (pool, id) = setup_with_video().await;
+        // Row is unnormalized by default from setup_with_video.
+        let result = get_song_paths(&pool, id).await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn get_song_paths_returns_none_when_audio_missing() {
+        let (pool, id) = setup_with_video().await;
+        // Mark normalized with only the video path; leave audio_file_path NULL.
+        sqlx::query(
+            "UPDATE videos SET normalized = 1, file_path = '/cache/v.mp4', audio_file_path = NULL
+             WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = get_song_paths(&pool, id).await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn get_song_paths_returns_none_for_nonexistent_id() {
+        let (pool, _) = setup_with_video().await;
+        let result = get_song_paths(&pool, 9999).await.unwrap();
+        assert_eq!(result, None);
+    }
 }

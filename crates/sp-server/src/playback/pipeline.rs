@@ -4,7 +4,8 @@
 //! [`PipelineCommand`]s over a crossbeam channel and emits
 //! [`PipelineEvent`]s back to the async engine via a Tokio mpsc channel.
 //!
-//! On Windows the thread decodes video via `sp_decoder::SyncedDecoder` and
+//! On Windows the thread decodes video via `sp_decoder::SplitSyncedDecoder`
+//! (driven by `MediaFoundationVideoReader` + `SymphoniaAudioReader`) and
 //! sends frames over NDI.  On other platforms the thread logs a warning and
 //! immediately reports an error (video decode requires Media Foundation).
 
@@ -26,8 +27,9 @@ use tracing::{debug, error};
 /// Commands sent from the async engine to the pipeline thread.
 #[derive(Debug)]
 pub enum PipelineCommand {
-    /// Start playing a video file.
-    Play(PathBuf),
+    /// Start playing a song. Both the video sidecar (`.mp4`) and the audio
+    /// sidecar (`.flac`) must exist.
+    Play { video: PathBuf, audio: PathBuf },
     /// Pause playback (send black frames).
     Pause,
     /// Resume playback after pause.
@@ -179,8 +181,12 @@ fn run_loop_stub(
                 info!(playlist_id, "pipeline thread shutting down");
                 break;
             }
-            Ok(PipelineCommand::Play(path)) => {
-                warn!(?path, "video decode not available on this platform");
+            Ok(PipelineCommand::Play { video, audio }) => {
+                warn!(
+                    ?video,
+                    ?audio,
+                    "video decode not available on this platform"
+                );
                 let _ = event_tx.send((
                     playlist_id,
                     PipelineEvent::Error("Video decode requires Windows (Media Foundation)".into()),
@@ -264,19 +270,26 @@ fn run_loop_windows(
                 break;
             }
 
-            Ok(PipelineCommand::Play(path)) => {
-                // Inner loop: decode current file; on NewPlay, restart decode
-                // with the new file. Breaks out to outer loop on Ended/Stopped/Error;
-                // returns true on Shutdown to signal outer loop to exit.
-                let mut current_path = path;
+            Ok(PipelineCommand::Play { video, audio }) => {
+                // Inner loop: decode current song; on NewPlay, restart decode
+                // with the new pair. Breaks out to outer loop on Ended/Stopped/
+                // Error; returns true on Shutdown.
+                let mut current_video = video;
+                let mut current_audio = audio;
                 let shutdown_requested = loop {
-                    info!(?current_path, playlist_id, "starting playback");
+                    info!(
+                        ?current_video,
+                        ?current_audio,
+                        playlist_id,
+                        "starting playback"
+                    );
                     paused = false;
 
                     match decode_and_send(
                         &cmd_rx,
                         &mut submitter,
-                        &current_path,
+                        &current_video,
+                        &current_audio,
                         &event_tx,
                         playlist_id,
                         &mut paused,
@@ -297,9 +310,13 @@ fn run_loop_windows(
                             submitter.flush();
                             break true;
                         }
-                        DecodeResult::NewPlay(new_path) => {
-                            info!(?new_path, playlist_id, "switching to new video");
-                            current_path = new_path;
+                        DecodeResult::NewPlay {
+                            video: new_v,
+                            audio: new_a,
+                        } => {
+                            info!(?new_v, ?new_a, playlist_id, "switching to new song");
+                            current_video = new_v;
+                            current_audio = new_a;
                             continue;
                         }
                         DecodeResult::Error(msg) => {
@@ -342,12 +359,12 @@ enum DecodeResult {
     /// Shutdown command received — thread should exit.
     Shutdown,
     /// A new Play command arrived mid-playback.
-    NewPlay(PathBuf),
+    NewPlay { video: PathBuf, audio: PathBuf },
     /// Decoder error.
     Error(String),
 }
 
-/// Inner decode loop: open file, read frames, send to NDI.
+/// Inner decode loop: open both sidecar files, read synced frames, send to NDI.
 ///
 /// Returns when the video ends or a Stop/Shutdown/Play command is received.
 #[cfg(windows)]
@@ -355,25 +372,46 @@ enum DecodeResult {
 fn decode_and_send(
     cmd_rx: &Receiver<PipelineCommand>,
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
-    path: &std::path::Path,
+    video_path: &std::path::Path,
+    audio_path: &std::path::Path,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
     paused: &mut bool,
 ) -> DecodeResult {
-    use sp_decoder::SyncedDecoder;
+    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder, SymphoniaAudioReader};
 
-    let mut decoder = match SyncedDecoder::open(path) {
+    let video_reader = match MediaFoundationVideoReader::open(video_path) {
+        Ok(v) => v,
+        Err(e) => {
+            return DecodeResult::Error(format!(
+                "failed to open video {}: {e}",
+                video_path.display()
+            ));
+        }
+    };
+    let audio_reader = match SymphoniaAudioReader::open(audio_path) {
+        Ok(a) => a,
+        Err(e) => {
+            return DecodeResult::Error(format!(
+                "failed to open audio {}: {e}",
+                audio_path.display()
+            ));
+        }
+    };
+    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), Box::new(audio_reader))
+    {
         Ok(d) => d,
         Err(e) => {
-            return DecodeResult::Error(format!("Failed to open {}: {e}", path.display()));
+            return DecodeResult::Error(format!("SplitSyncedDecoder::new failed: {e}"));
         }
     };
 
     // Apply the file's real frame rate to the submitter so NDI paces correctly.
-    let info = decoder.video_info();
-    submitter.set_frame_rate(info.frame_rate_num as i32, info.frame_rate_den as i32);
+    let (num, den) = decoder.frame_rate();
+    submitter.set_frame_rate(num as i32, den as i32);
 
-    // Report start. Duration may be 0 initially — it gets refined as we decode.
+    // Report start. Duration is sample-accurate from the FLAC STREAMINFO so
+    // it is always correct at open time — no more duration=0 bug.
     let _ = event_tx.send((
         playlist_id,
         PipelineEvent::Started {
@@ -395,9 +433,9 @@ fn decode_and_send(
                 submitter.flush();
                 return DecodeResult::Stopped;
             }
-            Ok(PipelineCommand::Play(new_path)) => {
+            Ok(PipelineCommand::Play { video, audio }) => {
                 submitter.flush();
-                return DecodeResult::NewPlay(new_path);
+                return DecodeResult::NewPlay { video, audio };
             }
             Ok(PipelineCommand::Pause) => {
                 *paused = true;
@@ -414,17 +452,14 @@ fn decode_and_send(
             }
         }
 
-        // If paused, send BGRA black at ~10 fps via the sync path.
         if *paused {
             submitter.send_black_bgra(1920, 1080);
             std::thread::sleep(std::time::Duration::from_millis(100));
             continue;
         }
 
-        // Decode the next synced frame.
         match decoder.next_synced() {
             Ok(Some((video_frame, audio_frames))) => {
-                // Convert audio chunks to sp_ndi::AudioFrame.
                 let ndi_audio: Vec<sp_ndi::AudioFrame> = audio_frames
                     .into_iter()
                     .map(|af| sp_ndi::AudioFrame {
@@ -445,7 +480,6 @@ fn decode_and_send(
 
                 frame_count += 1;
 
-                // Report position every 500 ms.
                 if last_position_report.elapsed() >= std::time::Duration::from_millis(500) {
                     let _ = event_tx.send((
                         playlist_id,
@@ -458,7 +492,6 @@ fn decode_and_send(
                 }
             }
             Ok(None) => {
-                // End of stream.
                 info!(playlist_id, frame_count, "video decode complete");
                 submitter.flush();
                 return DecodeResult::Ended;
@@ -528,7 +561,10 @@ mod tests {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let pipeline = PlaybackPipeline::spawn("test-play".into(), None, event_tx, 4);
 
-        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/test.mp4")));
+        pipeline.send(PipelineCommand::Play {
+            video: PathBuf::from("/tmp/test_video.mp4"),
+            audio: PathBuf::from("/tmp/test_audio.flac"),
+        });
         // Give the thread a moment to process.
         std::thread::sleep(std::time::Duration::from_millis(50));
         pipeline.shutdown();
@@ -561,11 +597,20 @@ mod tests {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let pipeline = PlaybackPipeline::spawn("test-multi-play".into(), None, event_tx, 5);
 
-        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/song-a.mp4")));
+        pipeline.send(PipelineCommand::Play {
+            video: PathBuf::from("/tmp/song-a_video.mp4"),
+            audio: PathBuf::from("/tmp/song-a_audio.flac"),
+        });
         std::thread::sleep(std::time::Duration::from_millis(30));
-        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/song-b.mp4")));
+        pipeline.send(PipelineCommand::Play {
+            video: PathBuf::from("/tmp/song-b_video.mp4"),
+            audio: PathBuf::from("/tmp/song-b_audio.flac"),
+        });
         std::thread::sleep(std::time::Duration::from_millis(30));
-        pipeline.send(PipelineCommand::Play(PathBuf::from("/tmp/song-c.mp4")));
+        pipeline.send(PipelineCommand::Play {
+            video: PathBuf::from("/tmp/song-c_video.mp4"),
+            audio: PathBuf::from("/tmp/song-c_audio.flac"),
+        });
         std::thread::sleep(std::time::Duration::from_millis(50));
         pipeline.shutdown();
 

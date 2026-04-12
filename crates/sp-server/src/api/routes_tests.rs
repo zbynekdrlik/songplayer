@@ -277,7 +277,7 @@ async fn resolume_hosts_crud() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri(&format!("/api/v1/resolume/hosts/{host_id}"))
+                .uri(format!("/api/v1/resolume/hosts/{host_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )

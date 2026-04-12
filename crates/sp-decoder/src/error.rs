@@ -13,15 +13,11 @@ pub enum DecoderError {
 
     /// No stream of the given kind is available.
     #[error("No {0} stream available")]
-    NoStream(&'static str),
+    NoStream(String),
 
     /// A sample read operation failed.
     #[error("Sample read failed: {0}")]
     ReadSample(String),
-
-    /// The stream has reached its end.
-    #[error("End of stream")]
-    EndOfStream,
 
     /// A seek operation failed.
     #[error("Seek failed: {0}")]
@@ -30,4 +26,16 @@ pub enum DecoderError {
     /// Locking the media buffer failed.
     #[error("Buffer lock failed: {0}")]
     BufferLock(String),
+
+    /// I/O failure opening or reading a file.
+    #[error("I/O failure: {0}")]
+    Io(String),
+
+    /// Decoder-side failure (Symphonia or MF codec error).
+    #[error("Decode failure: {0}")]
+    Decode(String),
+
+    /// Video and audio sidecars disagree on duration / format.
+    #[error("Video/audio mismatch: {0}")]
+    Mismatch(String),
 }

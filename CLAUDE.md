@@ -128,6 +128,18 @@ SQLite via sqlx with manual migrations. Migration logic lives in `crates/sp-serv
 **NDI network name format (scene detection):**
 NDI sources on the network are advertised as `"MACHINE (stream)"` — the machine hostname that owns the sender, a space, then the stream name in parentheses. When OBS adds an NDI source, its `ndi_source_name` input setting stores this full string (e.g. `"RESOLUME-SNV (SP-fast)"`). SongPlayer's playlist `ndi_output_name` is just the bare stream part (`"SP-fast"`), so `crates/sp-server/src/obs/ndi_discovery.rs::extract_ndi_stream_name` strips the `MACHINE ` prefix before matching. Anyone touching the scene-detection path must preserve this split — otherwise the map built in `rebuild_ndi_source_map` will never match real OBS inputs.
 
+**Split-file audio layout (FLAC pipeline):**
+Each cached song is stored as two sidecar files sharing a common base name:
+
+- `{safe_song}_{safe_artist}_{video_id}_normalized[_gf]_video.mp4` — H.264/VP9/AV1 stream-copied from YouTube, zero re-encodes.
+- `{safe_song}_{safe_artist}_{video_id}_normalized[_gf]_audio.flac` — decoded from YouTube's Opus stream, 2-pass FFmpeg loudnorm at -14 LUFS, re-encoded to FLAC exactly once. Signal is lossless from this point to NDI.
+
+The decoder split follows the file layout: `sp_decoder::MediaFoundationVideoReader` (Windows-only, hardware-accelerated MF) reads the video sidecar, and `sp_decoder::SymphoniaAudioReader` (pure Rust, cross-platform) reads the FLAC sidecar. `SplitSyncedDecoder` drives both with audio-as-master-clock at 40 ms tolerance. The `VideoStream` / `AudioStream` / `MediaStream` traits in `sp_decoder::stream` let unit tests drive the sync algorithm with mock readers on Linux.
+
+On first boot of a new version, `sp_server::startup::self_heal_cache` walks the cache directory: any legacy single-file `.mp4` from before the FLAC migration is deleted, any orphan half-sidecars (video without audio or vice versa) are deleted, and every complete video+audio pair is re-linked to its DB row. Migration V4 resets `normalized = 0` for every existing row so the download worker re-processes everything under the new layout.
+
+A one-shot startup sync (`sp_server::startup::startup_sync_active_playlists`, matching legacy Python `tools.py::trigger_startup_sync`) runs for every `is_active = 1` playlist once tools are ready — this was missing from the initial Rust port and is restored alongside the FLAC migration.
+
 **Circular import avoidance:**
 Use local imports inside functions when needed to break cycles:
 ```rust

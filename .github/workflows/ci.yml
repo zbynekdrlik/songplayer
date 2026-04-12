@@ -372,13 +372,20 @@ jobs:
           # cross-platform tests in sp-server/playback/submitter.rs. The Windows-gated
           # decoder code in sp-decoder/reader.rs is skipped by cargo-mutants on Linux
           # automatically (cfg(windows) functions aren't compiled in the mutation build).
+          # sp-decoder/src/audio/ (Symphonia wrapper) and sp-decoder/src/video/
+          # (Windows-only MF wrapper) are excluded because their arithmetic and
+          # helper functions are glue around external library APIs that can only
+          # be validated against real files on the target platform. Both are
+          # exercised by integration tests against committed fixtures.
           cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
             --exclude-re 'sp-server/src/downloader/' \
             --exclude-re 'sp-server/src/reprocess/' \
             --exclude-re 'sp-server/src/api/websocket' \
-            --exclude-re 'sp-server/src/playlist/'
+            --exclude-re 'sp-server/src/playlist/' \
+            --exclude-re 'sp-decoder/src/audio/' \
+            --exclude-re 'sp-decoder/src/video/'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -1020,31 +1027,38 @@ jobs:
           }
           Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"
 
-      - name: Verify download worker is processing
+      - name: Verify download worker produces a split-file pair
         shell: powershell
         run: |
-          # After sync, the download worker should start processing videos.
-          # Check that at least one video has been picked up (normalized=true or file exists).
-          # The worker processes one at a time with 5s polling, so wait up to 90s.
-          $maxWait = 90
+          # After V4 migration + self_heal_cache on first 0.11 boot, the
+          # cache is empty and every video row has normalized=0. The
+          # download worker runs serially: download video, download audio,
+          # extract metadata, FFmpeg 2-pass loudnorm → FLAC, rename. One
+          # full song can take 2-5 minutes depending on length and network.
+          # We wait for at least one complete *_normalized_*_video.mp4
+          # (the split-file layout's video sidecar) with a 20-minute cap.
+          $maxWait = 1200
           $elapsed = 0
           $found = $false
           while ($elapsed -lt $maxWait) {
-            $cacheFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_temp*" -ErrorAction SilentlyContinue
-            $normalizedFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_normalized*" -ErrorAction SilentlyContinue
-            if ($cacheFiles.Count -gt 0 -or $normalizedFiles.Count -gt 0) {
-              Write-Host "OK: Download worker is active - found files in cache"
-              $cacheFiles | ForEach-Object { Write-Host "  downloading: $($_.Name) ($($_.Length) bytes)" }
-              $normalizedFiles | ForEach-Object { Write-Host "  completed: $($_.Name) ($($_.Length) bytes)" }
+            $pairFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_normalized*_video.mp4" -ErrorAction SilentlyContinue
+            $audioFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_normalized*_audio.flac" -ErrorAction SilentlyContinue
+            if ($pairFiles.Count -gt 0 -and $audioFiles.Count -gt 0) {
+              Write-Host "OK: Download worker produced at least one split-file pair"
+              $pairFiles | ForEach-Object { Write-Host "  video: $($_.Name) ($($_.Length) bytes)" }
+              $audioFiles | ForEach-Object { Write-Host "  audio: $($_.Name) ($($_.Length) bytes)" }
               $found = $true
               break
             }
-            Start-Sleep -Seconds 10
-            $elapsed += 10
-            Write-Host "Waiting for download worker... ($elapsed/$maxWait s)"
+            # Diagnostic: show any in-flight or legacy files.
+            $tempFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_temp*" -ErrorAction SilentlyContinue
+            $legacyFiles = Get-ChildItem "C:\ProgramData\SongPlayer\cache" -Filter "*_normalized*.mp4" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '_video\.mp4$' }
+            Write-Host "Waiting for split-file pair... ($elapsed/$maxWait s) [temp=$($tempFiles.Count), legacy=$($legacyFiles.Count)]"
+            Start-Sleep -Seconds 20
+            $elapsed += 20
           }
           if (-not $found) {
-            Write-Error "FAIL: Download worker did not produce any files after ${maxWait}s. Check yt-dlp/ffmpeg."
+            Write-Error "FAIL: Download worker did not produce a *_normalized_*_video.mp4 + *_normalized_*_audio.flac pair after ${maxWait}s. Check yt-dlp/ffmpeg."
             exit 1
           }
 

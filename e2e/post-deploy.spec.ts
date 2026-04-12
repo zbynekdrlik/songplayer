@@ -150,10 +150,15 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
     const card = page.locator(".playlist-card", { hasText: pl.name });
 
-    // Within 10 s the card must show the `.np-info` block. Song/artist
-    // strings may be empty if the Gemini metadata pass failed, so we
-    // check for the presence of the block rather than its text.
-    await expect(card.locator(".np-info")).toBeVisible({ timeout: 10_000 });
+    // Within 10 s the card must show the `.np-info` block with a
+    // non-empty position counter (proves NowPlaying actually arrived).
+    const npInfo = card.locator(".np-info");
+    await expect(npInfo).toBeVisible({ timeout: 10_000 });
+    const npText = await npInfo.innerText();
+    expect(
+      npText.length,
+      `.np-info must contain text (song/position), got empty string`,
+    ).toBeGreaterThan(0);
 
     // Cleanup.
     await request.post(`/api/v1/playback/${pl.id}/pause`);
@@ -303,6 +308,85 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // Cleanup: switch back to the non-sp scene.
     await obs!.switchScene(nonSp);
     await request.post(`/api/v1/playback/${fastId}/pause`);
+  });
+
+  /**
+   * Regression test for the stuck-WaitingForScene bug shipped in 0.11.0.
+   *
+   * Deterministic version: switches OBS to sp-fast, waits for the
+   * engine to start playing, then asserts the dashboard card shows
+   * `.np-info` with an advancing position counter. This catches:
+   *
+   * - The bridge subscription race (initial SceneChanged missed
+   *   because the bridge subscribed after the OBS client spawned)
+   * - The stuck-WaitingForScene bug (engine parks when SceneOn fires
+   *   before any videos are normalized, and no event rewakes it)
+   * - State broadcast bugs (engine plays but dashboard never updates)
+   *
+   * Why advancing position matters: a stale "0:00 / X:XX" display
+   * would pass a visibility check but proves the pipeline is frozen.
+   */
+  test("active scene's playlist card shows Playing with advancing position", async ({
+    page,
+    request,
+  }) => {
+    expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
+
+    const scenes = await obs!.listScenes();
+    expect(
+      scenes.includes(FAST_SCENE_NAME),
+      `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
+    ).toBe(true);
+
+    // Start from a clean non-sp baseline so the scene switch is a
+    // real transition, not a no-op.
+    const nonSp = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
+    await obs!.switchScene(nonSp);
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Switch to sp-fast and let the engine detect it.
+    await obs!.switchScene(FAST_SCENE_NAME);
+
+    await page.goto("/");
+    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+
+    const card = page.locator(".playlist-card").filter({ hasText: FAST_PLAYLIST_NAME });
+    await expect(card).toBeVisible();
+
+    // 1. The `.np-info` block must appear within 30 s. If the engine
+    //    is stuck in WaitingForScene (the original bug), the card
+    //    stays "Nothing playing" and this times out.
+    await expect(
+      card.locator(".np-info"),
+      `card for ${FAST_PLAYLIST_NAME} must show .np-info after switching to ${FAST_SCENE_NAME}`,
+    ).toBeVisible({ timeout: 30_000 });
+
+    // 2. The position counter must advance. Read twice 2.5 s apart
+    //    and assert strictly increasing — a frozen "0:00 / 4:44"
+    //    proves the pipeline thread is dead.
+    const readPosition = async () => {
+      const text = (await card.locator(".np-info").innerText()) ?? "";
+      const match = text.match(/(\d+):(\d+)\s*\/\s*\d+:\d+/);
+      if (!match) return -1;
+      return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    };
+
+    const first = await readPosition();
+    expect(
+      first,
+      `${FAST_PLAYLIST_NAME}: position counter not found in .np-info text`,
+    ).toBeGreaterThanOrEqual(0);
+
+    await page.waitForTimeout(2_500);
+    const second = await readPosition();
+    expect(
+      second,
+      `${FAST_PLAYLIST_NAME}: position must advance (first=${first}s, second=${second}s). ` +
+        `A flat counter means the pipeline is frozen.`,
+    ).toBeGreaterThan(first);
+
+    // Cleanup: switch back to non-sp scene.
+    await obs!.switchScene(nonSp);
   });
 
   /**

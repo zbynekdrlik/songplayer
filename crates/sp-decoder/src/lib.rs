@@ -1,23 +1,29 @@
-//! Windows Media Foundation video/audio decoder for SongPlayer.
+//! Media decoder for SongPlayer.
 //!
-//! On Windows this crate provides [`MediaReader`] (low-level MF source reader)
-//! and [`SyncedDecoder`] (A/V synchronised frame iterator).
+//! This crate provides stream-oriented readers that plug into the playback
+//! pipeline through the shared [`stream`] traits:
 //!
-//! On non-Windows platforms only the error and frame types are exported so that
-//! consuming crates can still compile cross-platform.
+//! * [`audio::SymphoniaAudioReader`] — pure-Rust FLAC decoder (cross-platform)
+//! * [`video::mf_reader::MediaFoundationVideoReader`] — Windows-only video
+//!   reader backed by Media Foundation.
+//!
+//! [`split_sync::SplitSyncedDecoder`] drives them with audio-as-master-clock.
 
 mod error;
 mod types;
 
-#[cfg(windows)]
-mod reader;
-#[cfg(windows)]
-mod sync;
+pub mod audio;
+pub mod split_sync;
+pub mod stream;
 
+#[cfg(windows)]
+pub mod video;
+
+pub use audio::SymphoniaAudioReader;
 pub use error::DecoderError;
+pub use split_sync::SplitSyncedDecoder;
+pub use stream::{AudioStream, MediaStream, VideoStream};
 pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamInfo};
 
 #[cfg(windows)]
-pub use reader::MediaReader;
-#[cfg(windows)]
-pub use sync::SyncedDecoder;
+pub use video::MediaFoundationVideoReader;
