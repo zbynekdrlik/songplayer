@@ -34,12 +34,14 @@ fn strip_emoji(s: &str) -> String {
             ],
             "",
         );
-    // Strip any remaining non-text characters
+    // Strip any remaining non-text characters.
+    // Keep: ASCII + Latin Extended (< 0x2600) and variation selectors (FE00-FE0F).
+    // 0x00C0-0x024F (Latin Extended) is already covered by < 0x2600.
     replaced
         .chars()
         .filter(|c| {
             let cp = *c as u32;
-            cp < 0x2600 || (0xFE00..=0xFE0F).contains(&cp) || (0x00C0..=0x024F).contains(&cp)
+            cp < 0x2600 || (0xFE00..=0xFE0F).contains(&cp)
         })
         .collect::<String>()
         .split_whitespace()
@@ -324,6 +326,7 @@ fn extract_json(text: &str) -> Result<String, MetadataError> {
 
 #[async_trait]
 impl MetadataProvider for GeminiProvider {
+    #[cfg_attr(test, mutants::skip)]
     async fn extract(&self, video_id: &str, title: &str) -> Result<VideoMetadata, MetadataError> {
         let body = self.build_request_body(video_id, title);
         let url = self.endpoint();
