@@ -56,7 +56,7 @@ static TRAILING_JUNK_RE: LazyLock<Regex> =
 /// Parse a YouTube video title into song/artist metadata.
 ///
 /// Tries two patterns in order (pipe-separated, then dash-separated).
-/// Falls back to returning the full title as the song with "Unknown Artist".
+/// Falls back to returning the full title as the song with empty artist.
 /// Normalize exotic delimiters to standard `|` or `-` before parsing.
 ///
 /// Converts `//`, `||`, em-dash (`—`), and en-dash (`–`) to standard
@@ -126,7 +126,7 @@ pub fn parse_title(title: &str) -> VideoMetadata {
     if title.is_empty() {
         return VideoMetadata {
             song: String::new(),
-            artist: "Unknown Artist".into(),
+            artist: "".into(),
             source: MetadataSource::Regex,
             gemini_failed: false,
         };
@@ -192,7 +192,7 @@ pub fn parse_title(title: &str) -> VideoMetadata {
     // No match — use full title as song name.
     VideoMetadata {
         song: title.to_string(),
-        artist: "Unknown Artist".into(),
+        artist: "".into(),
         source: MetadataSource::Regex,
         gemini_failed: false,
     }
@@ -379,7 +379,7 @@ mod tests {
     fn unknown_format_returns_full_title() {
         let m = parse_title("Unknown format title");
         assert_eq!(m.song, "Unknown format title");
-        assert_eq!(m.artist, "Unknown Artist");
+        assert_eq!(m.artist, "");
         assert_eq!(m.source, MetadataSource::Regex);
     }
 
@@ -387,21 +387,21 @@ mod tests {
     fn empty_title() {
         let m = parse_title("");
         assert_eq!(m.song, "");
-        assert_eq!(m.artist, "Unknown Artist");
+        assert_eq!(m.artist, "");
     }
 
     #[test]
     fn whitespace_only_title() {
         let m = parse_title("   ");
         assert_eq!(m.song, "");
-        assert_eq!(m.artist, "Unknown Artist");
+        assert_eq!(m.artist, "");
     }
 
     #[test]
     fn artist_too_short_falls_through() {
         // Artist "AB" is only 2 chars — should not match (need > 2).
         let m = parse_title("Song | AB");
-        assert_eq!(m.artist, "Unknown Artist");
+        assert_eq!(m.artist, "");
     }
 
     #[test]
@@ -610,7 +610,7 @@ mod tests {
     #[test]
     fn multi_pipe_both_segments_too_short_falls_through() {
         let m = parse_title("Some Song | AB | CD");
-        assert_eq!(m.artist, "Unknown Artist");
+        assert_eq!(m.artist, "");
     }
 
     // ---- shorten_artist tests ----

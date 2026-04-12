@@ -59,15 +59,21 @@ impl GeminiProvider {
              IMPORTANT RULES:\n\
              1. Search for the YouTube URL to find the actual artist and song information\n\
              2. For worship/church music, identify the performing artist/band (not the church name)\n\
-             3. Remove feat./ft./featuring from artist name\n\
-             4. Remove (Official Video), (Live), etc from song titles\n\
+             3. Return ONLY the primary artist/band. Remove ALL featured/secondary artists, collaborators, \
+                and \"feat./ft./featuring\" credits. \"Elevation Worship & Chandler Moore\" → just \"Elevation Worship\". \
+                \"Maverick City Music x UPPERROOM\" → just \"Maverick City Music\".\n\
+             4. Remove (Official Video), (Live), etc from song titles. Also remove parenthetical subtitles \
+                like \"(We Crown You)\", \"(Moment)\", \"(Here In Your Presence)\" — return only the main song name.\n\
              5. For single songs with \"/\" in their actual title (like \"Faithful Then / Faithful Now\"), keep the full title\n\
              6. NEVER include album names in the song title - return only the actual song name\n\
              7. If the video is a medley or contains multiple distinct songs, return ONLY the first song\n\
-             8. If no artist found, return empty string for artist\n\
-             9. NEVER fabricate or guess information. Only return data you found via search or can clearly extract from the title. If the video is not a song (e.g. vocal workout, instrumental), return an empty artist.\n\
+             8. If no artist found, return empty string for artist. NEVER return \"Unknown Artist\".\n\
+             9. NEVER fabricate or guess information. Only return data you found via search or can clearly extract from the title. \
+                If the video is not a song (e.g. vocal workout, instrumental), return the title as song and empty artist.\n\
              10. For COVERS: use the performing artist from THIS video, NOT the original song's artist. \
                  If the title says \"(Cover) | New Heights Worship\", the artist is \"New Heights Worship\".\n\
+             11. Preserve the artist's official brand casing. If an artist styles themselves in lowercase \
+                 (like \"planetboom\", \"deadmau5\") or uppercase (like \"TAYA\"), keep that exact casing.\n\
              \n\
              ARTIST NAME SHORTENING — apply these rules:\n\
              - For PERSONAL names (individual people), shorten first/middle names to initials: \
@@ -90,6 +96,9 @@ impl GeminiProvider {
              - \"JIREH (Cover) | New Heights Worship\" → {{\"artist\": \"New Heights Worship\", \"song\": \"Jireh\"}}\n\
              - \"Puro - Johan y Sofi (Mantenme Puro)\" → {{\"artist\": \"Johan y Sofi\", \"song\": \"Puro\"}}\n\
              - \"Song For His Presence - Hillsong Young & Free\" → {{\"artist\": \"Hillsong Young & Free\", \"song\": \"Song For His Presence\"}}\n\
+             - \"God I'm Just Grateful | Elevation Worship & Chandler Moore\" → {{\"artist\": \"Elevation Worship\", \"song\": \"God I'm Just Grateful\"}}\n\
+             - \"No One Like The Lord (We Crown You) - Circuit Rider Music\" → {{\"artist\": \"Circuit Rider Music\", \"song\": \"No One Like The Lord\"}}\n\
+             - \"Home (Here In Your Presence) | planetboom\" → {{\"artist\": \"planetboom\", \"song\": \"Home\"}}\n\
              \n\
              REMEMBER: Return ONLY valid JSON, nothing else. The song field should contain ONLY the song title, never album names or other metadata."
         );
@@ -127,10 +136,13 @@ impl GeminiProvider {
             .get("artist")
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| MetadataError::InvalidResponse("missing 'artist' field".into()))?;
+            .unwrap_or_default();
 
-        let artist = shorten_artist(&artist_raw);
+        let artist = if artist_raw.is_empty() {
+            String::new()
+        } else {
+            shorten_artist(&artist_raw)
+        };
 
         Ok(VideoMetadata {
             song,
@@ -293,9 +305,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_missing_artist() {
+    fn parse_response_missing_artist_returns_empty() {
         let text = r#"{"song": "Test"}"#;
-        assert!(GeminiProvider::parse_response(text).is_err());
+        let meta = GeminiProvider::parse_response(text).unwrap();
+        assert_eq!(meta.song, "Test");
+        assert_eq!(meta.artist, "");
     }
 
     #[test]
