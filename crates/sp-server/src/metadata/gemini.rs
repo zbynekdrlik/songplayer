@@ -10,6 +10,23 @@ use std::time::Duration;
 use super::parser::shorten_artist;
 use super::{MetadataError, MetadataProvider};
 
+/// Strip emoji characters from a string. Keeps only ASCII + common Latin/accented chars.
+fn strip_emoji(s: &str) -> String {
+    s.chars()
+        .filter(|c| {
+            // Keep: ASCII, Latin Extended, common punctuation, accented chars
+            // Remove: emoji ranges (U+1F000+), misc symbols (U+2600+), dingbats, etc.
+            let cp = *c as u32;
+            cp < 0x2600
+                || (0xFE00..=0xFE0F).contains(&cp) // variation selectors
+                || (0x00C0..=0x024F).contains(&cp) // Latin Extended
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));
 
@@ -74,6 +91,8 @@ impl GeminiProvider {
                  If the title says \"(Cover) | New Heights Worship\", the artist is \"New Heights Worship\".\n\
              11. Preserve the artist's official brand casing. If an artist styles themselves in lowercase \
                  (like \"planetboom\", \"deadmau5\") or uppercase (like \"TAYA\"), keep that exact casing.\n\
+             12. NEVER include emojis in song or artist. Replace emojis with their text meaning: \
+                 heart emoji → \"Love\", fire emoji → remove, etc. Example: \"Yahweh We 🤍 You\" → \"Yahweh We Love You\".\n\
              \n\
              ARTIST NAME SHORTENING — apply these rules:\n\
              - For PERSONAL names (individual people), shorten first/middle names to initials: \
@@ -230,14 +249,14 @@ impl GeminiProvider {
         let song = parsed
             .get("song")
             .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
+            .map(|s| strip_emoji(s.trim()))
             .filter(|s| !s.is_empty())
             .ok_or_else(|| MetadataError::InvalidResponse("missing 'song' field".into()))?;
 
         let artist_raw = parsed
             .get("artist")
             .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
+            .map(|s| strip_emoji(s.trim()))
             .unwrap_or_default();
 
         let artist = if artist_raw.is_empty() {
@@ -503,6 +522,22 @@ mod tests {
         let text = r#"{"song": "The Blessing", "artist": "Elevation Worship"}"#;
         let meta = GeminiProvider::parse_response(text).unwrap();
         assert_eq!(meta.artist, "Elevation Worship");
+    }
+
+    #[test]
+    fn parse_response_strips_emoji_from_song() {
+        let text = r#"{"song": "Yahweh We 🤍 You", "artist": "Elevation Worship"}"#;
+        let meta = GeminiProvider::parse_response(text).unwrap();
+        assert_eq!(meta.song, "Yahweh We You");
+        assert_eq!(meta.artist, "Elevation Worship");
+    }
+
+    #[test]
+    fn strip_emoji_removes_hearts_and_symbols() {
+        assert_eq!(strip_emoji("Yahweh We 🤍 You"), "Yahweh We You");
+        assert_eq!(strip_emoji("Song 🔥 Title"), "Song Title");
+        assert_eq!(strip_emoji("Normal Text"), "Normal Text");
+        assert_eq!(strip_emoji("Café María"), "Café María"); // accented chars preserved
     }
 
     // ---- Async tests for provider chain (mock-based) ----
