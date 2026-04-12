@@ -83,6 +83,12 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
+    /// Whether the OBS program scene currently shows this playlist's NDI
+    /// output. Updated from `handle_scene_change`. Used by
+    /// `on_video_processed` to decide whether a freshly-normalized video
+    /// should auto-start playback. Purely engine-level bookkeeping — the
+    /// pure [`PlayState`] state machine does not track it.
+    scene_active: bool,
     /// Abort handle for the in-flight title-show timer (1.5s after Started).
     /// Cancelled when a new video starts so a stale timer from the previous
     /// video can't fire mid-song after a skip.
@@ -200,6 +206,7 @@ impl PlaybackEngine {
                 state: PlayState::Idle,
                 mode: PlaybackMode::default(),
                 current_video_id: None,
+                scene_active: false,
                 title_show_abort: None,
                 title_hide_abort: None,
                 cached_song: String::new(),
@@ -217,13 +224,103 @@ impl PlaybackEngine {
     }
 
     /// Handle a scene change from the OBS module.
+    ///
+    /// When the scene goes on program we first fire `VideosAvailable` to
+    /// lift the pipeline out of `Idle` (the pure state machine's
+    /// `Idle + SceneOn` transition is a no-op by design), then fire
+    /// `SceneOn` which runs `SelectAndPlay`. Folding both into one
+    /// entry point guarantees every caller (OBS bridge, API, tests)
+    /// goes through the same sequence.
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
-        let event = if on_program {
-            PlayEvent::SceneOn
+        // Engine-level bookkeeping: remember which pipelines currently
+        // own the program scene, independent of the pure state machine.
+        // `on_video_processed` reads this to decide whether a
+        // freshly-normalized video should auto-start playback.
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.scene_active = on_program;
+        }
+
+        if on_program {
+            self.apply_event(playlist_id, PlayEvent::VideosAvailable)
+                .await;
+            self.apply_event(playlist_id, PlayEvent::SceneOn).await;
         } else {
-            PlayEvent::SceneOff
+            self.apply_event(playlist_id, PlayEvent::SceneOff).await;
+        }
+    }
+
+    /// Re-wake pipelines parked in `WaitingForScene` after the download
+    /// worker finishes normalizing a video.
+    ///
+    /// The stuck-WaitingForScene bug (shipped in 0.11.0): on first boot
+    /// after the V4 migration reset every row to `normalized = 0`, OBS
+    /// is already sitting on an `sp-*` scene when SongPlayer starts.
+    /// The scene-on event fires `SelectAndPlay`, which finds nothing
+    /// (DB is empty), so the pipeline parks in `WaitingForScene` with
+    /// `current_video_id = None`. When the download worker finally
+    /// produces a normalized video there is nothing to re-run the
+    /// selection — the engine is deaf to the download worker.
+    ///
+    /// This method is that missing listener. The `youtube_id` argument
+    /// is taken from the `processed:{id}` broadcast that
+    /// [`crate::downloader::DownloadWorker`] emits on every completed
+    /// pipeline run. We look up the playlist that owns this video id;
+    /// if that playlist's scene is currently active and no video is
+    /// playing, we re-run `SelectAndPlay` through the state machine.
+    pub async fn on_video_processed(&mut self, youtube_id: &str) {
+        // Find the playlist that owns this just-processed video.
+        let row = match sqlx::query("SELECT playlist_id FROM videos WHERE youtube_id = ?")
+            .bind(youtube_id)
+            .fetch_optional(&self.pool)
+            .await
+        {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                debug!(
+                    youtube_id,
+                    "on_video_processed: no video row for youtube_id, ignoring"
+                );
+                return;
+            }
+            Err(e) => {
+                warn!(youtube_id, %e, "on_video_processed: DB lookup failed");
+                return;
+            }
         };
-        self.apply_event(playlist_id, event).await;
+
+        use sqlx::Row;
+        let playlist_id: i64 = row.get("playlist_id");
+
+        // Only re-wake if the pipeline is waiting AND its scene is
+        // currently on program AND nothing is playing. Otherwise a
+        // processed event could steal the current video.
+        let should_wake = self
+            .pipelines
+            .get(&playlist_id)
+            .map(|pp| {
+                matches!(pp.state, PlayState::WaitingForScene)
+                    && pp.scene_active
+                    && pp.current_video_id.is_none()
+            })
+            .unwrap_or(false);
+
+        if !should_wake {
+            debug!(
+                playlist_id,
+                youtube_id, "on_video_processed: pipeline not in wake-eligible state, ignoring"
+            );
+            return;
+        }
+
+        info!(
+            playlist_id,
+            youtube_id, "on_video_processed: re-running SelectAndPlay on previously-stuck pipeline"
+        );
+
+        // Re-fire SceneOn through the state machine. `WaitingForScene
+        // + SceneOn` transitions to `WaitingForScene + SelectAndPlay`,
+        // which now has a normalized video to pick.
+        self.apply_event(playlist_id, PlayEvent::SceneOn).await;
     }
 
     /// Handle an event emitted by a pipeline thread.

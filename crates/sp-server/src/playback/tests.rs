@@ -101,6 +101,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             state: PlayState::Idle,
             mode: PlaybackMode::default(),
             current_video_id: None,
+            scene_active: false,
             title_show_abort: Some(task.abort_handle()),
             title_hide_abort: None,
             cached_song: String::new(),
@@ -663,4 +664,137 @@ async fn history_capacity_is_bounded() {
             Some(PREVIOUS_HISTORY_CAPACITY as i64 + 2)
         );
     }
+}
+
+/// Regression test for the stuck-WaitingForScene bug that shipped in
+/// 0.11.0 and caused nothing to play on win-resolume after the FLAC
+/// migration reset every video to `normalized = 0`.
+///
+/// Scenario:
+///   1. The engine receives `SceneOn` for a playlist BEFORE any video
+///      is normalized. `SelectAndPlay` runs but finds no candidate, so
+///      the pipeline parks in `WaitingForScene` with `current_video_id
+///      = None`.
+///   2. The download worker finishes processing a video and broadcasts
+///      "processed:<id>" on the shared event channel.
+///   3. The engine must detect this and re-run `SelectAndPlay` for any
+///      pipeline whose scene is currently active but has no video
+///      playing, so the freshly-normalized video starts playing.
+///
+/// Before the fix the engine had no listener for the processed event,
+/// so the pipeline stayed parked indefinitely even though OBS was
+/// sitting on the matching scene and normalized videos existed in the
+/// DB. This test drives the engine through that exact sequence and
+/// asserts the pipeline ends in `Playing` state.
+#[tokio::test]
+async fn processed_event_rewakes_waiting_pipeline_with_new_video() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (7, 'ytfast', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(pool.clone(), obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(7, "SP-fast");
+
+    // Step 1: scene goes active BEFORE any video exists. Simulates
+    // OBS sitting on sp-fast at server startup immediately after V4
+    // migration resets normalized=0 and the cache is empty.
+    engine.handle_scene_change(7, true).await;
+
+    {
+        let pp = engine
+            .pipelines
+            .get(&7)
+            .expect("pipeline exists for playlist 7");
+        // Pipeline is parked — WaitingForScene, no video selected.
+        assert_eq!(pp.state, PlayState::WaitingForScene);
+        assert!(
+            pp.current_video_id.is_none(),
+            "no video should be selected yet; DB is empty"
+        );
+    }
+
+    // Step 2: download worker finishes a video. Insert a normalized
+    // row that matches the shape the real worker writes via
+    // `mark_video_processed_pair`, then tell the engine a video was
+    // processed for this playlist.
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (100, 7, 'yt-new-100', 1, '/tmp/new_video_100_video.mp4', '/tmp/new_video_100_audio.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Step 3: engine must re-run SelectAndPlay for pipeline 7. Calling
+    // the public entry point — this method must exist; if the test
+    // fails to compile that is the red-test state.
+    engine.on_video_processed("yt-new-100").await;
+
+    // Step 4: pipeline is now Playing the freshly-normalized video.
+    let pp = engine
+        .pipelines
+        .get(&7)
+        .expect("pipeline still exists for playlist 7");
+    assert_eq!(
+        pp.state,
+        PlayState::Playing { video_id: 100 },
+        "after processed event with active scene the pipeline must be Playing"
+    );
+    assert_eq!(pp.current_video_id, Some(100));
+}
+
+/// Negative case: a processed event MUST NOT start playback for a
+/// pipeline whose scene is NOT active. The engine only re-runs
+/// `SelectAndPlay` for playlists currently on program.
+#[tokio::test]
+async fn processed_event_does_not_play_inactive_scene() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (7, 'ytfast', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (3, 'ytpresence', 'u2')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(pool.clone(), obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(7, "SP-fast");
+    engine.ensure_pipeline(3, "SP-presence");
+
+    // Scene is active only on playlist 7, not on 3.
+    engine.handle_scene_change(7, true).await;
+
+    // Insert a normalized video on playlist 3 (the INACTIVE scene).
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (200, 3, 'yt-new-200', 1, '/tmp/video_200_video.mp4', '/tmp/video_200_audio.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    engine.on_video_processed("yt-new-200").await;
+
+    // Playlist 3 must stay Idle / WaitingForScene — its scene is not on program.
+    let pp3 = engine.pipelines.get(&3).expect("pipeline 3 exists");
+    assert!(
+        !matches!(pp3.state, PlayState::Playing { .. }),
+        "inactive-scene playlist 3 must not auto-play; got {:?}",
+        pp3.state
+    );
+    assert!(
+        pp3.current_video_id.is_none(),
+        "inactive-scene playlist 3 must not have a selected video"
+    );
 }

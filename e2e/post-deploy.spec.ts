@@ -306,6 +306,90 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Regression test for the stuck-WaitingForScene bug shipped in 0.11.0.
+   *
+   * Scenario: if `/api/v1/status` currently reports a non-empty
+   * `active_playlist_ids` (meaning OBS is on an `sp-*` scene that
+   * matches at least one playlist's NDI output), then the dashboard
+   * card for that playlist MUST be in a Playing state within 30 s —
+   * showing `.np-info` AND advancing the position counter.
+   *
+   * This catches the exact bug the manual verification on win-resolume
+   * exposed: the server correctly populated `active_playlist_ids` but
+   * the per-playlist card stayed "Nothing playing" because the engine
+   * was parked in `WaitingForScene` with no video selected, and no one
+   * woke it up when the download worker produced normalized videos.
+   *
+   * Why this is stronger than the existing "full chain" test: this one
+   * observes LIVE state without switching scenes itself, so it catches
+   * state-machine wedges that only happen when the scene was already
+   * active at startup. The full-chain test toggles the scene and
+   * doesn't trigger the wedge.
+   */
+  test("active scene's playlist card shows Playing with advancing position", async ({
+    page,
+    request,
+  }) => {
+    const status = await (await request.get("/api/v1/status")).json();
+    const activeIds = (status.active_playlist_ids as number[]) ?? [];
+    expect(
+      activeIds.length,
+      `this test requires at least one sp-* scene on OBS program — current active_scene=${status.active_scene}`,
+    ).toBeGreaterThan(0);
+
+    // Resolve each active playlist id to its name so we can locate
+    // its dashboard card.
+    const allPlaylists = (await (await request.get("/api/v1/playlists")).json()) as Array<{
+      id: number;
+      name: string;
+    }>;
+    const activeNames = activeIds.map((id) => {
+      const pl = allPlaylists.find((p) => p.id === id);
+      if (!pl) throw new Error(`active playlist id ${id} not found in /api/v1/playlists`);
+      return pl.name;
+    });
+
+    await page.goto("/");
+    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+
+    for (const name of activeNames) {
+      const card = page.locator(".playlist-card").filter({ hasText: name });
+      await expect(card).toBeVisible();
+
+      // 1. The `.np-info` block must be visible within 30 s. If the
+      //    bug is present, the card stays "Nothing playing" forever
+      //    and this times out.
+      await expect(card.locator(".np-info"), `card for active playlist ${name} must show .np-info`)
+        .toBeVisible({ timeout: 30_000 });
+
+      // 2. The position counter must be non-zero and advancing. A
+      //    stale "0:00 / X:XX" display would pass #1 but fail #2.
+      //    Read twice with a 2-second gap and assert the second read
+      //    is strictly greater.
+      const readPosition = async () => {
+        const text = (await card.locator(".np-info").innerText()) ?? "";
+        const match = text.match(/(\d+):(\d+)\s*\/\s*\d+:\d+/);
+        if (!match) return -1;
+        return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+      };
+
+      const first = await readPosition();
+      expect(
+        first,
+        `playlist ${name}: position counter not found in .np-info text — card may be stale`,
+      ).toBeGreaterThanOrEqual(0);
+
+      await page.waitForTimeout(2_500);
+      const second = await readPosition();
+      expect(
+        second,
+        `playlist ${name}: position counter must advance (first=${first}s, second=${second}s). ` +
+          `A flat counter means the pipeline is frozen — exactly the stuck-WaitingForScene bug.`,
+      ).toBeGreaterThan(first);
+    }
+  });
+
+  /**
    * Zero browser console errors/warnings. Runs last so it observes the
    * state after all other tests have interacted with the dashboard.
    *
