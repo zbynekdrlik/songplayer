@@ -85,8 +85,7 @@ fn normalize_title(title: &str) -> String {
     };
 
     // Em-dash and en-dash act as song|artist (not artist-song), so normalize to pipe
-    let s = s.replace(" — ", " | ").replace(" – ", " | ");
-    s
+    s.replace(" — ", " | ").replace(" – ", " | ")
 }
 
 /// Strip "Official Music Video", "Worship Together Session", etc. from an artist string.
