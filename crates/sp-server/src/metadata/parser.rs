@@ -230,6 +230,7 @@ pub fn clean_song_title(song: &str) -> String {
 }
 
 /// Words that indicate a band/group name — never abbreviate these artists.
+/// Includes common articles/prepositions that appear in band names but not personal names.
 const BAND_INDICATORS: &[&str] = &[
     "worship",
     "music",
@@ -247,6 +248,19 @@ const BAND_INDICATORS: &[&str] = &[
     "rhythm",
     "heights",
     "city",
+    "sons",
+    "house",
+    // Articles/prepositions — personal names don't contain these
+    "of",
+    "the",
+    "and",
+    "for",
+    "in",
+    "on",
+    "at",
+    "by",
+    "from",
+    "with",
 ];
 
 /// Shorten personal artist names to initials (e.g. "Michael Bethany" → "M. Bethany").
@@ -322,7 +336,7 @@ mod tests {
     fn pipe_format_basic() {
         let m = parse_title("HOLYGHOST | Sons Of Sunday");
         assert_eq!(m.song, "HOLYGHOST");
-        assert_eq!(m.artist, "S. O. Sunday");
+        assert_eq!(m.artist, "Sons Of Sunday");
         assert_eq!(m.source, MetadataSource::Regex);
         assert!(!m.gemini_failed);
     }
