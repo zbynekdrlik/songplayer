@@ -7,6 +7,7 @@ use sp_core::metadata::{MetadataSource, VideoMetadata};
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use super::parser::shorten_artist;
 use super::{MetadataError, MetadataProvider};
 
 static JSON_FENCE_RE: LazyLock<Regex> =
@@ -42,37 +43,56 @@ impl GeminiProvider {
 
     /// Build the request body for the Gemini API.
     fn build_request_body(&self, video_id: &str, title: &str) -> Value {
+        let video_url = format!("https://www.youtube.com/watch?v={video_id}");
         let prompt = format!(
-            "Extract the song name and artist from this YouTube video.\n\
+            "Look up information about this YouTube video and extract the artist and song title:\n\
+             URL: {video_url}\n\
+             Title: \"{title}\"\n\
              \n\
-             YouTube URL: https://www.youtube.com/watch?v={video_id}\n\
-             Video title: {title}\n\
+             Use Google Search to find information about this specific YouTube video URL.\n\
              \n\
-             Use Google Search to find the correct song name and artist.\n\
+             CRITICAL: Respond with ONLY a valid JSON object. No explanatory text allowed.\n\
              \n\
-             Rules:\n\
-             - Return ONLY a JSON object with \"song\" and \"artist\" keys\n\
-             - Use the official song name (not the video title)\n\
-             - Use the original/primary artist name\n\
-             - Do not include feat./ft. artists in the artist field\n\
-             - If you cannot determine the song/artist, use the video title as song \
-               and \"Unknown Artist\" as artist\n\
+             Return EXACTLY this format:\n\
+             {{\"artist\": \"Primary Artist Name\", \"song\": \"Song Title\"}}\n\
+             \n\
+             IMPORTANT RULES:\n\
+             1. Search for the YouTube URL to find the actual artist and song information\n\
+             2. For worship/church music, identify the performing artist/band (not the church name)\n\
+             3. Remove feat./ft./featuring from artist name\n\
+             4. Remove (Official Video), (Live), etc from song titles\n\
+             5. For single songs with \"/\" in their actual title (like \"Faithful Then / Faithful Now\"), keep the full title\n\
+             6. NEVER include album names in the song title - return only the actual song name\n\
+             7. If the video is a medley or contains multiple distinct songs, return ONLY the first song\n\
+             8. If no artist found, return empty string for artist\n\
+             9. For personal artist names, shorten first/middle names to initials keeping the last name full \
+                (e.g. \"Michael Bethany\" → \"M. Bethany\", \"Chris Tomlin\" → \"C. Tomlin\"). \
+                NEVER abbreviate band or group names (\"Elevation Worship\" stays \"Elevation Worship\")\n\
              \n\
              Examples:\n\
-             {{\"song\": \"Bohemian Rhapsody\", \"artist\": \"Queen\"}}\n\
-             {{\"song\": \"The Blessing\", \"artist\": \"Elevation Worship\"}}"
+             - \"HOLYGHOST | Sons Of Sunday\" → {{\"artist\": \"Sons Of Sunday\", \"song\": \"HOLYGHOST\"}}\n\
+             - \"'COME RIGHT NOW' | Official Video\" → {{\"artist\": \"Planetshakers\", \"song\": \"COME RIGHT NOW\"}}\n\
+             - \"Supernatural Love | Show Me Your Glory - Live At Chapel | Planetshakers Official Music Video\" → {{\"artist\": \"Planetshakers\", \"song\": \"Supernatural Love\"}}\n\
+             - \"Forever | Live At Chapel\" → {{\"artist\": \"K. Jobe\", \"song\": \"Forever\"}}\n\
+             - \"The Blessing (Live) | Elevation Worship\" → {{\"artist\": \"Elevation Worship\", \"song\": \"The Blessing\"}}\n\
+             - \"Faithful Then / Faithful Now | Elevation Worship\" → {{\"artist\": \"Elevation Worship\", \"song\": \"Faithful Then / Faithful Now\"}}\n\
+             - \"There Is A King/What Would You Do | Live | Elevation Worship\" → {{\"artist\": \"Elevation Worship\", \"song\": \"There Is A King\"}}\n\
+             - \"Pat Barrett - Count On You (Live)\" → {{\"artist\": \"P. Barrett\", \"song\": \"Count On You\"}}\n\
+             \n\
+             REMEMBER: Return ONLY valid JSON, nothing else. The song field should contain ONLY the song title, never album names or other metadata."
         );
 
         serde_json::json!({
             "system_instruction": {
-                "parts": [{"text": "You are a JSON API. Return only valid JSON, no markdown, no explanation."}]
+                "parts": [{"text": "You are a JSON API that returns only valid JSON objects. Never include explanatory text, reasoning, or any content outside the JSON structure."}]
             },
             "contents": [
                 {"role": "user", "parts": [{"text": prompt}]}
             ],
             "tools": [{"google_search": {}}],
             "generationConfig": {
-                "temperature": 0.1
+                "temperature": 0.1,
+                "candidateCount": 1
             }
         })
     }
@@ -91,12 +111,14 @@ impl GeminiProvider {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| MetadataError::InvalidResponse("missing 'song' field".into()))?;
 
-        let artist = parsed
+        let artist_raw = parsed
             .get("artist")
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| MetadataError::InvalidResponse("missing 'artist' field".into()))?;
+
+        let artist = shorten_artist(&artist_raw);
 
         Ok(VideoMetadata {
             song,
@@ -276,6 +298,56 @@ mod tests {
         let meta = GeminiProvider::parse_response(text).unwrap();
         assert_eq!(meta.song, "Test");
         assert_eq!(meta.artist, "Artist");
+    }
+
+    #[test]
+    fn build_request_body_contains_worship_rules() {
+        let provider = GeminiProvider::new("test-key".into(), "gemini-2.5-flash".into());
+        let body = provider.build_request_body("dQw4w9WgXcQ", "Test Title");
+        let prompt = body["contents"][0]["parts"][0]["text"].as_str().unwrap();
+        assert!(
+            prompt.contains("worship"),
+            "prompt must mention worship music"
+        );
+        assert!(prompt.contains("album"), "prompt must mention album names");
+        assert!(prompt.contains("medley"), "prompt must mention medleys");
+        assert!(
+            prompt.contains("HOLYGHOST"),
+            "prompt must have HOLYGHOST example"
+        );
+        assert!(
+            prompt.contains("Planetshakers"),
+            "prompt must have Planetshakers example"
+        );
+        assert!(
+            prompt.contains("Faithful Then / Faithful Now"),
+            "prompt must have slash example"
+        );
+        assert!(
+            prompt.contains("shorten"),
+            "prompt must mention artist shortening"
+        );
+    }
+
+    #[test]
+    fn build_request_body_has_google_search_tool() {
+        let provider = GeminiProvider::new("test-key".into(), "gemini-2.5-flash".into());
+        let body = provider.build_request_body("test", "Test");
+        assert!(body["tools"][0]["google_search"].is_object());
+    }
+
+    #[test]
+    fn parse_response_shortens_personal_artist() {
+        let text = r#"{"song": "Count On You", "artist": "Pat Barrett"}"#;
+        let meta = GeminiProvider::parse_response(text).unwrap();
+        assert_eq!(meta.artist, "P. Barrett");
+    }
+
+    #[test]
+    fn parse_response_does_not_shorten_band() {
+        let text = r#"{"song": "The Blessing", "artist": "Elevation Worship"}"#;
+        let meta = GeminiProvider::parse_response(text).unwrap();
+        assert_eq!(meta.artist, "Elevation Worship");
     }
 
     // ---- Async tests for provider chain (mock-based) ----

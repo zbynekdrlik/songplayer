@@ -288,7 +288,7 @@ pub async fn start(
         .unwrap_or_default();
     let gemini_model = db::models::get_setting(&pool, "gemini_model")
         .await?
-        .unwrap_or_else(|| "gemini-2.0-flash".to_string());
+        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
 
     // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");
