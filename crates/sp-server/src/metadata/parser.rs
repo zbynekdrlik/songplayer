@@ -89,6 +89,37 @@ fn normalize_title(title: &str) -> String {
     s
 }
 
+/// Strip "Official Music Video", "Worship Together Session", etc. from an artist string.
+fn clean_artist_suffix(artist: &str) -> String {
+    let mut cleaned = artist.to_string();
+    for re in TRAILING_PATTERNS.iter() {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+    // Additional artist-specific suffixes not in TRAILING_PATTERNS
+    static ARTIST_EXTRA_SUFFIXES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        [
+            r"(?i)\s*worship\s+together\s+session\s*$",
+            r"(?i)\s*lyric\s*video\s*$",
+        ]
+        .iter()
+        .map(|p| Regex::new(p).expect("artist suffix pattern must compile"))
+        .collect()
+    });
+    for re in ARTIST_EXTRA_SUFFIXES.iter() {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+    // Strip "Official Planetshakers" → "Planetshakers" etc.
+    static OFFICIAL_PREFIX_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^official\s+").expect("compile"));
+    cleaned = OFFICIAL_PREFIX_RE.replace(&cleaned, "").to_string();
+    // Remove bracket content
+    cleaned = BRACKET_ROUND_RE.replace_all(&cleaned, "").to_string();
+    cleaned = BRACKET_SQUARE_RE.replace_all(&cleaned, "").to_string();
+    cleaned = WHITESPACE_RE.replace_all(&cleaned, " ").to_string();
+    cleaned = TRAILING_JUNK_RE.replace_all(&cleaned, "").to_string();
+    cleaned.trim().to_string()
+}
+
 pub fn parse_title(title: &str) -> VideoMetadata {
     let title = title.trim();
     if title.is_empty() {
@@ -102,10 +133,35 @@ pub fn parse_title(title: &str) -> VideoMetadata {
 
     let title = &normalize_title(title);
 
+    // Multi-pipe: titles with 3+ pipe segments use "Song | Middle... | Artist [suffix]"
+    let pipe_segments: Vec<&str> = title.split('|').collect();
+    if pipe_segments.len() >= 3 {
+        let song_raw = pipe_segments[0].trim().to_string();
+        let last = pipe_segments.last().unwrap().trim();
+        // Clean the last segment (strip "Official Music Video", "Worship Together Session", etc.).
+        // If cleaning leaves nothing useful (pure junk), fall back to second-to-last segment.
+        let artist = clean_artist_suffix(last);
+        let artist = if artist.len() > 2 {
+            artist
+        } else {
+            clean_artist_suffix(pipe_segments[pipe_segments.len() - 2].trim())
+        };
+        if artist.len() > 2 {
+            let song = clean_song_title(&song_raw);
+            return VideoMetadata {
+                song,
+                artist,
+                source: MetadataSource::Regex,
+                gemini_failed: false,
+            };
+        }
+    }
+
     // Pattern 1: "Song | Artist" (artist_first = false)
     if let Some(caps) = PIPE_RE.captures(title) {
         let song_raw = caps[1].trim().to_string();
-        let artist = caps[2].trim().to_string();
+        let artist_raw = caps[2].trim().to_string();
+        let artist = clean_artist_suffix(&artist_raw);
         if artist.len() > 2 {
             let song = clean_song_title(&song_raw);
             return VideoMetadata {
@@ -377,5 +433,28 @@ mod tests {
         let m = parse_title("IMAGEN – Genock Gabriel");
         assert_eq!(m.song, "IMAGEN");
         assert_eq!(m.artist, "Genock Gabriel");
+    }
+
+    #[test]
+    fn three_segment_pipe_takes_last_as_artist() {
+        let m = parse_title(
+            "Supernatural Love | Show Me Your Glory - Live At Chapel | Planetshakers Official Music Video",
+        );
+        assert_eq!(m.song, "Supernatural Love");
+        assert_eq!(m.artist, "Planetshakers");
+    }
+
+    #[test]
+    fn three_segment_pipe_planetshakers_pattern() {
+        let m = parse_title("Free Indeed | REVIVAL | Planetshakers Official Music Video");
+        assert_eq!(m.song, "Free Indeed");
+        assert_eq!(m.artist, "Planetshakers");
+    }
+
+    #[test]
+    fn worship_together_session_pattern() {
+        let m = parse_title("My Father's World | Chris Tomlin | Worship Together Session");
+        assert_eq!(m.song, "My Father's World");
+        assert_eq!(m.artist, "Chris Tomlin");
     }
 }
