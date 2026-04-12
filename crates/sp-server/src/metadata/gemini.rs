@@ -10,16 +10,26 @@ use std::time::Duration;
 use super::parser::shorten_artist;
 use super::{MetadataError, MetadataProvider};
 
-/// Strip emoji characters from a string. Keeps only ASCII + common Latin/accented chars.
+/// Replace common emojis with text equivalents, then strip remaining non-text chars.
 fn strip_emoji(s: &str) -> String {
-    s.chars()
+    // Replace known emojis with text first (before stripping)
+    let replaced = s
+        .replace('\u{2764}', "Love") // ❤ red heart
+        .replace('\u{1F90D}', "Love") // 🤍 white heart
+        .replace('\u{1F499}', "Love") // 💙 blue heart
+        .replace('\u{1F49C}', "Love") // 💜 purple heart
+        .replace('\u{2665}', "Love") // ♥ heart suit
+        .replace('\u{1F525}', "") // 🔥 fire
+        .replace('\u{1F64F}', "") // 🙏 pray
+        .replace('\u{2728}', "") // ✨ sparkles
+        .replace('\u{1F3B6}', "") // 🎶 notes
+        .replace('\u{1F3B5}', ""); // 🎵 note
+    // Strip any remaining non-text characters
+    replaced
+        .chars()
         .filter(|c| {
-            // Keep: ASCII, Latin Extended, common punctuation, accented chars
-            // Remove: emoji ranges (U+1F000+), misc symbols (U+2600+), dingbats, etc.
             let cp = *c as u32;
-            cp < 0x2600
-                || (0xFE00..=0xFE0F).contains(&cp) // variation selectors
-                || (0x00C0..=0x024F).contains(&cp) // Latin Extended
+            cp < 0x2600 || (0xFE00..=0xFE0F).contains(&cp) || (0x00C0..=0x024F).contains(&cp)
         })
         .collect::<String>()
         .split_whitespace()
@@ -528,16 +538,21 @@ mod tests {
     fn parse_response_strips_emoji_from_song() {
         let text = r#"{"song": "Yahweh We 🤍 You", "artist": "Elevation Worship"}"#;
         let meta = GeminiProvider::parse_response(text).unwrap();
-        assert_eq!(meta.song, "Yahweh We You");
+        assert_eq!(meta.song, "Yahweh We Love You");
         assert_eq!(meta.artist, "Elevation Worship");
     }
 
     #[test]
-    fn strip_emoji_removes_hearts_and_symbols() {
-        assert_eq!(strip_emoji("Yahweh We 🤍 You"), "Yahweh We You");
+    fn strip_emoji_replaces_hearts_with_love() {
+        assert_eq!(strip_emoji("Yahweh We 🤍 You"), "Yahweh We Love You");
+        assert_eq!(strip_emoji("Song ❤ You"), "Song Love You");
+    }
+
+    #[test]
+    fn strip_emoji_removes_non_heart_emoji() {
         assert_eq!(strip_emoji("Song 🔥 Title"), "Song Title");
         assert_eq!(strip_emoji("Normal Text"), "Normal Text");
-        assert_eq!(strip_emoji("Café María"), "Café María"); // accented chars preserved
+        assert_eq!(strip_emoji("Café María"), "Café María");
     }
 
     // ---- Async tests for provider chain (mock-based) ----
