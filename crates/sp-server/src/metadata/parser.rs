@@ -115,6 +115,8 @@ fn clean_artist_suffix(artist: &str) -> String {
     // Remove bracket content
     cleaned = BRACKET_ROUND_RE.replace_all(&cleaned, "").to_string();
     cleaned = BRACKET_SQUARE_RE.replace_all(&cleaned, "").to_string();
+    // Strip trailing lone opening paren (from regex captures that stop at "(")
+    cleaned = cleaned.trim_end_matches('(').to_string();
     cleaned = WHITESPACE_RE.replace_all(&cleaned, " ").to_string();
     cleaned = TRAILING_JUNK_RE.replace_all(&cleaned, "").to_string();
     cleaned.trim().to_string()
@@ -456,5 +458,19 @@ mod tests {
         let m = parse_title("My Father's World | Chris Tomlin | Worship Together Session");
         assert_eq!(m.song, "My Father's World");
         assert_eq!(m.artist, "Chris Tomlin");
+    }
+
+    #[test]
+    fn pipe_artist_with_feat_paren_is_cleaned() {
+        let m = parse_title("Keep On | Elevation Worship (feat. Davide Mutendji)");
+        assert_eq!(m.song, "Keep On");
+        assert_eq!(m.artist, "Elevation Worship");
+    }
+
+    #[test]
+    fn pipe_artist_with_live_paren_is_cleaned() {
+        let m = parse_title("Get This Party Started | Planetshakers (Live)");
+        assert_eq!(m.song, "Get This Party Started");
+        assert_eq!(m.artist, "Planetshakers");
     }
 }
