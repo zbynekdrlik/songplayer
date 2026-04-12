@@ -244,6 +244,9 @@ impl DownloadWorker {
 
     /// Download the best audio stream only via yt-dlp. Returns the actual
     /// file path that yt-dlp wrote (the extension is codec-dependent).
+    ///
+    /// Uses `--print after_move:filepath` so yt-dlp itself reports the
+    /// final path on stdout, avoiding a racy directory scan.
     async fn download_audio_stream(
         &self,
         video_id: &str,
@@ -256,10 +259,6 @@ impl DownloadWorker {
             .parent()
             .unwrap_or(std::path::Path::new("."));
 
-        // yt-dlp writes the file with an extension it picks itself based on
-        // the source stream. We pass the base path with `%(ext)s` so yt-dlp
-        // appends the native extension; afterwards we locate the file by
-        // listing the cache dir for matches.
         let output_template = format!("{}.%(ext)s", output_base.display());
 
         let mut cmd = tokio::process::Command::new(&self.tools.ytdlp);
@@ -270,6 +269,7 @@ impl DownloadWorker {
             .args(["--js-runtimes", "node"])
             .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
             .arg("--no-part")
+            .args(["--print", "after_move:filepath"])
             .args(["-o", &output_template])
             .arg(&url)
             .stdout(std::process::Stdio::piped())
@@ -286,23 +286,22 @@ impl DownloadWorker {
             );
         }
 
-        // Find the file that was written.
-        let parent = output_base.parent().unwrap_or(std::path::Path::new("."));
-        let file_stem = output_base
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid output base"))?;
-        let entries = std::fs::read_dir(parent)?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && name.starts_with(file_stem)
-                && !name.ends_with(".part")
-            {
-                return Ok(path);
-            }
-        }
-        anyhow::bail!("no audio output file matched prefix {file_stem}")
+        // `--print after_move:filepath` writes the final path as the
+        // last non-empty line on stdout.
+        let stdout = String::from_utf8_lossy(&child_output.stdout);
+        let filepath = stdout
+            .lines()
+            .rev()
+            .find(|l| !l.is_empty() && !l.starts_with('['))
+            .map(|l| PathBuf::from(l.trim()))
+            .filter(|p| p.exists())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "yt-dlp did not report a valid filepath for audio of {video_id}; stdout: {stdout}"
+                )
+            })?;
+
+        Ok(filepath)
     }
 }
 

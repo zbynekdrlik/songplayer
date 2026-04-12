@@ -310,6 +310,8 @@ pub async fn start(
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_gemini_key = gemini_key.clone();
     let dl_gemini_model = gemini_model.clone();
+    let startup_sync_pool = pool.clone();
+    let startup_sync_tx = sync_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -323,11 +325,18 @@ pub async fn start(
                     ffmpeg_available: true,
                     ytdlp_version: version,
                 });
-                // Store resolved tool paths for sync workers.
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
 
-                // Build metadata providers for the download worker.
+                // Startup sync fires AFTER tools are ready so the sync
+                // worker doesn't silently drop the requests.
+                if let Err(e) =
+                    startup::startup_sync_active_playlists(&startup_sync_pool, &startup_sync_tx)
+                        .await
+                {
+                    tracing::warn!("startup sync enqueue failed: {e}");
+                }
+
                 let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
                 if !dl_gemini_key.is_empty() {
                     dl_providers.push(Box::new(metadata::gemini::GeminiProvider::new(
@@ -336,10 +345,6 @@ pub async fn start(
                     )));
                 }
 
-                // Spawn download worker now that tools are available.
-                // Uses the hoisted dl_event_tx_for_worker so the engine
-                // loop (subscribed further down) can react to
-                // `processed:<id>` events.
                 let dl_worker = downloader::DownloadWorker::new(
                     dl_pool,
                     paths,
@@ -355,12 +360,6 @@ pub async fn start(
             }
         }
     });
-
-    // Startup sync (legacy parity): fire a one-shot SyncRequest per active
-    // playlist so the download worker has fresh video IDs to process.
-    if let Err(e) = startup::startup_sync_active_playlists(&pool, &sync_tx).await {
-        tracing::warn!("startup sync enqueue failed: {e}");
-    }
 
     // 6. Sync handler — receives SyncRequests and calls playlist::sync_playlist
     let sync_pool = pool.clone();

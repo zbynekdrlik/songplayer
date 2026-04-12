@@ -10,7 +10,7 @@ use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use symphonia::core::units::Time;
+use symphonia::core::units::{Time, TimeBase};
 
 use crate::error::DecoderError;
 use crate::stream::{AudioStream, MediaStream};
@@ -28,6 +28,7 @@ pub struct SymphoniaAudioReader {
     sample_rate: u32,
     channels: u16,
     duration_ms: u64,
+    time_base: TimeBase,
     /// After a seek, the first returned packet uses this timestamp instead of
     /// the block-boundary timestamp, giving the caller a sample-accurate view
     /// of the requested position.
@@ -60,7 +61,7 @@ impl SymphoniaAudioReader {
             .tracks()
             .iter()
             .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-            .ok_or(DecoderError::NoStream("audio"))?;
+            .ok_or(DecoderError::NoStream("audio".into()))?;
 
         let track_id = track.id;
         let codec_params = &track.codec_params;
@@ -73,12 +74,13 @@ impl SymphoniaAudioReader {
             .ok_or_else(|| DecoderError::Decode("missing channels".into()))?
             .count() as u16;
 
-        // FLAC STREAMINFO reports total sample count in frames. Derived
-        // duration is sample-accurate and available immediately after open —
-        // this kills the duration=0 class of bugs from the previous release.
-        let duration_ms = match (codec_params.n_frames, codec_params.time_base) {
-            (Some(n_frames), Some(tb)) => {
-                let t = tb.calc_time(n_frames);
+        let time_base = codec_params
+            .time_base
+            .unwrap_or(TimeBase::new(1, sample_rate));
+
+        let duration_ms = match codec_params.n_frames {
+            Some(n_frames) => {
+                let t = time_base.calc_time(n_frames);
                 t.seconds * 1_000 + ((t.frac * 1_000.0) as u64)
             }
             _ => 0,
@@ -95,6 +97,7 @@ impl SymphoniaAudioReader {
             sample_rate,
             channels,
             duration_ms,
+            time_base,
             pending_seek_ts_ms: None,
         })
     }
@@ -165,13 +168,10 @@ impl SymphoniaAudioReader {
             }
 
             let ts = packet.ts();
-            // Use the seek-requested timestamp for the first packet after a
-            // seek, so callers see the exact requested position rather than
-            // the FLAC block-boundary timestamp.
-            let timestamp_ms = self
-                .pending_seek_ts_ms
-                .take()
-                .unwrap_or_else(|| ts * 1_000 / sample_rate as u64);
+            let timestamp_ms = self.pending_seek_ts_ms.take().unwrap_or_else(|| {
+                let t = self.time_base.calc_time(ts);
+                t.seconds * 1_000 + (t.frac * 1_000.0) as u64
+            });
 
             return Ok(Some(DecodedAudioFrame {
                 data: interleaved,

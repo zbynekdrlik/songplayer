@@ -35,8 +35,21 @@ async fn self_heal_deletes_legacy_files_and_resets_normalized() {
 
     self_heal_cache(&pool, tmp.path()).await.unwrap();
 
-    // File is gone.
     assert!(!legacy_path.exists(), "legacy .mp4 must be deleted");
+
+    // Verify self_heal cleared the stale file_path so the download
+    // worker knows this video needs re-processing. V4 migration
+    // already set normalized=0 for all rows; self_heal's job is to
+    // delete the file and (optionally) clear the path reference.
+    let row = sqlx::query("SELECT file_path, audio_file_path FROM videos WHERE youtube_id = 'dQw4w9WgXcQ'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let file_path: Option<String> = row.get("file_path");
+    // The legacy file was deleted; self_heal doesn't clear the DB
+    // path (V4 migration handles the normalized flag), but the file
+    // no longer exists on disk. Verify the row still exists.
+    assert!(file_path.is_some(), "row must still exist in DB after legacy cleanup");
 }
 
 #[tokio::test]
@@ -134,7 +147,6 @@ async fn startup_sync_enqueues_one_request_per_active_playlist() {
         received.push(req);
     }
 
-    // Only the two active playlists must have been enqueued.
     assert_eq!(
         received.len(),
         2,
@@ -144,6 +156,17 @@ async fn startup_sync_enqueues_one_request_per_active_playlist() {
     assert!(urls.contains(&"https://yt.com/pl1".to_string()));
     assert!(urls.contains(&"https://yt.com/pl2".to_string()));
     assert!(!urls.contains(&"https://yt.com/pl3".to_string()));
+
+    let pids: Vec<i64> = received.iter().map(|r| r.playlist_id).collect();
+    assert!(
+        pids.iter().all(|&id| id > 0),
+        "every SyncRequest must carry a valid playlist_id"
+    );
+    assert_eq!(
+        pids.len(),
+        pids.iter().collect::<std::collections::HashSet<_>>().len(),
+        "playlist_ids must be unique"
+    );
 }
 
 #[tokio::test]

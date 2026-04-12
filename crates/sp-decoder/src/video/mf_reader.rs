@@ -45,7 +45,9 @@ impl MediaFoundationVideoReader {
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
         unsafe {
             let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            debug!(hr = ?hr, "CoInitializeEx result");
+            if hr.is_err() {
+                return Err(DecoderError::ComInit(format!("CoInitializeEx: {hr}")));
+            }
             MFStartup(MF_API_VERSION, MFSTARTUP_NOSOCKET)
                 .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
         }
@@ -82,9 +84,7 @@ impl MediaFoundationVideoReader {
             reader
                 .SetCurrentMediaType(VIDEO_STREAM, None, &video_type)
                 .map_err(|e| {
-                    DecoderError::NoStream(Box::leak(
-                        format!("video: SetCurrentMediaType failed: {e}").into_boxed_str(),
-                    ))
+                    DecoderError::NoStream(format!("video: SetCurrentMediaType failed: {e}"))
                 })?;
         }
 
@@ -129,17 +129,15 @@ impl MediaFoundationVideoReader {
     }
 
     fn make_video_output_type() -> Result<IMFMediaType, DecoderError> {
-        let media_type: IMFMediaType = unsafe {
-            MFCreateMediaType()
-                .map_err(|e| DecoderError::NoStream(Box::leak(e.to_string().into_boxed_str())))?
-        };
+        let media_type: IMFMediaType =
+            unsafe { MFCreateMediaType().map_err(|e| DecoderError::NoStream(e.to_string()))? };
         unsafe {
             media_type
                 .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
-                .map_err(|e| DecoderError::NoStream(Box::leak(e.to_string().into_boxed_str())))?;
+                .map_err(|e| DecoderError::NoStream(e.to_string()))?;
             media_type
                 .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
-                .map_err(|e| DecoderError::NoStream(Box::leak(e.to_string().into_boxed_str())))?;
+                .map_err(|e| DecoderError::NoStream(e.to_string()))?;
         }
         Ok(media_type)
     }
@@ -158,8 +156,11 @@ impl MediaFoundationVideoReader {
                 .map_err(|e| DecoderError::BufferLock(e.to_string()))?;
         }
 
-        let nv12: Vec<u8> =
-            unsafe { std::slice::from_raw_parts(data_ptr, current_len as usize).to_vec() };
+        let nv12: Vec<u8> = if current_len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(data_ptr, current_len as usize).to_vec() }
+        };
 
         unsafe {
             buffer
@@ -256,7 +257,7 @@ impl VideoStream for MediaFoundationVideoReader {
         };
 
         let (nv12_data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
-        let timestamp_ms = (timestamp_100ns / 10_000) as u64;
+        let timestamp_ms = (timestamp_100ns.max(0) / 10_000) as u64;
 
         if timestamp_ms > self.duration_ms {
             self.duration_ms = timestamp_ms;

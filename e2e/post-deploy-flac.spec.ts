@@ -96,16 +96,25 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       `these normalized videos are still on the legacy layout: ${normalizedButLegacy.join(", ")}`,
     ).toEqual([]);
 
-    // Log the current count for diagnostics but don't require a minimum:
-    // the CI step "Verify download worker produces a split-file pair"
-    // already polls for up to 20 minutes before the Playwright suite
-    // runs. If that step succeeded, at least one pair exists. If this
-    // spec is re-run standalone against an empty cache, zero is also a
-    // correct state.
     console.log(
       `FLAC layout check: ${foundPaths.length} normalized videos on new layout, ` +
         `${normalizedButLegacy.length} on legacy layout`,
     );
+
+    // In CI the "Verify download worker" step guarantees at least one
+    // pair before Playwright runs. Enforce a minimum so the test can't
+    // pass vacuously with zero checked pairs.
+    if (foundPaths.length === 0) {
+      console.warn(
+        "WARNING: zero normalized videos found — if running in CI this is a bug; " +
+          "if running standalone against an empty cache this is expected.",
+      );
+    }
+    expect(
+      foundPaths.length,
+      "at least one normalized video must use the split-file layout " +
+        "(the CI download-wait step should have produced one before this test)",
+    ).toBeGreaterThan(0);
   });
 
   test("every audio sidecar paired with a video sidecar ends in .flac", async ({ request }) => {
@@ -133,14 +142,21 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         if (!v.normalized || !v.file_path) continue;
         const m = v.file_path.match(PAIR_SUFFIX_RE);
         if (!m) continue;
-        // Derived audio filename: swap `_video.mp4` -> `_audio.flac`.
-        const audioFilename = v.file_path.replace(/_video\.mp4$/, "_audio.flac");
-        expect(audioFilename.endsWith("_audio.flac")).toBe(true);
+        // Video path must contain a YouTube-ID-shaped segment (11 chars).
+        const ytIdMatch = v.file_path.match(/([a-zA-Z0-9_-]{11})_normalized/);
+        expect(
+          ytIdMatch,
+          `video path must contain an 11-char YouTube ID: ${v.file_path}`,
+        ).not.toBeNull();
+        // The naming convention guarantees a sibling `_audio.flac`.
+        expect(v.file_path).toMatch(/_video\.mp4$/);
         checked += 1;
       }
     }
-    // Same rationale as the prior test — zero is acceptable when the
-    // cache has been wiped and re-run standalone.
-    console.log(`Checked ${checked} pairs for derived audio filename consistency`);
+    console.log(`Checked ${checked} pairs for naming convention consistency`);
+    expect(
+      checked,
+      "at least one normalized video pair must be checkable",
+    ).toBeGreaterThan(0);
   });
 });

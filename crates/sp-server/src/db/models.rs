@@ -207,7 +207,7 @@ pub async fn mark_video_processed_pair(
     video_path: &str,
     audio_path: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE videos
          SET song = ?, artist = ?, metadata_source = ?,
              gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1
@@ -222,6 +222,12 @@ pub async fn mark_video_processed_pair(
     .bind(video_db_id)
     .execute(pool)
     .await?;
+    debug_assert_eq!(
+        result.rows_affected(),
+        1,
+        "mark_video_processed_pair: expected 1 row affected for id={video_db_id}, got {}",
+        result.rows_affected()
+    );
     Ok(())
 }
 

@@ -13,15 +13,11 @@ pub enum DecoderError {
 
     /// No stream of the given kind is available.
     #[error("No {0} stream available")]
-    NoStream(&'static str),
+    NoStream(String),
 
     /// A sample read operation failed.
     #[error("Sample read failed: {0}")]
     ReadSample(String),
-
-    /// The stream has reached its end.
-    #[error("End of stream")]
-    EndOfStream,
 
     /// A seek operation failed.
     #[error("Seek failed: {0}")]

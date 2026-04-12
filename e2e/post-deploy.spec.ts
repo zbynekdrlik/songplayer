@@ -150,10 +150,15 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
     const card = page.locator(".playlist-card", { hasText: pl.name });
 
-    // Within 10 s the card must show the `.np-info` block. Song/artist
-    // strings may be empty if the Gemini metadata pass failed, so we
-    // check for the presence of the block rather than its text.
-    await expect(card.locator(".np-info")).toBeVisible({ timeout: 10_000 });
+    // Within 10 s the card must show the `.np-info` block with a
+    // non-empty position counter (proves NowPlaying actually arrived).
+    const npInfo = card.locator(".np-info");
+    await expect(npInfo).toBeVisible({ timeout: 10_000 });
+    const npText = await npInfo.innerText();
+    expect(
+      npText.length,
+      `.np-info must contain text (song/position), got empty string`,
+    ).toBeGreaterThan(0);
 
     // Cleanup.
     await request.post(`/api/v1/playback/${pl.id}/pause`);
