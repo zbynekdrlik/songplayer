@@ -152,7 +152,7 @@ pub fn parse_title(title: &str) -> VideoMetadata {
             let song = clean_song_title(&song_raw);
             return VideoMetadata {
                 song,
-                artist,
+                artist: shorten_artist(&artist),
                 source: MetadataSource::Regex,
                 gemini_failed: false,
             };
@@ -168,7 +168,7 @@ pub fn parse_title(title: &str) -> VideoMetadata {
             let song = clean_song_title(&song_raw);
             return VideoMetadata {
                 song,
-                artist,
+                artist: shorten_artist(&artist),
                 source: MetadataSource::Regex,
                 gemini_failed: false,
             };
@@ -183,7 +183,7 @@ pub fn parse_title(title: &str) -> VideoMetadata {
             let song = clean_song_title(&song_raw);
             return VideoMetadata {
                 song,
-                artist,
+                artist: shorten_artist(&artist),
                 source: MetadataSource::Regex,
                 gemini_failed: false,
             };
@@ -322,7 +322,7 @@ mod tests {
     fn pipe_format_basic() {
         let m = parse_title("HOLYGHOST | Sons Of Sunday");
         assert_eq!(m.song, "HOLYGHOST");
-        assert_eq!(m.artist, "Sons Of Sunday");
+        assert_eq!(m.artist, "S. O. Sunday");
         assert_eq!(m.source, MetadataSource::Regex);
         assert!(!m.gemini_failed);
     }
@@ -345,7 +345,7 @@ mod tests {
     fn pipe_format_with_official_suffix() {
         let m = parse_title("Amazing Song | Great Artist Official Music Video");
         assert_eq!(m.song, "Amazing Song");
-        assert_eq!(m.artist, "Great Artist");
+        assert_eq!(m.artist, "G. Artist");
     }
 
     #[test]
@@ -381,7 +381,7 @@ mod tests {
     fn dash_format_with_bracket_stops_song() {
         let m = parse_title("Artist Name - Song Title (Official Video)");
         assert_eq!(m.song, "Song Title");
-        assert_eq!(m.artist, "Artist Name");
+        assert_eq!(m.artist, "A. Name");
     }
 
     // ---- clean_song_title tests ----
@@ -513,7 +513,7 @@ mod tests {
     fn en_dash_delimiter_parsed_as_dash() {
         let m = parse_title("IMAGEN – Genock Gabriel");
         assert_eq!(m.song, "IMAGEN");
-        assert_eq!(m.artist, "Genock Gabriel");
+        assert_eq!(m.artist, "G. Gabriel");
     }
 
     #[test]
@@ -536,7 +536,7 @@ mod tests {
     fn worship_together_session_pattern() {
         let m = parse_title("My Father's World | Chris Tomlin | Worship Together Session");
         assert_eq!(m.song, "My Father's World");
-        assert_eq!(m.artist, "Chris Tomlin");
+        assert_eq!(m.artist, "C. Tomlin");
     }
 
     #[test]
@@ -609,5 +609,19 @@ mod tests {
     #[test]
     fn shorten_handles_personal_name() {
         assert_eq!(shorten_artist("Pat Barrett"), "P. Barrett");
+    }
+
+    #[test]
+    fn parser_output_shortens_personal_artist() {
+        let m = parse_title("Pat Barrett - Count On You (Live)");
+        assert_eq!(m.song, "Count On You");
+        assert_eq!(m.artist, "P. Barrett");
+    }
+
+    #[test]
+    fn parser_output_does_not_shorten_band() {
+        let m = parse_title("The Blessing | Elevation Worship");
+        assert_eq!(m.song, "The Blessing");
+        assert_eq!(m.artist, "Elevation Worship");
     }
 }
