@@ -749,6 +749,68 @@ async fn processed_event_rewakes_waiting_pipeline_with_new_video() {
     assert_eq!(pp.current_video_id, Some(100));
 }
 
+/// Negative case that specifically targets the `scene_active` guard in
+/// `should_wake`: a pipeline parked in `WaitingForScene` whose scene is
+/// NOT currently active must NOT auto-play when a matching video is
+/// processed. Kills the `&&` → `||` mutation on the `scene_active`
+/// predicate — if the guard loses effect, the pipeline transitions to
+/// Playing under the mutation and the test catches it.
+#[tokio::test]
+async fn processed_event_ignores_waiting_pipeline_with_inactive_scene() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (7, 'ytfast', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(pool.clone(), obs_tx, None, resolume_tx, ws_tx);
+    engine.ensure_pipeline(7, "SP-fast");
+
+    // Put the pipeline in WaitingForScene WITHOUT the scene being on
+    // program. Simulates: scene flipped to sp-fast (engine transitioned
+    // WaitingForScene via VideosAvailable) then flipped away before any
+    // video was normalized. scene_active is now false.
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.state = PlayState::WaitingForScene;
+        pp.scene_active = false;
+        pp.current_video_id = None;
+    }
+
+    // Insert a normalized video that matches playlist 7 — the one the
+    // download worker would have produced later.
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (300, 7, 'yt-new-300', 1, '/tmp/video_300_video.mp4', '/tmp/video_300_audio.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    engine.on_video_processed("yt-new-300").await;
+
+    // Even though the playlist has a WaitingForScene state AND a fresh
+    // video is available, the scene is NOT active, so the engine must
+    // NOT start playback. Under the `&&` → `||` mutation on
+    // `scene_active`, should_wake becomes true and the pipeline would
+    // transition to Playing via SelectAndPlay.
+    let pp = engine.pipelines.get(&7).expect("pipeline 7 exists");
+    assert_eq!(
+        pp.state,
+        PlayState::WaitingForScene,
+        "pipeline must stay in WaitingForScene when scene is inactive; got {:?}",
+        pp.state
+    );
+    assert!(
+        pp.current_video_id.is_none(),
+        "no video should be selected when scene is inactive; got {:?}",
+        pp.current_video_id
+    );
+}
+
 /// Negative case: a processed event MUST NOT start playback for a
 /// pipeline whose scene is NOT active. The engine only re-runs
 /// `SelectAndPlay` for playlists currently on program.

@@ -394,8 +394,29 @@ pub async fn start(
         }
     });
 
-    // 7. OBS WebSocket client
+    // 7. OBS WebSocket client + OBS→engine bridge
+    //
+    // The bridge subscribes to obs_event_tx BEFORE the OBS client spawns.
+    // On a fast LAN the OBS client can connect, authenticate, rebuild the
+    // NDI source map, and broadcast the initial SceneChanged event in
+    // under 50 ms — fast enough to beat a subscription that happens after
+    // the spawn. Subscribing first guarantees the bridge never misses the
+    // initial scene detection, which is what triggers auto-play on startup.
     let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
+
+    // Bridge: subscribe BEFORE the OBS client spawns so the initial
+    // SceneChanged event is never lost to a subscription race.
+    {
+        let obs_event_rx = obs_event_tx.subscribe();
+        let bridge_engine_tx = engine_tx.clone();
+        let bridge_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(run_obs_engine_bridge(
+            obs_event_rx,
+            bridge_engine_tx,
+            bridge_shutdown,
+        ));
+    }
+
     let mut obs_cmd_tx: Option<tokio::sync::mpsc::Sender<obs::ObsCommand>> = None;
     let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
         .await?
@@ -424,24 +445,6 @@ pub async fn start(
         );
         obs_cmd_tx = Some(obs_client.cmd_sender());
         info!("OBS WebSocket client started");
-    }
-
-    // Bridge: convert OBS scene-change events to per-playlist EngineCommands.
-    //
-    // The OBS client broadcasts `ObsEvent::SceneChanged { active_playlist_ids }`
-    // every time the program scene changes. For the playback engine, we need
-    // to turn that set diff into per-playlist `SceneChanged { playlist_id,
-    // on_program }` messages so each pipeline state machine sees the right
-    // transition.
-    {
-        let obs_event_rx = obs_event_tx.subscribe();
-        let bridge_engine_tx = engine_tx.clone();
-        let bridge_shutdown = shutdown_tx.subscribe();
-        tokio::spawn(run_obs_engine_bridge(
-            obs_event_rx,
-            bridge_engine_tx,
-            bridge_shutdown,
-        ));
     }
 
     // 8. Reprocess worker (with Gemini provider if API key is configured)
