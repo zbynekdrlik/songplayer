@@ -61,10 +61,14 @@ test.describe("FLAC pipeline post-deploy verification", () => {
 
   test("dashboard loads without console errors", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".playlist-card").first()).toBeVisible({
+      timeout: 30_000,
+    });
   });
 
-  test("at least one normalized video uses the split-file video sidecar suffix", async ({ request }) => {
+  test("at least one normalized video uses the split-file video sidecar suffix", async ({
+    request,
+  }) => {
     const playlistsResp = await request.get("/api/v1/playlists");
     expect(playlistsResp.status()).toBe(200);
     const playlists = (await playlistsResp.json()) as PlaylistEntry[];
@@ -102,7 +106,69 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     );
   });
 
-  test("every audio sidecar paired with a video sidecar ends in .flac", async ({ request }) => {
+  test("at least one normalized video has Gemini metadata (not gemini_failed)", async ({
+    request,
+  }) => {
+    const playlistsResp = await request.get("/api/v1/playlists");
+    const playlists = (await playlistsResp.json()) as PlaylistEntry[];
+
+    let geminiOk = 0;
+    let geminiFailed = 0;
+    let noArtist = 0;
+
+    for (const pl of playlists) {
+      const videosResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+      const videos = (await videosResp.json()) as VideoEntry[];
+      for (const v of videos) {
+        if (!v.normalized) continue;
+        if (v.gemini_failed) {
+          geminiFailed += 1;
+        } else {
+          geminiOk += 1;
+          // Gemini-processed videos must have a song title
+          expect(
+            v.song,
+            `normalized video ${v.youtube_id} has gemini_failed=false but empty song`,
+          ).toBeTruthy();
+          // Artist should never be "Unknown Artist" (empty is OK for non-songs)
+          if (v.artist) {
+            expect(
+              v.artist,
+              `video ${v.youtube_id} has "Unknown Artist" — should be empty or real name`,
+            ).not.toBe("Unknown Artist");
+          }
+        }
+        // No artist field should contain emoji
+        if (v.artist) {
+          expect(
+            // eslint-disable-next-line no-control-regex
+            /[\u{1F000}-\u{1FFFF}]/u.test(v.artist),
+            `artist "${v.artist}" for ${v.youtube_id} contains emoji`,
+          ).toBe(false);
+        }
+        if (v.song) {
+          expect(
+            /[\u{1F000}-\u{1FFFF}]/u.test(v.song),
+            `song "${v.song}" for ${v.youtube_id} contains emoji`,
+          ).toBe(false);
+        }
+      }
+    }
+
+    console.log(
+      `Gemini metadata check: ${geminiOk} OK, ${geminiFailed} failed, ${noArtist} no-artist`,
+    );
+
+    // At least one video must have been successfully processed by Gemini
+    expect(
+      geminiOk,
+      `expected at least 1 Gemini-processed video, got ${geminiOk} OK / ${geminiFailed} failed`,
+    ).toBeGreaterThan(0);
+  });
+
+  test("every audio sidecar paired with a video sidecar ends in .flac", async ({
+    request,
+  }) => {
     // Indirect check: the server exposes video file_path but not audio
     // path in /api/v1/playlists/{id}/videos. We verify the implication
     // that the audio sidecar exists by deriving its expected filename
