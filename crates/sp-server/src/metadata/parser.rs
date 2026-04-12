@@ -566,6 +566,39 @@ mod tests {
         assert_eq!(m.artist, "Planetshakers");
     }
 
+    // ---- multi-pipe mutant-killing tests ----
+
+    /// Kills the `> 2` → `>= 2` mutant on the inner artist length check:
+    /// a 2-char cleaned last segment must be rejected, falling to second-to-last.
+    #[test]
+    fn multi_pipe_two_char_last_segment_falls_to_second() {
+        // "XY" is 2 chars → rejected → falls to "Planetshakers" (second-to-last)
+        let m = parse_title("My Song | Planetshakers | XY");
+        assert_eq!(m.song, "My Song");
+        assert_eq!(m.artist, "Planetshakers");
+    }
+
+    /// Kills the `- 2` → `/ 2` mutant on the second-to-last index:
+    /// with 5 segments where the last cleans to ≤2 chars, the second-to-last
+    /// (index 3) must be picked, not index 5/2=2.
+    #[test]
+    fn multi_pipe_five_segments_picks_second_to_last() {
+        // 5 segments: ["Song", "A", "B", "Planetshakers", "XY"]
+        // Last "XY" is 2 chars → rejected → second-to-last (index 3) = "Planetshakers"
+        // With / 2 mutant: index 5/2=2 = "B" (wrong)
+        let m = parse_title("Song | A | B | Planetshakers | XY");
+        assert_eq!(m.song, "Song");
+        assert_eq!(m.artist, "Planetshakers");
+    }
+
+    /// Kills the `> 2` → `>= 2` mutant on the outer artist length check:
+    /// both last AND second-to-last clean to ≤2 chars → must fall through.
+    #[test]
+    fn multi_pipe_both_segments_too_short_falls_through() {
+        let m = parse_title("Some Song | AB | CD");
+        assert_eq!(m.artist, "Unknown Artist");
+    }
+
     // ---- shorten_artist tests ----
 
     #[test]
