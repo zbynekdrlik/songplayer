@@ -229,6 +229,85 @@ pub fn clean_song_title(song: &str) -> String {
     }
 }
 
+/// Words that indicate a band/group name — never abbreviate these artists.
+const BAND_INDICATORS: &[&str] = &[
+    "worship",
+    "music",
+    "church",
+    "choir",
+    "band",
+    "team",
+    "united",
+    "collective",
+    "community",
+    "ministry",
+    "ministries",
+    "ensemble",
+    "orchestra",
+    "rhythm",
+    "heights",
+    "city",
+];
+
+/// Shorten personal artist names to initials (e.g. "Michael Bethany" → "M. Bethany").
+/// Band/group names are never abbreviated. Comma-separated lists are handled per-segment.
+pub fn shorten_artist(artist: &str) -> String {
+    if artist.contains(',') {
+        return artist
+            .split(',')
+            .map(|s| shorten_single_artist(s.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+    }
+    if artist.contains('&') {
+        return artist
+            .split('&')
+            .map(|s| shorten_single_artist(s.trim()))
+            .collect::<Vec<_>>()
+            .join(" & ");
+    }
+    shorten_single_artist(artist)
+}
+
+/// Shorten a single artist name (no commas/ampersands).
+fn shorten_single_artist(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+
+    // Single word or empty — never abbreviate
+    if words.len() <= 1 {
+        return name.to_string();
+    }
+
+    // Check if any word is a band indicator
+    if words
+        .iter()
+        .any(|w| BAND_INDICATORS.iter().any(|b| w.to_lowercase() == *b))
+    {
+        return name.to_string();
+    }
+
+    // More than 3 words without a band indicator is ambiguous — don't abbreviate
+    if words.len() > 3 {
+        return name.to_string();
+    }
+
+    // Abbreviate all words except the last
+    let mut parts: Vec<String> = Vec::new();
+    for (i, word) in words.iter().enumerate() {
+        if i < words.len() - 1 {
+            let initial = word
+                .chars()
+                .next()
+                .map(|c| format!("{}.", c.to_uppercase().next().unwrap_or(c)))
+                .unwrap_or_default();
+            parts.push(initial);
+        } else {
+            parts.push(word.to_string());
+        }
+    }
+    parts.join(" ")
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -472,5 +551,63 @@ mod tests {
         let m = parse_title("Get This Party Started | Planetshakers (Live)");
         assert_eq!(m.song, "Get This Party Started");
         assert_eq!(m.artist, "Planetshakers");
+    }
+
+    // ---- shorten_artist tests ----
+
+    #[test]
+    fn shorten_personal_name_two_words() {
+        assert_eq!(shorten_artist("Michael Bethany"), "M. Bethany");
+    }
+
+    #[test]
+    fn shorten_personal_name_three_words() {
+        assert_eq!(shorten_artist("Martin W Smith"), "M. W. Smith");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_band_with_worship() {
+        assert_eq!(shorten_artist("Elevation Worship"), "Elevation Worship");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_single_word() {
+        assert_eq!(shorten_artist("Planetshakers"), "Planetshakers");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_band_with_music() {
+        assert_eq!(shorten_artist("Maverick City Music"), "Maverick City Music");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_vous_worship() {
+        assert_eq!(shorten_artist("VOUS Worship"), "VOUS Worship");
+    }
+
+    #[test]
+    fn shorten_handles_comma_separated_artists() {
+        assert_eq!(
+            shorten_artist("SEU Worship, Roosevelt Stewart, Grace Shuffitt"),
+            "SEU Worship, R. Stewart, G. Shuffitt"
+        );
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_ampersand_band() {
+        assert_eq!(
+            shorten_artist("Bethel Music & Kristene DiMarco"),
+            "Bethel Music & K. DiMarco"
+        );
+    }
+
+    #[test]
+    fn shorten_does_not_touch_all_caps_acronym() {
+        assert_eq!(shorten_artist("TAYA"), "TAYA");
+    }
+
+    #[test]
+    fn shorten_handles_personal_name() {
+        assert_eq!(shorten_artist("Pat Barrett"), "P. Barrett");
     }
 }
