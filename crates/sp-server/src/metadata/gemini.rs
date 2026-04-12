@@ -12,18 +12,28 @@ use super::{MetadataError, MetadataProvider};
 
 /// Replace common emojis with text equivalents, then strip remaining non-text chars.
 fn strip_emoji(s: &str) -> String {
-    // Replace known emojis with text first (before stripping)
+    // Replace known emojis: hearts → "Love", others → remove
     let replaced = s
-        .replace('\u{2764}', "Love") // ❤ red heart
-        .replace('\u{1F90D}', "Love") // 🤍 white heart
-        .replace('\u{1F499}', "Love") // 💙 blue heart
-        .replace('\u{1F49C}', "Love") // 💜 purple heart
-        .replace('\u{2665}', "Love") // ♥ heart suit
-        .replace('\u{1F525}', "") // 🔥 fire
-        .replace('\u{1F64F}', "") // 🙏 pray
-        .replace('\u{2728}', "") // ✨ sparkles
-        .replace('\u{1F3B6}', "") // 🎶 notes
-        .replace('\u{1F3B5}', ""); // 🎵 note
+        .replace(
+            [
+                '\u{2764}',
+                '\u{1F90D}',
+                '\u{1F499}',
+                '\u{1F49C}',
+                '\u{2665}',
+            ],
+            "Love",
+        )
+        .replace(
+            [
+                '\u{1F525}',
+                '\u{1F64F}',
+                '\u{2728}',
+                '\u{1F3B6}',
+                '\u{1F3B5}',
+            ],
+            "",
+        );
     // Strip any remaining non-text characters
     replaced
         .chars()
@@ -226,24 +236,21 @@ impl GeminiProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        match extract_json(text) {
-            Ok(json_str) => {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
-                    let clean_song = parsed
-                        .get("song")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| song.to_string());
-                    let clean_artist = parsed
-                        .get("artist")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.trim().to_string())
-                        .unwrap_or_else(|| artist.to_string());
-                    return Ok((clean_song, clean_artist));
-                }
+        if let Ok(json_str) = extract_json(text) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
+                let clean_song = parsed
+                    .get("song")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| song.to_string());
+                let clean_artist = parsed
+                    .get("artist")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_else(|| artist.to_string());
+                return Ok((clean_song, clean_artist));
             }
-            Err(_) => {}
         }
 
         Ok((song.to_string(), artist.to_string()))
