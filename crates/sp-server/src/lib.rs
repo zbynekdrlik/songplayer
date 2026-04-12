@@ -290,6 +290,17 @@ pub async fn start(
         .await?
         .unwrap_or_else(|| "gemini-2.5-flash".to_string());
 
+    // Migrate stale gemini_model setting from the old default.
+    if gemini_model == "gemini-2.0-flash" {
+        tracing::info!("upgrading gemini_model setting from gemini-2.0-flash to gemini-2.5-flash");
+        db::models::set_setting(&pool, "gemini_model", "gemini-2.5-flash").await?;
+    }
+    let gemini_model = if gemini_model == "gemini-2.0-flash" {
+        "gemini-2.5-flash".to_string()
+    } else {
+        gemini_model
+    };
+
     // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");
     let tools_mgr = downloader::tools::ToolsManager::new(tools_dir);
