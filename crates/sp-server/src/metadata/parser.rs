@@ -249,6 +249,18 @@ const BAND_INDICATORS: &[&str] = &[
     "city",
     "sons",
     "house",
+    // Common band-name words that aren't personal names
+    "young",
+    "free",
+    "voice",
+    "college",
+    "grupo",
+    "sound",
+    "room",
+    "hill",
+    "hillsong",
+    "upperroom",
+    "elevation",
     // Articles/prepositions — personal names don't contain these
     "of",
     "the",
@@ -260,6 +272,8 @@ const BAND_INDICATORS: &[&str] = &[
     "by",
     "from",
     "with",
+    "y",
+    "x", // Spanish "and", collaboration separator
 ];
 
 /// Shorten personal artist names to initials (e.g. "Michael Bethany" → "M. Bethany").
@@ -655,6 +669,29 @@ mod tests {
     #[test]
     fn shorten_handles_personal_name() {
         assert_eq!(shorten_artist("Pat Barrett"), "P. Barrett");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_hillsong_young_free() {
+        assert_eq!(
+            shorten_artist("Hillsong Young & Free"),
+            "Hillsong Young & Free"
+        );
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_one_voice() {
+        assert_eq!(shorten_artist("One Voice"), "One Voice");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_spanish_y() {
+        assert_eq!(shorten_artist("Johan y Sofi"), "Johan y Sofi");
+    }
+
+    #[test]
+    fn shorten_does_not_abbreviate_grupo_grace() {
+        assert_eq!(shorten_artist("Grupo Grace"), "Grupo Grace");
     }
 
     #[test]
