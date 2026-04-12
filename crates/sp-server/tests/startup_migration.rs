@@ -41,15 +41,20 @@ async fn self_heal_deletes_legacy_files_and_resets_normalized() {
     // worker knows this video needs re-processing. V4 migration
     // already set normalized=0 for all rows; self_heal's job is to
     // delete the file and (optionally) clear the path reference.
-    let row = sqlx::query("SELECT file_path, audio_file_path FROM videos WHERE youtube_id = 'dQw4w9WgXcQ'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let row = sqlx::query(
+        "SELECT file_path, audio_file_path FROM videos WHERE youtube_id = 'dQw4w9WgXcQ'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let file_path: Option<String> = row.get("file_path");
     // The legacy file was deleted; self_heal doesn't clear the DB
     // path (V4 migration handles the normalized flag), but the file
     // no longer exists on disk. Verify the row still exists.
-    assert!(file_path.is_some(), "row must still exist in DB after legacy cleanup");
+    assert!(
+        file_path.is_some(),
+        "row must still exist in DB after legacy cleanup"
+    );
 }
 
 #[tokio::test]
