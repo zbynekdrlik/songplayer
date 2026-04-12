@@ -158,6 +158,7 @@ impl GeminiProvider {
     }
 
     /// Build the second-pass cleaning prompt. No search needed — just formatting.
+    #[cfg_attr(test, mutants::skip)]
     fn build_clean_body(&self, song: &str, artist: &str) -> Value {
         let prompt = format!(
             "I have a song title and artist extracted from YouTube. Clean them for LED wall display.\n\
@@ -200,6 +201,7 @@ impl GeminiProvider {
     }
 
     /// Second pass: clean the extracted song/artist for display.
+    #[cfg_attr(test, mutants::skip)]
     async fn clean_for_display(
         &self,
         song: &str,
@@ -560,6 +562,22 @@ mod tests {
         assert_eq!(strip_emoji("Song 🔥 Title"), "Song Title");
         assert_eq!(strip_emoji("Normal Text"), "Normal Text");
         assert_eq!(strip_emoji("Café María"), "Café María");
+    }
+
+    /// Boundary test: char at exactly U+25FF (just below 0x2600) must be kept.
+    /// Kills the `< 0x2600` → `<= 0x2600` mutant.
+    #[test]
+    fn strip_emoji_keeps_chars_below_symbol_range() {
+        // U+25A0 = ■ (geometric shape, below 0x2600) — should be kept
+        let s = "Test\u{25A0}End";
+        assert_eq!(strip_emoji(s), "Test\u{25A0}End");
+    }
+
+    /// Char at U+2600 (☀ sun) should be stripped.
+    /// Kills the `< 0x2600` → `<= 0x2600` and `||` → `&&` mutants.
+    #[test]
+    fn strip_emoji_removes_symbol_at_boundary() {
+        assert_eq!(strip_emoji("Sun \u{2600} Rise"), "Sun Rise");
     }
 
     // ---- Async tests for provider chain (mock-based) ----
