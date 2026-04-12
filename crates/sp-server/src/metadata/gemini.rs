@@ -377,8 +377,8 @@ impl MetadataProvider for GeminiProvider {
             if !meta.song.is_empty() {
                 match self.clean_for_display(&meta.song, &meta.artist).await {
                     Ok((clean_song, clean_artist)) => {
-                        meta.song = clean_song;
-                        meta.artist = clean_artist;
+                        meta.song = strip_emoji(&clean_song);
+                        meta.artist = strip_emoji(&clean_artist);
                     }
                     Err(e) => {
                         tracing::debug!("clean_for_display failed, keeping raw: {e}");
