@@ -65,9 +65,18 @@ impl GeminiProvider {
              6. NEVER include album names in the song title - return only the actual song name\n\
              7. If the video is a medley or contains multiple distinct songs, return ONLY the first song\n\
              8. If no artist found, return empty string for artist\n\
-             9. For personal artist names, shorten first/middle names to initials keeping the last name full \
-                (e.g. \"Michael Bethany\" → \"M. Bethany\", \"Chris Tomlin\" → \"C. Tomlin\"). \
-                NEVER abbreviate band or group names (\"Elevation Worship\" stays \"Elevation Worship\")\n\
+             9. NEVER fabricate or guess information. Only return data you found via search or can clearly extract from the title. If the video is not a song (e.g. vocal workout, instrumental), return an empty artist.\n\
+             10. For COVERS: use the performing artist from THIS video, NOT the original song's artist. \
+                 If the title says \"(Cover) | New Heights Worship\", the artist is \"New Heights Worship\".\n\
+             \n\
+             ARTIST NAME SHORTENING — apply these rules:\n\
+             - For PERSONAL names (individual people), shorten first/middle names to initials: \
+               \"Chris Tomlin\" → \"C. Tomlin\", \"Pat Barrett\" → \"P. Barrett\"\n\
+             - NEVER abbreviate band/group/duo names. These stay in full: \
+               \"Elevation Worship\", \"Planetshakers\", \"Hillsong Young & Free\", \"Sons Of Sunday\", \
+               \"One Voice\", \"VOUS Worship\", \"Maverick City Music\"\n\
+             - Spanish/foreign duo names stay in full: \"Johan y Sofi\" (do NOT shorten to \"J. Y. Sofi\")\n\
+             - When in doubt whether a name is a person or a group, do NOT shorten it\n\
              \n\
              Examples:\n\
              - \"HOLYGHOST | Sons Of Sunday\" → {{\"artist\": \"Sons Of Sunday\", \"song\": \"HOLYGHOST\"}}\n\
@@ -78,6 +87,9 @@ impl GeminiProvider {
              - \"Faithful Then / Faithful Now | Elevation Worship\" → {{\"artist\": \"Elevation Worship\", \"song\": \"Faithful Then / Faithful Now\"}}\n\
              - \"There Is A King/What Would You Do | Live | Elevation Worship\" → {{\"artist\": \"Elevation Worship\", \"song\": \"There Is A King\"}}\n\
              - \"Pat Barrett - Count On You (Live)\" → {{\"artist\": \"P. Barrett\", \"song\": \"Count On You\"}}\n\
+             - \"JIREH (Cover) | New Heights Worship\" → {{\"artist\": \"New Heights Worship\", \"song\": \"Jireh\"}}\n\
+             - \"Puro - Johan y Sofi (Mantenme Puro)\" → {{\"artist\": \"Johan y Sofi\", \"song\": \"Puro\"}}\n\
+             - \"Song For His Presence - Hillsong Young & Free\" → {{\"artist\": \"Hillsong Young & Free\", \"song\": \"Song For His Presence\"}}\n\
              \n\
              REMEMBER: Return ONLY valid JSON, nothing else. The song field should contain ONLY the song title, never album names or other metadata."
         );
@@ -326,6 +338,18 @@ mod tests {
         assert!(
             prompt.contains("shorten"),
             "prompt must mention artist shortening"
+        );
+        assert!(
+            prompt.contains("COVERS"),
+            "prompt must mention cover attribution"
+        );
+        assert!(
+            prompt.contains("fabricate"),
+            "prompt must warn against fabrication"
+        );
+        assert!(
+            prompt.contains("Johan y Sofi"),
+            "prompt must have Spanish duo example"
         );
     }
 
