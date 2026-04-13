@@ -3,6 +3,7 @@
 pub mod api;
 pub mod db;
 pub mod downloader;
+pub mod lyrics;
 pub mod metadata;
 pub mod obs;
 pub mod playback;
