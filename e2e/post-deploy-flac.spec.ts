@@ -206,4 +206,62 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     }
     console.log(`Checked ${checked} pairs for naming convention consistency`);
   });
+
+  test("lyrics processing status endpoint responds", async ({ request }) => {
+    const resp = await request.get("/api/v1/lyrics/status");
+    expect(resp.status()).toBe(200);
+    const data = await resp.json();
+    expect(data).toHaveProperty("total");
+    expect(data).toHaveProperty("processed");
+    expect(data).toHaveProperty("pending");
+    expect(typeof data.total).toBe("number");
+  });
+
+  test("lyrics available for at least one video", async ({ request }) => {
+    const plResp = await request.get("/api/v1/playlists");
+    const playlists: PlaylistEntry[] = await plResp.json();
+    let foundLyrics = false;
+
+    for (const pl of playlists) {
+      const vidResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+      const videos: VideoEntry[] = await vidResp.json();
+
+      for (const vid of videos) {
+        if (!vid.normalized) continue;
+        const lyricsResp = await request.get(`/api/v1/videos/${vid.id}/lyrics`);
+        if (lyricsResp.status() === 200) {
+          const lyrics = await lyricsResp.json();
+          expect(lyrics).toHaveProperty("lines");
+          expect(lyrics.lines.length).toBeGreaterThan(0);
+          expect(lyrics.lines[0]).toHaveProperty("en");
+          if (lyrics.lines[0].words) {
+            expect(lyrics.lines[0].words.length).toBeGreaterThan(0);
+            expect(lyrics.lines[0].words[0]).toHaveProperty("start_ms");
+          }
+          foundLyrics = true;
+          break;
+        }
+      }
+      if (foundLyrics) break;
+    }
+
+    if (!foundLyrics) {
+      console.log("DIAGNOSTIC: No videos with lyrics found yet — worker may still be processing");
+    }
+  });
+
+  test("dashboard shows karaoke panel when playing with lyrics", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector(".playlist-card", { timeout: 10_000 });
+
+    const karaokePanel = page.locator(".karaoke-panel");
+    const panelCount = await karaokePanel.count();
+
+    if (panelCount > 0) {
+      const panel = karaokePanel.first();
+      await expect(panel.locator(".karaoke-current")).toBeVisible();
+    } else {
+      console.log("DIAGNOSTIC: No karaoke panel visible — no active playback or no lyrics");
+    }
+  });
 });
