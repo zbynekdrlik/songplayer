@@ -149,12 +149,14 @@ impl HostDriver {
                 }
             }
             ResolumeCommand::ShowSubtitles { en, sk } => {
-                // TODO(task-12): implement subtitle display on Resolume clips
-                debug!(host = %self.host, %en, ?sk, "show_subtitles (not yet implemented)");
+                if let Err(e) = handlers::set_subtitles(self, &en, sk.as_deref()).await {
+                    warn!(host = %self.host, %e, "subtitle set failed");
+                }
             }
             ResolumeCommand::HideSubtitles => {
-                // TODO(task-12): implement subtitle hide on Resolume clips
-                debug!(host = %self.host, "hide_subtitles (not yet implemented)");
+                if let Err(e) = handlers::clear_subtitles(self).await {
+                    warn!(host = %self.host, %e, "subtitle clear failed");
+                }
             }
             ResolumeCommand::RefreshMapping => {
                 if let Err(e) = self.refresh_mapping().await {

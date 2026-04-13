@@ -140,6 +140,81 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Show subtitles — instant text swap on all `#sp-subs` and `#sp-subssk` clips.
+/// No fade animation; text is written directly.
+pub async fn set_subtitles(
+    driver: &mut HostDriver,
+    en: &str,
+    sk: Option<&str>,
+) -> Result<(), anyhow::Error> {
+    let subs_clips = driver
+        .clip_mapping
+        .get(super::SUBS_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+    let subs_sk_clips = driver
+        .clip_mapping
+        .get(super::SUBS_SK_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+
+    if subs_clips.is_none() && subs_sk_clips.is_none() {
+        debug!(
+            subs_token = super::SUBS_TOKEN,
+            subs_sk_token = super::SUBS_SK_TOKEN,
+            "no Resolume subtitle clips found, skipping set_subtitles"
+        );
+        return Ok(());
+    }
+
+    driver.ensure_endpoint().await?;
+    let driver_ref: &HostDriver = driver;
+
+    if let Some(clips) = subs_clips {
+        set_text_all(driver_ref, &clips, en).await?;
+    }
+    if let Some(clips) = subs_sk_clips {
+        let sk_text = sk.unwrap_or("");
+        set_text_all(driver_ref, &clips, sk_text).await?;
+    }
+    Ok(())
+}
+
+/// Hide subtitles — clear text on all `#sp-subs` and `#sp-subssk` clips.
+/// No fade animation; text is cleared directly.
+pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
+    let subs_clips = driver
+        .clip_mapping
+        .get(super::SUBS_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+    let subs_sk_clips = driver
+        .clip_mapping
+        .get(super::SUBS_SK_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+
+    if subs_clips.is_none() && subs_sk_clips.is_none() {
+        debug!(
+            subs_token = super::SUBS_TOKEN,
+            subs_sk_token = super::SUBS_SK_TOKEN,
+            "no Resolume subtitle clips found, skipping clear_subtitles"
+        );
+        return Ok(());
+    }
+
+    driver.ensure_endpoint().await?;
+    let driver_ref: &HostDriver = driver;
+
+    if let Some(clips) = subs_clips {
+        set_text_all(driver_ref, &clips, "").await?;
+    }
+    if let Some(clips) = subs_sk_clips {
+        set_text_all(driver_ref, &clips, "").await?;
+    }
+    Ok(())
+}
+
 /// Drain all pending futures, logging each individual error at `warn`
 /// level. Returns the first error seen (if any) so the caller can
 /// short-circuit the fade loop, but never silently drops a failure —
