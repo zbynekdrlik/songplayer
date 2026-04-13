@@ -3,6 +3,7 @@
 //! This crate is WASM-safe — no OS-specific dependencies.
 
 pub mod config;
+pub mod lyrics;
 pub mod metadata;
 pub mod models;
 pub mod playback;
