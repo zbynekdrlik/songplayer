@@ -5,40 +5,31 @@ use sp_core::ws::ServerMsg;
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
     track: LyricsTrack,
-    last_line_index: Option<usize>,
 }
 
 impl LyricsState {
     pub fn new(track: LyricsTrack) -> Self {
-        Self {
-            track,
-            last_line_index: None,
-        }
+        Self { track }
     }
 
     /// Compute the [`ServerMsg::LyricsUpdate`] for the given playback position.
     ///
-    /// Always returns `Some` — callers receive a message with all-`None` fields
-    /// when the position falls between lines, so the dashboard can clear itself.
-    pub fn update(&mut self, playlist_id: i64, position_ms: u64) -> Option<ServerMsg> {
+    /// Returns a message with all-`None` fields when the position falls between
+    /// lines, so the dashboard can clear itself.
+    pub fn update(&self, playlist_id: i64, position_ms: u64) -> ServerMsg {
         let result = self.track.line_at(position_ms);
 
-        let msg = match result {
-            None => {
-                self.last_line_index = None;
-                ServerMsg::LyricsUpdate {
-                    playlist_id,
-                    line_en: None,
-                    line_sk: None,
-                    prev_line_en: None,
-                    next_line_en: None,
-                    active_word_index: None,
-                    word_count: None,
-                }
-            }
+        match result {
+            None => ServerMsg::LyricsUpdate {
+                playlist_id,
+                line_en: None,
+                line_sk: None,
+                prev_line_en: None,
+                next_line_en: None,
+                active_word_index: None,
+                word_count: None,
+            },
             Some((idx, line)) => {
-                self.last_line_index = Some(idx);
-
                 let active_word_index = self.track.word_index_at(line, position_ms);
                 let word_count = line.words.as_ref().map(|w| w.len());
 
@@ -60,9 +51,7 @@ impl LyricsState {
                     word_count,
                 }
             }
-        };
-
-        Some(msg)
+        }
     }
 
     /// Returns `(en_text, sk_text)` for the line active at `position_ms`.
@@ -129,8 +118,8 @@ mod tests {
 
     #[test]
     fn update_emits_lyrics_for_active_line() {
-        let mut state = LyricsState::new(test_track());
-        let msg = state.update(1, 1500).unwrap();
+        let state = LyricsState::new(test_track());
+        let msg = state.update(1, 1500);
         match msg {
             ServerMsg::LyricsUpdate {
                 playlist_id,
@@ -151,9 +140,9 @@ mod tests {
 
     #[test]
     fn update_emits_none_between_lines() {
-        let mut state = LyricsState::new(test_track());
+        let state = LyricsState::new(test_track());
         // position 500 is before the first line (starts at 1000)
-        let msg = state.update(1, 500).unwrap();
+        let msg = state.update(1, 500);
         match msg {
             ServerMsg::LyricsUpdate {
                 line_en,
@@ -177,9 +166,9 @@ mod tests {
 
     #[test]
     fn update_prev_next_lines() {
-        let mut state = LyricsState::new(test_track());
+        let state = LyricsState::new(test_track());
         // position in second line
-        let msg = state.update(1, 3500).unwrap();
+        let msg = state.update(1, 3500);
         match msg {
             ServerMsg::LyricsUpdate {
                 line_en,
@@ -199,9 +188,9 @@ mod tests {
 
     #[test]
     fn update_word_index_advances() {
-        let mut state = LyricsState::new(test_track());
+        let state = LyricsState::new(test_track());
         // First update: position at start of first word
-        let msg1 = state.update(1, 1000).unwrap();
+        let msg1 = state.update(1, 1000);
         let idx1 = match msg1 {
             ServerMsg::LyricsUpdate {
                 active_word_index, ..
@@ -209,7 +198,7 @@ mod tests {
             _ => panic!("Expected LyricsUpdate"),
         };
         // Second update: position at start of second word
-        let msg2 = state.update(1, 2000).unwrap();
+        let msg2 = state.update(1, 2000);
         let idx2 = match msg2 {
             ServerMsg::LyricsUpdate {
                 active_word_index, ..

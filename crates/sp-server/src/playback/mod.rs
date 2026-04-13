@@ -714,10 +714,9 @@ impl PlaybackEngine {
         });
 
         // Emit lyrics update for karaoke display
-        if let Some(ref mut lyrics) = pp.lyrics_state {
-            if let Some(msg) = lyrics.update(playlist_id, position_ms) {
-                let _ = self.ws_event_tx.send(msg);
-            }
+        if let Some(ref lyrics) = pp.lyrics_state {
+            let msg = lyrics.update(playlist_id, position_ms);
+            let _ = self.ws_event_tx.send(msg);
             // Resolume subtitle update
             let (en, sk) = lyrics.resolume_lines(position_ms);
             match en {

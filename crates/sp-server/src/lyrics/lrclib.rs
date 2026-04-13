@@ -6,7 +6,12 @@ use serde::Deserialize;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use tracing::debug;
 
-const USER_AGENT: &str = "SongPlayer/0.13.0 (github.com/zbynekdrlik/songplayer)";
+fn user_agent() -> String {
+    format!(
+        "SongPlayer/{} (github.com/zbynekdrlik/songplayer)",
+        env!("CARGO_PKG_VERSION")
+    )
+}
 const LRCLIB_BASE: &str = "https://lrclib.net/api/get";
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
@@ -48,7 +53,7 @@ pub async fn fetch_lyrics(
 
     let response = client
         .get(&url)
-        .header("User-Agent", USER_AGENT)
+        .header("User-Agent", user_agent())
         .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await?;
@@ -99,7 +104,9 @@ pub fn parse_lrc(lrc_text: &str) -> Option<LyricsTrack> {
         }
 
         // Find closing ']'
-        let close = raw.find(']')?;
+        let Some(close) = raw.find(']') else {
+            continue;
+        };
         let ts_str = &raw[1..close];
         let text = raw[close + 1..].trim().to_string();
 
@@ -282,6 +289,16 @@ mod tests {
     fn lrc_skips_empty_text_lines() {
         let lrc = "[00:01.00] First line\n[00:02.00] \n[00:03.00] Third line";
         let track = parse_lrc(lrc).expect("should parse");
+        assert_eq!(track.lines.len(), 2);
+        assert_eq!(track.lines[0].en, "First line");
+        assert_eq!(track.lines[1].en, "Third line");
+    }
+
+    #[test]
+    fn lrc_skips_malformed_lines_without_closing_bracket() {
+        // A line like "[00:02.00 Missing text" has no closing ']' — must be skipped, not abort
+        let lrc = "[00:01.00] First line\n[00:02.00 Missing bracket\n[00:03.00] Third line";
+        let track = parse_lrc(lrc).expect("should parse despite malformed line");
         assert_eq!(track.lines.len(), 2);
         assert_eq!(track.lines[0].en, "First line");
         assert_eq!(track.lines[1].en, "Third line");

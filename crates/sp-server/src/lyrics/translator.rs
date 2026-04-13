@@ -8,16 +8,13 @@ use std::time::Duration;
 /// Translate all EN lyrics lines to Slovak, modifying `track` in place.
 /// Sets `track.language_translation = "sk"` on success.
 #[cfg_attr(test, mutants::skip)]
-pub async fn translate_lyrics(
-    client: &reqwest::Client,
-    api_key: &str,
-    model: &str,
-    track: &mut LyricsTrack,
-) -> Result<()> {
+pub async fn translate_lyrics(api_key: &str, model: &str, track: &mut LyricsTrack) -> Result<()> {
     if track.lines.is_empty() {
         track.language_translation = "sk".to_string();
         return Ok(());
     }
+
+    let client = reqwest::Client::new();
 
     // Build numbered input text
     let numbered: String = track

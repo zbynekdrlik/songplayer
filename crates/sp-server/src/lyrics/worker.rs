@@ -213,16 +213,9 @@ impl LyricsWorker {
         }
 
         // Step 3: Gemini translation (if API key non-empty)
-        // Use a fresh client for each translation to avoid stale connection pool issues
         if !self.gemini_api_key.is_empty() {
-            let fresh_client = Client::new();
-            match translator::translate_lyrics(
-                &fresh_client,
-                &self.gemini_api_key,
-                &self.gemini_model,
-                &mut track,
-            )
-            .await
+            match translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
+                .await
             {
                 Ok(()) => {
                     debug!("lyrics_worker: translation succeeded for {youtube_id}");
