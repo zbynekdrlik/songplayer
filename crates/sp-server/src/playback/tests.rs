@@ -130,6 +130,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             cached_duration_ms: 0,
             last_now_playing_broadcast: None,
             history: std::collections::VecDeque::new(),
+            lyrics_state: None,
         };
 
         assert!(pp.title_show_abort.is_some());

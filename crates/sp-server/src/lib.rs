@@ -698,6 +698,7 @@ mod tests {
             sync_tx,
             resolume_tx,
             obs_rebuild_tx,
+            cache_dir: PathBuf::from("cache"),
         };
 
         // Verify the router can be built.
@@ -968,6 +969,7 @@ mod tests {
             sync_tx,
             resolume_tx,
             obs_rebuild_tx,
+            cache_dir: PathBuf::from("cache"),
         };
 
         // Verify clone works.
