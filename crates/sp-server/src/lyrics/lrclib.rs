@@ -6,6 +6,7 @@ use serde::Deserialize;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use tracing::debug;
 
+#[cfg_attr(test, mutants::skip)]
 fn user_agent() -> String {
     format!(
         "SongPlayer/{} (github.com/zbynekdrlik/songplayer)",
