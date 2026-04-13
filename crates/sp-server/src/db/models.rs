@@ -377,6 +377,39 @@ pub async fn get_lyrics_status(pool: &SqlitePool) -> Result<(i64, i64, i64), sql
     Ok((total, processed, pending))
 }
 
+/// Get next video that has lyrics but is missing SK translation.
+#[cfg_attr(test, mutants::skip)]
+pub async fn get_next_video_missing_translation(
+    pool: &SqlitePool,
+    cache_dir: &std::path::Path,
+) -> Result<Option<(i64, String)>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, (i64, String)>(
+        "SELECT v.id, v.youtube_id \
+         FROM videos v \
+         JOIN playlists p ON p.id = v.playlist_id \
+         WHERE v.has_lyrics = 1 AND p.is_active = 1 \
+         ORDER BY v.id LIMIT 10",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for (id, youtube_id) in rows {
+        let path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
+        if !path.exists() {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(track) = serde_json::from_str::<sp_core::lyrics::LyricsTrack>(&content) {
+                let has_sk = track.lines.iter().any(|l| l.sk.is_some());
+                if !has_sk {
+                    return Ok(Some((id, youtube_id)));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Reset lyrics fields for a video so it will be re-processed.
 #[cfg_attr(test, mutants::skip)]
 pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {

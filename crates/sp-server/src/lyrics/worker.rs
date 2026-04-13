@@ -9,10 +9,12 @@ use sp_core::lyrics::LyricsTrack;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
-    db::models::{get_next_video_without_lyrics, mark_video_lyrics},
+    db::models::{
+        get_next_video_missing_translation, get_next_video_without_lyrics, mark_video_lyrics,
+    },
     lyrics::{aligner, lrclib, translator},
 };
 
@@ -114,6 +116,8 @@ impl LyricsWorker {
         let row = match get_next_video_without_lyrics(&self.pool).await {
             Ok(Some(r)) => r,
             Ok(None) => {
+                // No new songs — try retranslating songs missing SK
+                self.retry_missing_translations().await;
                 debug!("lyrics_worker: no pending videos");
                 return;
             }
@@ -278,5 +282,42 @@ impl LyricsWorker {
 
         // No usable source found — mark as no_source so it's skipped
         anyhow::bail!("no usable lyrics source for {youtube_id}");
+    }
+
+    /// Retry Gemini translation for songs that have lyrics but no SK.
+    #[cfg_attr(test, mutants::skip)]
+    async fn retry_missing_translations(&self) {
+        if self.gemini_api_key.is_empty() {
+            return;
+        }
+        let result = get_next_video_missing_translation(&self.pool, &self.cache_dir).await;
+        let (_video_id, youtube_id) = match result {
+            Ok(Some(pair)) => pair,
+            _ => return,
+        };
+
+        let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
+        let content = match tokio::fs::read_to_string(&lyrics_path).await {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let mut track: LyricsTrack = match serde_json::from_str(&content) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        info!("lyrics_worker: retrying translation for {youtube_id}");
+        match translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
+            .await
+        {
+            Ok(()) => {
+                let json = serde_json::to_vec(&track).unwrap_or_default();
+                let _ = tokio::fs::write(&lyrics_path, &json).await;
+                info!("lyrics_worker: translation retry succeeded for {youtube_id}");
+            }
+            Err(e) => {
+                debug!("lyrics_worker: translation retry failed for {youtube_id}: {e}");
+            }
+        }
     }
 }
