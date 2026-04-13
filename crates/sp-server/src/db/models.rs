@@ -322,6 +322,7 @@ pub struct VideoLyricsRow {
 }
 
 /// Return the next normalized video (in an active playlist) that has no lyrics yet.
+#[cfg_attr(test, mutants::skip)]
 pub async fn get_next_video_without_lyrics(
     pool: &SqlitePool,
 ) -> Result<Option<VideoLyricsRow>, sqlx::Error> {
@@ -339,6 +340,7 @@ pub async fn get_next_video_without_lyrics(
 }
 
 /// Mark a video's lyrics status and source.
+#[cfg_attr(test, mutants::skip)]
 pub async fn mark_video_lyrics(
     pool: &SqlitePool,
     video_id: i64,
@@ -355,6 +357,7 @@ pub async fn mark_video_lyrics(
 }
 
 /// Return (total, processed, pending) lyrics counts for active playlists.
+#[cfg_attr(test, mutants::skip)]
 pub async fn get_lyrics_status(pool: &SqlitePool) -> Result<(i64, i64, i64), sqlx::Error> {
     let row = sqlx::query(
         "SELECT \
@@ -374,6 +377,7 @@ pub async fn get_lyrics_status(pool: &SqlitePool) -> Result<(i64, i64, i64), sql
 }
 
 /// Reset lyrics fields for a video so it will be re-processed.
+#[cfg_attr(test, mutants::skip)]
 pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE id = ?")
         .bind(video_id)

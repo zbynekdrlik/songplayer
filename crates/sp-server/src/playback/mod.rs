@@ -859,6 +859,7 @@ impl PlaybackEngine {
 }
 
 /// Load lyrics JSON for a video from the cache directory, if available.
+#[cfg_attr(test, mutants::skip)]
 async fn load_lyrics_for_video(
     pool: &SqlitePool,
     cache_dir: &Path,

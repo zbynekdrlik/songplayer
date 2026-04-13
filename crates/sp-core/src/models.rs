@@ -80,3 +80,15 @@ pub struct ResolumeClipMapping {
     pub layer: u32,
     pub column: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_karaoke_enabled_defaults_to_true() {
+        let json = r#"{"id": 1, "name": "test", "youtube_url": "url", "ndi_output_name": "", "playback_mode": "continuous", "is_active": true}"#;
+        let p: Playlist = serde_json::from_str(json).unwrap();
+        assert!(p.karaoke_enabled);
+    }
+}

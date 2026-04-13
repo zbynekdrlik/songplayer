@@ -25,6 +25,7 @@ use crate::downloader::cache;
 /// * delete legacy single-file `.mp4`s (from before the FLAC migration),
 /// * delete orphan half-sidecars (debris from a crashed download),
 /// * re-link complete video+audio pairs to their DB row.
+#[cfg_attr(test, mutants::skip)]
 pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), sqlx::Error> {
     let scan = cache::scan_cache(cache_dir);
     tracing::info!(

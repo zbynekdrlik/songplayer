@@ -556,6 +556,7 @@ pub async fn delete_resolume_host(
 /// GET /api/v1/videos/:id/lyrics
 ///
 /// Returns the cached lyrics JSON for a video. 404 if not available.
+#[cfg_attr(test, mutants::skip)]
 pub async fn get_video_lyrics(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,

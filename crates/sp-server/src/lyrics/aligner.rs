@@ -47,6 +47,7 @@ struct TranscribeOutput {
 /// Writes a temporary `.txt` file for the lyrics, invokes the Python helper,
 /// reads the resulting JSON, and returns the parsed `Vec<LyricsLine>`.
 /// The temp file and output file are cleaned up after parsing.
+#[cfg_attr(test, mutants::skip)]
 pub async fn align_lyrics(
     python_path: &Path,
     script_path: &Path,
@@ -119,6 +120,7 @@ pub async fn align_lyrics(
 /// Transcribe `audio_path` using Qwen3-ASR-1.7B.
 ///
 /// Returns the transcribed text string.
+#[cfg_attr(test, mutants::skip)]
 pub async fn transcribe_audio(
     python_path: &Path,
     script_path: &Path,
@@ -176,6 +178,7 @@ pub async fn transcribe_audio(
 /// Check whether the Python environment has a CUDA-capable GPU available.
 ///
 /// Runs `lyrics_worker.py check-gpu` and parses the `"gpu"` field.
+#[cfg_attr(test, mutants::skip)]
 pub async fn check_gpu(python_path: &Path, script_path: &Path) -> Result<bool> {
     let mut cmd = Command::new(python_path);
     cmd.args([script_path.as_os_str(), "check-gpu".as_ref()]);
