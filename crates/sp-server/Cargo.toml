@@ -37,6 +37,7 @@ regex = { workspace = true }
 rand = { workspace = true }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 urlencoding = "2"
+socket2 = "0.6.3"
 
 [dev-dependencies]
 tempfile = "3.27.0"

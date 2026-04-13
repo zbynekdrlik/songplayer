@@ -616,7 +616,15 @@ pub async fn start(
 
     // 11. Axum HTTP server
     let router = api::router(state, config.dist_dir);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
+    let listener = {
+        use socket2::{Domain, Socket, Type};
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+        socket.set_reuse_address(true)?;
+        socket.set_nonblocking(true)?;
+        socket.bind(&std::net::SocketAddr::from(([0, 0, 0, 0], config.port)).into())?;
+        socket.listen(128)?;
+        tokio::net::TcpListener::from_std(socket.into())?
+    };
     info!(port = config.port, "HTTP server listening");
 
     // Serve with graceful shutdown
