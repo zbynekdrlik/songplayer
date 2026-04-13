@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 pub struct ToolPaths {
     pub ytdlp: PathBuf,
     pub ffmpeg: PathBuf,
+    /// Path to a Python interpreter, if one is available on this machine.
+    /// `None` when neither `python` nor `python3` is found on `PATH`.
+    pub python: Option<PathBuf>,
 }
 
 /// Manages downloading and locating yt-dlp and FFmpeg binaries.
@@ -60,7 +63,13 @@ impl ToolsManager {
             }
         }
 
-        Ok(ToolPaths { ytdlp, ffmpeg })
+        let python = Self::detect_python().await;
+
+        Ok(ToolPaths {
+            ytdlp,
+            ffmpeg,
+            python,
+        })
     }
 
     /// Run `yt-dlp --update` to get the latest version.
@@ -167,6 +176,53 @@ impl ToolsManager {
         tokio::fs::set_permissions(path, perms).await?;
         Ok(())
     }
+
+    /// Detect a Python interpreter by trying `python` then `python3`.
+    /// Returns `None` if neither is available on `PATH`.
+    async fn detect_python() -> Option<PathBuf> {
+        for candidate in &["python", "python3"] {
+            let mut cmd = tokio::process::Command::new(candidate);
+            cmd.arg("--version");
+            super::hide_console_window(&mut cmd);
+            if let Ok(output) = cmd.output().await {
+                if output.status.success() {
+                    // Resolve to an absolute path so the caller doesn't need
+                    // to rely on PATH being set in child processes.
+                    if let Ok(path) = which_python(candidate).await {
+                        tracing::info!("Python detected: {} ({:?})", candidate, path);
+                        return Some(path);
+                    }
+                    // Fallback: just return the bare command name as a PathBuf.
+                    return Some(PathBuf::from(candidate));
+                }
+            }
+        }
+        tracing::info!("Python not found on PATH; lyrics ASR/alignment disabled");
+        None
+    }
+}
+
+/// Try to resolve a command name to an absolute path using the OS `where`/`which` command.
+async fn which_python(name: &str) -> Result<PathBuf, anyhow::Error> {
+    #[cfg(windows)]
+    let locator = "where";
+    #[cfg(not(windows))]
+    let locator = "which";
+
+    let output = tokio::process::Command::new(locator)
+        .arg(name)
+        .output()
+        .await?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // `where` on Windows may return multiple lines; take the first one.
+        let first = stdout.lines().next().unwrap_or("").trim();
+        if !first.is_empty() {
+            return Ok(PathBuf::from(first));
+        }
+    }
+    anyhow::bail!("could not resolve {name} to absolute path")
 }
 
 // ---------------------------------------------------------------------------

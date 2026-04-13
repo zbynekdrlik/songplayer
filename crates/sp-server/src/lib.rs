@@ -302,7 +302,7 @@ pub async fn start(
 
     // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");
-    let tools_mgr = downloader::tools::ToolsManager::new(tools_dir);
+    let tools_mgr = downloader::tools::ToolsManager::new(tools_dir.clone());
 
     // Download worker broadcast channel. Hoisted out of the tools-setup
     // task so the engine can subscribe before tools become ready — that
@@ -322,6 +322,12 @@ pub async fn start(
     let dl_gemini_model = gemini_model.clone();
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
+    let lyrics_pool = pool.clone();
+    let lyrics_cache_dir = config.cache_dir.clone();
+    let lyrics_gemini_key = gemini_key.clone();
+    let lyrics_gemini_model = gemini_model.clone();
+    let lyrics_shutdown = shutdown_tx.clone();
+    let lyrics_tools_dir = tools_dir;
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -355,6 +361,8 @@ pub async fn start(
                     )));
                 }
 
+                let lyrics_ytdlp = paths.ytdlp.clone();
+                let lyrics_python = paths.python.clone();
                 let dl_worker = downloader::DownloadWorker::new(
                     dl_pool,
                     paths,
@@ -364,6 +372,19 @@ pub async fn start(
                 );
                 tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                 info!("download worker started");
+
+                // Lyrics worker
+                let lyrics_worker = lyrics::LyricsWorker::new(
+                    lyrics_pool,
+                    lyrics_cache_dir,
+                    lyrics_ytdlp,
+                    lyrics_python,
+                    lyrics_tools_dir,
+                    lyrics_gemini_key,
+                    lyrics_gemini_model,
+                );
+                tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
+                info!("lyrics worker started");
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
