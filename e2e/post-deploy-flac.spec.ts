@@ -260,8 +260,50 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     if (panelCount > 0) {
       const panel = karaokePanel.first();
       await expect(panel.locator(".karaoke-current")).toBeVisible();
+
+      // Verify word-level highlighting classes exist
+      const words = panel.locator(".karaoke-word");
+      const wordCount = await words.count();
+      if (wordCount > 0) {
+        // At least one word should have the active class
+        const activeWords = panel.locator(".karaoke-word-active");
+        const pastWords = panel.locator(".karaoke-word-past");
+        const futureWords = panel.locator(".karaoke-word-future");
+        const totalHighlighted =
+          (await activeWords.count()) +
+          (await pastWords.count()) +
+          (await futureWords.count());
+        expect(totalHighlighted).toBeGreaterThan(0);
+      }
+
+      // Verify SK translation line is present (may or may not be visible)
+      const skLine = panel.locator(".karaoke-sk");
+      if ((await skLine.count()) > 0) {
+        const skText = await skLine.first().textContent();
+        expect(skText?.length).toBeGreaterThan(0);
+      }
     } else {
-      console.log("DIAGNOSTIC: No karaoke panel visible — no active playback or no lyrics");
+      console.log(
+        "DIAGNOSTIC: No karaoke panel visible — no active playback or no lyrics",
+      );
+    }
+  });
+
+  test("karaoke panel hidden for idle playlists", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector(".playlist-card", { timeout: 10_000 });
+
+    const cards = page.locator(".playlist-card");
+    const cardCount = await cards.count();
+
+    for (let i = 0; i < cardCount; i++) {
+      const card = cards.nth(i);
+      const idleText = card.locator(".np-idle");
+      if ((await idleText.count()) > 0) {
+        // Idle playlist should not show karaoke panel
+        const karaoke = card.locator(".karaoke-panel");
+        expect(await karaoke.count()).toBe(0);
+      }
     }
   });
 });

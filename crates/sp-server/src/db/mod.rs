@@ -566,6 +566,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_next_video_without_lyrics_returns_unprocessed() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        // Insert a playlist
+        sqlx::query("INSERT INTO playlists (name, youtube_url, is_active) VALUES ('test', 'https://youtube.com/playlist?list=test', 1)")
+            .execute(&pool).await.unwrap();
+        // Insert a normalized video without lyrics
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title, normalized, has_lyrics) VALUES (1, 'abc12345678', 'Test Song', 1, 0)")
+            .execute(&pool).await.unwrap();
+        let row = models::get_next_video_without_lyrics(&pool).await.unwrap();
+        assert!(row.is_some());
+        let row = row.unwrap();
+        assert_eq!(row.youtube_id, "abc12345678");
+        // Mark as having lyrics
+        models::mark_video_lyrics(&pool, row.id, true, Some("lrclib"))
+            .await
+            .unwrap();
+        let row2 = models::get_next_video_without_lyrics(&pool).await.unwrap();
+        assert!(row2.is_none());
+    }
+
+    #[tokio::test]
     async fn get_active_playlists_includes_ndi_name() {
         let pool = setup().await;
 
