@@ -157,57 +157,66 @@ impl LyricsWorker {
         // Step 1: Acquire lyrics via source waterfall
         let (mut track, mut source) = self.acquire_lyrics(&row).await?;
 
-        // Step 2: Forced alignment (if python available and audio file exists)
-        if let Some(python) = &self.python_path {
-            if let Some(audio_path) = &row.audio_file_path {
-                let audio = PathBuf::from(audio_path);
-                if audio.exists() {
-                    let lyrics_text: String = track
-                        .lines
-                        .iter()
-                        .map(|l| l.en.as_str())
-                        .collect::<Vec<_>>()
-                        .join("\n");
+        // Step 2: Forced alignment — DISABLED until Qwen3 model compatibility
+        // is resolved with transformers library. The model architecture
+        // "qwen3_asr" is not recognized by transformers 5.5.3.
+        // See: https://github.com/QwenLM/Qwen3-ASR
+        if false {
+            if let Some(python) = &self.python_path {
+                if let Some(audio_path) = &row.audio_file_path {
+                    let audio = PathBuf::from(audio_path);
+                    if audio.exists() {
+                        let lyrics_text: String = track
+                            .lines
+                            .iter()
+                            .map(|l| l.en.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n");
 
-                    let output_path = self
-                        .cache_dir
-                        .join(format!("{youtube_id}_align_output.json"));
+                        let output_path = self
+                            .cache_dir
+                            .join(format!("{youtube_id}_align_output.json"));
 
-                    match aligner::align_lyrics(
-                        python,
-                        &self.script_path,
-                        &self.models_dir,
-                        &audio,
-                        &lyrics_text,
-                        &output_path,
-                    )
-                    .await
-                    {
-                        Ok(aligned_lines) => {
-                            track.lines = aligned_lines;
-                            source = format!("{source}+aligner");
-                            track.source = source.clone();
+                        match aligner::align_lyrics(
+                            python,
+                            &self.script_path,
+                            &self.models_dir,
+                            &audio,
+                            &lyrics_text,
+                            &output_path,
+                        )
+                        .await
+                        {
+                            Ok(aligned_lines) => {
+                                track.lines = aligned_lines;
+                                source = format!("{source}+aligner");
+                                track.source = source.clone();
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "lyrics_worker: alignment failed for {youtube_id}, keeping original timestamps: {e}"
+                                );
+                            }
                         }
-                        Err(e) => {
-                            warn!(
-                                "lyrics_worker: alignment failed for {youtube_id}, keeping original timestamps: {e}"
-                            );
-                        }
+                    } else {
+                        debug!(
+                            "lyrics_worker: audio file not found for {youtube_id}, skipping alignment"
+                        );
                     }
                 } else {
                     debug!(
-                        "lyrics_worker: audio file not found for {youtube_id}, skipping alignment"
+                        "lyrics_worker: no audio_file_path for {youtube_id}, skipping alignment"
                     );
                 }
-            } else {
-                debug!("lyrics_worker: no audio_file_path for {youtube_id}, skipping alignment");
             }
         }
 
         // Step 3: Gemini translation (if API key non-empty)
+        // Use a fresh client for each translation to avoid stale connection pool issues
         if !self.gemini_api_key.is_empty() {
+            let fresh_client = Client::new();
             match translator::translate_lyrics(
-                &self.client,
+                &fresh_client,
                 &self.gemini_api_key,
                 &self.gemini_model,
                 &mut track,
