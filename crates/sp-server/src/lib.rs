@@ -523,6 +523,7 @@ pub async fn start(
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(
         pool.clone(),
+        config.cache_dir.clone(),
         obs_event_tx,
         obs_cmd_tx,
         resolume_cmd_tx,

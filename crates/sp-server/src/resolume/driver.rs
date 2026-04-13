@@ -148,6 +148,14 @@ impl HostDriver {
                     warn!(host = %self.host, %e, "hide_title failed");
                 }
             }
+            ResolumeCommand::ShowSubtitles { en, sk } => {
+                // TODO(task-12): implement subtitle display on Resolume clips
+                debug!(host = %self.host, %en, ?sk, "show_subtitles (not yet implemented)");
+            }
+            ResolumeCommand::HideSubtitles => {
+                // TODO(task-12): implement subtitle hide on Resolume clips
+                debug!(host = %self.host, "hide_subtitles (not yet implemented)");
+            }
             ResolumeCommand::RefreshMapping => {
                 if let Err(e) = self.refresh_mapping().await {
                     warn!(host = %self.host, %e, "refresh_mapping failed");

@@ -21,6 +21,10 @@ pub enum ResolumeCommand {
     ShowTitle { song: String, artist: String },
     /// Hide the title (fade out + clear text) on all `#sp-title` clips.
     HideTitle,
+    /// Show subtitle text (lyrics) on Resolume subtitle clips.
+    ShowSubtitles { en: String, sk: Option<String> },
+    /// Hide subtitles (clear text) on Resolume subtitle clips.
+    HideSubtitles,
     /// Force a refresh of the clip mapping cache.
     RefreshMapping,
     /// Stop the worker.
