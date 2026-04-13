@@ -92,12 +92,24 @@ pub async fn align_lyrics(
         models_dir.display(),
     );
 
-    let status = cmd
-        .status()
-        .await
+    let mut child = cmd
+        .spawn()
         .context("failed to spawn lyrics_worker.py align")?;
 
-    // Clean up temp lyrics file regardless of outcome
+    let timeout = std::time::Duration::from_secs(120);
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            let _ = fs::remove_file(&temp_txt).await;
+            anyhow::bail!("lyrics_worker.py align failed: {e}");
+        }
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = fs::remove_file(&temp_txt).await;
+            anyhow::bail!("lyrics_worker.py align timed out after {timeout:?}");
+        }
+    };
+
     let _ = fs::remove_file(&temp_txt).await;
 
     if !status.success() {
@@ -154,10 +166,19 @@ pub async fn transcribe_audio(
         models_dir.display(),
     );
 
-    let status = cmd
-        .status()
-        .await
+    let mut child = cmd
+        .spawn()
         .context("failed to spawn lyrics_worker.py transcribe")?;
+
+    let timeout = std::time::Duration::from_secs(300);
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => anyhow::bail!("lyrics_worker.py transcribe failed: {e}"),
+        Err(_) => {
+            let _ = child.kill().await;
+            anyhow::bail!("lyrics_worker.py transcribe timed out after {timeout:?}");
+        }
+    };
 
     if !status.success() {
         anyhow::bail!("lyrics_worker.py transcribe exited with status {}", status);
