@@ -306,6 +306,83 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()
 }
 
 // ---------------------------------------------------------------------------
+// Lyrics
+// ---------------------------------------------------------------------------
+
+/// A video row with the fields needed by the lyrics worker.
+#[derive(Debug, sqlx::FromRow)]
+pub struct VideoLyricsRow {
+    pub id: i64,
+    pub youtube_id: String,
+    pub song: String,
+    pub artist: String,
+    pub duration_ms: Option<i64>,
+    pub audio_file_path: Option<String>,
+    pub youtube_url: String,
+}
+
+/// Return the next normalized video (in an active playlist) that has no lyrics yet.
+pub async fn get_next_video_without_lyrics(
+    pool: &SqlitePool,
+) -> Result<Option<VideoLyricsRow>, sqlx::Error> {
+    sqlx::query_as::<_, VideoLyricsRow>(
+        "SELECT v.id, v.youtube_id, COALESCE(v.song, '') as song, \
+         COALESCE(v.artist, '') as artist, v.duration_ms, v.audio_file_path, \
+         p.youtube_url \
+         FROM videos v \
+         JOIN playlists p ON p.id = v.playlist_id \
+         WHERE v.normalized = 1 AND v.has_lyrics = 0 AND p.is_active = 1 \
+         ORDER BY v.id LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Mark a video's lyrics status and source.
+pub async fn mark_video_lyrics(
+    pool: &SqlitePool,
+    video_id: i64,
+    has_lyrics: bool,
+    lyrics_source: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE videos SET has_lyrics = ?, lyrics_source = ? WHERE id = ?")
+        .bind(has_lyrics as i32)
+        .bind(lyrics_source)
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Return (total, processed, pending) lyrics counts for active playlists.
+pub async fn get_lyrics_status(pool: &SqlitePool) -> Result<(i64, i64, i64), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT \
+         COUNT(*) as total, \
+         SUM(CASE WHEN has_lyrics = 1 THEN 1 ELSE 0 END) as processed, \
+         SUM(CASE WHEN has_lyrics = 0 AND normalized = 1 THEN 1 ELSE 0 END) as pending \
+         FROM videos v \
+         JOIN playlists p ON p.id = v.playlist_id \
+         WHERE p.is_active = 1",
+    )
+    .fetch_one(pool)
+    .await?;
+    let total: i64 = row.get("total");
+    let processed: i64 = row.try_get("processed").unwrap_or(0);
+    let pending: i64 = row.try_get("pending").unwrap_or(0);
+    Ok((total, processed, pending))
+}
+
+/// Reset lyrics fields for a video so it will be re-processed.
+pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE id = ?")
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

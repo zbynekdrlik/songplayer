@@ -146,6 +146,7 @@ mod tests {
             is_active: true,
             created_at: None,
             updated_at: None,
+            karaoke_enabled: true,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: models::Playlist = serde_json::from_str(&json).unwrap();

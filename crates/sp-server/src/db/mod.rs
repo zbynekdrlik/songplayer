@@ -13,6 +13,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (2, MIGRATION_V2),
     (3, MIGRATION_V3),
     (4, MIGRATION_V4),
+    (5, MIGRATION_V5),
 ];
 
 const MIGRATION_V1: &str = "
@@ -90,6 +91,12 @@ ALTER TABLE playlists DROP COLUMN resolume_title_token;
 const MIGRATION_V4: &str = "
 ALTER TABLE videos ADD COLUMN audio_file_path TEXT;
 UPDATE videos SET normalized = 0;
+";
+
+const MIGRATION_V5: &str = "
+ALTER TABLE videos ADD COLUMN has_lyrics INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_source TEXT;
+ALTER TABLE playlists ADD COLUMN karaoke_enabled INTEGER NOT NULL DEFAULT 1;
 ";
 
 /// Create a connection pool backed by a file.
@@ -175,7 +182,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 5);
     }
 
     #[tokio::test]
@@ -184,7 +191,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 5);
     }
 
     #[tokio::test]
@@ -540,6 +547,22 @@ mod tests {
             meta,
             Some(("My Song".to_string(), "Artist Name".to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn migration_v5_adds_lyrics_columns() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        // Verify videos.has_lyrics column exists
+        let row = sqlx::query_scalar::<_, i64>("SELECT has_lyrics FROM videos LIMIT 0")
+            .fetch_optional(&pool)
+            .await;
+        assert!(row.is_ok());
+        // Verify playlists.karaoke_enabled column exists
+        let row = sqlx::query_scalar::<_, i64>("SELECT karaoke_enabled FROM playlists LIMIT 0")
+            .fetch_optional(&pool)
+            .await;
+        assert!(row.is_ok());
     }
 
     #[tokio::test]

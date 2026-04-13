@@ -18,6 +18,12 @@ pub struct Playlist {
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default = "default_true")]
+    pub karaoke_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// A single video within a playlist.
