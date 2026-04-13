@@ -360,10 +360,12 @@ impl PlaybackEngine {
                             }
                             Ok(None) => {
                                 pp.lyrics_state = None;
+                                self.clear_lyrics_display(playlist_id);
                             }
                             Err(e) => {
                                 warn!(playlist_id, video_id, "failed to load lyrics: {e}");
                                 pp.lyrics_state = None;
+                                self.clear_lyrics_display(playlist_id);
                             }
                         }
                     }
@@ -475,19 +477,7 @@ impl PlaybackEngine {
                     pp.cancel_title_timers();
                     pp.lyrics_state = None;
                 }
-                // Clear lyrics on the dashboard
-                let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
-                    playlist_id,
-                    line_en: None,
-                    line_sk: None,
-                    prev_line_en: None,
-                    next_line_en: None,
-                    active_word_index: None,
-                    word_count: None,
-                });
-                let _ = self
-                    .resolume_tx
-                    .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+                self.clear_lyrics_display(playlist_id);
                 self.apply_event(playlist_id, PlayEvent::VideoEnded).await;
             }
             PipelineEvent::Error(msg) => {
@@ -496,6 +486,7 @@ impl PlaybackEngine {
                     pp.cancel_title_timers();
                     pp.lyrics_state = None;
                 }
+                self.clear_lyrics_display(playlist_id);
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
@@ -670,6 +661,22 @@ impl PlaybackEngine {
     ///
     /// Skips the broadcast if less than
     /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
+    /// Send empty lyrics to dashboard and Resolume to clear stale display.
+    fn clear_lyrics_display(&self, playlist_id: i64) {
+        let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
+            playlist_id,
+            line_en: None,
+            line_sk: None,
+            prev_line_en: None,
+            next_line_en: None,
+            active_word_index: None,
+            word_count: None,
+        });
+        let _ = self
+            .resolume_tx
+            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+    }
+
     /// broadcast for the same playlist.
     fn maybe_broadcast_position_update(
         &mut self,
