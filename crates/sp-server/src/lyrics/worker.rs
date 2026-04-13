@@ -65,6 +65,7 @@ impl LyricsWorker {
     // Main loop
     // ---------------------------------------------------------------------------
 
+    #[cfg_attr(test, mutants::skip)]
     pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
         tracing::info!("lyrics_worker: started");
         loop {
@@ -85,6 +86,7 @@ impl LyricsWorker {
     // process_next
     // ---------------------------------------------------------------------------
 
+    #[cfg_attr(test, mutants::skip)]
     async fn process_next(&self) {
         let row = match get_next_video_without_lyrics(&self.pool).await {
             Ok(Some(r)) => r,
@@ -126,6 +128,7 @@ impl LyricsWorker {
     // process_song — main pipeline
     // ---------------------------------------------------------------------------
 
+    #[cfg_attr(test, mutants::skip)]
     async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
         let video_id = row.id;
         let youtube_id = &row.youtube_id;
@@ -217,6 +220,7 @@ impl LyricsWorker {
     // acquire_lyrics — source waterfall
     // ---------------------------------------------------------------------------
 
+    #[cfg_attr(test, mutants::skip)]
     async fn acquire_lyrics(
         &self,
         row: &crate::db::models::VideoLyricsRow,

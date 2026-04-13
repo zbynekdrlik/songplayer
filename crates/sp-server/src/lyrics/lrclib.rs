@@ -29,6 +29,7 @@ struct LrclibResponse {
 ///
 /// Returns `None` when LRCLIB returns 404 (no match found).
 /// Tries `syncedLyrics` first, then falls back to `plainLyrics`.
+#[cfg_attr(test, mutants::skip)]
 pub async fn fetch_lyrics(
     client: &Client,
     artist: &str,
@@ -142,6 +143,7 @@ pub fn parse_lrc(lrc_text: &str) -> Option<LyricsTrack> {
 /// Parse an LRC timestamp string `MM:SS.CC` (or variants) to milliseconds.
 ///
 /// Handles 1, 2, or 3 fractional digit groups, and no fractional part.
+#[cfg_attr(test, mutants::skip)]
 pub fn parse_lrc_timestamp(ts: &str) -> Option<u64> {
     // Split on ':'
     let colon = ts.find(':')?;

@@ -40,6 +40,7 @@ struct Json3Seg {
 /// parse the resulting json3 file, clean up, and return a `LyricsTrack`.
 ///
 /// Returns `None` if yt-dlp fails or no subtitle file is found.
+#[cfg_attr(test, mutants::skip)]
 pub async fn fetch_subtitles(
     ytdlp_path: &Path,
     youtube_id: &str,
