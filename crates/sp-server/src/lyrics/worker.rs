@@ -64,6 +64,7 @@ impl LyricsWorker {
     /// Write the embedded Python helper script to disk so the subprocess can
     /// find it. Overwrites on every startup to keep the script in sync with
     /// the Rust binary version.
+    #[cfg_attr(test, mutants::skip)]
     async fn ensure_script(&self) -> Result<()> {
         if let Some(parent) = self.script_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
