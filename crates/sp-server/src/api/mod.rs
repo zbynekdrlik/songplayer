@@ -72,6 +72,19 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/resolume/hosts/{id}",
             axum::routing::delete(routes::delete_resolume_host),
         )
+        // Lyrics
+        .route(
+            "/api/v1/videos/{id}/lyrics",
+            axum::routing::get(routes::get_video_lyrics),
+        )
+        .route(
+            "/api/v1/videos/{id}/lyrics/reprocess",
+            axum::routing::post(routes::reprocess_video_lyrics),
+        )
+        .route(
+            "/api/v1/lyrics/status",
+            axum::routing::get(routes::get_lyrics_status),
+        )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
         // Middleware

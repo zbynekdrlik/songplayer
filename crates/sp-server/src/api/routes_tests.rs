@@ -33,6 +33,7 @@ async fn test_state() -> AppState {
         sync_tx,
         resolume_tx,
         obs_rebuild_tx,
+        cache_dir: std::path::PathBuf::from("/tmp/cache"),
     }
 }
 

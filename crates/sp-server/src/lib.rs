@@ -49,6 +49,8 @@ pub struct AppState {
     /// Signal — sent by playlist CRUD handlers so the OBS client can rebuild
     /// its NDI source map.
     pub obs_rebuild_tx: broadcast::Sender<()>,
+    /// Directory where cached media and lyrics JSON files are stored.
+    pub cache_dir: PathBuf,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -281,6 +283,7 @@ pub async fn start(
         sync_tx: sync_tx.clone(),
         resolume_tx: resolume_cmd_tx.clone(),
         obs_rebuild_tx: obs_rebuild_tx.clone(),
+        cache_dir: config.cache_dir.clone(),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
