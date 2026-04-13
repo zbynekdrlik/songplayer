@@ -66,30 +66,19 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         .await?;
     }
 
-    // Build a set of video IDs that have a complete video+audio pair.
-    let paired_ids: std::collections::HashSet<&str> =
-        scan.songs.iter().map(|s| s.video_id.as_str()).collect();
-
-    // Handle lyrics sidecars: delete orphaned ones, re-link paired ones.
-    for (video_id, path) in &scan.lyrics_files {
-        if !paired_ids.contains(video_id.as_str()) {
-            tracing::info!(
-                "removing orphaned lyrics sidecar for {}: {}",
-                video_id,
-                path.display()
-            );
-            if let Err(e) = std::fs::remove_file(path) {
-                tracing::warn!(
-                    "failed to remove orphaned lyrics file {}: {e}",
-                    path.display()
-                );
-            }
-        } else {
-            sqlx::query("UPDATE videos SET has_lyrics = 1 WHERE youtube_id = ? AND has_lyrics = 0")
-                .bind(video_id)
-                .execute(pool)
-                .await?;
+    // Delete all stale lyrics sidecar files. The lyrics worker will recreate
+    // them from clean sources (LRCLIB). This ensures migration V6's reset
+    // actually takes effect and old YouTube garbage isn't preserved.
+    for (_video_id, path) in &scan.lyrics_files {
+        if let Err(e) = std::fs::remove_file(path) {
+            tracing::warn!("failed to remove stale lyrics file {}: {e}", path.display());
         }
+    }
+    if !scan.lyrics_files.is_empty() {
+        tracing::info!(
+            "removed {} stale lyrics sidecar files for reprocessing",
+            scan.lyrics_files.len()
+        );
     }
 
     Ok(())
