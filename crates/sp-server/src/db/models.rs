@@ -333,6 +333,7 @@ pub async fn get_next_video_without_lyrics(
          FROM videos v \
          JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.normalized = 1 AND v.has_lyrics = 0 AND p.is_active = 1 \
+         AND (v.lyrics_source IS NULL OR v.lyrics_source != 'failed') \
          ORDER BY v.id LIMIT 1",
     )
     .fetch_optional(pool)
