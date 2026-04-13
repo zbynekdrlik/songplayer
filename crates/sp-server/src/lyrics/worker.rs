@@ -61,6 +61,22 @@ impl LyricsWorker {
         }
     }
 
+    /// Write the embedded Python helper script to disk so the subprocess can
+    /// find it. Overwrites on every startup to keep the script in sync with
+    /// the Rust binary version.
+    async fn ensure_script(&self) -> Result<()> {
+        if let Some(parent) = self.script_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(
+            &self.script_path,
+            include_str!("../../../../scripts/lyrics_worker.py"),
+        )
+        .await?;
+        tracing::info!("lyrics_worker: wrote {}", self.script_path.display());
+        Ok(())
+    }
+
     // ---------------------------------------------------------------------------
     // Main loop
     // ---------------------------------------------------------------------------
@@ -68,6 +84,11 @@ impl LyricsWorker {
     #[cfg_attr(test, mutants::skip)]
     pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
         tracing::info!("lyrics_worker: started");
+
+        // Ensure the Python helper script is written to disk.
+        if let Err(e) = self.ensure_script().await {
+            error!("lyrics_worker: failed to write lyrics_worker.py: {e}");
+        }
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => { break; }
