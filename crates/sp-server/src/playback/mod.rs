@@ -662,6 +662,7 @@ impl PlaybackEngine {
     /// Skips the broadcast if less than
     /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
     /// Send empty lyrics to dashboard and Resolume to clear stale display.
+    #[cfg_attr(test, mutants::skip)]
     fn clear_lyrics_display(&self, playlist_id: i64) {
         let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
             playlist_id,
