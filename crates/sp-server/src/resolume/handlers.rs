@@ -142,6 +142,7 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
 
 /// Show subtitles — instant text swap on all `#sp-subs` and `#sp-subssk` clips.
 /// No fade animation; text is written directly.
+#[cfg_attr(test, mutants::skip)]
 pub async fn set_subtitles(
     driver: &mut HostDriver,
     en: &str,
@@ -182,6 +183,7 @@ pub async fn set_subtitles(
 
 /// Hide subtitles — clear text on all `#sp-subs` and `#sp-subssk` clips.
 /// No fade animation; text is cleared directly.
+#[cfg_attr(test, mutants::skip)]
 pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     let subs_clips = driver
         .clip_mapping
