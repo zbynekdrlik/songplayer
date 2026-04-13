@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use reqwest::Client;
-use sp_core::lyrics::{LyricsLine, LyricsTrack};
+use sp_core::lyrics::LyricsTrack;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
@@ -13,13 +13,14 @@ use tracing::{debug, error, warn};
 
 use crate::{
     db::models::{get_next_video_without_lyrics, mark_video_lyrics},
-    lyrics::{aligner, lrclib, translator, youtube_subs},
+    lyrics::{aligner, lrclib, translator},
 };
 
 // ---------------------------------------------------------------------------
 // Public struct
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub struct LyricsWorker {
     pool: SqlitePool,
     client: Client,
