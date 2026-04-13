@@ -1,0 +1,102 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: SongPlayer
+    - button "Dashboard" [ref=e4] [cursor=pointer]
+    - button "Settings" [ref=e5] [cursor=pointer]
+    - generic [ref=e6]: 🟢 WS
+  - main [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - heading "Playlists" [level=1] [ref=e10]
+        - generic [ref=e13]: "OBS: sp-fast"
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - generic [ref=e16]:
+            - heading "ytwarmup" [level=3] [ref=e17]
+            - text: SP-warmup
+          - paragraph [ref=e19]: Nothing playing
+          - generic [ref=e20]:
+            - button "Prev" [ref=e21] [cursor=pointer]
+            - button "Play" [ref=e22] [cursor=pointer]
+            - button "Pause" [ref=e23] [cursor=pointer]
+            - button "Skip" [ref=e24] [cursor=pointer]
+            - combobox "Playback mode" [ref=e25] [cursor=pointer]:
+              - option "Continuous" [selected]
+              - option "Single"
+              - option "Loop"
+            - button "Sync" [ref=e26] [cursor=pointer]
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - heading "ytpresence" [level=3] [ref=e29]
+            - text: SP-presence
+          - paragraph [ref=e31]: Nothing playing
+          - generic [ref=e32]:
+            - button "Prev" [ref=e33] [cursor=pointer]
+            - button "Play" [ref=e34] [cursor=pointer]
+            - button "Pause" [ref=e35] [cursor=pointer]
+            - button "Skip" [ref=e36] [cursor=pointer]
+            - combobox "Playback mode" [ref=e37] [cursor=pointer]:
+              - option "Continuous" [selected]
+              - option "Single"
+              - option "Loop"
+            - button "Sync" [ref=e38] [cursor=pointer]
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - heading "ytslow" [level=3] [ref=e41]
+            - text: SP-slow
+          - paragraph [ref=e43]: Nothing playing
+          - generic [ref=e44]:
+            - button "Prev" [ref=e45] [cursor=pointer]
+            - button "Play" [ref=e46] [cursor=pointer]
+            - button "Pause" [ref=e47] [cursor=pointer]
+            - button "Skip" [ref=e48] [cursor=pointer]
+            - combobox "Playback mode" [ref=e49] [cursor=pointer]:
+              - option "Continuous" [selected]
+              - option "Single"
+              - option "Loop"
+            - button "Sync" [ref=e50] [cursor=pointer]
+        - generic [ref=e51]:
+          - generic [ref=e52]:
+            - heading "yt90s" [level=3] [ref=e53]
+            - text: SP-90s
+          - paragraph [ref=e55]: Nothing playing
+          - generic [ref=e56]:
+            - button "Prev" [ref=e57] [cursor=pointer]
+            - button "Play" [ref=e58] [cursor=pointer]
+            - button "Pause" [ref=e59] [cursor=pointer]
+            - button "Skip" [ref=e60] [cursor=pointer]
+            - combobox "Playback mode" [ref=e61] [cursor=pointer]:
+              - option "Continuous" [selected]
+              - option "Single"
+              - option "Loop"
+            - button "Sync" [ref=e62] [cursor=pointer]
+        - generic [ref=e63]:
+          - generic [ref=e64]:
+            - heading "ytworship" [level=3] [ref=e65]
+            - text: SP-worship
+          - paragraph [ref=e67]: Nothing playing
+          - generic [ref=e68]:
+            - button "Prev" [ref=e69] [cursor=pointer]
+            - button "Play" [ref=e70] [cursor=pointer]
+            - button "Pause" [ref=e71] [cursor=pointer]
+            - button "Skip" [ref=e72] [cursor=pointer]
+            - combobox "Playback mode" [ref=e73] [cursor=pointer]:
+              - option "Continuous" [selected]
+              - option "Single"
+              - option "Loop"
+            - button "Sync" [ref=e74] [cursor=pointer]
+        - generic [ref=e75]:
+          - generic [ref=e76]:
+            - heading "ytfast" [level=3] [ref=e77]
+            - text: SP-fast
+          - paragraph [ref=e79]: Nothing playing
+          - generic [ref=e80]:
+            - button "Prev" [ref=e81] [cursor=pointer]
+            - button "Play" [ref=e82] [cursor=pointer]
+            - button "Pause" [ref=e83] [cursor=pointer]
+            - button "Skip" [ref=e84] [cursor=pointer]
+            - combobox "Playback mode" [ref=e85] [cursor=pointer]:
+              - option "Continuous" [selected]
+              - option "Single"
+              - option "Loop"
+            - button "Sync" [ref=e86] [cursor=pointer]

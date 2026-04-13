@@ -14,6 +14,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (3, MIGRATION_V3),
     (4, MIGRATION_V4),
     (5, MIGRATION_V5),
+    (6, MIGRATION_V6),
 ];
 
 const MIGRATION_V1: &str = "
@@ -99,6 +100,10 @@ ALTER TABLE videos ADD COLUMN lyrics_source TEXT;
 ALTER TABLE playlists ADD COLUMN karaoke_enabled INTEGER NOT NULL DEFAULT 1;
 ";
 
+const MIGRATION_V6: &str = "
+UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -182,7 +187,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 5);
+        assert_eq!(ver, 6);
     }
 
     #[tokio::test]
@@ -191,7 +196,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 5);
+        assert_eq!(ver, 6);
     }
 
     #[tokio::test]

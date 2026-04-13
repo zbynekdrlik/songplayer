@@ -135,10 +135,9 @@ impl LyricsWorker {
         match self.process_song(row).await {
             Ok(()) => {}
             Err(e) => {
-                error!("lyrics_worker: failed to process video {youtube_id}: {e}");
-                // Mark as failed (has_lyrics=0 but with a source indicating failure)
+                debug!("lyrics_worker: no lyrics for {youtube_id}: {e}");
                 if let Err(db_err) =
-                    mark_video_lyrics(&self.pool, video_id, false, Some("failed")).await
+                    mark_video_lyrics(&self.pool, video_id, false, Some("no_source")).await
                 {
                     error!("lyrics_worker: failed to mark video {youtube_id} as failed: {db_err}");
                 }
@@ -269,86 +268,14 @@ impl LyricsWorker {
             }
         }
 
-        // 2. YouTube subs
-        let subs_temp_dir = self.cache_dir.join("_subs_temp");
-        let _ = tokio::fs::create_dir_all(&subs_temp_dir).await;
+        // 2. YouTube subs — DISABLED: auto-generated subs are unusable for
+        // karaoke (full of [music] markers, overlapping text, garbled phrases).
+        // Will be re-enabled when Gemini-based lyrics extraction is implemented
+        // or Qwen3-ASR alignment (#25) is working.
 
-        let subs_result =
-            youtube_subs::fetch_subtitles(&self.ytdlp_path, youtube_id, &subs_temp_dir).await;
+        // 3. Qwen3-ASR — DISABLED until model compatibility resolved (#25)
 
-        // Clean up temp dir regardless of outcome
-        let _ = tokio::fs::remove_dir_all(&subs_temp_dir).await;
-
-        match subs_result {
-            Ok(Some(track)) => {
-                debug!("lyrics_worker: YouTube subs hit for {youtube_id}");
-                return Ok((track, "youtube".to_string()));
-            }
-            Ok(None) => {
-                debug!("lyrics_worker: YouTube subs miss for {youtube_id}");
-            }
-            Err(e) => {
-                warn!("lyrics_worker: YouTube subs error for {youtube_id}: {e}");
-            }
-        }
-
-        // 3. Qwen3-ASR (if python available and audio file exists)
-        if let Some(python) = &self.python_path {
-            if let Some(audio_path) = &row.audio_file_path {
-                let audio = PathBuf::from(audio_path);
-                if audio.exists() {
-                    let output_path = self.cache_dir.join(format!("{youtube_id}_asr_output.json"));
-
-                    match aligner::transcribe_audio(
-                        python,
-                        &self.script_path,
-                        &self.models_dir,
-                        &audio,
-                        &output_path,
-                    )
-                    .await
-                    {
-                        Ok(text) if !text.trim().is_empty() => {
-                            debug!("lyrics_worker: ASR transcription succeeded for {youtube_id}");
-
-                            let lines: Vec<LyricsLine> = text
-                                .lines()
-                                .map(str::trim)
-                                .filter(|l| !l.is_empty())
-                                .map(|l| LyricsLine {
-                                    start_ms: 0,
-                                    end_ms: 0,
-                                    en: l.to_string(),
-                                    sk: None,
-                                    words: None,
-                                })
-                                .collect();
-
-                            if !lines.is_empty() {
-                                let track = LyricsTrack {
-                                    version: 1,
-                                    source: "asr".to_string(),
-                                    language_source: "en".to_string(),
-                                    language_translation: String::new(),
-                                    lines,
-                                };
-                                return Ok((track, "asr".to_string()));
-                            }
-                        }
-                        Ok(_) => {
-                            debug!("lyrics_worker: ASR returned empty text for {youtube_id}");
-                        }
-                        Err(e) => {
-                            warn!("lyrics_worker: ASR failed for {youtube_id}: {e}");
-                        }
-                    }
-                } else {
-                    debug!("lyrics_worker: audio file not found for ASR for {youtube_id}");
-                }
-            }
-        }
-
-        // All sources failed
-        anyhow::bail!("all lyrics sources failed for video {youtube_id}");
+        // No usable source found — mark as no_source so it's skipped
+        anyhow::bail!("no usable lyrics source for {youtube_id}");
     }
 }
