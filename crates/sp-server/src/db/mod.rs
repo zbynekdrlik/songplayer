@@ -17,6 +17,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (6, MIGRATION_V6),
     (7, MIGRATION_V7),
     (8, MIGRATION_V8),
+    (9, MIGRATION_V9),
 ];
 
 const MIGRATION_V1: &str = "
@@ -127,6 +128,14 @@ const MIGRATION_V8: &str = "
 UPDATE videos SET lyrics_source = 'lrclib' WHERE lyrics_source LIKE 'lrclib+qwen3%';
 ";
 
+// V9 = reset all lyrics rows to re-process them through the new
+// YT-subs-first pipeline. Retires 'lrclib+qwen3' (whole-song alignment)
+// in favour of 'yt_subs+qwen3' (chunked) or plain 'lrclib' (line-level
+// fallback). Idempotent: a row already at (0, NULL) is a no-op.
+const MIGRATION_V9: &str = "
+UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -210,7 +219,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 8);
+        assert_eq!(ver, 9);
     }
 
     #[tokio::test]
@@ -219,7 +228,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 8);
+        assert_eq!(ver, 9);
     }
 
     #[tokio::test]
@@ -705,5 +714,57 @@ mod tests {
                 .unwrap();
         assert_eq!(v3_src, None);
         assert_eq!(v3_has, 0);
+    }
+
+    #[tokio::test]
+    async fn migration_v9_resets_has_lyrics_and_lyrics_source_for_all_rows() {
+        // Seed a DB at V8 with various lyrics_source values, then re-run
+        // migrations to V9 and confirm all rows are back at (0, NULL).
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (yt, src, has) in [
+            ("a1", Some("lrclib"), 1),
+            ("a2", Some("yt_subs+qwen3"), 1),
+            ("a3", Some("lrclib+qwen3"), 1), // retired value
+            ("a4", None::<&str>, 0),
+        ] {
+            sqlx::query(
+                "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, lyrics_source) \
+                 VALUES (1, ?, 't', ?, ?)",
+            )
+            .bind(yt)
+            .bind(has)
+            .bind(src)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Rewind schema_version to force V9 to re-run.
+        sqlx::query("DELETE FROM schema_version WHERE version = 9")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        let rows = sqlx::query("SELECT has_lyrics, lyrics_source FROM videos ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 4);
+        for row in rows {
+            let hl: i64 = row.get("has_lyrics");
+            let src: Option<String> = row.get("lyrics_source");
+            assert_eq!(hl, 0, "has_lyrics must be 0 after V9");
+            assert_eq!(src, None, "lyrics_source must be NULL after V9");
+        }
     }
 }
