@@ -92,14 +92,80 @@ def cmd_transcribe(args):
         json.dump(result, f, ensure_ascii=False)
 
 
+def _isolate_vocals(audio_path, models_dir):
+    """Run Mel-Roformer to extract the vocal stem, then resample it to
+    exactly 16 kHz mono float32 WAV — the input format Qwen3-ForcedAligner
+    expects. Returns the absolute path to a temp WAV that the caller MUST
+    delete after use.
+
+    Sequential-load pattern: this function loads Mel-Roformer, separates,
+    then relies on garbage collection + explicit torch.cuda.empty_cache()
+    to free ~6-8 GB of VRAM before the caller loads Qwen3.
+    """
+    import gc
+    import os
+    import tempfile
+    import torch
+    from audio_separator.separator import Separator
+    import librosa
+    import soundfile as sf
+
+    sep = Separator(
+        model_file_dir=models_dir,
+        output_format="WAV",
+        output_dir=tempfile.gettempdir(),
+    )
+    sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+    out_files = sep.separate(audio_path)
+    vocal_candidates = [p for p in out_files if "Vocals" in p or "vocals" in p]
+    if not vocal_candidates:
+        raise RuntimeError(
+            f"audio-separator did not produce a Vocals stem (got: {out_files})"
+        )
+    vocal_path = vocal_candidates[0]
+    # audio-separator writes to output_dir without the dir prefix in out_files;
+    # handle both cases.
+    if not os.path.isabs(vocal_path):
+        vocal_path = os.path.join(tempfile.gettempdir(), vocal_path)
+
+    # Free VRAM before loading the aligner.
+    del sep
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Resample to exactly 16 kHz mono float32. Qwen3's docstring: "All audios
+    # will be converted into mono 16k float32 arrays in [-1, 1]." We do this
+    # explicitly instead of relying on qwen_asr.normalize_audios() so we
+    # control the mono-conversion strategy (librosa averages channels,
+    # preserving energy on hard-panned vocals) and get a smaller intermediate
+    # file for faster subprocess I/O.
+    audio, _ = librosa.load(vocal_path, sr=16000, mono=True)
+    fd, resampled_path = tempfile.mkstemp(suffix="_vocals16k.wav")
+    os.close(fd)
+    sf.write(resampled_path, audio, 16000, subtype="FLOAT")
+
+    try:
+        os.remove(vocal_path)
+    except OSError:
+        pass  # best-effort; the OS will clean temp eventually
+    return resampled_path
+
+
 def cmd_align(args):
     """
     Align lyrics text to audio using Qwen3-ForcedAligner-0.6B.
+
+    Pipeline:
+        1. Mel-Roformer isolates the vocal stem from the mixed audio.
+        2. Resample vocal stem to 16 kHz mono float32 (Qwen3's expected input).
+        3. Qwen3-ForcedAligner aligns text to the clean vocal WAV.
+
     --text is a PATH to a UTF-8 text file with one lyric line per row.
     Writes JSON {"lines": [{"en": str, "words": [{"text": str, "start_ms": int, "end_ms": int}]}]}
     to --output.
-    Uses the official qwen-asr PyPI package (https://pypi.org/project/qwen-asr/).
     """
+    import os
     import torch
     from qwen_asr import Qwen3ForcedAligner
 
@@ -110,26 +176,35 @@ def cmd_align(args):
         _write_output([], args.output)
         return
 
-    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
+    # Step 1+2: isolate + resample. Returns a 16 kHz mono float32 WAV path.
+    vocal_path = _isolate_vocals(args.audio, args.models_dir)
 
-    model = Qwen3ForcedAligner.from_pretrained(
-        "Qwen/Qwen3-ForcedAligner-0.6B",
-        dtype=torch.bfloat16,
-        device_map=device_map,
-    )
+    try:
+        # Step 3: align against the clean vocal stem, not the mixed audio.
+        device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    full_text = "\n".join(lyrics_lines)
+        model = Qwen3ForcedAligner.from_pretrained(
+            "Qwen/Qwen3-ForcedAligner-0.6B",
+            dtype=torch.bfloat16,
+            device_map=device_map,
+        )
 
-    results = model.align(
-        audio=args.audio,
-        text=full_text,
-        language="English",
-    )
+        full_text = "\n".join(lyrics_lines)
 
-    word_stream = results[0]
+        results = model.align(
+            audio=vocal_path,
+            text=full_text,
+            language="English",
+        )
 
-    lines_out = _group_words_into_lines(word_stream, lyrics_lines)
-    _write_output(lines_out, args.output)
+        word_stream = results[0]
+        lines_out = _group_words_into_lines(word_stream, lyrics_lines)
+        _write_output(lines_out, args.output)
+    finally:
+        try:
+            os.remove(vocal_path)
+        except OSError:
+            pass
 
 
 def _group_words_into_lines(word_stream, lyrics_lines):
