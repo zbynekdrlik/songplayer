@@ -419,46 +419,6 @@ pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), 
     Ok(())
 }
 
-/// Update only the `lyrics_source` label on a video (used after re-alignment
-/// adds word-level timestamps to a previously line-only LRCLIB track).
-#[cfg_attr(test, mutants::skip)]
-pub async fn set_video_lyrics_source(
-    pool: &SqlitePool,
-    video_id: i64,
-    lyrics_source: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE videos SET lyrics_source = ? WHERE id = ?")
-        .bind(lyrics_source)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-/// Return the next video that has lyrics from LRCLIB (line-level only, never
-/// aligned with Qwen3) AND has an audio file ≤5 minutes (Qwen3 architectural
-/// limit). Used by the worker to retroactively add word-level timestamps to
-/// songs processed before the aligner was wired in.
-#[cfg_attr(test, mutants::skip)]
-pub async fn get_next_video_missing_alignment(
-    pool: &SqlitePool,
-) -> Result<Option<VideoLyricsRow>, sqlx::Error> {
-    sqlx::query_as::<_, VideoLyricsRow>(
-        "SELECT v.id, v.youtube_id, COALESCE(v.song, '') as song, \
-         COALESCE(v.artist, '') as artist, v.duration_ms, v.audio_file_path, \
-         p.youtube_url \
-         FROM videos v \
-         JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.has_lyrics = 1 AND v.lyrics_source = 'lrclib' \
-         AND v.audio_file_path IS NOT NULL \
-         AND v.duration_ms IS NOT NULL AND v.duration_ms <= 300000 \
-         AND p.is_active = 1 \
-         ORDER BY v.id LIMIT 1",
-    )
-    .fetch_optional(pool)
-    .await
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
