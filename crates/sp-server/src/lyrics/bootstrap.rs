@@ -177,9 +177,24 @@ pub async fn ensure_ready(
         }
 
         // Verify the install actually worked regardless of pip's exit codes.
-        if !is_ready(&venv_python).await {
+        // Retry up to 5× with backoff: immediately after `pip install
+        // --force-reinstall torch`, Windows sometimes fails to import the
+        // freshly-written ~300 `.pyd` files for a brief window (file system
+        // cache / antivirus scan). Retrying gives the OS time to settle.
+        let mut ok = false;
+        for attempt in 0..5 {
+            if is_ready(&venv_python).await {
+                ok = true;
+                break;
+            }
+            tracing::debug!(
+                "lyrics bootstrap: is_ready check failed (attempt {attempt}), retrying"
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+        if !ok {
             anyhow::bail!(
-                "lyrics bootstrap: post-install is_ready check failed — qwen_asr or CUDA torch not available"
+                "lyrics bootstrap: post-install is_ready check failed after 5 attempts — qwen_asr or CUDA torch not available"
             );
         }
 
