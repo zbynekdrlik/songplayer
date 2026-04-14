@@ -298,6 +298,58 @@ jobs:
           fi
           echo "OK: No skip patterns in E2E tests."
 
+      - name: Deletion audit — no legacy lyrics pipeline symbols
+        run: |
+          set -eu
+          echo "Scanning repo for retired symbols from the old Qwen3 whole-song path..."
+          BANNED_NAMES=(
+            "align_lyrics"
+            "merge_word_timings"
+            "ensure_progressive_words"
+            "count_duplicate_start_ms"
+            "retry_missing_alignment"
+            "set_video_lyrics_source"
+            "get_next_video_missing_alignment"
+          )
+          FAIL=0
+          SEARCH_PATHS=(crates src-tauri sp-ui scripts e2e)
+
+          for name in "${BANNED_NAMES[@]}"; do
+            # Check for function/method calls of retired symbols in executable code
+            # Exclude: comments (//), string literals (quoted), assertions, and test fixtures marked "retired"
+            HITS=$(grep -rn "$name" "${SEARCH_PATHS[@]}" \
+              --exclude-dir=node_modules --exclude-dir=target \
+              --exclude-dir=dist 2>/dev/null \
+              | grep -v "// " \
+              | grep -v '"' \
+              | grep -v "'" \
+              | grep -v "#\[cfg(test)\]" \
+              || true)
+            if [ -n "$HITS" ]; then
+              echo "ERROR: retired symbol '$name' appears in production code:"; echo "$HITS"; FAIL=1
+            fi
+          done
+
+          # Check for Python function definitions (not comments)
+          BANNED_PY=(
+            "def cmd_align("
+            "def cmd_transcribe("
+            "def cmd_download_models("
+            "def _group_words_into_lines("
+          )
+          for py in "${BANNED_PY[@]}"; do
+            HITS=$(grep -rn -F "$py" scripts 2>/dev/null || true)
+            if [ -n "$HITS" ]; then
+              echo "ERROR: retired Python function '$py' still defined:"; echo "$HITS"; FAIL=1
+            fi
+          done
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "FAIL: legacy code leaked back in."
+            exit 1
+          fi
+          echo "OK: no retired symbols in production code."
+
       - name: Verify deploy job uses always() condition
         run: |
           # Extract the full if: condition block (may span multiple lines with >-)
