@@ -84,9 +84,16 @@ pub async fn ensure_ready(
             return Ok(Some(venv_python));
         }
 
-        // 1. Create venv if the directory is missing.
-        if !venv_dir.exists() {
-            tracing::info!("lyrics bootstrap: creating venv at {}", venv_dir.display());
+        // 1. Create venv if the interpreter is missing (handles corrupted venv too).
+        if !venv_python.exists() {
+            if venv_dir.exists() {
+                tracing::warn!(
+                    "lyrics bootstrap: venv at {} is incomplete (no interpreter), repopulating",
+                    venv_dir.display()
+                );
+            } else {
+                tracing::info!("lyrics bootstrap: creating venv at {}", venv_dir.display());
+            }
             let mut cmd = Command::new(system_python);
             cmd.args(["-m", "venv"]).arg(&venv_dir);
             use std::os::windows::process::CommandExt;
@@ -106,10 +113,17 @@ pub async fn ensure_ready(
         pip.args(["-m", "pip", "install", "-U", "qwen-asr"]);
         use std::os::windows::process::CommandExt;
         pip.creation_flags(0x08000000);
-        let pip_status = tokio::time::timeout(std::time::Duration::from_secs(600), pip.status())
-            .await
-            .context("pip install qwen-asr timed out after 10 minutes")?
-            .context("failed to spawn pip install")?;
+        let mut pip_child = pip.spawn().context("failed to spawn pip install")?;
+        let pip_status =
+            match tokio::time::timeout(std::time::Duration::from_secs(600), pip_child.wait()).await
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => anyhow::bail!("pip install qwen-asr failed: {e}"),
+                Err(_) => {
+                    let _ = pip_child.kill().await;
+                    anyhow::bail!("pip install qwen-asr timed out after 10 minutes");
+                }
+            };
         if !pip_status.success() {
             anyhow::bail!("pip install qwen-asr exited with status {pip_status}");
         }
@@ -123,11 +137,18 @@ pub async fn ensure_ready(
             .arg(models_dir)
             .env("HF_HOME", models_dir);
         preload.creation_flags(0x08000000);
+        let mut preload_child = preload.spawn().context("failed to spawn preload")?;
         let preload_status =
-            tokio::time::timeout(std::time::Duration::from_secs(900), preload.status())
+            match tokio::time::timeout(std::time::Duration::from_secs(900), preload_child.wait())
                 .await
-                .context("model preload timed out after 15 minutes")?
-                .context("failed to spawn preload")?;
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => anyhow::bail!("model preload failed: {e}"),
+                Err(_) => {
+                    let _ = preload_child.kill().await;
+                    anyhow::bail!("model preload timed out after 15 minutes");
+                }
+            };
         if !preload_status.success() {
             anyhow::bail!("model preload exited with status {preload_status}");
         }
