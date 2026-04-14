@@ -405,4 +405,164 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       )
       .toBe(true);
   });
+
+  test("song #148 Planetshakers 'Get This Party Started' has real word-level alignment", async ({
+    request,
+  }) => {
+    // 25-minute poll budget covers cold-start bootstrap (1.2 GB Qwen3 +
+    // 500 MB Mel-Roformer + 500 MB anvuew dereverb downloads) PLUS the
+    // first song running through the new pipeline. Overall test timeout
+    // is 28 min for a safety margin above the poll loop.
+    test.setTimeout(28 * 60 * 1000);
+
+    // Match by song + artist rather than YouTube ID — the track may be
+    // uploaded multiple times and we just need ONE copy to hit the
+    // YT-subs chunked path.
+    const SONG_NEEDLE = "party started";
+    const ARTIST_NEEDLE = "planetshaker";
+    const MIN_LINES = 30;
+    const MIN_TOTAL_WORDS = 200;
+    const MAX_DUPLICATE_PCT = 10;
+    const MIN_STDDEV_LINES = 10;
+    const MIN_STDDEV_MS = 50;
+
+    interface Word {
+      text: string;
+      start_ms: number;
+      end_ms: number;
+    }
+    interface Line {
+      start_ms?: number;
+      end_ms?: number;
+      en: string;
+      words?: Word[];
+    }
+    interface Track {
+      source?: string;
+      lines: Line[];
+    }
+
+    function duplicateStartPct(line: Line): number {
+      const w = line.words ?? [];
+      if (w.length < 2) return 0;
+      let dup = 0;
+      for (let i = 1; i < w.length; i++) {
+        if (w[i].start_ms === w[i - 1].start_ms) dup += 1;
+      }
+      return (100 * dup) / (w.length - 1);
+    }
+
+    function gapStddevMs(line: Line): number {
+      const w = line.words ?? [];
+      if (w.length < 3) return 0;
+      const gaps: number[] = [];
+      for (let i = 1; i < w.length; i++) gaps.push(w[i].start_ms - w[i - 1].start_ms);
+      const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      const variance =
+        gaps.map((g) => (g - mean) ** 2).reduce((a, b) => a + b, 0) / gaps.length;
+      return Math.sqrt(variance);
+    }
+
+    async function findTrack(): Promise<Track | null> {
+      const plResp = await request.get("/api/v1/playlists");
+      if (!plResp.ok()) return null;
+      const playlists: PlaylistEntry[] = await plResp.json();
+      for (const pl of playlists) {
+        const vidResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+        if (!vidResp.ok()) continue;
+        const videos: VideoEntry[] = await vidResp.json();
+        for (const v of videos) {
+          const song = (v.song ?? "").toLowerCase();
+          const artist = (v.artist ?? "").toLowerCase();
+          if (!song.includes(SONG_NEEDLE)) continue;
+          if (!artist.includes(ARTIST_NEEDLE)) continue;
+          const lyricsResp = await request.get(`/api/v1/videos/${v.id}/lyrics`);
+          if (!lyricsResp.ok()) return null;
+          return (await lyricsResp.json()) as Track;
+        }
+      }
+      return null;
+    }
+
+    await expect
+      .poll(
+        async () => {
+          const t = await findTrack();
+          console.log(
+            `[#148 poll] ${t ? `source=${t.source ?? "?"} lines=${t.lines?.length ?? 0}` : "not-yet"} @ ${new Date().toISOString()}`,
+          );
+          return t !== null;
+        },
+        {
+          message:
+            `#148 "Get This Party Started" never produced lyrics in 25 min. ` +
+            `Either the song didn't sync into any playlist, or the pipeline ` +
+            `aborted before persisting. Check the server log on win-resolume.`,
+          timeout: 25 * 60 * 1000,
+          intervals: [30_000],
+        },
+      )
+      .toBe(true);
+
+    const track = await findTrack();
+    expect(track, "track must exist post-poll").not.toBeNull();
+
+    // Gate 1: source must be the YT-subs chunked-alignment happy path.
+    expect(
+      track!.source,
+      `Expected source "yt_subs+qwen3" (proves new pipeline ran). Got "${track!.source}". ` +
+        `Fallback to LRCLIB means #148 did NOT get word-level karaoke.`,
+    ).toBe("yt_subs+qwen3");
+
+    // Gate 2: line count plausible for this song.
+    expect(track!.lines.length).toBeGreaterThanOrEqual(MIN_LINES);
+
+    // Gate 3: every line must have a populated words array.
+    for (const [i, line] of track!.lines.entries()) {
+      expect(
+        Array.isArray(line.words) && line.words!.length > 0,
+        `Line ${i} ("${line.en}") has no words — assembly/align failed for this chunk.`,
+      ).toBe(true);
+    }
+
+    // Gate 4: total word count >= threshold.
+    const totalWords = track!.lines.reduce(
+      (sum, l) => sum + (l.words?.length ?? 0),
+      0,
+    );
+    expect(
+      totalWords,
+      `Total word count ${totalWords} below threshold ${MIN_TOTAL_WORDS}`,
+    ).toBeGreaterThanOrEqual(MIN_TOTAL_WORDS);
+
+    // Gate 5: duplicate-start percentage across the whole track < threshold.
+    const perLinePcts = track!.lines.map(duplicateStartPct);
+    const allDuplicate =
+      perLinePcts.reduce(
+        (s, p, i) => s + p * (track!.lines[i].words?.length ?? 0),
+        0,
+      ) / Math.max(1, totalWords);
+    expect(
+      allDuplicate,
+      `Weighted duplicate_start_pct ${allDuplicate.toFixed(2)}% exceeds ${MAX_DUPLICATE_PCT}% — ` +
+        `alignment is degenerate (multiple words share start_ms on many lines).`,
+    ).toBeLessThan(MAX_DUPLICATE_PCT);
+
+    // Gate 6: >= MIN_STDDEV_LINES lines show real inter-word timing variation.
+    const stddevLines = track!.lines.filter(
+      (l) => gapStddevMs(l) >= MIN_STDDEV_MS,
+    ).length;
+    expect(
+      stddevLines,
+      `Only ${stddevLines} lines have gap_stddev >= ${MIN_STDDEV_MS}ms ` +
+        `(need >= ${MIN_STDDEV_LINES}). Even spacing is a signature of a synthetic ` +
+        `post-processor, not a real aligner.`,
+    ).toBeGreaterThanOrEqual(MIN_STDDEV_LINES);
+
+    console.log(
+      `#148 alignment OK: lines=${track!.lines.length} ` +
+        `words=${totalWords} dup%=${allDuplicate.toFixed(2)} ` +
+        `stddev_lines=${stddevLines}`,
+    );
+  });
 });
