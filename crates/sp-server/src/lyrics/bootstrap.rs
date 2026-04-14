@@ -39,7 +39,7 @@ pub async fn is_ready(python_path: &Path) -> bool {
     let mut cmd = Command::new(python_path);
     cmd.args([
         "-c",
-        "import qwen_asr, torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)",
+        "import qwen_asr, torch, audio_separator, sys; sys.exit(0 if torch.cuda.is_available() else 1)",
     ]);
     #[cfg(windows)]
     {
@@ -255,5 +255,18 @@ mod tests {
     async fn is_ready_false_when_missing() {
         let result = is_ready(Path::new("/definitely/not/a/real/path/python")).await;
         assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn is_ready_import_string_includes_audio_separator() {
+        // This is a static check: the import string used by is_ready must
+        // name every package the aligner+isolator depend on. If someone
+        // drops audio_separator from the bootstrap but forgets to add it
+        // back here, this test fails.
+        let src = include_str!("bootstrap.rs");
+        assert!(
+            src.contains("import qwen_asr, torch, audio_separator, sys"),
+            "is_ready check must import audio_separator alongside qwen_asr + torch"
+        );
     }
 }
