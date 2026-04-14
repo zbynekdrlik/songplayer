@@ -306,4 +306,55 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       }
     }
   });
+
+  test("at least one lyrics JSON has word-level timestamps", async ({ request }) => {
+    const playlistsResp = await request.get("/api/v1/playlists");
+    expect(playlistsResp.ok()).toBe(true);
+    const playlists: PlaylistEntry[] = await playlistsResp.json();
+    expect(playlists.length).toBeGreaterThan(0);
+
+    let foundWordLevel = false;
+    let checkedVideos = 0;
+
+    for (const pl of playlists) {
+      const videosResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+      if (!videosResp.ok()) continue;
+      const videos: VideoEntry[] = await videosResp.json();
+
+      for (const v of videos) {
+        if (checkedVideos >= 30) break;
+        const lyricsResp = await request.get(`/api/v1/videos/${v.id}/lyrics`);
+        if (!lyricsResp.ok()) continue;
+        checkedVideos++;
+
+        const track = await lyricsResp.json();
+        if (!Array.isArray(track.lines)) continue;
+
+        const lineWithWords = track.lines.find(
+          (l: any) =>
+            Array.isArray(l.words) &&
+            l.words.length > 0 &&
+            l.words.every(
+              (w: any) =>
+                typeof w.text === "string" &&
+                typeof w.start_ms === "number" &&
+                typeof w.end_ms === "number" &&
+                w.end_ms >= w.start_ms,
+            ),
+        );
+
+        if (lineWithWords) {
+          foundWordLevel = true;
+          break;
+        }
+      }
+      if (foundWordLevel) break;
+    }
+
+    expect(
+      foundWordLevel,
+      `No video had word-level timestamps after checking ${checkedVideos} lyrics files. ` +
+        `If the aligner ran, at least one song should have track.lines[i].words populated.`,
+    ).toBe(true);
+  });
 });
