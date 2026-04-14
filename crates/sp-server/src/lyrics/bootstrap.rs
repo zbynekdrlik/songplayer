@@ -65,7 +65,7 @@ pub async fn ensure_ready(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (tools_dir, script_path, models_dir, system_python);
-        return Ok(None);
+        Ok(None)
     }
 
     #[cfg(target_os = "windows")]
