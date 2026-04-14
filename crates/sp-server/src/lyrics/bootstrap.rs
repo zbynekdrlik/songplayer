@@ -22,8 +22,10 @@ pub fn venv_python_path(tools_dir: &Path) -> PathBuf {
     tools_dir.join("lyrics_venv").join("bin").join("python")
 }
 
-/// Returns `true` if `python_path` exists AND running `python_path -c "import qwen_asr"`
-/// exits 0 within 10 seconds. Used to decide whether bootstrap is needed.
+/// Returns `true` if `python_path` exists AND `python_path -c "..."` confirms
+/// both `qwen_asr` is importable AND `torch.cuda.is_available()`. Used to
+/// decide whether bootstrap is needed. A venv with CPU-only torch fails this
+/// check so the bootstrap re-runs and installs the CUDA variant.
 #[cfg_attr(test, mutants::skip)]
 pub async fn is_ready(python_path: &Path) -> bool {
     use tokio::process::Command;
@@ -33,14 +35,17 @@ pub async fn is_ready(python_path: &Path) -> bool {
     }
 
     let mut cmd = Command::new(python_path);
-    cmd.args(["-c", "import qwen_asr"]);
+    cmd.args([
+        "-c",
+        "import qwen_asr, torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)",
+    ]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
 
-    let res = tokio::time::timeout(std::time::Duration::from_secs(10), cmd.status()).await;
+    let res = tokio::time::timeout(std::time::Duration::from_secs(15), cmd.status()).await;
 
     matches!(res, Ok(Ok(s)) if s.success())
 }
@@ -126,6 +131,41 @@ pub async fn ensure_ready(
             };
         if !pip_status.success() {
             anyhow::bail!("pip install qwen-asr exited with status {pip_status}");
+        }
+
+        // 2b. Force-reinstall torch with CUDA support. qwen-asr pulls the
+        // CPU-only torch wheel from PyPI by default; Qwen3-ForcedAligner
+        // inference on a 4-minute audio without CUDA takes minutes instead
+        // of seconds. Install the cu124 variant from the PyTorch index.
+        tracing::info!("lyrics bootstrap: installing CUDA torch variant");
+        let mut torch_pip = Command::new(&venv_python);
+        torch_pip.args([
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--force-reinstall",
+            "torch",
+            "--index-url",
+            "https://download.pytorch.org/whl/cu124",
+        ]);
+        torch_pip.creation_flags(0x08000000);
+        let mut torch_child = torch_pip
+            .spawn()
+            .context("failed to spawn torch pip install")?;
+        let torch_status =
+            match tokio::time::timeout(std::time::Duration::from_secs(900), torch_child.wait())
+                .await
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => anyhow::bail!("torch CUDA install failed: {e}"),
+                Err(_) => {
+                    let _ = torch_child.kill().await;
+                    anyhow::bail!("torch CUDA install timed out after 15 minutes");
+                }
+            };
+        if !torch_status.success() {
+            anyhow::bail!("torch CUDA install exited with status {torch_status}");
         }
 
         // 3. Preload the model so the first song doesn't pay the 1.2GB download.
