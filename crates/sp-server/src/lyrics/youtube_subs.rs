@@ -52,7 +52,6 @@ pub async fn fetch_subtitles(
     let mut cmd = Command::new(ytdlp_path);
     cmd.args([
         "--write-subs",
-        "--write-auto-subs",
         "--sub-format",
         "json3",
         "--sub-lang",
@@ -329,5 +328,23 @@ mod tests {
 
         let result = parse_json3(content).unwrap();
         assert!(result.is_none());
+    }
+
+    /// The yt-dlp invocation must NOT pass the auto-subs flag.
+    /// Auto-generated captions are unusable (overlapping words, [music] markers,
+    /// duplicated timestamps). Only author-uploaded manual subs are acceptable.
+    #[test]
+    fn fetch_subtitles_source_does_not_contain_auto_subs_flag() {
+        let src = include_str!("youtube_subs.rs");
+        // Check that the arg list does NOT contain the auto-subs option.
+        // Split on "cmd.args([" to isolate just the invocation.
+        let start = src.find("cmd.args([").expect("Should find cmd.args");
+        let args_section = &src[start..];
+        let end = args_section.find("])").expect("Should find closing ]");
+        let invocation = &args_section[..end + 2];
+        assert!(
+            !invocation.contains("--write-auto-subs"),
+            "yt-dlp args must not include --write-auto-subs flag"
+        );
     }
 }
