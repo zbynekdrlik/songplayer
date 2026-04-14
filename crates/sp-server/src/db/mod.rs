@@ -16,6 +16,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (5, MIGRATION_V5),
     (6, MIGRATION_V6),
     (7, MIGRATION_V7),
+    (8, MIGRATION_V8),
 ];
 
 const MIGRATION_V1: &str = "
@@ -117,6 +118,15 @@ const MIGRATION_V7: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
 ";
 
+// V8 = reset lrclib+qwen3* rows to 'lrclib' so retry_missing_alignment
+// picks them up and re-runs word-level alignment through the new
+// vocal-isolation pipeline (Mel-Roformer + Qwen3-ForcedAligner). The
+// English lyrics JSON on disk is preserved — only its per-word timestamps
+// will be re-populated in place. No LRCLIB re-fetch, no Gemini re-translation.
+const MIGRATION_V8: &str = "
+UPDATE videos SET lyrics_source = 'lrclib' WHERE lyrics_source LIKE 'lrclib+qwen3%';
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -200,7 +210,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 7);
+        assert_eq!(ver, 8);
     }
 
     #[tokio::test]
@@ -209,7 +219,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 7);
+        assert_eq!(ver, 8);
     }
 
     #[tokio::test]
@@ -617,5 +627,83 @@ mod tests {
         let playlists = models::get_active_playlists(&pool).await.unwrap();
         assert_eq!(playlists.len(), 1);
         assert_eq!(playlists[0].ndi_output_name, "SP-test");
+    }
+
+    #[tokio::test]
+    async fn migration_v8_downgrades_qwen3_rows_to_lrclib() {
+        let pool = create_memory_pool().await.expect("memory pool");
+        run_migrations(&pool).await.expect("migrations");
+
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'test', 'u', 'n', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, title, has_lyrics, lyrics_source) \
+             VALUES (1, 1, 'aaaaaaaaaaa', 't', 1, 'lrclib+qwen3'), \
+                    (2, 1, 'bbbbbbbbbbb', 't', 1, 'lrclib'), \
+                    (3, 1, 'ccccccccccc', 't', 0, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Simulate a row that would have been at schema_version=7 before V8.
+        // run_migrations is idempotent: since the pool already ran through V8,
+        // we have to rewind schema_version and apply V8 manually to prove V8
+        // itself does the right thing on top of V7 state.
+        sqlx::query("UPDATE videos SET lyrics_source = 'lrclib+qwen3' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Re-run migrations: already at version 8 so this is a no-op, but the
+        // point of the assertion below is that after the full migration chain
+        // has been applied, any row currently labeled lrclib+qwen3 was (or
+        // would have been) reset by V8. For an already-migrated DB we instead
+        // apply the V8 SQL directly so the test is deterministic.
+        let v8_sql = MIGRATIONS
+            .iter()
+            .find(|(v, _)| *v == 8)
+            .expect("V8 migration is registered")
+            .1;
+        for stmt in v8_sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            sqlx::query(stmt).execute(&pool).await.unwrap();
+        }
+
+        let (v1_src, v1_has): (Option<String>, i64) =
+            sqlx::query_as("SELECT lyrics_source, has_lyrics FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            v1_src.as_deref(),
+            Some("lrclib"),
+            "V8 must downgrade lrclib+qwen3 to lrclib"
+        );
+        assert_eq!(
+            v1_has, 1,
+            "has_lyrics must stay 1 so retry_missing_alignment picks the row up without refetching"
+        );
+
+        let (v2_src, v2_has): (Option<String>, i64) =
+            sqlx::query_as("SELECT lyrics_source, has_lyrics FROM videos WHERE id = 2")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(v2_src.as_deref(), Some("lrclib"));
+        assert_eq!(v2_has, 1);
+
+        let (v3_src, v3_has): (Option<String>, i64) =
+            sqlx::query_as("SELECT lyrics_source, has_lyrics FROM videos WHERE id = 3")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(v3_src, None);
+        assert_eq!(v3_has, 0);
     }
 }
