@@ -325,21 +325,17 @@ pub fn ensure_progressive_words(line: &mut LyricsLine) {
 
     // Case B: aligner produced some real timestamps. Clamp into the
     // LRCLIB line range and enforce strictly-increasing start_ms.
+    // Use `.max(...)` (not if-branches) so cargo-mutants has no
+    // conditional operators to flip into equivalent mutants.
     for w in words.iter_mut() {
         w.start_ms = w.start_ms.clamp(line_start, line_end);
-        if w.end_ms < w.start_ms {
-            w.end_ms = w.start_ms;
-        }
+        w.end_ms = w.end_ms.max(w.start_ms);
     }
     let n = words.len();
     for i in 1..n {
-        let prev = words[i - 1].start_ms;
-        if words[i].start_ms <= prev {
-            words[i].start_ms = prev + 1;
-            if words[i].end_ms < words[i].start_ms {
-                words[i].end_ms = words[i].start_ms;
-            }
-        }
+        let min_next = words[i - 1].start_ms + 1;
+        words[i].start_ms = words[i].start_ms.max(min_next);
+        words[i].end_ms = words[i].end_ms.max(words[i].start_ms);
     }
 
     // If the +1ms chain pushed the last word past line_end, the aligner
@@ -834,6 +830,64 @@ mod tests {
         assert_eq!(w[3].end_ms, 116);
         assert_eq!(w[4].start_ms, 116);
         assert_eq!(w[4].end_ms, 120);
+    }
+
+    #[test]
+    fn progressive_last_word_exactly_at_line_end_no_fallback() {
+        // Input that already lands with last word = line_end exactly,
+        // no strict-increase bump needed. Fallback MUST NOT trigger
+        // (tests the `>` operator vs `>=`).
+        let mut line = line_with_words(
+            1000,
+            2000,
+            "a b c",
+            vec![(1500, 1600, "a"), (1800, 1900, "b"), (2000, 2000, "c")],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        // Values must be preserved exactly — fallback would redistribute.
+        assert_eq!(w[0].start_ms, 1500);
+        assert_eq!(w[1].start_ms, 1800);
+        assert_eq!(w[2].start_ms, 2000);
+    }
+
+    #[test]
+    fn progressive_zero_duration_line_uses_1ms_guard() {
+        // LRCLIB line with end_ms == start_ms (zero duration). The guard
+        // `line_end.max(line_start + 1)` ensures at least 1ms of range so
+        // arithmetic below is well-defined. Tests `+ 1` vs `* 1` mutation.
+        let mut line = line_with_words(
+            1000,
+            1000, // same as start_ms → 0 duration
+            "a b",
+            vec![(0, 0, "a"), (0, 0, "b")],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        // Case A fires (all-zero). span = max(1000, 1001) - 1000 = 1.
+        // Distribution: 1000 + 1*i/2 → [1000, 1000]
+        // Then strict-increase won't run (Case A returns), so words may
+        // equal each other. The GUARD ensures span is at least 1 (not 0).
+        // With `+1` guard: span = 1, distribution well-defined.
+        // With `*1` mutation: span = 0, still well-defined but no spread.
+        // Both produce [1000, 1000] so this specific case is
+        // equivalent — add a non-zero-start case to discriminate.
+        //
+        // Better test: zero-duration line, non-zero aligned input.
+        let mut line2 = line_with_words(1000, 1000, "a b", vec![(500, 500, "a"), (500, 500, "b")]);
+        ensure_progressive_words(&mut line2);
+        let w2 = line2.words.unwrap();
+        // With `+1`: line_end=1001, clamp→[1000,1000], strict→[1000,1001],
+        //           last(1001) > line_end(1001)? no → keep → [1000, 1001]
+        // With `*1`: line_end=1000, clamp→[1000,1000], strict→[1000,1001],
+        //           last(1001) > line_end(1000)? yes → fallback with span=0
+        //           → [1000, 1000] (still degenerate).
+        assert_eq!(w2[0].start_ms, 1000);
+        assert_eq!(
+            w2[1].start_ms, 1001,
+            "with +1 guard, last word should stay at 1001 (no fallback)"
+        );
+        let _ = w; // silence unused warning for first line block
     }
 
     #[test]
