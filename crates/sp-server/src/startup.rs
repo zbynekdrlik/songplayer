@@ -66,32 +66,11 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         .await?;
     }
 
-    // Delete all stale lyrics sidecar files. The lyrics worker will recreate
-    // them from clean sources (LRCLIB). This ensures migration V6's reset
-    // actually takes effect and old YouTube garbage isn't preserved.
-    for (video_id, path) in &scan.lyrics_files {
-        if let Err(e) = std::fs::remove_file(path) {
-            tracing::warn!("failed to remove stale lyrics file {}: {e}", path.display());
-        }
-        // Reset DB row so it matches disk state even if migrations V6/V7 didn't run.
-        let _ = sqlx::query(
-            "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE youtube_id = ?",
-        )
-        .bind(video_id)
-        .execute(pool)
-        .await;
-    }
-    if !scan.lyrics_files.is_empty() {
-        tracing::info!(
-            "removed {} stale lyrics sidecar files for reprocessing",
-            scan.lyrics_files.len()
-        );
-    }
-
     // Detect DB/disk mismatch: rows marked has_lyrics=1 but JSON file is gone.
-    // This happens when a previous deploy's self-heal already deleted the
-    // files; the DB thinks they exist so the worker skips them. Reset so the
-    // worker reprocesses.
+    // This was originally a wholesale delete-all-lyrics-and-reset loop from
+    // PR #24's migration, but that caused Gemini quota burn on every restart
+    // (N songs × 1 Gemini translation call per restart). Now we only reset
+    // rows where the file is genuinely missing — a truly idempotent self-heal.
     let claimed_rows = sqlx::query("SELECT youtube_id FROM videos WHERE has_lyrics = 1")
         .fetch_all(pool)
         .await?;
