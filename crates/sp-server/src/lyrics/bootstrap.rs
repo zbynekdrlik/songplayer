@@ -161,14 +161,55 @@ pub async fn ensure_ready(
             );
         }
 
-        // 2a. Force-reinstall torch with CUDA support. qwen-asr pulls the
-        // CPU-only torch wheel from PyPI by default; Qwen3-ForcedAligner
-        // inference on a 4-minute audio without CUDA takes minutes instead
-        // of seconds. Install the cu124 variant from the PyTorch index.
+        // 2a. Install audio-separator[gpu] for Mel-Roformer vocal isolation.
+        // This preprocessing step runs before Qwen3-ForcedAligner; without
+        // vocal isolation the aligner produces degenerate timestamps on
+        // sung music (instruments mask phoneme boundaries).
         //
-        // Ordering: this MUST run BEFORE step 2b (audio-separator) so the
-        // latter sees CUDA torch already in place and does not downgrade it
-        // via its own transitive deps.
+        // Ordering: install BEFORE the CUDA torch force-reinstall below.
+        // `audio-separator[gpu]` pulls onnxruntime-gpu plus its own torch
+        // build — installing it AFTER cu124 torch was observed to clobber
+        // cu124 with the audio-separator sibling torch, breaking CUDA in
+        // `is_ready`. Installing it BEFORE means the final force-reinstall
+        // of cu124 torch in step 2b is authoritative and wins.
+        tracing::info!(
+            "lyrics bootstrap: installing {AUDIO_SEPARATOR_PACKAGE} (Mel-Roformer vocal isolation)"
+        );
+        let mut sep_pip = Command::new(&venv_python);
+        sep_pip.args(["-m", "pip", "install", "-U", AUDIO_SEPARATOR_PACKAGE]);
+        sep_pip.creation_flags(0x08000000);
+        let mut sep_child = sep_pip
+            .spawn()
+            .context("failed to spawn pip install audio-separator")?;
+        let sep_status = match tokio::time::timeout(
+            std::time::Duration::from_secs(AUDIO_SEPARATOR_PIP_TIMEOUT_SECS),
+            sep_child.wait(),
+        )
+        .await
+        {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => anyhow::bail!("pip install audio-separator spawn failed: {e}"),
+            Err(_) => {
+                let _ = sep_child.kill().await;
+                anyhow::bail!(
+                    "pip install audio-separator timed out after {AUDIO_SEPARATOR_PIP_TIMEOUT_SECS} s"
+                );
+            }
+        };
+        if !sep_status.success() {
+            tracing::warn!(
+                "lyrics bootstrap: pip install audio-separator exited {sep_status} (tolerated, final is_ready check decides)"
+            );
+        }
+
+        // 2b. Force-reinstall torch with CUDA support. qwen-asr pulls the
+        // CPU-only torch wheel from PyPI by default, and `audio-separator[gpu]`
+        // in step 2a pulls its own sibling torch build that clobbers cu124
+        // unless we run this AFTER it. Qwen3-ForcedAligner inference on a
+        // 4-minute audio without CUDA takes minutes instead of seconds.
+        // Install the cu124 variant from the PyTorch index LAST so it wins
+        // — pip `--force-reinstall` on `torch` alone replaces whatever
+        // torch build the earlier steps left behind.
         tracing::info!("lyrics bootstrap: installing CUDA torch variant");
         let mut torch_pip = Command::new(&venv_python);
         torch_pip.args([
@@ -199,41 +240,6 @@ pub async fn ensure_ready(
         if !torch_status.success() {
             tracing::warn!(
                 "lyrics bootstrap: torch CUDA install exited {torch_status} (tolerated, final is_ready check decides)"
-            );
-        }
-
-        // 2b. Install audio-separator[gpu] for Mel-Roformer vocal isolation.
-        // This preprocessing step runs before Qwen3-ForcedAligner; without
-        // vocal isolation the aligner produces degenerate timestamps on
-        // sung music (instruments mask phoneme boundaries).
-        // Same exit-code tolerance as qwen-asr: final is_ready check decides.
-        tracing::info!(
-            "lyrics bootstrap: installing {AUDIO_SEPARATOR_PACKAGE} (Mel-Roformer vocal isolation)"
-        );
-        let mut sep_pip = Command::new(&venv_python);
-        sep_pip.args(["-m", "pip", "install", "-U", AUDIO_SEPARATOR_PACKAGE]);
-        sep_pip.creation_flags(0x08000000);
-        let mut sep_child = sep_pip
-            .spawn()
-            .context("failed to spawn pip install audio-separator")?;
-        let sep_status = match tokio::time::timeout(
-            std::time::Duration::from_secs(AUDIO_SEPARATOR_PIP_TIMEOUT_SECS),
-            sep_child.wait(),
-        )
-        .await
-        {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => anyhow::bail!("pip install audio-separator spawn failed: {e}"),
-            Err(_) => {
-                let _ = sep_child.kill().await;
-                anyhow::bail!(
-                    "pip install audio-separator timed out after {AUDIO_SEPARATOR_PIP_TIMEOUT_SECS} s"
-                );
-            }
-        };
-        if !sep_status.success() {
-            tracing::warn!(
-                "lyrics bootstrap: pip install audio-separator exited {sep_status} (tolerated, final is_ready check decides)"
             );
         }
 
