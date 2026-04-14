@@ -13,11 +13,15 @@ Standard practice for forced alignment on sung music (WhisperX, every serious ly
 ## Revised pipeline
 
 ```
-song_audio.flac
+song_audio.flac (typically 48 kHz stereo)
    ↓
 [Mel-Roformer vocal isolation]   ← NEW: preprocessing step
    ↓
-vocal_stem.wav (mono, 44.1 kHz, vocals only)
+vocal_stem (vocals only, native rate)
+   ↓
+[Resample to 16 kHz mono float32]   ← NEW: explicit, not auto
+   ↓
+vocal_16k_mono.wav
    ↓
 [Qwen3-ForcedAligner-0.6B]       ← unchanged from prior design
    ↓
@@ -27,6 +31,8 @@ word-level timestamps (real this time)
    ↓
 {song}_lyrics.json
 ```
+
+**Sample-rate decision:** Qwen3's docstring says "All audios will be converted into mono 16k float32 arrays in [-1, 1]." The library auto-resamples, but we resample explicitly for three reasons: (1) we control the mono-conversion strategy (avoid silent failures on hard-panned vocals), (2) smaller intermediate file → faster subprocess I/O, (3) eliminates dependency on `normalize_audios()` internal behavior across qwen-asr versions.
 
 ## Vocal isolation: Mel-Roformer
 
@@ -95,14 +101,28 @@ sys.exit(0 if torch.cuda.is_available() else 1)
 New helper:
 ```python
 def _isolate_vocals(audio_path: str, models_dir: str) -> str:
-    """Run Mel-Roformer to extract vocal stem. Returns path to temp wav."""
+    """Run Mel-Roformer to extract vocal stem, then resample to 16 kHz mono.
+    Returns path to a 16k mono float32 WAV ready for Qwen3."""
     from audio_separator.separator import Separator
+    import soundfile as sf
+    import librosa
+    import tempfile, os
+
     sep = Separator(model_file_dir=models_dir, output_format="WAV")
     sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
-    out = sep.separate(audio_path)  # returns list; vocal track is one of them
-    # Find vocal stem path
-    vocal = [p for p in out if "Vocals" in p][0]
-    return vocal
+    out = sep.separate(audio_path)
+    vocal_path = [p for p in out if "Vocals" in p][0]
+
+    # Resample to exactly 16 kHz mono float32 — Qwen3's expected input.
+    # We do this explicitly to avoid relying on qwen_asr's internal
+    # normalize_audios() behavior, and to avoid losing energy on
+    # hard-panned vocals from a naive L+R average.
+    audio, _ = librosa.load(vocal_path, sr=16000, mono=True)
+    fd, resampled_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    sf.write(resampled_path, audio, 16000, subtype="FLOAT")
+    os.remove(vocal_path)  # free disk; only need the resampled version
+    return resampled_path
 ```
 
 Modify `cmd_align`:
