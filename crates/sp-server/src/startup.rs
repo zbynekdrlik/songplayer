@@ -88,6 +88,31 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         );
     }
 
+    // Detect DB/disk mismatch: rows marked has_lyrics=1 but JSON file is gone.
+    // This happens when a previous deploy's self-heal already deleted the
+    // files; the DB thinks they exist so the worker skips them. Reset so the
+    // worker reprocesses.
+    let claimed_rows = sqlx::query("SELECT youtube_id FROM videos WHERE has_lyrics = 1")
+        .fetch_all(pool)
+        .await?;
+    let mut orphan_resets = 0usize;
+    for row in claimed_rows {
+        let youtube_id: String = row.get("youtube_id");
+        let json_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
+        if !json_path.exists() {
+            sqlx::query(
+                "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE youtube_id = ?",
+            )
+            .bind(&youtube_id)
+            .execute(pool)
+            .await?;
+            orphan_resets += 1;
+        }
+    }
+    if orphan_resets > 0 {
+        tracing::info!("reset {orphan_resets} DB rows claiming has_lyrics=1 but missing JSON file");
+    }
+
     Ok(())
 }
 
