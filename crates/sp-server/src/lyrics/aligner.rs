@@ -227,19 +227,24 @@ pub async fn align_chunks(
 mod tests {
     /// Audit: retired symbols must no longer be referenced from this file.
     /// Keeps the compiler from being the only line of defence against a
-    /// dangling `pub use aligner::align_lyrics` re-export leaking back in.
+    /// dangling re-export of the old API leaking back in.
+    ///
+    /// NOTE: banned symbol names are split across two string literals joined
+    /// at runtime so this test file does not contain the verbatim string it is
+    /// checking for (which would cause the test to always fail on itself).
     #[test]
     fn aligner_source_has_no_retired_symbols() {
         let src = include_str!("aligner.rs");
-        for banned in [
-            "align_lyrics",
-            "merge_word_timings",
-            "ensure_progressive_words",
-            "count_duplicate_start_ms",
-        ] {
+        let banned = [
+            ["align", "_lyrics"].concat(),
+            ["merge_word", "_timings"].concat(),
+            ["ensure_progressive", "_words"].concat(),
+            ["count_duplicate", "_start_ms"].concat(),
+        ];
+        for sym in &banned {
             assert!(
-                !src.contains(banned),
-                "aligner.rs must not contain retired symbol `{banned}`"
+                !src.contains(sym.as_str()),
+                "aligner.rs must not contain retired symbol `{sym}`"
             );
         }
     }

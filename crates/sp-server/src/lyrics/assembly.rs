@@ -16,7 +16,7 @@
 //! the renderer can detect and skip them. Over-aligned chunks drop the
 //! surplus words.
 
-use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
+use sp_core::lyrics::{LyricsTrack, LyricsWord};
 
 #[derive(Debug, Clone)]
 pub struct AlignedWord {
@@ -79,6 +79,7 @@ pub fn assemble(mut original: LyricsTrack, results: Vec<ChunkResult>) -> LyricsT
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sp_core::lyrics::LyricsLine;
 
     fn line(start_ms: u64, end_ms: u64, en: &str) -> LyricsLine {
         LyricsLine {

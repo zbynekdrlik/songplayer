@@ -92,57 +92,7 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         tracing::info!("reset {orphan_resets} DB rows claiming has_lyrics=1 but missing JSON file");
     }
 
-    // Repair degenerate word-level timestamps in existing _lyrics.json files.
-    // Qwen3-ForcedAligner sometimes emits runs of identical start_ms for
-    // hard-to-align phrases; idempotent fix distributes them evenly across
-    // the LRCLIB line's duration.
-    let repaired = repair_degenerate_word_timings(cache_dir).await;
-    if repaired > 0 {
-        tracing::info!("repaired degenerate word timestamps in {repaired} lyrics JSON files");
-    }
-
     Ok(())
-}
-
-/// Scan `cache_dir` for `*_lyrics.json` files and apply
-/// `aligner::ensure_progressive_words` to each line in-place. Returns the
-/// count of files that were actually modified. Idempotent: the helper is a
-/// no-op when words are already strictly increasing, so files without
-/// degenerate data are read but not rewritten.
-#[cfg_attr(test, mutants::skip)]
-async fn repair_degenerate_word_timings(cache_dir: &Path) -> usize {
-    let Ok(mut entries) = tokio::fs::read_dir(cache_dir).await else {
-        return 0;
-    };
-    let mut fixed = 0usize;
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if !name.ends_with("_lyrics.json") {
-            continue;
-        }
-        let Ok(bytes) = tokio::fs::read(&path).await else {
-            continue;
-        };
-        let Ok(mut track) = serde_json::from_slice::<sp_core::lyrics::LyricsTrack>(&bytes) else {
-            continue;
-        };
-        let before = track.clone();
-        for line in &mut track.lines {
-            crate::lyrics::aligner::ensure_progressive_words(line);
-        }
-        if track != before {
-            let Ok(new_bytes) = serde_json::to_vec(&track) else {
-                continue;
-            };
-            if tokio::fs::write(&path, &new_bytes).await.is_ok() {
-                fixed += 1;
-            }
-        }
-    }
-    fixed
 }
 
 /// Trigger a one-time playlist sync for every active playlist at startup.
