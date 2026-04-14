@@ -254,6 +254,15 @@ def cmd_preload(args):
     print(json.dumps({"loaded": True, "device": device_map}))
 
 
+def cmd_isolate_vocals(args):
+    """Diagnostic: run Mel-Roformer vocal isolation + 16 kHz mono resample
+    on a given audio file and print the resulting WAV path. Useful for
+    manual validation on win-resolume after deploy. The caller owns the
+    resulting file and should delete it when done."""
+    path = _isolate_vocals(args.audio, args.models_dir)
+    print(json.dumps({"vocal_path": path}))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Qwen3 ML helper for lyrics alignment and transcription"
@@ -283,6 +292,14 @@ def main():
     # preload
     subparsers.add_parser("preload", help="Download + load model to surface failures early")
 
+    # isolate-vocals
+    p_iso = subparsers.add_parser(
+        "isolate-vocals",
+        help="Isolate vocals with Mel-Roformer and resample to 16 kHz mono (diagnostic)",
+    )
+    p_iso.add_argument("--audio", required=True, help="Path to mixed audio file")
+    p_iso.add_argument("--models-dir", required=True, help="Directory containing models")
+
     args = parser.parse_args()
 
     dispatch = {
@@ -291,6 +308,7 @@ def main():
         "transcribe": cmd_transcribe,
         "align": cmd_align,
         "preload": cmd_preload,
+        "isolate-vocals": cmd_isolate_vocals,
     }
 
     try:
