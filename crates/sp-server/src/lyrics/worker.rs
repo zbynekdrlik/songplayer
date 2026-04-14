@@ -299,11 +299,17 @@ impl LyricsWorker {
         let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let content = match tokio::fs::read_to_string(&lyrics_path).await {
             Ok(c) => c,
-            Err(_) => return,
+            Err(e) => {
+                debug!("lyrics retry: failed to read {youtube_id}_lyrics.json: {e}");
+                return;
+            }
         };
         let mut track: LyricsTrack = match serde_json::from_str(&content) {
             Ok(t) => t,
-            Err(_) => return,
+            Err(e) => {
+                debug!("lyrics retry: failed to parse {youtube_id}_lyrics.json: {e}");
+                return;
+            }
         };
 
         info!("lyrics_worker: retrying translation for {youtube_id}");

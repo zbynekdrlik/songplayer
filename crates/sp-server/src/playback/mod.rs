@@ -657,11 +657,10 @@ impl PlaybackEngine {
         });
     }
 
-    /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
-    ///
-    /// Skips the broadcast if less than
-    /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
     /// Send empty lyrics to dashboard and Resolume to clear stale display.
+    ///
+    /// Called when switching to a song without subtitles so the previous
+    /// song's lyrics don't linger on screen.
     #[cfg_attr(test, mutants::skip)]
     fn clear_lyrics_display(&self, playlist_id: i64) {
         let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
@@ -678,6 +677,10 @@ impl PlaybackEngine {
             .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
     }
 
+    /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
+    ///
+    /// Skips the broadcast if less than
+    /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
     /// broadcast for the same playlist.
     fn maybe_broadcast_position_update(
         &mut self,

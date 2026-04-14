@@ -69,10 +69,17 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     // Delete all stale lyrics sidecar files. The lyrics worker will recreate
     // them from clean sources (LRCLIB). This ensures migration V6's reset
     // actually takes effect and old YouTube garbage isn't preserved.
-    for (_video_id, path) in &scan.lyrics_files {
+    for (video_id, path) in &scan.lyrics_files {
         if let Err(e) = std::fs::remove_file(path) {
             tracing::warn!("failed to remove stale lyrics file {}: {e}", path.display());
         }
+        // Reset DB row so it matches disk state even if migrations V6/V7 didn't run.
+        let _ = sqlx::query(
+            "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE youtube_id = ?",
+        )
+        .bind(video_id)
+        .execute(pool)
+        .await;
     }
     if !scan.lyrics_files.is_empty() {
         tracing::info!(

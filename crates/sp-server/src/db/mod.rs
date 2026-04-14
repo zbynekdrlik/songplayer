@@ -101,10 +101,18 @@ ALTER TABLE videos ADD COLUMN lyrics_source TEXT;
 ALTER TABLE playlists ADD COLUMN karaoke_enabled INTEGER NOT NULL DEFAULT 1;
 ";
 
+// V6 resets all lyrics after disabling YouTube auto-subs source.
+// Forces reprocessing with LRCLIB-only (clean lyrics).
 const MIGRATION_V6: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
 ";
 
+// V7 = re-run of V6's lyrics reset.
+//
+// V6 ran on machines before the startup.rs stale-file cleanup landed.
+// On those machines, normalized rows were re-linked to stale lyrics files
+// that still existed on disk, short-circuiting the reprocessing intent.
+// V7 forces another reset now that startup actually deletes those files.
 const MIGRATION_V7: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
 ";

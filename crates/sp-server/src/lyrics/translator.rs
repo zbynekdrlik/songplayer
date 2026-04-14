@@ -29,12 +29,13 @@ pub async fn translate_lyrics(api_key: &str, model: &str, track: &mut LyricsTrac
     let body = build_translation_body(model, &numbered, line_count);
 
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model, api_key
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+        model
     );
 
     let resp = client
         .post(&url)
+        .header("x-goog-api-key", api_key)
         .json(&body)
         .timeout(Duration::from_secs(30))
         .send()

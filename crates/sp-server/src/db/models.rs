@@ -388,22 +388,21 @@ pub async fn get_next_video_missing_translation(
          FROM videos v \
          JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.has_lyrics = 1 AND p.is_active = 1 \
-         ORDER BY v.id LIMIT 10",
+         ORDER BY v.id",
     )
     .fetch_all(pool)
     .await?;
 
     for (id, youtube_id) in rows {
         let path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
-        if !path.exists() {
-            continue;
-        }
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(track) = serde_json::from_str::<sp_core::lyrics::LyricsTrack>(&content) {
-                let has_sk = track.lines.iter().any(|l| l.sk.is_some());
-                if !has_sk {
-                    return Ok(Some((id, youtube_id)));
-                }
+        let content = match tokio::fs::read_to_string(&path).await {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if let Ok(track) = serde_json::from_str::<sp_core::lyrics::LyricsTrack>(&content) {
+            let has_sk = track.lines.iter().any(|l| l.sk.is_some());
+            if !has_sk {
+                return Ok(Some((id, youtube_id)));
             }
         }
     }
