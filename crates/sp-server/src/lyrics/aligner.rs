@@ -308,8 +308,8 @@ pub fn ensure_progressive_words(line: &mut LyricsLine) {
     let line_start = line.start_ms;
     let line_end = line.end_ms.max(line_start + 1000);
 
-    // Case A: every word has start_ms == 0 — treat as "no alignment info"
-    // and distribute evenly across the LRCLIB line duration.
+    // Case A: every word has start_ms == 0 — aligner produced nothing.
+    // Distribute evenly across the LRCLIB line duration.
     if words.iter().all(|w| w.start_ms == 0) {
         let n = words.len() as u64;
         let span = line_end - line_start;
@@ -321,54 +321,36 @@ pub fn ensure_progressive_words(line: &mut LyricsLine) {
         return;
     }
 
-    // Case B: clamp any stray 0s to line_start (aligner didn't emit
-    // timing for head words but others are fine).
+    // Case B: aligner produced some real timestamps. Clamp into the
+    // LRCLIB line range and enforce strictly-increasing start_ms.
     for w in words.iter_mut() {
-        if w.start_ms < line_start {
-            w.start_ms = line_start;
-        }
+        w.start_ms = w.start_ms.clamp(line_start, line_end);
         if w.end_ms < w.start_ms {
             w.end_ms = w.start_ms;
         }
     }
-
-    // Case C: walk the word list, find runs where start_ms doesn't
-    // strictly increase, and redistribute those runs evenly between the
-    // preceding unique timestamp and the following unique timestamp (or
-    // line_end).
-    let len = words.len();
-    let mut i = 0;
-    while i < len {
-        // Find end of a run where start_ms does not strictly increase
-        // past words[i].
-        let run_start = i;
-        let base = words[run_start].start_ms;
-        let mut run_end = run_start;
-        while run_end + 1 < len && words[run_end + 1].start_ms <= base {
-            run_end += 1;
-        }
-
-        if run_end > run_start {
-            let range_start = base;
-            let range_end = if run_end + 1 < len {
-                words[run_end + 1].start_ms
-            } else {
-                line_end.max(range_start + 1)
-            };
-            let span = range_end.saturating_sub(range_start).max(1);
-            let run_len = (run_end - run_start + 1) as u64;
-            for (offset, w) in words
-                .iter_mut()
-                .skip(run_start)
-                .take(run_end - run_start + 1)
-                .enumerate()
-            {
-                let j = offset as u64;
-                w.start_ms = range_start + span * j / run_len;
-                w.end_ms = range_start + span * (j + 1) / run_len;
+    let n = words.len();
+    for i in 1..n {
+        let prev = words[i - 1].start_ms;
+        if words[i].start_ms <= prev {
+            words[i].start_ms = prev + 1;
+            if words[i].end_ms < words[i].start_ms {
+                words[i].end_ms = words[i].start_ms;
             }
         }
-        i = run_end + 1;
+    }
+
+    // If the +1ms chain pushed the last word past line_end, the aligner
+    // output was so degenerate that we have no real information — fall
+    // back to even distribution across the LRCLIB line range.
+    if words[n - 1].start_ms > line_end {
+        let n_u = n as u64;
+        let span = line_end - line_start;
+        for (i, w) in words.iter_mut().enumerate() {
+            let i = i as u64;
+            w.start_ms = line_start + span * i / n_u;
+            w.end_ms = line_start + span * (i + 1) / n_u;
+        }
     }
 }
 
@@ -752,6 +734,46 @@ mod tests {
         assert_eq!(w.len(), 1);
         // Single word: no adjustment needed (len < 2 short-circuit)
         assert_eq!(w[0].start_ms, 0);
+    }
+
+    #[test]
+    fn progressive_words_outside_line_bounds_clamped_and_fixed() {
+        // Observed in prod: LRCLIB line says 81570-87360 but aligner put
+        // every word at 101360 (way past line_end). Old code had
+        // range_end < range_start → span=0 → all same value, still
+        // degenerate. New code clamps to line range, then enforces strict
+        // increase.
+        let mut line = line_with_words(
+            81570,
+            87360,
+            "Get up get up and praise the Lord",
+            vec![
+                (86624, 93992, "Get"),
+                (101360, 101360, "up"),
+                (101360, 101360, "get"),
+                (101360, 101360, "up"),
+                (101360, 101360, "and"),
+                (101360, 101360, "praise"),
+                (101360, 101360, "the"),
+                (101360, 101361, "Lord"),
+            ],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        // Every start_ms strictly increases
+        for pair in w.windows(2) {
+            assert!(
+                pair[0].start_ms < pair[1].start_ms,
+                "strictly increasing required, got {} → {}",
+                pair[0].start_ms,
+                pair[1].start_ms,
+            );
+        }
+        // All start_ms clamped to line range [81570, 87360]
+        for ww in &w {
+            assert!(ww.start_ms >= 81570);
+            assert!(ww.start_ms <= 87360);
+        }
     }
 
     #[test]
