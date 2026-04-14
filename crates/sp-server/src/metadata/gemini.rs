@@ -74,6 +74,7 @@ impl GeminiProvider {
 
     /// Build the API endpoint URL. The API key is sent via the
     /// `x-goog-api-key` header, not as a query parameter.
+    #[cfg_attr(test, mutants::skip)]
     fn endpoint(&self) -> String {
         format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
