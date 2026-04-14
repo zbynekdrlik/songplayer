@@ -364,6 +364,20 @@ test.describe("FLAC pipeline post-deploy verification", () => {
               const delta = Math.abs(w[0].start_ms - l.start_ms);
               if (delta > 2000) return false;
             }
+            // Inter-word gaps must vary: real singing has irregular timing,
+            // a post-processor that synthesizes perfectly-even spacing has
+            // stddev ≈ 0. Require ≥30 ms stddev so the synthetic fallback
+            // can never satisfy this assertion on its own.
+            const gaps: number[] = [];
+            for (let i = 1; i < w.length; i++) {
+              gaps.push(w[i].start_ms - w[i - 1].start_ms);
+            }
+            const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+            const variance =
+              gaps.map((g) => (g - mean) ** 2).reduce((a, b) => a + b, 0) /
+              gaps.length;
+            const stddev = Math.sqrt(variance);
+            if (stddev < 30) return false;
             return true;
           });
           if (hasProgressiveWords) return { checked, found: true };
