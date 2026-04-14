@@ -1,5 +1,6 @@
 pub mod aligner;
 pub mod bootstrap;
+pub mod chunking;
 pub mod lrclib;
 pub mod renderer;
 pub mod translator;
