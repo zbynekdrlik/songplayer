@@ -267,6 +267,25 @@ fn convert_align_output(output: AlignOutput) -> Vec<LyricsLine> {
         .collect()
 }
 
+/// Merge aligned-word timings into LRCLIB-sourced lines.
+///
+/// Preserves each LRCLIB line's `start_ms` / `end_ms` / `en` text and
+/// attaches the aligned `words` from the matching aligned line by index.
+/// Aligned lines beyond `lrclib.len()` are dropped. LRCLIB lines beyond
+/// `aligned.len()` keep `words = None`.
+pub fn merge_word_timings(lrclib: Vec<LyricsLine>, aligned: Vec<LyricsLine>) -> Vec<LyricsLine> {
+    let mut aligned_iter = aligned.into_iter();
+    lrclib
+        .into_iter()
+        .map(|mut line| {
+            if let Some(a) = aligned_iter.next() {
+                line.words = a.words;
+            }
+            line
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -432,5 +451,100 @@ mod tests {
         assert!(lines[0].words.is_none());
         assert_eq!(lines[0].start_ms, 0);
         assert_eq!(lines[0].end_ms, 0);
+    }
+
+    fn lrclib_line(start_ms: u64, end_ms: u64, en: &str) -> LyricsLine {
+        LyricsLine {
+            start_ms,
+            end_ms,
+            en: en.to_string(),
+            sk: None,
+            words: None,
+        }
+    }
+
+    fn aligned_line(en: &str, words: Vec<(u64, u64, &str)>) -> LyricsLine {
+        LyricsLine {
+            start_ms: words.first().map(|w| w.0).unwrap_or(0),
+            end_ms: words.last().map(|w| w.1).unwrap_or(0),
+            en: en.to_string(),
+            sk: None,
+            words: Some(
+                words
+                    .into_iter()
+                    .map(|(s, e, t)| LyricsWord {
+                        text: t.to_string(),
+                        start_ms: s,
+                        end_ms: e,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    #[test]
+    fn merge_word_timings_same_count_preserves_lrclib_timing() {
+        let lrclib = vec![
+            lrclib_line(1000, 3000, "Hello world"),
+            lrclib_line(3500, 5000, "Amazing grace"),
+        ];
+        let aligned = vec![
+            aligned_line(
+                "Hello world",
+                vec![(1100, 1500, "Hello"), (1600, 2200, "world")],
+            ),
+            aligned_line(
+                "Amazing grace",
+                vec![(3600, 4200, "Amazing"), (4300, 4900, "grace")],
+            ),
+        ];
+        let out = merge_word_timings(lrclib, aligned);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].start_ms, 1000, "lrclib start_ms preserved");
+        assert_eq!(out[0].end_ms, 3000, "lrclib end_ms preserved");
+        assert_eq!(out[0].en, "Hello world");
+        let words0 = out[0].words.as_ref().expect("words present");
+        assert_eq!(words0.len(), 2);
+        assert_eq!(words0[0].text, "Hello");
+        assert_eq!(words0[1].text, "world");
+        assert_eq!(out[1].start_ms, 3500);
+    }
+
+    #[test]
+    fn merge_word_timings_fewer_aligned_leaves_tail_unaligned() {
+        let lrclib = vec![
+            lrclib_line(0, 1000, "Line one"),
+            lrclib_line(1000, 2000, "Line two"),
+            lrclib_line(2000, 3000, "Line three"),
+        ];
+        let aligned = vec![aligned_line(
+            "Line one",
+            vec![(0, 500, "Line"), (500, 1000, "one")],
+        )];
+        let out = merge_word_timings(lrclib, aligned);
+        assert_eq!(out.len(), 3);
+        assert!(out[0].words.is_some());
+        assert!(out[1].words.is_none(), "unaligned line stays wordless");
+        assert!(out[2].words.is_none());
+    }
+
+    #[test]
+    fn merge_word_timings_more_aligned_ignores_extras() {
+        let lrclib = vec![lrclib_line(0, 1000, "Only one line")];
+        let aligned = vec![
+            aligned_line("Only one line", vec![(0, 500, "Only")]),
+            aligned_line("Phantom extra", vec![(500, 1000, "Phantom")]),
+        ];
+        let out = merge_word_timings(lrclib, aligned);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].en, "Only one line");
+        assert_eq!(out[0].words.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn merge_word_timings_empty_aligned_returns_lrclib_unchanged() {
+        let lrclib = vec![lrclib_line(0, 1000, "Line one")];
+        let out = merge_word_timings(lrclib.clone(), vec![]);
+        assert_eq!(out, lrclib);
     }
 }
