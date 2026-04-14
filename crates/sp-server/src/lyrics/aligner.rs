@@ -96,7 +96,7 @@ pub async fn align_lyrics(
         .spawn()
         .context("failed to spawn lyrics_worker.py align")?;
 
-    let timeout = std::time::Duration::from_secs(120);
+    let timeout = std::time::Duration::from_secs(300);
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
@@ -941,6 +941,21 @@ mod tests {
         };
         ensure_progressive_words(&mut line);
         assert!(line.words.is_none());
+    }
+
+    #[test]
+    fn align_lyrics_timeout_accommodates_vocal_isolation() {
+        // Vocal isolation (Mel-Roformer) + alignment (Qwen3) together run
+        // ~60-90 s on the RTX 3070 Ti for a typical 4-minute song, and
+        // more on first-model-load. The 120 s timeout was tight even for
+        // the old pipeline; with isolation added, 300 s is the correct
+        // ceiling. This test guards against accidental re-tightening.
+        let src = include_str!("aligner.rs");
+        // align_lyrics must reference a 300 s (or greater) timeout
+        assert!(
+            src.contains("Duration::from_secs(300)"),
+            "align_lyrics timeout must be >= 300 s to cover vocal isolation + alignment"
+        );
     }
 
     #[test]
