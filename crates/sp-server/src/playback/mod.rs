@@ -9,6 +9,7 @@ pub mod state;
 pub mod submitter;
 
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
@@ -108,6 +109,9 @@ struct PlaylistPipeline {
     /// when a new video is selected (via `SelectAndPlay`); popped by
     /// `handle_previous`. Bounded to [`PREVIOUS_HISTORY_CAPACITY`].
     history: VecDeque<i64>,
+    /// Active lyrics state for karaoke display. Loaded when a video with
+    /// lyrics starts; cleared when the video ends.
+    lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
 }
 
 impl PlaylistPipeline {
@@ -129,6 +133,7 @@ impl PlaylistPipeline {
 /// pipeline events, and drives the [`PlayState`] state machine.
 pub struct PlaybackEngine {
     pool: SqlitePool,
+    cache_dir: PathBuf,
     pipelines: HashMap<i64, PlaylistPipeline>,
     event_rx: mpsc::UnboundedReceiver<(i64, PipelineEvent)>,
     event_tx: mpsc::UnboundedSender<(i64, PipelineEvent)>,
@@ -151,6 +156,7 @@ impl PlaybackEngine {
     /// Create a new playback engine. Loads the NDI SDK once on Windows.
     pub fn new(
         pool: SqlitePool,
+        cache_dir: PathBuf,
         obs_event_tx: broadcast::Sender<ObsEvent>,
         obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
@@ -176,6 +182,7 @@ impl PlaybackEngine {
 
         Self {
             pool,
+            cache_dir,
             pipelines: HashMap::new(),
             event_rx,
             event_tx,
@@ -214,6 +221,7 @@ impl PlaybackEngine {
                 cached_duration_ms: 0,
                 last_now_playing_broadcast: None,
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
+                lyrics_state: None,
             }
         });
     }
@@ -339,6 +347,30 @@ impl PlaybackEngine {
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
                     .await;
 
+                // Load lyrics for karaoke display
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    if let Some(video_id) = pp.current_video_id {
+                        let cache_dir = self.cache_dir.clone();
+                        let pool = self.pool.clone();
+                        match load_lyrics_for_video(&pool, &cache_dir, video_id).await {
+                            Ok(Some(track)) => {
+                                pp.lyrics_state =
+                                    Some(crate::lyrics::renderer::LyricsState::new(track));
+                                debug!(playlist_id, video_id, "lyrics loaded for karaoke");
+                            }
+                            Ok(None) => {
+                                pp.lyrics_state = None;
+                                self.clear_lyrics_display(playlist_id);
+                            }
+                            Err(e) => {
+                                warn!(playlist_id, video_id, "failed to load lyrics: {e}");
+                                pp.lyrics_state = None;
+                                self.clear_lyrics_display(playlist_id);
+                            }
+                        }
+                    }
+                }
+
                 debug!(playlist_id, duration_ms, "video started");
                 let dur = *duration_ms;
 
@@ -443,14 +475,18 @@ impl PlaybackEngine {
             PipelineEvent::Ended => {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
+                    pp.lyrics_state = None;
                 }
+                self.clear_lyrics_display(playlist_id);
                 self.apply_event(playlist_id, PlayEvent::VideoEnded).await;
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
+                    pp.lyrics_state = None;
                 }
+                self.clear_lyrics_display(playlist_id);
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
@@ -621,6 +657,26 @@ impl PlaybackEngine {
         });
     }
 
+    /// Send empty lyrics to dashboard and Resolume to clear stale display.
+    ///
+    /// Called when switching to a song without subtitles so the previous
+    /// song's lyrics don't linger on screen.
+    #[cfg_attr(test, mutants::skip)]
+    fn clear_lyrics_display(&self, playlist_id: i64) {
+        let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
+            playlist_id,
+            line_en: None,
+            line_sk: None,
+            prev_line_en: None,
+            next_line_en: None,
+            active_word_index: None,
+            word_count: None,
+        });
+        let _ = self
+            .resolume_tx
+            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+    }
+
     /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
     ///
     /// Skips the broadcast if less than
@@ -667,6 +723,26 @@ impl PlaybackEngine {
             position_ms,
             duration_ms: dur,
         });
+
+        // Emit lyrics update for karaoke display
+        if let Some(ref lyrics) = pp.lyrics_state {
+            let msg = lyrics.update(playlist_id, position_ms);
+            let _ = self.ws_event_tx.send(msg);
+            // Resolume subtitle update
+            let (en, sk) = lyrics.resolume_lines(position_ms);
+            match en {
+                Some(en_text) => {
+                    let _ = self.resolume_tx.try_send(
+                        crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
+                    );
+                }
+                None => {
+                    let _ = self
+                        .resolume_tx
+                        .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+                }
+            }
+        }
     }
 
     /// Execute a [`PlayAction`] produced by the state machine.
@@ -790,6 +866,36 @@ impl PlaybackEngine {
             }
         }
     }
+}
+
+/// Load lyrics JSON for a video from the cache directory, if available.
+#[cfg_attr(test, mutants::skip)]
+async fn load_lyrics_for_video(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    video_id: i64,
+) -> Result<Option<sp_core::lyrics::LyricsTrack>, anyhow::Error> {
+    use sqlx::Row;
+    let row = sqlx::query("SELECT youtube_id, has_lyrics FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_optional(pool)
+        .await?;
+    let row = match row {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+    let has_lyrics: i64 = row.get("has_lyrics");
+    if has_lyrics == 0 {
+        return Ok(None);
+    }
+    let youtube_id: String = row.get("youtube_id");
+    let lyrics_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
+    if !lyrics_path.exists() {
+        return Ok(None);
+    }
+    let content = tokio::fs::read_to_string(&lyrics_path).await?;
+    let track: sp_core::lyrics::LyricsTrack = serde_json::from_str(&content)?;
+    Ok(Some(track))
 }
 
 // ---------------------------------------------------------------------------

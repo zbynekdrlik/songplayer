@@ -323,4 +323,41 @@ body {
     font-size: 0.85rem;
 }
 
+/* Karaoke panel */
+.karaoke-panel {
+    background: #0d1b2a;
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 8px;
+    text-align: center;
+}
+.karaoke-line {
+    margin: 4px 0;
+}
+.karaoke-dim {
+    color: #444;
+    font-size: 0.85em;
+}
+.karaoke-current {
+    font-size: 1.1em;
+}
+.karaoke-sk {
+    color: #4ea8de;
+    font-size: 0.95em;
+}
+.karaoke-word {
+    transition: color 0.15s;
+}
+.karaoke-word-past {
+    color: #888;
+}
+.karaoke-word-active {
+    color: #e94560;
+    font-weight: bold;
+    text-decoration: underline;
+}
+.karaoke-word-future {
+    color: #555;
+}
+
 .video-list th { color: var(--text-dim); }

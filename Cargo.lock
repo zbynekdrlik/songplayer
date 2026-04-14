@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.12.0-dev.1"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.12.0-dev.1"
+version = "0.13.0"
 dependencies = [
  "mutants",
  "symphonia",
@@ -1916,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.12.0-dev.1"
+version = "0.13.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -1926,7 +1926,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.12.0-dev.1"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1942,6 +1942,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socket2",
  "sp-core",
  "sp-decoder",
  "sp-ndi",
@@ -1954,6 +1955,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "urlencoding",
  "uuid",
  "wiremock",
  "zip",
@@ -2665,6 +2667,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf-8"

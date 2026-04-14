@@ -13,6 +13,9 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (2, MIGRATION_V2),
     (3, MIGRATION_V3),
     (4, MIGRATION_V4),
+    (5, MIGRATION_V5),
+    (6, MIGRATION_V6),
+    (7, MIGRATION_V7),
 ];
 
 const MIGRATION_V1: &str = "
@@ -90,6 +93,28 @@ ALTER TABLE playlists DROP COLUMN resolume_title_token;
 const MIGRATION_V4: &str = "
 ALTER TABLE videos ADD COLUMN audio_file_path TEXT;
 UPDATE videos SET normalized = 0;
+";
+
+const MIGRATION_V5: &str = "
+ALTER TABLE videos ADD COLUMN has_lyrics INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_source TEXT;
+ALTER TABLE playlists ADD COLUMN karaoke_enabled INTEGER NOT NULL DEFAULT 1;
+";
+
+// V6 resets all lyrics after disabling YouTube auto-subs source.
+// Forces reprocessing with LRCLIB-only (clean lyrics).
+const MIGRATION_V6: &str = "
+UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
+";
+
+// V7 = re-run of V6's lyrics reset.
+//
+// V6 ran on machines before the startup.rs stale-file cleanup landed.
+// On those machines, normalized rows were re-linked to stale lyrics files
+// that still existed on disk, short-circuiting the reprocessing intent.
+// V7 forces another reset now that startup actually deletes those files.
+const MIGRATION_V7: &str = "
+UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
 ";
 
 /// Create a connection pool backed by a file.
@@ -175,7 +200,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 7);
     }
 
     #[tokio::test]
@@ -184,7 +209,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 7);
     }
 
     #[tokio::test]
@@ -540,6 +565,44 @@ mod tests {
             meta,
             Some(("My Song".to_string(), "Artist Name".to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn migration_v5_adds_lyrics_columns() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        // Verify videos.has_lyrics column exists
+        let row = sqlx::query_scalar::<_, i64>("SELECT has_lyrics FROM videos LIMIT 0")
+            .fetch_optional(&pool)
+            .await;
+        assert!(row.is_ok());
+        // Verify playlists.karaoke_enabled column exists
+        let row = sqlx::query_scalar::<_, i64>("SELECT karaoke_enabled FROM playlists LIMIT 0")
+            .fetch_optional(&pool)
+            .await;
+        assert!(row.is_ok());
+    }
+
+    #[tokio::test]
+    async fn get_next_video_without_lyrics_returns_unprocessed() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        // Insert a playlist
+        sqlx::query("INSERT INTO playlists (name, youtube_url, is_active) VALUES ('test', 'https://youtube.com/playlist?list=test', 1)")
+            .execute(&pool).await.unwrap();
+        // Insert a normalized video without lyrics
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title, normalized, has_lyrics) VALUES (1, 'abc12345678', 'Test Song', 1, 0)")
+            .execute(&pool).await.unwrap();
+        let row = models::get_next_video_without_lyrics(&pool).await.unwrap();
+        assert!(row.is_some());
+        let row = row.unwrap();
+        assert_eq!(row.youtube_id, "abc12345678");
+        // Mark as having lyrics
+        models::mark_video_lyrics(&pool, row.id, true, Some("lrclib"))
+            .await
+            .unwrap();
+        let row2 = models::get_next_video_without_lyrics(&pool).await.unwrap();
+        assert!(row2.is_none());
     }
 
     #[tokio::test]

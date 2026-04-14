@@ -3,6 +3,7 @@
 pub mod api;
 pub mod db;
 pub mod downloader;
+pub mod lyrics;
 pub mod metadata;
 pub mod obs;
 pub mod playback;
@@ -48,6 +49,8 @@ pub struct AppState {
     /// Signal — sent by playlist CRUD handlers so the OBS client can rebuild
     /// its NDI source map.
     pub obs_rebuild_tx: broadcast::Sender<()>,
+    /// Directory where cached media and lyrics JSON files are stored.
+    pub cache_dir: PathBuf,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -280,6 +283,7 @@ pub async fn start(
         sync_tx: sync_tx.clone(),
         resolume_tx: resolume_cmd_tx.clone(),
         obs_rebuild_tx: obs_rebuild_tx.clone(),
+        cache_dir: config.cache_dir.clone(),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -301,7 +305,7 @@ pub async fn start(
 
     // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");
-    let tools_mgr = downloader::tools::ToolsManager::new(tools_dir);
+    let tools_mgr = downloader::tools::ToolsManager::new(tools_dir.clone());
 
     // Download worker broadcast channel. Hoisted out of the tools-setup
     // task so the engine can subscribe before tools become ready — that
@@ -321,6 +325,12 @@ pub async fn start(
     let dl_gemini_model = gemini_model.clone();
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
+    let lyrics_pool = pool.clone();
+    let lyrics_cache_dir = config.cache_dir.clone();
+    let lyrics_gemini_key = gemini_key.clone();
+    let lyrics_gemini_model = gemini_model.clone();
+    let lyrics_shutdown = shutdown_tx.clone();
+    let lyrics_tools_dir = tools_dir;
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -354,6 +364,8 @@ pub async fn start(
                     )));
                 }
 
+                let lyrics_ytdlp = paths.ytdlp.clone();
+                let lyrics_python = paths.python.clone();
                 let dl_worker = downloader::DownloadWorker::new(
                     dl_pool,
                     paths,
@@ -363,6 +375,19 @@ pub async fn start(
                 );
                 tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                 info!("download worker started");
+
+                // Lyrics worker
+                let lyrics_worker = lyrics::LyricsWorker::new(
+                    lyrics_pool,
+                    lyrics_cache_dir,
+                    lyrics_ytdlp,
+                    lyrics_python,
+                    lyrics_tools_dir,
+                    lyrics_gemini_key,
+                    lyrics_gemini_model,
+                );
+                tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
+                info!("lyrics worker started");
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -501,6 +526,7 @@ pub async fn start(
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(
         pool.clone(),
+        config.cache_dir.clone(),
         obs_event_tx,
         obs_cmd_tx,
         resolume_cmd_tx,
@@ -590,7 +616,15 @@ pub async fn start(
 
     // 11. Axum HTTP server
     let router = api::router(state, config.dist_dir);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
+    let listener = {
+        use socket2::{Domain, Socket, Type};
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+        socket.set_reuse_address(true)?;
+        socket.set_nonblocking(true)?;
+        socket.bind(&std::net::SocketAddr::from(([0, 0, 0, 0], config.port)).into())?;
+        socket.listen(128)?;
+        tokio::net::TcpListener::from_std(socket.into())?
+    };
     info!(port = config.port, "HTTP server listening");
 
     // Serve with graceful shutdown
@@ -672,6 +706,7 @@ mod tests {
             sync_tx,
             resolume_tx,
             obs_rebuild_tx,
+            cache_dir: PathBuf::from("cache"),
         };
 
         // Verify the router can be built.
@@ -942,6 +977,7 @@ mod tests {
             sync_tx,
             resolume_tx,
             obs_rebuild_tx,
+            cache_dir: PathBuf::from("cache"),
         };
 
         // Verify clone works.

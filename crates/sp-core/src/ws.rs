@@ -76,4 +76,50 @@ pub enum ServerMsg {
         message: String,
     },
     Pong,
+    LyricsUpdate {
+        playlist_id: i64,
+        line_en: Option<String>,
+        line_sk: Option<String>,
+        prev_line_en: Option<String>,
+        next_line_en: Option<String>,
+        active_word_index: Option<usize>,
+        word_count: Option<usize>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lyrics_update_roundtrip_all_fields() {
+        let msg = ServerMsg::LyricsUpdate {
+            playlist_id: 42,
+            line_en: Some("Hello world".to_string()),
+            line_sk: Some("Ahoj svet".to_string()),
+            prev_line_en: Some("Previous line".to_string()),
+            next_line_en: Some("Next line".to_string()),
+            active_word_index: Some(1),
+            word_count: Some(2),
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let decoded: ServerMsg = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn lyrics_update_roundtrip_all_none() {
+        let msg = ServerMsg::LyricsUpdate {
+            playlist_id: 1,
+            line_en: None,
+            line_sk: None,
+            prev_line_en: None,
+            next_line_en: None,
+            active_word_index: None,
+            word_count: None,
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let decoded: ServerMsg = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(msg, decoded);
+    }
 }

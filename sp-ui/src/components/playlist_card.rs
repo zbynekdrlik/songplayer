@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use sp_core::models::Playlist;
 use sp_core::playback::PlaybackState;
 
+use crate::components::karaoke_panel;
 use crate::components::playback_controls;
 use crate::store::DashboardStore;
 
@@ -36,26 +37,29 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
                         let pos_s = info.position_ms / 1000;
                         let dur_s = info.duration_ms / 1000;
                         view! {
-                            <div class="np-info">
-                                <span class="np-song">{info.song.clone()}</span>
-                                <span class="np-artist">{info.artist.clone()}</span>
-                                <div class="progress-bar">
-                                    <div
-                                        class="progress-fill"
-                                        style:width=format!("{pct:.1}%")
-                                    ></div>
+                            <div>
+                                <div class="np-info">
+                                    <span class="np-song">{info.song.clone()}</span>
+                                    <span class="np-artist">{info.artist.clone()}</span>
+                                    <div class="progress-bar">
+                                        <div
+                                            class="progress-fill"
+                                            style:width=format!("{pct:.1}%")
+                                        ></div>
+                                    </div>
+                                    <span class="np-time">
+                                        {format!(
+                                            "{}:{:02} / {}:{:02}  [{}]  {}",
+                                            pos_s / 60,
+                                            pos_s % 60,
+                                            dur_s / 60,
+                                            dur_s % 60,
+                                            state_label,
+                                            info.mode.as_str(),
+                                        )}
+                                    </span>
                                 </div>
-                                <span class="np-time">
-                                    {format!(
-                                        "{}:{:02} / {}:{:02}  [{}]  {}",
-                                        pos_s / 60,
-                                        pos_s % 60,
-                                        dur_s / 60,
-                                        dur_s % 60,
-                                        state_label,
-                                        info.mode.as_str(),
-                                    )}
-                                </span>
+                                <karaoke_panel::KaraokePanel info=info.clone() />
                             </div>
                         }
                             .into_any()

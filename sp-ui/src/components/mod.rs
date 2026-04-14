@@ -1,4 +1,5 @@
 pub mod download_queue;
+pub mod karaoke_panel;
 pub mod obs_status;
 pub mod playback_controls;
 pub mod playlist_card;

@@ -21,7 +21,14 @@ fn engine_construction() {
         let (obs_tx, _obs_rx) = broadcast::channel(16);
         let (resolume_tx, _) = mpsc::channel(16);
         let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-        let engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+        let engine = PlaybackEngine::new(
+            pool,
+            std::path::PathBuf::from("/tmp/test-cache"),
+            obs_tx,
+            None,
+            resolume_tx,
+            ws_tx,
+        );
         assert!(engine.pipelines.is_empty());
     });
 }
@@ -38,7 +45,14 @@ fn engine_ensure_pipeline_creates_entry() {
         let (obs_tx, _obs_rx) = broadcast::channel(16);
         let (resolume_tx, _) = mpsc::channel(16);
         let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-        let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+        let mut engine = PlaybackEngine::new(
+            pool,
+            std::path::PathBuf::from("/tmp/test-cache"),
+            obs_tx,
+            None,
+            resolume_tx,
+            ws_tx,
+        );
 
         engine.ensure_pipeline(1, "TestNDI");
         assert!(engine.pipelines.contains_key(&1));
@@ -61,7 +75,14 @@ fn engine_ensure_pipeline_multiple_playlists() {
         let (obs_tx, _obs_rx) = broadcast::channel(16);
         let (resolume_tx, _) = mpsc::channel(16);
         let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-        let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+        let mut engine = PlaybackEngine::new(
+            pool,
+            std::path::PathBuf::from("/tmp/test-cache"),
+            obs_tx,
+            None,
+            resolume_tx,
+            ws_tx,
+        );
 
         engine.ensure_pipeline(1, "NDI-1");
         engine.ensure_pipeline(2, "NDI-2");
@@ -109,6 +130,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             cached_duration_ms: 0,
             last_now_playing_broadcast: None,
             history: std::collections::VecDeque::new(),
+            lyrics_state: None,
         };
 
         assert!(pp.title_show_abort.is_some());
@@ -199,7 +221,14 @@ async fn pipeline_started_event_broadcasts_now_playing() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "SP-p");
 
     // Simulate a video having been selected (so current_video_id is set).
@@ -305,7 +334,14 @@ async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "TestNDI");
     if let Some(pp) = engine.pipelines.get_mut(&1) {
         pp.current_video_id = Some(7);
@@ -366,7 +402,14 @@ async fn apply_event_triggers_state_change_and_broadcast() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "TestNDI");
 
     // Idle + VideosAvailable → WaitingForScene (state change).
@@ -407,7 +450,14 @@ async fn apply_event_no_broadcast_when_state_unchanged() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "TestNDI");
 
     // First transition: Idle → WaitingForScene — broadcast expected.
@@ -451,7 +501,14 @@ async fn position_events_are_throttled() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(64);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "SP-p");
     if let Some(pp) = engine.pipelines.get_mut(&1) {
         pp.current_video_id = Some(42);
@@ -527,7 +584,14 @@ async fn handle_previous_with_empty_history_is_noop() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "TestNDI");
 
     // Fresh pipeline: current_video_id = None, history = [].
@@ -576,7 +640,14 @@ async fn handle_previous_pops_history_and_plays() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "TestNDI");
 
     // Simulate having played 10, 11, 12 in order. Current = 12, history = [10, 11].
@@ -643,7 +714,14 @@ async fn history_capacity_is_bounded() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool, obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(1, "TestNDI");
 
     // Simulate the SelectAndPlay bookkeeping for `CAPACITY + 3` videos
@@ -698,7 +776,14 @@ async fn processed_event_rewakes_waiting_pipeline_with_new_video() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool.clone(), obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool.clone(),
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(7, "SP-fast");
 
     // Step 1: scene goes active BEFORE any video exists. Simulates
@@ -767,7 +852,14 @@ async fn processed_event_ignores_waiting_pipeline_with_inactive_scene() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool.clone(), obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool.clone(),
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(7, "SP-fast");
 
     // Put the pipeline in WaitingForScene WITHOUT the scene being on
@@ -830,7 +922,14 @@ async fn processed_event_does_not_play_inactive_scene() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(pool.clone(), obs_tx, None, resolume_tx, ws_tx);
+    let mut engine = PlaybackEngine::new(
+        pool.clone(),
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+    );
     engine.ensure_pipeline(7, "SP-fast");
     engine.ensure_pipeline(3, "SP-presence");
 

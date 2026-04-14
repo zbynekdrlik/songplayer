@@ -18,6 +18,12 @@ pub struct Playlist {
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default = "default_true")]
+    pub karaoke_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// A single video within a playlist.
@@ -73,4 +79,16 @@ pub struct ResolumeClipMapping {
     pub playlist_id: i64,
     pub layer: u32,
     pub column: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_karaoke_enabled_defaults_to_true() {
+        let json = r#"{"id": 1, "name": "test", "youtube_url": "url", "ndi_output_name": "", "playback_mode": "continuous", "is_active": true}"#;
+        let p: Playlist = serde_json::from_str(json).unwrap();
+        assert!(p.karaoke_enabled);
+    }
 }

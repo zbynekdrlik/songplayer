@@ -53,6 +53,8 @@ pub struct ScanResult {
     pub songs: Vec<CachedSong>,
     pub legacy: Vec<LegacyFile>,
     pub orphans: Vec<Orphan>,
+    /// Lyrics sidecar files: `(youtube_id, path)`.
+    pub lyrics_files: Vec<(String, PathBuf)>,
 }
 
 static VIDEO_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]{11}$").unwrap());
@@ -64,6 +66,9 @@ static SPLIT_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static LEGACY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(.+)_(.+)_([a-zA-Z0-9_-]{11})_normalized(_gf)?\.mp4$").unwrap());
+
+static LYRICS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([a-zA-Z0-9_-]{11})_lyrics\.json$").unwrap());
 
 /// Build the output filename for the video sidecar.
 pub fn video_filename(song: &str, artist: &str, video_id: &str, gemini_failed: bool) -> String {
@@ -95,6 +100,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
     let mut video_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
     let mut audio_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
     let mut legacy: Vec<LegacyFile> = Vec::new();
+    let mut lyrics_files: Vec<(String, PathBuf)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -126,6 +132,11 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
                 gemini_failed: caps.get(4).is_some(),
                 path,
             });
+            continue;
+        }
+
+        if let Some(caps) = LYRICS_RE.captures(filename) {
+            lyrics_files.push((caps[1].to_string(), path));
             continue;
         }
     }
@@ -161,6 +172,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         songs,
         legacy,
         orphans,
+        lyrics_files,
     }
 }
 
@@ -431,5 +443,34 @@ mod tests {
         assert!(!is_valid_video_id("toolongstring123"));
         assert!(!is_valid_video_id("hello world"));
         assert!(!is_valid_video_id("abc!def@123"));
+    }
+
+    #[test]
+    fn scan_cache_detects_lyrics_file() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("dQw4w9WgXcQ_lyrics.json"),
+            r#"{"lines":[]}"#,
+        )
+        .unwrap();
+
+        let result = scan_cache(dir.path());
+        assert_eq!(result.lyrics_files.len(), 1);
+        assert_eq!(result.lyrics_files[0].0, "dQw4w9WgXcQ");
+        assert!(result.songs.is_empty());
+        assert!(result.legacy.is_empty());
+        assert!(result.orphans.is_empty());
+    }
+
+    #[test]
+    fn scan_cache_ignores_non_matching_json() {
+        let dir = tempfile::tempdir().unwrap();
+        // Wrong suffix
+        fs::write(dir.path().join("dQw4w9WgXcQ_meta.json"), "{}").unwrap();
+        // Too long video id
+        fs::write(dir.path().join("dQw4w9WgXcQXXX_lyrics.json"), "{}").unwrap();
+
+        let result = scan_cache(dir.path());
+        assert!(result.lyrics_files.is_empty());
     }
 }

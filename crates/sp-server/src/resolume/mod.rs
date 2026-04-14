@@ -14,6 +14,12 @@ use crate::resolume::driver::HostDriver;
 /// Any Resolume clip whose name contains this tag becomes a title target.
 pub const TITLE_TOKEN: &str = "#sp-title";
 
+/// Resolume clip tag for English subtitle text delivery.
+pub const SUBS_TOKEN: &str = "#sp-subs";
+
+/// Resolume clip tag for Slovak subtitle text delivery.
+pub const SUBS_SK_TOKEN: &str = "#sp-subssk";
+
 /// Commands sent to per-host Resolume workers.
 #[derive(Debug, Clone)]
 pub enum ResolumeCommand {
@@ -21,6 +27,10 @@ pub enum ResolumeCommand {
     ShowTitle { song: String, artist: String },
     /// Hide the title (fade out + clear text) on all `#sp-title` clips.
     HideTitle,
+    /// Show subtitle text (lyrics) on Resolume subtitle clips.
+    ShowSubtitles { en: String, sk: Option<String> },
+    /// Hide subtitles (clear text) on Resolume subtitle clips.
+    HideSubtitles,
     /// Force a refresh of the clip mapping cache.
     RefreshMapping,
     /// Stop the worker.

@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use tokio::fs;
 use tracing::warn;
 
 use sp_core::playback::PlaybackMode;
@@ -33,6 +34,7 @@ pub struct UpdatePlaylistRequest {
     pub ndi_output_name: Option<String>,
     pub playback_mode: Option<String>,
     pub is_active: Option<bool>,
+    pub karaoke_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -220,6 +222,10 @@ pub async fn update_playlist(
     if let Some(active) = body.is_active {
         sets.push("is_active = ?");
         binds.push(if active { "1" } else { "0" }.to_string());
+    }
+    if let Some(karaoke) = body.karaoke_enabled {
+        sets.push("karaoke_enabled = ?");
+        binds.push(if karaoke { "1" } else { "0" }.to_string());
     }
 
     if sets.is_empty() {
@@ -538,6 +544,90 @@ pub async fn delete_resolume_host(
         }
         Err(e) => {
             warn!("delete_resolume_host error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lyrics endpoints
+// ---------------------------------------------------------------------------
+
+/// GET /api/v1/videos/:id/lyrics
+///
+/// Returns the cached lyrics JSON for a video. 404 if not available.
+#[cfg_attr(test, mutants::skip)]
+pub async fn get_video_lyrics(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+) -> impl IntoResponse {
+    // Query the video to check has_lyrics and get youtube_id.
+    let result = sqlx::query("SELECT youtube_id, has_lyrics FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_optional(&state.pool)
+        .await;
+
+    let row = match result {
+        Ok(Some(r)) => r,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            warn!("get_video_lyrics db error: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let has_lyrics: i32 = row.get("has_lyrics");
+    if has_lyrics == 0 {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let youtube_id: String = row.get("youtube_id");
+    let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
+
+    match fs::read_to_string(&lyrics_path).await {
+        Ok(contents) => match serde_json::from_str::<serde_json::Value>(&contents) {
+            Ok(json) => Json(json).into_response(),
+            Err(e) => {
+                warn!("get_video_lyrics parse error for {youtube_id}: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        },
+        Err(e) => {
+            warn!("get_video_lyrics read error for {youtube_id}: {e}");
+            StatusCode::NOT_FOUND.into_response()
+        }
+    }
+}
+
+/// POST /api/v1/videos/:id/lyrics/reprocess
+///
+/// Re-queues a video for lyrics processing.
+pub async fn reprocess_video_lyrics(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+) -> impl IntoResponse {
+    match crate::db::models::reset_video_lyrics(&state.pool, video_id).await {
+        Ok(()) => Json(serde_json::json!({"status": "queued"})).into_response(),
+        Err(e) => {
+            warn!("reprocess_video_lyrics error for video {video_id}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// GET /api/v1/lyrics/status
+///
+/// Returns the lyrics processing queue status across all active playlists.
+pub async fn get_lyrics_status(State(state): State<AppState>) -> impl IntoResponse {
+    match crate::db::models::get_lyrics_status(&state.pool).await {
+        Ok((total, processed, pending)) => Json(serde_json::json!({
+            "total": total,
+            "processed": processed,
+            "pending": pending,
+        }))
+        .into_response(),
+        Err(e) => {
+            warn!("get_lyrics_status error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

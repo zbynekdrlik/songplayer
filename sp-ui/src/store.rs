@@ -17,6 +17,12 @@ pub struct NowPlayingInfo {
     pub duration_ms: u64,
     pub state: PlaybackState,
     pub mode: PlaybackMode,
+    pub line_en: Option<String>,
+    pub line_sk: Option<String>,
+    pub prev_line_en: Option<String>,
+    pub next_line_en: Option<String>,
+    pub active_word_index: Option<usize>,
+    pub word_count: Option<usize>,
 }
 
 /// A single item in the download queue.
@@ -78,6 +84,12 @@ impl DashboardStore {
                         duration_ms: 0,
                         state: PlaybackState::default(),
                         mode: PlaybackMode::default(),
+                        line_en: None,
+                        line_sk: None,
+                        prev_line_en: None,
+                        next_line_en: None,
+                        active_word_index: None,
+                        word_count: None,
                     });
                     entry.video_id = video_id;
                     entry.song = song;
@@ -106,6 +118,12 @@ impl DashboardStore {
                                 duration_ms: 0,
                                 state,
                                 mode,
+                                line_en: None,
+                                line_sk: None,
+                                prev_line_en: None,
+                                next_line_en: None,
+                                active_word_index: None,
+                                word_count: None,
                             },
                         );
                     }
@@ -148,6 +166,26 @@ impl DashboardStore {
                     // Keep only the last 50 errors.
                     if errs.len() > 50 {
                         errs.drain(0..errs.len() - 50);
+                    }
+                });
+            }
+            ServerMsg::LyricsUpdate {
+                playlist_id,
+                line_en,
+                line_sk,
+                prev_line_en,
+                next_line_en,
+                active_word_index,
+                word_count,
+            } => {
+                self.now_playing.update(|map| {
+                    if let Some(info) = map.get_mut(&playlist_id) {
+                        info.line_en = line_en;
+                        info.line_sk = line_sk;
+                        info.prev_line_en = prev_line_en;
+                        info.next_line_en = next_line_en;
+                        info.active_word_index = active_word_index;
+                        info.word_count = word_count;
                     }
                 });
             }

@@ -148,6 +148,16 @@ impl HostDriver {
                     warn!(host = %self.host, %e, "hide_title failed");
                 }
             }
+            ResolumeCommand::ShowSubtitles { en, sk } => {
+                if let Err(e) = handlers::set_subtitles(self, &en, sk.as_deref()).await {
+                    warn!(host = %self.host, %e, "subtitle set failed");
+                }
+            }
+            ResolumeCommand::HideSubtitles => {
+                if let Err(e) = handlers::clear_subtitles(self).await {
+                    warn!(host = %self.host, %e, "subtitle clear failed");
+                }
+            }
             ResolumeCommand::RefreshMapping => {
                 if let Err(e) = self.refresh_mapping().await {
                     warn!(host = %self.host, %e, "refresh_mapping failed");

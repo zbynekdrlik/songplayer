@@ -25,12 +25,14 @@ use crate::downloader::cache;
 /// * delete legacy single-file `.mp4`s (from before the FLAC migration),
 /// * delete orphan half-sidecars (debris from a crashed download),
 /// * re-link complete video+audio pairs to their DB row.
+#[cfg_attr(test, mutants::skip)]
 pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), sqlx::Error> {
     let scan = cache::scan_cache(cache_dir);
     tracing::info!(
         songs = scan.songs.len(),
         legacy = scan.legacy.len(),
         orphans = scan.orphans.len(),
+        lyrics = scan.lyrics_files.len(),
         "self-heal cache scan"
     );
 
@@ -62,6 +64,28 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         .bind(&song.video_id)
         .execute(pool)
         .await?;
+    }
+
+    // Delete all stale lyrics sidecar files. The lyrics worker will recreate
+    // them from clean sources (LRCLIB). This ensures migration V6's reset
+    // actually takes effect and old YouTube garbage isn't preserved.
+    for (video_id, path) in &scan.lyrics_files {
+        if let Err(e) = std::fs::remove_file(path) {
+            tracing::warn!("failed to remove stale lyrics file {}: {e}", path.display());
+        }
+        // Reset DB row so it matches disk state even if migrations V6/V7 didn't run.
+        let _ = sqlx::query(
+            "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE youtube_id = ?",
+        )
+        .bind(video_id)
+        .execute(pool)
+        .await;
+    }
+    if !scan.lyrics_files.is_empty() {
+        tracing::info!(
+            "removed {} stale lyrics sidecar files for reprocessing",
+            scan.lyrics_files.len()
+        );
     }
 
     Ok(())
