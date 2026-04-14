@@ -311,44 +311,59 @@ jobs:
             "set_video_lyrics_source"
             "get_next_video_missing_alignment"
           )
-          FAIL=0
-          SEARCH_PATHS=(crates src-tauri sp-ui scripts e2e)
-
-          for name in "${BANNED_NAMES[@]}"; do
-            # Check for function/method calls of retired symbols in executable code
-            # Exclude: comments (//), string literals (quoted), assertions, and test fixtures marked "retired"
-            HITS=$(grep -rn "$name" "${SEARCH_PATHS[@]}" \
-              --exclude-dir=node_modules --exclude-dir=target \
-              --exclude-dir=dist 2>/dev/null \
-              | grep -v "// " \
-              | grep -v '"' \
-              | grep -v "'" \
-              | grep -v "#\[cfg(test)\]" \
-              || true)
-            if [ -n "$HITS" ]; then
-              echo "ERROR: retired symbol '$name' appears in production code:"; echo "$HITS"; FAIL=1
-            fi
-          done
-
-          # Check for Python function definitions (not comments)
+          BANNED_LITERALS=(
+            '"lrclib+qwen3"'
+          )
+          BANNED_CLI=(
+            "--write-auto-subs"
+          )
           BANNED_PY=(
             "def cmd_align("
             "def cmd_transcribe("
             "def cmd_download_models("
             "def _group_words_into_lines("
           )
+          FAIL=0
+          SEARCH_PATHS=(crates src-tauri sp-ui scripts e2e)
+          # Audit tests in worker.rs/aligner.rs split banned names across
+          # concat!-joined string literals, so the joined form never
+          # appears as a substring in source. We therefore search for the
+          # unbroken form — any match is a real regression.
+          for name in "${BANNED_NAMES[@]}"; do
+            HITS=$(grep -rn "$name" "${SEARCH_PATHS[@]}" \
+              --exclude-dir=node_modules --exclude-dir=target \
+              --exclude-dir=dist 2>/dev/null || true)
+            if [ -n "$HITS" ]; then
+              echo "ERROR: retired symbol '$name' still referenced:"; echo "$HITS"; FAIL=1
+            fi
+          done
+          for lit in "${BANNED_LITERALS[@]}"; do
+            HITS=$(grep -rn -F "$lit" "${SEARCH_PATHS[@]}" \
+              --exclude-dir=node_modules --exclude-dir=target \
+              --exclude-dir=dist 2>/dev/null || true)
+            if [ -n "$HITS" ]; then
+              echo "ERROR: retired literal $lit still present:"; echo "$HITS"; FAIL=1
+            fi
+          done
+          for cli in "${BANNED_CLI[@]}"; do
+            HITS=$(grep -rn -F -- "$cli" "${SEARCH_PATHS[@]}" \
+              --exclude-dir=node_modules --exclude-dir=target \
+              --exclude-dir=dist 2>/dev/null || true)
+            if [ -n "$HITS" ]; then
+              echo "ERROR: retired CLI arg '$cli' still present:"; echo "$HITS"; FAIL=1
+            fi
+          done
           for py in "${BANNED_PY[@]}"; do
             HITS=$(grep -rn -F "$py" scripts 2>/dev/null || true)
             if [ -n "$HITS" ]; then
               echo "ERROR: retired Python function '$py' still defined:"; echo "$HITS"; FAIL=1
             fi
           done
-
           if [ "$FAIL" -ne 0 ]; then
             echo "FAIL: legacy code leaked back in."
             exit 1
           fi
-          echo "OK: no retired symbols in production code."
+          echo "OK: no retired symbols found."
 
       - name: Verify deploy job uses always() condition
         run: |
