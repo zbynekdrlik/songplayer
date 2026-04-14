@@ -14,7 +14,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     db::models::{
-        get_next_video_missing_translation, get_next_video_without_lyrics, mark_video_lyrics,
+        get_next_video_missing_alignment, get_next_video_missing_translation,
+        get_next_video_without_lyrics, mark_video_lyrics, set_video_lyrics_source,
     },
     lyrics::{aligner, lrclib, translator},
 };
@@ -163,7 +164,8 @@ impl LyricsWorker {
         let row = match get_next_video_without_lyrics(&self.pool).await {
             Ok(Some(r)) => r,
             Ok(None) => {
-                // No new songs — try retranslating songs missing SK
+                // No new songs — try retroactive alignment then retranslation.
+                self.retry_missing_alignment().await;
                 self.retry_missing_translations().await;
                 debug!("lyrics_worker: no pending videos");
                 return;
@@ -411,6 +413,94 @@ impl LyricsWorker {
                     "lyrics_worker: translation backoff for {secs}s after {} consecutive failures",
                     backoff.consecutive_failures
                 );
+            }
+        }
+    }
+
+    /// Retroactively run Qwen3 forced alignment on songs that have LRCLIB
+    /// lyrics but no word-level timestamps yet. Reads the existing JSON,
+    /// runs the aligner, merges word timings into the line-level track,
+    /// rewrites the JSON, and updates `lyrics_source` to `lrclib+qwen3`.
+    /// Does NOT call Gemini — preserves existing SK translations.
+    #[cfg_attr(test, mutants::skip)]
+    async fn retry_missing_alignment(&self) {
+        let venv_python = self.venv_python.read().await.clone();
+        let Some(python) = venv_python else {
+            return;
+        };
+
+        let row = match get_next_video_missing_alignment(&self.pool).await {
+            Ok(Some(r)) => r,
+            _ => return,
+        };
+
+        let video_id = row.id;
+        let youtube_id = row.youtube_id.clone();
+        let Some(audio_str) = row.audio_file_path.as_ref() else {
+            return;
+        };
+        let audio_path = PathBuf::from(audio_str);
+        if !audio_path.exists() {
+            debug!(
+                "lyrics_worker: alignment retry skipped — audio missing for {youtube_id}: {audio_str}"
+            );
+            return;
+        }
+
+        let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
+        let content = match tokio::fs::read_to_string(&lyrics_path).await {
+            Ok(c) => c,
+            Err(e) => {
+                debug!("alignment retry: failed to read {youtube_id}_lyrics.json: {e}");
+                return;
+            }
+        };
+        let mut track: LyricsTrack = match serde_json::from_str(&content) {
+            Ok(t) => t,
+            Err(e) => {
+                debug!("alignment retry: failed to parse {youtube_id}_lyrics.json: {e}");
+                return;
+            }
+        };
+
+        let lyrics_text: String = track
+            .lines
+            .iter()
+            .map(|l| l.en.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output_path = self
+            .cache_dir
+            .join(format!("{youtube_id}_align_output.json"));
+
+        info!("lyrics_worker: retroactive alignment for {youtube_id}");
+        match aligner::align_lyrics(
+            &python,
+            &self.script_path,
+            &self.models_dir,
+            &audio_path,
+            &lyrics_text,
+            &output_path,
+        )
+        .await
+        {
+            Ok(aligned_lines) => {
+                track.lines =
+                    aligner::merge_word_timings(std::mem::take(&mut track.lines), aligned_lines);
+                track.source = "lrclib+qwen3".to_string();
+                let json = serde_json::to_vec(&track).unwrap_or_default();
+                if let Err(e) = tokio::fs::write(&lyrics_path, &json).await {
+                    warn!("lyrics_worker: failed to rewrite {youtube_id}_lyrics.json: {e}");
+                    return;
+                }
+                if let Err(e) = set_video_lyrics_source(&self.pool, video_id, "lrclib+qwen3").await
+                {
+                    warn!("lyrics_worker: failed to update lyrics_source for {youtube_id}: {e}");
+                }
+                info!("lyrics_worker: retroactive alignment succeeded for {youtube_id}");
+            }
+            Err(e) => {
+                warn!("lyrics_worker: retroactive alignment failed for {youtube_id}: {e}");
             }
         }
     }
