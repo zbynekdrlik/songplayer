@@ -112,7 +112,11 @@ pub async fn ensure_ready(
             }
         }
 
-        // 2. Install qwen-asr into the venv.
+        // 2. Install qwen-asr into the venv. pip's exit code is NOT
+        // authoritative: in non-TTY mode it sometimes returns 1 for benign
+        // warnings (like leftover `~distribution` stubs from a prior partial
+        // install). We log but do not bail on non-zero; the final is_ready
+        // check at the end of bootstrap is the real success gate.
         tracing::info!("lyrics bootstrap: installing qwen-asr (this may take several minutes)");
         let mut pip = Command::new(&venv_python);
         pip.args(["-m", "pip", "install", "-U", "qwen-asr"]);
@@ -123,14 +127,16 @@ pub async fn ensure_ready(
             match tokio::time::timeout(std::time::Duration::from_secs(600), pip_child.wait()).await
             {
                 Ok(Ok(s)) => s,
-                Ok(Err(e)) => anyhow::bail!("pip install qwen-asr failed: {e}"),
+                Ok(Err(e)) => anyhow::bail!("pip install qwen-asr spawn failed: {e}"),
                 Err(_) => {
                     let _ = pip_child.kill().await;
                     anyhow::bail!("pip install qwen-asr timed out after 10 minutes");
                 }
             };
         if !pip_status.success() {
-            anyhow::bail!("pip install qwen-asr exited with status {pip_status}");
+            tracing::warn!(
+                "lyrics bootstrap: pip install qwen-asr exited {pip_status} (tolerated, final is_ready check decides)"
+            );
         }
 
         // 2b. Force-reinstall torch with CUDA support. qwen-asr pulls the
@@ -158,14 +164,23 @@ pub async fn ensure_ready(
                 .await
             {
                 Ok(Ok(s)) => s,
-                Ok(Err(e)) => anyhow::bail!("torch CUDA install failed: {e}"),
+                Ok(Err(e)) => anyhow::bail!("torch CUDA install spawn failed: {e}"),
                 Err(_) => {
                     let _ = torch_child.kill().await;
                     anyhow::bail!("torch CUDA install timed out after 15 minutes");
                 }
             };
         if !torch_status.success() {
-            anyhow::bail!("torch CUDA install exited with status {torch_status}");
+            tracing::warn!(
+                "lyrics bootstrap: torch CUDA install exited {torch_status} (tolerated, final is_ready check decides)"
+            );
+        }
+
+        // Verify the install actually worked regardless of pip's exit codes.
+        if !is_ready(&venv_python).await {
+            anyhow::bail!(
+                "lyrics bootstrap: post-install is_ready check failed — qwen_asr or CUDA torch not available"
+            );
         }
 
         // 3. Preload the model so the first song doesn't pay the 1.2GB download.
