@@ -1,78 +1,81 @@
-//! Rust subprocess wrapper for the `lyrics_worker.py` Python ML helper.
+//! Rust subprocess wrappers for `lyrics_worker.py`.
 //!
-//! Provides async functions to drive Qwen3-based alignment and transcription
-//! by spawning the Python script as a child process and parsing its JSON output.
+//! Two entry points:
+//!   - `preprocess_vocals(flac) → clean_wav`: Mel-Roformer + anvuew + 16 kHz
+//!   - `align_chunks(wav, chunks) → ChunkResults`: chunked Qwen3 alignment
+//!
+//! No post-processing, no band-aid, no duplicate-timing fixups. The
+//! assembly and quality modules in this crate own all data shaping.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
-use sp_core::lyrics::{LyricsLine, LyricsWord};
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 use tracing::debug;
 
+use crate::lyrics::assembly::{AlignedWord, ChunkResult};
+use crate::lyrics::chunking::ChunkRequest;
+
 // ---------------------------------------------------------------------------
-// Python output structures
+// On-disk JSON shapes shared with Python
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-struct AlignOutput {
-    lines: Vec<AlignLine>,
+#[derive(Debug, Serialize)]
+struct ChunkInRequest<'a> {
+    chunk_idx: usize,
+    start_ms: u64,
+    end_ms: u64,
+    text: &'a str,
+    word_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ChunkRequestFile<'a> {
+    chunks: Vec<ChunkInRequest<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AlignLine {
-    en: String,
-    words: Vec<AlignWord>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AlignWord {
+struct ChunkOutWord {
     text: String,
     start_ms: u64,
     end_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
-struct TranscribeOutput {
-    text: String,
+struct ChunkOut {
+    chunk_idx: usize,
+    words: Vec<ChunkOutWord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChunkResultFile {
+    chunks: Vec<ChunkOut>,
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// preprocess_vocals
 // ---------------------------------------------------------------------------
 
-/// Align `lyrics_text` to `audio_path` using Qwen3-ForcedAligner-0.6B.
-///
-/// Writes a temporary `.txt` file for the lyrics, invokes the Python helper,
-/// reads the resulting JSON, and returns the parsed `Vec<LyricsLine>`.
-/// The temp file and output file are cleaned up after parsing.
+/// Run Mel-Roformer vocal isolation + anvuew de-reverb + 16 kHz mono float32
+/// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
+/// the same path on success.
 #[cfg_attr(test, mutants::skip)]
-pub async fn align_lyrics(
+pub async fn preprocess_vocals(
     python_path: &Path,
     script_path: &Path,
     models_dir: &Path,
-    audio_path: &Path,
-    lyrics_text: &str,
-    output_path: &Path,
-) -> Result<Vec<LyricsLine>> {
-    // Write lyrics to a temp file
-    let temp_txt = output_path.with_extension("lyrics_tmp.txt");
-    fs::write(&temp_txt, lyrics_text)
-        .await
-        .context("failed to write temporary lyrics text file")?;
-
-    // Build the command
+    audio_in: &Path,
+    wav_out: &Path,
+) -> Result<PathBuf> {
     let mut cmd = Command::new(python_path);
     cmd.args([
         script_path.as_os_str(),
-        "align".as_ref(),
+        "preprocess-vocals".as_ref(),
         "--audio".as_ref(),
-        audio_path.as_os_str(),
-        "--text".as_ref(),
-        temp_txt.as_os_str(),
+        audio_in.as_os_str(),
         "--output".as_ref(),
-        output_path.as_os_str(),
+        wav_out.as_os_str(),
         "--models-dir".as_ref(),
         models_dir.as_os_str(),
     ]);
@@ -84,72 +87,74 @@ pub async fn align_lyrics(
     }
 
     debug!(
-        "Running aligner: {} align --audio {} --text {} --output {} --models-dir {}",
+        "running preprocess-vocals: {} --audio {} --output {}",
         python_path.display(),
-        audio_path.display(),
-        temp_txt.display(),
-        output_path.display(),
-        models_dir.display(),
+        audio_in.display(),
+        wav_out.display()
     );
 
-    let mut child = cmd
-        .spawn()
-        .context("failed to spawn lyrics_worker.py align")?;
-
-    let timeout = std::time::Duration::from_secs(300);
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
+    let mut child = cmd.spawn().context("failed to spawn preprocess-vocals")?;
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(600), child.wait()).await
+    {
         Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            let _ = fs::remove_file(&temp_txt).await;
-            anyhow::bail!("lyrics_worker.py align failed: {e}");
-        }
+        Ok(Err(e)) => anyhow::bail!("preprocess-vocals wait failed: {e}"),
         Err(_) => {
             let _ = child.kill().await;
-            let _ = fs::remove_file(&temp_txt).await;
-            anyhow::bail!("lyrics_worker.py align timed out after {timeout:?}");
+            anyhow::bail!("preprocess-vocals timed out after 600 s");
         }
     };
-
-    let _ = fs::remove_file(&temp_txt).await;
-
     if !status.success() {
-        anyhow::bail!("lyrics_worker.py align exited with status {}", status);
+        anyhow::bail!("preprocess-vocals exited with status {status}");
     }
-
-    // Read and parse JSON output
-    let json_bytes = fs::read(output_path)
-        .await
-        .context("failed to read aligner output JSON")?;
-
-    let _ = fs::remove_file(output_path).await;
-
-    let parsed: AlignOutput =
-        serde_json::from_slice(&json_bytes).context("failed to parse aligner JSON output")?;
-
-    Ok(convert_align_output(parsed))
+    Ok(wav_out.to_path_buf())
 }
 
-/// Transcribe `audio_path` using Qwen3-ASR-1.7B.
+// ---------------------------------------------------------------------------
+// align_chunks
+// ---------------------------------------------------------------------------
+
+/// Write `requests` to a temp file, invoke `lyrics_worker.py align-chunks`
+/// on the clean WAV, parse the result JSON, and return `ChunkResult`s.
 ///
-/// Returns the transcribed text string.
+/// `chunks_path` and `output_path` are caller-owned scratch files that
+/// this function writes and then removes on success.
 #[cfg_attr(test, mutants::skip)]
-pub async fn transcribe_audio(
+pub async fn align_chunks(
     python_path: &Path,
     script_path: &Path,
-    models_dir: &Path,
-    audio_path: &Path,
+    audio_wav: &Path,
+    requests: &[ChunkRequest],
+    chunks_path: &Path,
     output_path: &Path,
-) -> Result<String> {
+) -> Result<Vec<ChunkResult>> {
+    let req_file = ChunkRequestFile {
+        chunks: requests
+            .iter()
+            .enumerate()
+            .map(|(idx, r)| ChunkInRequest {
+                chunk_idx: idx,
+                start_ms: r.start_ms,
+                end_ms: r.end_ms,
+                text: &r.text,
+                word_count: r.word_count,
+            })
+            .collect(),
+    };
+    let json = serde_json::to_vec(&req_file)?;
+    fs::write(chunks_path, &json)
+        .await
+        .context("failed to write chunks request file")?;
+
     let mut cmd = Command::new(python_path);
     cmd.args([
         script_path.as_os_str(),
-        "transcribe".as_ref(),
+        "align-chunks".as_ref(),
         "--audio".as_ref(),
-        audio_path.as_os_str(),
+        audio_wav.as_os_str(),
+        "--chunks".as_ref(),
+        chunks_path.as_os_str(),
         "--output".as_ref(),
         output_path.as_os_str(),
-        "--models-dir".as_ref(),
-        models_dir.as_os_str(),
     ]);
 
     #[cfg(windows)]
@@ -159,197 +164,59 @@ pub async fn transcribe_audio(
     }
 
     debug!(
-        "Running transcriber: {} transcribe --audio {} --output {} --models-dir {}",
-        python_path.display(),
-        audio_path.display(),
-        output_path.display(),
-        models_dir.display(),
+        "running align-chunks with {} requests on {}",
+        requests.len(),
+        audio_wav.display()
     );
 
-    let mut child = cmd
-        .spawn()
-        .context("failed to spawn lyrics_worker.py transcribe")?;
-
-    let timeout = std::time::Duration::from_secs(300);
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
+    let mut child = cmd.spawn().context("failed to spawn align-chunks")?;
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(900), child.wait()).await
+    {
         Ok(Ok(s)) => s,
-        Ok(Err(e)) => anyhow::bail!("lyrics_worker.py transcribe failed: {e}"),
+        Ok(Err(e)) => anyhow::bail!("align-chunks wait failed: {e}"),
         Err(_) => {
             let _ = child.kill().await;
-            anyhow::bail!("lyrics_worker.py transcribe timed out after {timeout:?}");
+            anyhow::bail!("align-chunks timed out after 900 s");
         }
     };
-
     if !status.success() {
-        anyhow::bail!("lyrics_worker.py transcribe exited with status {}", status);
+        anyhow::bail!("align-chunks exited with status {status}");
     }
 
-    let json_bytes = fs::read(output_path)
+    let content = fs::read_to_string(output_path)
         .await
-        .context("failed to read transcribe output JSON")?;
+        .context("failed to read align-chunks output")?;
+    let parsed: ChunkResultFile =
+        serde_json::from_str(&content).context("failed to parse align-chunks output JSON")?;
 
+    let results = parsed
+        .chunks
+        .into_iter()
+        .map(|c| {
+            let line_index = requests
+                .get(c.chunk_idx)
+                .map(|r| r.line_index)
+                .unwrap_or(usize::MAX);
+            ChunkResult {
+                line_index,
+                words: c
+                    .words
+                    .into_iter()
+                    .map(|w| AlignedWord {
+                        text: w.text,
+                        start_ms: w.start_ms,
+                        end_ms: w.end_ms,
+                    })
+                    .collect(),
+            }
+        })
+        .filter(|r| r.line_index != usize::MAX)
+        .collect();
+
+    let _ = fs::remove_file(chunks_path).await;
     let _ = fs::remove_file(output_path).await;
 
-    let parsed: TranscribeOutput =
-        serde_json::from_slice(&json_bytes).context("failed to parse transcribe JSON output")?;
-
-    Ok(parsed.text)
-}
-
-/// Check whether the Python environment has a CUDA-capable GPU available.
-///
-/// Runs `lyrics_worker.py check-gpu` and parses the `"gpu"` field.
-#[cfg_attr(test, mutants::skip)]
-pub async fn check_gpu(python_path: &Path, script_path: &Path) -> Result<bool> {
-    let mut cmd = Command::new(python_path);
-    cmd.args([script_path.as_os_str(), "check-gpu".as_ref()]);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    let output = cmd
-        .output()
-        .await
-        .context("failed to spawn lyrics_worker.py check-gpu")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "lyrics_worker.py check-gpu exited with status {}",
-            output.status
-        );
-    }
-
-    #[derive(Deserialize)]
-    struct GpuOutput {
-        gpu: bool,
-    }
-
-    let parsed: GpuOutput =
-        serde_json::from_slice(&output.stdout).context("failed to parse check-gpu JSON output")?;
-
-    Ok(parsed.gpu)
-}
-
-// ---------------------------------------------------------------------------
-// Conversion helpers
-// ---------------------------------------------------------------------------
-
-fn convert_align_output(output: AlignOutput) -> Vec<LyricsLine> {
-    output
-        .lines
-        .into_iter()
-        .map(|line| {
-            let words: Vec<LyricsWord> = line
-                .words
-                .into_iter()
-                .map(|w| LyricsWord {
-                    text: w.text,
-                    start_ms: w.start_ms,
-                    end_ms: w.end_ms,
-                })
-                .collect();
-
-            // Derive line timing from first/last word, or default to 0
-            let start_ms = words.first().map(|w| w.start_ms).unwrap_or(0);
-            let end_ms = words.last().map(|w| w.end_ms).unwrap_or(0);
-
-            LyricsLine {
-                start_ms,
-                end_ms,
-                en: line.en,
-                sk: None,
-                words: if words.is_empty() { None } else { Some(words) },
-            }
-        })
-        .collect()
-}
-
-/// Merge aligned-word timings into LRCLIB-sourced lines.
-///
-/// Preserves each LRCLIB line's `start_ms` / `end_ms` / `en` text and
-/// attaches the aligned `words` from the matching aligned line by index.
-/// Also repairs degenerate word timings (runs of identical `start_ms` that
-/// Qwen3-ForcedAligner emits for repeated or hard-to-align phrases) by
-/// distributing them evenly across the LRCLIB line's duration.
-pub fn merge_word_timings(lrclib: Vec<LyricsLine>, aligned: Vec<LyricsLine>) -> Vec<LyricsLine> {
-    let mut aligned_iter = aligned.into_iter();
-    lrclib
-        .into_iter()
-        .map(|mut line| {
-            if let Some(a) = aligned_iter.next() {
-                line.words = a.words;
-            }
-            ensure_progressive_words(&mut line);
-            line
-        })
-        .collect()
-}
-
-/// Rewrite `line.words` in place so each word has a strictly-increasing
-/// `start_ms`. Distributes runs of identical timestamps (common Qwen3
-/// output for filler phrases) evenly across either the next unique
-/// timestamp or the LRCLIB line end.
-///
-/// If every word has `start_ms == 0`, distributes them across the whole
-/// LRCLIB line `[start_ms, end_ms]`.
-///
-/// A no-op when words are already strictly increasing.
-pub fn ensure_progressive_words(line: &mut LyricsLine) {
-    let Some(words) = line.words.as_mut() else {
-        return;
-    };
-    if words.len() < 2 {
-        return;
-    }
-
-    let line_start = line.start_ms;
-    // Guard against degenerate LRCLIB data where end_ms <= start_ms.
-    // Use at least 1ms of range so arithmetic below stays well-defined.
-    let line_end = line.end_ms.max(line_start + 1);
-
-    // Case A: every word has start_ms == 0 — aligner produced nothing.
-    // Distribute evenly across the LRCLIB line duration.
-    if words.iter().all(|w| w.start_ms == 0) {
-        let n = words.len() as u64;
-        let span = line_end - line_start;
-        for (i, w) in words.iter_mut().enumerate() {
-            let i = i as u64;
-            w.start_ms = line_start + span * i / n;
-            w.end_ms = line_start + span * (i + 1) / n;
-        }
-        return;
-    }
-
-    // Case B: aligner produced some real timestamps. Clamp into the
-    // LRCLIB line range and enforce strictly-increasing start_ms.
-    // Use `.max(...)` (not if-branches) so cargo-mutants has no
-    // conditional operators to flip into equivalent mutants.
-    for w in words.iter_mut() {
-        w.start_ms = w.start_ms.clamp(line_start, line_end);
-        w.end_ms = w.end_ms.max(w.start_ms);
-    }
-    let n = words.len();
-    for i in 1..n {
-        let min_next = words[i - 1].start_ms + 1;
-        words[i].start_ms = words[i].start_ms.max(min_next);
-        words[i].end_ms = words[i].end_ms.max(words[i].start_ms);
-    }
-
-    // If the +1ms chain pushed the last word past line_end, the aligner
-    // output was so degenerate that we have no real information — fall
-    // back to even distribution across the LRCLIB line range.
-    if words[n - 1].start_ms > line_end {
-        let n_u = n as u64;
-        let span = line_end - line_start;
-        for (i, w) in words.iter_mut().enumerate() {
-            let i = i as u64;
-            w.start_ms = line_start + span * i / n_u;
-            w.end_ms = line_start + span * (i + 1) / n_u;
-        }
-    }
+    Ok(results)
 }
 
 // ---------------------------------------------------------------------------
@@ -358,620 +225,21 @@ pub fn ensure_progressive_words(line: &mut LyricsLine) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
+    /// Audit: retired symbols must no longer be referenced from this file.
+    /// Keeps the compiler from being the only line of defence against a
+    /// dangling `pub use aligner::align_lyrics` re-export leaking back in.
     #[test]
-    fn test_parse_align_output() {
-        let json = r#"{
-            "lines": [
-                {
-                    "en": "Hello world",
-                    "words": [
-                        {"text": "Hello", "start_ms": 100, "end_ms": 500},
-                        {"text": "world", "start_ms": 600, "end_ms": 1000}
-                    ]
-                },
-                {
-                    "en": "Foo bar baz",
-                    "words": [
-                        {"text": "Foo", "start_ms": 1100, "end_ms": 1300},
-                        {"text": "bar", "start_ms": 1400, "end_ms": 1600},
-                        {"text": "baz", "start_ms": 1700, "end_ms": 2000}
-                    ]
-                }
-            ]
-        }"#;
-
-        let parsed: AlignOutput = serde_json::from_str(json).expect("parse AlignOutput");
-        assert_eq!(parsed.lines.len(), 2);
-
-        let first = &parsed.lines[0];
-        assert_eq!(first.en, "Hello world");
-        assert_eq!(first.words.len(), 2);
-        assert_eq!(first.words[0].text, "Hello");
-        assert_eq!(first.words[0].start_ms, 100);
-        assert_eq!(first.words[0].end_ms, 500);
-        assert_eq!(first.words[1].text, "world");
-        assert_eq!(first.words[1].start_ms, 600);
-        assert_eq!(first.words[1].end_ms, 1000);
-
-        let second = &parsed.lines[1];
-        assert_eq!(second.en, "Foo bar baz");
-        assert_eq!(second.words.len(), 3);
-        assert_eq!(second.words[2].text, "baz");
-        assert_eq!(second.words[2].end_ms, 2000);
-    }
-
-    #[test]
-    fn test_parse_align_output_empty_lines() {
-        let json = r#"{"lines": []}"#;
-        let parsed: AlignOutput = serde_json::from_str(json).expect("parse empty AlignOutput");
-        assert_eq!(parsed.lines.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_align_output_empty_words() {
-        let json = r#"{
-            "lines": [
-                {"en": "Instrumental", "words": []}
-            ]
-        }"#;
-        let parsed: AlignOutput =
-            serde_json::from_str(json).expect("parse AlignOutput empty words");
-        assert_eq!(parsed.lines[0].en, "Instrumental");
-        assert_eq!(parsed.lines[0].words.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_transcribe_output() {
-        let json = r#"{"text": "Hello this is a transcription"}"#;
-        let parsed: TranscribeOutput = serde_json::from_str(json).expect("parse TranscribeOutput");
-        assert_eq!(parsed.text, "Hello this is a transcription");
-    }
-
-    #[test]
-    fn test_parse_transcribe_output_empty() {
-        let json = r#"{"text": ""}"#;
-        let parsed: TranscribeOutput =
-            serde_json::from_str(json).expect("parse TranscribeOutput empty");
-        assert_eq!(parsed.text, "");
-    }
-
-    #[test]
-    fn test_convert_align_output_to_lyrics_lines() {
-        let output = AlignOutput {
-            lines: vec![
-                AlignLine {
-                    en: "Amazing grace".to_string(),
-                    words: vec![
-                        AlignWord {
-                            text: "Amazing".to_string(),
-                            start_ms: 0,
-                            end_ms: 400,
-                        },
-                        AlignWord {
-                            text: "grace".to_string(),
-                            start_ms: 500,
-                            end_ms: 900,
-                        },
-                    ],
-                },
-                AlignLine {
-                    en: "How sweet the sound".to_string(),
-                    words: vec![
-                        AlignWord {
-                            text: "How".to_string(),
-                            start_ms: 1000,
-                            end_ms: 1200,
-                        },
-                        AlignWord {
-                            text: "sweet".to_string(),
-                            start_ms: 1300,
-                            end_ms: 1600,
-                        },
-                        AlignWord {
-                            text: "the".to_string(),
-                            start_ms: 1700,
-                            end_ms: 1900,
-                        },
-                        AlignWord {
-                            text: "sound".to_string(),
-                            start_ms: 2000,
-                            end_ms: 2500,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        let lines = convert_align_output(output);
-        assert_eq!(lines.len(), 2);
-
-        let first = &lines[0];
-        assert_eq!(first.en, "Amazing grace");
-        assert_eq!(first.start_ms, 0);
-        assert_eq!(first.end_ms, 900);
-        assert!(first.words.is_some());
-        let words0 = first.words.as_ref().unwrap();
-        assert_eq!(words0.len(), 2);
-        assert_eq!(words0[0].text, "Amazing");
-        assert_eq!(words0[1].text, "grace");
-
-        let second = &lines[1];
-        assert_eq!(second.en, "How sweet the sound");
-        assert_eq!(second.start_ms, 1000);
-        assert_eq!(second.end_ms, 2500);
-        assert_eq!(second.words.as_ref().unwrap().len(), 4);
-    }
-
-    #[test]
-    fn test_convert_align_output_empty_words_gives_none() {
-        let output = AlignOutput {
-            lines: vec![AlignLine {
-                en: "Silence".to_string(),
-                words: vec![],
-            }],
-        };
-        let lines = convert_align_output(output);
-        assert_eq!(lines.len(), 1);
-        assert!(lines[0].words.is_none());
-        assert_eq!(lines[0].start_ms, 0);
-        assert_eq!(lines[0].end_ms, 0);
-    }
-
-    fn lrclib_line(start_ms: u64, end_ms: u64, en: &str) -> LyricsLine {
-        LyricsLine {
-            start_ms,
-            end_ms,
-            en: en.to_string(),
-            sk: None,
-            words: None,
-        }
-    }
-
-    fn aligned_line(en: &str, words: Vec<(u64, u64, &str)>) -> LyricsLine {
-        LyricsLine {
-            start_ms: words.first().map(|w| w.0).unwrap_or(0),
-            end_ms: words.last().map(|w| w.1).unwrap_or(0),
-            en: en.to_string(),
-            sk: None,
-            words: Some(
-                words
-                    .into_iter()
-                    .map(|(s, e, t)| LyricsWord {
-                        text: t.to_string(),
-                        start_ms: s,
-                        end_ms: e,
-                    })
-                    .collect(),
-            ),
-        }
-    }
-
-    #[test]
-    fn merge_word_timings_same_count_preserves_lrclib_timing() {
-        let lrclib = vec![
-            lrclib_line(1000, 3000, "Hello world"),
-            lrclib_line(3500, 5000, "Amazing grace"),
-        ];
-        let aligned = vec![
-            aligned_line(
-                "Hello world",
-                vec![(1100, 1500, "Hello"), (1600, 2200, "world")],
-            ),
-            aligned_line(
-                "Amazing grace",
-                vec![(3600, 4200, "Amazing"), (4300, 4900, "grace")],
-            ),
-        ];
-        let out = merge_word_timings(lrclib, aligned);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].start_ms, 1000, "lrclib start_ms preserved");
-        assert_eq!(out[0].end_ms, 3000, "lrclib end_ms preserved");
-        assert_eq!(out[0].en, "Hello world");
-        let words0 = out[0].words.as_ref().expect("words present");
-        assert_eq!(words0.len(), 2);
-        assert_eq!(words0[0].text, "Hello");
-        assert_eq!(words0[1].text, "world");
-        assert_eq!(out[1].start_ms, 3500);
-    }
-
-    #[test]
-    fn merge_word_timings_fewer_aligned_leaves_tail_unaligned() {
-        let lrclib = vec![
-            lrclib_line(0, 1000, "Line one"),
-            lrclib_line(1000, 2000, "Line two"),
-            lrclib_line(2000, 3000, "Line three"),
-        ];
-        let aligned = vec![aligned_line(
-            "Line one",
-            vec![(0, 500, "Line"), (500, 1000, "one")],
-        )];
-        let out = merge_word_timings(lrclib, aligned);
-        assert_eq!(out.len(), 3);
-        assert!(out[0].words.is_some());
-        assert!(out[1].words.is_none(), "unaligned line stays wordless");
-        assert!(out[2].words.is_none());
-    }
-
-    #[test]
-    fn merge_word_timings_more_aligned_ignores_extras() {
-        let lrclib = vec![lrclib_line(0, 1000, "Only one line")];
-        let aligned = vec![
-            aligned_line("Only one line", vec![(0, 500, "Only")]),
-            aligned_line("Phantom extra", vec![(500, 1000, "Phantom")]),
-        ];
-        let out = merge_word_timings(lrclib, aligned);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].en, "Only one line");
-        assert_eq!(out[0].words.as_ref().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn merge_word_timings_empty_aligned_returns_lrclib_unchanged() {
-        let lrclib = vec![lrclib_line(0, 1000, "Line one")];
-        let out = merge_word_timings(lrclib.clone(), vec![]);
-        assert_eq!(out, lrclib);
-    }
-
-    // -----------------------------------------------------------------------
-    // ensure_progressive_words
-    // -----------------------------------------------------------------------
-
-    fn line_with_words(
-        start_ms: u64,
-        end_ms: u64,
-        en: &str,
-        words: Vec<(u64, u64, &str)>,
-    ) -> LyricsLine {
-        LyricsLine {
-            start_ms,
-            end_ms,
-            en: en.to_string(),
-            sk: None,
-            words: Some(
-                words
-                    .into_iter()
-                    .map(|(s, e, t)| LyricsWord {
-                        text: t.to_string(),
-                        start_ms: s,
-                        end_ms: e,
-                    })
-                    .collect(),
-            ),
-        }
-    }
-
-    #[test]
-    fn progressive_no_op_when_already_strictly_increasing() {
-        let mut line = line_with_words(
-            1000,
-            5000,
-            "a b c",
-            vec![(1100, 1500, "a"), (1600, 2200, "b"), (2300, 3000, "c")],
-        );
-        let before = line.words.clone();
-        ensure_progressive_words(&mut line);
-        assert_eq!(line.words, before);
-    }
-
-    #[test]
-    fn progressive_all_zero_words_distributed_evenly_across_line() {
-        let mut line = line_with_words(
-            1000,
-            5000,
-            "a b c d",
-            vec![(0, 0, "a"), (0, 0, "b"), (0, 0, "c"), (0, 0, "d")],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        // span = 4000, n = 4, each word gets 1000ms
-        assert_eq!(w[0].start_ms, 1000);
-        assert_eq!(w[0].end_ms, 2000);
-        assert_eq!(w[1].start_ms, 2000);
-        assert_eq!(w[2].start_ms, 3000);
-        assert_eq!(w[3].start_ms, 4000);
-        assert_eq!(w[3].end_ms, 5000);
-        // strictly increasing
-        for pair in w.windows(2) {
-            assert!(
-                pair[0].start_ms < pair[1].start_ms,
-                "expected strictly increasing"
-            );
-        }
-    }
-
-    #[test]
-    fn progressive_mid_run_of_duplicates_redistributed_within_range() {
-        // "to be praised" all share 103120, next word (line end) is 104000
-        let mut line = line_with_words(
-            102000,
-            104000,
-            "greatly to be praised",
-            vec![
-                (102500, 103000, "greatly"),
-                (103120, 103120, "to"),
-                (103120, 103120, "be"),
-                (103120, 103120, "praised"),
-            ],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        // greatly unchanged
-        assert_eq!(w[0].start_ms, 102500);
-        // to, be, praised distributed across [103120, 104000] = span 880, n=3
-        assert_eq!(w[1].start_ms, 103120);
-        assert!(w[2].start_ms > w[1].start_ms);
-        assert!(w[3].start_ms > w[2].start_ms);
-        assert!(w[3].end_ms <= 104000);
-    }
-
-    #[test]
-    fn progressive_tail_run_uses_line_end() {
-        // All three trailing words at 500ms, no following word — should fan
-        // out toward line.end_ms.
-        let mut line = line_with_words(
-            0,
-            3000,
-            "x y z",
-            vec![(500, 500, "x"), (500, 500, "y"), (500, 500, "z")],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        assert_eq!(w[0].start_ms, 500);
-        assert!(w[1].start_ms > w[0].start_ms);
-        assert!(w[2].start_ms > w[1].start_ms);
-        assert!(w[2].end_ms <= 3000);
-    }
-
-    #[test]
-    fn progressive_single_word_no_op() {
-        let mut line = line_with_words(1000, 2000, "solo", vec![(0, 0, "solo")]);
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        assert_eq!(w.len(), 1);
-        // Single word: no adjustment needed (len < 2 short-circuit)
-        assert_eq!(w[0].start_ms, 0);
-    }
-
-    #[test]
-    fn progressive_words_outside_line_bounds_clamped_and_fixed() {
-        // Observed in prod: LRCLIB line says 81570-87360 but aligner put
-        // every word at 101360 (way past line_end). Old code had
-        // range_end < range_start → span=0 → all same value, still
-        // degenerate. New code clamps to line range, then enforces strict
-        // increase.
-        let mut line = line_with_words(
-            81570,
-            87360,
-            "Get up get up and praise the Lord",
-            vec![
-                (86624, 93992, "Get"),
-                (101360, 101360, "up"),
-                (101360, 101360, "get"),
-                (101360, 101360, "up"),
-                (101360, 101360, "and"),
-                (101360, 101360, "praise"),
-                (101360, 101360, "the"),
-                (101360, 101361, "Lord"),
-            ],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        // Every start_ms strictly increases
-        for pair in w.windows(2) {
-            assert!(
-                pair[0].start_ms < pair[1].start_ms,
-                "strictly increasing required, got {} → {}",
-                pair[0].start_ms,
-                pair[1].start_ms,
-            );
-        }
-        // All start_ms clamped to line range [81570, 87360]
-        for ww in &w {
-            assert!(ww.start_ms >= 81570);
-            assert!(ww.start_ms <= 87360);
-        }
-    }
-
-    #[test]
-    fn progressive_regressing_timestamps_enforced_increasing() {
-        // word[2] has start_ms < word[1] (aligner produced non-monotonic).
-        // The strict-increase pass must bump it.
-        let mut line = line_with_words(
-            0,
-            10_000,
-            "a b c d",
-            vec![
-                (1000, 1500, "a"),
-                (2000, 2500, "b"),
-                (500, 800, "c"), // regresses — must be bumped
-                (3000, 3500, "d"),
-            ],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        assert_eq!(w[0].start_ms, 1000);
-        assert_eq!(w[1].start_ms, 2000);
-        assert_eq!(w[2].start_ms, 2001, "regressing word bumped to prev+1");
-        assert_eq!(w[3].start_ms, 3000);
-    }
-
-    #[test]
-    fn progressive_fallback_exact_even_distribution_values() {
-        // Force the +1ms chain to push past line_end so the fallback
-        // triggers. Assert exact values so arithmetic mutations fail.
-        // line [100, 120] (span 20), 5 words all clamped to line_end
-        // then bumped to 120, 121, 122, 123, 124 — last word 124 > 120
-        // triggers fallback: even distribution across [100, 120].
-        // expected: 100 + 20*i/5 for i=0..4 → 100, 104, 108, 112, 116
-        //           end_ms = 100 + 20*(i+1)/5 → 104, 108, 112, 116, 120
-        let mut line = line_with_words(
-            100,
-            120,
-            "a b c d e",
-            vec![
-                (200, 200, "a"),
-                (200, 200, "b"),
-                (200, 200, "c"),
-                (200, 200, "d"),
-                (200, 200, "e"),
-            ],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        assert_eq!(w[0].start_ms, 100);
-        assert_eq!(w[0].end_ms, 104);
-        assert_eq!(w[1].start_ms, 104);
-        assert_eq!(w[1].end_ms, 108);
-        assert_eq!(w[2].start_ms, 108);
-        assert_eq!(w[2].end_ms, 112);
-        assert_eq!(w[3].start_ms, 112);
-        assert_eq!(w[3].end_ms, 116);
-        assert_eq!(w[4].start_ms, 116);
-        assert_eq!(w[4].end_ms, 120);
-    }
-
-    #[test]
-    fn progressive_last_word_exactly_at_line_end_no_fallback() {
-        // Input that already lands with last word = line_end exactly,
-        // no strict-increase bump needed. Fallback MUST NOT trigger
-        // (tests the `>` operator vs `>=`).
-        let mut line = line_with_words(
-            1000,
-            2000,
-            "a b c",
-            vec![(1500, 1600, "a"), (1800, 1900, "b"), (2000, 2000, "c")],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        // Values must be preserved exactly — fallback would redistribute.
-        assert_eq!(w[0].start_ms, 1500);
-        assert_eq!(w[1].start_ms, 1800);
-        assert_eq!(w[2].start_ms, 2000);
-    }
-
-    #[test]
-    fn progressive_zero_duration_line_uses_1ms_guard() {
-        // LRCLIB line with end_ms == start_ms (zero duration). The guard
-        // `line_end.max(line_start + 1)` ensures at least 1ms of range so
-        // arithmetic below is well-defined. Tests `+ 1` vs `* 1` mutation.
-        let mut line = line_with_words(
-            1000,
-            1000, // same as start_ms → 0 duration
-            "a b",
-            vec![(0, 0, "a"), (0, 0, "b")],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        // Case A fires (all-zero). span = max(1000, 1001) - 1000 = 1.
-        // Distribution: 1000 + 1*i/2 → [1000, 1000]
-        // Then strict-increase won't run (Case A returns), so words may
-        // equal each other. The GUARD ensures span is at least 1 (not 0).
-        // With `+1` guard: span = 1, distribution well-defined.
-        // With `*1` mutation: span = 0, still well-defined but no spread.
-        // Both produce [1000, 1000] so this specific case is
-        // equivalent — add a non-zero-start case to discriminate.
-        //
-        // Better test: zero-duration line, non-zero aligned input.
-        let mut line2 = line_with_words(1000, 1000, "a b", vec![(500, 500, "a"), (500, 500, "b")]);
-        ensure_progressive_words(&mut line2);
-        let w2 = line2.words.unwrap();
-        // With `+1`: line_end=1001, clamp→[1000,1000], strict→[1000,1001],
-        //           last(1001) > line_end(1001)? no → keep → [1000, 1001]
-        // With `*1`: line_end=1000, clamp→[1000,1000], strict→[1000,1001],
-        //           last(1001) > line_end(1000)? yes → fallback with span=0
-        //           → [1000, 1000] (still degenerate).
-        assert_eq!(w2[0].start_ms, 1000);
-        assert_eq!(
-            w2[1].start_ms, 1001,
-            "with +1 guard, last word should stay at 1001 (no fallback)"
-        );
-        let _ = w; // silence unused warning for first line block
-    }
-
-    #[test]
-    fn progressive_fallback_not_triggered_when_last_word_at_line_end() {
-        // Boundary: last word's clamped start_ms ends exactly at line_end
-        // after the +1 chain. Should NOT trigger fallback.
-        // line [1000, 1010], 3 words at 0 → Case A (all zero), not this path.
-        // Use one real word + two clamped to hit Case B.
-        let mut line = line_with_words(
-            1000,
-            1010,
-            "a b c",
-            vec![(1005, 1005, "a"), (2000, 2000, "b"), (2000, 2000, "c")],
-        );
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        // Expected flow:
-        //   clamp: [1005, 1010, 1010]
-        //   strict+1: [1005, 1010, 1011]
-        //   last (1011) > line_end (1010) → fallback
-        //   fallback: 1000 + 10*i/3 → 1000, 1003, 1006
-        assert_eq!(w[0].start_ms, 1000);
-        assert_eq!(w[1].start_ms, 1003);
-        assert_eq!(w[2].start_ms, 1006);
-    }
-
-    #[test]
-    fn progressive_end_ms_never_less_than_start_ms() {
-        // Pin the end_ms invariant: every word's end_ms >= start_ms.
-        // Input has end_ms < start_ms for one word to force the clamp.
-        let mut line = line_with_words(0, 5000, "a b", vec![(1000, 500, "a"), (2000, 3000, "b")]);
-        ensure_progressive_words(&mut line);
-        let w = line.words.unwrap();
-        assert!(
-            w[0].end_ms >= w[0].start_ms,
-            "word[0]: end_ms ({}) must be >= start_ms ({})",
-            w[0].end_ms,
-            w[0].start_ms
-        );
-        assert_eq!(w[0].end_ms, w[0].start_ms, "end_ms clamped up to start_ms");
-    }
-
-    #[test]
-    fn progressive_no_words_no_op() {
-        let mut line = LyricsLine {
-            start_ms: 0,
-            end_ms: 1000,
-            en: "empty".into(),
-            sk: None,
-            words: None,
-        };
-        ensure_progressive_words(&mut line);
-        assert!(line.words.is_none());
-    }
-
-    #[test]
-    fn align_lyrics_timeout_accommodates_vocal_isolation() {
-        // Vocal isolation (Mel-Roformer) + alignment (Qwen3) together run
-        // ~60-90 s on the RTX 3070 Ti for a typical 4-minute song, and
-        // more on first-model-load. The 120 s timeout was tight even for
-        // the old pipeline; with isolation added, 300 s is the correct
-        // ceiling. This test guards against accidental re-tightening.
+    fn aligner_source_has_no_retired_symbols() {
         let src = include_str!("aligner.rs");
-        // align_lyrics must reference a 300 s (or greater) timeout
-        assert!(
-            src.contains("Duration::from_secs(300)"),
-            "align_lyrics timeout must be >= 300 s to cover vocal isolation + alignment"
-        );
-    }
-
-    #[test]
-    fn merge_word_timings_calls_progressive() {
-        // Integration: merge + progressive in one call
-        let lrclib = vec![lrclib_line(1000, 5000, "a b c d")];
-        let aligned = vec![aligned_line(
-            "a b c d",
-            vec![(0, 0, "a"), (0, 0, "b"), (0, 0, "c"), (0, 0, "d")],
-        )];
-        let out = merge_word_timings(lrclib, aligned);
-        let w = out[0].words.as_ref().unwrap();
-        for pair in w.windows(2) {
+        for banned in [
+            "align_lyrics",
+            "merge_word_timings",
+            "ensure_progressive_words",
+            "count_duplicate_start_ms",
+        ] {
             assert!(
-                pair[0].start_ms < pair[1].start_ms,
-                "merge should have produced strictly increasing word timestamps"
+                !src.contains(banned),
+                "aligner.rs must not contain retired symbol `{banned}`"
             );
         }
     }
