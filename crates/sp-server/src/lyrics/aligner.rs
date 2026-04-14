@@ -306,7 +306,9 @@ pub fn ensure_progressive_words(line: &mut LyricsLine) {
     }
 
     let line_start = line.start_ms;
-    let line_end = line.end_ms.max(line_start + 1000);
+    // Guard against degenerate LRCLIB data where end_ms <= start_ms.
+    // Use at least 1ms of range so arithmetic below stays well-defined.
+    let line_end = line.end_ms.max(line_start + 1);
 
     // Case A: every word has start_ms == 0 — aligner produced nothing.
     // Distribute evenly across the LRCLIB line duration.
@@ -774,6 +776,104 @@ mod tests {
             assert!(ww.start_ms >= 81570);
             assert!(ww.start_ms <= 87360);
         }
+    }
+
+    #[test]
+    fn progressive_regressing_timestamps_enforced_increasing() {
+        // word[2] has start_ms < word[1] (aligner produced non-monotonic).
+        // The strict-increase pass must bump it.
+        let mut line = line_with_words(
+            0,
+            10_000,
+            "a b c d",
+            vec![
+                (1000, 1500, "a"),
+                (2000, 2500, "b"),
+                (500, 800, "c"), // regresses — must be bumped
+                (3000, 3500, "d"),
+            ],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        assert_eq!(w[0].start_ms, 1000);
+        assert_eq!(w[1].start_ms, 2000);
+        assert_eq!(w[2].start_ms, 2001, "regressing word bumped to prev+1");
+        assert_eq!(w[3].start_ms, 3000);
+    }
+
+    #[test]
+    fn progressive_fallback_exact_even_distribution_values() {
+        // Force the +1ms chain to push past line_end so the fallback
+        // triggers. Assert exact values so arithmetic mutations fail.
+        // line [100, 120] (span 20), 5 words all clamped to line_end
+        // then bumped to 120, 121, 122, 123, 124 — last word 124 > 120
+        // triggers fallback: even distribution across [100, 120].
+        // expected: 100 + 20*i/5 for i=0..4 → 100, 104, 108, 112, 116
+        //           end_ms = 100 + 20*(i+1)/5 → 104, 108, 112, 116, 120
+        let mut line = line_with_words(
+            100,
+            120,
+            "a b c d e",
+            vec![
+                (200, 200, "a"),
+                (200, 200, "b"),
+                (200, 200, "c"),
+                (200, 200, "d"),
+                (200, 200, "e"),
+            ],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        assert_eq!(w[0].start_ms, 100);
+        assert_eq!(w[0].end_ms, 104);
+        assert_eq!(w[1].start_ms, 104);
+        assert_eq!(w[1].end_ms, 108);
+        assert_eq!(w[2].start_ms, 108);
+        assert_eq!(w[2].end_ms, 112);
+        assert_eq!(w[3].start_ms, 112);
+        assert_eq!(w[3].end_ms, 116);
+        assert_eq!(w[4].start_ms, 116);
+        assert_eq!(w[4].end_ms, 120);
+    }
+
+    #[test]
+    fn progressive_fallback_not_triggered_when_last_word_at_line_end() {
+        // Boundary: last word's clamped start_ms ends exactly at line_end
+        // after the +1 chain. Should NOT trigger fallback.
+        // line [1000, 1010], 3 words at 0 → Case A (all zero), not this path.
+        // Use one real word + two clamped to hit Case B.
+        let mut line = line_with_words(
+            1000,
+            1010,
+            "a b c",
+            vec![(1005, 1005, "a"), (2000, 2000, "b"), (2000, 2000, "c")],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        // Expected flow:
+        //   clamp: [1005, 1010, 1010]
+        //   strict+1: [1005, 1010, 1011]
+        //   last (1011) > line_end (1010) → fallback
+        //   fallback: 1000 + 10*i/3 → 1000, 1003, 1006
+        assert_eq!(w[0].start_ms, 1000);
+        assert_eq!(w[1].start_ms, 1003);
+        assert_eq!(w[2].start_ms, 1006);
+    }
+
+    #[test]
+    fn progressive_end_ms_never_less_than_start_ms() {
+        // Pin the end_ms invariant: every word's end_ms >= start_ms.
+        // Input has end_ms < start_ms for one word to force the clamp.
+        let mut line = line_with_words(0, 5000, "a b", vec![(1000, 500, "a"), (2000, 3000, "b")]);
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        assert!(
+            w[0].end_ms >= w[0].start_ms,
+            "word[0]: end_ms ({}) must be >= start_ms ({})",
+            w[0].end_ms,
+            w[0].start_ms
+        );
+        assert_eq!(w[0].end_ms, w[0].start_ms, "end_ms clamped up to start_ms");
     }
 
     #[test]
