@@ -128,7 +128,12 @@ mod tests {
 
     #[test]
     fn gap_stddev_ms_zero_for_perfectly_even_gaps() {
-        let l = line_with_words(&[(0, 50, "a"), (100, 150, "b"), (200, 250, "c"), (300, 350, "d")]);
+        let l = line_with_words(&[
+            (0, 50, "a"),
+            (100, 150, "b"),
+            (200, 250, "c"),
+            (300, 350, "d"),
+        ]);
         // All gaps == 100 ms → stddev 0.
         assert!(gap_stddev_ms(&l).abs() < 0.001);
     }
