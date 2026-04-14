@@ -141,6 +141,36 @@ pub async fn ensure_ready(
             );
         }
 
+        // 2a. Install audio-separator[gpu] for Mel-Roformer vocal isolation.
+        // This preprocessing step runs before Qwen3-ForcedAligner; without
+        // vocal isolation the aligner produces degenerate timestamps on
+        // sung music (instruments mask phoneme boundaries).
+        // Same exit-code tolerance as qwen-asr: final is_ready check decides.
+        tracing::info!(
+            "lyrics bootstrap: installing audio-separator[gpu] (Mel-Roformer vocal isolation)"
+        );
+        let mut sep_pip = Command::new(&venv_python);
+        sep_pip.args(["-m", "pip", "install", "-U", "audio-separator[gpu]"]);
+        sep_pip.creation_flags(0x08000000);
+        let mut sep_child = sep_pip
+            .spawn()
+            .context("failed to spawn pip install audio-separator")?;
+        let sep_status =
+            match tokio::time::timeout(std::time::Duration::from_secs(900), sep_child.wait()).await
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => anyhow::bail!("pip install audio-separator spawn failed: {e}"),
+                Err(_) => {
+                    let _ = sep_child.kill().await;
+                    anyhow::bail!("pip install audio-separator timed out after 15 minutes");
+                }
+            };
+        if !sep_status.success() {
+            tracing::warn!(
+                "lyrics bootstrap: pip install audio-separator exited {sep_status} (tolerated, final is_ready check decides)"
+            );
+        }
+
         // 2b. Force-reinstall torch with CUDA support. qwen-asr pulls the
         // CPU-only torch wheel from PyPI by default; Qwen3-ForcedAligner
         // inference on a 4-minute audio without CUDA takes minutes instead
@@ -267,6 +297,18 @@ mod tests {
         assert!(
             src.contains("import qwen_asr, torch, audio_separator, sys"),
             "is_ready check must import audio_separator alongside qwen_asr + torch"
+        );
+    }
+
+    #[test]
+    fn ensure_ready_installs_audio_separator() {
+        // Static audit: the bootstrap source must contain a pip install
+        // step for audio-separator[gpu], otherwise the venv will never
+        // satisfy is_ready and bootstrap will always fail loudly.
+        let src = include_str!("bootstrap.rs");
+        assert!(
+            src.contains("\"audio-separator[gpu]\""),
+            "bootstrap must install audio-separator[gpu] via pip"
         );
     }
 }
