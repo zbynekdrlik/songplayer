@@ -334,19 +334,39 @@ test.describe("FLAC pipeline post-deploy verification", () => {
           const track = await lyricsResp.json();
           if (!Array.isArray(track.lines)) continue;
 
-          const hasWords = track.lines.some(
-            (l: any) =>
-              Array.isArray(l.words) &&
-              l.words.length > 0 &&
-              l.words.every(
-                (w: any) =>
-                  typeof w.text === "string" &&
-                  typeof w.start_ms === "number" &&
-                  typeof w.end_ms === "number" &&
-                  w.end_ms >= w.start_ms,
-              ),
-          );
-          if (hasWords) return { checked, found: true };
+          // Strong assertion: at least one line must have ≥3 words with
+          // strictly increasing start_ms AND the first word's start_ms
+          // within a reasonable window of the line's own start_ms. This
+          // catches the bug where the aligner emits runs of identical
+          // timestamps (degenerate karaoke — jumps from first word to
+          // last with nothing in between) that a naive `end_ms >= start_ms`
+          // check passes.
+          const hasProgressiveWords = track.lines.some((l: any) => {
+            if (!Array.isArray(l.words) || l.words.length < 3) return false;
+            const w = l.words;
+            // All words well-formed
+            for (const ww of w) {
+              if (
+                typeof ww.text !== "string" ||
+                typeof ww.start_ms !== "number" ||
+                typeof ww.end_ms !== "number" ||
+                ww.end_ms < ww.start_ms
+              ) {
+                return false;
+              }
+            }
+            // Strictly increasing start_ms across the whole line
+            for (let i = 1; i < w.length; i++) {
+              if (w[i].start_ms <= w[i - 1].start_ms) return false;
+            }
+            // First word within ±2s of the LRCLIB line start
+            if (typeof l.start_ms === "number") {
+              const delta = Math.abs(w[0].start_ms - l.start_ms);
+              if (delta > 2000) return false;
+            }
+            return true;
+          });
+          if (hasProgressiveWords) return { checked, found: true };
         }
       }
       return { checked, found: false };

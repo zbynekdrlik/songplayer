@@ -271,8 +271,9 @@ fn convert_align_output(output: AlignOutput) -> Vec<LyricsLine> {
 ///
 /// Preserves each LRCLIB line's `start_ms` / `end_ms` / `en` text and
 /// attaches the aligned `words` from the matching aligned line by index.
-/// Aligned lines beyond `lrclib.len()` are dropped. LRCLIB lines beyond
-/// `aligned.len()` keep `words = None`.
+/// Also repairs degenerate word timings (runs of identical `start_ms` that
+/// Qwen3-ForcedAligner emits for repeated or hard-to-align phrases) by
+/// distributing them evenly across the LRCLIB line's duration.
 pub fn merge_word_timings(lrclib: Vec<LyricsLine>, aligned: Vec<LyricsLine>) -> Vec<LyricsLine> {
     let mut aligned_iter = aligned.into_iter();
     lrclib
@@ -281,9 +282,94 @@ pub fn merge_word_timings(lrclib: Vec<LyricsLine>, aligned: Vec<LyricsLine>) -> 
             if let Some(a) = aligned_iter.next() {
                 line.words = a.words;
             }
+            ensure_progressive_words(&mut line);
             line
         })
         .collect()
+}
+
+/// Rewrite `line.words` in place so each word has a strictly-increasing
+/// `start_ms`. Distributes runs of identical timestamps (common Qwen3
+/// output for filler phrases) evenly across either the next unique
+/// timestamp or the LRCLIB line end.
+///
+/// If every word has `start_ms == 0`, distributes them across the whole
+/// LRCLIB line `[start_ms, end_ms]`.
+///
+/// A no-op when words are already strictly increasing.
+pub fn ensure_progressive_words(line: &mut LyricsLine) {
+    let Some(words) = line.words.as_mut() else {
+        return;
+    };
+    if words.len() < 2 {
+        return;
+    }
+
+    let line_start = line.start_ms;
+    let line_end = line.end_ms.max(line_start + 1000);
+
+    // Case A: every word has start_ms == 0 — treat as "no alignment info"
+    // and distribute evenly across the LRCLIB line duration.
+    if words.iter().all(|w| w.start_ms == 0) {
+        let n = words.len() as u64;
+        let span = line_end - line_start;
+        for (i, w) in words.iter_mut().enumerate() {
+            let i = i as u64;
+            w.start_ms = line_start + span * i / n;
+            w.end_ms = line_start + span * (i + 1) / n;
+        }
+        return;
+    }
+
+    // Case B: clamp any stray 0s to line_start (aligner didn't emit
+    // timing for head words but others are fine).
+    for w in words.iter_mut() {
+        if w.start_ms < line_start {
+            w.start_ms = line_start;
+        }
+        if w.end_ms < w.start_ms {
+            w.end_ms = w.start_ms;
+        }
+    }
+
+    // Case C: walk the word list, find runs where start_ms doesn't
+    // strictly increase, and redistribute those runs evenly between the
+    // preceding unique timestamp and the following unique timestamp (or
+    // line_end).
+    let len = words.len();
+    let mut i = 0;
+    while i < len {
+        // Find end of a run where start_ms does not strictly increase
+        // past words[i].
+        let run_start = i;
+        let base = words[run_start].start_ms;
+        let mut run_end = run_start;
+        while run_end + 1 < len && words[run_end + 1].start_ms <= base {
+            run_end += 1;
+        }
+
+        if run_end > run_start {
+            let range_start = base;
+            let range_end = if run_end + 1 < len {
+                words[run_end + 1].start_ms
+            } else {
+                line_end.max(range_start + 1)
+            };
+            let span = range_end.saturating_sub(range_start).max(1);
+            let run_len = (run_end - run_start + 1) as u64;
+            for (offset, w) in words
+                .iter_mut()
+                .skip(run_start)
+                .take(run_end - run_start + 1)
+                .enumerate()
+            {
+                let j = offset as u64;
+                w.start_ms = range_start + span * j / run_len;
+                w.end_ms = range_start + span * (j + 1) / run_len;
+            }
+        }
+        i = run_end + 1;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -546,5 +632,156 @@ mod tests {
         let lrclib = vec![lrclib_line(0, 1000, "Line one")];
         let out = merge_word_timings(lrclib.clone(), vec![]);
         assert_eq!(out, lrclib);
+    }
+
+    // -----------------------------------------------------------------------
+    // ensure_progressive_words
+    // -----------------------------------------------------------------------
+
+    fn line_with_words(
+        start_ms: u64,
+        end_ms: u64,
+        en: &str,
+        words: Vec<(u64, u64, &str)>,
+    ) -> LyricsLine {
+        LyricsLine {
+            start_ms,
+            end_ms,
+            en: en.to_string(),
+            sk: None,
+            words: Some(
+                words
+                    .into_iter()
+                    .map(|(s, e, t)| LyricsWord {
+                        text: t.to_string(),
+                        start_ms: s,
+                        end_ms: e,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    #[test]
+    fn progressive_no_op_when_already_strictly_increasing() {
+        let mut line = line_with_words(
+            1000,
+            5000,
+            "a b c",
+            vec![(1100, 1500, "a"), (1600, 2200, "b"), (2300, 3000, "c")],
+        );
+        let before = line.words.clone();
+        ensure_progressive_words(&mut line);
+        assert_eq!(line.words, before);
+    }
+
+    #[test]
+    fn progressive_all_zero_words_distributed_evenly_across_line() {
+        let mut line = line_with_words(
+            1000,
+            5000,
+            "a b c d",
+            vec![(0, 0, "a"), (0, 0, "b"), (0, 0, "c"), (0, 0, "d")],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        // span = 4000, n = 4, each word gets 1000ms
+        assert_eq!(w[0].start_ms, 1000);
+        assert_eq!(w[0].end_ms, 2000);
+        assert_eq!(w[1].start_ms, 2000);
+        assert_eq!(w[2].start_ms, 3000);
+        assert_eq!(w[3].start_ms, 4000);
+        assert_eq!(w[3].end_ms, 5000);
+        // strictly increasing
+        for pair in w.windows(2) {
+            assert!(
+                pair[0].start_ms < pair[1].start_ms,
+                "expected strictly increasing"
+            );
+        }
+    }
+
+    #[test]
+    fn progressive_mid_run_of_duplicates_redistributed_within_range() {
+        // "to be praised" all share 103120, next word (line end) is 104000
+        let mut line = line_with_words(
+            102000,
+            104000,
+            "greatly to be praised",
+            vec![
+                (102500, 103000, "greatly"),
+                (103120, 103120, "to"),
+                (103120, 103120, "be"),
+                (103120, 103120, "praised"),
+            ],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        // greatly unchanged
+        assert_eq!(w[0].start_ms, 102500);
+        // to, be, praised distributed across [103120, 104000] = span 880, n=3
+        assert_eq!(w[1].start_ms, 103120);
+        assert!(w[2].start_ms > w[1].start_ms);
+        assert!(w[3].start_ms > w[2].start_ms);
+        assert!(w[3].end_ms <= 104000);
+    }
+
+    #[test]
+    fn progressive_tail_run_uses_line_end() {
+        // All three trailing words at 500ms, no following word — should fan
+        // out toward line.end_ms.
+        let mut line = line_with_words(
+            0,
+            3000,
+            "x y z",
+            vec![(500, 500, "x"), (500, 500, "y"), (500, 500, "z")],
+        );
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        assert_eq!(w[0].start_ms, 500);
+        assert!(w[1].start_ms > w[0].start_ms);
+        assert!(w[2].start_ms > w[1].start_ms);
+        assert!(w[2].end_ms <= 3000);
+    }
+
+    #[test]
+    fn progressive_single_word_no_op() {
+        let mut line = line_with_words(1000, 2000, "solo", vec![(0, 0, "solo")]);
+        ensure_progressive_words(&mut line);
+        let w = line.words.unwrap();
+        assert_eq!(w.len(), 1);
+        // Single word: no adjustment needed (len < 2 short-circuit)
+        assert_eq!(w[0].start_ms, 0);
+    }
+
+    #[test]
+    fn progressive_no_words_no_op() {
+        let mut line = LyricsLine {
+            start_ms: 0,
+            end_ms: 1000,
+            en: "empty".into(),
+            sk: None,
+            words: None,
+        };
+        ensure_progressive_words(&mut line);
+        assert!(line.words.is_none());
+    }
+
+    #[test]
+    fn merge_word_timings_calls_progressive() {
+        // Integration: merge + progressive in one call
+        let lrclib = vec![lrclib_line(1000, 5000, "a b c d")];
+        let aligned = vec![aligned_line(
+            "a b c d",
+            vec![(0, 0, "a"), (0, 0, "b"), (0, 0, "c"), (0, 0, "d")],
+        )];
+        let out = merge_word_timings(lrclib, aligned);
+        let w = out[0].words.as_ref().unwrap();
+        for pair in w.windows(2) {
+            assert!(
+                pair[0].start_ms < pair[1].start_ms,
+                "merge should have produced strictly increasing word timestamps"
+            );
+        }
     }
 }
