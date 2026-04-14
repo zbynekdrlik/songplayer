@@ -210,6 +210,11 @@ pub async fn ensure_ready(
         // Install the cu124 variant from the PyTorch index LAST so it wins
         // — pip `--force-reinstall` on `torch` alone replaces whatever
         // torch build the earlier steps left behind.
+        //
+        // Pin the triplet: installing `torch` alone with --force-reinstall
+        // on win-resolume produced torchvision 0.26 + torchaudio 2.11, which
+        // bind against a torch 2.11 ABI that doesn't exist on the cu124
+        // index. Matched versions keep qwen_asr importable.
         tracing::info!("lyrics bootstrap: installing CUDA torch variant");
         let mut torch_pip = Command::new(&venv_python);
         torch_pip.args([
@@ -218,7 +223,9 @@ pub async fn ensure_ready(
             "install",
             "--upgrade",
             "--force-reinstall",
-            "torch",
+            "torch==2.6.0+cu124",
+            "torchvision==0.21.0+cu124",
+            "torchaudio==2.6.0+cu124",
             "--index-url",
             "https://download.pytorch.org/whl/cu124",
         ]);
@@ -356,6 +363,42 @@ mod tests {
         assert!(
             AUDIO_SEPARATOR_PACKAGE.contains("[gpu]"),
             "AUDIO_SEPARATOR_PACKAGE must request the [gpu] extra, got: {AUDIO_SEPARATOR_PACKAGE:?}"
+        );
+    }
+
+    /// bootstrap must pin torch + torchvision + torchaudio to versions that
+    /// form a compatible ABI triplet. Observed on win-resolume: installing
+    /// `torch` alone with --force-reinstall leaves torchvision at 0.26 and
+    /// torchaudio at 2.11, which binds against a torch 2.11 ABI that
+    /// doesn't exist on the cu124 index — qwen_asr import fails with
+    /// "operator torchvision::nms does not exist".
+    #[test]
+    fn bootstrap_pins_matched_torch_triplet() {
+        let src = include_str!("bootstrap.rs");
+        assert!(
+            src.contains("torch==2.6.0+cu124"),
+            "bootstrap.rs must pin torch==2.6.0+cu124"
+        );
+        assert!(
+            src.contains("torchvision==0.21.0+cu124"),
+            "bootstrap.rs must pin torchvision==0.21.0+cu124"
+        );
+        assert!(
+            src.contains("torchaudio==2.6.0+cu124"),
+            "bootstrap.rs must pin torchaudio==2.6.0+cu124"
+        );
+    }
+
+    /// The anvuew dereverb model (SDR 19.17, 2026 SOTA) must be referenced
+    /// in the Python helper so preload warms it at bootstrap. This ensures
+    /// the first song doesn't pay the ~500 MB download inside the
+    /// alignment subprocess timeout.
+    #[test]
+    fn bootstrap_preloads_anvuew_dereverb() {
+        let py_src = include_str!("../../../../scripts/lyrics_worker.py");
+        assert!(
+            py_src.contains("dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"),
+            "lyrics_worker.py must reference the anvuew dereverb checkpoint"
         );
     }
 }
