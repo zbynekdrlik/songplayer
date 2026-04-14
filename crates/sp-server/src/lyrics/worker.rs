@@ -28,11 +28,18 @@ pub struct LyricsWorker {
     client: Client,
     cache_dir: PathBuf,
     ytdlp_path: PathBuf,
+    /// System Python (used to bootstrap the venv). `None` on platforms
+    /// without a usable Python install.
     python_path: Option<PathBuf>,
+    /// Tools directory (parent of `lyrics_venv/`).
+    tools_dir: PathBuf,
     script_path: PathBuf,
     models_dir: PathBuf,
     gemini_api_key: String,
     gemini_model: String,
+    /// Venv Python path — populated by `ensure_script_and_bootstrap`.
+    /// `None` means alignment is disabled for this run.
+    venv_python: tokio::sync::RwLock<Option<PathBuf>>,
 }
 
 impl LyricsWorker {
@@ -57,10 +64,12 @@ impl LyricsWorker {
             cache_dir,
             ytdlp_path,
             python_path,
+            tools_dir,
             script_path,
             models_dir,
             gemini_api_key,
             gemini_model,
+            venv_python: tokio::sync::RwLock::new(None),
         }
     }
 
@@ -92,6 +101,31 @@ impl LyricsWorker {
         // Ensure the Python helper script is written to disk.
         if let Err(e) = self.ensure_script().await {
             error!("lyrics_worker: failed to write lyrics_worker.py: {e}");
+        }
+
+        // Bootstrap the Python venv + qwen-asr + model preload.
+        if let Some(sys_py) = self.python_path.as_ref() {
+            match crate::lyrics::bootstrap::ensure_ready(
+                &self.tools_dir,
+                &self.script_path,
+                &self.models_dir,
+                sys_py,
+            )
+            .await
+            {
+                Ok(Some(venv)) => {
+                    tracing::info!("lyrics_worker: aligner ready at {}", venv.display());
+                    *self.venv_python.write().await = Some(venv);
+                }
+                Ok(None) => {
+                    tracing::info!("lyrics_worker: alignment disabled (non-Windows)");
+                }
+                Err(e) => {
+                    warn!("lyrics_worker: bootstrap failed, alignment disabled: {e}");
+                }
+            }
+        } else {
+            warn!("lyrics_worker: no system Python, alignment disabled");
         }
         loop {
             tokio::select! {
@@ -162,56 +196,66 @@ impl LyricsWorker {
         // Step 1: Acquire lyrics via source waterfall
         let (mut track, mut source) = self.acquire_lyrics(&row).await?;
 
-        // Step 2: Forced alignment — DISABLED until Qwen3 model compatibility
-        // is resolved with transformers library. The model architecture
-        // "qwen3_asr" is not recognized by transformers 5.5.3.
-        // See: https://github.com/QwenLM/Qwen3-ASR
-        if false {
-            if let Some(python) = &self.python_path {
-                if let Some(audio_path) = &row.audio_file_path {
-                    let audio = PathBuf::from(audio_path);
-                    if audio.exists() {
-                        let lyrics_text: String = track
-                            .lines
-                            .iter()
-                            .map(|l| l.en.as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n");
+        // Step 2: Forced alignment via Qwen3-ForcedAligner (issue #25).
+        //
+        // Skip if:
+        //   - venv bootstrap failed or running on non-Windows,
+        //   - audio file missing,
+        //   - audio duration > 5 min (Qwen3-ForcedAligner architectural limit).
+        const QWEN3_ALIGNER_MAX_MS: u64 = 5 * 60 * 1000;
+        let venv_python = self.venv_python.read().await.clone();
+        let duration_ms = row.duration_ms.map(|d| d as u64).unwrap_or(0);
+        let audio_path = row.audio_file_path.as_ref().map(PathBuf::from);
 
-                        let output_path = self
-                            .cache_dir
-                            .join(format!("{youtube_id}_align_output.json"));
+        if let (Some(python), Some(audio)) = (venv_python.as_ref(), audio_path.as_ref()) {
+            if !audio.exists() {
+                debug!(
+                    "lyrics_worker: audio file {} missing, skipping alignment",
+                    audio.display()
+                );
+            } else if duration_ms == 0 {
+                debug!("lyrics_worker: unknown duration for {youtube_id}, skipping alignment");
+            } else if duration_ms > QWEN3_ALIGNER_MAX_MS {
+                info!(
+                    "lyrics_worker: {youtube_id} is {}s (>5min), skipping alignment",
+                    duration_ms / 1000
+                );
+            } else {
+                let lyrics_text: String = track
+                    .lines
+                    .iter()
+                    .map(|l| l.en.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
 
-                        match aligner::align_lyrics(
-                            python,
-                            &self.script_path,
-                            &self.models_dir,
-                            &audio,
-                            &lyrics_text,
-                            &output_path,
-                        )
-                        .await
-                        {
-                            Ok(aligned_lines) => {
-                                track.lines = aligned_lines;
-                                source = format!("{source}+aligner");
-                                track.source = source.clone();
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "lyrics_worker: alignment failed for {youtube_id}, keeping original timestamps: {e}"
-                                );
-                            }
-                        }
-                    } else {
-                        debug!(
-                            "lyrics_worker: audio file not found for {youtube_id}, skipping alignment"
+                let output_path = self
+                    .cache_dir
+                    .join(format!("{youtube_id}_align_output.json"));
+
+                match aligner::align_lyrics(
+                    python,
+                    &self.script_path,
+                    &self.models_dir,
+                    audio,
+                    &lyrics_text,
+                    &output_path,
+                )
+                .await
+                {
+                    Ok(aligned_lines) => {
+                        track.lines = aligner::merge_word_timings(
+                            std::mem::take(&mut track.lines),
+                            aligned_lines,
+                        );
+                        source = "lrclib+qwen3".to_string();
+                        track.source = source.clone();
+                        info!("lyrics_worker: aligned {youtube_id} with Qwen3");
+                    }
+                    Err(e) => {
+                        warn!(
+                            "lyrics_worker: alignment failed for {youtube_id}, keeping line-level: {e}"
                         );
                     }
-                } else {
-                    debug!(
-                        "lyrics_worker: no audio_file_path for {youtube_id}, skipping alignment"
-                    );
                 }
             }
         }
