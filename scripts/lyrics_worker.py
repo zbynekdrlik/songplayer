@@ -92,64 +92,110 @@ def cmd_transcribe(args):
         json.dump(result, f, ensure_ascii=False)
 
 
+MEL_ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+
+
+def _pick_vocal_stem(out_files, fallback_dir):
+    """Return the absolute path of the vocal stem among `out_files`.
+
+    Prefers filenames that contain 'Vocals'/'vocals'; falls back to the
+    single file that does NOT contain 'Instrumental' so we are robust to
+    audio-separator changing its stem-filename template across versions.
+    """
+    import os
+
+    def _abs(p):
+        return p if os.path.isabs(p) else os.path.join(fallback_dir, p)
+
+    vocal = [p for p in out_files if "Vocals" in p or "vocals" in p]
+    if vocal:
+        return _abs(vocal[0])
+
+    non_inst = [p for p in out_files if "Instrumental" not in p and "instrumental" not in p]
+    if len(non_inst) == 1:
+        return _abs(non_inst[0])
+
+    raise RuntimeError(
+        f"audio-separator did not produce an identifiable Vocals stem (got: {out_files})"
+    )
+
+
 def _isolate_vocals(audio_path, models_dir):
     """Run Mel-Roformer to extract the vocal stem, then resample it to
-    exactly 16 kHz mono float32 WAV — the input format Qwen3-ForcedAligner
-    expects. Returns the absolute path to a temp WAV that the caller MUST
-    delete after use.
+    exactly 16 kHz mono float32 WAV in [-1, 1] — the input format
+    Qwen3-ForcedAligner expects. Returns the absolute path to a temp WAV
+    that the caller MUST delete after use.
 
     Sequential-load pattern: this function loads Mel-Roformer, separates,
     then relies on garbage collection + explicit torch.cuda.empty_cache()
     to free ~6-8 GB of VRAM before the caller loads Qwen3.
+
+    Temp-file hygiene: writes all stems to a per-call `mkdtemp` directory
+    and removes the entire directory on return, so the Instrumental stem
+    Mel-Roformer emits alongside Vocals does not leak (~50-80 MB/song).
+    The returned 16 kHz WAV lives outside that dir so the caller controls
+    its lifetime.
     """
     import gc
     import os
+    import shutil
     import tempfile
+    import numpy as np
     import torch
     from audio_separator.separator import Separator
     import librosa
     import soundfile as sf
 
-    sep = Separator(
-        model_file_dir=models_dir,
-        output_format="WAV",
-        output_dir=tempfile.gettempdir(),
-    )
-    sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
-    out_files = sep.separate(audio_path)
-    vocal_candidates = [p for p in out_files if "Vocals" in p or "vocals" in p]
-    if not vocal_candidates:
-        raise RuntimeError(
-            f"audio-separator did not produce a Vocals stem (got: {out_files})"
-        )
-    vocal_path = vocal_candidates[0]
-    # audio-separator writes to output_dir without the dir prefix in out_files;
-    # handle both cases.
-    if not os.path.isabs(vocal_path):
-        vocal_path = os.path.join(tempfile.gettempdir(), vocal_path)
-
-    # Free VRAM before loading the aligner.
-    del sep
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    # Resample to exactly 16 kHz mono float32. Qwen3's docstring: "All audios
-    # will be converted into mono 16k float32 arrays in [-1, 1]." We do this
-    # explicitly instead of relying on qwen_asr.normalize_audios() so we
-    # control the mono-conversion strategy (librosa averages channels,
-    # preserving energy on hard-panned vocals) and get a smaller intermediate
-    # file for faster subprocess I/O.
-    audio, _ = librosa.load(vocal_path, sr=16000, mono=True)
-    fd, resampled_path = tempfile.mkstemp(suffix="_vocals16k.wav")
-    os.close(fd)
-    sf.write(resampled_path, audio, 16000, subtype="FLOAT")
-
+    stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
     try:
-        os.remove(vocal_path)
-    except OSError:
-        pass  # best-effort; the OS will clean temp eventually
-    return resampled_path
+        sep = Separator(
+            model_file_dir=models_dir,
+            output_format="WAV",
+            output_dir=stem_dir,
+        )
+        sep.load_model(MEL_ROFORMER_MODEL)
+        out_files = sep.separate(audio_path)
+        vocal_path = _pick_vocal_stem(out_files, stem_dir)
+
+        # Free VRAM before loading the aligner. audio-separator keeps an
+        # ONNX Runtime session that GC can miss — dereference the public
+        # model_instance first so ORT session teardown is invoked.
+        if hasattr(sep, "model_instance"):
+            sep.model_instance = None
+        del sep
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Resample to exactly 16 kHz mono float32. Qwen3's docstring: "All
+        # audios will be converted into mono 16k float32 arrays in [-1, 1]."
+        # We do this explicitly instead of relying on qwen_asr.normalize_audios()
+        # so we control the mono-conversion strategy (librosa averages channels,
+        # preserving energy on hard-panned vocals) and get a smaller intermediate
+        # file for faster subprocess I/O.
+        audio, _ = librosa.load(vocal_path, sr=16000, mono=True)
+
+        # Peak-normalize only if the separator output exceeds [-1, 1].
+        # Hot-mastered source material can survive Mel-Roformer with
+        # residual peaks > 1.0, which can confuse the aligner's feature
+        # extractor. No-op for typical vocal stems (peak < 1).
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        if peak > 1.0:
+            audio = audio / peak
+
+        fd, resampled_path = tempfile.mkstemp(suffix="_vocals16k.wav")
+        os.close(fd)
+        try:
+            sf.write(resampled_path, audio, 16000, subtype="FLOAT")
+        except Exception:
+            try:
+                os.remove(resampled_path)
+            except OSError:
+                pass
+            raise
+        return resampled_path
+    finally:
+        shutil.rmtree(stem_dir, ignore_errors=True)
 
 
 def cmd_align(args):
@@ -239,19 +285,37 @@ def _write_output(lines, output_path):
 
 def cmd_preload(args):
     """Force model download + load to surface failures at bootstrap time
-    rather than on the first real song. Exits 0 on success, non-zero otherwise."""
+    rather than on the first real song. Preloads BOTH the Mel-Roformer
+    separator checkpoint (~500 MB) and the Qwen3-ForcedAligner model
+    (~1.2 GB). Exits 0 on success, non-zero otherwise.
+
+    Without Mel-Roformer preload the first real song pays ~500 MB of
+    downloads inside the 300 s alignment subprocess timeout, which can
+    push the first-song alignment past the timeout on a slow link.
+    """
     import torch
+    from audio_separator.separator import Separator
     from qwen_asr import Qwen3ForcedAligner
 
-    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
+    # 1. Warm Mel-Roformer: download the .ckpt into models_dir. Load it
+    # and then dereference so the VRAM is free before Qwen3 loads.
+    mel_sep = Separator(model_file_dir=args.models_dir, output_format="WAV")
+    mel_sep.load_model(MEL_ROFORMER_MODEL)
+    if hasattr(mel_sep, "model_instance"):
+        mel_sep.model_instance = None
+    del mel_sep
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
+    # 2. Warm Qwen3-ForcedAligner.
+    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = Qwen3ForcedAligner.from_pretrained(
         "Qwen/Qwen3-ForcedAligner-0.6B",
         dtype=torch.bfloat16,
         device_map=device_map,
     )
     _ = next(model.parameters())
-    print(json.dumps({"loaded": True, "device": device_map}))
+    print(json.dumps({"loaded": True, "device": device_map, "mel_roformer": MEL_ROFORMER_MODEL}))
 
 
 def cmd_isolate_vocals(args):

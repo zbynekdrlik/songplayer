@@ -258,6 +258,19 @@ impl LyricsWorker {
                 .await
                 {
                     Ok(aligned_lines) => {
+                        // Warn LOUDLY if aligner output is still degenerate
+                        // (many words share the same start_ms). After vocal
+                        // isolation this should be rare — a warning here
+                        // means Mel-Roformer's output was unusable or the
+                        // aligner itself failed internally, and the band-aid
+                        // post-processor below would silently mask it.
+                        let (total_words, duplicate_run_words) =
+                            count_duplicate_start_ms(&aligned_lines);
+                        if total_words >= 10 && duplicate_run_words * 2 > total_words {
+                            warn!(
+                                "lyrics_worker: degenerate aligner output for {youtube_id} ({duplicate_run_words}/{total_words} words share start_ms with their predecessor) — vocal isolation may have failed, band-aid will mask it"
+                            );
+                        }
                         track.lines = aligner::merge_word_timings(
                             std::mem::take(&mut track.lines),
                             aligned_lines,
@@ -485,6 +498,12 @@ impl LyricsWorker {
         .await
         {
             Ok(aligned_lines) => {
+                let (total_words, duplicate_run_words) = count_duplicate_start_ms(&aligned_lines);
+                if total_words >= 10 && duplicate_run_words * 2 > total_words {
+                    warn!(
+                        "lyrics_worker: degenerate retroactive aligner output for {youtube_id} ({duplicate_run_words}/{total_words} words share start_ms with predecessor) — vocal isolation may have failed"
+                    );
+                }
                 track.lines =
                     aligner::merge_word_timings(std::mem::take(&mut track.lines), aligned_lines);
                 track.source = "lrclib+qwen3".to_string();
@@ -503,5 +522,107 @@ impl LyricsWorker {
                 warn!("lyrics_worker: retroactive alignment failed for {youtube_id}: {e}");
             }
         }
+    }
+}
+
+/// Count total aligned words and words whose `start_ms` equals their
+/// in-line predecessor's `start_ms`. Returns `(total, duplicate_run)`.
+///
+/// Used to detect degenerate aligner output (many words "collapsed" to
+/// identical timestamps) before the band-aid post-processor silently
+/// spreads them into evenly-distributed fakes. A ratio above 50 % on
+/// a song with ≥10 words is a strong signal that Mel-Roformer isolation
+/// failed or Qwen3 could not localize phonemes — warrants a log warning.
+fn count_duplicate_start_ms(lines: &[sp_core::lyrics::LyricsLine]) -> (usize, usize) {
+    let mut total = 0usize;
+    let mut duplicate_run = 0usize;
+    for line in lines {
+        if let Some(words) = &line.words {
+            total += words.len();
+            for pair in words.windows(2) {
+                if pair[1].start_ms == pair[0].start_ms {
+                    duplicate_run += 1;
+                }
+            }
+        }
+    }
+    (total, duplicate_run)
+}
+
+#[cfg(test)]
+mod degenerate_detection_tests {
+    use super::count_duplicate_start_ms;
+    use sp_core::lyrics::{LyricsLine, LyricsWord};
+
+    fn line(words: &[(u64, u64, &str)]) -> LyricsLine {
+        LyricsLine {
+            start_ms: words.first().map(|w| w.0).unwrap_or(0),
+            end_ms: words.last().map(|w| w.1).unwrap_or(0),
+            en: String::new(),
+            sk: None,
+            words: Some(
+                words
+                    .iter()
+                    .map(|(s, e, t)| LyricsWord {
+                        start_ms: *s,
+                        end_ms: *e,
+                        text: (*t).to_string(),
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    #[test]
+    fn real_alignment_has_zero_duplicate_runs() {
+        let lines = vec![line(&[
+            (1000, 1200, "hey"),
+            (1200, 1400, "there"),
+            (1400, 1800, "friend"),
+        ])];
+        let (total, dup) = count_duplicate_start_ms(&lines);
+        assert_eq!(total, 3);
+        assert_eq!(dup, 0);
+    }
+
+    #[test]
+    fn fully_degenerate_alignment_has_n_minus_one_duplicate_runs_per_line() {
+        // A line where every word shares the same start_ms — the exact
+        // failure mode we saw on the Planetshakers worship song.
+        let lines = vec![line(&[
+            (1000, 2000, "bouncing"),
+            (1000, 2000, "off"),
+            (1000, 2000, "the"),
+            (1000, 2000, "walls"),
+        ])];
+        let (total, dup) = count_duplicate_start_ms(&lines);
+        assert_eq!(total, 4);
+        assert_eq!(dup, 3, "3 of the 4 words share start_ms with predecessor");
+    }
+
+    #[test]
+    fn duplicate_runs_only_count_in_line_predecessors_not_cross_line() {
+        // Last word of line 1 and first word of line 2 happen to share
+        // start_ms — this should NOT count as a duplicate run because
+        // they are in different lines.
+        let lines = vec![
+            line(&[(1000, 1500, "one"), (2000, 2500, "two")]),
+            line(&[(2000, 2500, "three"), (3000, 3500, "four")]),
+        ];
+        let (total, dup) = count_duplicate_start_ms(&lines);
+        assert_eq!(total, 4);
+        assert_eq!(dup, 0);
+    }
+
+    #[test]
+    fn empty_or_wordless_lines_contribute_zero() {
+        let lines = vec![LyricsLine {
+            start_ms: 0,
+            end_ms: 1000,
+            en: "instrumental".into(),
+            sk: None,
+            words: None,
+        }];
+        assert_eq!(count_duplicate_start_ms(&lines), (0, 0));
     }
 }
