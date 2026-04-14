@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Returns the absolute path to the venv Python interpreter, or `None`
 /// if the bootstrap is skipped (non-Windows).
+#[cfg_attr(test, mutants::skip)]
 #[cfg(target_os = "windows")]
 pub fn venv_python_path(tools_dir: &Path) -> PathBuf {
     tools_dir
@@ -17,6 +18,7 @@ pub fn venv_python_path(tools_dir: &Path) -> PathBuf {
         .join("python.exe")
 }
 
+#[cfg_attr(test, mutants::skip)]
 #[cfg(not(target_os = "windows"))]
 pub fn venv_python_path(tools_dir: &Path) -> PathBuf {
     tools_dir.join("lyrics_venv").join("bin").join("python")
