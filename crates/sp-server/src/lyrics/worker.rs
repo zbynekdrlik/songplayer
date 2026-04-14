@@ -8,6 +8,7 @@ use reqwest::Client;
 use sp_core::lyrics::LyricsTrack;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
@@ -40,6 +41,17 @@ pub struct LyricsWorker {
     /// Venv Python path — populated by `ensure_script_and_bootstrap`.
     /// `None` means alignment is disabled for this run.
     venv_python: tokio::sync::RwLock<Option<PathBuf>>,
+    /// Exponential backoff gate for translation retries. When Gemini
+    /// rate-limits (HTTP 429) or errors, the retry worker is silenced
+    /// until this `Instant`. Doubles on each consecutive failure, capped
+    /// at 10 minutes; resets on success.
+    retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+}
+
+#[derive(Default)]
+struct RetryBackoff {
+    silent_until: Option<Instant>,
+    consecutive_failures: u32,
 }
 
 impl LyricsWorker {
@@ -70,6 +82,7 @@ impl LyricsWorker {
             gemini_api_key,
             gemini_model,
             venv_python: tokio::sync::RwLock::new(None),
+            retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
         }
     }
 
@@ -329,11 +342,28 @@ impl LyricsWorker {
     }
 
     /// Retry Gemini translation for songs that have lyrics but no SK.
+    ///
+    /// Respects the `retry_backoff` gate: if the previous attempt failed
+    /// (especially with HTTP 429), the next attempt is delayed by an
+    /// exponential window (60s, 120s, 240s, 480s, capped at 600s) to
+    /// avoid hammering the Gemini API and burning quota on repeated
+    /// rate-limited requests.
     #[cfg_attr(test, mutants::skip)]
     async fn retry_missing_translations(&self) {
         if self.gemini_api_key.is_empty() {
             return;
         }
+
+        // Respect backoff from previous failure.
+        {
+            let backoff = self.retry_backoff.lock().await;
+            if let Some(until) = backoff.silent_until
+                && Instant::now() < until
+            {
+                return;
+            }
+        }
+
         let result = get_next_video_missing_translation(&self.pool, &self.cache_dir).await;
         let (_video_id, youtube_id) = match result {
             Ok(Some(pair)) => pair,
@@ -364,9 +394,23 @@ impl LyricsWorker {
                 let json = serde_json::to_vec(&track).unwrap_or_default();
                 let _ = tokio::fs::write(&lyrics_path, &json).await;
                 info!("lyrics_worker: translation retry succeeded for {youtube_id}");
+                let mut backoff = self.retry_backoff.lock().await;
+                backoff.consecutive_failures = 0;
+                backoff.silent_until = None;
             }
             Err(e) => {
                 debug!("lyrics_worker: translation retry failed for {youtube_id}: {e}");
+                let mut backoff = self.retry_backoff.lock().await;
+                backoff.consecutive_failures = backoff.consecutive_failures.saturating_add(1);
+                // Exponential backoff: 60s, 120s, 240s, 480s, capped at 600s (10 min)
+                let attempt_index = backoff.consecutive_failures.saturating_sub(1).min(4);
+                let secs = 60u64.saturating_mul(1u64 << attempt_index).min(600);
+                let until = Instant::now() + Duration::from_secs(secs);
+                backoff.silent_until = Some(until);
+                warn!(
+                    "lyrics_worker: translation backoff for {secs}s after {} consecutive failures",
+                    backoff.consecutive_failures
+                );
             }
         }
     }
