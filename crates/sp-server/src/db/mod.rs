@@ -18,6 +18,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (7, MIGRATION_V7),
     (8, MIGRATION_V8),
     (9, MIGRATION_V9),
+    (10, MIGRATION_V10),
 ];
 
 const MIGRATION_V1: &str = "
@@ -135,6 +136,19 @@ const MIGRATION_V9: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
 ";
 
+// V10 = re-reset rows that fell into the partial 'yt_subs' state during
+// the first deploy of v0.16.x — bootstrap failed there, so the YT-subs
+// fetch succeeded but chunked alignment never ran and the rows persisted
+// as (has_lyrics=1, lyrics_source='yt_subs'). The new worker query
+// `get_next_video_without_lyrics` filters on has_lyrics=0, so without
+// V10 those rows would never be re-picked-up. Reset them so the
+// now-fixed alignment pipeline gets a second shot. Scoped to 'yt_subs'
+// rows only — LRCLIB-line-level rows are correct as-is and shouldn't
+// pay another reprocessing cycle.
+const MIGRATION_V10: &str = "
+UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE lyrics_source = 'yt_subs';
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -218,7 +232,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 9);
+        assert_eq!(ver, 10);
     }
 
     #[tokio::test]
@@ -227,7 +241,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 9);
+        assert_eq!(ver, 10);
     }
 
     #[tokio::test]
@@ -769,5 +783,73 @@ mod tests {
             assert_eq!(hl, 0, "has_lyrics must be 0 after V9");
             assert_eq!(src, None, "lyrics_source must be NULL after V9");
         }
+    }
+
+    /// V10 must only reset rows whose `lyrics_source` is `'yt_subs'` (the
+    /// partial half-done state from a deploy where bootstrap failed and
+    /// chunked alignment never ran). LRCLIB and `yt_subs+qwen3` rows
+    /// MUST be left untouched — they're correct as-is and shouldn't pay
+    /// another reprocessing cycle.
+    #[tokio::test]
+    async fn migration_v10_resets_only_partial_yt_subs_rows() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed AFTER V9 ran: simulate the post-V9 worker writing rows.
+        for (yt, src, has) in [
+            ("a1", Some("lrclib"), 1),        // line-level fallback — keep
+            ("a2", Some("yt_subs+qwen3"), 1), // happy path — keep
+            ("a3", Some("yt_subs"), 1),       // partial — must be reset
+            ("a4", None::<&str>, 0),          // unprocessed — keep at (0, NULL)
+        ] {
+            sqlx::query(
+                "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, lyrics_source) \
+                 VALUES (1, ?, 't', ?, ?)",
+            )
+            .bind(yt)
+            .bind(has)
+            .bind(src)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Force V10 to re-run.
+        sqlx::query("DELETE FROM schema_version WHERE version = 10")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        let rows = sqlx::query(
+            "SELECT youtube_id, has_lyrics, lyrics_source FROM videos ORDER BY youtube_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 4);
+        let by_id: std::collections::HashMap<String, (i64, Option<String>)> = rows
+            .into_iter()
+            .map(|r| {
+                let yt: String = r.get("youtube_id");
+                (yt, (r.get("has_lyrics"), r.get("lyrics_source")))
+            })
+            .collect();
+
+        assert_eq!(by_id["a1"], (1, Some("lrclib".into())), "lrclib untouched");
+        assert_eq!(
+            by_id["a2"],
+            (1, Some("yt_subs+qwen3".into())),
+            "yt_subs+qwen3 untouched"
+        );
+        assert_eq!(by_id["a3"], (0, None), "partial yt_subs reset");
+        assert_eq!(by_id["a4"], (0, None), "already-empty unchanged");
     }
 }
