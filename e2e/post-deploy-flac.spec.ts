@@ -306,4 +306,381 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       }
     }
   });
+
+  test("at least one lyrics JSON has word-level timestamps", async ({ request }) => {
+    // Post-deploy, the lyrics worker needs time to bootstrap the Python venv,
+    // download the 1.2 GB Qwen3-ForcedAligner model, and align the first song.
+    // Poll for up to 18 minutes; if no song ever produces word-level timestamps,
+    // fail loudly — the aligner is broken.
+    test.setTimeout(20 * 60 * 1000);
+
+    const hasWordLevel = async (): Promise<{ checked: number; found: boolean }> => {
+      const playlistsResp = await request.get("/api/v1/playlists");
+      if (!playlistsResp.ok()) return { checked: 0, found: false };
+      const playlists: PlaylistEntry[] = await playlistsResp.json();
+
+      let checked = 0;
+      for (const pl of playlists) {
+        const videosResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+        if (!videosResp.ok()) continue;
+        const videos: VideoEntry[] = await videosResp.json();
+
+        for (const v of videos) {
+          if (checked >= 30) return { checked, found: false };
+          const lyricsResp = await request.get(`/api/v1/videos/${v.id}/lyrics`);
+          if (!lyricsResp.ok()) continue;
+          checked++;
+
+          const track = await lyricsResp.json();
+          if (!Array.isArray(track.lines)) continue;
+
+          // Strong assertion: at least one line must have ≥3 words with
+          // strictly increasing start_ms AND the first word's start_ms
+          // within a reasonable window of the line's own start_ms. This
+          // catches the bug where the aligner emits runs of identical
+          // timestamps (degenerate karaoke — jumps from first word to
+          // last with nothing in between) that a naive `end_ms >= start_ms`
+          // check passes.
+          const hasProgressiveWords = track.lines.some((l: any) => {
+            if (!Array.isArray(l.words) || l.words.length < 3) return false;
+            const w = l.words;
+            // All words well-formed
+            for (const ww of w) {
+              if (
+                typeof ww.text !== "string" ||
+                typeof ww.start_ms !== "number" ||
+                typeof ww.end_ms !== "number" ||
+                ww.end_ms < ww.start_ms
+              ) {
+                return false;
+              }
+            }
+            // Strictly increasing start_ms across the whole line
+            for (let i = 1; i < w.length; i++) {
+              if (w[i].start_ms <= w[i - 1].start_ms) return false;
+            }
+            // First word within ±2s of the LRCLIB line start
+            if (typeof l.start_ms === "number") {
+              const delta = Math.abs(w[0].start_ms - l.start_ms);
+              if (delta > 2000) return false;
+            }
+            // Inter-word gaps must vary: real singing has irregular timing,
+            // a post-processor that synthesizes perfectly-even spacing has
+            // stddev ≈ 0. Require ≥30 ms stddev so the synthetic fallback
+            // can never satisfy this assertion on its own.
+            const gaps: number[] = [];
+            for (let i = 1; i < w.length; i++) {
+              gaps.push(w[i].start_ms - w[i - 1].start_ms);
+            }
+            const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+            const variance =
+              gaps.map((g) => (g - mean) ** 2).reduce((a, b) => a + b, 0) /
+              gaps.length;
+            const stddev = Math.sqrt(variance);
+            if (stddev < 30) return false;
+            return true;
+          });
+          if (hasProgressiveWords) return { checked, found: true };
+        }
+      }
+      return { checked, found: false };
+    };
+
+    await expect
+      .poll(
+        async () => {
+          const { checked, found } = await hasWordLevel();
+          console.log(
+            `[word-level poll] checked=${checked} found=${found} @ ${new Date().toISOString()}`,
+          );
+          return found;
+        },
+        {
+          message:
+            "No video had word-level timestamps after polling for 18 minutes. " +
+            "If the aligner ran, at least one song should have track.lines[i].words populated.",
+          timeout: 18 * 60 * 1000,
+          intervals: [30_000],
+        },
+      )
+      .toBe(true);
+  });
+
+  test("song #148 Planetshakers 'Get This Party Started' has real word-level alignment", async ({
+    request,
+  }) => {
+    // Poll budget covers cold-start bootstrap (~7 min for model downloads)
+    // PLUS the worker chewing through the queue serially up to id 148.
+    // Once #148 is persisted as yt_subs+qwen3, a subsequent deploy
+    // doesn't reset it (V10 only resets `yt_subs` partial rows), so
+    // re-runs return the cached track immediately.
+    test.setTimeout(63 * 60 * 1000);
+
+    // Match by song + artist rather than YouTube ID — the track may be
+    // uploaded multiple times and we just need ONE copy to hit the
+    // YT-subs chunked path.
+    const SONG_NEEDLE = "party started";
+    const ARTIST_NEEDLE = "planetshaker";
+    // Empirically observed on win-resolume against the live YT manual
+    // subtitles: 27 SRT events, 214 words. Thresholds set below the
+    // observed counts so a small upstream subtitle edit doesn't flake.
+    const MIN_LINES = 25;
+    const MIN_TOTAL_WORDS = 200;
+    const MAX_DUPLICATE_PCT = 10;
+    const MIN_STDDEV_LINES = 10;
+    const MIN_STDDEV_MS = 50;
+
+    interface Word {
+      text: string;
+      start_ms: number;
+      end_ms: number;
+    }
+    interface Line {
+      start_ms?: number;
+      end_ms?: number;
+      en: string;
+      words?: Word[];
+    }
+    interface Track {
+      source?: string;
+      lines: Line[];
+    }
+
+    function duplicateStartPct(line: Line): number {
+      const w = line.words ?? [];
+      if (w.length < 2) return 0;
+      let dup = 0;
+      for (let i = 1; i < w.length; i++) {
+        if (w[i].start_ms === w[i - 1].start_ms) dup += 1;
+      }
+      return (100 * dup) / (w.length - 1);
+    }
+
+    function gapStddevMs(line: Line): number {
+      const w = line.words ?? [];
+      if (w.length < 3) return 0;
+      const gaps: number[] = [];
+      for (let i = 1; i < w.length; i++) gaps.push(w[i].start_ms - w[i - 1].start_ms);
+      const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      const variance =
+        gaps.map((g) => (g - mean) ** 2).reduce((a, b) => a + b, 0) / gaps.length;
+      return Math.sqrt(variance);
+    }
+
+    async function findTrack(): Promise<Track | null> {
+      const plResp = await request.get("/api/v1/playlists");
+      if (!plResp.ok()) return null;
+      const playlists: PlaylistEntry[] = await plResp.json();
+      for (const pl of playlists) {
+        const vidResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+        if (!vidResp.ok()) continue;
+        const videos: VideoEntry[] = await vidResp.json();
+        for (const v of videos) {
+          const song = (v.song ?? "").toLowerCase();
+          const artist = (v.artist ?? "").toLowerCase();
+          if (!song.includes(SONG_NEEDLE)) continue;
+          if (!artist.includes(ARTIST_NEEDLE)) continue;
+          const lyricsResp = await request.get(`/api/v1/videos/${v.id}/lyrics`);
+          if (!lyricsResp.ok()) return null;
+          return (await lyricsResp.json()) as Track;
+        }
+      }
+      return null;
+    }
+
+    await expect
+      .poll(
+        async () => {
+          const t = await findTrack();
+          console.log(
+            `[#148 poll] ${t ? `source=${t.source ?? "?"} lines=${t.lines?.length ?? 0}` : "not-yet"} @ ${new Date().toISOString()}`,
+          );
+          return t !== null;
+        },
+        {
+          message:
+            `#148 "Get This Party Started" never produced lyrics in 60 min. ` +
+            `Either the song didn't sync into any playlist, or the pipeline ` +
+            `aborted before persisting. Check the server log on win-resolume.`,
+          timeout: 60 * 60 * 1000,
+          intervals: [30_000],
+        },
+      )
+      .toBe(true);
+
+    const track = await findTrack();
+    expect(track, "track must exist post-poll").not.toBeNull();
+
+    // Gate 1: source must be the YT-subs chunked-alignment happy path.
+    expect(
+      track!.source,
+      `Expected source "yt_subs+qwen3" (proves new pipeline ran). Got "${track!.source}". ` +
+        `Fallback to LRCLIB means #148 did NOT get word-level karaoke.`,
+    ).toBe("yt_subs+qwen3");
+
+    // Gate 2: line count plausible for this song.
+    expect(track!.lines.length).toBeGreaterThanOrEqual(MIN_LINES);
+
+    // Gate 3: every line must have a populated words array.
+    for (const [i, line] of track!.lines.entries()) {
+      expect(
+        Array.isArray(line.words) && line.words!.length > 0,
+        `Line ${i} ("${line.en}") has no words — assembly/align failed for this chunk.`,
+      ).toBe(true);
+    }
+
+    // Gate 4: total word count >= threshold.
+    const totalWords = track!.lines.reduce(
+      (sum, l) => sum + (l.words?.length ?? 0),
+      0,
+    );
+    expect(
+      totalWords,
+      `Total word count ${totalWords} below threshold ${MIN_TOTAL_WORDS}`,
+    ).toBeGreaterThanOrEqual(MIN_TOTAL_WORDS);
+
+    // Gate 5: duplicate-start percentage across the whole track < threshold.
+    const perLinePcts = track!.lines.map(duplicateStartPct);
+    const allDuplicate =
+      perLinePcts.reduce(
+        (s, p, i) => s + p * (track!.lines[i].words?.length ?? 0),
+        0,
+      ) / Math.max(1, totalWords);
+    expect(
+      allDuplicate,
+      `Weighted duplicate_start_pct ${allDuplicate.toFixed(2)}% exceeds ${MAX_DUPLICATE_PCT}% — ` +
+        `alignment is degenerate (multiple words share start_ms on many lines).`,
+    ).toBeLessThan(MAX_DUPLICATE_PCT);
+
+    // Gate 6: >= MIN_STDDEV_LINES lines show real inter-word timing variation.
+    const stddevLines = track!.lines.filter(
+      (l) => gapStddevMs(l) >= MIN_STDDEV_MS,
+    ).length;
+    expect(
+      stddevLines,
+      `Only ${stddevLines} lines have gap_stddev >= ${MIN_STDDEV_MS}ms ` +
+        `(need >= ${MIN_STDDEV_LINES}). Even spacing is a signature of a synthetic ` +
+        `post-processor, not a real aligner.`,
+    ).toBeGreaterThanOrEqual(MIN_STDDEV_LINES);
+
+    console.log(
+      `#148 alignment OK: lines=${track!.lines.length} ` +
+        `words=${totalWords} dup%=${allDuplicate.toFixed(2)} ` +
+        `stddev_lines=${stddevLines}`,
+    );
+  });
+
+  test("YT-subs quality floor: at least 80% of yt_subs+qwen3 songs have weighted duplicate < 15%", async ({
+    request,
+  }) => {
+    // Populate gradually as the worker processes the queue. Budget must
+    // be long enough that most YT-subs songs have been processed — the
+    // worker handles ~3.5 min per yt_subs song serially, and the
+    // catalog on win-resolume has ~24 such songs.
+    test.setTimeout(75 * 60 * 1000);
+
+    interface Word {
+      start_ms: number;
+      end_ms: number;
+    }
+    interface Line {
+      en: string;
+      words?: Word[];
+    }
+    interface Track {
+      source?: string;
+      lines: Line[];
+    }
+
+    function weightedDup(track: Track): number {
+      const total = track.lines.reduce(
+        (s, l) => s + (l.words?.length ?? 0),
+        0,
+      );
+      if (total === 0) return 0;
+      let sumDupXWords = 0;
+      for (const l of track.lines) {
+        const w = l.words ?? [];
+        if (w.length < 2) continue;
+        let dup = 0;
+        for (let i = 1; i < w.length; i++) {
+          if (w[i].start_ms === w[i - 1].start_ms) dup += 1;
+        }
+        const pct = (100 * dup) / (w.length - 1);
+        sumDupXWords += pct * w.length;
+      }
+      return sumDupXWords / total;
+    }
+
+    async function surveyAllYtSubsQwen3(): Promise<Map<number, number>> {
+      const scored = new Map<number, number>();
+      const pls = await request.get("/api/v1/playlists");
+      if (!pls.ok()) return scored;
+      const playlists: PlaylistEntry[] = await pls.json();
+      for (const pl of playlists) {
+        const vr = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+        if (!vr.ok()) continue;
+        const videos: VideoEntry[] = await vr.json();
+        for (const v of videos) {
+          if (!v.normalized) continue;
+          const lr = await request.get(`/api/v1/videos/${v.id}/lyrics`);
+          if (!lr.ok()) continue;
+          const track = (await lr.json()) as Track;
+          if (track.source !== "yt_subs+qwen3") continue;
+          scored.set(v.id, weightedDup(track));
+        }
+      }
+      return scored;
+    }
+
+    // Wait for at least 8 yt_subs+qwen3 songs before scoring the floor
+    // — any fewer and the ratio is too noisy. Given ~24 YT-subs songs
+    // in the cache, 8 is 1/3 of the set.
+    const MIN_SONGS = 8;
+    const FLOOR_QUALITY_PCT = 15.0;
+    const FLOOR_PASS_RATIO = 0.8;
+
+    let scored = new Map<number, number>();
+    await expect
+      .poll(
+        async () => {
+          scored = await surveyAllYtSubsQwen3();
+          console.log(
+            `[yt-subs floor poll] ${scored.size} yt_subs+qwen3 songs @ ${new Date().toISOString()}`,
+          );
+          return scored.size;
+        },
+        {
+          message:
+            `Expected at least ${MIN_SONGS} yt_subs+qwen3 songs on the box, ` +
+            `got none in 75 min. Worker stalled or queue empty.`,
+          timeout: 75 * 60 * 1000,
+          intervals: [60_000],
+        },
+      )
+      .toBeGreaterThanOrEqual(MIN_SONGS);
+
+    const passing: string[] = [];
+    const failing: string[] = [];
+    for (const [id, dup] of scored.entries()) {
+      const bucket = dup < FLOOR_QUALITY_PCT ? passing : failing;
+      bucket.push(`#${id}:${dup.toFixed(1)}%`);
+    }
+    const ratio = passing.length / scored.size;
+    console.log(
+      `yt-subs floor: ${passing.length}/${scored.size} = ${(ratio * 100).toFixed(1)}% ` +
+        `of yt_subs+qwen3 songs have weighted dup < ${FLOOR_QUALITY_PCT}%`,
+    );
+    console.log(`  PASSING (${passing.length}): ${passing.join(", ")}`);
+    if (failing.length > 0) {
+      console.log(`  FAILING (${failing.length}): ${failing.join(", ")}`);
+    }
+
+    expect(
+      ratio,
+      `Only ${(ratio * 100).toFixed(1)}% of yt_subs+qwen3 songs clear the ` +
+        `${FLOOR_QUALITY_PCT}% duplicate-start threshold (floor requires ${FLOOR_PASS_RATIO * 100}%). ` +
+        `Failing: ${failing.join(", ")}`,
+    ).toBeGreaterThanOrEqual(FLOOR_PASS_RATIO);
+  });
 });

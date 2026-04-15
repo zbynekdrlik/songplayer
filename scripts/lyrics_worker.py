@@ -1,324 +1,310 @@
 #!/usr/bin/env python3
 """
-lyrics_worker.py — Python ML helper for Qwen3 lyrics alignment and transcription.
+lyrics_worker.py — narrow Python entry points for the lyrics pipeline.
 
 Commands:
-  check-gpu         Print GPU availability as JSON
-  download-models   Download Qwen3 models via huggingface_hub
-  transcribe        Transcribe audio to text using Qwen3-ASR-1.7B
-  align             Align lyrics text to audio using Qwen3-ForcedAligner-0.6B
+  preprocess-vocals  Mel-Roformer + anvuew dereverb + 16 kHz mono float32 WAV
+  align-chunks       Chunked Qwen3-ForcedAligner alignment (loads model once,
+                     loops over all chunks from a JSON request file)
+  preload            Warm Mel-Roformer + anvuew + Qwen3-ForcedAligner at boot
+  isolate-vocals     Diagnostic: Mel-Roformer only, 16 kHz mono float32 WAV
 """
 
 import argparse
+import gc
 import json
-import sys
 import os
+import shutil
+import sys
+import tempfile
 
 
-def cmd_check_gpu(args):
-    """Print GPU info as JSON: {"gpu": bool, "device": str, "vram_gb": float}"""
-    try:
-        import torch
-        if torch.cuda.is_available():
-            idx = torch.cuda.current_device()
-            name = torch.cuda.get_device_name(idx)
-            props = torch.cuda.get_device_properties(idx)
-            vram_gb = props.total_memory / (1024 ** 3)
-            result = {"gpu": True, "device": name, "vram_gb": round(vram_gb, 2)}
-        else:
-            result = {"gpu": False, "device": "cpu", "vram_gb": 0.0}
-    except ImportError:
-        result = {"gpu": False, "device": "cpu", "vram_gb": 0.0}
-
-    print(json.dumps(result))
+MEL_ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+DEREVERB_MODEL = "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
 
 
-def cmd_download_models(args):
-    """Download Qwen3 aligner and ASR models to models_dir."""
-    from huggingface_hub import snapshot_download
+def _pick_vocal_stem(out_files, fallback_dir):
+    """Return the absolute path of the Vocals stem among `out_files`."""
+    def _abs(p):
+        return p if os.path.isabs(p) else os.path.join(fallback_dir, p)
 
-    os.makedirs(args.models_dir, exist_ok=True)
-
-    models = [
-        "Qwen/Qwen3-ForcedAligner-0.6B",
-        "Qwen/Qwen3-ASR-1.7B",
+    vocal = [p for p in out_files if "Vocals" in p or "vocals" in p]
+    if vocal:
+        return _abs(vocal[0])
+    non_inst = [
+        p for p in out_files if "Instrumental" not in p and "instrumental" not in p
     ]
-
-    for model_id in models:
-        local_name = model_id.replace("/", "--")
-        local_dir = os.path.join(args.models_dir, local_name)
-        print(f"Downloading {model_id} -> {local_dir}", flush=True)
-        snapshot_download(repo_id=model_id, local_dir=local_dir)
-        print(f"Done: {model_id}", flush=True)
+    if len(non_inst) == 1:
+        return _abs(non_inst[0])
+    raise RuntimeError(
+        f"audio-separator did not produce an identifiable Vocals stem (got: {out_files})"
+    )
 
 
-def cmd_transcribe(args):
+def _pick_dereverbed_stem(out_files, fallback_dir):
+    """Return the absolute path of the anvuew *(noreverb)* stem.
+
+    Match on the parenthesized token *(noreverb)* in the filename — the
+    substring 'dry' false-matched real filenames on earlier runs. If no
+    explicit noreverb tag is present, fall back to the single file that
+    does not contain '(reverb)'.
     """
-    Transcribe audio using Qwen3-ASR-1.7B.
-    Writes JSON {"text": "..."} to --output.
-    """
+    def _abs(p):
+        return p if os.path.isabs(p) else os.path.join(fallback_dir, p)
+
+    noreverb = [p for p in out_files if "(noreverb)" in p.lower()]
+    if noreverb:
+        return _abs(noreverb[0])
+    non_reverb = [p for p in out_files if "(reverb)" not in p.lower()]
+    if len(non_reverb) == 1:
+        return _abs(non_reverb[0])
+    raise RuntimeError(
+        f"anvuew dereverb did not produce an identifiable (noreverb) stem (got: {out_files})"
+    )
+
+
+def _free_vram(sep):
+    """Drop separator state so the next model can load without OOM."""
     import torch
-    from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+    if hasattr(sep, "model_instance"):
+        sep.model_instance = None
+    del sep
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    model_dir = os.path.join(args.models_dir, "Qwen--Qwen3-ASR-1.7B")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
 
-    processor = AutoProcessor.from_pretrained(model_dir)
-    model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        model_dir,
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-    ).to(device)
+def cmd_preprocess_vocals(args):
+    """Mel-Roformer isolate → anvuew dereverb → 16 kHz mono float32 WAV.
 
+    Writes a FLOAT WAV to --output. Exits 0 on success.
+    """
+    import numpy as np
     import librosa
-    audio, sr = librosa.load(args.audio, sr=16000, mono=True)
+    import soundfile as sf
+    from audio_separator.separator import Separator
 
-    inputs = processor(
-        audio,
-        sampling_rate=16000,
-        return_tensors="pt",
-    ).to(device)
-    if dtype == torch.float16:
-        inputs = {k: v.half() if v.is_floating_point() else v for k, v in inputs.items()}
+    stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
+    try:
+        # Step 1: Mel-Roformer vocal isolation.
+        sep = Separator(
+            model_file_dir=args.models_dir,
+            output_format="WAV",
+            output_dir=stem_dir,
+        )
+        sep.load_model(MEL_ROFORMER_MODEL)
+        out_files = sep.separate(args.audio)
+        vocal_path = _pick_vocal_stem(out_files, stem_dir)
+        _free_vram(sep)
 
-    with torch.no_grad():
-        generated_ids = model.generate(**inputs)
+        # Step 2: anvuew mel-band roformer dereverb on the isolated vocal.
+        sep2 = Separator(
+            model_file_dir=args.models_dir,
+            output_format="WAV",
+            output_dir=stem_dir,
+        )
+        sep2.load_model(DEREVERB_MODEL)
+        out_files2 = sep2.separate(vocal_path)
+        dry_path = _pick_dereverbed_stem(out_files2, stem_dir)
+        _free_vram(sep2)
 
-    transcription = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    result = {"text": transcription.strip()}
+        # Step 3: resample to exactly 16 kHz mono float32, peak-clamp.
+        audio, _ = librosa.load(dry_path, sr=16000, mono=True)
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        if peak > 1.0:
+            audio = audio / peak
+        sf.write(args.output, audio, 16000, subtype="FLOAT")
+    finally:
+        shutil.rmtree(stem_dir, ignore_errors=True)
+
+    print(json.dumps({"output": args.output}))
+
+
+def cmd_align_chunks(args):
+    """Chunked Qwen3-ForcedAligner: loads the model ONCE, loops over all chunks.
+
+    --chunks is a path to JSON with shape:
+      {"chunks": [{"chunk_idx": 0, "word_offset": 0,
+                   "start_ms": 500, "end_ms": 3500,
+                   "text": "hey there friend", "word_count": 3}, ...]}
+
+    The `word_offset` field is metadata — Python ignores it and only the
+    Rust assembly phase uses it to slot sub-chunk output back into the
+    right position within a split-line's full word sequence.
+
+    Writes JSON to --output with shape:
+      {"chunks": [{"chunk_idx": 0, "words": [
+          {"text": "hey", "start_ms": 1000, "end_ms": 1200}, ...
+      ]}, ...]}
+
+    Word timestamps are absolute (start_ms of chunk + aligner offset).
+    """
+    import numpy as np
+    import soundfile as sf
+    import torch
+    from qwen_asr import Qwen3ForcedAligner
+
+    with open(args.chunks, "r", encoding="utf-8") as f:
+        request = json.load(f)
+    chunks_in = request["chunks"]
+
+    # preprocess_vocals is the only producer of --audio and always writes
+    # 16 kHz mono float32. Don't re-check the sample rate here — the
+    # previous guard was dead defense that hid resample bugs upstream
+    # behind a generic RuntimeError. If the WAV drifts from 16 kHz we
+    # want Qwen3's own assertion (it reads at 16 kHz internally) to
+    # surface the actual stack trace.
+    audio, _sr = sf.read(args.audio, dtype="float32")
+    if audio.ndim != 1:
+        audio = np.mean(audio, axis=1).astype("float32")
+
+    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model = Qwen3ForcedAligner.from_pretrained(
+        "Qwen/Qwen3-ForcedAligner-0.6B",
+        dtype=torch.bfloat16,
+        device_map=device_map,
+    )
+
+    results = []
+    total_samples = audio.shape[0]
+    for c in chunks_in:
+        start_s = int(round(c["start_ms"] * 16000 / 1000))
+        end_s = int(round(c["end_ms"] * 16000 / 1000))
+        start_s = max(0, start_s)
+        end_s = min(total_samples, end_s)
+        if end_s <= start_s:
+            results.append({"chunk_idx": c["chunk_idx"], "words": []})
+            continue
+        slice_ = audio[start_s:end_s]
+        fd, wav_path = tempfile.mkstemp(suffix="_chunk.wav")
+        os.close(fd)
+        try:
+            sf.write(wav_path, slice_, 16000, subtype="FLOAT")
+            aligned = model.align(
+                audio=wav_path,
+                text=c["text"],
+                language="English",
+            )
+            word_stream = aligned[0]
+            offset_ms = c["start_ms"]
+            words_out = [
+                {
+                    "text": w.text,
+                    "start_ms": int(round(w.start_time * 1000)) + offset_ms,
+                    "end_ms": int(round(w.end_time * 1000)) + offset_ms,
+                }
+                for w in word_stream
+            ]
+        finally:
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
+        results.append({"chunk_idx": c["chunk_idx"], "words": words_out})
 
     with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
+        json.dump({"chunks": results}, f, ensure_ascii=False)
 
 
-def cmd_align(args):
-    """
-    Align lyrics text to audio using Qwen3-ForcedAligner-0.6B.
-    --text is a PATH to a plain-text file with one line per lyric line.
-    Writes JSON {"lines": [{"en": str, "words": [{"text": str, "start_ms": int, "end_ms": int}]}]}
-    to --output.
+def cmd_preload(args):
+    """Warm Mel-Roformer + anvuew dereverb + Qwen3-ForcedAligner at bootstrap.
+
+    Surfaces model-download failures before any real song is processed.
     """
     import torch
+    from audio_separator.separator import Separator
+    from qwen_asr import Qwen3ForcedAligner
 
-    model_dir = os.path.join(args.models_dir, "Qwen--Qwen3-ForcedAligner-0.6B")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    mel = Separator(model_file_dir=args.models_dir, output_format="WAV")
+    mel.load_model(MEL_ROFORMER_MODEL)
+    _free_vram(mel)
 
-    # Read lyrics text from file
-    with open(args.text, "r", encoding="utf-8") as f:
-        lyrics_text = f.read()
+    dereverb = Separator(model_file_dir=args.models_dir, output_format="WAV")
+    dereverb.load_model(DEREVERB_MODEL)
+    _free_vram(dereverb)
 
-    lyrics_lines = [line.strip() for line in lyrics_text.splitlines() if line.strip()]
-
-    # Load the forced aligner model
-    # Qwen3-ForcedAligner follows the CTC alignment pattern typical of MMS/wav2vec2 models
-    try:
-        from transformers import AutoProcessor, AutoModelForCTC
-        processor = AutoProcessor.from_pretrained(model_dir)
-        model = AutoModelForCTC.from_pretrained(model_dir).to(device)
-        _align_with_ctc(model, processor, args.audio, lyrics_lines, args.output, device)
-    except Exception as e:
-        # Fallback: try generic AutoModel approach
-        _align_generic(model_dir, args.audio, lyrics_lines, args.output, device, str(e))
-
-
-def _align_with_ctc(model, processor, audio_path, lyrics_lines, output_path, device):
-    """CTC-based forced alignment (wav2vec2/MMS pattern)."""
-    import torch
-    import librosa
-
-    audio, sr = librosa.load(audio_path, sr=16000, mono=True)
-    duration_ms = int(len(audio) / sr * 1000)
-
-    inputs = processor(audio, sampling_rate=16000, return_tensors="pt").to(device)
-
-    with torch.no_grad():
-        logits = model(**inputs).logits
-
-    # Use torchaudio forced alignment if available
-    try:
-        import torchaudio
-        from torchaudio.functional import forced_align
-
-        # Build transcript tokens for each line
-        full_text = " | ".join(lyrics_lines)
-        token_ids = processor.tokenizer.encode(full_text, add_special_tokens=False)
-        targets = torch.tensor([token_ids], dtype=torch.int32)
-
-        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-        input_lengths = torch.tensor([log_probs.shape[1]])
-        target_lengths = torch.tensor([len(token_ids)])
-
-        aligned = forced_align(
-            log_probs.cpu().float(),
-            targets,
-            input_lengths,
-            target_lengths,
-            blank=0,
+    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
+    # `from_pretrained` downloads + instantiates the aligner. We don't poke
+    # `model.parameters()` afterwards — the Qwen3ForcedAligner wrapper isn't
+    # an nn.Module subclass and has no `.parameters()` method. Completing
+    # `from_pretrained` without raising is proof enough that weights loaded.
+    _model = Qwen3ForcedAligner.from_pretrained(
+        "Qwen/Qwen3-ForcedAligner-0.6B",
+        dtype=torch.bfloat16,
+        device_map=device_map,
+    )
+    print(
+        json.dumps(
+            {
+                "loaded": True,
+                "device": device_map,
+                "mel_roformer": MEL_ROFORMER_MODEL,
+                "dereverb": DEREVERB_MODEL,
+            }
         )
-        _emit_alignment_from_tokens(
-            aligned, token_ids, processor, audio, sr, lyrics_lines, duration_ms, output_path
-        )
-        return
-    except (ImportError, Exception):
-        pass
-
-    # Fallback: distribute lines evenly across audio duration
-    _emit_evenly_distributed(lyrics_lines, duration_ms, output_path)
+    )
 
 
-def _emit_alignment_from_tokens(aligned, token_ids, processor, audio, sr, lyrics_lines, duration_ms, output_path):
-    """Convert token alignments to word-level timings."""
-    # frames_per_second for wav2vec2-style models is typically sr/320
-    frames_per_second = sr / 320
-    ms_per_frame = 1000.0 / frames_per_second
-
-    token_strs = processor.tokenizer.convert_ids_to_tokens(token_ids)
-
-    # Reconstruct words from tokens
-    words = []
-    current_word_tokens = []
-    current_word_start = None
-
-    spans = aligned[0].tolist() if hasattr(aligned[0], 'tolist') else list(aligned[0])
-
-    for i, (span, tok) in enumerate(zip(spans, token_strs)):
-        if tok in ("<pad>", "<s>", "</s>", "|", " "):
-            if current_word_tokens:
-                words.append({
-                    "text": processor.tokenizer.convert_tokens_to_string(current_word_tokens),
-                    "start_frame": current_word_start,
-                    "end_frame": i,
-                })
-                current_word_tokens = []
-                current_word_start = None
-        else:
-            if current_word_start is None:
-                current_word_start = i
-            current_word_tokens.append(tok)
-
-    if current_word_tokens:
-        words.append({
-            "text": processor.tokenizer.convert_tokens_to_string(current_word_tokens),
-            "start_frame": current_word_start,
-            "end_frame": len(spans),
-        })
-
-    # Convert frames to ms
-    for w in words:
-        w["start_ms"] = int(w["start_frame"] * ms_per_frame)
-        w["end_ms"] = min(int(w["end_frame"] * ms_per_frame), duration_ms)
-        del w["start_frame"], w["end_frame"]
-
-    # Group words into lines by matching against lyrics_lines
-    _group_words_into_lines(words, lyrics_lines, duration_ms, output_path)
-
-
-def _group_words_into_lines(words, lyrics_lines, duration_ms, output_path):
-    """Match aligned words back to source lyric lines and write output JSON."""
-    output_lines = []
-    word_idx = 0
-    n_words = len(words)
-
-    for line_text in lyrics_lines:
-        line_words_expected = line_text.split()
-        n_expected = len(line_words_expected)
-        slice_end = min(word_idx + n_expected, n_words)
-        line_word_slice = words[word_idx:slice_end]
-        word_idx = slice_end
-
-        if line_word_slice:
-            start_ms = line_word_slice[0]["start_ms"]
-            end_ms = line_word_slice[-1]["end_ms"]
-        else:
-            start_ms = 0
-            end_ms = duration_ms
-
-        output_lines.append({
-            "en": line_text,
-            "words": [
-                {"text": w["text"], "start_ms": w["start_ms"], "end_ms": w["end_ms"]}
-                for w in line_word_slice
-            ],
-        })
-
-    _write_output(output_lines, output_path)
-
-
-def _align_generic(model_dir, audio_path, lyrics_lines, output_path, device, error_hint):
-    """Generic fallback: load model and run basic inference, then distribute evenly."""
+def cmd_isolate_vocals(args):
+    """Diagnostic: Mel-Roformer only, 16 kHz mono float32 WAV path printed."""
+    import numpy as np
     import librosa
-    audio, sr = librosa.load(audio_path, sr=16000, mono=True)
-    duration_ms = int(len(audio) / sr * 1000)
-    _emit_evenly_distributed(lyrics_lines, duration_ms, output_path)
+    import soundfile as sf
+    from audio_separator.separator import Separator
 
+    stem_dir = tempfile.mkdtemp(prefix="sp_diag_")
+    try:
+        sep = Separator(
+            model_file_dir=args.models_dir,
+            output_format="WAV",
+            output_dir=stem_dir,
+        )
+        sep.load_model(MEL_ROFORMER_MODEL)
+        out_files = sep.separate(args.audio)
+        vocal_path = _pick_vocal_stem(out_files, stem_dir)
+        _free_vram(sep)
 
-def _emit_evenly_distributed(lyrics_lines, duration_ms, output_path):
-    """Fallback: evenly distribute lines across the audio duration."""
-    n = len(lyrics_lines)
-    if n == 0:
-        _write_output([], output_path)
-        return
+        audio, _ = librosa.load(vocal_path, sr=16000, mono=True)
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        if peak > 1.0:
+            audio = audio / peak
 
-    step_ms = duration_ms // n
-    output_lines = []
-    for i, line_text in enumerate(lyrics_lines):
-        start_ms = i * step_ms
-        end_ms = (i + 1) * step_ms if i < n - 1 else duration_ms
-        line_words = line_text.split()
-        n_words = len(line_words)
-        word_step = (end_ms - start_ms) // max(n_words, 1)
-        words = []
-        for j, w in enumerate(line_words):
-            ws = start_ms + j * word_step
-            we = start_ms + (j + 1) * word_step if j < n_words - 1 else end_ms
-            words.append({"text": w, "start_ms": ws, "end_ms": we})
-        output_lines.append({"en": line_text, "words": words})
-
-    _write_output(output_lines, output_path)
-
-
-def _write_output(lines, output_path):
-    result = {"lines": lines}
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
+        fd, resampled = tempfile.mkstemp(suffix="_vocals16k.wav")
+        os.close(fd)
+        sf.write(resampled, audio, 16000, subtype="FLOAT")
+    finally:
+        shutil.rmtree(stem_dir, ignore_errors=True)
+    print(json.dumps({"vocal_path": resampled}))
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Qwen3 ML helper for lyrics alignment and transcription"
-    )
+    parser = argparse.ArgumentParser(description="SongPlayer lyrics Python helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # check-gpu
-    subparsers.add_parser("check-gpu", help="Print GPU availability as JSON")
+    p_pre = subparsers.add_parser("preprocess-vocals")
+    p_pre.add_argument("--audio", required=True)
+    p_pre.add_argument("--output", required=True)
+    p_pre.add_argument("--models-dir", required=True)
 
-    # download-models
-    p_dl = subparsers.add_parser("download-models", help="Download Qwen3 models")
-    p_dl.add_argument("--models-dir", required=True, help="Directory to store models")
+    p_ac = subparsers.add_parser("align-chunks")
+    p_ac.add_argument("--audio", required=True)
+    p_ac.add_argument("--chunks", required=True)
+    p_ac.add_argument("--output", required=True)
 
-    # transcribe
-    p_tr = subparsers.add_parser("transcribe", help="Transcribe audio to text")
-    p_tr.add_argument("--audio", required=True, help="Path to audio file")
-    p_tr.add_argument("--output", required=True, help="Path to write output JSON")
-    p_tr.add_argument("--models-dir", required=True, help="Directory containing models")
+    p_pl = subparsers.add_parser("preload")
+    p_pl.add_argument("--models-dir", required=True)
 
-    # align
-    p_al = subparsers.add_parser("align", help="Align lyrics text to audio")
-    p_al.add_argument("--audio", required=True, help="Path to audio file")
-    p_al.add_argument("--text", required=True, help="Path to text file with lyrics")
-    p_al.add_argument("--output", required=True, help="Path to write output JSON")
-    p_al.add_argument("--models-dir", required=True, help="Directory containing models")
+    p_iv = subparsers.add_parser("isolate-vocals")
+    p_iv.add_argument("--audio", required=True)
+    p_iv.add_argument("--models-dir", required=True)
 
     args = parser.parse_args()
-
     dispatch = {
-        "check-gpu": cmd_check_gpu,
-        "download-models": cmd_download_models,
-        "transcribe": cmd_transcribe,
-        "align": cmd_align,
+        "preprocess-vocals": cmd_preprocess_vocals,
+        "align-chunks": cmd_align_chunks,
+        "preload": cmd_preload,
+        "isolate-vocals": cmd_isolate_vocals,
     }
-
     try:
         dispatch[args.command](args)
     except Exception as e:

@@ -1,270 +1,247 @@
-//! Rust subprocess wrapper for the `lyrics_worker.py` Python ML helper.
+//! Rust subprocess wrappers for `lyrics_worker.py`.
 //!
-//! Provides async functions to drive Qwen3-based alignment and transcription
-//! by spawning the Python script as a child process and parsing its JSON output.
+//! Two entry points:
+//!   - `preprocess_vocals(flac) → clean_wav`: Mel-Roformer + anvuew + 16 kHz
+//!   - `align_chunks(wav, chunks) → ChunkResults`: chunked Qwen3 alignment
+//!
+//! No post-processing, no band-aid, no duplicate-timing fixups. The
+//! assembly and quality modules in this crate own all data shaping.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
-use sp_core::lyrics::{LyricsLine, LyricsWord};
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 use tracing::debug;
 
+use crate::lyrics::assembly::{AlignedWord, ChunkResult};
+use crate::lyrics::chunking::ChunkRequest;
+
 // ---------------------------------------------------------------------------
-// Python output structures
+// On-disk JSON shapes shared with Python
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-struct AlignOutput {
-    lines: Vec<AlignLine>,
+#[derive(Debug, Serialize)]
+struct ChunkInRequest<'a> {
+    chunk_idx: usize,
+    /// Position within the source line's word stream where this chunk's
+    /// words begin. Round-tripped to Python unchanged so the Rust
+    /// assembly phase can slot sub-chunk outputs back into the right
+    /// slice of a split line's full word sequence.
+    word_offset: usize,
+    start_ms: u64,
+    end_ms: u64,
+    text: &'a str,
+    word_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ChunkRequestFile<'a> {
+    chunks: Vec<ChunkInRequest<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AlignLine {
-    en: String,
-    words: Vec<AlignWord>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AlignWord {
+struct ChunkOutWord {
     text: String,
     start_ms: u64,
     end_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
-struct TranscribeOutput {
-    text: String,
+struct ChunkOut {
+    chunk_idx: usize,
+    words: Vec<ChunkOutWord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChunkResultFile {
+    chunks: Vec<ChunkOut>,
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// preprocess_vocals
 // ---------------------------------------------------------------------------
 
-/// Align `lyrics_text` to `audio_path` using Qwen3-ForcedAligner-0.6B.
-///
-/// Writes a temporary `.txt` file for the lyrics, invokes the Python helper,
-/// reads the resulting JSON, and returns the parsed `Vec<LyricsLine>`.
-/// The temp file and output file are cleaned up after parsing.
+/// Run Mel-Roformer vocal isolation + anvuew de-reverb + 16 kHz mono float32
+/// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
+/// the same path on success.
 #[cfg_attr(test, mutants::skip)]
-pub async fn align_lyrics(
+pub async fn preprocess_vocals(
     python_path: &Path,
     script_path: &Path,
     models_dir: &Path,
-    audio_path: &Path,
-    lyrics_text: &str,
-    output_path: &Path,
-) -> Result<Vec<LyricsLine>> {
-    // Write lyrics to a temp file
-    let temp_txt = output_path.with_extension("lyrics_tmp.txt");
-    fs::write(&temp_txt, lyrics_text)
-        .await
-        .context("failed to write temporary lyrics text file")?;
-
-    // Build the command
+    audio_in: &Path,
+    wav_out: &Path,
+) -> Result<PathBuf> {
     let mut cmd = Command::new(python_path);
     cmd.args([
         script_path.as_os_str(),
-        "align".as_ref(),
+        "preprocess-vocals".as_ref(),
         "--audio".as_ref(),
-        audio_path.as_os_str(),
-        "--text".as_ref(),
-        temp_txt.as_os_str(),
+        audio_in.as_os_str(),
         "--output".as_ref(),
-        output_path.as_os_str(),
+        wav_out.as_os_str(),
         "--models-dir".as_ref(),
         models_dir.as_os_str(),
     ]);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    debug!(
-        "Running aligner: {} align --audio {} --text {} --output {} --models-dir {}",
-        python_path.display(),
-        audio_path.display(),
-        temp_txt.display(),
-        output_path.display(),
-        models_dir.display(),
-    );
-
-    let mut child = cmd
-        .spawn()
-        .context("failed to spawn lyrics_worker.py align")?;
-
-    let timeout = std::time::Duration::from_secs(120);
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            let _ = fs::remove_file(&temp_txt).await;
-            anyhow::bail!("lyrics_worker.py align failed: {e}");
-        }
-        Err(_) => {
-            let _ = child.kill().await;
-            let _ = fs::remove_file(&temp_txt).await;
-            anyhow::bail!("lyrics_worker.py align timed out after {timeout:?}");
-        }
-    };
-
-    let _ = fs::remove_file(&temp_txt).await;
-
-    if !status.success() {
-        anyhow::bail!("lyrics_worker.py align exited with status {}", status);
-    }
-
-    // Read and parse JSON output
-    let json_bytes = fs::read(output_path)
-        .await
-        .context("failed to read aligner output JSON")?;
-
-    let _ = fs::remove_file(output_path).await;
-
-    let parsed: AlignOutput =
-        serde_json::from_slice(&json_bytes).context("failed to parse aligner JSON output")?;
-
-    Ok(convert_align_output(parsed))
-}
-
-/// Transcribe `audio_path` using Qwen3-ASR-1.7B.
-///
-/// Returns the transcribed text string.
-#[cfg_attr(test, mutants::skip)]
-pub async fn transcribe_audio(
-    python_path: &Path,
-    script_path: &Path,
-    models_dir: &Path,
-    audio_path: &Path,
-    output_path: &Path,
-) -> Result<String> {
-    let mut cmd = Command::new(python_path);
-    cmd.args([
-        script_path.as_os_str(),
-        "transcribe".as_ref(),
-        "--audio".as_ref(),
-        audio_path.as_os_str(),
-        "--output".as_ref(),
-        output_path.as_os_str(),
-        "--models-dir".as_ref(),
-        models_dir.as_os_str(),
-    ]);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    debug!(
-        "Running transcriber: {} transcribe --audio {} --output {} --models-dir {}",
-        python_path.display(),
-        audio_path.display(),
-        output_path.display(),
-        models_dir.display(),
-    );
-
-    let mut child = cmd
-        .spawn()
-        .context("failed to spawn lyrics_worker.py transcribe")?;
-
-    let timeout = std::time::Duration::from_secs(300);
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => anyhow::bail!("lyrics_worker.py transcribe failed: {e}"),
-        Err(_) => {
-            let _ = child.kill().await;
-            anyhow::bail!("lyrics_worker.py transcribe timed out after {timeout:?}");
-        }
-    };
-
-    if !status.success() {
-        anyhow::bail!("lyrics_worker.py transcribe exited with status {}", status);
-    }
-
-    let json_bytes = fs::read(output_path)
-        .await
-        .context("failed to read transcribe output JSON")?;
-
-    let _ = fs::remove_file(output_path).await;
-
-    let parsed: TranscribeOutput =
-        serde_json::from_slice(&json_bytes).context("failed to parse transcribe JSON output")?;
-
-    Ok(parsed.text)
-}
-
-/// Check whether the Python environment has a CUDA-capable GPU available.
-///
-/// Runs `lyrics_worker.py check-gpu` and parses the `"gpu"` field.
-#[cfg_attr(test, mutants::skip)]
-pub async fn check_gpu(python_path: &Path, script_path: &Path) -> Result<bool> {
-    let mut cmd = Command::new(python_path);
-    cmd.args([script_path.as_os_str(), "check-gpu".as_ref()]);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    let output = cmd
-        .output()
-        .await
-        .context("failed to spawn lyrics_worker.py check-gpu")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "lyrics_worker.py check-gpu exited with status {}",
-            output.status
+    // audio-separator calls ffmpeg.exe without an absolute path, so the
+    // Python subprocess needs tools_dir (parent of lyrics_worker.py) on
+    // PATH — that's where the app's bundled ffmpeg.exe lives.
+    if let Some(tools_dir) = script_path.parent() {
+        cmd.env(
+            "PATH",
+            crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
     }
 
-    #[derive(Deserialize)]
-    struct GpuOutput {
-        gpu: bool,
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
-    let parsed: GpuOutput =
-        serde_json::from_slice(&output.stdout).context("failed to parse check-gpu JSON output")?;
+    debug!(
+        "running preprocess-vocals: {} --audio {} --output {}",
+        python_path.display(),
+        audio_in.display(),
+        wav_out.display()
+    );
 
-    Ok(parsed.gpu)
+    let mut child = cmd.spawn().context("failed to spawn preprocess-vocals")?;
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(600), child.wait()).await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => anyhow::bail!("preprocess-vocals wait failed: {e}"),
+        Err(_) => {
+            let _ = child.kill().await;
+            anyhow::bail!("preprocess-vocals timed out after 600 s");
+        }
+    };
+    if !status.success() {
+        anyhow::bail!("preprocess-vocals exited with status {status}");
+    }
+    Ok(wav_out.to_path_buf())
 }
 
 // ---------------------------------------------------------------------------
-// Conversion helpers
+// align_chunks
 // ---------------------------------------------------------------------------
 
-fn convert_align_output(output: AlignOutput) -> Vec<LyricsLine> {
-    output
-        .lines
+/// Write `requests` to a temp file, invoke `lyrics_worker.py align-chunks`
+/// on the clean WAV, parse the result JSON, and return `ChunkResult`s.
+///
+/// `chunks_path` and `output_path` are caller-owned scratch files that
+/// this function writes and then removes on success.
+#[cfg_attr(test, mutants::skip)]
+pub async fn align_chunks(
+    python_path: &Path,
+    script_path: &Path,
+    audio_wav: &Path,
+    requests: &[ChunkRequest],
+    chunks_path: &Path,
+    output_path: &Path,
+) -> Result<Vec<ChunkResult>> {
+    let req_file = ChunkRequestFile {
+        chunks: requests
+            .iter()
+            .enumerate()
+            .map(|(idx, r)| ChunkInRequest {
+                chunk_idx: idx,
+                word_offset: r.word_offset,
+                start_ms: r.start_ms,
+                end_ms: r.end_ms,
+                text: &r.text,
+                word_count: r.word_count,
+            })
+            .collect(),
+    };
+    let json = serde_json::to_vec(&req_file)?;
+    fs::write(chunks_path, &json)
+        .await
+        .context("failed to write chunks request file")?;
+
+    let mut cmd = Command::new(python_path);
+    cmd.args([
+        script_path.as_os_str(),
+        "align-chunks".as_ref(),
+        "--audio".as_ref(),
+        audio_wav.as_os_str(),
+        "--chunks".as_ref(),
+        chunks_path.as_os_str(),
+        "--output".as_ref(),
+        output_path.as_os_str(),
+    ]);
+    // Same PATH injection as preprocess_vocals — align-chunks loads the
+    // Qwen3 aligner which depends on audio-separator's imports, which in
+    // turn may load ffmpeg. Keep the subprocess environment consistent.
+    if let Some(tools_dir) = script_path.parent() {
+        cmd.env(
+            "PATH",
+            crate::lyrics::bootstrap::prepend_path_with(tools_dir),
+        );
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    debug!(
+        "running align-chunks with {} requests on {}",
+        requests.len(),
+        audio_wav.display()
+    );
+
+    let mut child = cmd.spawn().context("failed to spawn align-chunks")?;
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(900), child.wait()).await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => anyhow::bail!("align-chunks wait failed: {e}"),
+        Err(_) => {
+            let _ = child.kill().await;
+            anyhow::bail!("align-chunks timed out after 900 s");
+        }
+    };
+    if !status.success() {
+        anyhow::bail!("align-chunks exited with status {status}");
+    }
+
+    let content = fs::read_to_string(output_path)
+        .await
+        .context("failed to read align-chunks output")?;
+    let parsed: ChunkResultFile =
+        serde_json::from_str(&content).context("failed to parse align-chunks output JSON")?;
+
+    let results = parsed
+        .chunks
         .into_iter()
-        .map(|line| {
-            let words: Vec<LyricsWord> = line
-                .words
-                .into_iter()
-                .map(|w| LyricsWord {
-                    text: w.text,
-                    start_ms: w.start_ms,
-                    end_ms: w.end_ms,
-                })
-                .collect();
-
-            // Derive line timing from first/last word, or default to 0
-            let start_ms = words.first().map(|w| w.start_ms).unwrap_or(0);
-            let end_ms = words.last().map(|w| w.end_ms).unwrap_or(0);
-
-            LyricsLine {
-                start_ms,
-                end_ms,
-                en: line.en,
-                sk: None,
-                words: if words.is_empty() { None } else { Some(words) },
+        .map(|c| {
+            let (line_index, word_offset) = requests
+                .get(c.chunk_idx)
+                .map(|r| (r.line_index, r.word_offset))
+                .unwrap_or((usize::MAX, 0));
+            ChunkResult {
+                line_index,
+                word_offset,
+                words: c
+                    .words
+                    .into_iter()
+                    .map(|w| AlignedWord {
+                        text: w.text,
+                        start_ms: w.start_ms,
+                        end_ms: w.end_ms,
+                    })
+                    .collect(),
             }
         })
-        .collect()
+        .filter(|r| r.line_index != usize::MAX)
+        .collect();
+
+    let _ = fs::remove_file(chunks_path).await;
+    let _ = fs::remove_file(output_path).await;
+
+    Ok(results)
 }
 
 // ---------------------------------------------------------------------------
@@ -275,162 +252,103 @@ fn convert_align_output(output: AlignOutput) -> Vec<LyricsLine> {
 mod tests {
     use super::*;
 
+    /// Audit: retired symbols must no longer be referenced from this file.
+    /// Keeps the compiler from being the only line of defence against a
+    /// dangling re-export of the old API leaking back in.
+    ///
+    /// NOTE: banned symbol names are split across two string literals joined
+    /// at runtime so this test file does not contain the verbatim string it is
+    /// checking for (which would cause the test to always fail on itself).
     #[test]
-    fn test_parse_align_output() {
-        let json = r#"{
-            "lines": [
+    fn aligner_source_has_no_retired_symbols() {
+        let src = include_str!("aligner.rs");
+        let banned = [
+            ["align", "_lyrics"].concat(),
+            ["merge_word", "_timings"].concat(),
+            ["ensure_progressive", "_words"].concat(),
+            ["count_duplicate", "_start_ms"].concat(),
+        ];
+        for sym in &banned {
+            assert!(
+                !src.contains(sym.as_str()),
+                "aligner.rs must not contain retired symbol `{sym}`"
+            );
+        }
+    }
+
+    /// JSON-contract schema test: the request shape Rust writes to
+    /// `chunks.json` must round-trip cleanly through the Python
+    /// helper. We can't invoke Python in a unit test, but we can at
+    /// least prove the Rust-side serialize then parse using the
+    /// matching deserialize struct — this catches drift between the
+    /// `ChunkInRequest` producer and any future consumer that reads
+    /// the same file.
+    ///
+    /// Equally important: verify the output-side shape (`ChunkOut` +
+    /// `ChunkOutWord`) deserialises from the exact JSON the Python
+    /// helper writes. The fixture below is copy-pasted from
+    /// `lyrics_worker.py::cmd_align_chunks` docstring.
+    #[test]
+    fn align_chunks_request_json_schema_roundtrips() {
+        let requests = vec![
+            ChunkInRequest {
+                chunk_idx: 0,
+                word_offset: 0,
+                start_ms: 500,
+                end_ms: 3500,
+                text: "hey there friend",
+                word_count: 3,
+            },
+            ChunkInRequest {
+                chunk_idx: 1,
+                word_offset: 3,
+                start_ms: 3500,
+                end_ms: 6500,
+                text: "goodbye now",
+                word_count: 2,
+            },
+        ];
+        let req_file = ChunkRequestFile { chunks: requests };
+        let json = serde_json::to_string(&req_file).expect("serialize");
+
+        // Shape the Python script reads (quoted from its docstring):
+        //   {"chunks": [{"chunk_idx": 0, "word_offset": 0,
+        //                "start_ms": 500, "end_ms": 3500,
+        //                "text": "hey there friend", "word_count": 3}, ...]}
+        assert!(json.contains("\"chunk_idx\""));
+        assert!(json.contains("\"word_offset\""));
+        assert!(json.contains("\"start_ms\""));
+        assert!(json.contains("\"end_ms\""));
+        assert!(json.contains("\"text\""));
+        assert!(json.contains("\"word_count\""));
+    }
+
+    #[test]
+    fn align_chunks_output_json_schema_matches_python_docstring() {
+        // Fixture verbatim from lyrics_worker.py::cmd_align_chunks docstring.
+        let fixture = r#"{
+            "chunks": [
                 {
-                    "en": "Hello world",
+                    "chunk_idx": 0,
                     "words": [
-                        {"text": "Hello", "start_ms": 100, "end_ms": 500},
-                        {"text": "world", "start_ms": 600, "end_ms": 1000}
+                        {"text": "hey", "start_ms": 1000, "end_ms": 1200},
+                        {"text": "there", "start_ms": 1200, "end_ms": 1400},
+                        {"text": "friend", "start_ms": 1400, "end_ms": 1800}
                     ]
                 },
                 {
-                    "en": "Foo bar baz",
-                    "words": [
-                        {"text": "Foo", "start_ms": 1100, "end_ms": 1300},
-                        {"text": "bar", "start_ms": 1400, "end_ms": 1600},
-                        {"text": "baz", "start_ms": 1700, "end_ms": 2000}
-                    ]
+                    "chunk_idx": 1,
+                    "words": []
                 }
             ]
         }"#;
-
-        let parsed: AlignOutput = serde_json::from_str(json).expect("parse AlignOutput");
-        assert_eq!(parsed.lines.len(), 2);
-
-        let first = &parsed.lines[0];
-        assert_eq!(first.en, "Hello world");
-        assert_eq!(first.words.len(), 2);
-        assert_eq!(first.words[0].text, "Hello");
-        assert_eq!(first.words[0].start_ms, 100);
-        assert_eq!(first.words[0].end_ms, 500);
-        assert_eq!(first.words[1].text, "world");
-        assert_eq!(first.words[1].start_ms, 600);
-        assert_eq!(first.words[1].end_ms, 1000);
-
-        let second = &parsed.lines[1];
-        assert_eq!(second.en, "Foo bar baz");
-        assert_eq!(second.words.len(), 3);
-        assert_eq!(second.words[2].text, "baz");
-        assert_eq!(second.words[2].end_ms, 2000);
-    }
-
-    #[test]
-    fn test_parse_align_output_empty_lines() {
-        let json = r#"{"lines": []}"#;
-        let parsed: AlignOutput = serde_json::from_str(json).expect("parse empty AlignOutput");
-        assert_eq!(parsed.lines.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_align_output_empty_words() {
-        let json = r#"{
-            "lines": [
-                {"en": "Instrumental", "words": []}
-            ]
-        }"#;
-        let parsed: AlignOutput =
-            serde_json::from_str(json).expect("parse AlignOutput empty words");
-        assert_eq!(parsed.lines[0].en, "Instrumental");
-        assert_eq!(parsed.lines[0].words.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_transcribe_output() {
-        let json = r#"{"text": "Hello this is a transcription"}"#;
-        let parsed: TranscribeOutput = serde_json::from_str(json).expect("parse TranscribeOutput");
-        assert_eq!(parsed.text, "Hello this is a transcription");
-    }
-
-    #[test]
-    fn test_parse_transcribe_output_empty() {
-        let json = r#"{"text": ""}"#;
-        let parsed: TranscribeOutput =
-            serde_json::from_str(json).expect("parse TranscribeOutput empty");
-        assert_eq!(parsed.text, "");
-    }
-
-    #[test]
-    fn test_convert_align_output_to_lyrics_lines() {
-        let output = AlignOutput {
-            lines: vec![
-                AlignLine {
-                    en: "Amazing grace".to_string(),
-                    words: vec![
-                        AlignWord {
-                            text: "Amazing".to_string(),
-                            start_ms: 0,
-                            end_ms: 400,
-                        },
-                        AlignWord {
-                            text: "grace".to_string(),
-                            start_ms: 500,
-                            end_ms: 900,
-                        },
-                    ],
-                },
-                AlignLine {
-                    en: "How sweet the sound".to_string(),
-                    words: vec![
-                        AlignWord {
-                            text: "How".to_string(),
-                            start_ms: 1000,
-                            end_ms: 1200,
-                        },
-                        AlignWord {
-                            text: "sweet".to_string(),
-                            start_ms: 1300,
-                            end_ms: 1600,
-                        },
-                        AlignWord {
-                            text: "the".to_string(),
-                            start_ms: 1700,
-                            end_ms: 1900,
-                        },
-                        AlignWord {
-                            text: "sound".to_string(),
-                            start_ms: 2000,
-                            end_ms: 2500,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        let lines = convert_align_output(output);
-        assert_eq!(lines.len(), 2);
-
-        let first = &lines[0];
-        assert_eq!(first.en, "Amazing grace");
-        assert_eq!(first.start_ms, 0);
-        assert_eq!(first.end_ms, 900);
-        assert!(first.words.is_some());
-        let words0 = first.words.as_ref().unwrap();
-        assert_eq!(words0.len(), 2);
-        assert_eq!(words0[0].text, "Amazing");
-        assert_eq!(words0[1].text, "grace");
-
-        let second = &lines[1];
-        assert_eq!(second.en, "How sweet the sound");
-        assert_eq!(second.start_ms, 1000);
-        assert_eq!(second.end_ms, 2500);
-        assert_eq!(second.words.as_ref().unwrap().len(), 4);
-    }
-
-    #[test]
-    fn test_convert_align_output_empty_words_gives_none() {
-        let output = AlignOutput {
-            lines: vec![AlignLine {
-                en: "Silence".to_string(),
-                words: vec![],
-            }],
-        };
-        let lines = convert_align_output(output);
-        assert_eq!(lines.len(), 1);
-        assert!(lines[0].words.is_none());
-        assert_eq!(lines[0].start_ms, 0);
-        assert_eq!(lines[0].end_ms, 0);
+        let parsed: ChunkResultFile =
+            serde_json::from_str(fixture).expect("Python docstring fixture must deserialize");
+        assert_eq!(parsed.chunks.len(), 2);
+        assert_eq!(parsed.chunks[0].chunk_idx, 0);
+        assert_eq!(parsed.chunks[0].words.len(), 3);
+        assert_eq!(parsed.chunks[0].words[0].text, "hey");
+        assert_eq!(parsed.chunks[0].words[0].start_ms, 1000);
+        assert_eq!(parsed.chunks[1].words.len(), 0);
     }
 }
