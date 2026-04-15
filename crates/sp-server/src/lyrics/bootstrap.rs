@@ -7,6 +7,19 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+/// Prepend `dir` to the current `PATH` env var, with the OS-appropriate
+/// separator, and return the joined string. Exposed as `pub(crate)` so
+/// `aligner.rs` can use the same helper when spawning its subprocesses.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn prepend_path_with(dir: &Path) -> std::ffi::OsString {
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let mut joined = std::ffi::OsString::from(dir);
+    joined.push(separator);
+    joined.push(existing);
+    joined
+}
+
 /// The `-c` script passed to the venv Python by `is_ready` to verify the
 /// three Python packages the aligner pipeline depends on are importable
 /// AND CUDA is available. Exit code 0 iff all four conditions hold:
@@ -279,7 +292,14 @@ pub async fn ensure_ready(
             .arg(script_path)
             .args(["preload", "--models-dir"])
             .arg(models_dir)
-            .env("HF_HOME", models_dir);
+            .env("HF_HOME", models_dir)
+            // audio-separator shells out to ffmpeg.exe without a full path,
+            // so the Python subprocess needs tools_dir prepended to PATH —
+            // that's where the app's bundled ffmpeg.exe lives alongside
+            // yt-dlp.exe. Without this the preload fails with
+            // "[WinError 2] The system cannot find the file specified"
+            // from inside audio_separator's constructor.
+            .env("PATH", prepend_path_with(tools_dir));
         preload.creation_flags(0x08000000);
         let mut preload_child = preload.spawn().context("failed to spawn preload")?;
         let preload_status =

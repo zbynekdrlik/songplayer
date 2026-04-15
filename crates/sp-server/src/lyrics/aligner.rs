@@ -79,6 +79,15 @@ pub async fn preprocess_vocals(
         "--models-dir".as_ref(),
         models_dir.as_os_str(),
     ]);
+    // audio-separator calls ffmpeg.exe without an absolute path, so the
+    // Python subprocess needs tools_dir (parent of lyrics_worker.py) on
+    // PATH — that's where the app's bundled ffmpeg.exe lives.
+    if let Some(tools_dir) = script_path.parent() {
+        cmd.env(
+            "PATH",
+            crate::lyrics::bootstrap::prepend_path_with(tools_dir),
+        );
+    }
 
     #[cfg(windows)]
     {
@@ -156,6 +165,15 @@ pub async fn align_chunks(
         "--output".as_ref(),
         output_path.as_os_str(),
     ]);
+    // Same PATH injection as preprocess_vocals — align-chunks loads the
+    // Qwen3 aligner which depends on audio-separator's imports, which in
+    // turn may load ffmpeg. Keep the subprocess environment consistent.
+    if let Some(tools_dir) = script_path.parent() {
+        cmd.env(
+            "PATH",
+            crate::lyrics::bootstrap::prepend_path_with(tools_dir),
+        );
+    }
 
     #[cfg(windows)]
     {

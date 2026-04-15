@@ -215,12 +215,15 @@ def cmd_preload(args):
     _free_vram(dereverb)
 
     device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
-    model = Qwen3ForcedAligner.from_pretrained(
+    # `from_pretrained` downloads + instantiates the aligner. We don't poke
+    # `model.parameters()` afterwards — the Qwen3ForcedAligner wrapper isn't
+    # an nn.Module subclass and has no `.parameters()` method. Completing
+    # `from_pretrained` without raising is proof enough that weights loaded.
+    _model = Qwen3ForcedAligner.from_pretrained(
         "Qwen/Qwen3-ForcedAligner-0.6B",
         dtype=torch.bfloat16,
         device_map=device_map,
     )
-    _ = next(model.parameters())
     print(
         json.dumps(
             {
