@@ -24,6 +24,11 @@ use crate::lyrics::chunking::ChunkRequest;
 #[derive(Debug, Serialize)]
 struct ChunkInRequest<'a> {
     chunk_idx: usize,
+    /// Position within the source line's word stream where this chunk's
+    /// words begin. Round-tripped to Python unchanged so the Rust
+    /// assembly phase can slot sub-chunk outputs back into the right
+    /// slice of a split line's full word sequence.
+    word_offset: usize,
     start_ms: u64,
     end_ms: u64,
     text: &'a str,
@@ -142,6 +147,7 @@ pub async fn align_chunks(
             .enumerate()
             .map(|(idx, r)| ChunkInRequest {
                 chunk_idx: idx,
+                word_offset: r.word_offset,
                 start_ms: r.start_ms,
                 end_ms: r.end_ms,
                 text: &r.text,
@@ -211,12 +217,13 @@ pub async fn align_chunks(
         .chunks
         .into_iter()
         .map(|c| {
-            let line_index = requests
+            let (line_index, word_offset) = requests
                 .get(c.chunk_idx)
-                .map(|r| r.line_index)
-                .unwrap_or(usize::MAX);
+                .map(|r| (r.line_index, r.word_offset))
+                .unwrap_or((usize::MAX, 0));
             ChunkResult {
                 line_index,
+                word_offset,
                 words: c
                     .words
                     .into_iter()

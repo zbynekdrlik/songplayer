@@ -19,6 +19,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (8, MIGRATION_V8),
     (9, MIGRATION_V9),
     (10, MIGRATION_V10),
+    (11, MIGRATION_V11),
 ];
 
 const MIGRATION_V1: &str = "
@@ -149,6 +150,15 @@ const MIGRATION_V10: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE lyrics_source = 'yt_subs';
 ";
 
+// V11 = reset 'yt_subs+qwen3' rows so they re-run through the long-line-
+// splitting chunking introduced to fix #119 Housefires (32-word SRT
+// events collapsed 27 words onto the same start_ms). Scoped to that
+// source only — LRCLIB-line-level rows are unaffected and don't pay
+// another reprocessing cycle.
+const MIGRATION_V11: &str = "
+UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE lyrics_source = 'yt_subs+qwen3';
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -232,7 +242,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 10);
+        assert_eq!(ver, 11);
     }
 
     #[tokio::test]
@@ -241,7 +251,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 10);
+        assert_eq!(ver, 11);
     }
 
     #[tokio::test]
@@ -844,12 +854,85 @@ mod tests {
             .collect();
 
         assert_eq!(by_id["a1"], (1, Some("lrclib".into())), "lrclib untouched");
+        assert_eq!(by_id["a3"], (0, None), "partial yt_subs reset");
+        assert_eq!(by_id["a4"], (0, None), "already-empty unchanged");
+        // a2 had 'yt_subs+qwen3' which V10 does NOT touch. But V11 DOES
+        // reset it. The test seeds happen AFTER V11 already ran (because
+        // the initial run_migrations got to V11), and only V10 is rewound,
+        // so V11 does NOT re-run and a2 stays untouched here.
         assert_eq!(
             by_id["a2"],
             (1, Some("yt_subs+qwen3".into())),
-            "yt_subs+qwen3 untouched"
+            "V10 must not touch yt_subs+qwen3"
         );
-        assert_eq!(by_id["a3"], (0, None), "partial yt_subs reset");
+    }
+
+    /// V11 resets rows whose lyrics_source == 'yt_subs+qwen3' — the
+    /// pre-long-line-split state — so they re-run through the new
+    /// chunking that splits lines with >10 words into sub-chunks.
+    /// LRCLIB rows and partial-reset NULL rows must be left alone.
+    #[tokio::test]
+    async fn migration_v11_resets_only_yt_subs_qwen3_rows() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (yt, src, has) in [
+            ("a1", Some("lrclib"), 1),
+            ("a2", Some("yt_subs+qwen3"), 1),
+            ("a3", Some("yt_subs"), 1),
+            ("a4", None::<&str>, 0),
+        ] {
+            sqlx::query(
+                "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, lyrics_source) \
+                 VALUES (1, ?, 't', ?, ?)",
+            )
+            .bind(yt)
+            .bind(has)
+            .bind(src)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Force V11 to re-run.
+        sqlx::query("DELETE FROM schema_version WHERE version = 11")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        let rows = sqlx::query(
+            "SELECT youtube_id, has_lyrics, lyrics_source FROM videos ORDER BY youtube_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let by_id: std::collections::HashMap<String, (i64, Option<String>)> = rows
+            .into_iter()
+            .map(|r| {
+                let yt: String = r.get("youtube_id");
+                (yt, (r.get("has_lyrics"), r.get("lyrics_source")))
+            })
+            .collect();
+
+        assert_eq!(by_id["a1"], (1, Some("lrclib".into())), "lrclib untouched");
+        assert_eq!(
+            by_id["a2"],
+            (0, None),
+            "yt_subs+qwen3 must be reset for re-alignment"
+        );
+        assert_eq!(
+            by_id["a3"],
+            (1, Some("yt_subs".into())),
+            "V11 must not touch partial yt_subs rows"
+        );
         assert_eq!(by_id["a4"], (0, None), "already-empty unchanged");
     }
 }

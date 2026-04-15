@@ -569,4 +569,118 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         `stddev_lines=${stddevLines}`,
     );
   });
+
+  test("YT-subs quality floor: at least 80% of yt_subs+qwen3 songs have weighted duplicate < 15%", async ({
+    request,
+  }) => {
+    // Populate gradually as the worker processes the queue. Budget must
+    // be long enough that most YT-subs songs have been processed — the
+    // worker handles ~3.5 min per yt_subs song serially, and the
+    // catalog on win-resolume has ~24 such songs.
+    test.setTimeout(75 * 60 * 1000);
+
+    interface Word {
+      start_ms: number;
+      end_ms: number;
+    }
+    interface Line {
+      en: string;
+      words?: Word[];
+    }
+    interface Track {
+      source?: string;
+      lines: Line[];
+    }
+
+    function weightedDup(track: Track): number {
+      const total = track.lines.reduce(
+        (s, l) => s + (l.words?.length ?? 0),
+        0,
+      );
+      if (total === 0) return 0;
+      let sumDupXWords = 0;
+      for (const l of track.lines) {
+        const w = l.words ?? [];
+        if (w.length < 2) continue;
+        let dup = 0;
+        for (let i = 1; i < w.length; i++) {
+          if (w[i].start_ms === w[i - 1].start_ms) dup += 1;
+        }
+        const pct = (100 * dup) / (w.length - 1);
+        sumDupXWords += pct * w.length;
+      }
+      return sumDupXWords / total;
+    }
+
+    async function surveyAllYtSubsQwen3(): Promise<Map<number, number>> {
+      const scored = new Map<number, number>();
+      const pls = await request.get("/api/v1/playlists");
+      if (!pls.ok()) return scored;
+      const playlists: PlaylistEntry[] = await pls.json();
+      for (const pl of playlists) {
+        const vr = await request.get(`/api/v1/playlists/${pl.id}/videos`);
+        if (!vr.ok()) continue;
+        const videos: VideoEntry[] = await vr.json();
+        for (const v of videos) {
+          if (!v.normalized) continue;
+          const lr = await request.get(`/api/v1/videos/${v.id}/lyrics`);
+          if (!lr.ok()) continue;
+          const track = (await lr.json()) as Track;
+          if (track.source !== "yt_subs+qwen3") continue;
+          scored.set(v.id, weightedDup(track));
+        }
+      }
+      return scored;
+    }
+
+    // Wait for at least 8 yt_subs+qwen3 songs before scoring the floor
+    // — any fewer and the ratio is too noisy. Given ~24 YT-subs songs
+    // in the cache, 8 is 1/3 of the set.
+    const MIN_SONGS = 8;
+    const FLOOR_QUALITY_PCT = 15.0;
+    const FLOOR_PASS_RATIO = 0.8;
+
+    let scored = new Map<number, number>();
+    await expect
+      .poll(
+        async () => {
+          scored = await surveyAllYtSubsQwen3();
+          console.log(
+            `[yt-subs floor poll] ${scored.size} yt_subs+qwen3 songs @ ${new Date().toISOString()}`,
+          );
+          return scored.size;
+        },
+        {
+          message:
+            `Expected at least ${MIN_SONGS} yt_subs+qwen3 songs on the box, ` +
+            `got none in 75 min. Worker stalled or queue empty.`,
+          timeout: 75 * 60 * 1000,
+          intervals: [60_000],
+        },
+      )
+      .toBeGreaterThanOrEqual(MIN_SONGS);
+
+    const passing: string[] = [];
+    const failing: string[] = [];
+    for (const [id, dup] of scored.entries()) {
+      const bucket = dup < FLOOR_QUALITY_PCT ? passing : failing;
+      bucket.push(`#${id}:${dup.toFixed(1)}%`);
+    }
+    const ratio = passing.length / scored.size;
+    console.log(
+      `yt-subs floor: ${passing.length}/${scored.size} = ${(ratio * 100).toFixed(1)}% ` +
+        `of yt_subs+qwen3 songs have weighted dup < ${FLOOR_QUALITY_PCT}%`,
+    );
+    console.log(`  PASSING (${passing.length}): ${passing.join(", ")}`);
+    if (failing.length > 0) {
+      console.log(`  FAILING (${failing.length}): ${failing.join(", ")}`);
+    }
+
+    expect(
+      ratio,
+      `Only ${(ratio * 100).toFixed(1)}% of yt_subs+qwen3 songs clear the ` +
+        `${FLOOR_QUALITY_PCT}% duplicate-start threshold (floor requires ${FLOOR_PASS_RATIO * 100}%). ` +
+        `Failing: ${failing.join(", ")}`,
+    ).toBeGreaterThanOrEqual(FLOOR_PASS_RATIO);
+  });
 });

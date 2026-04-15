@@ -96,6 +96,15 @@ impl LyricsWorker {
             error!("lyrics_worker: failed to write lyrics_worker.py: {e}");
         }
 
+        // Start with a fresh yt-dlp scratch directory. Each song's
+        // fetch_subtitles call writes a .json3 and then deletes it, but
+        // a crash mid-fetch (or yt-dlp writing unexpected extra files
+        // like .vtt fallbacks) can leak residue. Emptying the dir at
+        // startup prevents unbounded growth across restarts.
+        let yt_tmp = std::env::temp_dir().join("sp_yt_subs");
+        let _ = tokio::fs::remove_dir_all(&yt_tmp).await;
+        let _ = tokio::fs::create_dir_all(&yt_tmp).await;
+
         if let Some(sys_py) = self.python_path.as_ref() {
             match crate::lyrics::bootstrap::ensure_ready(
                 &self.tools_dir,

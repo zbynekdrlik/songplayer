@@ -124,8 +124,13 @@ def cmd_align_chunks(args):
     """Chunked Qwen3-ForcedAligner: loads the model ONCE, loops over all chunks.
 
     --chunks is a path to JSON with shape:
-      {"chunks": [{"chunk_idx": 0, "start_ms": 500, "end_ms": 3500,
+      {"chunks": [{"chunk_idx": 0, "word_offset": 0,
+                   "start_ms": 500, "end_ms": 3500,
                    "text": "hey there friend", "word_count": 3}, ...]}
+
+    The `word_offset` field is metadata — Python ignores it and only the
+    Rust assembly phase uses it to slot sub-chunk output back into the
+    right position within a split-line's full word sequence.
 
     Writes JSON to --output with shape:
       {"chunks": [{"chunk_idx": 0, "words": [
