@@ -409,18 +409,22 @@ test.describe("FLAC pipeline post-deploy verification", () => {
   test("song #148 Planetshakers 'Get This Party Started' has real word-level alignment", async ({
     request,
   }) => {
-    // 25-minute poll budget covers cold-start bootstrap (1.2 GB Qwen3 +
-    // 500 MB Mel-Roformer + 500 MB anvuew dereverb downloads) PLUS the
-    // first song running through the new pipeline. Overall test timeout
-    // is 28 min for a safety margin above the poll loop.
-    test.setTimeout(28 * 60 * 1000);
+    // Poll budget covers cold-start bootstrap (~7 min for model downloads)
+    // PLUS the worker chewing through the queue serially up to id 148.
+    // Once #148 is persisted as yt_subs+qwen3, a subsequent deploy
+    // doesn't reset it (V10 only resets `yt_subs` partial rows), so
+    // re-runs return the cached track immediately.
+    test.setTimeout(63 * 60 * 1000);
 
     // Match by song + artist rather than YouTube ID — the track may be
     // uploaded multiple times and we just need ONE copy to hit the
     // YT-subs chunked path.
     const SONG_NEEDLE = "party started";
     const ARTIST_NEEDLE = "planetshaker";
-    const MIN_LINES = 30;
+    // Empirically observed on win-resolume against the live YT manual
+    // subtitles: 27 SRT events, 214 words. Thresholds set below the
+    // observed counts so a small upstream subtitle edit doesn't flake.
+    const MIN_LINES = 25;
     const MIN_TOTAL_WORDS = 200;
     const MAX_DUPLICATE_PCT = 10;
     const MIN_STDDEV_LINES = 10;
@@ -495,10 +499,10 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         },
         {
           message:
-            `#148 "Get This Party Started" never produced lyrics in 25 min. ` +
+            `#148 "Get This Party Started" never produced lyrics in 60 min. ` +
             `Either the song didn't sync into any playlist, or the pipeline ` +
             `aborted before persisting. Check the server log on win-resolume.`,
-          timeout: 25 * 60 * 1000,
+          timeout: 60 * 60 * 1000,
           intervals: [30_000],
         },
       )
