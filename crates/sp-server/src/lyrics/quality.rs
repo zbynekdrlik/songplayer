@@ -124,6 +124,29 @@ mod tests {
         assert_eq!(duplicate_start_pct(&l), 0.0);
     }
 
+    /// Boundary: exactly 2 words must produce a real percentage, not 0.
+    /// Catches a `< 2` → `<= 2` mutation that would wrongly zero this case.
+    #[test]
+    fn duplicate_start_pct_two_words_progressive_returns_zero() {
+        let l = line_with_words(&[(0, 100, "a"), (200, 300, "b")]);
+        assert_eq!(
+            duplicate_start_pct(&l),
+            0.0,
+            "two non-duplicate words must not be short-circuited as 'too few'"
+        );
+    }
+
+    /// Boundary: exactly 2 words sharing start_ms must be 100% duplicate,
+    /// not 0%. Catches the same `< 2` → `<= 2` mutation more aggressively.
+    #[test]
+    fn duplicate_start_pct_two_words_collapsed_returns_100_pct() {
+        let l = line_with_words(&[(50, 100, "a"), (50, 100, "b")]);
+        assert!(
+            (duplicate_start_pct(&l) - 100.0).abs() < 0.001,
+            "two duplicate-start words must be 100% — would silently report 0% under <= 2 mutation"
+        );
+    }
+
     // ---------- gap_stddev_ms ----------
 
     #[test]
@@ -156,6 +179,23 @@ mod tests {
     fn gap_stddev_ms_fewer_than_three_words_returns_zero() {
         let l = line_with_words(&[(0, 100, "a"), (200, 300, "b")]);
         assert_eq!(gap_stddev_ms(&l), 0.0);
+    }
+
+    /// Boundary: exactly 3 words must produce a real stddev, not 0.
+    /// Catches `< 3` → `<= 3` and `< 3` → `== 3` mutations that would
+    /// silently zero this case (3 words = 2 gaps, the minimum needed
+    /// for a meaningful sample stddev).
+    #[test]
+    fn gap_stddev_ms_three_words_with_unequal_gaps_is_positive() {
+        // gaps: 100, 300. mean 200. variance = (10000 + 10000) / 2 = 10000.
+        // stddev = 100.
+        let l = line_with_words(&[(0, 50, "a"), (100, 150, "b"), (400, 450, "c")]);
+        let s = gap_stddev_ms(&l);
+        assert!(
+            (s - 100.0).abs() < 0.001,
+            "expected stddev 100 ms for 3-word line with gaps (100, 300); got {s} — \
+             a `<= 3` or `== 3` mutation in the guard would short-circuit to 0.0"
+        );
     }
 
     #[test]

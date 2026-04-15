@@ -279,6 +279,11 @@ impl LyricsWorker {
         Ok(assembled)
     }
 
+    /// Pure observability — emits a `warn!` per line whose alignment came
+    /// back collapsed enough to suspect Mel-Roformer or the aligner failed.
+    /// Skipped by mutation testing because the only behaviour is logging,
+    /// which we don't unit-test against captured trace output.
+    #[cfg_attr(test, mutants::skip)]
     fn warn_on_degenerate_lines(&self, track: &LyricsTrack, youtube_id: &str) {
         for (idx, line) in track.lines.iter().enumerate() {
             let pct = quality::duplicate_start_pct(line);
