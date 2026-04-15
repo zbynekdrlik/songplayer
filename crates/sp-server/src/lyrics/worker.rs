@@ -235,9 +235,18 @@ impl LyricsWorker {
         Ok(())
     }
 
-    /// Plan chunks → preprocess vocals → align → assemble. On any hard error,
-    /// returns `Err((original_track, error))` so the caller can fall back to
-    /// the line-level track without losing it.
+    /// Plan chunks → preprocess vocals → align → assemble.
+    ///
+    /// The unusual `Result<LyricsTrack, (LyricsTrack, anyhow::Error)>`
+    /// signature is a deliberate borrow-checker workaround. `track` is
+    /// moved into `assembly::assemble` on success. When one of the
+    /// subprocess steps fails partway through, we still need the
+    /// original `track` back so the caller can persist it as a
+    /// line-level `yt_subs` entry (the LRCLIB-quality fallback) rather
+    /// than losing the song entirely. Cloning the track on entry would
+    /// avoid the tuple return, but tracks can contain hundreds of
+    /// `LyricsLine`s with nested word vectors — cheaper to shuttle the
+    /// owned value back through the error channel.
     #[cfg_attr(test, mutants::skip)]
     async fn run_chunked_alignment(
         &self,

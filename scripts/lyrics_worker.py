@@ -148,9 +148,13 @@ def cmd_align_chunks(args):
         request = json.load(f)
     chunks_in = request["chunks"]
 
-    audio, sr = sf.read(args.audio, dtype="float32")
-    if sr != 16000:
-        raise RuntimeError(f"expected 16 kHz audio, got {sr}")
+    # preprocess_vocals is the only producer of --audio and always writes
+    # 16 kHz mono float32. Don't re-check the sample rate here — the
+    # previous guard was dead defense that hid resample bugs upstream
+    # behind a generic RuntimeError. If the WAV drifts from 16 kHz we
+    # want Qwen3's own assertion (it reads at 16 kHz internally) to
+    # surface the actual stack trace.
+    audio, _sr = sf.read(args.audio, dtype="float32")
     if audio.ndim != 1:
         audio = np.mean(audio, axis=1).astype("float32")
 

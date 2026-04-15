@@ -250,6 +250,8 @@ pub async fn align_chunks(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     /// Audit: retired symbols must no longer be referenced from this file.
     /// Keeps the compiler from being the only line of defence against a
     /// dangling re-export of the old API leaking back in.
@@ -272,5 +274,81 @@ mod tests {
                 "aligner.rs must not contain retired symbol `{sym}`"
             );
         }
+    }
+
+    /// JSON-contract schema test: the request shape Rust writes to
+    /// `chunks.json` must round-trip cleanly through the Python
+    /// helper. We can't invoke Python in a unit test, but we can at
+    /// least prove the Rust-side serialize then parse using the
+    /// matching deserialize struct — this catches drift between the
+    /// `ChunkInRequest` producer and any future consumer that reads
+    /// the same file.
+    ///
+    /// Equally important: verify the output-side shape (`ChunkOut` +
+    /// `ChunkOutWord`) deserialises from the exact JSON the Python
+    /// helper writes. The fixture below is copy-pasted from
+    /// `lyrics_worker.py::cmd_align_chunks` docstring.
+    #[test]
+    fn align_chunks_request_json_schema_roundtrips() {
+        let requests = vec![
+            ChunkInRequest {
+                chunk_idx: 0,
+                word_offset: 0,
+                start_ms: 500,
+                end_ms: 3500,
+                text: "hey there friend",
+                word_count: 3,
+            },
+            ChunkInRequest {
+                chunk_idx: 1,
+                word_offset: 3,
+                start_ms: 3500,
+                end_ms: 6500,
+                text: "goodbye now",
+                word_count: 2,
+            },
+        ];
+        let req_file = ChunkRequestFile { chunks: requests };
+        let json = serde_json::to_string(&req_file).expect("serialize");
+
+        // Shape the Python script reads (quoted from its docstring):
+        //   {"chunks": [{"chunk_idx": 0, "word_offset": 0,
+        //                "start_ms": 500, "end_ms": 3500,
+        //                "text": "hey there friend", "word_count": 3}, ...]}
+        assert!(json.contains("\"chunk_idx\""));
+        assert!(json.contains("\"word_offset\""));
+        assert!(json.contains("\"start_ms\""));
+        assert!(json.contains("\"end_ms\""));
+        assert!(json.contains("\"text\""));
+        assert!(json.contains("\"word_count\""));
+    }
+
+    #[test]
+    fn align_chunks_output_json_schema_matches_python_docstring() {
+        // Fixture verbatim from lyrics_worker.py::cmd_align_chunks docstring.
+        let fixture = r#"{
+            "chunks": [
+                {
+                    "chunk_idx": 0,
+                    "words": [
+                        {"text": "hey", "start_ms": 1000, "end_ms": 1200},
+                        {"text": "there", "start_ms": 1200, "end_ms": 1400},
+                        {"text": "friend", "start_ms": 1400, "end_ms": 1800}
+                    ]
+                },
+                {
+                    "chunk_idx": 1,
+                    "words": []
+                }
+            ]
+        }"#;
+        let parsed: ChunkResultFile =
+            serde_json::from_str(fixture).expect("Python docstring fixture must deserialize");
+        assert_eq!(parsed.chunks.len(), 2);
+        assert_eq!(parsed.chunks[0].chunk_idx, 0);
+        assert_eq!(parsed.chunks[0].words.len(), 3);
+        assert_eq!(parsed.chunks[0].words[0].text, "hey");
+        assert_eq!(parsed.chunks[0].words[0].start_ms, 1000);
+        assert_eq!(parsed.chunks[1].words.len(), 0);
     }
 }

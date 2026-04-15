@@ -291,6 +291,47 @@ mod tests {
         assert_eq!(chunks[0].word_count + chunks[1].word_count, 11);
     }
 
+    /// Defensive test: a malformed YT SRT event where `start_ms ==
+    /// end_ms` (zero-duration line) must not panic. All derived
+    /// sub-chunks collapse to the same [start, end] window — the
+    /// aligner will return whatever it can, but we survive.
+    #[test]
+    fn plan_chunks_zero_duration_line_does_not_panic() {
+        let t = track(vec![line(5_000, 5_000, "one two three four five")]);
+        let chunks = plan_chunks(&t);
+        // 5 words < MAX_WORDS_PER_CHUNK → single chunk, zero-duration audio window
+        // pre-pad, 500ms pad on each side.
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].start_ms, 4_500);
+        assert_eq!(chunks[0].end_ms, 5_500);
+        assert_eq!(chunks[0].word_count, 5);
+    }
+
+    /// Same invariant for the split-path: a long zero-duration line
+    /// produces multiple sub-chunks that all share the same audio
+    /// window. Division-by-zero avoided via the `if total_words > MAX`
+    /// gate AND because `line_duration as f64 * ratio` is just 0 when
+    /// the line has zero length.
+    #[test]
+    fn plan_chunks_zero_duration_long_line_splits_without_panic() {
+        let text: String = (1..=15)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let t = track(vec![line(10_000, 10_000, &text)]);
+        let chunks = plan_chunks(&t);
+        // 15 words > 10 → must split into 2 sub-chunks
+        assert_eq!(chunks.len(), 2);
+        // Both sub-chunks share the same [start, end] because duration is 0
+        assert_eq!(chunks[0].start_ms, 9_500);
+        assert_eq!(chunks[0].end_ms, 10_500);
+        assert_eq!(chunks[1].start_ms, 9_500);
+        assert_eq!(chunks[1].end_ms, 10_500);
+        // word_offsets are still correct so assembly can stitch them back
+        assert_eq!(chunks[0].word_offset, 0);
+        assert_eq!(chunks[1].word_offset, 8);
+    }
+
     #[test]
     fn plan_chunks_sub_chunk_times_are_proportional_to_word_position() {
         // 20 words over [0, 10_000]: sub-chunk 2 (words 10..20) should
