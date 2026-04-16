@@ -147,6 +147,66 @@ pub fn parse_translation_response(text: &str, expected_count: usize) -> Vec<Stri
     result
 }
 
+/// Translate lyrics to Slovak via Claude Opus (CLIProxyAPI).
+///
+/// Returns a vector of Slovak translation strings matching the input lines.
+pub async fn translate_via_claude(
+    ai_client: &crate::ai::client::AiClient,
+    track: &LyricsTrack,
+) -> Result<Vec<String>> {
+    if track.lines.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let numbered: String = track
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", i + 1, line.en))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let line_count = track.lines.len();
+
+    let system = format!(
+        "You are a Slovak worship lyrics translator.\n\
+         \n\
+         CRITICAL: Output EXACTLY {line_count} numbered lines, one per input line.\n\
+         Format: N: Slovak text\n\
+         \n\
+         TRANSLATION RULES:\n\
+         1. Preserve meaning and emotional tone of worship lyrics\n\
+         2. Use natural Slovak phrasing — not word-for-word translation\n\
+         3. Keep each line ≤45 characters for LED wall display\n\
+         4. DO NOT translate these sacred words: Hallelujah, Hosanna, Amen, Selah, Maranatha, Emmanuel\n\
+         5. NEVER produce Czech words. Use Slovak: pretože (not protože), tiež (not také), \
+            hovorím (not říkám), iba (not pouze)\n\
+         \n\
+         WORSHIP GLOSSARY:\n\
+         - Jesus → Ježiš, Christ → Kristus, Lord → Pán, God → Boh\n\
+         - grace → milosť, Holy Spirit → Duch Svätý, Lamb of God → Baránok Boží\n\
+         - salvation → spasenie, faith → viera, mercy → milosrdenstvo\n\
+         - glory → sláva, kingdom → kráľovstvo, cross → kríž\n\
+         - praise → chvála, worship → uctievanie, eternal life → večný život\n\
+         - resurrection → vzkriesenie"
+    );
+
+    let response = ai_client
+        .chat(&system, &numbered)
+        .await
+        .map_err(|e| anyhow!("Claude translation failed: {e}"))?;
+
+    let translations = parse_translation_response(&response, line_count);
+
+    // Verify we got reasonable output
+    let non_empty = translations.iter().filter(|t| !t.is_empty()).count();
+    if non_empty == 0 && line_count > 0 {
+        return Err(anyhow!("Claude translation returned no translations"));
+    }
+
+    Ok(translations)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -247,5 +307,14 @@ mod tests {
         let user_text = body["contents"][0]["parts"][0]["text"].as_str().unwrap();
         assert!(user_text.contains("1: Amazing grace"));
         assert!(user_text.contains("2: How sweet"));
+    }
+
+    #[test]
+    fn translate_via_claude_uses_same_parse_logic() {
+        // translate_via_claude reuses parse_translation_response, so the same
+        // parser tests apply. Just verify the format is compatible.
+        let mock_response = "1: Úžasná milosť\n2: Aký sladký zvuk";
+        let result = parse_translation_response(mock_response, 2);
+        assert_eq!(result, vec!["Úžasná milosť", "Aký sladký zvuk"]);
     }
 }
