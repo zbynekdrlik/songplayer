@@ -9,6 +9,7 @@ pub mod provider;
 pub mod quality;
 pub mod qwen3_provider;
 pub mod renderer;
+pub mod reprocess;
 pub mod translator;
 mod worker;
 pub mod youtube_subs;

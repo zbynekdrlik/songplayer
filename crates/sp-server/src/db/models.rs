@@ -357,6 +357,30 @@ pub async fn mark_video_lyrics(
     Ok(())
 }
 
+/// Persist a successful lyrics processing run: sets has_lyrics=1, records source,
+/// pipeline_version, quality_score, and clears manual_priority — all in one query.
+#[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration test below
+pub async fn mark_video_lyrics_complete(
+    pool: &SqlitePool,
+    video_id: i64,
+    source: &str,
+    pipeline_version: u32,
+    quality_score: f32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
+         lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
+         lyrics_manual_priority = 0 WHERE id = ?",
+    )
+    .bind(source)
+    .bind(pipeline_version as i64)
+    .bind(quality_score as f64)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Return (total, processed, pending) lyrics counts for active playlists.
 #[cfg_attr(test, mutants::skip)]
 pub async fn get_lyrics_status(pool: &SqlitePool) -> Result<(i64, i64, i64), sqlx::Error> {
@@ -573,5 +597,47 @@ mod tests {
         let (pool, _) = setup_with_video().await;
         let result = get_song_paths(&pool, 9999).await.unwrap();
         assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn mark_video_lyrics_complete_writes_all_fields() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, lyrics_manual_priority) \
+                     VALUES (1, 1, 'abc', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        mark_video_lyrics_complete(&pool, 1, "ensemble:qwen3+autosub", 2, 0.85)
+            .await
+            .unwrap();
+
+        let row = sqlx::query(
+            "SELECT has_lyrics, lyrics_source, lyrics_pipeline_version, \
+             lyrics_quality_score, lyrics_manual_priority FROM videos WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.get::<i64, _>("has_lyrics"), 1);
+        assert_eq!(
+            row.get::<String, _>("lyrics_source"),
+            "ensemble:qwen3+autosub"
+        );
+        assert_eq!(row.get::<i64, _>("lyrics_pipeline_version"), 2);
+        assert!((row.get::<f64, _>("lyrics_quality_score") - 0.85).abs() < 1e-3);
+        assert_eq!(
+            row.get::<i64, _>("lyrics_manual_priority"),
+            0,
+            "manual_priority must be cleared on successful processing"
+        );
     }
 }
