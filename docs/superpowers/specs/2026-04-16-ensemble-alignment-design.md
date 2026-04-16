@@ -316,7 +316,7 @@ The early-stop in step 2 is a **time optimization**, not cost (Claude Opus on Ma
 | Manual sub line anchors | 0.8 | Line-level only, no word timing |
 | LRCLIB line anchors | 0.5 | Community-sourced, variable quality |
 
-**Gemini audio transcription** is a first-class provider, not a fallback. It receives the audio file (FLAC sidecar) and a prompt requesting word-level transcription with timestamps. Key advantages: no local GPU needed, no vocal isolation pipeline (Gemini handles the full mix), different ASR model = uncorrelated errors with Qwen3 (improves ensemble diversity). Uses the existing Gemini API key already configured in SongPlayer.
+**Gemini audio transcription** is a first-class provider, not a fallback. It receives the audio file (FLAC sidecar) and a prompt requesting word-level transcription with timestamps. Uses the latest Gemini model (`gemini-3.1-pro-preview` as of 2026-04, configurable via `SETTING_GEMINI_MODEL`). Key advantages: no local GPU needed, no vocal isolation pipeline (Gemini handles the full mix), different ASR model = uncorrelated errors with Qwen3 (improves ensemble diversity). Uses the existing Gemini API key already configured in SongPlayer. The codebase default must be updated from `gemini-2.5-flash` to the latest available model.
 
 Weights are hardcoded in provider implementations. The audit log collects all data needed to move to adaptive weights in the future.
 
