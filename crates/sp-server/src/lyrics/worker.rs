@@ -52,6 +52,7 @@ struct RetryBackoff {
 }
 
 impl LyricsWorker {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: SqlitePool,
         cache_dir: PathBuf,
