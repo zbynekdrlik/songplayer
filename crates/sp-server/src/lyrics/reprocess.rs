@@ -12,7 +12,9 @@ use crate::db::models::VideoLyricsRow;
 ///
 /// Returns None when every active playlist song is current-version and
 /// no manual queue entry is pending.
-#[cfg_attr(test, mutants::skip)] // I/O-only dispatch between three queries; behavior tested via bucket ordering tests below
+#[cfg_attr(test, mutants::skip)] // Priority ordering (manual > null > stale) exercised end-to-end by
+// `manual_priority_beats_null_beats_stale`; per-bucket filters are
+// individually mutation-tested via active/normalized/tiebreaker tests.
 pub async fn get_next_video_for_lyrics(
     pool: &SqlitePool,
     current_version: u32,
@@ -191,24 +193,64 @@ mod tests {
     #[tokio::test]
     async fn inactive_playlist_songs_are_never_returned() {
         let pool = setup().await;
+        // One song per bucket, all on inactive playlist (id=2)
         sqlx::query(
-            "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics, lyrics_manual_priority) \
-             VALUES (2, 'inactive_manual', 1, 0, 1)",
-        ).execute(&pool).await.unwrap();
-        assert!(get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none());
+            "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_quality_score, lyrics_manual_priority) \
+             VALUES \
+                 (2, 'inactive_manual', 1, 0, 0, NULL, 1), \
+                 (2, 'inactive_null',   1, 0, 0, NULL, 0), \
+                 (2, 'inactive_stale',  1, 1, 1, 0.1, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
+            "no song from an inactive playlist should ever be returned, regardless of bucket"
+        );
     }
 
     #[tokio::test]
     async fn unnormalized_videos_are_never_returned() {
         let pool = setup().await;
+        // One song per bucket, all un-normalized
         sqlx::query(
-            "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics) \
-             VALUES (1, 'unnormalized', 0, 0)",
+            "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_quality_score, lyrics_manual_priority) \
+             VALUES \
+                 (1, 'unnorm_manual', 0, 0, 0, NULL, 1), \
+                 (1, 'unnorm_null',   0, 0, 0, NULL, 0), \
+                 (1, 'unnorm_stale',  0, 1, 1, 0.1, 0)",
         )
         .execute(&pool)
         .await
         .unwrap();
-        assert!(get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none());
+        assert!(
+            get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
+            "un-normalized videos must be filtered from every bucket"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_bucket_tiebreaks_by_id_when_quality_equal() {
+        let pool = setup().await;
+        // Both rows have identical quality score; lower id must win.
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_quality_score) \
+             VALUES \
+                 (10, 1, 'same_q_hi_id', 1, 1, 1, 0.5), \
+                 (5,  1, 'same_q_lo_id', 1, 1, 1, 0.5)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "same_q_lo_id",
+            "when quality scores tie, lower v.id must win"
+        );
     }
 
     #[tokio::test]
