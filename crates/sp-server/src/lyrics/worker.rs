@@ -90,6 +90,17 @@ impl LyricsWorker {
         )
         .await?;
         tracing::info!("lyrics_worker: wrote {}", self.script_path.display());
+
+        // Deploy the quality measurement script alongside the worker so CI
+        // can run it on win-resolume to snapshot baseline vs post-deploy state.
+        let measure_path = self.tools_dir.join("measure_lyrics_quality.py");
+        tokio::fs::write(
+            &measure_path,
+            include_str!("../../../../scripts/measure_lyrics_quality.py"),
+        )
+        .await?;
+        tracing::info!("lyrics_worker: wrote {}", measure_path.display());
+
         Ok(())
     }
 
