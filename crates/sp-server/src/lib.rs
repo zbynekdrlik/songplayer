@@ -53,6 +53,7 @@ pub struct AppState {
     /// Directory where cached media and lyrics JSON files are stored.
     pub cache_dir: PathBuf,
     pub ai_proxy: Arc<ai::proxy::ProxyManager>,
+    pub ai_client: Arc<ai::client::AiClient>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -275,6 +276,22 @@ pub async fn start(
     let (sync_tx, mut sync_rx) = mpsc::channel::<SyncRequest>(64);
     let (resolume_cmd_tx, mut resolume_cmd_rx) = mpsc::channel::<resolume::ResolumeCommand>(64);
 
+    // Read AI settings from DB or use defaults
+    let ai_api_url = db::models::get_setting(&pool, sp_core::config::SETTING_AI_API_URL)
+        .await?
+        .unwrap_or_else(|| sp_core::config::DEFAULT_AI_API_URL.to_string());
+    let ai_model = db::models::get_setting(&pool, sp_core::config::SETTING_AI_MODEL)
+        .await?
+        .unwrap_or_else(|| sp_core::config::DEFAULT_AI_MODEL.to_string());
+
+    let ai_settings = ai::AiSettings {
+        api_url: ai_api_url,
+        api_key: None,
+        model: ai_model,
+        system_prompt_extra: None,
+    };
+    let ai_client = Arc::new(ai::client::AiClient::new(ai_settings));
+
     let state = AppState {
         pool: pool.clone(),
         event_tx: event_tx.clone(),
@@ -290,6 +307,7 @@ pub async fn start(
             config.cache_dir.clone(),
             ai::proxy::ProxyManager::default_port(),
         )),
+        ai_client: ai_client.clone(),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -298,13 +316,14 @@ pub async fn start(
         .unwrap_or_default();
     let gemini_model = db::models::get_setting(&pool, "gemini_model")
         .await?
-        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+        .unwrap_or_else(|| sp_core::config::DEFAULT_GEMINI_MODEL.to_string());
 
-    // Migrate stale gemini_model setting from the old default.
-    let gemini_model = if gemini_model == "gemini-2.0-flash" {
-        tracing::info!("upgrading gemini_model setting from gemini-2.0-flash to gemini-2.5-flash");
-        db::models::set_setting(&pool, "gemini_model", "gemini-2.5-flash").await?;
-        "gemini-2.5-flash".to_string()
+    // Migrate stale gemini_model setting from old defaults.
+    let gemini_model = if gemini_model == "gemini-2.0-flash" || gemini_model == "gemini-2.5-flash" {
+        let new_model = sp_core::config::DEFAULT_GEMINI_MODEL;
+        tracing::info!("upgrading gemini_model setting from {gemini_model} to {new_model}");
+        db::models::set_setting(&pool, "gemini_model", new_model).await?;
+        new_model.to_string()
     } else {
         gemini_model
     };
@@ -337,6 +356,7 @@ pub async fn start(
     let lyrics_gemini_model = gemini_model.clone();
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
+    let ai_client_for_dl = ai_client.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -363,6 +383,10 @@ pub async fn start(
                 }
 
                 let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
+                // Claude first (via CLIProxyAPI), Gemini as fallback
+                dl_providers.push(Box::new(metadata::claude::ClaudeMetadataProvider::new(
+                    ai_client_for_dl.clone(),
+                )));
                 if !dl_gemini_key.is_empty() {
                     dl_providers.push(Box::new(metadata::gemini::GeminiProvider::new(
                         dl_gemini_key,
@@ -717,6 +741,7 @@ mod tests {
                 PathBuf::from("cache"),
                 ai::proxy::ProxyManager::default_port(),
             )),
+            ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
         };
 
         // Verify the router can be built.
@@ -992,6 +1017,7 @@ mod tests {
                 PathBuf::from("cache"),
                 ai::proxy::ProxyManager::default_port(),
             )),
+            ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
         };
 
         // Verify clone works.

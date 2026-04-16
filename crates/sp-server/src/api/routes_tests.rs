@@ -38,6 +38,9 @@ async fn test_state() -> AppState {
             std::path::PathBuf::from("/tmp/cache"),
             crate::ai::proxy::ProxyManager::default_port(),
         )),
+        ai_client: std::sync::Arc::new(crate::ai::client::AiClient::new(
+            crate::ai::AiSettings::default(),
+        )),
     }
 }
 
