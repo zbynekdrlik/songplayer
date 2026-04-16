@@ -34,6 +34,13 @@ async fn test_state() -> AppState {
         resolume_tx,
         obs_rebuild_tx,
         cache_dir: std::path::PathBuf::from("/tmp/cache"),
+        ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
+            std::path::PathBuf::from("/tmp/cache"),
+            crate::ai::proxy::ProxyManager::default_port(),
+        )),
+        ai_client: std::sync::Arc::new(crate::ai::client::AiClient::new(
+            crate::ai::AiSettings::default(),
+        )),
     }
 }
 

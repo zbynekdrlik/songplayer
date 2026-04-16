@@ -161,7 +161,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         });
     }
 
-    for (vid, (_, _, _, path)) in video_half.into_iter().chain(audio_half.into_iter()) {
+    for (vid, (_, _, _, path)) in video_half.into_iter().chain(audio_half) {
         orphans.push(Orphan {
             video_id: vid,
             path,

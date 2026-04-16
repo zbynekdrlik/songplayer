@@ -1,11 +1,13 @@
 //! SongPlayer server — all business logic.
 
+pub mod ai;
 pub mod api;
 pub mod db;
 pub mod downloader;
 pub mod lyrics;
 pub mod metadata;
 pub mod obs;
+mod obs_bridge;
 pub mod playback;
 pub mod playlist;
 pub mod reprocess;
@@ -51,6 +53,8 @@ pub struct AppState {
     pub obs_rebuild_tx: broadcast::Sender<()>,
     /// Directory where cached media and lyrics JSON files are stored.
     pub cache_dir: PathBuf,
+    pub ai_proxy: Arc<ai::proxy::ProxyManager>,
+    pub ai_client: Arc<ai::client::AiClient>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -89,117 +93,10 @@ pub struct ToolsStatus {
     pub ytdlp_version: Option<String>,
 }
 
-/// Pure helper: compute the per-playlist engine commands that should
-/// follow from an OBS `SceneChanged` event, given the previously-active
-/// set.
-///
-/// For every playlist that was active before and is not active now,
-/// emit `(pid, false)`. For every playlist that IS active now, emit
-/// `(pid, true)` — **unconditionally**, even if it was already active
-/// in the previous set. The `true` commands are idempotent at the
-/// state machine level (`(Playing, SceneOn)` falls through to the
-/// default no-op arm), so re-emitting them is safe.
-///
-/// Why unconditional on `true`: the engine state can be mutated
-/// out-of-band — e.g. a REST `/pause` call transitions `Playing →
-/// WaitingForScene` without the bridge seeing an OBS event. If the
-/// bridge then naively diffed against its own tracked `previous` set,
-/// a subsequent identical scene event (same scene, same active set)
-/// would produce an empty diff and the engine would stay stuck in
-/// `WaitingForScene` forever. Re-emitting `on_program: true` lets the
-/// `(WaitingForScene, SceneOn) → SelectAndPlay` transition fire and
-/// playback resumes. This behaviour is exercised by the
-/// `bridge_re_emits_scene_on_after_external_state_change` test.
-pub(crate) fn scene_change_commands(
-    previous: &std::collections::HashSet<i64>,
-    current: &std::collections::HashSet<i64>,
-) -> Vec<(i64, bool)> {
-    let mut out = Vec::new();
-
-    // Playlists that just left the program scene.
-    let mut newly_off: Vec<i64> = previous.difference(current).copied().collect();
-    newly_off.sort_unstable();
-    for pid in newly_off {
-        out.push((pid, false));
-    }
-
-    // ALL currently-active playlists get `true` — idempotent at the
-    // state machine level, but required so that a WaitingForScene
-    // state (from an out-of-band pause) gets re-kicked.
-    let mut all_on: Vec<i64> = current.iter().copied().collect();
-    all_on.sort_unstable();
-    for pid in all_on {
-        out.push((pid, true));
-    }
-
-    out
-}
-
-/// Bridge task body — consumes `ObsEvent::SceneChanged` and
-/// `ObsEvent::Disconnected` broadcasts and dispatches per-playlist
-/// `EngineCommand::SceneChanged` messages to the playback engine.
-async fn run_obs_engine_bridge(
-    mut obs_event_rx: broadcast::Receiver<obs::ObsEvent>,
-    engine_tx: mpsc::Sender<EngineCommand>,
-    mut shutdown: broadcast::Receiver<()>,
-) {
-    use std::collections::HashSet;
-    use tracing::debug;
-
-    let mut previous: HashSet<i64> = HashSet::new();
-    loop {
-        tokio::select! {
-            _ = shutdown.recv() => {
-                debug!("OBS→engine scene bridge shutting down");
-                break;
-            }
-            event = obs_event_rx.recv() => {
-                let evt = match event {
-                    Ok(e) => e,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!("OBS→engine bridge lagged by {n} events");
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                };
-                match evt {
-                    obs::ObsEvent::SceneChanged { active_playlist_ids, .. } => {
-                        let cmds = scene_change_commands(&previous, &active_playlist_ids);
-                        for (playlist_id, on_program) in cmds {
-                            let _ = engine_tx
-                                .send(EngineCommand::SceneChanged { playlist_id, on_program })
-                                .await;
-                        }
-                        previous = active_playlist_ids;
-                    }
-                    obs::ObsEvent::Disconnected => {
-                        // On disconnect, mark all previously-active playlists as off
-                        // so the pipelines stop playback instead of continuing into
-                        // the void.
-                        for &pid in &previous {
-                            let _ = engine_tx
-                                .send(EngineCommand::SceneChanged {
-                                    playlist_id: pid,
-                                    on_program: false,
-                                })
-                                .await;
-                        }
-                        previous.clear();
-                    }
-                    obs::ObsEvent::Connected => {
-                        // No-op: a fresh connect is always followed by a
-                        // CurrentProgramSceneChanged event (either the initial
-                        // GetCurrentProgramScene response or the next real
-                        // scene switch), which will compute the correct active
-                        // set and dispatch per-playlist SceneChanged commands
-                        // from the `previous` diff above. Doing work here
-                        // would race that event.
-                    }
-                }
-            }
-        }
-    }
-}
+// scene_change_commands and run_obs_engine_bridge live in obs_bridge.rs
+use obs_bridge::run_obs_engine_bridge;
+#[cfg(test)]
+pub(crate) use obs_bridge::scene_change_commands;
 
 // ---------------------------------------------------------------------------
 // Server configuration
@@ -273,6 +170,22 @@ pub async fn start(
     let (sync_tx, mut sync_rx) = mpsc::channel::<SyncRequest>(64);
     let (resolume_cmd_tx, mut resolume_cmd_rx) = mpsc::channel::<resolume::ResolumeCommand>(64);
 
+    // Read AI settings from DB or use defaults
+    let ai_api_url = db::models::get_setting(&pool, sp_core::config::SETTING_AI_API_URL)
+        .await?
+        .unwrap_or_else(|| sp_core::config::DEFAULT_AI_API_URL.to_string());
+    let ai_model = db::models::get_setting(&pool, sp_core::config::SETTING_AI_MODEL)
+        .await?
+        .unwrap_or_else(|| sp_core::config::DEFAULT_AI_MODEL.to_string());
+
+    let ai_settings = ai::AiSettings {
+        api_url: ai_api_url,
+        api_key: None,
+        model: ai_model,
+        system_prompt_extra: None,
+    };
+    let ai_client = Arc::new(ai::client::AiClient::new(ai_settings));
+
     let state = AppState {
         pool: pool.clone(),
         event_tx: event_tx.clone(),
@@ -284,6 +197,11 @@ pub async fn start(
         resolume_tx: resolume_cmd_tx.clone(),
         obs_rebuild_tx: obs_rebuild_tx.clone(),
         cache_dir: config.cache_dir.clone(),
+        ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
+            config.cache_dir.clone(),
+            ai::proxy::ProxyManager::default_port(),
+        )),
+        ai_client: ai_client.clone(),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -292,13 +210,14 @@ pub async fn start(
         .unwrap_or_default();
     let gemini_model = db::models::get_setting(&pool, "gemini_model")
         .await?
-        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+        .unwrap_or_else(|| sp_core::config::DEFAULT_GEMINI_MODEL.to_string());
 
-    // Migrate stale gemini_model setting from the old default.
-    let gemini_model = if gemini_model == "gemini-2.0-flash" {
-        tracing::info!("upgrading gemini_model setting from gemini-2.0-flash to gemini-2.5-flash");
-        db::models::set_setting(&pool, "gemini_model", "gemini-2.5-flash").await?;
-        "gemini-2.5-flash".to_string()
+    // Migrate stale gemini_model setting from old defaults.
+    let gemini_model = if gemini_model == "gemini-2.0-flash" || gemini_model == "gemini-2.5-flash" {
+        let new_model = sp_core::config::DEFAULT_GEMINI_MODEL;
+        tracing::info!("upgrading gemini_model setting from {gemini_model} to {new_model}");
+        db::models::set_setting(&pool, "gemini_model", new_model).await?;
+        new_model.to_string()
     } else {
         gemini_model
     };
@@ -331,6 +250,7 @@ pub async fn start(
     let lyrics_gemini_model = gemini_model.clone();
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
+    let ai_client_for_dl = ai_client.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -357,6 +277,10 @@ pub async fn start(
                 }
 
                 let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
+                // Claude first (via CLIProxyAPI), Gemini as fallback
+                dl_providers.push(Box::new(metadata::claude::ClaudeMetadataProvider::new(
+                    ai_client_for_dl.clone(),
+                )));
                 if !dl_gemini_key.is_empty() {
                     dl_providers.push(Box::new(metadata::gemini::GeminiProvider::new(
                         dl_gemini_key,
@@ -385,6 +309,7 @@ pub async fn start(
                     lyrics_tools_dir,
                     lyrics_gemini_key,
                     lyrics_gemini_model,
+                    Some(ai_client_for_dl),
                 );
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                 info!("lyrics worker started");
@@ -707,6 +632,11 @@ mod tests {
             resolume_tx,
             obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
+            ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
+                PathBuf::from("cache"),
+                ai::proxy::ProxyManager::default_port(),
+            )),
+            ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
         };
 
         // Verify the router can be built.
@@ -978,6 +908,11 @@ mod tests {
             resolume_tx,
             obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
+            ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
+                PathBuf::from("cache"),
+                ai::proxy::ProxyManager::default_port(),
+            )),
+            ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
         };
 
         // Verify clone works.

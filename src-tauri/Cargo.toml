@@ -1,6 +1,6 @@
 [package]
 name = "sp-tauri"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"
