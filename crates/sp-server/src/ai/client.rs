@@ -53,7 +53,7 @@ impl AiClient {
             }
 
             let resp = req
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(300))
                 .send()
                 .await
                 .context("failed to send chat completion request")?;
