@@ -60,7 +60,7 @@ pub async fn translate_lyrics(api_key: &str, model: &str, track: &mut LyricsTrac
 
     let translations = parse_translation_response(text, line_count);
 
-    for (line, sk_text) in track.lines.iter_mut().zip(translations.into_iter()) {
+    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
         line.sk = if sk_text.is_empty() {
             None
         } else {

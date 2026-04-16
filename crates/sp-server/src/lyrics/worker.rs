@@ -314,7 +314,7 @@ impl LyricsWorker {
         if let Some(ai_client) = &self.ai_client {
             match translator::translate_via_claude(ai_client, &track).await {
                 Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations.into_iter()) {
+                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
                         line.sk = if sk_text.is_empty() {
                             None
                         } else {
@@ -506,7 +506,7 @@ impl LyricsWorker {
         let result = if let Some(ai_client) = &self.ai_client {
             match translator::translate_via_claude(ai_client, &track).await {
                 Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations.into_iter()) {
+                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
                         line.sk = if sk_text.is_empty() {
                             None
                         } else {
