@@ -273,6 +273,27 @@ mod tests {
     }
 
     #[test]
+    fn build_merge_prompt_line_count_excludes_empty_lines() {
+        // Kills the `!l.trim().is_empty()` mutation: if ! is removed,
+        // the filter counts ONLY empty lines. Reference text has 3 non-empty
+        // lines and 2 empty lines; prompt must say "3 lines", not "2".
+        let ref_text = "line one\n\nline two\n   \nline three";
+        let (_, user) = build_merge_prompt(ref_text, "manual_subs", &[]);
+        assert!(
+            user.contains("3 lines"),
+            "expected 3 lines in prompt, got: {user}"
+        );
+        assert!(
+            user.contains("EXACTLY 3 lines"),
+            "expected explicit count in output instruction"
+        );
+        assert!(
+            !user.contains("0 lines") && !user.contains("2 lines"),
+            "line count must exclude empty/whitespace lines"
+        );
+    }
+
+    #[test]
     fn parse_merge_response_json() {
         let json = r#"{
             "lines": [{

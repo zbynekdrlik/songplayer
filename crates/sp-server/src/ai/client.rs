@@ -194,4 +194,113 @@ mod tests {
             "Here is the result:\n\n```json\n{\"lines\": []}\n```\n\nThe merge is complete.";
         assert_eq!(strip_markdown_fences(input), r#"{"lines": []}"#);
     }
+
+    #[tokio::test]
+    async fn chat_success_returns_content() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "hello world"}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        });
+        let result = client.chat("sys", "user").await.unwrap();
+        assert_eq!(result, "hello world");
+    }
+
+    #[tokio::test]
+    async fn chat_retries_on_5xx_and_succeeds() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // First call: 503, second: 200
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "retry succeeded"}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        });
+        let result = client.chat("", "user").await.unwrap();
+        assert_eq!(result, "retry succeeded");
+    }
+
+    #[tokio::test]
+    async fn chat_fails_on_400_without_retry() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .expect(1) // no retry for 400
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        });
+        let result = client.chat("", "user").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_json_parses_response() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "```json\n{\"ok\": true, \"count\": 42}\n```"}}]
+            })))
+            .mount(&server)
+            .await;
+
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            ok: bool,
+            count: u32,
+        }
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        });
+        let result: Reply = client.chat_json("", "user").await.unwrap();
+        assert!(result.ok);
+        assert_eq!(result.count, 42);
+    }
 }

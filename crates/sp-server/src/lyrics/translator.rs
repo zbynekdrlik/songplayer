@@ -322,4 +322,153 @@ mod tests {
         let result = parse_translation_response(mock_response, 2);
         assert_eq!(result, vec!["Úžasná milosť", "Aký sladký zvuk"]);
     }
+
+    /// Build a LyricsTrack with N lines for test fixtures.
+    fn make_track(lines: &[&str]) -> LyricsTrack {
+        LyricsTrack {
+            version: 1,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines: lines
+                .iter()
+                .enumerate()
+                .map(|(i, s)| sp_core::lyrics::LyricsLine {
+                    start_ms: (i as u64) * 1000,
+                    end_ms: (i as u64 + 1) * 1000,
+                    en: (*s).to_string(),
+                    sk: None,
+                    words: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn translate_via_claude_returns_parsed_translations() {
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Mock Claude response with the expected numbered format
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "1: Prvá riadka\n2: Druhá riadka\n3: Tretia riadka"
+                }
+            }]
+        });
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "claude-opus-4-20250514".into(),
+            system_prompt_extra: None,
+        });
+
+        let track = make_track(&["Line one", "Line two", "Line three"]);
+        let result = translate_via_claude(&client, &track).await;
+
+        assert!(
+            result.is_ok(),
+            "translation should succeed, got: {result:?}"
+        );
+        let translations = result.unwrap();
+        assert_eq!(translations.len(), 3);
+        assert_eq!(translations[0], "Prvá riadka");
+        assert_eq!(translations[1], "Druhá riadka");
+        assert_eq!(translations[2], "Tretia riadka");
+    }
+
+    #[tokio::test]
+    async fn translate_via_claude_errors_on_empty_response() {
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Mock Claude returning non-numbered content (e.g. refusal)
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "I cannot help with that request."
+                }
+            }]
+        });
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "claude-opus-4-20250514".into(),
+            system_prompt_extra: None,
+        });
+
+        let track = make_track(&["Line one", "Line two"]);
+        let result = translate_via_claude(&client, &track).await;
+
+        assert!(
+            result.is_err(),
+            "expected error on non-numbered response, got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn translate_via_claude_empty_track_returns_empty() {
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+
+        // No mock server needed — empty track short-circuits before any HTTP call.
+        let client = AiClient::new(AiSettings::default());
+        let track = make_track(&[]);
+        let result = translate_via_claude(&client, &track).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn translate_via_claude_sends_correct_model_and_max_tokens() {
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Verify the request body contains model + max_tokens (substring match).
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(body_string_contains("claude-opus-4-20250514"))
+            .and(body_string_contains("max_tokens"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "1: OK"}}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "claude-opus-4-20250514".into(),
+            system_prompt_extra: None,
+        });
+
+        let track = make_track(&["test"]);
+        let _ = translate_via_claude(&client, &track).await;
+        // wiremock verifies .expect(1) on drop
+    }
 }

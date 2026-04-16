@@ -161,14 +161,21 @@ claude-oauth:
         Ok(())
     }
 
-    /// Start the CLIProxyAPI process.
+    /// Start the CLIProxyAPI process and wait for it to become ready.
+    ///
+    /// Returns Err if:
+    /// - Binary not found
+    /// - Spawn fails
+    /// - Process exits immediately (config error, missing auth)
+    /// - Health check (`/v1/models`) doesn't respond within ~10 seconds
+    ///
+    /// On any failure, the stale child handle is cleared so a subsequent
+    /// `status()` correctly reports `running: false`.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start(&self) -> anyhow::Result<()> {
-        {
-            let guard = self.child.read().await;
-            if guard.is_some() {
-                return Ok(());
-            }
+        // Already running?
+        if self.is_running().await {
+            return Ok(());
         }
 
         let binary = self
@@ -194,37 +201,71 @@ claude-oauth:
         }
 
         let child = cmd.spawn()?;
-
         {
             let mut guard = self.child.write().await;
             *guard = Some(child);
         }
 
-        // Wait for the process to become ready
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
+        // Poll readiness: 10 attempts, 1s interval.
+        // Fail fast if the child exits before we reach readiness.
         let url = format!("http://127.0.0.1:{}/v1/models", self.port);
-        match reqwest::Client::new()
-            .get(&url)
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                info!(port = self.port, "CLIProxyAPI started successfully");
+        let http = reqwest::Client::new();
+
+        for attempt in 1..=10u32 {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+            // Has the child already exited? If so, clear the handle and fail.
+            {
+                let mut guard = self.child.write().await;
+                if let Some(ref mut child) = *guard {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        *guard = None;
+                        anyhow::bail!(
+                            "CLIProxyAPI exited during startup (attempt {attempt}, status: {status})"
+                        );
+                    }
+                } else {
+                    // Somehow cleared — give up.
+                    anyhow::bail!("CLIProxyAPI handle lost during startup");
+                }
             }
-            Ok(resp) => {
-                warn!(
-                    port = self.port,
-                    status = %resp.status(),
-                    "CLIProxyAPI responded with non-success"
-                );
-            }
-            Err(e) => {
-                warn!(?e, "CLIProxyAPI may not have started correctly");
+
+            // Is it responding?
+            match http
+                .get(&url)
+                .timeout(std::time::Duration::from_secs(2))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    info!(
+                        port = self.port,
+                        attempt, "CLIProxyAPI started successfully"
+                    );
+                    return Ok(());
+                }
+                Ok(resp) => {
+                    warn!(
+                        attempt,
+                        status = %resp.status(),
+                        "CLIProxyAPI responded with non-success, retrying"
+                    );
+                }
+                Err(_) => {
+                    // Not ready yet — keep polling.
+                }
             }
         }
-        Ok(())
+
+        // Timed out waiting for readiness — kill the process and report failure.
+        {
+            let mut guard = self.child.write().await;
+            if let Some(mut child) = guard.take() {
+                child.kill().await.ok();
+                child.wait().await.ok();
+            }
+        }
+        anyhow::bail!("CLIProxyAPI failed to respond on {url} within 10 seconds")
     }
 
     /// Stop the CLIProxyAPI process.
