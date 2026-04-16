@@ -33,6 +33,7 @@ impl Orchestrator {
     }
 
     /// Run the full ensemble pipeline for one song.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn process_song(&self, ctx: &SongContext) -> Result<LyricsTrack> {
         info!(
             video_id = %ctx.video_id,

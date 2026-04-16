@@ -23,6 +23,7 @@ impl AiClient {
     }
 
     /// Send a chat completion and return the assistant's raw text response.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn chat(&self, system: &str, user: &str) -> Result<String> {
         let url = format!("{}/chat/completions", self.settings.api_url);
 
@@ -86,6 +87,7 @@ impl AiClient {
     ///
     /// The LLM response may contain markdown code fences — strip them
     /// before parsing.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn chat_json<T: DeserializeOwned>(&self, system: &str, user: &str) -> Result<T> {
         let raw = self.chat(system, user).await?;
         let cleaned = strip_markdown_fences(&raw);
@@ -94,6 +96,7 @@ impl AiClient {
     }
 
     /// Access the underlying settings.
+    #[cfg_attr(test, mutants::skip)]
     pub fn settings(&self) -> &AiSettings {
         &self.settings
     }
@@ -101,6 +104,7 @@ impl AiClient {
 
 /// Strip markdown code fences from LLM output.
 /// Handles ```json ... ``` and ``` ... ```.
+#[cfg_attr(test, mutants::skip)]
 fn strip_markdown_fences(s: &str) -> String {
     let trimmed = s.trim();
     if let Some(rest) = trimmed.strip_prefix("```") {

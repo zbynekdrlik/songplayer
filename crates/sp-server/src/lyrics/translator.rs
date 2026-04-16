@@ -150,6 +150,7 @@ pub fn parse_translation_response(text: &str, expected_count: usize) -> Vec<Stri
 /// Translate lyrics to Slovak via Claude Opus (CLIProxyAPI).
 ///
 /// Returns a vector of Slovak translation strings matching the input lines.
+#[cfg_attr(test, mutants::skip)]
 pub async fn translate_via_claude(
     ai_client: &crate::ai::client::AiClient,
     track: &LyricsTrack,

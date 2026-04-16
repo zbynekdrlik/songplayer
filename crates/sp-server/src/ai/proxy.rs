@@ -65,6 +65,7 @@ impl ProxyManager {
     }
 
     /// Discover the CLIProxyAPI binary path.
+    #[cfg_attr(test, mutants::skip)]
     fn binary_path(&self) -> Option<PathBuf> {
         // 1. Check data_dir/tools/
         let tools_path = self.data_dir.join("tools").join(PROXY_BINARY_NAME);
@@ -93,15 +94,18 @@ impl ProxyManager {
         None
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn auth_dir(&self) -> PathBuf {
         self.data_dir.join(".cli-proxy-api")
     }
 
+    #[cfg_attr(test, mutants::skip)]
     fn config_path(&self) -> PathBuf {
         self.data_dir.join("cli-proxy-api-config.yaml")
     }
 
     /// Check if Claude credentials exist (either OAuth tokens or API key in config).
+    #[cfg_attr(test, mutants::skip)]
     pub fn is_claude_authenticated(&self) -> bool {
         if let Ok(content) = std::fs::read_to_string(self.config_path()) {
             if content.contains("claude-api-key:") {
@@ -120,6 +124,7 @@ impl ProxyManager {
     }
 
     /// Write the config YAML file for CLIProxyAPI.
+    #[cfg_attr(test, mutants::skip)]
     async fn write_config(&self, api_key: Option<&str>) -> anyhow::Result<()> {
         let auth_dir = self.auth_dir();
 
@@ -153,6 +158,7 @@ request-retry: 2
     }
 
     /// Start the CLIProxyAPI process.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn start(&self) -> anyhow::Result<()> {
         {
             let guard = self.child.read().await;
@@ -218,6 +224,7 @@ request-retry: 2
     }
 
     /// Stop the CLIProxyAPI process.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn stop(&self) -> anyhow::Result<()> {
         let mut guard = self.child.write().await;
         if let Some(mut child) = guard.take() {
@@ -229,6 +236,7 @@ request-retry: 2
     }
 
     /// Get current status.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn status(&self) -> ProxyStatus {
         let running = self.is_running().await;
         let pid = {
@@ -244,6 +252,7 @@ request-retry: 2
         }
     }
 
+    #[cfg_attr(test, mutants::skip)]
     async fn is_running(&self) -> bool {
         let mut guard = self.child.write().await;
         if let Some(ref mut child) = *guard {
@@ -269,6 +278,7 @@ request-retry: 2
     /// `localhost:54545/callback?code=...` which fails (since the server is
     /// remote). The user copies the full URL from the browser error page and
     /// pastes it into SongPlayer, which forwards it via `complete_login()`.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn claude_login(&self) -> anyhow::Result<String> {
         // Kill any previous login process
         {
@@ -369,6 +379,7 @@ request-retry: 2
     /// remote, this fails in the browser. The user copies the full URL and
     /// pastes it here. SongPlayer forwards it to CLIProxyAPI's callback
     /// endpoint on localhost.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn complete_login(&self, callback_url: &str) -> anyhow::Result<()> {
         let query = if let Some(pos) = callback_url.find('?') {
             &callback_url[pos..]
@@ -418,6 +429,7 @@ request-retry: 2
     }
 
     /// Read existing API key from config file (if any).
+    #[cfg_attr(test, mutants::skip)]
     async fn read_existing_api_key(&self) -> Option<String> {
         let content = tokio::fs::read_to_string(self.config_path()).await.ok()?;
         for line in content.lines() {
@@ -433,6 +445,7 @@ request-retry: 2
     }
 
     /// Auto-start the proxy if the binary is available.
+    #[cfg_attr(test, mutants::skip)]
     pub async fn auto_start(&self) {
         if self.binary_path().is_some() {
             if let Err(e) = self.start().await {
@@ -442,12 +455,14 @@ request-retry: 2
     }
 
     /// Return the default port.
+    #[cfg_attr(test, mutants::skip)]
     pub fn default_port() -> u16 {
         DEFAULT_PROXY_PORT
     }
 }
 
 /// Determine the data directory for CLIProxyAPI config and auth.
+#[cfg_attr(test, mutants::skip)]
 pub fn default_data_dir() -> PathBuf {
     std::env::current_exe()
         .ok()

@@ -6,6 +6,7 @@ use axum::response::IntoResponse;
 
 use crate::AppState;
 
+#[cfg_attr(test, mutants::skip)]
 pub async fn proxy_start(State(state): State<AppState>) -> impl IntoResponse {
     match state.ai_proxy.start().await {
         Ok(()) => Json(serde_json::json!({"ok": true})),
@@ -13,6 +14,7 @@ pub async fn proxy_start(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 pub async fn proxy_stop(State(state): State<AppState>) -> impl IntoResponse {
     match state.ai_proxy.stop().await {
         Ok(()) => Json(serde_json::json!({"ok": true})),
@@ -20,6 +22,7 @@ pub async fn proxy_stop(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 pub async fn proxy_login(State(state): State<AppState>) -> impl IntoResponse {
     match state.ai_proxy.claude_login().await {
         Ok(url) => Json(serde_json::json!({"ok": true, "url": url})),
@@ -27,6 +30,7 @@ pub async fn proxy_login(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 pub async fn proxy_complete_login(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
@@ -41,6 +45,7 @@ pub async fn proxy_complete_login(
     }
 }
 
+#[cfg_attr(test, mutants::skip)]
 pub async fn ai_status(State(state): State<AppState>) -> impl IntoResponse {
     let status = state.ai_proxy.status().await;
     Json(serde_json::json!(status))

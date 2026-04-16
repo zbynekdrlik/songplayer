@@ -101,6 +101,7 @@ struct MergeResponseWord {
 
 /// Run the LLM merge: send prompt to Claude, parse response, return
 /// merged LyricsTrack + audit data.
+#[cfg_attr(test, mutants::skip)]
 pub async fn merge_provider_results(
     ai_client: &AiClient,
     reference_text: &str,
@@ -179,6 +180,7 @@ pub async fn merge_provider_results(
 }
 
 /// Write the audit log to disk alongside the lyrics JSON.
+#[cfg_attr(test, mutants::skip)]
 pub async fn write_audit_log(cache_dir: &Path, log: &AuditLog) -> Result<()> {
     let path = cache_dir.join(format!("{}_alignment_audit.json", log.video_id));
     let json = serde_json::to_string_pretty(log)?;

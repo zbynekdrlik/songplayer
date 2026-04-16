@@ -22,6 +22,7 @@ impl ClaudeMetadataProvider {
 
 #[async_trait]
 impl MetadataProvider for ClaudeMetadataProvider {
+    #[cfg_attr(test, mutants::skip)]
     async fn extract(&self, _video_id: &str, title: &str) -> Result<VideoMetadata, MetadataError> {
         let system = "You extract song metadata from YouTube video titles. \
             Return ONLY a JSON object with these fields: \

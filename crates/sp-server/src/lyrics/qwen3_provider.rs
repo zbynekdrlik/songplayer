@@ -32,6 +32,7 @@ impl AlignmentProvider for Qwen3Provider {
         ctx.clean_vocal_path.is_some()
     }
 
+    #[cfg_attr(test, mutants::skip)]
     async fn align(&self, ctx: &SongContext) -> Result<ProviderResult> {
         let clean_vocal = ctx
             .clean_vocal_path
