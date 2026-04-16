@@ -301,6 +301,7 @@ pub async fn start(
                 info!("download worker started");
 
                 // Lyrics worker
+                let lyrics_pool_for_loop = lyrics_pool.clone();
                 let lyrics_worker = lyrics::LyricsWorker::new(
                     lyrics_pool,
                     lyrics_cache_dir,
@@ -313,6 +314,13 @@ pub async fn start(
                 );
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                 info!("lyrics worker started");
+
+                // Lyrics queue-update broadcast loop (every 2s → WS clients)
+                tokio::spawn(crate::lyrics::worker::queue_update_loop(
+                    lyrics_pool_for_loop,
+                    tools_event_tx.clone(),
+                    lyrics_shutdown.subscribe(),
+                ));
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");

@@ -561,6 +561,36 @@ impl LyricsWorker {
     }
 }
 
+/// Broadcast lyrics queue counts on a 2-second interval until shutdown.
+/// Consumed by the dashboard /lyrics page via WebSocket.
+#[cfg_attr(test, mutants::skip)] // I/O-only; covered by end-to-end tests
+pub async fn queue_update_loop(
+    pool: sqlx::SqlitePool,
+    events_tx: tokio::sync::broadcast::Sender<sp_core::ws::ServerMsg>,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) {
+    use crate::lyrics::LYRICS_PIPELINE_VERSION;
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.recv() => break,
+            _ = interval.tick() => {
+                if let Ok((b0, b1, b2)) =
+                    crate::api::lyrics::fetch_queue_counts(&pool, LYRICS_PIPELINE_VERSION).await
+                {
+                    let _ = events_tx.send(sp_core::ws::ServerMsg::LyricsQueueUpdate {
+                        bucket0_count: b0,
+                        bucket1_count: b1,
+                        bucket2_count: b2,
+                        pipeline_version: LYRICS_PIPELINE_VERSION,
+                        processing: None,
+                    });
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Audit: retired symbols must not appear in this file.

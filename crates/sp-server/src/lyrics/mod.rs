@@ -13,9 +13,10 @@ pub mod renderer;
 pub mod reprocess;
 pub mod text_merge;
 pub mod translator;
-mod worker;
+pub mod worker;
 pub mod youtube_subs;
 pub use worker::LyricsWorker;
+pub use worker::queue_update_loop;
 
 use sp_core::lyrics::LyricsTrack;
 
