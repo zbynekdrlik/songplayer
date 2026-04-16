@@ -346,9 +346,15 @@ jobs:
             fi
           done
           for cli in "${BANNED_CLI[@]}"; do
-            HITS=$(grep -rn -F -- "$cli" "${SEARCH_PATHS[@]}" \
+            # Exclude scripts/experiments — Phase 2 validation work
+            # legitimately invokes --write-auto-subs to MEASURE auto-sub
+            # quality; the audit only catches regressions in the
+            # production lyrics pipeline. The exclude-dir flags MUST
+            # come before `--` or grep treats them as search paths.
+            HITS=$(grep -rn -F \
               --exclude-dir=node_modules --exclude-dir=target \
-              --exclude-dir=dist 2>/dev/null || true)
+              --exclude-dir=dist --exclude-dir=experiments \
+              -- "$cli" "${SEARCH_PATHS[@]}" 2>/dev/null || true)
             if [ -n "$HITS" ]; then
               echo "ERROR: retired CLI arg '$cli' still present:"; echo "$HITS"; FAIL=1
             fi
