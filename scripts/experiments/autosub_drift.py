@@ -195,6 +195,31 @@ def make_histogram(drifts_ms: List[int], buckets: List[int]) -> str:
     return "\n".join(lines)
 
 
+def classify_bucket(rms_ms: float) -> str:
+    """Map an RMS drift in ms to one of the spec's three decision buckets."""
+    if rms_ms < 300:
+        return "green"
+    if rms_ms <= 700:
+        return "amber"
+    return "red"
+
+
+def recommendation_from_buckets(buckets: List[str]) -> str:
+    """Worst per-song bucket determines the project recommendation.
+
+    One red song kills the project. One amber song downgrades to refine.
+    All green greenlights. Empty input is treated as a kill (no signal
+    is not a positive signal).
+    """
+    if not buckets:
+        return "kill"
+    if "red" in buckets:
+        return "kill"
+    if "amber" in buckets:
+        return "refine"
+    return "greenlight"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True, help="Path to local copy of songplayer.db")

@@ -195,3 +195,38 @@ def test_make_histogram_buckets_and_renders_ascii():
 def test_make_histogram_handles_empty_drifts():
     text = make_histogram([], [-1000, 0, 1000])
     assert "no data" in text.lower()
+
+
+from autosub_drift import classify_bucket, recommendation_from_buckets
+
+
+def test_classify_bucket_green():
+    assert classify_bucket(0) == "green"
+    assert classify_bucket(299) == "green"
+
+
+def test_classify_bucket_amber():
+    assert classify_bucket(300) == "amber"
+    assert classify_bucket(700) == "amber"
+
+
+def test_classify_bucket_red():
+    assert classify_bucket(701) == "red"
+    assert classify_bucket(5000) == "red"
+
+
+def test_recommendation_red_kills_project():
+    assert recommendation_from_buckets(["green", "amber", "red"]) == "kill"
+
+
+def test_recommendation_amber_downgrades_to_refine():
+    assert recommendation_from_buckets(["green", "amber", "green"]) == "refine"
+
+
+def test_recommendation_all_green_greenlights():
+    assert recommendation_from_buckets(["green", "green", "green"]) == "greenlight"
+
+
+def test_recommendation_empty_input_kills():
+    """No data is not a positive signal."""
+    assert recommendation_from_buckets([]) == "kill"
