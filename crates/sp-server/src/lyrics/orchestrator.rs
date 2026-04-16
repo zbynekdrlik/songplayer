@@ -85,15 +85,69 @@ impl Orchestrator {
             anyhow::bail!("no providers produced results for {}", ctx.video_id);
         }
 
-        // Merge via LLM
-        let (track, word_details) = merge::merge_provider_results(
-            &self.ai_client,
-            &reference_text,
-            &reference_source,
-            &results,
-        )
-        .await
-        .context("LLM merge failed")?;
+        // Single provider: pass through directly (no LLM merge needed).
+        // LLM merge only adds value with 2+ providers giving conflicting timings.
+        let (track, word_details) = if results.len() == 1 {
+            info!(
+                video_id = %ctx.video_id,
+                provider = %results[0].provider_name,
+                "single provider — passing through without LLM merge"
+            );
+            let pr = &results[0];
+            let lines = pr
+                .lines
+                .iter()
+                .map(|l| sp_core::lyrics::LyricsLine {
+                    start_ms: l.start_ms,
+                    end_ms: l.end_ms,
+                    en: l.text.clone(),
+                    sk: None,
+                    words: Some(
+                        l.words
+                            .iter()
+                            .map(|w| sp_core::lyrics::LyricsWord {
+                                text: w.text.clone(),
+                                start_ms: w.start_ms,
+                                end_ms: w.end_ms,
+                            })
+                            .collect(),
+                    ),
+                })
+                .collect();
+            let track = LyricsTrack {
+                version: 2,
+                source: format!("ensemble:{}", pr.provider_name),
+                language_source: "en".into(),
+                language_translation: String::new(),
+                lines,
+            };
+            let details: Vec<WordMergeDetail> = pr
+                .lines
+                .iter()
+                .flat_map(|l| &l.words)
+                .enumerate()
+                .map(|(i, w)| WordMergeDetail {
+                    word_index: i,
+                    reference_text: w.text.clone(),
+                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, w.confidence)],
+                    outliers_rejected: vec![],
+                    merged_start_ms: w.start_ms,
+                    merged_confidence: w.confidence * 0.7,
+                    spread_ms: 0,
+                })
+                .collect();
+            (track, details)
+        } else {
+            // 2+ providers: merge via LLM
+            merge::merge_provider_results(
+                &self.ai_client,
+                &reference_text,
+                &reference_source,
+                &results,
+            )
+            .await
+            .context("LLM merge failed")?
+        };
 
         // Compute quality metrics
         let total_words = word_details.len().max(1);
