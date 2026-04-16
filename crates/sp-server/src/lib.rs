@@ -1,5 +1,6 @@
 //! SongPlayer server — all business logic.
 
+pub mod ai;
 pub mod api;
 pub mod db;
 pub mod downloader;
