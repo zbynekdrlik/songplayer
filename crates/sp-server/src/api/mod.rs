@@ -1,5 +1,6 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
+pub mod ai;
 pub mod routes;
 pub mod websocket;
 
@@ -87,6 +88,21 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
+        // AI proxy
+        .route(
+            "/api/v1/ai/proxy/start",
+            axum::routing::post(ai::proxy_start),
+        )
+        .route("/api/v1/ai/proxy/stop", axum::routing::post(ai::proxy_stop))
+        .route(
+            "/api/v1/ai/proxy/login",
+            axum::routing::post(ai::proxy_login),
+        )
+        .route(
+            "/api/v1/ai/proxy/complete-login",
+            axum::routing::post(ai::proxy_complete_login),
+        )
+        .route("/api/v1/ai/status", axum::routing::get(ai::ai_status))
         // Middleware
         .layer(CorsLayer::permissive())
         .with_state(state);

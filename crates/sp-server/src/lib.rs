@@ -52,6 +52,7 @@ pub struct AppState {
     pub obs_rebuild_tx: broadcast::Sender<()>,
     /// Directory where cached media and lyrics JSON files are stored.
     pub cache_dir: PathBuf,
+    pub ai_proxy: Arc<ai::proxy::ProxyManager>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -285,6 +286,10 @@ pub async fn start(
         resolume_tx: resolume_cmd_tx.clone(),
         obs_rebuild_tx: obs_rebuild_tx.clone(),
         cache_dir: config.cache_dir.clone(),
+        ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
+            config.cache_dir.clone(),
+            ai::proxy::ProxyManager::default_port(),
+        )),
     };
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -708,6 +713,10 @@ mod tests {
             resolume_tx,
             obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
+            ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
+                PathBuf::from("cache"),
+                ai::proxy::ProxyManager::default_port(),
+            )),
         };
 
         // Verify the router can be built.
@@ -979,6 +988,10 @@ mod tests {
             resolume_tx,
             obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
+            ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
+                PathBuf::from("cache"),
+                ai::proxy::ProxyManager::default_port(),
+            )),
         };
 
         // Verify clone works.
