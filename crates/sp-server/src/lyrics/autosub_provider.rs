@@ -367,4 +367,56 @@ mod tests {
         // Linear between: at 0.65 wps → 0.1 + (0.35/0.7)*0.5 = 0.35
         assert!((density_gate_confidence(0.65) - 0.35).abs() < 1e-3);
     }
+
+    #[test]
+    fn density_gate_boundary_mutations_caught() {
+        // Values just below the upper plateau (1.0) must be in the linear region.
+        let v = density_gate_confidence(0.999);
+        assert!(v < 0.6 - 1e-4, "0.999 wps must be below plateau, got {v}");
+        // Values just above the lower floor (0.3) must exceed it.
+        let v = density_gate_confidence(0.301);
+        assert!(v > 0.1 + 1e-4, "0.301 wps must exceed floor, got {v}");
+    }
+
+    #[test]
+    fn match_advances_past_consumed_autosub_word() {
+        // Two reference "a"s should match two different autosub "a"s — not the
+        // same one twice. If pointer fails to advance, both ref words match idx 0
+        // and pick up start_ms=100 instead of 100 and 200.
+        let ref_words = vec!["a", "a"];
+        let autosub = vec![
+            AutosubWord {
+                text: "a".into(),
+                start_ms: 100,
+            },
+            AutosubWord {
+                text: "a".into(),
+                start_ms: 200,
+            },
+        ];
+        let out = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(out[0].autosub_start_ms, Some(100));
+        assert_eq!(
+            out[1].autosub_start_ms,
+            Some(200),
+            "second 'a' must match the second autosub word, not the first"
+        );
+    }
+
+    #[test]
+    fn match_noise_reference_words_produce_none_without_consuming_autosub() {
+        let ref_words = vec!["[music]", "hello"];
+        let autosub = vec![AutosubWord {
+            text: "hello".into(),
+            start_ms: 500,
+        }];
+        let out = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(out[0].autosub_start_ms, None);
+        assert_eq!(out[0].reference_text, "[music]");
+        assert_eq!(
+            out[1].autosub_start_ms,
+            Some(500),
+            "noise reference must not consume the autosub pointer"
+        );
+    }
 }
