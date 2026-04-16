@@ -15,7 +15,24 @@ Spec: docs/superpowers/specs/2026-04-16-phase2-autosub-drift-experiment-design.m
 """
 
 import argparse
+import re
 import sys
+
+_PUNCT_RE = re.compile(r"[^\w]")
+_NOISE_TOKENS = {"[music]", ">>", "[applause]", "[laughter]"}
+
+
+def normalize_word(text: str) -> str:
+    """Lowercase, strip punctuation, drop noise tokens.
+
+    Returns an empty string for noise tokens, empty input, or
+    whitespace-only input. Used to compare auto-sub words against
+    Qwen3 words on equal footing.
+    """
+    s = text.strip().lower()
+    if s in _NOISE_TOKENS or not s:
+        return ""
+    return _PUNCT_RE.sub("", s)
 
 
 def main() -> int:
