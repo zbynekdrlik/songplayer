@@ -1,5 +1,8 @@
 pub mod download_queue;
 pub mod karaoke_panel;
+pub mod lyrics_playlist_section;
+pub mod lyrics_queue_card;
+pub mod lyrics_song_row;
 pub mod obs_status;
 pub mod playback_controls;
 pub mod playlist_card;
