@@ -95,6 +95,7 @@ pub struct ToolsStatus {
 
 // scene_change_commands and run_obs_engine_bridge live in obs_bridge.rs
 use obs_bridge::run_obs_engine_bridge;
+#[cfg(test)]
 pub(crate) use obs_bridge::scene_change_commands;
 
 // ---------------------------------------------------------------------------
