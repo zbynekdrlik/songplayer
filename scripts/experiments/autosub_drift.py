@@ -186,11 +186,22 @@ def make_histogram(drifts_ms: List[int], buckets: List[int]) -> str:
     if not drifts_ms:
         return "no data"
     counts = [0] * (len(buckets) - 1)
+    last_bin = len(buckets) - 2
     for d in drifts_ms:
         for i in range(len(buckets) - 1):
-            if buckets[i] <= d < buckets[i + 1]:
-                counts[i] += 1
-                break
+            lo = buckets[i]
+            hi = buckets[i + 1]
+            # Last bin is closed on both ends so a drift equal to the
+            # max bucket edge is counted, not silently dropped. All
+            # other bins remain half-open [lo, hi).
+            if i == last_bin:
+                if lo <= d <= hi:
+                    counts[i] += 1
+                    break
+            else:
+                if lo <= d < hi:
+                    counts[i] += 1
+                    break
     lines = []
     label_width = max(
         len(f"[{buckets[i]}, {buckets[i + 1]})") for i in range(len(buckets) - 1)
@@ -219,13 +230,14 @@ def _render_song_section(r: SongResult) -> str:
         return f"{header}\n\n- URL: {url}\n- **No data: {r.error}**\n"
     assert r.match and r.stats and r.histogram is not None
     bucket = classify_bucket(r.stats.rms_ms)
+    attempted = r.match.matched + r.match.skipped
     body = [
         header,
         "",
         f"- URL: {url}",
-        f"- Match rate: **{r.match.matched}/{r.match.total_qwen_words}**"
-        f" Qwen3 words matched ({r.match.matched / max(r.match.total_qwen_words, 1):.1%}),"
-        f" {r.match.skipped} skipped",
+        f"- Match rate: **{r.match.matched}/{attempted}** Qwen3 words"
+        f" attempted ({r.match.matched / max(attempted, 1):.1%}),"
+        f" {r.match.skipped} skipped (no auto-sub counterpart in window)",
         f"- Auto-sub stream: {r.match.total_autosub_words} words",
         f"- Drift: RMS **{r.stats.rms_ms:.0f} ms**, mean {r.stats.mean_ms} ms,"
         f" median {r.stats.median_ms} ms, min {r.stats.min_ms} ms, max {r.stats.max_ms} ms,"
@@ -413,7 +425,14 @@ def fetch_autosubs(video_id: str, tmp_dir: Path) -> Optional[Path]:
         capture_output=True,
     )
     candidate = tmp_dir / f"{video_id}.en.json3"
-    return candidate if candidate.exists() else None
+    if candidate.exists():
+        return candidate
+    # When a video has BOTH manual and auto-generated English captions,
+    # yt-dlp writes the auto-sub variant as <id>.en-orig.json3 to keep
+    # it distinct. Our test corpus is selected for having manual subs,
+    # so this fallback is the common case, not the edge.
+    orig = tmp_dir / f"{video_id}.en-orig.json3"
+    return orig if orig.exists() else None
 
 
 def fetch_qwen_reference(db_path: Path, video_id: str) -> Optional[List[Word]]:

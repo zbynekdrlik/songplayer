@@ -1,9 +1,5 @@
 """Unit tests for autosub_drift.py pure functions."""
 
-def test_placeholder():
-    assert True
-
-
 from autosub_drift import normalize_word
 
 
@@ -69,7 +65,7 @@ def test_parse_json3_skips_whitespace_only_segs():
     assert parse_json3(json.dumps(raw)) == [Word(text="ok", start_ms=5100)]
 
 
-def test_parse_json3_falls_back_to_event_start_when_no_segs():
+def test_parse_json3_sentence_level_event_assigns_all_words_event_start():
     """Sentence-level event without per-word offsets uses event tStartMs for the whole text."""
     raw = {
         "events": [
@@ -160,6 +156,8 @@ def test_compute_stats_basic():
     assert s.min_ms == -100
     assert s.max_ms == 200
     assert math.isclose(s.rms_ms, math.sqrt((10000 + 0 + 10000 + 40000) / 4))
+    assert s.p05_ms == -100
+    assert s.p95_ms == 200
 
 
 def test_compute_stats_empty_returns_zeros():
@@ -263,7 +261,7 @@ def test_write_report_includes_required_sections(tmp_path):
     assert "abc123" in text
     assert "## Conclusion" in text
     assert "## Recommendation" in text
-    assert "200/250" in text  # match rate
+    assert "200/250" in text and "Qwen3 words attempted" in text  # match rate
     assert "bucket: ###" in text  # histogram
 
 
@@ -321,3 +319,36 @@ def test_write_report_includes_raw_data_references_section(tmp_path):
     assert "## Raw data references" in text
     assert "tempfile.mkdtemp" in text
     assert "songplayer.db" in text
+
+
+def test_write_report_match_rate_denominator_uses_attempted_not_total(tmp_path):
+    """Noise tokens skipped without a match attempt must not dilute the rate."""
+    results = [
+        SongResult(
+            video_id="v",
+            title="T",
+            artist="A",
+            error=None,
+            # 80 attempted (70 matched + 10 skipped), 100 total qwen words
+            # (the extra 20 were noise tokens normalized away). Rate must be
+            # 70/80 = 87.5%, not 70/100 = 70%.
+            match=MatchResult(matched=70, skipped=10,
+                              drifts_ms=[0]*70,
+                              total_qwen_words=100, total_autosub_words=120),
+            stats=DriftStats(70, 0, 0, 0.0, 0, 0, 0, 0),
+            histogram="h",
+        )
+    ]
+    out = tmp_path / "report.md"
+    write_report(results, out)
+    text = out.read_text()
+    assert "70/80" in text
+    assert "87.5%" in text
+
+
+def test_make_histogram_includes_drift_at_last_edge():
+    drifts = [2000]  # exactly the last bucket edge
+    buckets = [-2000, -1000, 0, 1000, 2000]
+    text = make_histogram(drifts, buckets)
+    # the [1000, 2000] bin should have one entry; total ##s == 1
+    assert text.count("#") == 1
