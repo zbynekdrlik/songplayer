@@ -1,5 +1,6 @@
 //! AI infrastructure: CLIProxyAPI proxy manager + OpenAI-compatible client.
 
+pub mod client;
 pub mod proxy;
 
 use serde::{Deserialize, Serialize};
