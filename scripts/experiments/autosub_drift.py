@@ -21,7 +21,8 @@ import re
 import statistics
 import sys
 from dataclasses import dataclass
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 
 _PUNCT_RE = re.compile(r"[^\w]")
 _NOISE_TOKENS = {"[music]", ">>", "[applause]", "[laughter]"}
@@ -193,6 +194,143 @@ def make_histogram(drifts_ms: List[int], buckets: List[int]) -> str:
         label = f"[{buckets[i]}, {buckets[i + 1]})".ljust(label_width)
         lines.append(f"{label} {'#' * c} ({c})")
     return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class SongResult:
+    video_id: str
+    title: str
+    artist: str
+    error: Optional[str]
+    match: Optional[MatchResult]
+    stats: Optional[DriftStats]
+    histogram: Optional[str]
+
+
+def _render_song_section(r: SongResult) -> str:
+    header = f"### {r.title} — {r.artist} (`{r.video_id}`)"
+    url = f"https://www.youtube.com/watch?v={r.video_id}"
+    if r.error:
+        return f"{header}\n\n- URL: {url}\n- **No data: {r.error}**\n"
+    assert r.match and r.stats and r.histogram is not None
+    bucket = classify_bucket(r.stats.rms_ms)
+    body = [
+        header,
+        "",
+        f"- URL: {url}",
+        f"- Match rate: **{r.match.matched}/{r.match.total_qwen_words}**"
+        f" Qwen3 words matched ({r.match.matched / max(r.match.total_qwen_words, 1):.1%}),"
+        f" {r.match.skipped} skipped",
+        f"- Auto-sub stream: {r.match.total_autosub_words} words",
+        f"- Drift: RMS **{r.stats.rms_ms:.0f} ms**, mean {r.stats.mean_ms} ms,"
+        f" median {r.stats.median_ms} ms, min {r.stats.min_ms} ms, max {r.stats.max_ms} ms,"
+        f" p05 {r.stats.p05_ms} ms, p95 {r.stats.p95_ms} ms",
+        f"- Bucket: **{bucket}**",
+        "",
+        "Histogram (drift in ms, `#` = one Qwen3 word):",
+        "",
+        "```",
+        r.histogram,
+        "```",
+        "",
+    ]
+    return "\n".join(body)
+
+
+def write_report(results: List[SongResult], out_path: Path) -> None:
+    """Render the durable markdown report to out_path."""
+    valid = [r for r in results if r.match and r.stats]
+    bucket_per_song = [classify_bucket(r.stats.rms_ms) for r in valid]
+    rec = recommendation_from_buckets(bucket_per_song)
+
+    parts: List[str] = []
+    parts.append("# Phase 2 Auto-Sub Drift Experiment")
+    parts.append("")
+    parts.append(
+        "Validation experiment for issue #29. Decides whether YouTube"
+        " auto-subtitles carry word-level timestamps accurate enough on"
+        " sung vocals to skip the Qwen3-ForcedAligner timing stage."
+    )
+    parts.append("")
+
+    parts.append("## Methodology")
+    parts.append("")
+    parts.append(
+        "- Auto-subs pulled with"
+        " `yt-dlp --write-auto-subs --sub-format json3 --sub-langs en --skip-download`."
+    )
+    parts.append(
+        "- Qwen3 reference word timings copied from win-resolume's"
+        " production `songplayer.db` (read-only SCP, no remote write)."
+    )
+    parts.append(
+        "- Matcher (Option A): sequential forward walk; for each Qwen3"
+        " word, search up to 10 auto-sub words ahead for an exact text"
+        " match after lowercasing + punctuation stripping. No backtrack."
+        " Skipped words are reported separately and do NOT pollute the"
+        " drift distribution."
+    )
+    parts.append(
+        "- Decision rule: per-song RMS drift `< 300 ms` → green,"
+        " `300–700 ms` → amber, `> 700 ms` → red. Worst per-song bucket"
+        " sets the project recommendation (one red kills, one amber"
+        " refines, all green greenlights)."
+    )
+    parts.append("")
+
+    parts.append("## Per-song results")
+    parts.append("")
+    for r in results:
+        parts.append(_render_song_section(r))
+
+    parts.append("## Conclusion")
+    parts.append("")
+    parts.append("| Song | RMS drift | Bucket |")
+    parts.append("| --- | --- | --- |")
+    for r in valid:
+        parts.append(
+            f"| {r.title} — {r.artist} | {r.stats.rms_ms:.0f} ms |"
+            f" {classify_bucket(r.stats.rms_ms)} |"
+        )
+    for r in results:
+        if r.error:
+            parts.append(f"| {r.title} — {r.artist} | n/a | no data ({r.error}) |")
+    parts.append("")
+
+    parts.append("## Recommendation")
+    parts.append("")
+    if rec == "kill":
+        worst = next(
+            (r for r in valid if classify_bucket(r.stats.rms_ms) == "red"),
+            None,
+        )
+        cite = f" Worst-case song: **{worst.title}** at {worst.stats.rms_ms:.0f} ms RMS." if worst else ""
+        parts.append(
+            f"**KILL** — auto-sub timing is not accurate enough on sung"
+            f" worship vocals to skip Qwen3.{cite} Close issue #29."
+        )
+    elif rec == "refine":
+        worst = next(
+            (r for r in valid if classify_bucket(r.stats.rms_ms) == "amber"),
+            None,
+        )
+        cite = f" Worst-case song: **{worst.title}** at {worst.stats.rms_ms:.0f} ms RMS." if worst else ""
+        parts.append(
+            f"**REFINE** — auto-sub timing is workable but needs a"
+            f" correction pass before it can replace Qwen3.{cite}"
+            f" Phase 2 design must include a refinement stage."
+        )
+    else:
+        parts.append(
+            "**GREENLIGHT** — auto-sub timing is accurate enough across"
+            " the test corpus. Phase 2 can use auto-sub timestamps"
+            " directly with no refinement pass. Open the Phase 2 design"
+            " brainstorm."
+        )
+    parts.append("")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(parts), encoding="utf-8")
 
 
 def classify_bucket(rms_ms: float) -> str:

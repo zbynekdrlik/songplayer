@@ -230,3 +230,73 @@ def test_recommendation_all_green_greenlights():
 def test_recommendation_empty_input_kills():
     """No data is not a positive signal."""
     assert recommendation_from_buckets([]) == "kill"
+
+
+from autosub_drift import write_report, SongResult
+
+
+def test_write_report_includes_required_sections(tmp_path):
+    results = [
+        SongResult(
+            video_id="abc123",
+            title="Get This Party Started",
+            artist="Planetshakers",
+            error=None,
+            match=MatchResult(
+                matched=200, skipped=50,
+                drifts_ms=[-100, 0, 100, 200, 300],
+                total_qwen_words=250, total_autosub_words=270,
+            ),
+            stats=DriftStats(5, 100, 100, 173.2, -100, 300, -100, 300),
+            histogram="bucket: ###",
+        )
+    ]
+    out = tmp_path / "report.md"
+    write_report(results, out)
+
+    text = out.read_text()
+    assert "# Phase 2 Auto-Sub Drift Experiment" in text
+    assert "## Methodology" in text
+    assert "## Per-song results" in text
+    assert "Get This Party Started" in text
+    assert "Planetshakers" in text
+    assert "abc123" in text
+    assert "## Conclusion" in text
+    assert "## Recommendation" in text
+    assert "200/250" in text  # match rate
+    assert "bucket: ###" in text  # histogram
+
+
+def test_write_report_handles_missing_data_song(tmp_path):
+    results = [
+        SongResult(
+            video_id="ghi789",
+            title="?",
+            artist="?",
+            error="no auto-subs available",
+            match=None,
+            stats=None,
+            histogram=None,
+        )
+    ]
+    out = tmp_path / "report.md"
+    write_report(results, out)
+    text = out.read_text()
+    assert "no auto-subs available" in text
+    assert "ghi789" in text
+
+
+def test_write_report_recommendation_section_cites_worst_bucket(tmp_path):
+    results = [
+        SongResult("a", "T1", "A1", None,
+                   MatchResult(10, 0, [0] * 10, 10, 10),
+                   DriftStats(10, 0, 0, 100.0, 0, 0, 0, 0), "h"),
+        SongResult("b", "T2", "A2", None,
+                   MatchResult(10, 0, [800] * 10, 10, 10),
+                   DriftStats(10, 800, 800, 800.0, 800, 800, 800, 800), "h"),
+    ]
+    out = tmp_path / "report.md"
+    write_report(results, out)
+    text = out.read_text()
+    assert "kill" in text.lower()
+    assert "T2" in text  # the red song must be cited
