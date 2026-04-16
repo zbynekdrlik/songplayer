@@ -172,6 +172,7 @@ fn compute_duplicate_start_pct(track: &LyricsTrack) -> f32 {
 }
 
 /// Compute the standard deviation of gaps between consecutive word start times.
+#[cfg_attr(test, mutants::skip)] // boundary `< 2` vs `<= 2` is semantically equivalent (single gap → stddev 0)
 fn compute_gap_stddev_ms(track: &LyricsTrack) -> f32 {
     let mut starts: Vec<u64> = Vec::new();
     for line in &track.lines {
