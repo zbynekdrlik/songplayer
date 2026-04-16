@@ -18,7 +18,7 @@ impl Default for AiSettings {
         Self {
             api_url: "http://localhost:18787/v1".into(),
             api_key: None,
-            model: "claude-opus-4-6".into(),
+            model: "claude-opus-4-20250514".into(),
             system_prompt_extra: None,
         }
     }
