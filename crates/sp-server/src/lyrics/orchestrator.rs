@@ -331,6 +331,60 @@ mod tests {
         assert!(orch.reconcile_reference_text(&ctx).await.is_err());
     }
 
+    #[tokio::test]
+    async fn reconcile_reference_text_multi_source_produces_merged_label() {
+        // Two candidates → Claude mocked to return lines from different sources.
+        // Verifies the aggregate-source label is "merged:lrclib+yt_subs".
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {"content": "{\"lines\":[{\"text\":\"line one\",\"source\":\"lrclib\"},{\"text\":\"line two\",\"source\":\"yt_subs\"}]}"}
+                }]
+            })))
+            .mount(&mock).await;
+
+        let orch = Orchestrator {
+            providers: vec![],
+            ai_client: Arc::new(AiClient::new(crate::ai::AiSettings {
+                api_url: format!("{}/v1", mock.uri()),
+                api_key: Some("test".into()),
+                model: "claude-opus-4-20250514".into(),
+                system_prompt_extra: None,
+            })),
+            cache_dir: PathBuf::from("/tmp"),
+        };
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![
+                CandidateText {
+                    source: "lrclib".into(),
+                    lines: vec!["line one".into(), "line two".into()],
+                    has_timing: false,
+                    line_timings: None,
+                },
+                CandidateText {
+                    source: "yt_subs".into(),
+                    lines: vec!["line one".into(), "line two".into()],
+                    has_timing: false,
+                    line_timings: None,
+                },
+            ],
+            autosub_json3: None,
+            duration_ms: 180_000,
+        };
+        let (text, source, per_line) = orch.reconcile_reference_text(&ctx).await.unwrap();
+        assert_eq!(text, "line one\nline two");
+        assert_eq!(
+            source, "merged:lrclib+yt_subs",
+            "multi-source aggregation must produce merged:x+y label"
+        );
+        assert_eq!(per_line, vec!["lrclib".to_string(), "yt_subs".to_string()]);
+    }
+
     #[test]
     fn compute_duplicate_start_pct_basic() {
         use sp_core::lyrics::{LyricsLine, LyricsWord};
