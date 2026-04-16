@@ -165,6 +165,76 @@ app.delete("/api/v1/resolume/hosts/:id", (_req, res) => {
   res.status(204).end();
 });
 
+// Lyrics pipeline queue
+app.get('/api/v1/lyrics/queue', (_req, res) => {
+  res.json({
+    bucket0_count: 2,
+    bucket1_count: 12,
+    bucket2_count: 187,
+    pipeline_version: 2,
+    processing: null,
+  });
+});
+
+// Lyrics songs list (supports ?playlist_id=N filter)
+app.get('/api/v1/lyrics/songs', (req, res) => {
+  res.json([
+    {
+      video_id: 1,
+      youtube_id: 'abc',
+      title: 'Song One',
+      song: 'One',
+      artist: 'Artist',
+      source: 'ensemble:qwen3+autosub',
+      pipeline_version: 2,
+      quality_score: 0.82,
+      has_lyrics: true,
+      is_stale: false,
+      manual_priority: false,
+    },
+    {
+      video_id: 2,
+      youtube_id: 'def',
+      title: 'Song Two',
+      song: 'Two',
+      artist: 'Artist',
+      source: null,
+      pipeline_version: 0,
+      quality_score: null,
+      has_lyrics: false,
+      is_stale: false,
+      manual_priority: false,
+    },
+  ]);
+});
+
+// Lyrics song detail
+app.get('/api/v1/lyrics/songs/:id', (req, res) => {
+  res.json({
+    list_item: {
+      video_id: Number(req.params.id),
+      youtube_id: 'abc',
+      song: 'Song',
+      artist: 'Artist',
+      source: 'ensemble:qwen3+autosub',
+      pipeline_version: 2,
+      quality_score: 0.82,
+      has_lyrics: true,
+      is_stale: false,
+      manual_priority: false,
+    },
+    lyrics_json: { version: 2, source: 'ensemble:qwen3+autosub', lines: [] },
+    audit_json: {
+      providers_run: ['qwen3', 'autosub'],
+      quality_metrics: { avg_confidence: 0.82 },
+    },
+  });
+});
+
+app.post('/api/v1/lyrics/reprocess', (_req, res) => res.json({ queued: 1 }));
+app.post('/api/v1/lyrics/reprocess-all-stale', (_req, res) => res.json({ queued: 187 }));
+app.post('/api/v1/lyrics/clear-manual-queue', (_req, res) => res.json({ queued: 2 }));
+
 // SPA fallback — serve index.html for unmatched routes
 app.get("*", (_req, res) => {
   res.sendFile(join(distPath, "index.html"));
