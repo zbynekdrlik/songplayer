@@ -1,6 +1,7 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
 pub mod ai;
+pub mod lyrics;
 pub mod routes;
 pub mod websocket;
 
@@ -85,6 +86,30 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/lyrics/status",
             axum::routing::get(routes::get_lyrics_status),
+        )
+        .route(
+            "/api/v1/lyrics/queue",
+            axum::routing::get(lyrics::get_queue),
+        )
+        .route(
+            "/api/v1/lyrics/songs",
+            axum::routing::get(lyrics::list_songs),
+        )
+        .route(
+            "/api/v1/lyrics/songs/{video_id}",
+            axum::routing::get(lyrics::get_song_detail),
+        )
+        .route(
+            "/api/v1/lyrics/reprocess",
+            axum::routing::post(lyrics::post_reprocess),
+        )
+        .route(
+            "/api/v1/lyrics/reprocess-all-stale",
+            axum::routing::post(lyrics::post_reprocess_all_stale),
+        )
+        .route(
+            "/api/v1/lyrics/clear-manual-queue",
+            axum::routing::post(lyrics::post_clear_manual),
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
