@@ -6,10 +6,15 @@ Pulls YouTube auto-subtitles + Qwen3 reference word timings for the
 three songs from issue #29, computes per-song drift statistics, and
 writes a markdown report at docs/experiments/2026-04-16-autosub-drift.md.
 
-Usage:
-    python scripts/experiments/autosub_drift.py
-        --db /tmp/songplayer.db
-        --out docs/experiments/2026-04-16-autosub-drift.md
+The Qwen3 reference is read from the production lyrics JSON cache
+(`<lyrics-dir>/<video_id>_lyrics.json`) rather than the SQLite DB —
+word-level alignment is stored in those JSON files, not in the schema.
+
+Usage (on win-resolume where Python + yt-dlp + the lyrics cache live):
+    python autosub_drift.py
+        --lyrics-dir C:\\ProgramData\\SongPlayer\\cache
+        --yt-dlp C:\\ProgramData\\SongPlayer\\tools\\yt-dlp.exe
+        --out C:\\Users\\Public\\drift-report.md
 
 Spec: docs/superpowers/specs/2026-04-16-phase2-autosub-drift-experiment-design.md
 """
@@ -352,9 +357,10 @@ def write_report(results: List[SongResult], out_path: Path) -> None:
         "Auto-sub json3 files are pulled into a per-run tmp dir created by"
         " `tempfile.mkdtemp(prefix=\"autosub_drift_\")` and are NOT committed"
         " to the repo. Re-run the script (see header docstring) to regenerate"
-        " them. The Qwen3 reference word timings are pulled from a read-only"
-        " SCP snapshot of the production `songplayer.db`; that snapshot is"
-        " also not committed."
+        " them. The Qwen3 reference word timings are read directly from the"
+        " production lyrics cache at"
+        " `<lyrics-dir>/<video_id>_lyrics.json` on win-resolume; those files"
+        " are also not committed."
     )
     parts.append("")
 
@@ -387,20 +393,7 @@ def recommendation_from_buckets(buckets: List[str]) -> str:
     return "greenlight"
 
 
-def pull_db_from_winresolume(local_path: Path) -> None:
-    """SCP the production songplayer.db from win-resolume to local_path.
-
-    Read-only — copies a snapshot, never writes back. Requires SSH
-    config to win-resolume already in place (the dev machine has it).
-    """
-    remote = "win-resolume:/c/ProgramData/SongPlayer/songplayer.db"
-    subprocess.run(
-        ["scp", "-q", remote, str(local_path)],
-        check=True,
-    )
-
-
-def fetch_autosubs(video_id: str, tmp_dir: Path) -> Optional[Path]:
+def fetch_autosubs(video_id: str, tmp_dir: Path, yt_dlp_path: str = "yt-dlp") -> Optional[Path]:
     """Download English auto-subs as json3. Returns the json3 path on
     success, or None if the video simply has no auto-subs (yt-dlp
     completed cleanly but produced no `<id>.en.json3` file).
@@ -412,7 +405,7 @@ def fetch_autosubs(video_id: str, tmp_dir: Path) -> Optional[Path]:
     out_template = tmp_dir / f"{video_id}.%(ext)s"
     subprocess.run(
         [
-            "yt-dlp",
+            yt_dlp_path,
             "--write-auto-subs",
             "--sub-format", "json3",
             "--sub-langs", "en",
@@ -435,33 +428,94 @@ def fetch_autosubs(video_id: str, tmp_dir: Path) -> Optional[Path]:
     return orig if orig.exists() else None
 
 
-def fetch_qwen_reference(db_path: Path, video_id: str) -> Optional[List[Word]]:
-    """Pull Qwen3 word-level alignment for a video from the local DB
-    snapshot. Returns None if no reference exists for this video.
+def fetch_qwen_reference(lyrics_dir: Path, video_id: str) -> Optional[List[Word]]:
+    """Read Qwen3 word-level alignment from the production lyrics cache
+    file `<lyrics_dir>/<video_id>_lyrics.json`. Returns None if the file
+    is missing or has no word-level data.
 
-    The schema is inspected at execution time before this function is
-    written for real — see Task 9. The query below is a placeholder
-    that Task 9 will replace with the actual table + column names.
+    Schema (LyricsTrack):
+        {"version": 1, "source": "yt_subs+qwen3", "lines":
+            [{"start_ms": int, "end_ms": int, "en": str,
+              "words": [{"text": str, "start_ms": int, "end_ms": int}, ...]},
+             ...]}
+
+    The reading order of words is line-by-line through `lines`, then
+    word-by-word through each line's `words` array — the same order the
+    forced aligner emitted them, which is the natural reading order of
+    the song.
     """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        # The Task 9 implementer must replace this query after running
-        # `.schema` against the real DB. Until then, this raises so the
-        # script fails loudly rather than silently returning None.
-        raise NotImplementedError(
-            "Replace this query after inspecting the real schema in Task 9."
-        )
-    finally:
-        conn.close()
+    lyrics_path = lyrics_dir / f"{video_id}_lyrics.json"
+    if not lyrics_path.exists():
+        return None
+    raw = lyrics_path.read_text(encoding="utf-8-sig")
+    doc = json.loads(raw)
+    out: List[Word] = []
+    for line in doc.get("lines", []):
+        for word in line.get("words", []) or []:
+            text = word.get("text", "")
+            if not text:
+                continue
+            out.append(Word(text=text, start_ms=int(word["start_ms"])))
+    return out if out else None
+
+
+# Three test songs from issue #29. video_id values are the YouTube IDs
+# verified against win-resolume's production songplayer.db on 2026-04-16.
+TEST_SONGS = [
+    ("VtHoABitbpw", "Get This Party Started", "Planetshakers"),    # #148
+    ("EOzYwg2Tuw0", "The Name Above", "planetboom"),                # #181
+    ("NuPP2Kxyo00", "There Is A King", "Elevation Worship"),        # #73
+]
+
+HISTOGRAM_BUCKETS = [-2000, -1000, -500, -300, -100, 0, 100, 300, 500, 1000, 2000]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, help="Path to local copy of songplayer.db")
+    parser.add_argument("--lyrics-dir", required=True,
+                        help="Directory containing <video_id>_lyrics.json files")
+    parser.add_argument("--yt-dlp", default="yt-dlp",
+                        help="Path to yt-dlp executable (default: 'yt-dlp' on PATH)")
     parser.add_argument("--out", required=True, help="Markdown report output path")
-    parser.parse_args()
-    print("not implemented yet", file=sys.stderr)
-    return 1
+    args = parser.parse_args()
+
+    lyrics_dir = Path(args.lyrics_dir)
+    out_path = Path(args.out)
+
+    if not lyrics_dir.is_dir():
+        sys.stderr.write(f"lyrics dir not found at {lyrics_dir}.\n")
+        return 2
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="autosub_drift_"))
+    print(f"working dir: {tmp_dir}", file=sys.stderr)
+
+    results: List[SongResult] = []
+    for video_id, title, artist in TEST_SONGS:
+        print(f"[{video_id}] {title} - {artist}", file=sys.stderr)
+        qwen = fetch_qwen_reference(lyrics_dir, video_id)
+        if not qwen:
+            results.append(SongResult(video_id, title, artist,
+                                       "no Qwen3 reference in lyrics cache",
+                                       None, None, None))
+            continue
+
+        json3 = fetch_autosubs(video_id, tmp_dir, args.yt_dlp)
+        if not json3:
+            results.append(SongResult(video_id, title, artist,
+                                       "no auto-subs available",
+                                       None, None, None))
+            continue
+
+        autosub = parse_json3(json3.read_text(encoding="utf-8"))
+        match = match_word_streams(qwen, autosub, window_n=10)
+        stats = compute_stats(match.drifts_ms)
+        hist = make_histogram(match.drifts_ms, HISTOGRAM_BUCKETS)
+        results.append(SongResult(video_id, title, artist, None,
+                                   match, stats, hist))
+
+    write_report(results, out_path)
+    print(f"report written to {out_path}", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
