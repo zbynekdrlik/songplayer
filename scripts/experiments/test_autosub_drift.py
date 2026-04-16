@@ -87,3 +87,61 @@ def test_parse_json3_falls_back_to_event_start_when_no_segs():
 def test_parse_json3_ignores_events_without_segs():
     raw = {"events": [{"tStartMs": 0}, {"tStartMs": 1000, "segs": [{"utf8": "yo"}]}]}
     assert parse_json3(json.dumps(raw)) == [Word(text="yo", start_ms=1000)]
+
+
+from autosub_drift import match_word_streams, MatchResult
+
+
+def test_match_perfect_alignment():
+    qwen = [Word("hello", 1000), Word("world", 2000)]
+    auto = [Word("hello", 1050), Word("world", 1980)]
+    result = match_word_streams(qwen, auto, window_n=10)
+    assert result.matched == 2
+    assert result.skipped == 0
+    assert result.drifts_ms == [50, -20]
+
+
+def test_match_skips_qwen_word_with_no_autosub_counterpart():
+    qwen = [Word("hello", 1000), Word("ghost", 1500), Word("world", 2000)]
+    auto = [Word("hello", 1000), Word("world", 2000)]
+    result = match_word_streams(qwen, auto, window_n=10)
+    assert result.matched == 2
+    assert result.skipped == 1
+    assert result.drifts_ms == [0, 0]
+
+
+def test_match_advances_only_on_match():
+    """An unmatched qwen word does NOT advance the autosub pointer."""
+    qwen = [Word("missing", 500), Word("hello", 1000), Word("world", 2000)]
+    auto = [Word("hello", 1000), Word("world", 2000)]
+    result = match_word_streams(qwen, auto, window_n=10)
+    assert result.matched == 2
+    assert result.skipped == 1
+
+
+def test_match_window_boundary_no_match_beyond_n():
+    """If the matching autosub word is beyond window_n, it's a skip."""
+    qwen = [Word("hello", 1000), Word("target", 2000)]
+    # 11 noise words then "target"
+    auto = [Word(f"noise{i}", 1000 + i * 10) for i in range(11)] + [Word("target", 2000)]
+    qwen_only_target = [Word("target", 2000)]
+    result = match_word_streams(qwen_only_target, auto, window_n=10)
+    assert result.matched == 0
+    assert result.skipped == 1
+
+
+def test_match_returns_zero_match_rate_when_disjoint():
+    qwen = [Word("apple", 1000), Word("banana", 2000)]
+    auto = [Word("orange", 1000), Word("grape", 2000)]
+    result = match_word_streams(qwen, auto, window_n=10)
+    assert result.matched == 0
+    assert result.skipped == 2
+    assert result.drifts_ms == []
+
+
+def test_match_normalizes_before_compare():
+    qwen = [Word("Hello!", 1000), Word("world", 2000)]
+    auto = [Word("hello", 1100), Word("World.", 2050)]
+    result = match_word_streams(qwen, auto, window_n=10)
+    assert result.matched == 2
+    assert result.drifts_ms == [100, 50]

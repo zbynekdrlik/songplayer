@@ -76,6 +76,62 @@ def normalize_word(text: str) -> str:
     return _PUNCT_RE.sub("", s)
 
 
+@dataclass(frozen=True)
+class MatchResult:
+    matched: int
+    skipped: int
+    drifts_ms: List[int]
+    total_qwen_words: int
+    total_autosub_words: int
+
+
+def match_word_streams(
+    qwen_words: List[Word],
+    autosub_words: List[Word],
+    window_n: int = 10,
+) -> MatchResult:
+    """Sequentially walk Qwen3 words; for each, search up to window_n
+    auto-sub words ahead for the first exact-text match (after
+    normalization). On match, record drift and advance the auto-sub
+    pointer past the matched word. On miss, skip and leave the auto-sub
+    pointer untouched. Strict forward walk; no backtracking.
+    """
+    drifts: List[int] = []
+    matched = 0
+    skipped = 0
+    auto_idx = 0
+
+    for q in qwen_words:
+        q_norm = normalize_word(q.text)
+        if not q_norm:
+            skipped += 1
+            continue
+
+        found = -1
+        for offset in range(window_n):
+            cand_idx = auto_idx + offset
+            if cand_idx >= len(autosub_words):
+                break
+            if normalize_word(autosub_words[cand_idx].text) == q_norm:
+                found = cand_idx
+                break
+
+        if found >= 0:
+            drifts.append(autosub_words[found].start_ms - q.start_ms)
+            matched += 1
+            auto_idx = found + 1
+        else:
+            skipped += 1
+
+    return MatchResult(
+        matched=matched,
+        skipped=skipped,
+        drifts_ms=drifts,
+        total_qwen_words=len(qwen_words),
+        total_autosub_words=len(autosub_words),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True, help="Path to local copy of songplayer.db")
