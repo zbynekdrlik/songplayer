@@ -10,6 +10,7 @@ use crate::store::DashboardStore;
 pub enum Page {
     Dashboard,
     Settings,
+    Lyrics,
 }
 
 impl Default for Page {
@@ -44,6 +45,12 @@ pub fn App() -> impl IntoView {
             >
                 "Settings"
             </button>
+            <button
+                class:active=move || page.get() == Page::Lyrics
+                on:click=move |_| page.set(Page::Lyrics)
+            >
+                "Lyrics"
+            </button>
             <span class="ws-indicator">
                 {move || {
                     if store.ws_connected.get() {
@@ -58,6 +65,7 @@ pub fn App() -> impl IntoView {
             {move || match page.get() {
                 Page::Dashboard => pages::dashboard::DashboardPage().into_any(),
                 Page::Settings => pages::settings::SettingsPage().into_any(),
+                Page::Lyrics => pages::lyrics::LyricsPage().into_any(),
             }}
         </main>
     }
