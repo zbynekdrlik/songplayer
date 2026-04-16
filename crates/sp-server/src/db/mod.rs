@@ -20,6 +20,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (9, MIGRATION_V9),
     (10, MIGRATION_V10),
     (11, MIGRATION_V11),
+    (12, MIGRATION_V12),
 ];
 
 const MIGRATION_V1: &str = "
@@ -159,6 +160,16 @@ const MIGRATION_V11: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE lyrics_source = 'yt_subs+qwen3';
 ";
 
+// V12 adds pipeline version tracking + quality score + manual reprocess priority.
+// Defaults: pipeline_version=0 (routes every existing row into the stale bucket
+// when LYRICS_PIPELINE_VERSION >= 1), quality_score=NULL (NULLS FIRST treats
+// them as worst), manual_priority=0 (not user-triggered).
+const MIGRATION_V12: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_pipeline_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_quality_score REAL;
+ALTER TABLE videos ADD COLUMN lyrics_manual_priority INTEGER NOT NULL DEFAULT 0;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -242,7 +253,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 11);
+        assert_eq!(ver, 12);
     }
 
     #[tokio::test]
@@ -251,7 +262,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 11);
+        assert_eq!(ver, 12);
     }
 
     #[tokio::test]
@@ -934,5 +945,63 @@ mod tests {
             "V11 must not touch partial yt_subs rows"
         );
         assert_eq!(by_id["a4"], (0, None), "already-empty unchanged");
+    }
+
+    #[tokio::test]
+    async fn migration_v12_adds_pipeline_version_quality_and_priority() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get::<String, _>("name"))
+            .collect();
+
+        assert!(
+            cols.contains(&"lyrics_pipeline_version".to_string()),
+            "missing lyrics_pipeline_version, got: {cols:?}"
+        );
+        assert!(
+            cols.contains(&"lyrics_quality_score".to_string()),
+            "missing lyrics_quality_score, got: {cols:?}"
+        );
+        assert!(
+            cols.contains(&"lyrics_manual_priority".to_string()),
+            "missing lyrics_manual_priority, got: {cols:?}"
+        );
+
+        // Defaults check
+        sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO videos (playlist_id, youtube_id) VALUES (1, 'abc')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let row = sqlx::query(
+            "SELECT lyrics_pipeline_version, lyrics_manual_priority, lyrics_quality_score \
+             FROM videos WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let pv: i64 = row.get("lyrics_pipeline_version");
+        let mp: i64 = row.get("lyrics_manual_priority");
+        let qs: Option<f64> = row.get("lyrics_quality_score");
+        assert_eq!(pv, 0, "pipeline_version defaults to 0");
+        assert_eq!(mp, 0, "manual_priority defaults to 0");
+        assert_eq!(qs, None, "quality_score defaults to NULL");
+    }
+
+    #[tokio::test]
+    async fn schema_version_reaches_12() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let ver = current_schema_version(&pool).await.unwrap();
+        assert_eq!(ver, 12);
     }
 }

@@ -16,6 +16,15 @@ pub use worker::LyricsWorker;
 
 use sp_core::lyrics::LyricsTrack;
 
+/// Monotonic version of the lyrics pipeline output. Bump when prompts, provider
+/// list, merge algorithm, or reference-text selection changes. Every bump
+/// triggers auto-reprocess of existing songs via the stale-version bucket.
+///
+/// Version history:
+/// - v1 (implicit, pre-this-PR): single-path yt_subs→Qwen3 or lrclib-line-level
+/// - v2 (this PR): ensemble orchestrator with AutoSubProvider + Claude text-merge
+pub const LYRICS_PIPELINE_VERSION: u32 = 2;
+
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
 /// - Strips inline bracketed noise like `[music]`, `[applause]`, `[laughter]`
