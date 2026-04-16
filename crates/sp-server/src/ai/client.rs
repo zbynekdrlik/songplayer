@@ -36,7 +36,8 @@ impl AiClient {
         let body = serde_json::json!({
             "model": self.settings.model,
             "messages": messages,
-            "temperature": 0.1
+            "temperature": 0.1,
+            "max_tokens": 32000
         });
 
         // Retry with exponential backoff on 429/5xx
@@ -105,7 +106,7 @@ impl AiClient {
 /// Strip markdown code fences from LLM output.
 /// Handles ```json ... ``` and ``` ... ```.
 #[cfg_attr(test, mutants::skip)]
-fn strip_markdown_fences(s: &str) -> String {
+pub fn strip_markdown_fences(s: &str) -> String {
     let trimmed = s.trim();
     if let Some(rest) = trimmed.strip_prefix("```") {
         // Skip optional language tag on the first line

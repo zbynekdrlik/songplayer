@@ -25,4 +25,4 @@ pub const DEFAULT_MAX_RESOLUTION: u32 = 1440;
 pub const SETTING_AI_API_URL: &str = "ai_api_url";
 pub const SETTING_AI_MODEL: &str = "ai_model";
 pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
-pub const DEFAULT_AI_MODEL: &str = "claude-opus-4-20250514";
+pub const DEFAULT_AI_MODEL: &str = "claude-opus-4-6";

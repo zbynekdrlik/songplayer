@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
 use std::path::Path;
 use tokio::fs;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::ai::client::AiClient;
 use crate::lyrics::provider::*;
@@ -116,10 +116,22 @@ pub async fn merge_provider_results(
         user.len()
     );
 
-    let response: MergeResponse = ai_client
-        .chat_json(&system, &user)
+    let raw_response = ai_client
+        .chat(&system, &user)
         .await
-        .context("LLM merge call failed")?;
+        .context("LLM merge HTTP call failed")?;
+
+    debug!("merge: Claude returned {} chars", raw_response.len());
+
+    // Strip markdown fences and parse
+    let cleaned = crate::ai::client::strip_markdown_fences(&raw_response);
+    let response: MergeResponse = serde_json::from_str(&cleaned).map_err(|e| {
+        warn!(
+            "merge: failed to parse Claude response as JSON: {e}\nFirst 500 chars: {}",
+            &cleaned[..cleaned.len().min(500)]
+        );
+        anyhow::anyhow!("LLM merge JSON parse failed: {e}")
+    })?;
 
     // Convert MergeResponse → LyricsTrack
     let lines: Vec<LyricsLine> = response
