@@ -16,7 +16,9 @@ Spec: docs/superpowers/specs/2026-04-16-phase2-autosub-drift-experiment-design.m
 
 import argparse
 import json
+import math
 import re
+import statistics
 import sys
 from dataclasses import dataclass
 from typing import List
@@ -130,6 +132,67 @@ def match_word_streams(
         total_qwen_words=len(qwen_words),
         total_autosub_words=len(autosub_words),
     )
+
+
+@dataclass(frozen=True)
+class DriftStats:
+    count: int
+    mean_ms: int
+    median_ms: int
+    rms_ms: float
+    min_ms: int
+    max_ms: int
+    p05_ms: int
+    p95_ms: int
+
+
+def _nearest_rank_percentile(sorted_values: List[int], pct: float) -> int:
+    if not sorted_values:
+        return 0
+    rank = max(1, math.ceil(pct / 100.0 * len(sorted_values)))
+    return sorted_values[rank - 1]
+
+
+def compute_stats(drifts_ms: List[int]) -> DriftStats:
+    """Per-song drift summary. Returns zeros for empty input."""
+    if not drifts_ms:
+        return DriftStats(0, 0, 0, 0.0, 0, 0, 0, 0)
+    s = sorted(drifts_ms)
+    rms = math.sqrt(sum(d * d for d in drifts_ms) / len(drifts_ms))
+    return DriftStats(
+        count=len(drifts_ms),
+        mean_ms=int(round(statistics.mean(drifts_ms))),
+        median_ms=int(round(statistics.median(drifts_ms))),
+        rms_ms=rms,
+        min_ms=s[0],
+        max_ms=s[-1],
+        p05_ms=_nearest_rank_percentile(s, 5),
+        p95_ms=_nearest_rank_percentile(s, 95),
+    )
+
+
+def make_histogram(drifts_ms: List[int], buckets: List[int]) -> str:
+    """ASCII histogram. Buckets are bin EDGES (length N gives N-1 bins).
+
+    Each bin label is `[lo, hi)`. Bar width is one `#` per drift. Returns
+    a 'no data' string for empty input.
+    """
+    if not drifts_ms:
+        return "no data"
+    counts = [0] * (len(buckets) - 1)
+    for d in drifts_ms:
+        for i in range(len(buckets) - 1):
+            if buckets[i] <= d < buckets[i + 1]:
+                counts[i] += 1
+                break
+    lines = []
+    label_width = max(
+        len(f"[{buckets[i]}, {buckets[i + 1]})") for i in range(len(buckets) - 1)
+    )
+    for i, c in enumerate(counts):
+        label = f"[{buckets[i]}, {buckets[i + 1]})".ljust(label_width)
+        lines.append(f"{label} {'#' * c} ({c})")
+    return "\n".join(lines)
 
 
 def main() -> int:

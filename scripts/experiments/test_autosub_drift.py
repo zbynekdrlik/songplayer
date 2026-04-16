@@ -145,3 +145,53 @@ def test_match_normalizes_before_compare():
     result = match_word_streams(qwen, auto, window_n=10)
     assert result.matched == 2
     assert result.drifts_ms == [100, 50]
+
+
+import math
+from autosub_drift import compute_stats, make_histogram, DriftStats
+
+
+def test_compute_stats_basic():
+    drifts = [-100, 0, 100, 200]
+    s = compute_stats(drifts)
+    assert s.count == 4
+    assert s.mean_ms == 50
+    assert s.median_ms == 50
+    assert s.min_ms == -100
+    assert s.max_ms == 200
+    assert math.isclose(s.rms_ms, math.sqrt((10000 + 0 + 10000 + 40000) / 4))
+
+
+def test_compute_stats_empty_returns_zeros():
+    s = compute_stats([])
+    assert s.count == 0
+    assert s.mean_ms == 0
+    assert s.rms_ms == 0.0
+    assert s.median_ms == 0
+    assert s.min_ms == 0
+    assert s.max_ms == 0
+    assert s.p05_ms == 0
+    assert s.p95_ms == 0
+
+
+def test_compute_stats_percentiles_with_100_values():
+    drifts = list(range(100))  # 0..99
+    s = compute_stats(drifts)
+    # nearest-rank percentile: p95 = value at index ceil(0.95 * 100) - 1 = 94
+    assert s.p95_ms == 94
+    assert s.p05_ms == 4
+
+
+def test_make_histogram_buckets_and_renders_ascii():
+    drifts = [-1500, -400, -50, 50, 400, 1500]
+    buckets = [-2000, -1000, -500, -300, -100, 0, 100, 300, 500, 1000, 2000]
+    text = make_histogram(drifts, buckets)
+    assert "[-2000, -1000)" in text
+    assert "[1000, 2000)" in text
+    # one drift in each of the 6 represented buckets, others empty
+    assert text.count("#") == 6
+
+
+def test_make_histogram_handles_empty_drifts():
+    text = make_histogram([], [-1000, 0, 1000])
+    assert "no data" in text.lower()
