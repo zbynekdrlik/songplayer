@@ -104,21 +104,30 @@ impl AiClient {
 }
 
 /// Strip markdown code fences from LLM output.
-/// Handles ```json ... ``` and ``` ... ```.
+///
+/// Handles multiple cases:
+/// 1. Entire response wrapped in ```json ... ```
+/// 2. Preamble text followed by ```json ... ``` (Claude often adds explanation)
+/// 3. No fences — return as-is
 #[cfg_attr(test, mutants::skip)]
 pub fn strip_markdown_fences(s: &str) -> String {
     let trimmed = s.trim();
-    if let Some(rest) = trimmed.strip_prefix("```") {
+
+    // Find ``` anywhere in the string (not just at the start)
+    if let Some(fence_start) = trimmed.find("```") {
+        let after_fence = &trimmed[fence_start + 3..];
         // Skip optional language tag on the first line
-        let rest = if let Some(newline_pos) = rest.find('\n') {
-            &rest[newline_pos + 1..]
+        let content_start = if let Some(newline_pos) = after_fence.find('\n') {
+            &after_fence[newline_pos + 1..]
         } else {
-            rest
+            after_fence
         };
-        if let Some(content) = rest.strip_suffix("```") {
-            return content.trim().to_string();
+        // Find closing fence
+        if let Some(close_pos) = content_start.find("```") {
+            return content_start[..close_pos].trim().to_string();
         }
     }
+
     trimmed.to_string()
 }
 
@@ -170,5 +179,19 @@ mod tests {
         let input = "  ```json\n  {\"key\": \"value\"}  \n```  ";
         let result = strip_markdown_fences(input);
         assert_eq!(result, r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn strip_markdown_fences_with_preamble() {
+        // Claude often adds explanation text before the JSON block
+        let input = "I'll analyze the data and produce the merged result.\n\n```json\n{\"key\": \"value\"}\n```";
+        assert_eq!(strip_markdown_fences(input), r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn strip_markdown_fences_with_preamble_and_trailing() {
+        let input =
+            "Here is the result:\n\n```json\n{\"lines\": []}\n```\n\nThe merge is complete.";
+        assert_eq!(strip_markdown_fences(input), r#"{"lines": []}"#);
     }
 }
