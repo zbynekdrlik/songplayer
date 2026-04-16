@@ -17,9 +17,14 @@ Spec: docs/superpowers/specs/2026-04-16-phase2-autosub-drift-experiment-design.m
 import argparse
 import json
 import math
+import os
 import re
+import shutil
+import sqlite3
 import statistics
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -356,6 +361,65 @@ def recommendation_from_buckets(buckets: List[str]) -> str:
     if "amber" in buckets:
         return "refine"
     return "greenlight"
+
+
+def pull_db_from_winresolume(local_path: Path) -> None:
+    """SCP the production songplayer.db from win-resolume to local_path.
+
+    Read-only — copies a snapshot, never writes back. Requires SSH
+    config to win-resolume already in place (the dev machine has it).
+    """
+    remote = "win-resolume:/c/ProgramData/SongPlayer/songplayer.db"
+    subprocess.run(
+        ["scp", "-q", remote, str(local_path)],
+        check=True,
+    )
+
+
+def fetch_autosubs(video_id: str, tmp_dir: Path) -> Optional[Path]:
+    """Download English auto-subs as json3. Returns the json3 path on
+    success, None if no auto-subs are available for this video."""
+    out_template = tmp_dir / f"{video_id}.%(ext)s"
+    try:
+        subprocess.run(
+            [
+                "yt-dlp",
+                "--write-auto-subs",
+                "--sub-format", "json3",
+                "--sub-langs", "en",
+                "--skip-download",
+                "--no-warnings",
+                "-o", str(out_template),
+                f"https://www.youtube.com/watch?v={video_id}",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        sys.stderr.write(f"yt-dlp failed for {video_id}: {e.stderr.decode(errors='replace')}\n")
+        return None
+    candidate = tmp_dir / f"{video_id}.en.json3"
+    return candidate if candidate.exists() else None
+
+
+def fetch_qwen_reference(db_path: Path, video_id: str) -> Optional[List[Word]]:
+    """Pull Qwen3 word-level alignment for a video from the local DB
+    snapshot. Returns None if no reference exists for this video.
+
+    The schema is inspected at execution time before this function is
+    written for real — see Task 9. The query below is a placeholder
+    that Task 9 will replace with the actual table + column names.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # The Task 9 implementer must replace this query after running
+        # `.schema` against the real DB. Until then, this raises so the
+        # script fails loudly rather than silently returning None.
+        raise NotImplementedError(
+            "Replace this query after inspecting the real schema in Task 9."
+        )
+    finally:
+        conn.close()
 
 
 def main() -> int:
