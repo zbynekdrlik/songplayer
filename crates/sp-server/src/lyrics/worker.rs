@@ -11,11 +11,13 @@ use reqwest::Client;
 use sp_core::lyrics::LyricsTrack;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    ai::client::AiClient,
     db::models::{
         get_next_video_missing_translation, get_next_video_without_lyrics, mark_video_lyrics,
     },
@@ -36,6 +38,9 @@ pub struct LyricsWorker {
     models_dir: PathBuf,
     gemini_api_key: String,
     gemini_model: String,
+    /// Claude Opus AI client for translation + future ensemble merge.
+    /// None if CLIProxyAPI is not configured.
+    ai_client: Option<Arc<AiClient>>,
     venv_python: tokio::sync::RwLock<Option<PathBuf>>,
     retry_backoff: tokio::sync::Mutex<RetryBackoff>,
 }
@@ -55,6 +60,7 @@ impl LyricsWorker {
         tools_dir: PathBuf,
         gemini_api_key: String,
         gemini_model: String,
+        ai_client: Option<Arc<AiClient>>,
     ) -> Self {
         let script_path = tools_dir.join("lyrics_worker.py");
         let models_dir = tools_dir.join("hf_models");
@@ -69,6 +75,7 @@ impl LyricsWorker {
             models_dir,
             gemini_api_key,
             gemini_model,
+            ai_client,
             venv_python: tokio::sync::RwLock::new(None),
             retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
         }
@@ -213,8 +220,30 @@ impl LyricsWorker {
         };
         track.source = final_source.clone();
 
-        // Step 3: Gemini translation (if configured).
-        if !self.gemini_api_key.is_empty() {
+        // Step 3: SK translation — Claude Opus first, Gemini fallback.
+        let mut translated = false;
+        if let Some(ai_client) = &self.ai_client {
+            match translator::translate_via_claude(ai_client, &track).await {
+                Ok(translations) => {
+                    for (line, sk_text) in track.lines.iter_mut().zip(translations.into_iter()) {
+                        line.sk = if sk_text.is_empty() {
+                            None
+                        } else {
+                            Some(sk_text)
+                        };
+                    }
+                    track.language_translation = "sk".to_string();
+                    translated = true;
+                    debug!("lyrics_worker: Claude translation succeeded for {youtube_id}");
+                }
+                Err(e) => {
+                    warn!(
+                        "lyrics_worker: Claude translation failed for {youtube_id}, trying Gemini: {e}"
+                    );
+                }
+            }
+        }
+        if !translated && !self.gemini_api_key.is_empty() {
             if let Err(e) =
                 translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
                     .await
@@ -351,7 +380,7 @@ impl LyricsWorker {
 
     #[cfg_attr(test, mutants::skip)]
     async fn retry_missing_translations(&self) {
-        if self.gemini_api_key.is_empty() {
+        if self.ai_client.is_none() && self.gemini_api_key.is_empty() {
             return;
         }
         {
@@ -383,9 +412,36 @@ impl LyricsWorker {
             }
         };
         info!("lyrics_worker: retrying translation for {youtube_id}");
-        match translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
-            .await
-        {
+
+        // Try Claude first, Gemini fallback
+        let result = if let Some(ai_client) = &self.ai_client {
+            match translator::translate_via_claude(ai_client, &track).await {
+                Ok(translations) => {
+                    for (line, sk_text) in track.lines.iter_mut().zip(translations.into_iter()) {
+                        line.sk = if sk_text.is_empty() {
+                            None
+                        } else {
+                            Some(sk_text)
+                        };
+                    }
+                    track.language_translation = "sk".to_string();
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("lyrics retry: Claude failed for {youtube_id}, trying Gemini: {e}");
+                    translator::translate_lyrics(
+                        &self.gemini_api_key,
+                        &self.gemini_model,
+                        &mut track,
+                    )
+                    .await
+                }
+            }
+        } else {
+            translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track).await
+        };
+
+        match result {
             Ok(()) => {
                 let json = serde_json::to_vec(&track).unwrap_or_default();
                 let _ = tokio::fs::write(&lyrics_path, &json).await;

@@ -309,6 +309,7 @@ pub async fn start(
                     lyrics_tools_dir,
                     lyrics_gemini_key,
                     lyrics_gemini_model,
+                    Some(ai_client_for_dl),
                 );
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                 info!("lyrics worker started");
