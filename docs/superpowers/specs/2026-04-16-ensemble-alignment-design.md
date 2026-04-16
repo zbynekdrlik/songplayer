@@ -274,7 +274,8 @@ When only one provider produces results for a song (common today — most songs 
 
 2. ALIGN (sequential by processing time)
    ├── Auto-sub transfer (instant, if density > 1 word/sec)
-   ├── WhisperX (30s, lightweight)
+   ├── Gemini audio transcription (30s, cloud, no vocal isolation)
+   ├── WhisperX (30s, lightweight local GPU)
    ├── Qwen3 (5min, needs vocal isolation)
    └── (future providers)
 
@@ -307,12 +308,15 @@ The early-stop in step 2 is a **time optimization**, not cost (Claude Opus on Ma
 
 | Provider | Base confidence | Notes |
 |----------|----------------|-------|
-| Qwen3-ForcedAligner | 0.9 | Best on isolated vocals |
-| WhisperX | 0.7 | Good general-purpose |
+| Qwen3-ForcedAligner | 0.9 | Best on isolated vocals, local GPU |
+| Gemini audio transcription | 0.8 | Cloud-based, handles full mix (no vocal isolation needed), native audio input since Gemini 1.5 |
+| WhisperX | 0.7 | Good general-purpose, lightweight local GPU |
 | Auto-sub (dense) | 0.6 | >1 word/sec density |
 | Auto-sub (sparse) | 0.1 | <0.3 words/sec |
 | Manual sub line anchors | 0.8 | Line-level only, no word timing |
 | LRCLIB line anchors | 0.5 | Community-sourced, variable quality |
+
+**Gemini audio transcription** is a first-class provider, not a fallback. It receives the audio file (FLAC sidecar) and a prompt requesting word-level transcription with timestamps. Key advantages: no local GPU needed, no vocal isolation pipeline (Gemini handles the full mix), different ASR model = uncorrelated errors with Qwen3 (improves ensemble diversity). Uses the existing Gemini API key already configured in SongPlayer.
 
 Weights are hardcoded in provider implementations. The audit log collects all data needed to move to adaptive weights in the future.
 
@@ -350,7 +354,9 @@ Existing files refactored:
 
 ## Future Expansion
 
-The CLIProxyAPI proxy is model-agnostic (OpenAI-compatible). If a speech-to-text model becomes available via the same interface (Claude audio input, OpenAI Whisper API, or a local whisper served on `/v1/audio/transcriptions`), it plugs in as another `AlignmentProvider` with zero architecture changes. The provider trait only cares about the output shape (`Vec<LineTiming>`), not how the timing was produced.
+The CLIProxyAPI proxy is model-agnostic (OpenAI-compatible). Any speech-to-text model available via the same interface (OpenAI Whisper API, or a local whisper served on `/v1/audio/transcriptions`) plugs in as another `AlignmentProvider` with zero architecture changes. The provider trait only cares about the output shape (`Vec<LineTiming>`), not how the timing was produced.
+
+As AI models increasingly support native audio input (Gemini already does, Claude may follow), each becomes a potential alignment provider — send audio + "transcribe with word-level timestamps" → get timed words. The ensemble gets stronger with every new model that ships audio capabilities.
 
 ## Out of Scope (Sub-project B, issue #32)
 
