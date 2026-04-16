@@ -308,4 +308,89 @@ mod tests {
         };
         assert_eq!(compute_gap_stddev_ms(&track), 0.0);
     }
+
+    #[test]
+    fn compute_gap_stddev_with_varying_gaps() {
+        use sp_core::lyrics::{LyricsLine, LyricsWord};
+        // Words at: 0, 100, 300, 600 → gaps: 100, 200, 300
+        // mean gap = 200, variance = ((100-200)^2 + (200-200)^2 + (300-200)^2) / 3
+        //          = (10000 + 0 + 10000) / 3 = 6666.67
+        // stddev = sqrt(6666.67) ≈ 81.65
+        let track = LyricsTrack {
+            version: 2,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines: vec![LyricsLine {
+                start_ms: 0,
+                end_ms: 700,
+                en: "a b c d".into(),
+                sk: None,
+                words: Some(vec![
+                    LyricsWord {
+                        text: "a".into(),
+                        start_ms: 0,
+                        end_ms: 90,
+                    },
+                    LyricsWord {
+                        text: "b".into(),
+                        start_ms: 100,
+                        end_ms: 290,
+                    },
+                    LyricsWord {
+                        text: "c".into(),
+                        start_ms: 300,
+                        end_ms: 590,
+                    },
+                    LyricsWord {
+                        text: "d".into(),
+                        start_ms: 600,
+                        end_ms: 700,
+                    },
+                ]),
+            }],
+        };
+        let stddev = compute_gap_stddev_ms(&track);
+        assert!(
+            (stddev - 81.65).abs() < 0.1,
+            "expected ~81.65, got {stddev}"
+        );
+    }
+
+    #[test]
+    fn compute_gap_stddev_uniform_gaps_is_zero() {
+        use sp_core::lyrics::{LyricsLine, LyricsWord};
+        // Words at: 0, 500, 1000 → gaps: 500, 500 → stddev = 0
+        let track = LyricsTrack {
+            version: 2,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines: vec![LyricsLine {
+                start_ms: 0,
+                end_ms: 1100,
+                en: "a b c".into(),
+                sk: None,
+                words: Some(vec![
+                    LyricsWord {
+                        text: "a".into(),
+                        start_ms: 0,
+                        end_ms: 400,
+                    },
+                    LyricsWord {
+                        text: "b".into(),
+                        start_ms: 500,
+                        end_ms: 900,
+                    },
+                    LyricsWord {
+                        text: "c".into(),
+                        start_ms: 1000,
+                        end_ms: 1100,
+                    },
+                ]),
+            }],
+        };
+        let stddev = compute_gap_stddev_ms(&track);
+        assert!(stddev.abs() < 0.01, "expected 0, got {stddev}");
+    }
 }

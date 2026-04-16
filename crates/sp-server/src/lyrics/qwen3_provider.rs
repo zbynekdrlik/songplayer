@@ -204,4 +204,33 @@ mod tests {
         assert_eq!(provider.name(), "qwen3");
         assert_eq!(provider.base_confidence(), 0.9);
     }
+
+    #[tokio::test]
+    async fn can_provide_requires_clean_vocal_path() {
+        let provider = Qwen3Provider {
+            python_path: PathBuf::from("/usr/bin/python3"),
+            script_path: PathBuf::from("/scripts/worker.py"),
+            models_dir: PathBuf::from("/models"),
+        };
+
+        let ctx_without = SongContext {
+            video_id: "test".into(),
+            audio_path: PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![],
+            autosub_json3: None,
+            duration_ms: 180000,
+        };
+        assert!(!provider.can_provide(&ctx_without).await);
+
+        let ctx_with = SongContext {
+            video_id: "test".into(),
+            audio_path: PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: Some(PathBuf::from("/tmp/vocals.wav")),
+            candidate_texts: vec![],
+            autosub_json3: None,
+            duration_ms: 180000,
+        };
+        assert!(provider.can_provide(&ctx_with).await);
+    }
 }
