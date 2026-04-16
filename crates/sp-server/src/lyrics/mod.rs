@@ -4,6 +4,7 @@ pub mod bootstrap;
 pub mod chunking;
 pub mod lrclib;
 pub mod merge;
+pub mod orchestrator;
 pub mod provider;
 pub mod quality;
 pub mod qwen3_provider;
