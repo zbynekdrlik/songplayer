@@ -141,12 +141,12 @@ UPDATE videos SET has_lyrics = 0, lyrics_source = NULL;
 // V10 = re-reset rows that fell into the partial 'yt_subs' state during
 // the first deploy of v0.16.x — bootstrap failed there, so the YT-subs
 // fetch succeeded but chunked alignment never ran and the rows persisted
-// as (has_lyrics=1, lyrics_source='yt_subs'). The new worker query
-// `get_next_video_without_lyrics` filters on has_lyrics=0, so without
-// V10 those rows would never be re-picked-up. Reset them so the
-// now-fixed alignment pipeline gets a second shot. Scoped to 'yt_subs'
-// rows only — LRCLIB-line-level rows are correct as-is and shouldn't
-// pay another reprocessing cycle.
+// as (has_lyrics=1, lyrics_source='yt_subs'). The worker uses
+// `get_next_video_for_lyrics` (3-bucket priority queue) which filters on
+// has_lyrics=0, so without V10 those rows would never be re-picked-up.
+// Reset them so the now-fixed alignment pipeline gets a second shot.
+// Scoped to 'yt_subs' rows only — LRCLIB-line-level rows are correct
+// as-is and shouldn't pay another reprocessing cycle.
 const MIGRATION_V10: &str = "
 UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE lyrics_source = 'yt_subs';
 ";
@@ -634,28 +634,6 @@ mod tests {
             .fetch_optional(&pool)
             .await;
         assert!(row.is_ok());
-    }
-
-    #[tokio::test]
-    async fn get_next_video_without_lyrics_returns_unprocessed() {
-        let pool = create_memory_pool().await.unwrap();
-        run_migrations(&pool).await.unwrap();
-        // Insert a playlist
-        sqlx::query("INSERT INTO playlists (name, youtube_url, is_active) VALUES ('test', 'https://youtube.com/playlist?list=test', 1)")
-            .execute(&pool).await.unwrap();
-        // Insert a normalized video without lyrics
-        sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title, normalized, has_lyrics) VALUES (1, 'abc12345678', 'Test Song', 1, 0)")
-            .execute(&pool).await.unwrap();
-        let row = models::get_next_video_without_lyrics(&pool).await.unwrap();
-        assert!(row.is_some());
-        let row = row.unwrap();
-        assert_eq!(row.youtube_id, "abc12345678");
-        // Mark as having lyrics
-        models::mark_video_lyrics(&pool, row.id, true, Some("lrclib"))
-            .await
-            .unwrap();
-        let row2 = models::get_next_video_without_lyrics(&pool).await.unwrap();
-        assert!(row2.is_none());
     }
 
     #[tokio::test]

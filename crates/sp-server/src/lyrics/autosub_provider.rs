@@ -9,7 +9,7 @@
 //! receives autosub results when they're likely to contribute signal.
 
 use crate::lyrics::provider::{
-    AlignmentProvider, CandidateText, LineTiming, ProviderResult, SongContext, WordTiming,
+    AlignmentProvider, LineTiming, ProviderResult, SongContext, WordTiming,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -356,6 +356,7 @@ pub async fn fetch_autosub(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lyrics::provider::CandidateText;
 
     #[test]
     fn normalize_word_lowercases_and_strips_punct() {

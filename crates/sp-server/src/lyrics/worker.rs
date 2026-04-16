@@ -340,7 +340,13 @@ impl LyricsWorker {
         let autosub_tmp = std::env::temp_dir().join(format!("sp_autosub_{youtube_id}"));
         let _ = tokio::fs::create_dir_all(&autosub_tmp).await;
 
-        let mut ctx = self.gather_sources(&row, &autosub_tmp).await?;
+        let mut ctx = match self.gather_sources(&row, &autosub_tmp).await {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
+                return Err(e);
+            }
+        };
 
         // Preprocess vocals for Qwen3 provider (best-effort; Qwen3 is skipped if this fails).
         let venv_python = self.venv_python.read().await.clone();
@@ -392,7 +398,40 @@ impl LyricsWorker {
             Err(e) => {
                 warn!("worker: ensemble failed for {youtube_id}: {e}");
                 let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
-                return Err(e);
+
+                // Zero-provider fallback: emit a line-level track from the first
+                // candidate with line timings. Preserves legacy LRCLIB-line-level behavior.
+                let fallback = ctx
+                    .candidate_texts
+                    .iter()
+                    .find(|c| c.has_timing && c.line_timings.is_some());
+                let Some(c) = fallback else {
+                    return Err(e);
+                };
+                info!(
+                    "worker: zero-provider fallback for {youtube_id} using source={}",
+                    c.source
+                );
+                let timings = c.line_timings.as_ref().unwrap();
+                let lines: Vec<sp_core::lyrics::LyricsLine> = c
+                    .lines
+                    .iter()
+                    .zip(timings.iter())
+                    .map(|(text, (start, end))| sp_core::lyrics::LyricsLine {
+                        start_ms: *start,
+                        end_ms: *end,
+                        en: text.clone(),
+                        sk: None,
+                        words: None,
+                    })
+                    .collect();
+                sp_core::lyrics::LyricsTrack {
+                    version: 2,
+                    source: c.source.clone(),
+                    language_source: "en".into(),
+                    language_translation: String::new(),
+                    lines,
+                }
             }
         };
 

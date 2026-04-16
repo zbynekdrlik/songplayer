@@ -321,25 +321,6 @@ pub struct VideoLyricsRow {
     pub youtube_url: String,
 }
 
-/// Return the next normalized video (in an active playlist) that has no lyrics yet.
-#[cfg_attr(test, mutants::skip)]
-pub async fn get_next_video_without_lyrics(
-    pool: &SqlitePool,
-) -> Result<Option<VideoLyricsRow>, sqlx::Error> {
-    sqlx::query_as::<_, VideoLyricsRow>(
-        "SELECT v.id, v.youtube_id, COALESCE(v.song, '') as song, \
-         COALESCE(v.artist, '') as artist, v.duration_ms, v.audio_file_path, \
-         p.youtube_url \
-         FROM videos v \
-         JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.normalized = 1 AND v.has_lyrics = 0 AND p.is_active = 1 \
-         AND (v.lyrics_source IS NULL OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source')) \
-         ORDER BY v.id LIMIT 1",
-    )
-    .fetch_optional(pool)
-    .await
-}
-
 /// Mark a video's lyrics status and source.
 #[cfg_attr(test, mutants::skip)]
 pub async fn mark_video_lyrics(
