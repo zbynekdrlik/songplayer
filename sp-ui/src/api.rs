@@ -108,3 +108,55 @@ pub async fn put_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), St
     }
     Ok(())
 }
+
+// ── Lyrics API helpers ────────────────────────────────────────────────────────
+
+/// GET the lyrics pipeline queue status.
+pub async fn get_lyrics_queue() -> Result<serde_json::Value, String> {
+    get("/api/v1/lyrics/queue").await
+}
+
+/// GET the list of songs with their lyrics state.
+///
+/// Pass `playlist_id` to filter to a single playlist.
+pub async fn get_lyrics_songs(playlist_id: Option<i64>) -> Result<Vec<serde_json::Value>, String> {
+    let url = if let Some(pid) = playlist_id {
+        format!("/api/v1/lyrics/songs?playlist_id={pid}")
+    } else {
+        "/api/v1/lyrics/songs".into()
+    };
+    get(&url).await
+}
+
+/// GET detailed lyrics info for a single video.
+pub async fn get_lyrics_song_detail(video_id: i64) -> Result<serde_json::Value, String> {
+    get(&format!("/api/v1/lyrics/songs/{video_id}")).await
+}
+
+/// POST to reprocess specific videos by ID.
+pub async fn post_reprocess_videos(video_ids: &[i64]) -> Result<serde_json::Value, String> {
+    post_json(
+        "/api/v1/lyrics/reprocess",
+        &serde_json::json!({ "video_ids": video_ids }),
+    )
+    .await
+}
+
+/// POST to reprocess all videos in a playlist.
+pub async fn post_reprocess_playlist(playlist_id: i64) -> Result<serde_json::Value, String> {
+    post_json(
+        "/api/v1/lyrics/reprocess",
+        &serde_json::json!({ "playlist_id": playlist_id }),
+    )
+    .await
+}
+
+/// POST to reprocess all stale lyrics entries.
+pub async fn post_reprocess_all_stale() -> Result<serde_json::Value, String> {
+    post_json("/api/v1/lyrics/reprocess-all-stale", &serde_json::json!({})).await
+}
+
+/// POST to clear the manual (bucket 0) lyrics queue.
+pub async fn post_clear_manual_queue() -> Result<serde_json::Value, String> {
+    post_json("/api/v1/lyrics/clear-manual-queue", &serde_json::json!({})).await
+}
