@@ -300,3 +300,24 @@ def test_write_report_recommendation_section_cites_worst_bucket(tmp_path):
     text = out.read_text()
     assert "kill" in text.lower()
     assert "T2" in text  # the red song must be cited
+
+
+def test_write_report_includes_raw_data_references_section(tmp_path):
+    results = [
+        SongResult(
+            video_id="abc123",
+            title="T",
+            artist="A",
+            error=None,
+            match=MatchResult(matched=1, skipped=0, drifts_ms=[0],
+                              total_qwen_words=1, total_autosub_words=1),
+            stats=DriftStats(1, 0, 0, 0.0, 0, 0, 0, 0),
+            histogram="h",
+        )
+    ]
+    out = tmp_path / "report.md"
+    write_report(results, out)
+    text = out.read_text()
+    assert "## Raw data references" in text
+    assert "tempfile.mkdtemp" in text
+    assert "songplayer.db" in text

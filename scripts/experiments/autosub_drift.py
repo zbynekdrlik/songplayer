@@ -334,6 +334,18 @@ def write_report(results: List[SongResult], out_path: Path) -> None:
         )
     parts.append("")
 
+    parts.append("## Raw data references")
+    parts.append("")
+    parts.append(
+        "Auto-sub json3 files are pulled into a per-run tmp dir created by"
+        " `tempfile.mkdtemp(prefix=\"autosub_drift_\")` and are NOT committed"
+        " to the repo. Re-run the script (see header docstring) to regenerate"
+        " them. The Qwen3 reference word timings are pulled from a read-only"
+        " SCP snapshot of the production `songplayer.db`; that snapshot is"
+        " also not committed."
+    )
+    parts.append("")
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(parts), encoding="utf-8")
 
@@ -378,26 +390,28 @@ def pull_db_from_winresolume(local_path: Path) -> None:
 
 def fetch_autosubs(video_id: str, tmp_dir: Path) -> Optional[Path]:
     """Download English auto-subs as json3. Returns the json3 path on
-    success, None if no auto-subs are available for this video."""
+    success, or None if the video simply has no auto-subs (yt-dlp
+    completed cleanly but produced no `<id>.en.json3` file).
+
+    A real yt-dlp failure (network error, banned video, malformed args)
+    raises subprocess.CalledProcessError unmodified — `main()` lets it
+    propagate so the script exits non-zero per the spec failure table.
+    """
     out_template = tmp_dir / f"{video_id}.%(ext)s"
-    try:
-        subprocess.run(
-            [
-                "yt-dlp",
-                "--write-auto-subs",
-                "--sub-format", "json3",
-                "--sub-langs", "en",
-                "--skip-download",
-                "--no-warnings",
-                "-o", str(out_template),
-                f"https://www.youtube.com/watch?v={video_id}",
-            ],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        sys.stderr.write(f"yt-dlp failed for {video_id}: {e.stderr.decode(errors='replace')}\n")
-        return None
+    subprocess.run(
+        [
+            "yt-dlp",
+            "--write-auto-subs",
+            "--sub-format", "json3",
+            "--sub-langs", "en",
+            "--skip-download",
+            "--no-warnings",
+            "-o", str(out_template),
+            f"https://www.youtube.com/watch?v={video_id}",
+        ],
+        check=True,
+        capture_output=True,
+    )
     candidate = tmp_dir / f"{video_id}.en.json3"
     return candidate if candidate.exists() else None
 
