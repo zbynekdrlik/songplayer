@@ -165,6 +165,26 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 
 **Follow existing patterns** from similar projects (restreamer, iem-mixer) for consistency in error handling, logging (tracing), and state management.
 
+## Pipeline versioning (lyrics)
+
+`crates/sp-server/src/lyrics/mod.rs::LYRICS_PIPELINE_VERSION` is a monotonic integer identifying the lyrics processing output format. Every song's lyrics JSON + DB row records the version it was produced under. On worker startup, songs with `lyrics_pipeline_version < LYRICS_PIPELINE_VERSION` are re-queued for reprocessing (stale bucket, worst-quality-first).
+
+**Bump the constant when:**
+- Adding or removing an `AlignmentProvider` from the worker registration
+- Changing a provider's algorithm (chunking, matcher, density gate thresholds)
+- Changing either Claude merge prompt (text reconciliation or timing merge)
+- Changing the reference-text-selection algorithm
+
+**Do NOT bump for:**
+- Bug fixes that produce identical output
+- Refactoring, renaming, logging changes
+- UI/dashboard-only changes
+- Performance optimizations with identical output
+
+**History:**
+- v1 (pre-#33): single-path yt_subs→Qwen3 or lrclib-line-level
+- v2 (this PR): ensemble orchestrator + AutoSubProvider + Claude text-merge
+
 ## Legacy OBS YouTube Player (obsytplayer)
 
 SongPlayer is the Rust replacement for the legacy Python OBS YouTube Player at `/home/newlevel/devel/obsytplayer/`. **Always reference the legacy code when implementing features** — it contains battle-tested logic for:
