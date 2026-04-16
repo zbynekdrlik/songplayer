@@ -318,7 +318,7 @@ def test_write_report_includes_raw_data_references_section(tmp_path):
     text = out.read_text()
     assert "## Raw data references" in text
     assert "tempfile.mkdtemp" in text
-    assert "songplayer.db" in text
+    assert "_lyrics.json" in text
 
 
 def test_write_report_match_rate_denominator_uses_attempted_not_total(tmp_path):

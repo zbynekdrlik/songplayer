@@ -282,8 +282,9 @@ def write_report(results: List[SongResult], out_path: Path) -> None:
         " `yt-dlp --write-auto-subs --sub-format json3 --sub-langs en --skip-download`."
     )
     parts.append(
-        "- Qwen3 reference word timings copied from win-resolume's"
-        " production `songplayer.db` (read-only SCP, no remote write)."
+        "- Qwen3 reference word timings read from win-resolume's production"
+        " lyrics cache (`<lyrics-dir>/<video_id>_lyrics.json`); no DB query"
+        " — the alignment is JSON-on-disk, not a SQLite table."
     )
     parts.append(
         "- Matcher (Option A): sequential forward walk; for each Qwen3"
