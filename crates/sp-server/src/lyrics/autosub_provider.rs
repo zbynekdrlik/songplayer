@@ -253,6 +253,11 @@ impl AlignmentProvider for AutoSubProvider {
             let line_slice = &matched[cursor..cursor + word_count];
             cursor += word_count;
 
+            // Skip empty reference lines (blank stanza separators) entirely.
+            if word_count == 0 {
+                continue;
+            }
+
             let words: Vec<WordTiming> = line_slice
                 .iter()
                 .enumerate()
@@ -767,5 +772,157 @@ mod tests {
         assert_eq!(result.lines[1].words.len(), 3);
         assert_eq!(result.lines[1].words[0].text, "how");
         assert_eq!(result.lines[1].words[0].start_ms, 2000);
+        // confidence from density_gate: 5 words / 5s = 1.0 wps → 0.6
+        assert!(
+            (result.lines[0].words[0].confidence - 0.6).abs() < 1e-6,
+            "align must stamp density-gated confidence on each word"
+        );
+        assert!((result.metadata["base_confidence"].as_f64().unwrap() - 0.6).abs() < 1e-6);
+        assert!((result.metadata["density_wps"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn align_skips_empty_reference_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blank.json3");
+        tokio::fs::write(
+            &path,
+            r#"{"events":[
+          {"tStartMs":1000,"segs":[{"utf8":"hello","tOffsetMs":0},{"utf8":"world","tOffsetMs":100},{"utf8":"one","tOffsetMs":200},{"utf8":"two","tOffsetMs":300},{"utf8":"three","tOffsetMs":400},{"utf8":"four","tOffsetMs":500},{"utf8":"five","tOffsetMs":600},{"utf8":"six","tOffsetMs":700},{"utf8":"seven","tOffsetMs":800},{"utf8":"eight","tOffsetMs":900}]}
+        ]}"#,
+        ).await.unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                // Line 2 is an empty stanza separator
+                lines: vec!["hello world".into(), "".into(), "one two three".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 10_000, // 10 words / 10s = 1.0 wps → passes gate
+        };
+        let result = AutoSubProvider.align(&ctx).await.unwrap();
+        // Three ref lines, but middle is blank — output must have 2 lines only.
+        assert_eq!(
+            result.lines.len(),
+            2,
+            "empty reference lines must not be emitted"
+        );
+        assert_eq!(result.lines[0].text, "hello world");
+        assert_eq!(result.lines[1].text, "one two three");
+    }
+
+    #[tokio::test]
+    async fn can_provide_true_at_exactly_10_words() {
+        // 10 words over 20s → 0.5 wps (passes density gate)
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exactly_10.json3");
+        let mut events = String::from("{\"events\":[");
+        for i in 0..10 {
+            if i > 0 {
+                events.push(',');
+            }
+            events.push_str(&format!(
+                "{{\"tStartMs\":{},\"segs\":[{{\"utf8\":\"w{}\"}}]}}",
+                i * 2000,
+                i
+            ));
+        }
+        events.push_str("]}");
+        tokio::fs::write(&path, events).await.unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["w0".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 20_000,
+        };
+        assert!(
+            AutoSubProvider.can_provide(&ctx).await,
+            "exactly 10 words must satisfy the >= 10 gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn can_provide_true_at_exactly_03_wps() {
+        // 30 words over 100s = 0.3 wps — must PASS (>= 0.3)
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exactly_03.json3");
+        let mut events = String::from("{\"events\":[");
+        for i in 0..30 {
+            if i > 0 {
+                events.push(',');
+            }
+            events.push_str(&format!(
+                "{{\"tStartMs\":{},\"segs\":[{{\"utf8\":\"w{}\"}}]}}",
+                i * 3000,
+                i
+            ));
+        }
+        events.push_str("]}");
+        tokio::fs::write(&path, events).await.unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["w0".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 100_000,
+        };
+        assert!(
+            AutoSubProvider.can_provide(&ctx).await,
+            "exactly 0.3 wps must pass the density gate (>= 0.3)"
+        );
+    }
+
+    #[tokio::test]
+    async fn can_provide_false_when_duration_is_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zero_dur.json3");
+        let mut events = String::from("{\"events\":[");
+        for i in 0..100 {
+            if i > 0 {
+                events.push(',');
+            }
+            events.push_str(&format!(
+                "{{\"tStartMs\":{},\"segs\":[{{\"utf8\":\"w{}\"}}]}}",
+                i * 1000,
+                i
+            ));
+        }
+        events.push_str("]}");
+        tokio::fs::write(&path, events).await.unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["w0".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 0, // zero duration — would divide by zero
+        };
+        assert!(
+            !AutoSubProvider.can_provide(&ctx).await,
+            "duration_ms=0 must short-circuit to false"
+        );
     }
 }
