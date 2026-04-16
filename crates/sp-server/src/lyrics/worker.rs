@@ -21,7 +21,10 @@ use crate::{
     db::models::{
         get_next_video_missing_translation, get_next_video_without_lyrics, mark_video_lyrics,
     },
-    lyrics::{aligner, assembly, chunking, lrclib, quality, translator, youtube_subs},
+    lyrics::{
+        aligner, assembly, chunking, lrclib, orchestrator::Orchestrator, provider::CandidateText,
+        provider::SongContext, quality, qwen3_provider::Qwen3Provider, translator, youtube_subs,
+    },
 };
 
 const DUPLICATE_START_WARN_PCT: f64 = 50.0;
@@ -191,21 +194,106 @@ impl LyricsWorker {
         // Step 1: Acquire lyrics. YT subs first, LRCLIB fallback.
         let (track, acquired_source) = self.acquire_lyrics(&row).await?;
 
-        // Step 2: If the source is YT manual subs and a venv is ready, run
-        // chunked alignment to populate word-level timestamps.
+        // Step 2: Run alignment — ensemble orchestrator when AI client is
+        // available, direct Qwen3 pipeline otherwise.
         let (mut track, final_source) = if acquired_source == "yt_subs" {
             let venv_python = self.venv_python.read().await.clone();
             let audio_path = row.audio_file_path.as_ref().map(PathBuf::from);
             if let (Some(python), Some(audio)) = (venv_python.as_ref(), audio_path.as_ref()) {
                 if audio.exists() {
-                    match self
-                        .run_chunked_alignment(python, audio, &youtube_id, track)
+                    // Try ensemble orchestrator (AI client + Qwen3 provider)
+                    if let Some(ai_client) = &self.ai_client {
+                        let candidate = CandidateText {
+                            source: acquired_source.clone(),
+                            lines: track.lines.iter().map(|l| l.en.clone()).collect(),
+                            has_timing: track.lines.iter().any(|l| l.start_ms > 0),
+                            line_timings: Some(
+                                track.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect(),
+                            ),
+                        };
+
+                        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
+                        // Preprocess vocals first (needed by Qwen3Provider)
+                        let clean_vocal = match aligner::preprocess_vocals(
+                            python,
+                            &self.script_path,
+                            &self.models_dir,
+                            audio,
+                            &wav_path,
+                        )
                         .await
-                    {
-                        Ok(t) => (t, "yt_subs+qwen3".to_string()),
-                        Err((original, e)) => {
-                            warn!("lyrics_worker: chunked alignment failed for {youtube_id}: {e}");
-                            (original, "yt_subs".to_string())
+                        {
+                            Ok(p) => Some(p),
+                            Err(e) => {
+                                warn!(
+                                    "lyrics_worker: vocal isolation failed for {youtube_id}: {e}"
+                                );
+                                None
+                            }
+                        };
+
+                        let ctx = SongContext {
+                            video_id: youtube_id.clone(),
+                            audio_path: audio.clone(),
+                            clean_vocal_path: clean_vocal,
+                            candidate_texts: vec![candidate],
+                            autosub_json3: None,
+                            duration_ms: row.duration_ms.unwrap_or(0) as u64,
+                        };
+
+                        let qwen3 = Qwen3Provider {
+                            python_path: python.clone(),
+                            script_path: self.script_path.clone(),
+                            models_dir: self.models_dir.clone(),
+                        };
+
+                        let orch = Orchestrator::new(
+                            vec![Box::new(qwen3)],
+                            ai_client.clone(),
+                            self.cache_dir.clone(),
+                        );
+
+                        match orch.process_song(&ctx).await {
+                            Ok(merged) => {
+                                // Clean up scratch WAV
+                                let _ = tokio::fs::remove_file(&wav_path).await;
+                                let src = merged.source.clone();
+                                (merged, src)
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "lyrics_worker: ensemble alignment failed for {youtube_id}, \
+                                     falling back to direct Qwen3: {e}"
+                                );
+                                let _ = tokio::fs::remove_file(&wav_path).await;
+                                // Fall back to direct Qwen3
+                                match self
+                                    .run_chunked_alignment(python, audio, &youtube_id, track)
+                                    .await
+                                {
+                                    Ok(t) => (t, "yt_subs+qwen3".to_string()),
+                                    Err((original, e2)) => {
+                                        warn!(
+                                            "lyrics_worker: direct Qwen3 also failed for {youtube_id}: {e2}"
+                                        );
+                                        (original, "yt_subs".to_string())
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // No AI client — direct Qwen3 path
+                        match self
+                            .run_chunked_alignment(python, audio, &youtube_id, track)
+                            .await
+                        {
+                            Ok(t) => (t, "yt_subs+qwen3".to_string()),
+                            Err((original, e)) => {
+                                warn!(
+                                    "lyrics_worker: chunked alignment failed for {youtube_id}: {e}"
+                                );
+                                (original, "yt_subs".to_string())
+                            }
                         }
                     }
                 } else {
