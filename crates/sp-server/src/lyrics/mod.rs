@@ -3,6 +3,7 @@ pub mod assembly;
 pub mod bootstrap;
 pub mod chunking;
 pub mod lrclib;
+pub mod merge;
 pub mod provider;
 pub mod quality;
 pub mod renderer;
