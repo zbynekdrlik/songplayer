@@ -309,30 +309,10 @@ impl LyricsWorker {
         };
         track.source = final_source.clone();
 
-        // Step 3: SK translation — Claude Opus first, Gemini fallback.
-        let mut translated = false;
-        if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, &track).await {
-                Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                        line.sk = if sk_text.is_empty() {
-                            None
-                        } else {
-                            Some(sk_text)
-                        };
-                    }
-                    track.language_translation = "sk".to_string();
-                    translated = true;
-                    debug!("lyrics_worker: Claude translation succeeded for {youtube_id}");
-                }
-                Err(e) => {
-                    warn!(
-                        "lyrics_worker: Claude translation failed for {youtube_id}, trying Gemini: {e}"
-                    );
-                }
-            }
-        }
-        if !translated && !self.gemini_api_key.is_empty() {
+        // Step 3: SK translation via Gemini.
+        // Note: Claude refuses to translate song lyrics (content policy).
+        // Gemini handles translation; Claude handles alignment merge.
+        if !self.gemini_api_key.is_empty() {
             if let Err(e) =
                 translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
                     .await
@@ -502,33 +482,10 @@ impl LyricsWorker {
         };
         info!("lyrics_worker: retrying translation for {youtube_id}");
 
-        // Try Claude first, Gemini fallback
-        let result = if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, &track).await {
-                Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                        line.sk = if sk_text.is_empty() {
-                            None
-                        } else {
-                            Some(sk_text)
-                        };
-                    }
-                    track.language_translation = "sk".to_string();
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("lyrics retry: Claude failed for {youtube_id}, trying Gemini: {e}");
-                    translator::translate_lyrics(
-                        &self.gemini_api_key,
-                        &self.gemini_model,
-                        &mut track,
-                    )
-                    .await
-                }
-            }
-        } else {
-            translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track).await
-        };
+        // Gemini only — Claude refuses to translate song lyrics (content policy)
+        let result =
+            translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
+                .await;
 
         match result {
             Ok(()) => {

@@ -149,6 +149,9 @@ auth-dir: "{auth_dir_str}"
 debug: false
 logging-to-file: false
 request-retry: 2
+claude-oauth:
+  - cloak:
+      mode: "never"
 {key_section}"#,
             port = self.port,
         );
