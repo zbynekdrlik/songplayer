@@ -6,6 +6,7 @@ pub mod lrclib;
 pub mod merge;
 pub mod provider;
 pub mod quality;
+pub mod qwen3_provider;
 pub mod renderer;
 pub mod translator;
 mod worker;
