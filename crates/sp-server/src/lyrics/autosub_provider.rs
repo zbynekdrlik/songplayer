@@ -8,6 +8,13 @@
 //! densities below 0.3 words/sec fail `can_provide`, so the merge layer only
 //! receives autosub results when they're likely to contribute signal.
 
+use crate::lyrics::provider::{
+    AlignmentProvider, CandidateText, LineTiming, ProviderResult, SongContext, WordTiming,
+};
+use anyhow::Result;
+use async_trait::async_trait;
+use std::path::{Path, PathBuf};
+
 /// Known YouTube auto-sub noise tokens that should never participate in word matching.
 /// Kept at module scope so `normalize_word`, `parse_json3`, and the matcher all use
 /// the same source of truth.
@@ -164,6 +171,181 @@ pub fn density_gate_confidence(words_per_second: f32) -> f32 {
     } else {
         0.1 + (words_per_second - 0.3) / 0.7 * 0.5
     }
+}
+
+pub struct AutoSubProvider;
+
+#[async_trait]
+impl AlignmentProvider for AutoSubProvider {
+    fn name(&self) -> &str {
+        "autosub"
+    }
+
+    fn base_confidence(&self) -> f32 {
+        0.6
+    }
+
+    async fn can_provide(&self, ctx: &SongContext) -> bool {
+        let Some(path) = ctx.autosub_json3.as_ref() else {
+            return false;
+        };
+        if !path.exists() {
+            return false;
+        }
+        let raw = match tokio::fs::read_to_string(path).await {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let words = match parse_json3(&raw) {
+            Ok(w) => w,
+            Err(_) => return false,
+        };
+        if words.len() < 10 || ctx.duration_ms == 0 {
+            return false;
+        }
+        let density = words.len() as f32 / (ctx.duration_ms as f32 / 1000.0);
+        density >= 0.3
+    }
+
+    async fn align(&self, ctx: &SongContext) -> Result<ProviderResult> {
+        let path = ctx
+            .autosub_json3
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("autosub path missing"))?;
+        let raw = tokio::fs::read_to_string(path).await?;
+        let autosub_words = parse_json3(&raw)?;
+
+        let density = autosub_words.len() as f32 / (ctx.duration_ms as f32 / 1000.0);
+        let confidence = density_gate_confidence(density);
+
+        // Reference comes from candidate_texts. In Task 7 the orchestrator will
+        // Claude-merge candidates into a single "reference"-labeled entry; until
+        // then we pick the first candidate. When the merged entry exists, use it.
+        let reference = ctx
+            .candidate_texts
+            .iter()
+            .find(|c| c.source == "reference")
+            .map(|c| &c.lines)
+            .or_else(|| ctx.candidate_texts.first().map(|c| &c.lines))
+            .ok_or_else(|| anyhow::anyhow!("no reference text available"))?;
+
+        // Flatten reference text into a word stream; remember each line's word count
+        // so we can re-slice matches back into the original line structure.
+        let mut flat_ref: Vec<&str> = Vec::new();
+        let mut line_word_counts: Vec<usize> = Vec::with_capacity(reference.len());
+        for line in reference {
+            let count_before = flat_ref.len();
+            for w in line.split_whitespace() {
+                flat_ref.push(w);
+            }
+            line_word_counts.push(flat_ref.len() - count_before);
+        }
+
+        let matched = match_reference_to_autosub(&flat_ref, &autosub_words, 10);
+
+        // Emit LineTimings. For each line, collect the matched words; use the
+        // first/last matched timestamps as line-level start/end. Unmatched reference
+        // words are silently skipped — the merge layer fills gaps from other providers.
+        let mut lines_out = Vec::with_capacity(reference.len());
+        let mut cursor = 0usize;
+        for (line_idx, line) in reference.iter().enumerate() {
+            let word_count = line_word_counts[line_idx];
+            let line_slice = &matched[cursor..cursor + word_count];
+            cursor += word_count;
+
+            let words: Vec<WordTiming> = line_slice
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, m)| {
+                    let start = m.autosub_start_ms?;
+                    // end_ms = next matched start_ms in this line, else start + 500 fallback
+                    let end = line_slice
+                        .iter()
+                        .skip(idx + 1)
+                        .find_map(|n| n.autosub_start_ms)
+                        .unwrap_or(start + 500);
+                    Some(WordTiming {
+                        text: m.reference_text.clone(),
+                        start_ms: start,
+                        end_ms: end,
+                        confidence,
+                    })
+                })
+                .collect();
+
+            let (line_start, line_end) = match (words.first(), words.last()) {
+                (Some(f), Some(l)) => (f.start_ms, l.end_ms),
+                _ => (0, 0),
+            };
+
+            lines_out.push(LineTiming {
+                text: line.clone(),
+                start_ms: line_start,
+                end_ms: line_end,
+                words,
+            });
+        }
+
+        Ok(ProviderResult {
+            provider_name: "autosub".into(),
+            lines: lines_out,
+            metadata: serde_json::json!({
+                "base_confidence": confidence,
+                "density_wps": density,
+                "autosub_word_count": autosub_words.len(),
+            }),
+        })
+    }
+}
+
+/// Fetch auto-subs for a YouTube video id into `out_dir`. Returns the
+/// downloaded json3 path or None if the video has no auto-subs. Errors
+/// propagate for real failures (network, banned, malformed args). yt-dlp exits
+/// 0 with no file when the video simply has no English auto-subs — that case
+/// is reported as Ok(None).
+#[cfg_attr(test, mutants::skip)] // I/O-only subprocess wrapper; covered by integration tests (Task 8)
+pub async fn fetch_autosub(
+    ytdlp_path: &Path,
+    video_id: &str,
+    out_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    tokio::fs::create_dir_all(out_dir).await?;
+    let out_template = out_dir.join(format!("{video_id}.%(ext)s"));
+    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    let mut cmd = tokio::process::Command::new(ytdlp_path);
+    cmd.arg("--write-auto-subs")
+        .arg("--sub-format")
+        .arg("json3")
+        .arg("--sub-langs")
+        .arg("en")
+        .arg("--skip-download")
+        .arg("--no-warnings")
+        .arg("-o")
+        .arg(&out_template)
+        .arg(&url);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd.kill_on_drop(true);
+    let output = cmd.output().await?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "yt-dlp auto-subs fetch failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let primary = out_dir.join(format!("{video_id}.en.json3"));
+    if primary.exists() {
+        return Ok(Some(primary));
+    }
+    // When a video has BOTH manual and auto subs, the auto variant gets -orig suffix.
+    let orig = out_dir.join(format!("{video_id}.en-orig.json3"));
+    if orig.exists() {
+        return Ok(Some(orig));
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -418,5 +600,172 @@ mod tests {
             Some(500),
             "noise reference must not consume the autosub pointer"
         );
+    }
+
+    #[tokio::test]
+    async fn can_provide_false_when_path_is_none() {
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["Hello world".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: None,
+            duration_ms: 180_000,
+        };
+        assert!(!AutoSubProvider.can_provide(&ctx).await);
+    }
+
+    #[tokio::test]
+    async fn can_provide_false_when_path_missing() {
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["Hello world".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(std::path::PathBuf::from("/tmp/does_not_exist_xyz.json3")),
+            duration_ms: 180_000,
+        };
+        assert!(!AutoSubProvider.can_provide(&ctx).await);
+    }
+
+    #[tokio::test]
+    async fn can_provide_false_when_under_10_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tiny.json3");
+        tokio::fs::write(
+            &path,
+            r#"{"events":[{"tStartMs":0,"segs":[{"utf8":"hi"}]}]}"#,
+        )
+        .await
+        .unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["Hello world".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 180_000,
+        };
+        assert!(!AutoSubProvider.can_provide(&ctx).await);
+    }
+
+    #[tokio::test]
+    async fn can_provide_false_when_density_below_threshold() {
+        // 20 words / 100s = 0.2 wps < 0.3 → fail
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sparse.json3");
+        let mut events = String::from("{\"events\":[");
+        for i in 0..20 {
+            if i > 0 {
+                events.push(',');
+            }
+            events.push_str(&format!(
+                "{{\"tStartMs\":{},\"segs\":[{{\"utf8\":\"w{}\"}}]}}",
+                i * 5000,
+                i
+            ));
+        }
+        events.push_str("]}");
+        tokio::fs::write(&path, events).await.unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["Hello world".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 100_000,
+        };
+        assert!(!AutoSubProvider.can_provide(&ctx).await);
+    }
+
+    #[tokio::test]
+    async fn can_provide_true_when_dense_enough() {
+        // 100 words / 100s = 1.0 wps → pass
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dense.json3");
+        let mut events = String::from("{\"events\":[");
+        for i in 0..100 {
+            if i > 0 {
+                events.push(',');
+            }
+            events.push_str(&format!(
+                "{{\"tStartMs\":{},\"segs\":[{{\"utf8\":\"w{}\"}}]}}",
+                i * 1000,
+                i
+            ));
+        }
+        events.push_str("]}");
+        tokio::fs::write(&path, events).await.unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["Hello world".into()],
+                has_timing: false,
+                line_timings: None,
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 100_000,
+        };
+        assert!(AutoSubProvider.can_provide(&ctx).await);
+    }
+
+    #[tokio::test]
+    async fn align_emits_matched_words_in_reference_line_structure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("aligned.json3");
+        tokio::fs::write(
+            &path,
+            r#"{"events":[
+          {"tStartMs":1000,"segs":[{"utf8":"Hello","tOffsetMs":0},{"utf8":"world","tOffsetMs":200}]},
+          {"tStartMs":2000,"segs":[{"utf8":"how","tOffsetMs":0},{"utf8":"are","tOffsetMs":200},{"utf8":"you","tOffsetMs":400}]}
+        ]}"#,
+        )
+        .await
+        .unwrap();
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: std::path::PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![CandidateText {
+                source: "reference".into(),
+                lines: vec!["Hello world".into(), "how are you".into()],
+                has_timing: true,
+                line_timings: Some(vec![(1000, 2000), (2000, 3000)]),
+            }],
+            autosub_json3: Some(path),
+            duration_ms: 5000, // 5 words / 5s = 1.0 wps
+        };
+        let result = AutoSubProvider.align(&ctx).await.unwrap();
+        assert_eq!(result.provider_name, "autosub");
+        assert_eq!(result.lines.len(), 2, "preserves reference line count");
+        assert_eq!(result.lines[0].words.len(), 2);
+        assert_eq!(result.lines[0].words[0].text, "Hello");
+        assert_eq!(result.lines[0].words[0].start_ms, 1000);
+        assert_eq!(result.lines[1].words.len(), 3);
+        assert_eq!(result.lines[1].words[0].text, "how");
+        assert_eq!(result.lines[1].words[0].start_ms, 2000);
     }
 }
