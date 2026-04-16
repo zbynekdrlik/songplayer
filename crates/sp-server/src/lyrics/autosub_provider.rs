@@ -8,7 +8,10 @@
 //! densities below 0.3 words/sec fail `can_provide`, so the merge layer only
 //! receives autosub results when they're likely to contribute signal.
 
-use std::collections::HashSet;
+/// Known YouTube auto-sub noise tokens that should never participate in word matching.
+/// Kept at module scope so `normalize_word`, `parse_json3`, and the matcher all use
+/// the same source of truth.
+const NOISE_TOKENS: &[&str] = &["[music]", ">>", "[applause]", "[laughter]"];
 
 /// A single word from the json3 auto-sub stream.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,9 +23,8 @@ pub struct AutosubWord {
 /// Normalize a word for matching: lowercase, strip `[^\w]`, drop noise tokens.
 /// Returns empty string for noise/empty/whitespace input.
 pub fn normalize_word(s: &str) -> String {
-    const NOISE: &[&str] = &["[music]", ">>", "[applause]", "[laughter]"];
     let trimmed = s.trim().to_lowercase();
-    if trimmed.is_empty() || NOISE.iter().any(|n| trimmed == *n) {
+    if trimmed.is_empty() || NOISE_TOKENS.iter().any(|n| trimmed == *n) {
         return String::new();
     }
     trimmed
@@ -82,11 +84,86 @@ pub fn parse_json3(json_text: &str) -> anyhow::Result<Vec<AutosubWord>> {
     }
 
     // Quietly drop known noise tokens at parse time so downstream matcher doesn't see them.
-    let noise: HashSet<&str> = ["[music]", ">>", "[applause]", "[laughter]"]
-        .into_iter()
-        .collect();
-    out.retain(|w| !noise.contains(w.text.to_lowercase().as_str()));
+    out.retain(|w| {
+        !NOISE_TOKENS
+            .iter()
+            .any(|n| *n == w.text.to_lowercase().as_str())
+    });
     Ok(out)
+}
+
+/// Per-reference-word match result from the forward walker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchedWord {
+    pub reference_text: String,
+    pub autosub_start_ms: Option<u64>,
+}
+
+/// Sequential forward walker, ported from scripts/experiments/autosub_drift.py.
+///
+/// For each reference word, search up to `window` autosub words ahead for the
+/// first exact-text match after normalization. On match: record start_ms and
+/// advance autosub pointer. On miss: return None for that word; autosub pointer
+/// stays where it was. No backtracking — drift recovers on the next match.
+pub fn match_reference_to_autosub(
+    reference_words: &[&str],
+    autosub_words: &[AutosubWord],
+    window: usize,
+) -> Vec<MatchedWord> {
+    let mut out = Vec::with_capacity(reference_words.len());
+    let mut auto_idx = 0usize;
+
+    for r in reference_words {
+        let r_norm = normalize_word(r);
+        if r_norm.is_empty() {
+            out.push(MatchedWord {
+                reference_text: (*r).to_string(),
+                autosub_start_ms: None,
+            });
+            continue;
+        }
+
+        let mut found = None;
+        for offset in 0..window {
+            let cand_idx = auto_idx + offset;
+            if cand_idx >= autosub_words.len() {
+                break;
+            }
+            if normalize_word(&autosub_words[cand_idx].text) == r_norm {
+                found = Some(cand_idx);
+                break;
+            }
+        }
+
+        match found {
+            Some(idx) => {
+                out.push(MatchedWord {
+                    reference_text: (*r).to_string(),
+                    autosub_start_ms: Some(autosub_words[idx].start_ms),
+                });
+                auto_idx = idx + 1;
+            }
+            None => out.push(MatchedWord {
+                reference_text: (*r).to_string(),
+                autosub_start_ms: None,
+            }),
+        }
+    }
+
+    out
+}
+
+/// Confidence for autosub word timings, gated by density. Worship-fast songs
+/// (density < 0.3 wps) get 0.1 so merge layer downweights them. Dense ballads
+/// (>= 1.0 wps) get 0.6 matching Qwen3's base confidence.
+pub fn density_gate_confidence(words_per_second: f32) -> f32 {
+    if words_per_second >= 1.0 {
+        0.6
+    } else if words_per_second <= 0.3 {
+        0.1 // defensive: can_provide already filters wps < 0.3
+    } else {
+        0.1 + (words_per_second - 0.3) / 0.7 * 0.5
+    }
 }
 
 #[cfg(test)]
@@ -161,5 +238,133 @@ mod tests {
     #[test]
     fn parse_json3_rejects_invalid_json() {
         assert!(parse_json3("not json").is_err());
+    }
+
+    #[test]
+    fn match_exact_sequential() {
+        let ref_words = vec!["Hello", "world", "again"];
+        let autosub = vec![
+            AutosubWord {
+                text: "Hello".into(),
+                start_ms: 100,
+            },
+            AutosubWord {
+                text: "world".into(),
+                start_ms: 200,
+            },
+            AutosubWord {
+                text: "again".into(),
+                start_ms: 300,
+            },
+        ];
+        let out = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].autosub_start_ms, Some(100));
+        assert_eq!(out[1].autosub_start_ms, Some(200));
+        assert_eq!(out[2].autosub_start_ms, Some(300));
+    }
+
+    #[test]
+    fn match_skips_unmatched_reference_words() {
+        let ref_words = vec!["Hello", "missing", "world"];
+        let autosub = vec![
+            AutosubWord {
+                text: "Hello".into(),
+                start_ms: 100,
+            },
+            AutosubWord {
+                text: "world".into(),
+                start_ms: 200,
+            },
+        ];
+        let out = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(out[0].autosub_start_ms, Some(100));
+        assert_eq!(
+            out[1].autosub_start_ms, None,
+            "'missing' has no counterpart"
+        );
+        assert_eq!(out[2].autosub_start_ms, Some(200));
+    }
+
+    #[test]
+    fn match_window_boundary() {
+        let ref_words = vec!["needle"];
+        // Autosub has "needle" at index 9 (inside window=10) and 10 (outside window=10)
+        let mut autosub: Vec<AutosubWord> = (0..9)
+            .map(|i| AutosubWord {
+                text: format!("pad{i}"),
+                start_ms: i as u64,
+            })
+            .collect();
+        autosub.push(AutosubWord {
+            text: "needle".into(),
+            start_ms: 999,
+        });
+
+        let inside = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(inside[0].autosub_start_ms, Some(999));
+
+        let outside = match_reference_to_autosub(&ref_words, &autosub, 9);
+        assert_eq!(
+            outside[0].autosub_start_ms, None,
+            "needle at offset 9 is outside window=9"
+        );
+    }
+
+    #[test]
+    fn match_autosub_pointer_advances_only_on_hit() {
+        let ref_words = vec!["a", "missing", "b"];
+        let autosub = vec![
+            AutosubWord {
+                text: "a".into(),
+                start_ms: 100,
+            },
+            AutosubWord {
+                text: "b".into(),
+                start_ms: 200,
+            },
+        ];
+        let out = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(out[0].autosub_start_ms, Some(100));
+        assert_eq!(out[1].autosub_start_ms, None);
+        assert_eq!(
+            out[2].autosub_start_ms,
+            Some(200),
+            "after miss, pointer stays at 'b' and matches it"
+        );
+    }
+
+    #[test]
+    fn match_normalizes_punctuation() {
+        let ref_words = vec!["Hello,", "world!"];
+        let autosub = vec![
+            AutosubWord {
+                text: "hello".into(),
+                start_ms: 100,
+            },
+            AutosubWord {
+                text: "World".into(),
+                start_ms: 200,
+            },
+        ];
+        let out = match_reference_to_autosub(&ref_words, &autosub, 10);
+        assert_eq!(out[0].autosub_start_ms, Some(100));
+        assert_eq!(out[1].autosub_start_ms, Some(200));
+    }
+
+    #[test]
+    fn density_gate_thresholds() {
+        assert!((density_gate_confidence(1.0) - 0.6).abs() < 1e-6);
+        assert!(
+            (density_gate_confidence(1.5) - 0.6).abs() < 1e-6,
+            "capped at 0.6"
+        );
+        assert!((density_gate_confidence(0.3) - 0.1).abs() < 1e-6);
+        assert!(
+            (density_gate_confidence(0.2) - 0.1).abs() < 1e-6,
+            "floored at 0.1"
+        );
+        // Linear between: at 0.65 wps → 0.1 + (0.35/0.7)*0.5 = 0.35
+        assert!((density_gate_confidence(0.65) - 0.35).abs() < 1e-3);
     }
 }
