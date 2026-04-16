@@ -1,0 +1,4 @@
+{"events":[
+  {"tStartMs":1000,"dDurationMs":500,"segs":[{"utf8":"Hello","tOffsetMs":0},{"utf8":" ","tOffsetMs":200},{"utf8":"world","tOffsetMs":250}]},
+  {"tStartMs":2000,"dDurationMs":800,"segs":[{"utf8":"how","tOffsetMs":0},{"utf8":" ","tOffsetMs":200},{"utf8":"are","tOffsetMs":300},{"utf8":" ","tOffsetMs":500},{"utf8":"you","tOffsetMs":600}]}
+]}
