@@ -22,31 +22,45 @@ pub fn build_merge_prompt(
     provider_results: &[ProviderResult],
 ) -> (String, String) {
     let system = "You are a lyrics alignment merger. You receive word-level \
-        timestamp results from multiple independent alignment providers for the \
-        same song. Your job: produce a single merged result with the best \
-        possible timing for each word.\n\n\
-        Rules:\n\
-        1. Match each provider's words to the reference text intelligently — \
-           handle contractions (you're = youre), ASR errors (grace vs Grace's), \
-           abbreviations (G.O.D = GOD), dropped words.\n\
-        2. If multiple providers matched a word: use weighted average of their \
-           timings (weights given per provider). Reject any estimate >2000ms \
-           from the median of others.\n\
-        3. If only one provider matched: use it with reduced confidence (0.7x).\n\
-        4. If no provider matched: zero-timed placeholder, confidence 0.\n\
-        5. If gap >2000ms between adjacent words within a line: set display_split=true.\n\
-        6. Return ONLY valid JSON, no markdown fences."
+        timestamp results from multiple independent alignment providers for \
+        the same song. Produce a single merged result with the best possible \
+        timing for each word.\n\n\
+        CRITICAL RULES:\n\
+        1. You MUST return ALL lines from the reference text. Every single \
+           line. Do not skip, summarize, or show examples.\n\
+        2. Match provider words to reference text intelligently \
+           (contractions, ASR errors, abbreviations).\n\
+        3. Multiple providers matched: weighted average of timings. Reject \
+           outliers >2000ms from median.\n\
+        4. Single provider matched: use its timing with confidence scaled \
+           to base_confidence * 0.7.\n\
+        5. No provider matched: zero-timed placeholder, confidence 0.\n\
+        6. Gap >2000ms between adjacent words within a line: set \
+           display_split=true on that line.\n\
+        7. Return ONLY the JSON object. No explanation. No preamble. No \
+           markdown fences. Start your response with { and end with }."
         .to_string();
+
+    // Count reference lines for the explicit instruction
+    let line_count = reference_text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
 
     let mut user = String::new();
     user.push_str(&format!(
-        "Reference text (source: {reference_source}):\n{reference_text}\n\n"
+        "Reference text (source: {reference_source}, {line_count} lines):\n\
+         {reference_text}\n\n"
     ));
     user.push_str("Provider results:\n");
     for pr in provider_results {
         user.push_str(&format!(
-            "\n--- {} (base_confidence in metadata) ---\n",
-            pr.provider_name
+            "\n--- {} (base_confidence: {}) ---\n",
+            pr.provider_name,
+            pr.metadata
+                .get("base_confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.7)
         ));
         for line in &pr.lines {
             let words_str: Vec<String> = line
@@ -57,12 +71,13 @@ pub fn build_merge_prompt(
             user.push_str(&format!("  [{}] {}\n", line.start_ms, words_str.join(" ")));
         }
     }
-    user.push_str(
-        "\nReturn JSON: {\"lines\": [{\"text\": \"...\", \"start_ms\": N, \
-        \"end_ms\": N, \"display_split\": false, \"words\": [{\"text\": \"...\", \
-        \"start_ms\": N, \"end_ms\": N, \"confidence\": 0.95, \"sources_agreed\": 2, \
-        \"spread_ms\": 50}]}]}",
-    );
+    user.push_str(&format!(
+        "\nReturn JSON with EXACTLY {line_count} lines (one per reference line):\n\
+         {{\"lines\": [{{\"text\": \"full line\", \"start_ms\": N, \"end_ms\": N, \
+         \"display_split\": false, \"words\": [{{\"text\": \"word\", \"start_ms\": N, \
+         \"end_ms\": N, \"confidence\": 0.63, \"sources_agreed\": 1, \
+         \"spread_ms\": 0}}]}}]}}"
+    ));
 
     (system, user)
 }

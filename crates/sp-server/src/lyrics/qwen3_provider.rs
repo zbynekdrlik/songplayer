@@ -131,7 +131,7 @@ fn track_to_provider_result(track: &LyricsTrack) -> ProviderResult {
                     .unwrap_or_default(),
             })
             .collect(),
-        metadata: serde_json::json!({"source": track.source}),
+        metadata: serde_json::json!({"source": track.source, "base_confidence": 0.9}),
     }
 }
 
