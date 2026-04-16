@@ -1,5 +1,6 @@
 //! Metadata extraction — Gemini AI provider + title regex parser.
 
+pub mod claude;
 pub mod gemini;
 pub mod parser;
 
