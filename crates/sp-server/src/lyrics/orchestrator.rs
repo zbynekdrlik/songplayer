@@ -40,8 +40,9 @@ impl Orchestrator {
             "orchestrator: starting ensemble alignment"
         );
 
-        // Pick best reference text
-        let (reference_text, reference_source) = self.select_reference_text(ctx);
+        // Reconcile candidate texts into one canonical reference via Claude text-merge
+        let (reference_text, reference_source, _per_line_sources) =
+            self.reconcile_reference_text(ctx).await?;
 
         // Run providers sequentially (cheapest first, ordered by registration)
         let mut results: Vec<ProviderResult> = Vec::new();
@@ -189,20 +190,55 @@ impl Orchestrator {
         Ok(track)
     }
 
-    /// Select the best reference text from candidates.
-    /// Priority: ccli > manual_subs > description > lrclib > autosub
-    fn select_reference_text(&self, ctx: &SongContext) -> (String, String) {
-        let priority = ["ccli", "manual_subs", "description", "lrclib", "autosub"];
-        for source in &priority {
-            if let Some(ct) = ctx.candidate_texts.iter().find(|c| c.source == *source) {
-                return (ct.lines.join("\n"), ct.source.clone());
+    /// Reconcile candidate texts into one canonical reference via Claude text-merge.
+    /// 0 candidates → error; 1 candidate → pass-through; 2+ → Claude merge.
+    ///
+    /// Returns `(joined_text, aggregated_source_label, per_line_sources)`:
+    /// - `joined_text` — one string with lines separated by `\n`, suitable for
+    ///   passing to the timing-merge prompt or a single-provider pass-through
+    /// - `aggregated_source_label` — if all reconciled lines came from the same
+    ///   candidate source, that source; otherwise `"merged:<s1>+<s2>+..."`
+    /// - `per_line_sources` — same length as reconciled lines; useful for
+    ///   audit-log provenance
+    async fn reconcile_reference_text(
+        &self,
+        ctx: &SongContext,
+    ) -> anyhow::Result<(String, String, Vec<String>)> {
+        use crate::lyrics::text_merge::merge_candidate_texts;
+        if ctx.candidate_texts.is_empty() {
+            anyhow::bail!(
+                "reconcile_reference_text: no candidates for {}",
+                ctx.video_id
+            );
+        }
+        let lines = merge_candidate_texts(&self.ai_client, &ctx.candidate_texts).await?;
+        let joined = lines
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Aggregate per-line sources into the reference_source label.
+        let agg_source = {
+            let mut uniq: Vec<&String> = Vec::new();
+            for l in &lines {
+                if !uniq.contains(&&l.source) {
+                    uniq.push(&l.source);
+                }
             }
-        }
-        // Fallback: first available
-        if let Some(ct) = ctx.candidate_texts.first() {
-            return (ct.lines.join("\n"), ct.source.clone());
-        }
-        (String::new(), "none".into())
+            if uniq.len() == 1 {
+                uniq[0].clone()
+            } else {
+                format!(
+                    "merged:{}",
+                    uniq.iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join("+")
+                )
+            }
+        };
+        let per_line_sources = lines.iter().map(|l| l.source.clone()).collect();
+        Ok((joined, agg_source, per_line_sources))
     }
 }
 
@@ -252,41 +288,8 @@ fn compute_gap_stddev_ms(track: &LyricsTrack) -> f32 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn select_reference_text_priority() {
-        let orch = Orchestrator {
-            providers: vec![],
-            ai_client: Arc::new(AiClient::new(crate::ai::AiSettings::default())),
-            cache_dir: PathBuf::from("/tmp"),
-        };
-        let ctx = SongContext {
-            video_id: "test".into(),
-            audio_path: PathBuf::from("/tmp/test.flac"),
-            clean_vocal_path: None,
-            candidate_texts: vec![
-                CandidateText {
-                    source: "autosub".into(),
-                    lines: vec!["autosub text".into()],
-                    has_timing: false,
-                    line_timings: None,
-                },
-                CandidateText {
-                    source: "manual_subs".into(),
-                    lines: vec!["manual text".into()],
-                    has_timing: true,
-                    line_timings: None,
-                },
-            ],
-            autosub_json3: None,
-            duration_ms: 180000,
-        };
-        let (text, source) = orch.select_reference_text(&ctx);
-        assert_eq!(source, "manual_subs");
-        assert_eq!(text, "manual text");
-    }
-
-    #[test]
-    fn select_reference_text_fallback() {
+    #[tokio::test]
+    async fn reconcile_reference_text_single_candidate_short_circuits() {
         let orch = Orchestrator {
             providers: vec![],
             ai_client: Arc::new(AiClient::new(crate::ai::AiSettings::default())),
@@ -297,17 +300,35 @@ mod tests {
             audio_path: PathBuf::from("/tmp/test.flac"),
             clean_vocal_path: None,
             candidate_texts: vec![CandidateText {
-                source: "unknown_source".into(),
-                lines: vec!["fallback text".into()],
+                source: "lrclib".into(),
+                lines: vec!["only text".into()],
                 has_timing: false,
                 line_timings: None,
             }],
             autosub_json3: None,
-            duration_ms: 180000,
+            duration_ms: 180_000,
         };
-        let (text, source) = orch.select_reference_text(&ctx);
-        assert_eq!(source, "unknown_source");
-        assert_eq!(text, "fallback text");
+        let (text, source, _) = orch.reconcile_reference_text(&ctx).await.unwrap();
+        assert_eq!(text, "only text");
+        assert_eq!(source, "lrclib");
+    }
+
+    #[tokio::test]
+    async fn reconcile_reference_text_empty_is_error() {
+        let orch = Orchestrator {
+            providers: vec![],
+            ai_client: Arc::new(AiClient::new(crate::ai::AiSettings::default())),
+            cache_dir: PathBuf::from("/tmp"),
+        };
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![],
+            autosub_json3: None,
+            duration_ms: 180_000,
+        };
+        assert!(orch.reconcile_reference_text(&ctx).await.is_err());
     }
 
     #[test]
