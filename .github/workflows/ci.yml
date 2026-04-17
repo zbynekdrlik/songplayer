@@ -314,9 +314,11 @@ jobs:
           BANNED_LITERALS=(
             '"lrclib+qwen3"'
           )
-          BANNED_CLI=(
-            "--write-auto-subs"
-          )
+          # No banned CLI args at this time. `--write-auto-subs` was
+          # previously banned from the production pipeline but is now a
+          # legitimate arg in `fetch_autosub` (sp-server/src/lyrics/autosub_provider.rs)
+          # since the ensemble includes AutoSubProvider as a 2nd alignment source.
+          BANNED_CLI=()
           BANNED_PY=(
             "def cmd_align("
             "def cmd_transcribe("

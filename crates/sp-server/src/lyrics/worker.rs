@@ -94,6 +94,7 @@ impl LyricsWorker {
         self.current_processing.clone()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn broadcast_stage(
         &self,
         video_id: i64,
