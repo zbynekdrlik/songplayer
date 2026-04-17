@@ -411,9 +411,10 @@ test.describe("FLAC pipeline post-deploy verification", () => {
   }) => {
     // Poll budget covers cold-start bootstrap (~7 min for model downloads)
     // PLUS the worker chewing through the queue serially up to id 148.
-    // Once #148 is persisted as yt_subs+qwen3, a subsequent deploy
-    // doesn't reset it (V10 only resets `yt_subs` partial rows), so
-    // re-runs return the cached track immediately.
+    // Once #148 is persisted as ensemble:qwen3 (or ensemble:qwen3+autosub),
+    // a subsequent deploy at the same LYRICS_PIPELINE_VERSION reuses the
+    // cached track immediately. A version bump invalidates it — the queue
+    // reprocesses and this test polls until it lands again.
     test.setTimeout(63 * 60 * 1000);
 
     // Match by song + artist rather than YouTube ID — the track may be
@@ -511,12 +512,17 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     const track = await findTrack();
     expect(track, "track must exist post-poll").not.toBeNull();
 
-    // Gate 1: source must be the YT-subs chunked-alignment happy path.
+    // Gate 1: source must be the ensemble path with qwen3 running (word-level
+    // alignment). Post-PR#38 the source label is `ensemble:qwen3` (single
+    // provider) or `ensemble:qwen3+autosub` / `ensemble:autosub+qwen3` (2-provider
+    // merge). A bare `yt_subs` or `lrclib` means the worker fell back to
+    // line-level lyrics with no word timings — that's the failure mode we gate
+    // against.
     expect(
-      track!.source,
-      `Expected source "yt_subs+qwen3" (proves new pipeline ran). Got "${track!.source}". ` +
-        `Fallback to LRCLIB means #148 did NOT get word-level karaoke.`,
-    ).toBe("yt_subs+qwen3");
+      track!.source?.includes("qwen3") && track!.source?.startsWith("ensemble:"),
+      `Expected ensemble source including qwen3 (proves word-level ran). Got "${track!.source}". ` +
+        `A bare "yt_subs" or "lrclib" means #148 did NOT get word-level karaoke.`,
+    ).toBe(true);
 
     // Gate 2: line count plausible for this song.
     expect(track!.lines.length).toBeGreaterThanOrEqual(MIN_LINES);
@@ -570,7 +576,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     );
   });
 
-  test("YT-subs quality floor: at least 80% of yt_subs+qwen3 songs have weighted duplicate < 15%", async ({
+  test("YT-subs quality floor: at least 80% of ensemble-qwen3 songs have weighted duplicate < 15%", async ({
     request,
   }) => {
     // Populate gradually as the worker processes the queue. Budget must
@@ -626,14 +632,22 @@ test.describe("FLAC pipeline post-deploy verification", () => {
           const lr = await request.get(`/api/v1/videos/${v.id}/lyrics`);
           if (!lr.ok()) continue;
           const track = (await lr.json()) as Track;
-          if (track.source !== "yt_subs+qwen3") continue;
+          // Accept any ensemble source that includes qwen3 (single-provider
+          // pass-through OR 2-provider merge). Bare yt_subs/lrclib = line-level
+          // fallback, excluded from the word-level quality floor.
+          if (
+            !track.source?.startsWith("ensemble:") ||
+            !track.source.includes("qwen3")
+          ) {
+            continue;
+          }
           scored.set(v.id, weightedDup(track));
         }
       }
       return scored;
     }
 
-    // Wait for at least 8 yt_subs+qwen3 songs before scoring the floor
+    // Wait for at least 8 ensemble-qwen3 songs before scoring the floor
     // — any fewer and the ratio is too noisy. Given ~24 YT-subs songs
     // in the cache, 8 is 1/3 of the set.
     const MIN_SONGS = 8;
@@ -646,13 +660,13 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         async () => {
           scored = await surveyAllYtSubsQwen3();
           console.log(
-            `[yt-subs floor poll] ${scored.size} yt_subs+qwen3 songs @ ${new Date().toISOString()}`,
+            `[yt-subs floor poll] ${scored.size} ensemble-qwen3 songs @ ${new Date().toISOString()}`,
           );
           return scored.size;
         },
         {
           message:
-            `Expected at least ${MIN_SONGS} yt_subs+qwen3 songs on the box, ` +
+            `Expected at least ${MIN_SONGS} ensemble-qwen3 songs on the box, ` +
             `got none in 75 min. Worker stalled or queue empty.`,
           timeout: 75 * 60 * 1000,
           intervals: [60_000],
@@ -669,7 +683,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     const ratio = passing.length / scored.size;
     console.log(
       `yt-subs floor: ${passing.length}/${scored.size} = ${(ratio * 100).toFixed(1)}% ` +
-        `of yt_subs+qwen3 songs have weighted dup < ${FLOOR_QUALITY_PCT}%`,
+        `of ensemble-qwen3 songs have weighted dup < ${FLOOR_QUALITY_PCT}%`,
     );
     console.log(`  PASSING (${passing.length}): ${passing.join(", ")}`);
     if (failing.length > 0) {
@@ -678,7 +692,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
 
     expect(
       ratio,
-      `Only ${(ratio * 100).toFixed(1)}% of yt_subs+qwen3 songs clear the ` +
+      `Only ${(ratio * 100).toFixed(1)}% of ensemble-qwen3 songs clear the ` +
         `${FLOOR_QUALITY_PCT}% duplicate-start threshold (floor requires ${FLOOR_PASS_RATIO * 100}%). ` +
         `Failing: ${failing.join(", ")}`,
     ).toBeGreaterThanOrEqual(FLOOR_PASS_RATIO);
