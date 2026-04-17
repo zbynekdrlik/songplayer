@@ -10,11 +10,12 @@
 use anyhow::Result;
 use reqwest::Client;
 use sp_core::lyrics::LyricsTrack;
+use sp_core::ws::{LyricsProcessingState, ServerMsg};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -40,6 +41,12 @@ pub struct LyricsWorker {
     ai_client: Option<Arc<AiClient>>,
     venv_python: tokio::sync::RwLock<Option<PathBuf>>,
     retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+    /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
+    /// event channel so messages reach all dashboard WS subscribers.
+    events_tx: broadcast::Sender<ServerMsg>,
+    /// Shared state read by `queue_update_loop` so the broadcast `processing`
+    /// field reflects the current song being aligned.
+    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
 }
 
 #[derive(Default)]
@@ -59,6 +66,7 @@ impl LyricsWorker {
         gemini_api_key: String,
         gemini_model: String,
         ai_client: Option<Arc<AiClient>>,
+        events_tx: broadcast::Sender<ServerMsg>,
     ) -> Self {
         let script_path = tools_dir.join("lyrics_worker.py");
         let models_dir = tools_dir.join("hf_models");
@@ -76,7 +84,48 @@ impl LyricsWorker {
             ai_client,
             venv_python: tokio::sync::RwLock::new(None),
             retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
+            events_tx,
+            current_processing: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Snapshot the current processing state for use by queue_update_loop.
+    pub fn current_processing(&self) -> Arc<RwLock<Option<LyricsProcessingState>>> {
+        self.current_processing.clone()
+    }
+
+    async fn broadcast_stage(
+        &self,
+        video_id: i64,
+        youtube_id: &str,
+        song: &str,
+        artist: &str,
+        stage: &str,
+        provider: Option<&str>,
+        started_at_unix_ms: i64,
+    ) {
+        let state = LyricsProcessingState {
+            video_id,
+            youtube_id: youtube_id.into(),
+            song: song.into(),
+            artist: artist.into(),
+            stage: stage.into(),
+            provider: provider.map(|s| s.to_string()),
+            started_at_unix_ms,
+        };
+        // Update shared state so the queue_update_loop's LyricsQueueUpdate carries it.
+        *self.current_processing.write().await = Some(state.clone());
+        // Fire the stage event for subscribers that want immediate transitions.
+        let _ = self.events_tx.send(ServerMsg::LyricsProcessingStage {
+            video_id,
+            youtube_id: state.youtube_id,
+            stage: state.stage,
+            provider: state.provider,
+        });
+    }
+
+    async fn clear_processing(&self) {
+        *self.current_processing.write().await = None;
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -186,6 +235,7 @@ impl LyricsWorker {
                 Some("no_source"),
             )
             .await;
+            self.clear_processing().await;
         }
     }
 
@@ -342,6 +392,11 @@ impl LyricsWorker {
 
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
+        let song = row.song.clone();
+        let artist = row.artist.clone();
+
+        let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
+        let start_instant = std::time::Instant::now();
 
         let ai_client = self.ai_client.clone().ok_or_else(|| {
             anyhow::anyhow!("ai_client not configured; ensemble pipeline requires Claude")
@@ -351,13 +406,36 @@ impl LyricsWorker {
         let autosub_tmp = std::env::temp_dir().join(format!("sp_autosub_{youtube_id}"));
         let _ = tokio::fs::create_dir_all(&autosub_tmp).await;
 
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "gathering",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
         let mut ctx = match self.gather_sources(&row, &autosub_tmp).await {
             Ok(c) => c,
             Err(e) => {
                 let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
+                self.clear_processing().await;
                 return Err(e);
             }
         };
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "text_merge",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
 
         // Preprocess vocals for Qwen3 provider (best-effort; Qwen3 is skipped if this fails).
         let venv_python = self.venv_python.read().await.clone();
@@ -403,6 +481,17 @@ impl LyricsWorker {
             }));
         }
 
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "aligning",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
         let orch = Orchestrator::new(providers, ai_client.clone(), self.cache_dir.clone());
         let mut track = match orch.process_song(&ctx).await {
             Ok(t) => t,
@@ -417,6 +506,7 @@ impl LyricsWorker {
                     .iter()
                     .find(|c| c.has_timing && c.line_timings.is_some());
                 let Some(c) = fallback else {
+                    self.clear_processing().await;
                     return Err(e);
                 };
                 info!(
@@ -451,8 +541,30 @@ impl LyricsWorker {
         let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
         let _ = tokio::fs::remove_file(&wav_path).await;
 
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "translating",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
         // SK translation (Claude → Gemini fallback) — unchanged logic, just extracted.
         self.translate_track(&mut track, &youtube_id).await;
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "persisting",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
 
         // Persist JSON + DB row with pipeline_version + quality_score.
         let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
@@ -481,6 +593,33 @@ impl LyricsWorker {
             quality_score,
             LYRICS_PIPELINE_VERSION
         );
+
+        // Broadcast completion and clear processing state.
+        let provider_count = tokio::fs::read_to_string(
+            &self
+                .cache_dir
+                .join(format!("{youtube_id}_alignment_audit.json")),
+        )
+        .await
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("providers_run")
+                .and_then(|p| p.as_array())
+                .map(|a| a.len())
+        })
+        .unwrap_or(0) as u8;
+        let duration_ms = start_instant.elapsed().as_millis() as u64;
+        let _ = self.events_tx.send(ServerMsg::LyricsCompleted {
+            video_id,
+            youtube_id: youtube_id.clone(),
+            source: track.source.clone(),
+            quality_score,
+            provider_count,
+            duration_ms,
+        });
+        self.clear_processing().await;
+
         Ok(())
     }
 
@@ -578,6 +717,7 @@ impl LyricsWorker {
 pub async fn queue_update_loop(
     pool: sqlx::SqlitePool,
     events_tx: tokio::sync::broadcast::Sender<sp_core::ws::ServerMsg>,
+    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     use crate::lyrics::LYRICS_PIPELINE_VERSION;
@@ -589,12 +729,13 @@ pub async fn queue_update_loop(
                 if let Ok((b0, b1, b2)) =
                     crate::api::lyrics::fetch_queue_counts(&pool, LYRICS_PIPELINE_VERSION).await
                 {
+                    let processing = current_processing.read().await.clone();
                     let _ = events_tx.send(sp_core::ws::ServerMsg::LyricsQueueUpdate {
                         bucket0_count: b0,
                         bucket1_count: b1,
                         bucket2_count: b2,
                         pipeline_version: LYRICS_PIPELINE_VERSION,
-                        processing: None,
+                        processing,
                     });
                 }
             }

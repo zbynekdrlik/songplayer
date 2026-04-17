@@ -311,7 +311,9 @@ pub async fn start(
                     lyrics_gemini_key,
                     lyrics_gemini_model,
                     Some(ai_client_for_dl),
+                    tools_event_tx.clone(),
                 );
+                let current_processing_handle = lyrics_worker.current_processing();
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                 info!("lyrics worker started");
 
@@ -319,6 +321,7 @@ pub async fn start(
                 tokio::spawn(crate::lyrics::worker::queue_update_loop(
                     lyrics_pool_for_loop,
                     tools_event_tx.clone(),
+                    current_processing_handle,
                     lyrics_shutdown.subscribe(),
                 ));
             }
