@@ -565,6 +565,81 @@ impl PlaybackEngine {
         }
     }
 
+    /// Jump to a specific video within a playlist and start playing it.
+    ///
+    /// For custom playlists this also updates `playlists.current_position` so
+    /// the next `Skip` advances to position+1. For youtube playlists the
+    /// column is ignored by the selector — only the pipeline command is
+    /// relevant. The previously-playing video (if any) is pushed onto the
+    /// history stack so `Previous` still walks the history.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn handle_play_video(&mut self, playlist_id: i64, video_id: i64) {
+        // Resolve paths first — if the video row is unknown, no side-effects.
+        let paths = match crate::db::models::get_song_paths(&self.pool, video_id).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                warn!(
+                    playlist_id,
+                    video_id, "PlayVideo: no paths for video; ignoring"
+                );
+                return;
+            }
+            Err(e) => {
+                warn!(playlist_id, video_id, %e, "PlayVideo: DB lookup failed; ignoring");
+                return;
+            }
+        };
+
+        // For custom playlists, bump current_position to the clicked item's
+        // position so Skip continues from the right place.
+        let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
+            .bind(playlist_id)
+            .fetch_optional(&self.pool)
+            .await
+            .unwrap_or_default();
+        if kind.as_deref() == Some("custom") {
+            if let Ok(Some(pos)) =
+                crate::db::models::position_for_playlist_item(&self.pool, playlist_id, video_id)
+                    .await
+            {
+                let _ = sqlx::query("UPDATE playlists SET current_position = ? WHERE id = ?")
+                    .bind(pos)
+                    .bind(playlist_id)
+                    .execute(&self.pool)
+                    .await;
+            }
+        }
+
+        // Send the pipeline command and update engine bookkeeping.
+        let (video_path, audio_path) = paths;
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            if let Some(prev) = pp.current_video_id {
+                if prev != video_id {
+                    pp.history.push_back(prev);
+                }
+            }
+            pp.current_video_id = Some(video_id);
+            pp.state = PlayState::Playing { video_id };
+            info!(
+                playlist_id,
+                video_id, %video_path, %audio_path,
+                "PlayVideo → jumping to clicked song"
+            );
+            pp.pipeline.send(PipelineCommand::Play {
+                video: video_path.into(),
+                audio: audio_path.into(),
+            });
+
+            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                playlist_id,
+                state: WsPlaybackState::Playing,
+                mode: pp.mode,
+            });
+        } else {
+            warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
+        }
+    }
+
     /// Run the engine event loop until shutdown.
     pub async fn run(mut self, mut shutdown: broadcast::Receiver<()>) {
         info!("playback engine started");

@@ -83,6 +83,16 @@ pub enum EngineCommand {
         playlist_id: i64,
         mode: PlaybackMode,
     },
+    /// Jump to a specific video within a playlist and start playing it
+    /// immediately. For custom playlists, also updates
+    /// `playlists.current_position` so subsequent Skip advances from the
+    /// new position. For youtube playlists it behaves like Previous
+    /// (plays the given video but does not affect the random-unplayed
+    /// selector; the next Skip will pick a fresh random video).
+    PlayVideo {
+        playlist_id: i64,
+        video_id: i64,
+    },
 }
 
 /// Status of external tool availability.
@@ -520,6 +530,9 @@ pub async fn start(
                         }
                         EngineCommand::SetMode { playlist_id, mode } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
+                        }
+                        EngineCommand::PlayVideo { playlist_id, video_id } => {
+                            engine.handle_play_video(playlist_id, video_id).await;
                         }
                         EngineCommand::SceneChanged { playlist_id, on_program } => {
                             // VideosAvailable + SceneOn (on program) or
