@@ -154,11 +154,11 @@ async fn get_video_title_info_returns_song_and_artist() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
 
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'url')")
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id, song, artist) VALUES (42, 1, 'abc', 'My Song', 'Artist Name')")
+    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id, song, artist) VALUES (42, 99, 'abc', 'My Song', 'Artist Name')")
         .execute(&pool)
         .await
         .unwrap();
@@ -182,11 +182,11 @@ async fn get_video_title_info_returns_none_for_missing_video() {
 async fn get_video_title_info_handles_null_song_and_artist() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'url')")
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (42, 1, 'abc')")
+    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (42, 99, 'abc')")
         .execute(&pool)
         .await
         .unwrap();
@@ -205,14 +205,14 @@ async fn pipeline_started_event_broadcasts_now_playing() {
 
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'P', 'url', 'SP-p')",
+         VALUES (99, 'P', 'url', 'SP-p')",
     )
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO videos (id, playlist_id, youtube_id, song, artist) \
-         VALUES (42, 1, 'abc123', 'Test Song', 'Test Artist')",
+         VALUES (42, 99, 'abc123', 'Test Song', 'Test Artist')",
     )
     .execute(&pool)
     .await
@@ -229,16 +229,16 @@ async fn pipeline_started_event_broadcasts_now_playing() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "SP-p");
+    engine.ensure_pipeline(99, "SP-p");
 
     // Simulate a video having been selected (so current_video_id is set).
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
+    if let Some(pp) = engine.pipelines.get_mut(&99) {
         pp.current_video_id = Some(42);
     }
 
     engine
         .handle_pipeline_event(
-            1,
+            99,
             PipelineEvent::Started {
                 duration_ms: 180_000,
             },
@@ -258,7 +258,7 @@ async fn pipeline_started_event_broadcasts_now_playing() {
                 position_ms,
                 duration_ms,
             })) => {
-                assert_eq!(playlist_id, 1);
+                assert_eq!(playlist_id, 99);
                 assert_eq!(video_id, 42);
                 assert_eq!(song, "Test Song");
                 assert_eq!(artist, "Test Artist");
@@ -326,7 +326,7 @@ fn should_send_position_update_boundary_checks() {
 async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'u')")
         .execute(&pool)
         .await
         .unwrap();
@@ -342,8 +342,8 @@ async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "TestNDI");
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
+    engine.ensure_pipeline(99, "TestNDI");
+    if let Some(pp) = engine.pipelines.get_mut(&99) {
         pp.current_video_id = Some(7);
         pp.cached_song = "song".into();
         pp.cached_artist = "artist".into();
@@ -355,7 +355,7 @@ async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
     }
 
     // Case A: duration_ms = 0 → must use cached 180_000.
-    engine.maybe_broadcast_position_update(1, 100, 0);
+    engine.maybe_broadcast_position_update(99, 100, 0);
     match ws_rx.try_recv() {
         Ok(ServerMsg::NowPlaying {
             position_ms: 100,
@@ -366,12 +366,12 @@ async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
     }
 
     // Reset last-broadcast so the throttle helper lets the next call through.
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
+    if let Some(pp) = engine.pipelines.get_mut(&99) {
         pp.last_now_playing_broadcast = None;
     }
 
     // Case B: duration_ms = 120_000 (non-zero) → must use 120_000.
-    engine.maybe_broadcast_position_update(1, 200, 120_000);
+    engine.maybe_broadcast_position_update(99, 200, 120_000);
     match ws_rx.try_recv() {
         Ok(ServerMsg::NowPlaying {
             position_ms: 200,
@@ -394,7 +394,7 @@ async fn apply_event_triggers_state_change_and_broadcast() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
 
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'u')")
         .execute(&pool)
         .await
         .unwrap();
@@ -410,13 +410,13 @@ async fn apply_event_triggers_state_change_and_broadcast() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "TestNDI");
+    engine.ensure_pipeline(99, "TestNDI");
 
     // Idle + VideosAvailable → WaitingForScene (state change).
-    engine.apply_event(1, PlayEvent::VideosAvailable).await;
+    engine.apply_event(99, PlayEvent::VideosAvailable).await;
 
     assert_eq!(
-        engine.pipelines.get(&1).unwrap().state,
+        engine.pipelines.get(&99).unwrap().state,
         PlayState::WaitingForScene,
         "apply_event should have advanced the state"
     );
@@ -427,7 +427,7 @@ async fn apply_event_triggers_state_change_and_broadcast() {
         Ok(ServerMsg::PlaybackStateChanged {
             playlist_id, state, ..
         }) => {
-            assert_eq!(playlist_id, 1);
+            assert_eq!(playlist_id, 99);
             assert_eq!(state, WsPlaybackState::WaitingForScene);
         }
         other => panic!("expected PlaybackStateChanged(WaitingForScene), got {other:?}"),
@@ -442,7 +442,7 @@ async fn apply_event_no_broadcast_when_state_unchanged() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
 
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'u')")
         .execute(&pool)
         .await
         .unwrap();
@@ -458,14 +458,14 @@ async fn apply_event_no_broadcast_when_state_unchanged() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "TestNDI");
+    engine.ensure_pipeline(99, "TestNDI");
 
     // First transition: Idle → WaitingForScene — broadcast expected.
-    engine.apply_event(1, PlayEvent::VideosAvailable).await;
+    engine.apply_event(99, PlayEvent::VideosAvailable).await;
     let _first = ws_rx.try_recv().expect("first transition broadcasts");
 
     // Second VideosAvailable: state stays WaitingForScene — NO broadcast.
-    engine.apply_event(1, PlayEvent::VideosAvailable).await;
+    engine.apply_event(99, PlayEvent::VideosAvailable).await;
     assert!(
         ws_rx.try_recv().is_err(),
         "state unchanged: no PlaybackStateChanged should be broadcast"
@@ -485,14 +485,14 @@ async fn position_events_are_throttled() {
 
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'P', 'url', 'SP-p')",
+         VALUES (99, 'P', 'url', 'SP-p')",
     )
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO videos (id, playlist_id, youtube_id, song, artist) \
-         VALUES (42, 1, 'abc123', 'Song', 'Artist')",
+         VALUES (42, 99, 'abc123', 'Song', 'Artist')",
     )
     .execute(&pool)
     .await
@@ -509,14 +509,14 @@ async fn position_events_are_throttled() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "SP-p");
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
+    engine.ensure_pipeline(99, "SP-p");
+    if let Some(pp) = engine.pipelines.get_mut(&99) {
         pp.current_video_id = Some(42);
     }
 
     engine
         .handle_pipeline_event(
-            1,
+            99,
             PipelineEvent::Started {
                 duration_ms: 180_000,
             },
@@ -530,7 +530,7 @@ async fn position_events_are_throttled() {
     for i in 1..=10u64 {
         engine
             .handle_pipeline_event(
-                1,
+                99,
                 PipelineEvent::Position {
                     position_ms: i * 10,
                     duration_ms: 180_000,
@@ -553,7 +553,7 @@ async fn position_events_are_throttled() {
     tokio::time::sleep(std::time::Duration::from_millis(550)).await;
     engine
         .handle_pipeline_event(
-            1,
+            99,
             PipelineEvent::Position {
                 position_ms: 700,
                 duration_ms: 180_000,
@@ -576,7 +576,7 @@ async fn position_events_are_throttled() {
 async fn handle_previous_with_empty_history_is_noop() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'u')")
         .execute(&pool)
         .await
         .unwrap();
@@ -592,13 +592,13 @@ async fn handle_previous_with_empty_history_is_noop() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "TestNDI");
+    engine.ensure_pipeline(99, "TestNDI");
 
     // Fresh pipeline: current_video_id = None, history = [].
-    engine.handle_previous(1).await;
+    engine.handle_previous(99).await;
 
     // State unchanged.
-    let pp = engine.pipelines.get(&1).unwrap();
+    let pp = engine.pipelines.get(&99).unwrap();
     assert_eq!(pp.state, PlayState::Idle);
     assert!(pp.current_video_id.is_none());
     assert!(pp.history.is_empty());
@@ -617,7 +617,7 @@ async fn handle_previous_with_empty_history_is_noop() {
 async fn handle_previous_pops_history_and_plays() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'u')")
         .execute(&pool)
         .await
         .unwrap();
@@ -626,7 +626,7 @@ async fn handle_previous_pops_history_and_plays() {
     for vid in [10_i64, 11, 12] {
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
-             VALUES (?, 1, ?, 1, ?, ?)",
+             VALUES (?, 99, ?, 1, ?, ?)",
         )
         .bind(vid)
         .bind(format!("yt{vid}"))
@@ -648,10 +648,10 @@ async fn handle_previous_pops_history_and_plays() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "TestNDI");
+    engine.ensure_pipeline(99, "TestNDI");
 
     // Simulate having played 10, 11, 12 in order. Current = 12, history = [10, 11].
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
+    if let Some(pp) = engine.pipelines.get_mut(&99) {
         pp.history.push_back(10);
         pp.history.push_back(11);
         pp.current_video_id = Some(12);
@@ -659,9 +659,9 @@ async fn handle_previous_pops_history_and_plays() {
     }
 
     // First Previous: should play 11, leaving history = [10].
-    engine.handle_previous(1).await;
+    engine.handle_previous(99).await;
     {
-        let pp = engine.pipelines.get(&1).unwrap();
+        let pp = engine.pipelines.get(&99).unwrap();
         assert_eq!(pp.current_video_id, Some(11));
         assert_eq!(pp.state, PlayState::Playing { video_id: 11 });
         assert_eq!(pp.history.len(), 1);
@@ -669,7 +669,7 @@ async fn handle_previous_pops_history_and_plays() {
     }
     match ws_rx.try_recv() {
         Ok(ServerMsg::PlaybackStateChanged {
-            playlist_id: 1,
+            playlist_id: 99,
             state,
             ..
         }) => assert_eq!(state, WsPlaybackState::Playing),
@@ -677,9 +677,9 @@ async fn handle_previous_pops_history_and_plays() {
     }
 
     // Second Previous: should play 10, leaving history = [].
-    engine.handle_previous(1).await;
+    engine.handle_previous(99).await;
     {
-        let pp = engine.pipelines.get(&1).unwrap();
+        let pp = engine.pipelines.get(&99).unwrap();
         assert_eq!(pp.current_video_id, Some(10));
         assert!(pp.history.is_empty());
     }
@@ -687,9 +687,9 @@ async fn handle_previous_pops_history_and_plays() {
     let _ = ws_rx.try_recv();
 
     // Third Previous: history now empty, no-op.
-    engine.handle_previous(1).await;
+    engine.handle_previous(99).await;
     {
-        let pp = engine.pipelines.get(&1).unwrap();
+        let pp = engine.pipelines.get(&99).unwrap();
         // current_video_id stays at 10, history still empty.
         assert_eq!(pp.current_video_id, Some(10));
         assert!(pp.history.is_empty());
@@ -706,7 +706,7 @@ async fn handle_previous_pops_history_and_plays() {
 async fn history_capacity_is_bounded() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'u')")
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'P', 'u')")
         .execute(&pool)
         .await
         .unwrap();
@@ -722,12 +722,12 @@ async fn history_capacity_is_bounded() {
         resolume_tx,
         ws_tx,
     );
-    engine.ensure_pipeline(1, "TestNDI");
+    engine.ensure_pipeline(99, "TestNDI");
 
     // Simulate the SelectAndPlay bookkeeping for `CAPACITY + 3` videos
     // by directly pushing to the history stack the same way the real
     // code path does.
-    if let Some(pp) = engine.pipelines.get_mut(&1) {
+    if let Some(pp) = engine.pipelines.get_mut(&99) {
         for i in 0..(PREVIOUS_HISTORY_CAPACITY as i64 + 3) {
             pp.history.push_back(i);
             while pp.history.len() > PREVIOUS_HISTORY_CAPACITY {
