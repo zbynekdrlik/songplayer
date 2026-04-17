@@ -21,6 +21,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (10, MIGRATION_V10),
     (11, MIGRATION_V11),
     (12, MIGRATION_V12),
+    (13, MIGRATION_V13),
 ];
 
 const MIGRATION_V1: &str = "
@@ -170,6 +171,40 @@ ALTER TABLE videos ADD COLUMN lyrics_quality_score REAL;
 ALTER TABLE videos ADD COLUMN lyrics_manual_priority INTEGER NOT NULL DEFAULT 0;
 ";
 
+// V13 introduces the "custom" playlist kind for the Live/DJ-style set list.
+//
+// - `kind` text defaults to 'youtube' so every existing playlist keeps its
+//   behavior. `current_position` is only meaningful for kind='custom' and
+//   tracks which item in the set list was last played (so Skip advances).
+// - `playlist_items` stores ordered references to existing videos. Videos
+//   themselves still live under their *home* youtube playlist; this table
+//   just names positions.
+// - The 'ytlive' row is the single pre-created custom playlist used for
+//   tonight's live event. youtube_url is the empty-string sentinel
+//   (the column is NOT NULL; avoiding a table recreate keeps the
+//   migration safe).
+const MIGRATION_V13: &str = "
+ALTER TABLE playlists ADD COLUMN kind TEXT NOT NULL DEFAULT 'youtube';
+ALTER TABLE playlists ADD COLUMN current_position INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE playlist_items (
+    playlist_id INTEGER NOT NULL,
+    video_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    added_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (playlist_id, position),
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX idx_playlist_items_playlist_video
+    ON playlist_items (playlist_id, video_id);
+
+INSERT OR IGNORE INTO playlists
+    (name, youtube_url, ndi_output_name, playback_mode, is_active, kind)
+VALUES
+    ('ytlive', '', 'SP-live', 'continuous', 1, 'custom');
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -253,7 +288,7 @@ mod tests {
     async fn pool_creation_and_migration() {
         let pool = setup().await;
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 12);
+        assert_eq!(ver, 13);
     }
 
     #[tokio::test]
@@ -262,7 +297,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap(); // second run must not fail
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 12);
+        assert_eq!(ver, 13);
     }
 
     #[tokio::test]
@@ -514,11 +549,16 @@ mod tests {
 
         // Get active playlists — verify all fields are populated
         let active = models::get_active_playlists(&pool).await.unwrap();
-        assert_eq!(active.len(), 1);
-        assert_eq!(active[0].id, playlist.id);
-        assert_eq!(active[0].name, "Worship");
-        assert_eq!(active[0].youtube_url, "https://yt.com/pl1");
-        assert!(active[0].is_active);
+        // V13 seeds ytlive, so we now have 2 active playlists
+        assert_eq!(active.len(), 2);
+        let worship = active
+            .iter()
+            .find(|p| p.name == "Worship")
+            .expect("should find Worship playlist");
+        assert_eq!(worship.id, playlist.id);
+        assert_eq!(worship.name, "Worship");
+        assert_eq!(worship.youtube_url, "https://yt.com/pl1");
+        assert!(worship.is_active);
 
         // Upsert video
         let video = models::upsert_video(&pool, playlist.id, "abc123", Some("My Song"))
@@ -646,8 +686,14 @@ mod tests {
             .unwrap();
 
         let playlists = models::get_active_playlists(&pool).await.unwrap();
-        assert_eq!(playlists.len(), 1);
-        assert_eq!(playlists[0].ndi_output_name, "SP-test");
+        // V13 seeds ytlive, so we now have 2 active playlists
+        assert_eq!(playlists.len(), 2);
+        // Find the test playlist we inserted
+        let p = playlists
+            .iter()
+            .find(|pl| pl.name == "P")
+            .expect("should find test playlist");
+        assert_eq!(p.ndi_output_name, "SP-test");
     }
 
     #[tokio::test]
@@ -657,7 +703,7 @@ mod tests {
 
         sqlx::query(
             "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
-             VALUES (1, 'test', 'u', 'n', 1)",
+             VALUES (99, 'test', 'u', 'n', 1)",
         )
         .execute(&pool)
         .await
@@ -665,9 +711,9 @@ mod tests {
 
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, title, has_lyrics, lyrics_source) \
-             VALUES (1, 1, 'aaaaaaaaaaa', 't', 1, 'lrclib+qwen3'), \
-                    (2, 1, 'bbbbbbbbbbb', 't', 1, 'lrclib'), \
-                    (3, 1, 'ccccccccccc', 't', 0, NULL)",
+             VALUES (1, 99, 'aaaaaaaaaaa', 't', 1, 'lrclib+qwen3'), \
+                    (2, 99, 'bbbbbbbbbbb', 't', 1, 'lrclib'), \
+                    (3, 99, 'ccccccccccc', 't', 0, NULL)",
         )
         .execute(&pool)
         .await
@@ -980,6 +1026,57 @@ mod tests {
         let pool = create_memory_pool().await.unwrap();
         run_migrations(&pool).await.unwrap();
         let ver = current_schema_version(&pool).await.unwrap();
-        assert_eq!(ver, 12);
+        assert_eq!(ver, 13);
+    }
+
+    #[tokio::test]
+    async fn migration_v13_adds_kind_and_current_position_columns() {
+        let pool = setup().await;
+        let cols: Vec<String> = sqlx::query("PRAGMA table_info(playlists)")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get::<String, _>("name"))
+            .collect();
+        assert!(cols.contains(&"kind".to_string()), "columns: {cols:?}");
+        assert!(
+            cols.contains(&"current_position".to_string()),
+            "columns: {cols:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_v13_creates_playlist_items_table() {
+        let pool = setup().await;
+        let row = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='playlist_items'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(row.is_some(), "playlist_items table should exist");
+    }
+
+    #[tokio::test]
+    async fn migration_v13_seeds_ytlive_custom_playlist() {
+        let pool = setup().await;
+        let row = sqlx::query(
+            "SELECT kind, ndi_output_name, playback_mode, is_active, current_position
+             FROM playlists WHERE name = 'ytlive'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let kind: String = row.get("kind");
+        let ndi: String = row.get("ndi_output_name");
+        let mode: String = row.get("playback_mode");
+        let is_active: i64 = row.get("is_active");
+        let pos: i64 = row.get("current_position");
+        assert_eq!(kind, "custom");
+        assert_eq!(ndi, "SP-live");
+        assert_eq!(mode, "continuous");
+        assert_eq!(is_active, 1);
+        assert_eq!(pos, 0);
     }
 }
