@@ -29,12 +29,18 @@ pub async fn get_next_video_for_lyrics(
 }
 
 async fn fetch_bucket_manual(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>> {
+    // Skip rows the worker has already tried and bailed on — mark_video_lyrics
+    // on the failure path does NOT clear manual_priority, so without this
+    // filter a failed manual-reprocess loops forever.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.lyrics_manual_priority = 1 AND p.is_active = 1 AND v.normalized = 1 \
+         WHERE v.lyrics_manual_priority = 1 \
+               AND (v.lyrics_source IS NULL \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source')) \
+               AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.id ASC LIMIT 1",
     )
     .fetch_optional(pool)
@@ -236,6 +242,31 @@ mod tests {
         assert!(
             get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
             "un-normalized videos must be filtered from every bucket"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_bucket_skips_failed_songs_so_user_reprocess_does_not_loop() {
+        // Regression: without this, clicking "Reprocess" on a song that has
+        // no text sources (no yt_subs, no LRCLIB) would loop forever in
+        // bucket 0 — mark_video_lyrics on failure does not clear
+        // manual_priority, so the selector re-picks it on every tick.
+        // The selector must skip rows marked as previously-failed so the
+        // manual queue advances even for no-source songs.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_manual_priority) VALUES \
+                 (1, 1, 'manual_failed', 1, 0, 'no_source', 1), \
+                 (2, 1, 'manual_retry',  1, 0, NULL,        1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "manual_retry",
+            "manual bucket must skip previously-failed songs so user-triggered reprocess doesn't loop"
         );
     }
 
