@@ -10,7 +10,8 @@ use sqlx::{Row, SqlitePool};
 /// Return all playlists where `is_active = 1`.
 pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, is_active
+        "SELECT id, name, youtube_url, ndi_output_name, is_active,
+                playback_mode, kind, current_position
          FROM playlists WHERE is_active = 1 ORDER BY id",
     )
     .fetch_all(pool)
@@ -23,7 +24,10 @@ pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sq
             name: r.get("name"),
             youtube_url: r.get("youtube_url"),
             ndi_output_name: r.get::<String, _>("ndi_output_name"),
+            playback_mode: r.get::<String, _>("playback_mode"),
             is_active: r.get::<i32, _>("is_active") != 0,
+            kind: r.get::<String, _>("kind"),
+            current_position: r.get::<i64, _>("current_position"),
             ..Default::default()
         })
         .collect())
@@ -36,7 +40,9 @@ pub async fn insert_playlist(
     youtube_url: &str,
 ) -> Result<Playlist, sqlx::Error> {
     let row = sqlx::query(
-        "INSERT INTO playlists (name, youtube_url) VALUES (?, ?) RETURNING id, name, youtube_url, is_active",
+        "INSERT INTO playlists (name, youtube_url)
+         VALUES (?, ?)
+         RETURNING id, name, youtube_url, is_active, playback_mode, kind, current_position",
     )
     .bind(name)
     .bind(youtube_url)
@@ -47,7 +53,10 @@ pub async fn insert_playlist(
         id: row.get("id"),
         name: row.get("name"),
         youtube_url: row.get("youtube_url"),
+        playback_mode: row.get::<String, _>("playback_mode"),
         is_active: row.get::<i32, _>("is_active") != 0,
+        kind: row.get::<String, _>("kind"),
+        current_position: row.get::<i64, _>("current_position"),
         ..Default::default()
     })
 }
@@ -655,5 +664,30 @@ mod tests {
             q, None,
             "fallback path must write NULL, not 0.0 — 0.0 poisons the NULLS FIRST queue ordering"
         );
+    }
+
+    #[tokio::test]
+    async fn get_active_playlists_includes_ytlive_with_kind_custom() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        let active = get_active_playlists(&pool).await.unwrap();
+        let ytlive = active
+            .iter()
+            .find(|p| p.name == "ytlive")
+            .expect("ytlive should be pre-seeded as active");
+        assert_eq!(ytlive.kind, "custom");
+        assert_eq!(ytlive.current_position, 0);
+        assert_eq!(ytlive.ndi_output_name, "SP-live");
+    }
+
+    #[tokio::test]
+    async fn insert_playlist_defaults_kind_to_youtube() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        let created = insert_playlist(&pool, "TestYT", "https://yt.com/test")
+            .await
+            .unwrap();
+        assert_eq!(created.kind, "youtube");
+        assert_eq!(created.current_position, 0);
     }
 }
