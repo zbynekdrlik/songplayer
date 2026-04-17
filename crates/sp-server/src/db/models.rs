@@ -597,13 +597,13 @@ mod tests {
     async fn mark_video_lyrics_complete_writes_all_fields() {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
-        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'p', 'u')")
             .execute(&pool)
             .await
             .unwrap();
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, lyrics_manual_priority) \
-                     VALUES (1, 1, 'abc', 1, 1)",
+                     VALUES (1, 99, 'abc', 1, 1)",
         )
         .execute(&pool)
         .await
@@ -639,13 +639,13 @@ mod tests {
     async fn mark_complete_with_none_quality_writes_null_not_zero() {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
-        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'p', 'u')")
             .execute(&pool)
             .await
             .unwrap();
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
-                     VALUES (1, 1, 'abc', 1)",
+                     VALUES (1, 99, 'abc', 1)",
         )
         .execute(&pool)
         .await
