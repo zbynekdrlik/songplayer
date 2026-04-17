@@ -12,6 +12,9 @@ use tower::ServiceExt;
 async fn setup() -> (SqlitePool, i64, i64, i64) {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
+    crate::startup::ensure_live_playlist_exists(&pool)
+        .await
+        .unwrap();
 
     let yt = crate::db::models::insert_playlist(&pool, "src", "https://yt.com/src")
         .await

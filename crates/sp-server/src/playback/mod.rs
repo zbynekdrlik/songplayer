@@ -981,3 +981,7 @@ async fn load_lyrics_for_video(
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_play_video.rs"]
+mod tests_play_video;

@@ -802,11 +802,14 @@ mod tests {
     async fn get_active_playlists_includes_ytlive_with_kind_custom() {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
         let active = get_active_playlists(&pool).await.unwrap();
         let ytlive = active
             .iter()
             .find(|p| p.name == "ytlive")
-            .expect("ytlive should be pre-seeded as active");
+            .expect("ytlive should exist after ensure_live_playlist_exists");
         assert_eq!(ytlive.kind, "custom");
         assert_eq!(ytlive.current_position, 0);
         assert_eq!(ytlive.ndi_output_name, "SP-live");
@@ -827,6 +830,9 @@ mod tests {
     async fn append_item_assigns_next_position() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
         let yt = insert_playlist(&pool, "src", "https://yt.com/src")
             .await
             .unwrap();
@@ -848,6 +854,9 @@ mod tests {
     async fn append_item_duplicate_errors() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
         let yt = insert_playlist(&pool, "src", "https://yt.com/src")
             .await
             .unwrap();
@@ -866,6 +875,9 @@ mod tests {
     async fn remove_item_compacts_positions() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
         let yt = insert_playlist(&pool, "src", "https://yt.com/src")
             .await
             .unwrap();
@@ -904,6 +916,9 @@ mod tests {
     async fn list_playlist_items_returns_rows_in_position_order() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
         let yt = insert_playlist(&pool, "src", "https://yt.com/src")
             .await
             .unwrap();
@@ -927,6 +942,9 @@ mod tests {
     async fn position_for_video_lookup() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
         let yt = insert_playlist(&pool, "src", "https://yt.com/src")
             .await
             .unwrap();

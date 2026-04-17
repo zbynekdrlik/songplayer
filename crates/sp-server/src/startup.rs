@@ -20,6 +20,26 @@ use sqlx::{Row, SqlitePool};
 use crate::SyncRequest;
 use crate::downloader::cache;
 
+/// Ensures the single pre-created `ytlive` custom playlist exists.
+/// Idempotent: a no-op when the row is already present.
+///
+/// Previously this row was seeded inside migration V13, but that caused
+/// pre-existing tests (which call `run_migrations` on an empty pool
+/// and count rows or hard-code playlist_id=1) to regress. Seeding in
+/// startup keeps migrations pure while guaranteeing the row exists
+/// whenever the server is actually running.
+pub async fn ensure_live_playlist_exists(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO playlists
+            (name, youtube_url, ndi_output_name, playback_mode, is_active, kind)
+         SELECT 'ytlive', '', 'SP-live', 'continuous', 1, 'custom'
+         WHERE NOT EXISTS (SELECT 1 FROM playlists WHERE name = 'ytlive')",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Walk the cache directory, categorise every file, and:
 ///
 /// * delete legacy single-file `.mp4`s (from before the FLAC migration),
@@ -136,8 +156,11 @@ mod sync_filter_tests {
     async fn startup_sync_skips_custom_playlists() {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
+        // Seed the ytlive custom playlist (normally done by ensure_live_playlist_exists
+        // at server startup, not by migrations).
+        ensure_live_playlist_exists(&pool).await.unwrap();
 
-        // Insert one youtube playlist alongside the pre-seeded ytlive custom one.
+        // Insert one youtube playlist alongside the custom ytlive one.
         db::models::insert_playlist(&pool, "ytfast", "https://yt.com/fast")
             .await
             .unwrap();
@@ -157,5 +180,49 @@ mod sync_filter_tests {
             "only youtube playlists should be synced"
         );
         assert_eq!(received_urls[0], "https://yt.com/fast");
+    }
+
+    #[tokio::test]
+    async fn ensure_live_playlist_is_idempotent_and_creates_ytlive() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        // Before: no ytlive row.
+        let before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM playlists WHERE name = 'ytlive'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(before, 0);
+
+        // First call inserts.
+        ensure_live_playlist_exists(&pool).await.unwrap();
+        let after_first: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM playlists WHERE name = 'ytlive'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after_first, 1);
+
+        // Second call is a no-op (idempotent).
+        ensure_live_playlist_exists(&pool).await.unwrap();
+        let after_second: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM playlists WHERE name = 'ytlive'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after_second, 1);
+
+        // Row has the expected kind + ndi_output_name.
+        let row = sqlx::query(
+            "SELECT kind, ndi_output_name, playback_mode FROM playlists WHERE name = 'ytlive'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        use sqlx::Row;
+        assert_eq!(row.get::<String, _>("kind"), "custom");
+        assert_eq!(row.get::<String, _>("ndi_output_name"), "SP-live");
+        assert_eq!(row.get::<String, _>("playback_mode"), "continuous");
     }
 }
