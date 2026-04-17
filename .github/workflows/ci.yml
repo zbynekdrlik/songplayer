@@ -546,7 +546,7 @@ jobs:
         shell: powershell
         run: |
           $cacheDir = "C:\ProgramData\SongPlayer\cache"
-          $toolsDir = "C:\ProgramData\SongPlayer\tools"
+          $toolsDir = "C:\ProgramData\SongPlayer\cache\tools"
           $outFile  = "C:\ProgramData\SongPlayer\baseline_before.json"
           $pyScript = "$toolsDir\measure_lyrics_quality.py"
           if (-not (Test-Path $pyScript)) {
@@ -1281,7 +1281,7 @@ jobs:
         shell: powershell
         run: |
           $cacheDir = "C:\ProgramData\SongPlayer\cache"
-          $toolsDir = "C:\ProgramData\SongPlayer\tools"
+          $toolsDir = "C:\ProgramData\SongPlayer\cache\tools"
           $outFile  = "C:\ProgramData\SongPlayer\measure_after.json"
           $pyScript = "$toolsDir\measure_lyrics_quality.py"
           if (-not (Test-Path $pyScript)) {
