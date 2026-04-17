@@ -109,6 +109,23 @@ pub async fn put_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), St
     Ok(())
 }
 
+/// POST JSON to `path` and discard the response body.
+///
+/// Used for playback control endpoints that accept a JSON body but
+/// reply with `204 No Content`.
+pub async fn post_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
+    let resp = Request::post(path)
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("POST {} → {}", path, resp.status()));
+    }
+    Ok(())
+}
+
 // ── Lyrics API helpers ────────────────────────────────────────────────────────
 
 /// GET the lyrics pipeline queue status.
@@ -159,4 +176,37 @@ pub async fn post_reprocess_all_stale() -> Result<serde_json::Value, String> {
 /// POST to clear the manual (bucket 0) lyrics queue.
 pub async fn post_clear_manual_queue() -> Result<serde_json::Value, String> {
     post_json("/api/v1/lyrics/clear-manual-queue", &serde_json::json!({})).await
+}
+
+// ── Live playlist API helpers ─────────────────────────────────────────────────
+
+/// GET all set-list items for a custom playlist.
+pub async fn get_live_items(playlist_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    get(&format!("/api/v1/playlists/{playlist_id}/items")).await
+}
+
+/// POST to append a video to a custom playlist's set list.
+pub async fn post_live_add_item(
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<serde_json::Value, String> {
+    post_json(
+        &format!("/api/v1/playlists/{playlist_id}/items"),
+        &serde_json::json!({ "video_id": video_id }),
+    )
+    .await
+}
+
+/// DELETE a video from a custom playlist.
+pub async fn delete_live_item(playlist_id: i64, video_id: i64) -> Result<(), String> {
+    delete(&format!("/api/v1/playlists/{playlist_id}/items/{video_id}")).await
+}
+
+/// POST to jump-and-play a specific video on a custom playlist.
+pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(), String> {
+    post_json_empty(
+        &format!("/api/v1/playlists/{playlist_id}/play-video"),
+        &serde_json::json!({ "video_id": video_id }),
+    )
+    .await
 }
