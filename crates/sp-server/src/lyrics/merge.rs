@@ -43,12 +43,20 @@ pub fn build_merge_prompt(
            one per reference word.\n\
         2. Match provider words to reference text intelligently \
            (contractions, ASR errors, abbreviations).\n\
-        3. Multiple providers matched: weighted average of timings. Reject \
-           outliers >2000ms from median.\n\
-        4. Single provider matched: use its timing with confidence scaled \
-           to base_confidence * 0.7.\n\
-        5. No provider matched: zero-timed placeholder, confidence 0.\n\
-        6. Return ONLY the JSON object. No explanation. No preamble. No \
+        3. Providers have DIFFERENT RELIABILITY — see each provider's \
+           base_confidence. Weight timings by base_confidence^2, NOT equal average. \
+           Example: qwen3 at 0.7 and autosub at 0.3 → qwen3 gets weight 0.49, autosub \
+           gets weight 0.09 (about 5:1 in favor of qwen3).\n\
+        4. If providers disagree by >1000ms at a word, DO NOT average — take the timing \
+           from the higher-base_confidence provider and emit c = that provider's base * 0.9 \
+           (the disagreement itself is signal that something is noisy).\n\
+        5. If providers agree (within 500ms), emit the weighted average from rule 3 and \
+           set c = min(1.0, max(base_conf of participating providers) * 1.2) — agreement \
+           across providers IS positive signal.\n\
+        6. Single provider matched: use its timing with c = base_confidence * 0.7.\n\
+        7. No provider matched: s=0, e=0, c=0.\n\
+        8. Reject outliers >2000ms from median of participating providers.\n\
+        9. Return ONLY the JSON object. No explanation. No preamble. No \
            markdown fences. Start your response with {{ and end with }}."
     );
 
@@ -221,6 +229,34 @@ pub async fn merge_provider_results(
         })
         .collect();
 
+    // Diagnostic: if merge confidence is worse than what a single best provider
+    // would have given on the pass-through path (base_confidence * 0.7), log a
+    // warning so operators can spot songs where the ensemble hurt rather than helped.
+    let avg_merged_confidence: f32 = if details.is_empty() {
+        0.0
+    } else {
+        details.iter().map(|d| d.merged_confidence).sum::<f32>() / details.len() as f32
+    };
+    let best_single_pass_through: f32 = provider_results
+        .iter()
+        .map(|pr| {
+            pr.metadata
+                .get("base_confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.7) as f32
+                * 0.7
+        })
+        .fold(0.0_f32, f32::max);
+    if avg_merged_confidence < best_single_pass_through {
+        warn!(
+            avg_merged_confidence,
+            best_single_pass_through,
+            provider_count = provider_results.len(),
+            "merge: ensemble confidence lower than best single-provider pass-through — \
+             providers may have disagreed noisily; consider raising density gate"
+        );
+    }
+
     Ok((track, details))
 }
 
@@ -269,6 +305,39 @@ mod tests {
         assert!(user.contains("manual_subs"));
         assert!(user.contains("qwen3"));
         assert!(user.contains("Hello@1000ms"));
+    }
+
+    #[test]
+    fn build_merge_prompt_system_emphasizes_confidence_weighting() {
+        // Prevents regression on the rule that Claude must weight by base_confidence
+        // squared — not blindly average the providers. This is what caused the
+        // h-A1Tzkjsi4 regression where autosub-heavy averaging dragged a song's
+        // conf below single-provider baseline.
+        let results = vec![
+            ProviderResult {
+                provider_name: "qwen3".into(),
+                lines: vec![],
+                metadata: serde_json::json!({"base_confidence": 0.7}),
+            },
+            ProviderResult {
+                provider_name: "autosub".into(),
+                lines: vec![],
+                metadata: serde_json::json!({"base_confidence": 0.3}),
+            },
+        ];
+        let (system, _) = build_merge_prompt("word one two", "m", &results);
+        assert!(
+            system.contains("base_confidence^2"),
+            "system prompt must tell Claude to weight by base_confidence squared"
+        );
+        assert!(
+            system.contains("disagree by >1000ms"),
+            "system prompt must instruct high-confidence preference on disagreement"
+        );
+        assert!(
+            system.contains("5:1"),
+            "system prompt must give a concrete example ratio"
+        );
     }
 
     #[test]
