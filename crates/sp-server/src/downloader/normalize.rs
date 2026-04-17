@@ -80,6 +80,11 @@ pub async fn normalize_audio(
 /// Pulled out of `normalize_audio` so it can be asserted against in unit
 /// tests without spawning a subprocess.
 pub(crate) fn build_pass2_args(af_filter: &str, input: &Path, output: &Path) -> Vec<OsString> {
+    // `-ar 48000 -ac 2` forces the FLAC output to 48 kHz stereo. Without
+    // this, ffmpeg preserves the source sample rate, which for some YouTube
+    // videos is 192 kHz — and `sp_decoder::split_sync` hard-requires 48 kHz.
+    // Mismatched rows fail decode with "audio sample rate must be 48000,
+    // got 192000" and the pipeline parks.
     vec![
         "-i".into(),
         input.as_os_str().to_os_string(),
@@ -87,6 +92,10 @@ pub(crate) fn build_pass2_args(af_filter: &str, input: &Path, output: &Path) -> 
         af_filter.into(),
         "-c:a".into(),
         "flac".into(),
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "2".into(),
         "-compression_level".into(),
         "5".into(),
         "-y".into(),
@@ -215,5 +224,32 @@ mod tests {
             !args.iter().any(|a| a == "-c:v"),
             "-c:v must not appear for audio-only normalize: {args:?}"
         );
+    }
+
+    #[test]
+    fn pass2_args_force_48khz_stereo() {
+        // Regression test for the 192 kHz FLAC bug: the decoder hard-requires
+        // 48 kHz stereo, so pass-2 must always force that sample rate and
+        // channel count regardless of the source file's format.
+        let filter = "loudnorm=I=-14:TP=-1:LRA=11:measured_I=-20";
+        let args = build_pass2_args(
+            filter,
+            std::path::Path::new("in.opus"),
+            std::path::Path::new("out.flac"),
+        );
+        let ar_idx = args
+            .iter()
+            .position(|a| a == "-ar")
+            .expect("-ar must be present");
+        assert_eq!(
+            args[ar_idx + 1],
+            "48000",
+            "-ar must be set to 48000: {args:?}"
+        );
+        let ac_idx = args
+            .iter()
+            .position(|a| a == "-ac")
+            .expect("-ac must be present");
+        assert_eq!(args[ac_idx + 1], "2", "-ac must be set to 2: {args:?}");
     }
 }
