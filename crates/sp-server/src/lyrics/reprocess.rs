@@ -43,12 +43,19 @@ async fn fetch_bucket_manual(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>
 }
 
 async fn fetch_bucket_null(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>> {
+    // `lyrics_source NOT IN ('failed','empty','no_source')` skips rows that the
+    // worker has already tried and bailed on — without this filter a song with
+    // zero text sources (no yt_subs, no LRCLIB match, no description/CCLI yet)
+    // gets picked every 10s forever, blocking every other null-lyric song
+    // behind it. Matches the pre-refactor guard in get_next_video_without_lyrics.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
+               AND (v.lyrics_source IS NULL \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source')) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.id ASC LIMIT 1",
@@ -229,6 +236,28 @@ mod tests {
         assert!(
             get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
             "un-normalized videos must be filtered from every bucket"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_bucket_skips_failed_songs_so_queue_advances() {
+        let pool = setup().await;
+        // Both rows look like failed attempts (has_lyrics=0) but only one has
+        // been tried; the other has been bailed on with a failure marker. The
+        // selector must skip the failed one so the queue moves forward.
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source) VALUES \
+                 (1, 1, 'previously_failed', 1, 0, 'no_source'), \
+                 (2, 1, 'never_tried',       1, 0, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "never_tried",
+            "previously-failed songs must not block the queue"
         );
     }
 
