@@ -1,6 +1,7 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
 pub mod ai;
+pub mod live;
 pub mod lyrics;
 pub mod routes;
 pub mod websocket;
@@ -128,6 +129,19 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::post(ai::proxy_complete_login),
         )
         .route("/api/v1/ai/status", axum::routing::get(ai::ai_status))
+        // Custom playlist set list + click-to-play.
+        .route(
+            "/api/v1/playlists/{id}/items",
+            axum::routing::get(live::get_items).post(live::post_add_item),
+        )
+        .route(
+            "/api/v1/playlists/{id}/items/{video_id}",
+            axum::routing::delete(live::delete_item),
+        )
+        .route(
+            "/api/v1/playlists/{id}/play-video",
+            axum::routing::post(live::post_play_video),
+        )
         // Middleware
         .layer(CorsLayer::permissive())
         .with_state(state);
