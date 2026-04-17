@@ -305,11 +305,19 @@ impl AlignmentProvider for AutoSubProvider {
     }
 }
 
+/// Detect yt-dlp rate-limit failures. When YouTube returns 429, the download
+/// surface is temporarily unavailable but the song-processing pipeline
+/// should continue without autosub rather than aborting entirely.
+pub fn is_rate_limit_error(stderr: &str) -> bool {
+    stderr.contains("HTTP Error 429") || stderr.contains("Too Many Requests")
+}
+
 /// Fetch auto-subs for a YouTube video id into `out_dir`. Returns the
 /// downloaded json3 path or None if the video has no auto-subs. Errors
 /// propagate for real failures (network, banned, malformed args). yt-dlp exits
 /// 0 with no file when the video simply has no English auto-subs — that case
-/// is reported as Ok(None).
+/// is reported as Ok(None). HTTP 429 from YouTube is treated as a graceful
+/// skip (Ok(None)) so the pipeline continues without autosub.
 #[cfg_attr(test, mutants::skip)] // I/O-only subprocess wrapper; covered by integration tests (Task 8)
 pub async fn fetch_autosub(
     ytdlp_path: &Path,
@@ -338,10 +346,15 @@ pub async fn fetch_autosub(
     cmd.kill_on_drop(true);
     let output = cmd.output().await?;
     if !output.status.success() {
-        anyhow::bail!(
-            "yt-dlp auto-subs fetch failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_rate_limit_error(&stderr) {
+            tracing::warn!(
+                video_id = %video_id,
+                "yt-dlp auto-subs hit HTTP 429 — skipping autosub for this song"
+            );
+            return Ok(None);
+        }
+        anyhow::bail!("yt-dlp auto-subs fetch failed: {stderr}");
     }
     let primary = out_dir.join(format!("{video_id}.en.json3"));
     if primary.exists() {
@@ -359,6 +372,25 @@ pub async fn fetch_autosub(
 mod tests {
     use super::*;
     use crate::lyrics::provider::CandidateText;
+
+    #[test]
+    fn rate_limit_error_detection() {
+        let stderr_429 =
+            "ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests";
+        assert!(is_rate_limit_error(stderr_429), "must detect HTTP 429");
+        let stderr_too_many = "yt-dlp: Too Many Requests from YouTube";
+        assert!(
+            is_rate_limit_error(stderr_too_many),
+            "must detect 'Too Many Requests' text"
+        );
+        let stderr_other = "ERROR: video unavailable";
+        assert!(
+            !is_rate_limit_error(stderr_other),
+            "non-rate-limit errors must still propagate as failures"
+        );
+        let stderr_empty = "";
+        assert!(!is_rate_limit_error(stderr_empty));
+    }
 
     #[test]
     fn normalize_word_lowercases_and_strips_punct() {
