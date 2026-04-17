@@ -23,8 +23,27 @@ impl AiClient {
     }
 
     /// Send a chat completion and return the assistant's raw text response.
+    /// Uses a default 300-second timeout — sufficient for typical requests.
+    /// For large merge prompts use [`chat_with_timeout`] with a higher value.
     #[cfg_attr(test, mutants::skip)]
     pub async fn chat(&self, system: &str, user: &str) -> Result<String> {
+        self.chat_with_timeout(system, user, 300).await
+    }
+
+    /// Send a chat completion with a caller-specified per-request timeout in seconds.
+    ///
+    /// This exists because LLM merge prompts for long songs (100+ lines, two providers)
+    /// can exceed the default 300s timeout: Claude Opus via CLIProxyAPI produces output
+    /// at ~50 tok/sec, so a 500-token response takes ~10s plus network, but larger songs
+    /// with 14k+ char prompts can push well past 300s. Callers that need more time (e.g.
+    /// `merge_provider_results`) should pass 600.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn chat_with_timeout(
+        &self,
+        system: &str,
+        user: &str,
+        timeout_secs: u64,
+    ) -> Result<String> {
         let url = format!("{}/chat/completions", self.settings.api_url);
 
         let mut messages = Vec::new();
@@ -53,7 +72,7 @@ impl AiClient {
             }
 
             let resp = req
-                .timeout(std::time::Duration::from_secs(300))
+                .timeout(std::time::Duration::from_secs(timeout_secs))
                 .send()
                 .await
                 .context("failed to send chat completion request")?;
@@ -271,6 +290,41 @@ mod tests {
         });
         let result = client.chat("", "user").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_with_timeout_respects_custom_timeout() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(2))
+                    .set_body_json(serde_json::json!({
+                        "choices": [{"message": {"content": "ok"}}]
+                    })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: Some("t".into()),
+            model: "m".into(),
+            system_prompt_extra: None,
+        });
+
+        let short = client.chat_with_timeout("", "q", 1).await;
+        assert!(short.is_err(), "1s timeout against 2s mock must fail");
+
+        let long = client.chat_with_timeout("", "q", 5).await;
+        assert!(
+            long.is_ok(),
+            "5s timeout against 2s mock must succeed, got {long:?}"
+        );
     }
 
     #[tokio::test]

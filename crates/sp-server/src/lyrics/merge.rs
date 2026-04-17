@@ -132,7 +132,7 @@ pub async fn merge_provider_results(
     );
 
     let raw_response = ai_client
-        .chat(&system, &user)
+        .chat_with_timeout(&system, &user, 600)
         .await
         .context("LLM merge HTTP call failed")?;
 
