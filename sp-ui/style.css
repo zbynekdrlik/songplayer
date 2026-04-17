@@ -416,3 +416,47 @@ body {
 .lyrics-processing { background: #222; padding: 8px; margin-bottom: 8px; border-radius: 4px; }
 .source-chip { background: #333; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; }
 .quality-text { color: #999; font-size: 0.85em; }
+
+/* ---- Live Page ---- */
+
+.live-page-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+.live-catalog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.live-catalog-table, .live-setlist-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.live-catalog-table th,
+.live-catalog-table td,
+.live-setlist-table th,
+.live-setlist-table td {
+    border-bottom: 1px solid #333;
+    padding: 0.25rem 0.5rem;
+    text-align: left;
+}
+
+.live-setlist-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.live-page-error,
+.live-catalog-error,
+.live-setlist-error {
+    color: #f66;
+    margin: 0.5rem 0;
+    min-height: 1.2em;
+}
