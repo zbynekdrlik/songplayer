@@ -572,6 +572,7 @@ impl PlaybackEngine {
     /// column is ignored by the selector — only the pipeline command is
     /// relevant. The previously-playing video (if any) is pushed onto the
     /// history stack so `Previous` still walks the history.
+    // mutants::skip: I/O-heavy orchestrator — covered by handle_play_video integration tests in playback/tests.rs.
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_play_video(&mut self, playlist_id: i64, video_id: i64) {
         // Resolve paths first — if the video row is unknown, no side-effects.
