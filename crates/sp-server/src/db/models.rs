@@ -340,13 +340,17 @@ pub async fn mark_video_lyrics(
 
 /// Persist a successful lyrics processing run: sets has_lyrics=1, records source,
 /// pipeline_version, quality_score, and clears manual_priority — all in one query.
+///
+/// `quality_score` is `None` for fallback paths (e.g. ensemble timeout) to avoid
+/// writing 0.0 which would poison the `ORDER BY lyrics_quality_score ASC NULLS FIRST`
+/// stale-bucket selector — songs with 0.0 score sort before all real scores.
 #[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration test below
 pub async fn mark_video_lyrics_complete(
     pool: &SqlitePool,
     video_id: i64,
     source: &str,
     pipeline_version: u32,
-    quality_score: f32,
+    quality_score: Option<f32>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
@@ -355,7 +359,7 @@ pub async fn mark_video_lyrics_complete(
     )
     .bind(source)
     .bind(pipeline_version as i64)
-    .bind(quality_score as f64)
+    .bind(quality_score.map(|q| q as f64))
     .bind(video_id)
     .execute(pool)
     .await?;
@@ -596,7 +600,7 @@ mod tests {
         .await
         .unwrap();
 
-        mark_video_lyrics_complete(&pool, 1, "ensemble:qwen3+autosub", 2, 0.85)
+        mark_video_lyrics_complete(&pool, 1, "ensemble:qwen3+autosub", 2, Some(0.85))
             .await
             .unwrap();
 
@@ -619,6 +623,37 @@ mod tests {
             row.get::<i64, _>("lyrics_manual_priority"),
             0,
             "manual_priority must be cleared on successful processing"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_complete_with_none_quality_writes_null_not_zero() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
+                     VALUES (1, 1, 'abc', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        mark_video_lyrics_complete(&pool, 1, "yt_subs", 2, None)
+            .await
+            .unwrap();
+
+        let q: Option<f64> =
+            sqlx::query_scalar("SELECT lyrics_quality_score FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            q, None,
+            "fallback path must write NULL, not 0.0 — 0.0 poisons the NULLS FIRST queue ordering"
         );
     }
 }

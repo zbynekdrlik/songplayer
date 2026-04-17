@@ -583,10 +583,10 @@ impl LyricsWorker {
         tokio::fs::write(&json_path, &json_bytes).await?;
 
         // Recover quality from the audit log the orchestrator wrote.
-        let quality_score = self
-            .read_quality_from_audit(&youtube_id)
-            .await
-            .unwrap_or(0.0);
+        // None is returned when the audit log is absent (e.g. ensemble timeout fallback).
+        // Passing None to mark_video_lyrics_complete writes SQL NULL instead of 0.0,
+        // which avoids poisoning the ORDER BY lyrics_quality_score ASC NULLS FIRST selector.
+        let quality_score: Option<f32> = self.read_quality_from_audit(&youtube_id).await;
 
         crate::db::models::mark_video_lyrics_complete(
             &self.pool,
@@ -598,10 +598,12 @@ impl LyricsWorker {
         .await?;
 
         tracing::info!(
-            "worker: persisted {} (source={}, quality={:.2}, version={})",
+            "worker: persisted {} (source={}, quality={}, version={})",
             youtube_id,
             track.source,
-            quality_score,
+            quality_score
+                .map(|q| format!("{q:.2}"))
+                .unwrap_or_else(|| "null".into()),
             LYRICS_PIPELINE_VERSION
         );
 
@@ -625,7 +627,7 @@ impl LyricsWorker {
             video_id,
             youtube_id: youtube_id.clone(),
             source: track.source.clone(),
-            quality_score,
+            quality_score: quality_score.unwrap_or(0.0),
             provider_count,
             duration_ms,
         });
