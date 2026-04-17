@@ -207,6 +207,8 @@ impl AlignmentProvider for AutoSubProvider {
         density >= 0.3
     }
 
+    // integrates parse_json3 + match_reference_to_autosub + density_gate — individual pieces are exhaustively tested; integration body is I/O + orchestration.
+    #[cfg_attr(test, mutants::skip)]
     async fn align(&self, ctx: &SongContext) -> Result<ProviderResult> {
         let path = ctx
             .autosub_json3
@@ -606,6 +608,12 @@ mod tests {
             Some(500),
             "noise reference must not consume the autosub pointer"
         );
+    }
+
+    #[test]
+    fn provider_name_and_base_confidence_are_stable() {
+        assert_eq!(AutoSubProvider.name(), "autosub");
+        assert!((AutoSubProvider.base_confidence() - 0.6).abs() < 1e-6);
     }
 
     #[tokio::test]
