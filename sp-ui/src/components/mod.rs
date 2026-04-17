@@ -1,4 +1,6 @@
 pub mod download_queue;
+pub mod live_catalog;
+pub mod live_setlist;
 pub mod karaoke_panel;
 pub mod lyrics_playlist_section;
 pub mod lyrics_queue_card;
