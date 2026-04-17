@@ -101,9 +101,11 @@ pub async fn startup_sync_active_playlists(
     pool: &SqlitePool,
     sync_tx: &tokio::sync::mpsc::Sender<SyncRequest>,
 ) -> Result<(), sqlx::Error> {
-    let rows = sqlx::query("SELECT id, youtube_url FROM playlists WHERE is_active = 1")
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, youtube_url FROM playlists WHERE is_active = 1 AND kind = 'youtube'",
+    )
+    .fetch_all(pool)
+    .await?;
     tracing::info!(
         count = rows.len(),
         "startup sync: enqueueing one SyncRequest per active playlist"
@@ -122,4 +124,34 @@ pub async fn startup_sync_active_playlists(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod sync_filter_tests {
+    use super::*;
+    use crate::db;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn startup_sync_skips_custom_playlists() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        // Insert one youtube playlist alongside the pre-seeded ytlive custom one.
+        db::models::insert_playlist(&pool, "ytfast", "https://yt.com/fast")
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<SyncRequest>(8);
+        startup_sync_active_playlists(&pool, &tx).await.unwrap();
+        drop(tx);
+
+        let mut received_urls = Vec::new();
+        while let Some(req) = rx.recv().await {
+            received_urls.push(req.youtube_url);
+        }
+
+        assert_eq!(received_urls.len(), 1, "only youtube playlists should be synced");
+        assert_eq!(received_urls[0], "https://yt.com/fast");
+    }
 }
