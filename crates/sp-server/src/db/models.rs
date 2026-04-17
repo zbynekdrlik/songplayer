@@ -438,6 +438,138 @@ pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), 
 }
 
 // ---------------------------------------------------------------------------
+// Custom playlist items
+// ---------------------------------------------------------------------------
+
+/// A single item in a custom playlist's set list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct PlaylistItem {
+    pub position: i64,
+    pub video_id: i64,
+}
+
+/// Append a video to a custom playlist's set list. Returns the assigned
+/// position. Errors if `(playlist_id, video_id)` already exists.
+pub async fn append_playlist_item(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let next_pos: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_items WHERE playlist_id = ?",
+    )
+    .bind(playlist_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)")
+        .bind(playlist_id)
+        .bind(video_id)
+        .bind(next_pos)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(next_pos)
+}
+
+/// Remove a video from a custom playlist's set list and compact positions
+/// so there are no gaps afterwards.
+pub async fn remove_playlist_item(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?")
+        .bind(playlist_id)
+        .bind(video_id)
+        .execute(&mut *tx)
+        .await?;
+
+    // Compact: rewrite positions 0..N-1 preserving order. Two-step to avoid
+    // PRIMARY KEY collisions: first negate all positions, then assign
+    // sequential non-negative positions based on the negated ordering.
+    sqlx::query(
+        "UPDATE playlist_items SET position = -position - 1
+         WHERE playlist_id = ?",
+    )
+    .bind(playlist_id)
+    .execute(&mut *tx)
+    .await?;
+    let rows = sqlx::query(
+        "SELECT video_id FROM playlist_items
+         WHERE playlist_id = ? ORDER BY position DESC",
+    )
+    .bind(playlist_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (new_pos, r) in rows.iter().enumerate() {
+        let vid: i64 = r.get("video_id");
+        sqlx::query(
+            "UPDATE playlist_items SET position = ?
+             WHERE playlist_id = ? AND video_id = ?",
+        )
+        .bind(new_pos as i64)
+        .bind(playlist_id)
+        .bind(vid)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Clamp current_position to the new valid range.
+    sqlx::query(
+        "UPDATE playlists
+         SET current_position = MIN(current_position,
+             COALESCE((SELECT MAX(position) FROM playlist_items WHERE playlist_id = ?), 0))
+         WHERE id = ?",
+    )
+    .bind(playlist_id)
+    .bind(playlist_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// List all items of a custom playlist in position order.
+pub async fn list_playlist_items(
+    pool: &SqlitePool,
+    playlist_id: i64,
+) -> Result<Vec<PlaylistItem>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT position, video_id FROM playlist_items
+         WHERE playlist_id = ? ORDER BY position",
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| PlaylistItem {
+            position: r.get("position"),
+            video_id: r.get("video_id"),
+        })
+        .collect())
+}
+
+/// Look up the position of a video within a custom playlist.
+pub async fn position_for_playlist_item(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT position FROM playlist_items
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .fetch_optional(pool)
+    .await
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -689,5 +821,132 @@ mod tests {
             .unwrap();
         assert_eq!(created.kind, "youtube");
         assert_eq!(created.current_position, 0);
+    }
+
+    #[tokio::test]
+    async fn append_item_assigns_next_position() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let yt = insert_playlist(&pool, "src", "https://yt.com/src")
+            .await
+            .unwrap();
+        let v1 = upsert_video(&pool, yt.id, "a", Some("A")).await.unwrap().id;
+        let v2 = upsert_video(&pool, yt.id, "b", Some("B")).await.unwrap().id;
+
+        let ytlive_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='ytlive'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let p1 = append_playlist_item(&pool, ytlive_id, v1).await.unwrap();
+        let p2 = append_playlist_item(&pool, ytlive_id, v2).await.unwrap();
+        assert_eq!(p1, 0);
+        assert_eq!(p2, 1);
+    }
+
+    #[tokio::test]
+    async fn append_item_duplicate_errors() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let yt = insert_playlist(&pool, "src", "https://yt.com/src")
+            .await
+            .unwrap();
+        let v = upsert_video(&pool, yt.id, "a", Some("A")).await.unwrap().id;
+        let ytlive_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='ytlive'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        append_playlist_item(&pool, ytlive_id, v).await.unwrap();
+        let err = append_playlist_item(&pool, ytlive_id, v).await;
+        assert!(err.is_err(), "duplicate append must error");
+    }
+
+    #[tokio::test]
+    async fn remove_item_compacts_positions() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let yt = insert_playlist(&pool, "src", "https://yt.com/src")
+            .await
+            .unwrap();
+        let v1 = upsert_video(&pool, yt.id, "id1", Some("A"))
+            .await
+            .unwrap()
+            .id;
+        let v2 = upsert_video(&pool, yt.id, "id2", Some("B"))
+            .await
+            .unwrap()
+            .id;
+        let v3 = upsert_video(&pool, yt.id, "id3", Some("C"))
+            .await
+            .unwrap()
+            .id;
+        let ytlive_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='ytlive'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        append_playlist_item(&pool, ytlive_id, v1).await.unwrap();
+        append_playlist_item(&pool, ytlive_id, v2).await.unwrap();
+        append_playlist_item(&pool, ytlive_id, v3).await.unwrap();
+
+        remove_playlist_item(&pool, ytlive_id, v2).await.unwrap();
+
+        let items = list_playlist_items(&pool, ytlive_id).await.unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].position, 0);
+        assert_eq!(items[0].video_id, v1);
+        assert_eq!(items[1].position, 1);
+        assert_eq!(items[1].video_id, v3);
+    }
+
+    #[tokio::test]
+    async fn list_playlist_items_returns_rows_in_position_order() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let yt = insert_playlist(&pool, "src", "https://yt.com/src")
+            .await
+            .unwrap();
+        let a = upsert_video(&pool, yt.id, "a", Some("A")).await.unwrap().id;
+        let b = upsert_video(&pool, yt.id, "b", Some("B")).await.unwrap().id;
+        let ytlive_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='ytlive'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        append_playlist_item(&pool, ytlive_id, a).await.unwrap();
+        append_playlist_item(&pool, ytlive_id, b).await.unwrap();
+
+        let items = list_playlist_items(&pool, ytlive_id).await.unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].video_id, a);
+        assert_eq!(items[1].video_id, b);
+    }
+
+    #[tokio::test]
+    async fn position_for_video_lookup() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let yt = insert_playlist(&pool, "src", "https://yt.com/src")
+            .await
+            .unwrap();
+        let a = upsert_video(&pool, yt.id, "a", Some("A")).await.unwrap().id;
+        let b = upsert_video(&pool, yt.id, "b", Some("B")).await.unwrap().id;
+        let ytlive_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='ytlive'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        append_playlist_item(&pool, ytlive_id, a).await.unwrap();
+        append_playlist_item(&pool, ytlive_id, b).await.unwrap();
+
+        let pos = position_for_playlist_item(&pool, ytlive_id, b)
+            .await
+            .unwrap();
+        assert_eq!(pos, Some(1));
+
+        let missing = position_for_playlist_item(&pool, ytlive_id, 999)
+            .await
+            .unwrap();
+        assert_eq!(missing, None);
     }
 }
