@@ -21,13 +21,26 @@ pub fn build_merge_prompt(
     reference_source: &str,
     provider_results: &[ProviderResult],
 ) -> (String, String) {
-    let system = "You are a lyrics alignment merger. You receive word-level \
+    // Count reference lines and total words for the explicit instructions
+    let line_count = reference_text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+
+    let total_word_count: usize = reference_text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.split_whitespace().count())
+        .sum();
+
+    let system = format!(
+        "You are a lyrics alignment merger. You receive word-level \
         timestamp results from multiple independent alignment providers for \
         the same song. Produce a single merged result with the best possible \
         timing for each word.\n\n\
         CRITICAL RULES:\n\
-        1. You MUST return ALL lines from the reference text. Every single \
-           line. Do not skip, summarize, or show examples.\n\
+        1. You MUST return EXACTLY {total_word_count} word entries, in reading order, \
+           one per reference word.\n\
         2. Match provider words to reference text intelligently \
            (contractions, ASR errors, abbreviations).\n\
         3. Multiple providers matched: weighted average of timings. Reject \
@@ -35,17 +48,9 @@ pub fn build_merge_prompt(
         4. Single provider matched: use its timing with confidence scaled \
            to base_confidence * 0.7.\n\
         5. No provider matched: zero-timed placeholder, confidence 0.\n\
-        6. Gap >2000ms between adjacent words within a line: set \
-           display_split=true on that line.\n\
-        7. Return ONLY the JSON object. No explanation. No preamble. No \
-           markdown fences. Start your response with { and end with }."
-        .to_string();
-
-    // Count reference lines for the explicit instruction
-    let line_count = reference_text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .count();
+        6. Return ONLY the JSON object. No explanation. No preamble. No \
+           markdown fences. Start your response with {{ and end with }}."
+    );
 
     let mut user = String::new();
     user.push_str(&format!(
@@ -72,51 +77,36 @@ pub fn build_merge_prompt(
         }
     }
     user.push_str(&format!(
-        "\nReturn JSON with EXACTLY {line_count} lines (one per reference line):\n\
-         {{\"lines\": [{{\"text\": \"full line\", \"start_ms\": N, \"end_ms\": N, \
-         \"display_split\": false, \"words\": [{{\"text\": \"word\", \"start_ms\": N, \
-         \"end_ms\": N, \"confidence\": 0.63, \"sources_agreed\": 1, \
-         \"spread_ms\": 0}}]}}]}}"
+        "\nReturn JSON with EXACTLY {total_word_count} word timings in reading order \
+         (no line structure, no text, no extra fields):\n\
+         {{\"words\": [{{\"s\": N, \"e\": N, \"c\": 0.63}}, ...]}}\n\n\
+         The reference text has {total_word_count} words across {line_count} lines. \
+         Match provider words to reference words intelligently (contractions, ASR errors) \
+         and emit one entry per reference word in the order they appear in the reference text. \
+         If no provider matched a word, emit {{\"s\": 0, \"e\": 0, \"c\": 0}}."
     ));
 
     (system, user)
 }
 
-/// Parsed LLM merge response.
+/// Parsed LLM merge response — compact per-word format.
 #[derive(Debug, serde::Deserialize)]
 struct MergeResponse {
-    lines: Vec<MergeResponseLine>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MergeResponseLine {
-    text: String,
-    start_ms: u64,
-    end_ms: u64,
-    /// Used by callers to decide if a visual gap should be inserted before this line.
-    #[serde(default)]
-    #[allow(dead_code)]
-    display_split: bool,
     words: Vec<MergeResponseWord>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct MergeResponseWord {
-    text: String,
-    start_ms: u64,
-    end_ms: u64,
-    confidence: f32,
-    /// Number of providers that agreed on this word's timing.
-    #[serde(default)]
-    #[allow(dead_code)]
-    sources_agreed: u8,
-    #[serde(default)]
-    spread_ms: u32,
+    /// start_ms
+    s: u64,
+    /// end_ms
+    e: u64,
+    /// confidence (0.0–1.0)
+    c: f32,
 }
 
 /// Run the LLM merge: send prompt to Claude, parse response, return
 /// merged LyricsTrack + audit data.
-#[cfg_attr(test, mutants::skip)]
 pub async fn merge_provider_results(
     ai_client: &AiClient,
     reference_text: &str,
@@ -132,7 +122,7 @@ pub async fn merge_provider_results(
     );
 
     let raw_response = ai_client
-        .chat_with_timeout(&system, &user, 600)
+        .chat(&system, &user)
         .await
         .context("LLM merge HTTP call failed")?;
 
@@ -148,27 +138,57 @@ pub async fn merge_provider_results(
         anyhow::anyhow!("LLM merge JSON parse failed: {e}")
     })?;
 
-    // Convert MergeResponse → LyricsTrack
-    let lines: Vec<LyricsLine> = response
-        .lines
-        .iter()
-        .map(|l| LyricsLine {
-            start_ms: l.start_ms,
-            end_ms: l.end_ms,
-            en: l.text.clone(),
-            sk: None,
-            words: Some(
-                l.words
-                    .iter()
-                    .map(|w| LyricsWord {
-                        text: w.text.clone(),
-                        start_ms: w.start_ms,
-                        end_ms: w.end_ms,
-                    })
-                    .collect(),
-            ),
-        })
+    // Reconstruct LyricsTrack from the reference text structure + compact word timings.
+    // The reference text carries line structure and word identity; response.words slots
+    // timings in flat reading order.
+    let ref_lines: Vec<&str> = reference_text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
         .collect();
+
+    let ref_words_per_line: Vec<Vec<&str>> = ref_lines
+        .iter()
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+
+    let total_ref_words: usize = ref_words_per_line.iter().map(|v| v.len()).sum();
+
+    if response.words.len() != total_ref_words {
+        anyhow::bail!(
+            "Claude returned {} word timings but reference has {} words",
+            response.words.len(),
+            total_ref_words
+        );
+    }
+
+    let mut cursor = 0;
+    let mut lines: Vec<LyricsLine> = Vec::with_capacity(ref_lines.len());
+    for (line_idx, ref_words) in ref_words_per_line.iter().enumerate() {
+        let n = ref_words.len();
+        let word_entries = &response.words[cursor..cursor + n];
+        cursor += n;
+
+        let words: Vec<LyricsWord> = ref_words
+            .iter()
+            .zip(word_entries.iter())
+            .map(|(text, w)| LyricsWord {
+                text: (*text).to_string(),
+                start_ms: w.s,
+                end_ms: w.e,
+            })
+            .collect();
+
+        let line_start = words.first().map(|w| w.start_ms).unwrap_or(0);
+        let line_end = words.last().map(|w| w.end_ms).unwrap_or(0);
+
+        lines.push(LyricsLine {
+            start_ms: line_start,
+            end_ms: line_end,
+            en: ref_lines[line_idx].to_string(),
+            sk: None,
+            words: Some(words),
+        });
+    }
 
     let track = LyricsTrack {
         version: 2,
@@ -185,23 +205,21 @@ pub async fn merge_provider_results(
         lines,
     };
 
-    // Build audit details from response
-    let mut details = Vec::new();
-    let mut word_idx = 0;
-    for line in &response.lines {
-        for word in &line.words {
-            details.push(WordMergeDetail {
-                word_index: word_idx,
-                reference_text: word.text.clone(),
-                provider_estimates: Vec::new(),
-                outliers_rejected: Vec::new(),
-                merged_start_ms: word.start_ms,
-                merged_confidence: word.confidence,
-                spread_ms: word.spread_ms,
-            });
-            word_idx += 1;
-        }
-    }
+    // Build audit details from the compact response
+    let details: Vec<WordMergeDetail> = response
+        .words
+        .iter()
+        .enumerate()
+        .map(|(word_idx, w)| WordMergeDetail {
+            word_index: word_idx,
+            reference_text: String::new(),
+            provider_estimates: Vec::new(),
+            outliers_rejected: Vec::new(),
+            merged_start_ms: w.s,
+            merged_confidence: w.c,
+            spread_ms: 0,
+        })
+        .collect();
 
     Ok((track, details))
 }
@@ -274,42 +292,110 @@ mod tests {
 
     #[test]
     fn build_merge_prompt_line_count_excludes_empty_lines() {
-        // Kills the `!l.trim().is_empty()` mutation: if ! is removed,
-        // the filter counts ONLY empty lines. Reference text has 3 non-empty
-        // lines and 2 empty lines; prompt must say "3 lines", not "2".
+        // Reference text has 3 non-empty lines × 2 words each = 6 words.
+        // Prompt must say "6 word" and "EXACTLY 6", not line-based counts.
         let ref_text = "line one\n\nline two\n   \nline three";
         let (_, user) = build_merge_prompt(ref_text, "manual_subs", &[]);
         assert!(
-            user.contains("3 lines"),
-            "expected 3 lines in prompt, got: {user}"
+            user.contains("6 word"),
+            "expected 6 word count in prompt, got: {user}"
         );
         assert!(
-            user.contains("EXACTLY 3 lines"),
-            "expected explicit count in output instruction"
+            user.contains("EXACTLY 6"),
+            "expected explicit word count in output instruction"
         );
         assert!(
-            !user.contains("0 lines") && !user.contains("2 lines"),
-            "line count must exclude empty/whitespace lines"
+            !user.contains("EXACTLY 3 lines") && !user.contains("EXACTLY 2"),
+            "must not use old line-based count in output instruction"
         );
     }
 
     #[test]
     fn parse_merge_response_json() {
         let json = r#"{
-            "lines": [{
-                "text": "Hello world",
-                "start_ms": 1000,
-                "end_ms": 2000,
-                "display_split": false,
-                "words": [
-                    {"text": "Hello", "start_ms": 1000, "end_ms": 1500, "confidence": 0.95, "sources_agreed": 2, "spread_ms": 50},
-                    {"text": "world", "start_ms": 1500, "end_ms": 2000, "confidence": 0.9, "sources_agreed": 1, "spread_ms": 0}
-                ]
-            }]
+            "words": [
+                {"s": 1000, "e": 1500, "c": 0.95},
+                {"s": 1500, "e": 2000, "c": 0.9}
+            ]
         }"#;
         let parsed: MergeResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.lines.len(), 1);
-        assert_eq!(parsed.lines[0].words.len(), 2);
-        assert_eq!(parsed.lines[0].words[0].confidence, 0.95);
+        assert_eq!(parsed.words.len(), 2);
+        assert_eq!(parsed.words[0].c, 0.95);
+    }
+
+    #[tokio::test]
+    async fn merge_reconstructs_lyricstrack_from_compact_claude_response() {
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "content": "{\"words\":[{\"s\":1000,\"e\":1500,\"c\":0.9},{\"s\":1500,\"e\":2000,\"c\":0.9},{\"s\":3000,\"e\":3500,\"c\":0.8}]}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let client = AiClient::new(crate::ai::AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "claude-opus-4-20250514".into(),
+            system_prompt_extra: None,
+        });
+
+        let reference = "Hello world\nAgain";
+        let providers = vec![ProviderResult {
+            provider_name: "qwen3".into(),
+            lines: vec![],
+            metadata: serde_json::json!({}),
+        }];
+
+        let (track, details) =
+            merge_provider_results(&client, reference, "manual_subs", &providers)
+                .await
+                .unwrap();
+        assert_eq!(track.lines.len(), 2);
+        assert_eq!(track.lines[0].en, "Hello world");
+        assert_eq!(track.lines[0].words.as_ref().unwrap().len(), 2);
+        assert_eq!(track.lines[0].words.as_ref().unwrap()[0].text, "Hello");
+        assert_eq!(track.lines[0].words.as_ref().unwrap()[0].start_ms, 1000);
+        assert_eq!(track.lines[1].en, "Again");
+        assert_eq!(track.lines[1].words.as_ref().unwrap()[0].text, "Again");
+        assert_eq!(track.lines[1].words.as_ref().unwrap()[0].start_ms, 3000);
+        assert_eq!(details.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn merge_bails_when_word_count_mismatches_reference() {
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "content": "{\"words\":[{\"s\":1,\"e\":2,\"c\":0.5}]}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+        let client = AiClient::new(crate::ai::AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "m".into(),
+            system_prompt_extra: None,
+        });
+        let reference = "Hello world"; // 2 words; mock returns 1
+        let providers = vec![ProviderResult {
+            provider_name: "qwen3".into(),
+            lines: vec![],
+            metadata: serde_json::json!({}),
+        }];
+        let err = merge_provider_results(&client, reference, "m", &providers).await;
+        assert!(err.is_err(), "must bail on word-count mismatch");
     }
 }
