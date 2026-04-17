@@ -151,7 +151,11 @@ mod sync_filter_tests {
             received_urls.push(req.youtube_url);
         }
 
-        assert_eq!(received_urls.len(), 1, "only youtube playlists should be synced");
+        assert_eq!(
+            received_urls.len(),
+            1,
+            "only youtube playlists should be synced"
+        );
         assert_eq!(received_urls[0], "https://yt.com/fast");
     }
 }
