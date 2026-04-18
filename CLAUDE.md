@@ -183,7 +183,9 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 
 **History:**
 - v1 (pre-#33): single-path yt_subs→Qwen3 or lrclib-line-level
-- v2 (this PR): ensemble orchestrator + AutoSubProvider + Claude text-merge
+- v2 (#34/#35): ensemble orchestrator + AutoSubProvider + Claude text-merge
+- v3 (#34/#35): merge prompt reworked — confidence-weighted, disagreement rule, compact output schema
+- v4 (#42): description provider added as 4th text candidate (raw YouTube description → Claude extraction → candidate_texts)
 
 ## Legacy OBS YouTube Player (obsytplayer)
 
