@@ -19,19 +19,24 @@ pub async fn get_next_video_for_lyrics(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    if let Some(row) = fetch_bucket_manual(pool).await? {
+    if let Some(row) = fetch_bucket_manual(pool, current_version).await? {
         return Ok(Some(row));
     }
-    if let Some(row) = fetch_bucket_null(pool).await? {
+    if let Some(row) = fetch_bucket_null(pool, current_version).await? {
         return Ok(Some(row));
     }
     fetch_bucket_stale(pool, current_version).await
 }
 
-async fn fetch_bucket_manual(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>> {
+async fn fetch_bucket_manual(
+    pool: &SqlitePool,
+    current_version: u32,
+) -> Result<Option<VideoLyricsRow>> {
     // Skip rows the worker has already tried and bailed on — mark_video_lyrics
     // on the failure path does NOT clear manual_priority, so without this
     // filter a failed manual-reprocess loops forever.
+    // Exception: if a row's recorded failure is from an OLDER pipeline version,
+    // allow it through — the worker may have new capability that succeeds now.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -39,21 +44,29 @@ async fn fetch_bucket_manual(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.lyrics_manual_priority = 1 \
                AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source')) \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source') \
+                    OR v.lyrics_pipeline_version < ?) \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.id ASC LIMIT 1",
     )
+    .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
     Ok(row)
 }
 
-async fn fetch_bucket_null(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>> {
+async fn fetch_bucket_null(
+    pool: &SqlitePool,
+    current_version: u32,
+) -> Result<Option<VideoLyricsRow>> {
     // `lyrics_source NOT IN ('failed','empty','no_source')` skips rows that the
     // worker has already tried and bailed on — without this filter a song with
     // zero text sources (no yt_subs, no LRCLIB match, no description/CCLI yet)
     // gets picked every 10s forever, blocking every other null-lyric song
     // behind it. Matches the pre-refactor guard in get_next_video_without_lyrics.
+    // Exception: if a row's recorded failure is from an OLDER pipeline version,
+    // allow it through — the worker may have new capability (e.g., a new
+    // provider added in the version bump) that succeeds where prior runs failed.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -61,11 +74,13 @@ async fn fetch_bucket_null(pool: &SqlitePool) -> Result<Option<VideoLyricsRow>> 
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
                AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source')) \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source') \
+                    OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.id ASC LIMIT 1",
     )
+    .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -256,9 +271,9 @@ mod tests {
         let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
-             lyrics_source, lyrics_manual_priority) VALUES \
-                 (1, 1, 'manual_failed', 1, 0, 'no_source', 1), \
-                 (2, 1, 'manual_retry',  1, 0, NULL,        1)",
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority) VALUES \
+                 (1, 1, 'manual_failed', 1, 0, 'no_source', 2, 1), \
+                 (2, 1, 'manual_retry',  1, 0, NULL,        0, 1)",
         )
         .execute(&pool)
         .await
@@ -278,9 +293,9 @@ mod tests {
         // selector must skip the failed one so the queue moves forward.
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
-             lyrics_source) VALUES \
-                 (1, 1, 'previously_failed', 1, 0, 'no_source'), \
-                 (2, 1, 'never_tried',       1, 0, NULL)",
+             lyrics_source, lyrics_pipeline_version) VALUES \
+                 (1, 1, 'previously_failed', 1, 0, 'no_source', 2), \
+                 (2, 1, 'never_tried',       1, 0, NULL,        0)",
         )
         .execute(&pool)
         .await
@@ -289,6 +304,87 @@ mod tests {
         assert_eq!(
             row.youtube_id, "never_tried",
             "previously-failed songs must not block the queue"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_bucket_retries_failed_songs_when_pipeline_version_bumps() {
+        // Regression: v4→v5 added description provider. Songs that failed under
+        // v4 (marked 'no_source' because yt_subs/lrclib/autosub all missed) must
+        // be retried on v5 because the worker now has new capability that might
+        // succeed. The previous filter locked them out forever.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version) VALUES \
+                 (1, 1, 'failed_v4', 1, 0, 'no_source', 4), \
+                 (2, 1, 'fresh',     1, 0, NULL,        0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // With current pipeline version = 5, both rows must be eligible.
+        // Verify the previously-failed row is not locked out by checking that
+        // after picking and "completing" the fresh row, the old-version failure
+        // is then returned.
+        let row = fetch_bucket_null(&pool, 5).await.unwrap().unwrap();
+        // Mark the first picked row as done so we can check what comes next.
+        sqlx::query(
+            "UPDATE videos SET has_lyrics = 1, lyrics_pipeline_version = 5 WHERE youtube_id = ?",
+        )
+        .bind(&row.youtube_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row2 = fetch_bucket_null(&pool, 5).await.unwrap();
+        assert!(
+            row2.is_some(),
+            "previously-failed v4 row must be retried under v5 pipeline"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_bucket_still_skips_current_version_failures_to_avoid_loops() {
+        // The OTHER regression guard: a song marked 'no_source' UNDER THE CURRENT
+        // pipeline version must still be skipped, otherwise the worker loops
+        // forever on the same failing song. Only older-version failures get retry.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version) VALUES \
+                 (1, 1, 'failed_v5', 1, 0, 'no_source', 5), \
+                 (2, 1, 'fresh',     1, 0, NULL,        0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row = fetch_bucket_null(&pool, 5).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "fresh",
+            "must pick the fresh row, NOT the current-version failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_bucket_retries_failed_songs_when_pipeline_version_bumps() {
+        // Same fix on the manual bucket: user-triggered reprocess of a previously
+        // failed song under an OLDER pipeline version must retry, not short-circuit.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority) VALUES \
+                 (1, 1, 'failed_v4_manual', 1, 0, 'no_source', 4, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row = fetch_bucket_manual(&pool, 5).await.unwrap();
+        assert!(
+            row.is_some(),
+            "manual bucket must retry older-pipeline failures on version bump"
         );
     }
 
