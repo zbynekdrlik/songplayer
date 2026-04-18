@@ -186,6 +186,7 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 - v2 (#34/#35): ensemble orchestrator + AutoSubProvider + Claude text-merge
 - v3 (#34/#35): merge prompt reworked — confidence-weighted, disagreement rule, compact output schema
 - v4 (#42): description provider added as 4th text candidate (raw YouTube description → Claude extraction → candidate_texts)
+- v5 (#42): description prompt reframed to software-engineering task (empty system, karaoke-app framing) — v4's direct-instruction prompt yielded 0% extraction on production because Claude via CLIProxyAPI OAuth returned conversational preamble instead of JSON
 
 ## Legacy OBS YouTube Player (obsytplayer)
 
