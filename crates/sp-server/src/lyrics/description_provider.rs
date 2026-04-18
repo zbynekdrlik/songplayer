@@ -73,6 +73,52 @@ pub(crate) fn parse_claude_response(raw: &str) -> Result<Option<Vec<String>>> {
     Ok(Some(out))
 }
 
+/// Read the cached extracted-lyrics JSON.
+///
+/// Returns:
+/// - `Ok(None)` when the file does not exist (no cache yet).
+/// - `Ok(Some(None))` when the cache records that this song has no lyrics in its description.
+/// - `Ok(Some(Some(lines)))` when the cache has extracted lyric lines.
+/// - `Err` when the file exists but is malformed (we refuse to silently discard it).
+pub(crate) async fn read_lyrics_cache(path: &Path) -> Result<Option<Option<Vec<String>>>> {
+    let Ok(bytes) = tokio::fs::read(path).await else {
+        return Ok(None);
+    };
+    let v: serde_json::Value =
+        serde_json::from_slice(&bytes).context("malformed description_lyrics cache")?;
+    let lines = v
+        .get("lines")
+        .ok_or_else(|| anyhow::anyhow!("cache missing 'lines' key"))?;
+    if lines.is_null() {
+        return Ok(Some(None));
+    }
+    let arr = lines
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("cache 'lines' is not array or null"))?;
+    let out: Vec<String> = arr
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    if out.len() != arr.len() {
+        anyhow::bail!("cache 'lines' contains non-string elements");
+    }
+    Ok(Some(Some(out)))
+}
+
+/// Write the extracted-lyrics JSON cache.
+///
+/// `lines = Some(&[...])` writes `{"lines": [...]}`.
+/// `lines = None` writes `{"lines": null}`.
+pub(crate) async fn write_lyrics_cache(path: &Path, lines: Option<&[String]>) -> Result<()> {
+    let body = match lines {
+        Some(l) => serde_json::json!({ "lines": l }),
+        None => serde_json::json!({ "lines": null }),
+    };
+    let s = serde_json::to_string(&body)?;
+    tokio::fs::write(path, s).await.context("write cache")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +219,33 @@ mod tests {
     fn parse_rejects_wrong_lines_type() {
         assert!(parse_claude_response(r#"{"lines": "string not array"}"#).is_err());
         assert!(parse_claude_response(r#"{"lines": 42}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn cache_roundtrip_with_lyrics() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("abc_description_lyrics.json");
+        write_lyrics_cache(&p, Some(&["one".into(), "two".into()]))
+            .await
+            .unwrap();
+        let back = read_lyrics_cache(&p).await.unwrap();
+        assert_eq!(back, Some(Some(vec!["one".into(), "two".into()])));
+    }
+
+    #[tokio::test]
+    async fn cache_roundtrip_with_null() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("abc_description_lyrics.json");
+        write_lyrics_cache(&p, None).await.unwrap();
+        let back = read_lyrics_cache(&p).await.unwrap();
+        assert_eq!(back, Some(None));
+    }
+
+    #[tokio::test]
+    async fn cache_missing_file_returns_ok_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("nonexistent_description_lyrics.json");
+        let back = read_lyrics_cache(&p).await.unwrap();
+        assert_eq!(back, None);
     }
 }
