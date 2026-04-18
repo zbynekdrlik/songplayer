@@ -55,6 +55,145 @@ struct RetryBackoff {
     consecutive_failures: u32,
 }
 
+/// Free function containing the `gather_sources` logic so it can be tested
+/// without constructing a full `LyricsWorker`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn gather_sources_impl(
+    ai_client: Option<&crate::ai::client::AiClient>,
+    ytdlp_path: &std::path::Path,
+    cache_dir: &std::path::Path,
+    client: &reqwest::Client,
+    row: &crate::db::models::VideoLyricsRow,
+    autosub_tmp_dir: &std::path::Path,
+) -> Result<crate::lyrics::provider::SongContext> {
+    use crate::lyrics::autosub_provider::fetch_autosub;
+    use crate::lyrics::provider::{CandidateText, SongContext};
+
+    let youtube_id = row.youtube_id.clone();
+    let audio_path = row
+        .audio_file_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_default();
+
+    // 1. Manual yt_subs
+    let yt_tmp = std::env::temp_dir().join("sp_yt_subs");
+    let _ = tokio::fs::create_dir_all(&yt_tmp).await;
+    let yt_subs_track = match youtube_subs::fetch_subtitles(ytdlp_path, &youtube_id, &yt_tmp).await
+    {
+        Ok(Some(track)) => {
+            info!("gather: YT manual subs hit for {youtube_id}");
+            Some(track)
+        }
+        Ok(None) => {
+            debug!("gather: no YT manual subs for {youtube_id}");
+            None
+        }
+        Err(e) => {
+            warn!("gather: YT sub fetch error for {youtube_id}: {e}");
+            None
+        }
+    };
+
+    // 2. LRCLIB (if song/artist known)
+    let lrclib_track = if !row.song.is_empty() && !row.artist.is_empty() {
+        let duration_s = row.duration_ms.map(|ms| (ms / 1000) as u32).unwrap_or(0);
+        match lrclib::fetch_lyrics(client, &row.artist, &row.song, duration_s).await {
+            Ok(Some(track)) => {
+                info!("gather: LRCLIB hit for {youtube_id}");
+                Some(track)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                warn!("gather: LRCLIB error for {youtube_id}: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // 3. Auto-sub json3
+    let autosub_json3 = match fetch_autosub(ytdlp_path, &youtube_id, autosub_tmp_dir).await {
+        Ok(Some(p)) => Some(p),
+        Ok(None) => None,
+        Err(e) => {
+            warn!("gather: autosub fetch error for {youtube_id}: {e}");
+            None
+        }
+    };
+
+    let mut candidate_texts: Vec<CandidateText> = Vec::new();
+    if let Some(t) = &yt_subs_track {
+        candidate_texts.push(CandidateText {
+            source: "yt_subs".into(),
+            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
+            has_timing: true,
+            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
+        });
+    }
+    if let Some(t) = &lrclib_track {
+        candidate_texts.push(CandidateText {
+            source: "lrclib".into(),
+            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
+            has_timing: true,
+            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
+        });
+    }
+
+    // 4. YouTube description lyrics (LLM-extracted). Best-effort.
+    if let Some(ai) = ai_client {
+        let description_lines = match crate::lyrics::description_provider::fetch_description_lyrics(
+            ai,
+            ytdlp_path,
+            &youtube_id,
+            cache_dir,
+            &row.song,
+            &row.artist,
+        )
+        .await
+        {
+            Ok(Some(lines)) if !lines.is_empty() => {
+                info!(
+                    youtube_id = %youtube_id,
+                    line_count = lines.len(),
+                    "gather: description lyrics hit"
+                );
+                Some(lines)
+            }
+            Ok(_) => {
+                debug!("gather: no description lyrics for {youtube_id}");
+                None
+            }
+            Err(e) => {
+                warn!("gather: description fetch error for {youtube_id}: {e}");
+                None
+            }
+        };
+        if let Some(lines) = description_lines {
+            candidate_texts.push(CandidateText {
+                source: "description".into(),
+                lines,
+                has_timing: false,
+                line_timings: None,
+            });
+        }
+    }
+
+    if candidate_texts.is_empty() {
+        anyhow::bail!("no text sources available for {youtube_id}");
+    }
+
+    Ok(SongContext {
+        video_id: youtube_id,
+        audio_path,
+        clean_vocal_path: None, // filled by process_song before orchestrator call
+        candidate_texts,
+        autosub_json3,
+        duration_ms: row.duration_ms.unwrap_or(0) as u64,
+    })
+}
+
 impl LyricsWorker {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -256,94 +395,15 @@ impl LyricsWorker {
         row: &crate::db::models::VideoLyricsRow,
         autosub_tmp_dir: &std::path::Path,
     ) -> Result<crate::lyrics::provider::SongContext> {
-        use crate::lyrics::autosub_provider::fetch_autosub;
-        use crate::lyrics::provider::{CandidateText, SongContext};
-
-        let youtube_id = row.youtube_id.clone();
-        let audio_path = row
-            .audio_file_path
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_default();
-
-        // 1. Manual yt_subs
-        let yt_tmp = std::env::temp_dir().join("sp_yt_subs");
-        let _ = tokio::fs::create_dir_all(&yt_tmp).await;
-        let yt_subs_track =
-            match youtube_subs::fetch_subtitles(&self.ytdlp_path, &youtube_id, &yt_tmp).await {
-                Ok(Some(track)) => {
-                    info!("gather: YT manual subs hit for {youtube_id}");
-                    Some(track)
-                }
-                Ok(None) => {
-                    debug!("gather: no YT manual subs for {youtube_id}");
-                    None
-                }
-                Err(e) => {
-                    warn!("gather: YT sub fetch error for {youtube_id}: {e}");
-                    None
-                }
-            };
-
-        // 2. LRCLIB (if song/artist known)
-        let lrclib_track = if !row.song.is_empty() && !row.artist.is_empty() {
-            let duration_s = row.duration_ms.map(|ms| (ms / 1000) as u32).unwrap_or(0);
-            match lrclib::fetch_lyrics(&self.client, &row.artist, &row.song, duration_s).await {
-                Ok(Some(track)) => {
-                    info!("gather: LRCLIB hit for {youtube_id}");
-                    Some(track)
-                }
-                Ok(None) => None,
-                Err(e) => {
-                    warn!("gather: LRCLIB error for {youtube_id}: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // 3. Auto-sub json3
-        let autosub_json3 =
-            match fetch_autosub(&self.ytdlp_path, &youtube_id, autosub_tmp_dir).await {
-                Ok(Some(p)) => Some(p),
-                Ok(None) => None,
-                Err(e) => {
-                    warn!("gather: autosub fetch error for {youtube_id}: {e}");
-                    None
-                }
-            };
-
-        let mut candidate_texts: Vec<CandidateText> = Vec::new();
-        if let Some(t) = &yt_subs_track {
-            candidate_texts.push(CandidateText {
-                source: "yt_subs".into(),
-                lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-                has_timing: true,
-                line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-            });
-        }
-        if let Some(t) = &lrclib_track {
-            candidate_texts.push(CandidateText {
-                source: "lrclib".into(),
-                lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-                has_timing: true,
-                line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-            });
-        }
-
-        if candidate_texts.is_empty() {
-            anyhow::bail!("no text sources available for {youtube_id}");
-        }
-
-        Ok(SongContext {
-            video_id: youtube_id,
-            audio_path,
-            clean_vocal_path: None, // filled by process_song before orchestrator call
-            candidate_texts,
-            autosub_json3,
-            duration_ms: row.duration_ms.unwrap_or(0) as u64,
-        })
+        gather_sources_impl(
+            self.ai_client.as_deref(),
+            &self.ytdlp_path,
+            &self.cache_dir,
+            &self.client,
+            row,
+            autosub_tmp_dir,
+        )
+        .await
     }
 
     /// Extract SK translation logic. Claude first (framed as localization task), Gemini fallback.
@@ -809,5 +869,95 @@ mod tests {
         let au = body.find("fetch_autosub(").expect("autosub call");
         assert!(yt < lr, "yt_subs must be before lrclib");
         assert!(lr < au, "lrclib must be before autosub");
+    }
+
+    /// Description provider is wired as the 4th candidate source.
+    /// Seeds a raw-description cache file so yt-dlp is never invoked,
+    /// stubs Claude via wiremock, and asserts the returned SongContext
+    /// contains exactly one CandidateText with source == "description".
+    #[tokio::test]
+    async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics() {
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+        use crate::db::models::VideoLyricsRow;
+        use crate::lyrics::worker::gather_sources_impl;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+
+        // Pre-seed the raw description cache so yt-dlp is never invoked.
+        tokio::fs::write(
+            cache_dir.path().join("vidDESC_description.txt"),
+            "Lyrics:\nAmazing grace\nHow sweet the sound",
+        )
+        .await
+        .unwrap();
+
+        // Stub Claude: return a valid JSON lyrics response.
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"lines\": [\"Amazing grace\", \"How sweet the sound\"]}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let row = VideoLyricsRow {
+            id: 1,
+            youtube_id: "vidDESC".into(),
+            song: "Amazing Grace".into(),
+            artist: "".into(), // empty artist → lrclib skipped
+            duration_ms: Some(180_000),
+            audio_file_path: None,
+            youtube_url: "https://www.youtube.com/watch?v=vidDESC".into(),
+        };
+
+        let autosub_tmp = tempfile::tempdir().unwrap();
+        let reqwest_client = reqwest::Client::new();
+        let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
+
+        let ctx = gather_sources_impl(
+            Some(&ai),
+            &bogus_ytdlp,
+            cache_dir.path(),
+            &reqwest_client,
+            &row,
+            autosub_tmp.path(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            ctx.candidate_texts.len(),
+            1,
+            "only description should be present; got: {:?}",
+            ctx.candidate_texts
+                .iter()
+                .map(|c| &c.source)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(ctx.candidate_texts[0].source, "description");
+        assert_eq!(
+            ctx.candidate_texts[0].lines,
+            vec![
+                "Amazing grace".to_string(),
+                "How sweet the sound".to_string()
+            ]
+        );
+        assert!(!ctx.candidate_texts[0].has_timing);
     }
 }
