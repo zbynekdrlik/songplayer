@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a fourth candidate-text source to the lyrics ensemble by fetching the YouTube video description via yt-dlp and extracting lyrics via a single Claude call, aiming to recover and exceed the pre-PR#38 catalog quality baseline (0.524 → ≥ 0.65).
+**Goal:** Add a fourth candidate-text source to the lyrics ensemble by fetching the YouTube video description via yt-dlp and extracting lyrics via a single Claude call. Two-axis acceptance: (A) **coverage** — songs-with-lyrics count rises from 47/231 (20%) to ≥120/231 (52%); (B) **quality non-regression** — `avg_confidence_mean` stays ≥ 0.504 (tolerates 0.02 noise around the 0.524 pre-baseline).
 
 **Architecture:** New `description_provider.rs` module with pure prompt/parse helpers (unit-tested) + I/O-wrapped orchestrator (wiremock-backed integration-tested). Two-layer disk cache (raw description + extracted lyrics JSON) so reprocesses reuse work. Plugs into existing `gather_sources` as the 4th concurrent source; zero orchestrator/text-merge changes required. `LYRICS_PIPELINE_VERSION` bumps 3 → 4 to trigger catalog auto-reprocess. A new CI quality-regression-fail step closes the green-CI-theater loophole PR #38 exposed.
 
@@ -14,7 +14,7 @@
 
 ## Scope reminders
 
-- **This PR BLOCKS PR #38 merge.** Land this first, let catalog reprocess complete under v4, confirm `avg_confidence_mean ≥ 0.65`, THEN merge #38.
+- **This PR BLOCKS PR #38 merge.** Land this first, let catalog reprocess complete under v4, confirm BOTH acceptance axes (coverage ≥ 120, avg_q ≥ 0.504), THEN merge #38.
 - **No user-visible VERSION bump.** Dev stays at `0.19.0-dev.1`. Only the internal `LYRICS_PIPELINE_VERSION` constant bumps.
 - **Mutation-skip annotations MUST carry a one-line justification** per airuleset. Every task that adds one shows the justification.
 - **`cargo fmt --all --check` is the last step before every commit.** Run it, confirm clean, then commit.
@@ -1482,7 +1482,14 @@ If Mutation Testing finds survivors, fix them in a new commit (pattern: pin the 
 
 This task only starts AFTER Task 14's CI is green AND CI has deployed the new binary to win-resolume via the existing Deploy job.
 
-- [ ] **Step 1: Capture the post-deploy baseline**
+**Catalog state going in (as of 2026-04-18 pre-PR#42):**
+- Total normalized songs: **231**
+- With lyrics at v3: **47** (20% coverage) — avg quality 0.524
+- Without lyrics (null bucket): **184** (80%)
+
+Acceptance is **two-axis** — coverage (how many songs gained lyrics) AND quality (non-regression on the existing subset). Both must pass.
+
+- [ ] **Step 1: Capture the pre-deploy baseline**
 
 On win-resolume via the `win-resolume` MCP Shell, run:
 
@@ -1490,43 +1497,72 @@ On win-resolume via the `win-resolume` MCP Shell, run:
 $py = "python"
 $cache = "C:\ProgramData\SongPlayer\cache\tools"
 & $py "$cache\measure_lyrics_quality.py" > "C:\ProgramData\SongPlayer\baseline_post_v4.json"
-Get-Content "C:\ProgramData\SongPlayer\baseline_post_v4.json" | ConvertFrom-Json | Select-Object -ExpandProperty aggregate
+$pre = Get-Content "C:\ProgramData\SongPlayer\baseline_post_v4.json" | ConvertFrom-Json
+$pre.aggregate
+Write-Host "song_count (with lyrics):" $pre.aggregate.song_count
 ```
 
-Expected initial value: `avg_confidence_mean` ≈ 0.524 (the post-PR#38 regressed state — should not have changed yet because the stale bucket just got filled).
+Expected: `song_count ≈ 47` and `avg_confidence_mean ≈ 0.524`.
 
 - [ ] **Step 2: Let the worker reprocess for 24–48 hours**
 
-The 3-bucket queue processes:
-- bucket 0 (manual): empty normally
-- bucket 1 (null-lyrics): existing work
-- bucket 2 (stale, `version < 4`): now contains all ~47 songs
+The 3-bucket queue processes in priority order: manual → null → stale.
 
-Expected throughput: ~4–5 min/song. Catalog drain time: ~4 hours. Buffer extends to 24–48h to allow reprocess across all cached songs (including the ~180 in bucket 1).
+- **bucket 1 (null-lyrics)**: **184 songs** now have a chance at lyrics via the new `description` source. Each one runs yt-dlp description fetch + Claude extraction + (if lyrics found) full alignment pipeline.
+- **bucket 2 (stale, `version < 4`)**: 47 songs at v3 → reprocess under v4 with description as a 4th candidate.
 
-No action required during this window beyond periodically checking `/api/v1/lyrics/queue` counts or the `/lyrics` dashboard to monitor progress.
+Expected throughput: ~4–5 min/song with one worker. Full catalog drain: ~18 hours wall-clock. Buffer extends to 48h for safety (descriptions add a Claude call; Demucs is the expensive step but is reused across reprocesses thanks to cached vocal files — see issue #41 for the long-term fix).
+
+During the wait, no action required. Spot-check progress via the `/lyrics` dashboard or `/api/v1/lyrics/queue`.
 
 - [ ] **Step 3: Take the final measurement**
 
 ```powershell
 & $py "$cache\measure_lyrics_quality.py" > "C:\ProgramData\SongPlayer\measure_final_v4.json"
-Get-Content "C:\ProgramData\SongPlayer\measure_final_v4.json" | ConvertFrom-Json | Select-Object -ExpandProperty aggregate
+$post = Get-Content "C:\ProgramData\SongPlayer\measure_final_v4.json" | ConvertFrom-Json
+$post.aggregate
+Write-Host "song_count (with lyrics):" $post.aggregate.song_count
+Write-Host "multi_provider_pct:" $post.aggregate.multi_provider_pct
 ```
 
-- [ ] **Step 4: Report the delta**
+Also pull the source distribution directly from the DB to see how many songs came via description:
 
-Report to the user:
-- Pre-PR#38 baseline: 0.631
-- Post-PR#38 (regressed): 0.524
-- Post-this-PR: **<measured value>**
-- Target: ≥ 0.65 (exceeds pre-PR#38 baseline by 2% tolerance)
-- Source distribution: how many of the 47 now include `description` as an ensemble component
-- Per-song improvements: list songs whose quality score rose the most, and any that regressed
+```powershell
+$db = "C:\ProgramData\SongPlayer\songplayer.db"
+python -c "
+import sqlite3
+c = sqlite3.connect(r'$db')
+print('=== Source distribution ===')
+for row in c.execute('SELECT lyrics_source, COUNT(*) FROM videos WHERE has_lyrics=1 GROUP BY lyrics_source ORDER BY 2 DESC'):
+    print(f'  {row[0]}: {row[1]}')
+print()
+print('=== Pipeline version distribution ===')
+for row in c.execute('SELECT lyrics_pipeline_version, COUNT(*) FROM videos WHERE has_lyrics=1 GROUP BY lyrics_pipeline_version ORDER BY 1'):
+    print(f'  v{row[0]}: {row[1]}')
+"
+```
+
+- [ ] **Step 4: Evaluate against the two-axis acceptance gate**
+
+**Axis A — Coverage (primary):**
+- **Hard target: `song_count (with lyrics) >= 120`** (at minimum 2× today's 47; realistic if description extraction works on worship videos).
+- **Stretch: `>= 150`** (close to 65% coverage of the 231-song catalog).
+
+**Axis B — Quality non-regression (secondary):**
+- **Hard target: `avg_confidence_mean >= 0.504`** (0.524 pre-baseline − 0.02 tolerance; blocks regression).
+- **Stretch: `avg_confidence_mean >= 0.631`** (recovers to pre-PR#38 level).
+
+**Also report (not gating, required in the summary):**
+- Source distribution — how many songs have `description` in their `lyrics_source` label (ensemble + single-provider forms like `ensemble:qwen3+description`).
+- Per-song quality delta — list the 10 largest positive changes and any regressions (use per-song `lyrics_quality_score` from before/after snapshots).
+- Number of songs still in the null bucket — these are songs where even the description had no lyrics.
 
 - [ ] **Step 5: Decision point**
 
-- **If `avg_confidence_mean ≥ 0.65`**: report to the user that this PR is ready to merge AND that PR #38 is now unblocked (post-this-PR-merge, PR #38 can be merged too).
-- **If `< 0.65`**: do NOT recommend merge. Sample specific songs' alignment audit logs (`cache/<youtube_id>_alignment_audit.json`) to identify where the merge is still losing confidence. Possible follow-ups: tune `text_merge.rs` to weight description higher, raise `pass_through_baseline` from 0.7 to 0.85, or reduce the noise floor on Qwen3. Open a new spec/plan cycle for the tuning work; do NOT merge this PR until the gate hits the target.
+- **Both axes pass** (coverage ≥ 120 AND avg_q ≥ 0.504): report to the user that this PR is ready to merge AND that PR #38 is now unblocked (post-this-PR-merge, PR #38 can be merged too).
+- **Axis A fails (coverage insufficient)**: descriptions didn't contain lyrics on enough videos. Diagnosis: sample 10 songs still in bucket 1 and look at their `_description.txt` — are descriptions present but Claude decided "no lyrics", or are descriptions empty, or did yt-dlp fail? File a follow-up issue with the diagnosis. Do NOT recommend merge.
+- **Axis B fails (quality regression)**: description text is noisy on existing songs. Diagnosis: sample 5 songs whose quality dropped most and look at their audit logs (`cache/<youtube_id>_alignment_audit.json`) to see what reference text text_merge chose. If description has poor/translated text and text_merge gave it too much weight, tune `text_merge.rs`. Do NOT recommend merge.
+- **Both fail**: revert, investigate, file tuning issues.
 
 - [ ] **Step 6: Create a GitHub issue for any follow-up work identified in Step 5**
 
@@ -1548,8 +1584,9 @@ After all 15 tasks:
 4. `LYRICS_PIPELINE_VERSION` is 4 in `crates/sp-server/src/lyrics/mod.rs`.
 5. `CLAUDE.md` history lists v1 through v4 accurately.
 6. Description cache files (`{id}_description.txt`, `{id}_description_lyrics.json`) are being written to the real cache dir on win-resolume (spot check via the MCP Shell).
-7. Post-deploy measurement after 24–48h shows `avg_confidence_mean ≥ 0.65`.
-8. Per-song source distribution includes `description` as a contributor in the reconciled reference text.
+7. **Axis A — Coverage:** post-deploy `song_count (with lyrics) >= 120` (up from 47 pre-PR). **Primary success criterion.**
+8. **Axis B — Quality:** post-deploy `avg_confidence_mean >= 0.504` (no regression vs the 0.524 pre-baseline, 0.02 tolerance). **Non-regression gate.**
+9. Source distribution shows `description` appearing in the `lyrics_source` column of multiple songs, either standalone or as part of `ensemble:...+description` labels.
 
 Once verified, report to the user. Await explicit "merge it" instruction per airuleset `pr-merge-policy` — green CI and a passing measurement are BOTH necessary but NEITHER is permission to merge.
 

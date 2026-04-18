@@ -10,9 +10,16 @@ Add a fourth candidate-text source to the lyrics ensemble pipeline: YouTube vide
 
 ## Why this PR exists
 
-PR #38 (ensemble lyrics pipeline) regressed catalog quality from **0.631 → 0.524 (−17%)** measured by `scripts/measure_lyrics_quality.py`. Root cause: `gather_sources` fetches only `yt_subs` (rare), `lrclib` (patchy worship coverage), and `autosub` (timing only, ASR mistakes). 79% of songs fall to single-provider `ensemble:qwen3` with unreliable reference text from Qwen3's own transcription.
+Two problems, both rooted in missing text sources:
 
-Descriptions are the biggest untapped source on the worship catalog. Adding them should recover and exceed the pre-#38 baseline.
+**Problem 1 — catalog coverage is 20%.** Out of 231 normalized songs on production (win-resolume, 2026-04-18), only **47 (20%)** have any lyrics at all. The other **184 (80%)** sit in the null-lyrics bucket because all three existing sources (`yt_subs`, `lrclib`, `autosub`) failed to find text for them. Most worship-music YouTube videos don't have manual captions, LRCLIB's coverage is patchy for worship, and autosub is timing-only — it contributes nothing when there's no reference text to match.
+
+**Problem 2 — the 47 songs that do have lyrics regressed.** PR #38's ensemble pipeline dropped avg quality from **0.631 → 0.524 (−17%)** measured by `scripts/measure_lyrics_quality.py`. 79% landed on single-provider `ensemble:qwen3` with unreliable reference text from Qwen3's own transcription.
+
+Descriptions are the biggest untapped source on the worship catalog — artists routinely paste full lyrics into the video description. Adding them addresses BOTH problems:
+
+- Unlocks lyrics for a large chunk of the 184 currently-silent songs.
+- Gives `text_merge.rs` a reliable reference text on songs that otherwise fall through to noisy ASR-only paths, raising quality on the existing 47.
 
 ## Non-goals
 
@@ -186,15 +193,31 @@ Not required for this PR (no user-visible UI change). The `/lyrics` page already
 
 ### Measurable-improvement verification (acceptance gate)
 
+Production catalog state as of 2026-04-18 (pre-PR#42):
+
+- **Total normalized songs:** 231
+- **With lyrics (v3):** 47 (20% coverage) — avg quality 0.524
+- **Without lyrics (null bucket):** 184 (80%) — all three existing sources failed to find text
+
+The description provider addresses **both dimensions**: unlocking silent songs AND improving the existing ones' reference text. Acceptance is two-axis accordingly.
+
 **Before merge to main:**
 
 1. Commit PR #42 on `dev`, monitor CI to green.
 2. Deploy to win-resolume (self-hosted runner path, same as PR #38).
-3. Take catalog snapshot immediately: `python scripts/measure_lyrics_quality.py > /tmp/pre.json` where `avg_confidence_mean` is expected ≈ 0.524.
-4. Wait 24-48 hours for the stale bucket to fully drain (227 songs at ~4-5 min/song = ~16-19 hours with one worker; descriptions add a Claude call but are cached after first pass).
-5. Take catalog snapshot: `python scripts/measure_lyrics_quality.py > /tmp/post.json`.
-6. **Acceptance target: `avg_confidence_mean >= 0.65`** (exceeds pre-PR#38 baseline of 0.631, proving this PR is net positive).
-7. If target not met, do NOT merge. Investigate (Claude prompt tweaks, quality-metric recalibration, or text_merge weight tuning) and retry.
+3. Take PRE snapshot immediately: `python scripts/measure_lyrics_quality.py > /tmp/pre.json`. Expect `with_lyrics_count ≈ 47`, `avg_confidence_mean ≈ 0.524`.
+4. Wait 24–48 hours for the stale bucket (47 songs) AND the null bucket (184 songs) to drain through the v4 worker. Throughput: ~4–5 min/song → ~18 hours wall-clock for the full catalog with one worker; descriptions add a Claude call but are cached after first pass. Buffer extends to 48h for safety.
+5. Take POST snapshot: `python scripts/measure_lyrics_quality.py > /tmp/post.json`.
+6. **Acceptance targets (BOTH must pass):**
+   - **Axis A — coverage**: `with_lyrics_count >= 120` (roughly 50%+ of the 231-song catalog; at minimum doubles today's 47). This proves description-extraction unlocked previously-silent songs. If description is available for most worship videos, realistic target is 150–180.
+   - **Axis B — quality non-regression**: `avg_confidence_mean >= 0.524 − 0.02 = 0.504` on the new post-snapshot set. Soft-stretch target: recovers toward the pre-PR#38 baseline (0.631). The 0.02 tolerance absorbs measurement noise.
+7. **Also report (not gating, but required in the completion summary):**
+   - Source distribution: how many new songs came via `description` vs other sources (emphasizes whether the new provider is pulling weight).
+   - Per-song quality delta: list the 10 biggest improvements and any regressions.
+   - Number of songs still in the null bucket (descriptions that had no lyrics even after Claude extraction).
+8. If EITHER axis fails, do NOT merge. Diagnose which case applies:
+   - **Low coverage (Axis A fails)**: descriptions don't actually contain lyrics on this catalog → add pinned-comment provider (#future), or accept that worship videos use different distribution channels.
+   - **Quality regression (Axis B fails)**: description text is noisy (e.g., translations mixed in, or artist bio bleeding through) → tune the Claude extraction prompt, or boost `description` weighting in `text_merge.rs`.
 
 ## Cost model
 
