@@ -119,6 +119,76 @@ pub(crate) async fn write_lyrics_cache(path: &Path, lines: Option<&[String]>) ->
     Ok(())
 }
 
+/// Fetch the YouTube video description, using a disk cache keyed by `youtube_id`.
+///
+/// Returns `Ok(Some(text))` when the description is available (cached or freshly
+/// fetched), `Ok(None)` when yt-dlp failed and no cache exists. Never creates a
+/// cache file on failure — so the next reprocess retries.
+// mutants::skip: subprocess I/O wrapper; behaviour covered by cached-hit test and
+// subprocess-failure integration test.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn fetch_raw_description(
+    ytdlp_path: &Path,
+    youtube_id: &str,
+    cache_dir: &Path,
+) -> Result<Option<String>> {
+    let cache_path = cache_dir.join(format!("{youtube_id}_description.txt"));
+    if let Ok(cached) = tokio::fs::read_to_string(&cache_path).await {
+        debug!(
+            youtube_id,
+            "description_provider: cache hit (raw description)"
+        );
+        return Ok(Some(cached));
+    }
+
+    let url = format!("https://www.youtube.com/watch?v={youtube_id}");
+    let mut cmd = tokio::process::Command::new(ytdlp_path);
+    cmd.arg("--skip-download")
+        .arg("--no-warnings")
+        .arg("--print")
+        .arg("%(description)s")
+        .arg(&url);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd.kill_on_drop(true);
+
+    let output = match cmd.output().await {
+        Ok(o) => o,
+        Err(e) => {
+            warn!(youtube_id, %e, "description_provider: yt-dlp spawn failed; skipping");
+            return Ok(None);
+        }
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            youtube_id,
+            status = ?output.status,
+            stderr = %stderr,
+            "description_provider: yt-dlp returned non-zero; skipping"
+        );
+        return Ok(None);
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        debug!(
+            youtube_id,
+            "description_provider: yt-dlp returned empty description"
+        );
+        // Cache the empty result so we don't re-spawn yt-dlp on reprocess.
+        let _ = tokio::fs::write(&cache_path, "").await;
+        return Ok(Some(String::new()));
+    }
+    tokio::fs::write(&cache_path, &text)
+        .await
+        .context("write description cache")?;
+    Ok(Some(text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +317,33 @@ mod tests {
         let p = dir.path().join("nonexistent_description_lyrics.json");
         let back = read_lyrics_cache(&p).await.unwrap();
         assert_eq!(back, None);
+    }
+
+    #[tokio::test]
+    async fn fetch_raw_description_returns_cached_without_subprocess() {
+        let dir = tempfile::tempdir().unwrap();
+        let cached_path = dir.path().join("videoid_description.txt");
+        tokio::fs::write(&cached_path, "hello from cache")
+            .await
+            .unwrap();
+
+        // If the function tries to spawn the bogus ytdlp path below, the test
+        // fails. Cached-read path must short-circuit.
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+        let out = fetch_raw_description(bogus_ytdlp, "videoid", dir.path())
+            .await
+            .unwrap();
+        assert_eq!(out.as_deref(), Some("hello from cache"));
+    }
+
+    #[tokio::test]
+    async fn fetch_raw_description_returns_none_when_ytdlp_missing_and_no_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+        let out = fetch_raw_description(bogus_ytdlp, "novideo", dir.path()).await;
+        // Subprocess spawn failure returns Ok(None) — description is optional.
+        assert!(matches!(out, Ok(None)));
+        // No cache file should have been written on failure.
+        assert!(!dir.path().join("novideo_description.txt").exists());
     }
 }
