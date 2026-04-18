@@ -616,4 +616,32 @@ mod tests {
             "malformed Claude response must NOT write a cache entry"
         );
     }
+
+    #[tokio::test]
+    async fn fetch_description_lyrics_empty_raw_caches_null_no_claude() {
+        let dir = tempfile::tempdir().unwrap();
+        // Empty raw description (yt-dlp returns empty string).
+        tokio::fs::write(dir.path().join("vidEMPTY_description.txt"), "")
+            .await
+            .unwrap();
+
+        // AiClient at unreachable URL — Claude must NOT be called for empty descriptions.
+        let ai = AiClient::new(AiSettings {
+            api_url: "http://127.0.0.1:1/v1".into(),
+            api_key: Some("never".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+
+        let out = fetch_description_lyrics(&ai, bogus_ytdlp, "vidEMPTY", dir.path(), "S", "A")
+            .await
+            .unwrap();
+        assert_eq!(out, None);
+
+        let cache = read_lyrics_cache(&dir.path().join("vidEMPTY_description_lyrics.json"))
+            .await
+            .unwrap();
+        assert_eq!(cache, Some(None), "empty description must cache null");
+    }
 }
