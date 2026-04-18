@@ -575,4 +575,45 @@ mod tests {
             "null result must be cached for instant reprocess"
         );
     }
+
+    #[tokio::test]
+    async fn fetch_description_lyrics_no_cache_on_malformed_claude_response() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            dir.path().join("vidBAD_description.txt"),
+            "some description",
+        )
+        .await
+        .unwrap();
+
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {"role": "assistant", "content": "this is not JSON at all"}
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+
+        let out = fetch_description_lyrics(&ai, bogus_ytdlp, "vidBAD", dir.path(), "S", "A")
+            .await
+            .unwrap();
+        assert_eq!(out, None);
+        // CRITICAL: no cache file on malformed response — we MUST retry on next reprocess.
+        assert!(
+            !dir.path().join("vidBAD_description_lyrics.json").exists(),
+            "malformed Claude response must NOT write a cache entry"
+        );
+    }
 }
