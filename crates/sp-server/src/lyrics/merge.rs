@@ -232,22 +232,24 @@ pub async fn merge_provider_results(
     // Diagnostic: if merge confidence is worse than what a single best provider
     // would have given on the pass-through path (base_confidence * 0.7), log a
     // warning so operators can spot songs where the ensemble hurt rather than helped.
-    let avg_merged_confidence: f32 = if details.is_empty() {
-        0.0
-    } else {
-        details.iter().map(|d| d.merged_confidence).sum::<f32>() / details.len() as f32
-    };
+    let avg_merged_confidence: f32 = mean_confidence(
+        &details
+            .iter()
+            .map(|d| d.merged_confidence)
+            .collect::<Vec<_>>(),
+    );
     let best_single_pass_through: f32 = provider_results
         .iter()
         .map(|pr| {
-            pr.metadata
-                .get("base_confidence")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.7) as f32
-                * 0.7
+            pass_through_baseline(
+                pr.metadata
+                    .get("base_confidence")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.7) as f32,
+            )
         })
         .fold(0.0_f32, f32::max);
-    if avg_merged_confidence < best_single_pass_through {
+    if merge_regressed(avg_merged_confidence, best_single_pass_through) {
         warn!(
             avg_merged_confidence,
             best_single_pass_through,
@@ -258,6 +260,28 @@ pub async fn merge_provider_results(
     }
 
     Ok((track, details))
+}
+
+/// Mean of a slice of confidences. Returns 0.0 for empty input.
+pub(crate) fn mean_confidence(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        0.0
+    } else {
+        values.iter().sum::<f32>() / values.len() as f32
+    }
+}
+
+/// Pass-through baseline: what a single provider's pass-through would have
+/// produced. Used in the diagnostic warn comparison.
+pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
+    base_confidence * 0.7
+}
+
+/// Returns true when the ensemble's merged average is strictly below the
+/// best single-provider pass-through (i.e. the ensemble hurt rather than
+/// helped). Used to gate the diagnostic warn log.
+pub(crate) fn merge_regressed(avg_merged: f32, best_single: f32) -> bool {
+    avg_merged < best_single
 }
 
 /// Write the audit log to disk alongside the lyrics JSON.
@@ -435,6 +459,72 @@ mod tests {
         assert_eq!(track.lines[1].words.as_ref().unwrap()[0].text, "Again");
         assert_eq!(track.lines[1].words.as_ref().unwrap()[0].start_ms, 3000);
         assert_eq!(details.len(), 3);
+    }
+
+    /// Regression: build_merge_prompt's line counting filter must skip empty
+    /// lines. Deleting the `!` in `!l.trim().is_empty()` would count empty
+    /// lines in line_count — this test catches it because the user prompt
+    /// interpolates line_count as "N lines", so a wrong count is observable.
+    #[test]
+    fn build_merge_prompt_skips_empty_lines_in_line_count() {
+        // "line one\n\nline two\n" has 2 non-empty lines.
+        // Without the `!`, empty lines are counted → line_count = 3.
+        let reference = "line one\n\nline two\n";
+        let (_, user) = build_merge_prompt(reference, "yt_subs", &[]);
+        // The user prompt contains "{line_count} lines", so assert exactly "2 lines".
+        assert!(
+            user.contains("2 lines"),
+            "expected '2 lines' (blank line excluded), got user prompt: {}",
+            &user[..200.min(user.len())]
+        );
+        assert!(
+            !user.contains("3 lines"),
+            "must not count the empty line, but found '3 lines' in user prompt"
+        );
+    }
+
+    /// Regression: mean_confidence computes sum/len. Mutations tried % and *.
+    #[test]
+    fn mean_confidence_computes_correct_mean() {
+        let result = mean_confidence(&[0.4, 0.8]);
+        assert!(
+            (result - 0.6).abs() < 1e-5,
+            "mean([0.4, 0.8]) should be 0.6, got {result}"
+        );
+        assert_eq!(mean_confidence(&[]), 0.0, "empty slice must return 0.0");
+        let single = mean_confidence(&[0.5]);
+        assert!(
+            (single - 0.5).abs() < 1e-5,
+            "mean([0.5]) should be 0.5, got {single}"
+        );
+    }
+
+    /// Regression: pass_through_baseline must multiply by 0.7. Mutations tried + and /.
+    #[test]
+    fn pass_through_baseline_multiplies_by_0_7() {
+        let val = pass_through_baseline(1.0);
+        assert!(
+            (val - 0.7).abs() < 1e-5,
+            "1.0 base → 0.7 baseline, got {val}"
+        );
+        let zero = pass_through_baseline(0.0);
+        assert!(zero.abs() < 1e-5, "0.0 base → 0.0 baseline, got {zero}");
+        let half = pass_through_baseline(0.5);
+        assert!(
+            (half - 0.35).abs() < 1e-5,
+            "0.5 base → 0.35 baseline, got {half}"
+        );
+    }
+
+    /// Regression: merge_regressed must be strict less-than. Mutations tried ==, >, <=.
+    #[test]
+    fn merge_regressed_strict_less_than() {
+        assert!(merge_regressed(0.3, 0.5), "0.3 < 0.5 must return true");
+        assert!(
+            !merge_regressed(0.5, 0.5),
+            "equal values must NOT trigger (strict <)"
+        );
+        assert!(!merge_regressed(0.7, 0.5), "higher avg must NOT trigger");
     }
 
     #[tokio::test]

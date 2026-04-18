@@ -938,6 +938,88 @@ mod tests {
         assert_eq!(items[1].video_id, b);
     }
 
+    /// Mutation-coverage: if the `playback_mode` assignment in
+    /// `get_active_playlists` is deleted, this test catches it because the
+    /// ytlive seed row has `playback_mode='continuous'` but the Default impl
+    /// would produce an empty string. Also pins `current_position` read.
+    #[tokio::test]
+    async fn get_active_playlists_reads_playback_mode_from_row() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        crate::startup::ensure_live_playlist_exists(&pool)
+            .await
+            .unwrap();
+        // Set a non-default current_position so we can distinguish DB value from Default (0).
+        sqlx::query("UPDATE playlists SET current_position = 7 WHERE name = 'ytlive'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let active = get_active_playlists(&pool).await.unwrap();
+        let ytlive = active
+            .iter()
+            .find(|p| p.name == "ytlive")
+            .expect("ytlive must be active");
+        assert_eq!(
+            ytlive.playback_mode, "continuous",
+            "get_active_playlists must read playback_mode from the row, not use Default"
+        );
+        assert_eq!(
+            ytlive.current_position, 7,
+            "get_active_playlists must read current_position from the row, not use Default"
+        );
+    }
+
+    /// Mutation-coverage: insert_playlist's struct init for playback_mode, kind,
+    /// and current_position must come from the RETURNING row, not fall back to
+    /// `Default`. To distinguish: after insert we UPDATE the row to non-default
+    /// values, then assert get_active_playlists returns the updated values.
+    #[tokio::test]
+    async fn insert_playlist_materialises_playback_mode_and_kind_and_current_position() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        // Insert via our helper — schema defaults: playback_mode='continuous',
+        // kind='youtube', current_position=0.
+        let created = insert_playlist(&pool, "TestYT", "https://yt.com/test")
+            .await
+            .unwrap();
+        assert_eq!(
+            created.playback_mode, "continuous",
+            "insert_playlist must read playback_mode from RETURNING row"
+        );
+        assert_eq!(
+            created.kind, "youtube",
+            "insert_playlist must read kind from RETURNING row"
+        );
+        assert_eq!(
+            created.current_position, 0,
+            "insert_playlist must read current_position from RETURNING row"
+        );
+
+        // Now mutate to non-default values and confirm get_active_playlists reads them.
+        sqlx::query(
+            "UPDATE playlists SET current_position = 42, playback_mode = 'single', is_active = 1
+             WHERE name = 'TestYT'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let active = get_active_playlists(&pool).await.unwrap();
+        let test = active
+            .iter()
+            .find(|p| p.name == "TestYT")
+            .expect("TestYT must be active");
+        assert_eq!(
+            test.current_position, 42,
+            "must read updated current_position from DB, not Default"
+        );
+        assert_eq!(
+            test.playback_mode, "single",
+            "must read updated playback_mode from DB, not Default"
+        );
+    }
+
     #[tokio::test]
     async fn position_for_video_lookup() {
         let pool = crate::db::create_memory_pool().await.unwrap();
