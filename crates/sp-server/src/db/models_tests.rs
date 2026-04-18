@@ -227,6 +227,46 @@ async fn mark_complete_with_none_quality_writes_null_not_zero() {
 }
 
 #[tokio::test]
+async fn mark_video_lyrics_stamps_pipeline_version_on_failure() {
+    // Regression guard for the infinite-loop production bug: a song that fails
+    // processing must record the current pipeline version, otherwise the null
+    // bucket's `OR lyrics_pipeline_version < current` retry clause brings it
+    // back every poll because the default version (0) is always < current.
+    let pool = db::create_memory_pool().await.unwrap();
+    db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'p', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
+                 VALUES (1, 99, 'loop_me', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    mark_video_lyrics(&pool, 1, false, Some("no_source"), 5)
+        .await
+        .unwrap();
+
+    let row = sqlx::query(
+        "SELECT has_lyrics, lyrics_source, lyrics_pipeline_version FROM videos WHERE id = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<i64, _>("has_lyrics"), 0);
+    assert_eq!(row.get::<String, _>("lyrics_source"), "no_source");
+    assert_eq!(
+        row.get::<i64, _>("lyrics_pipeline_version"),
+        5,
+        "failure write MUST stamp current pipeline version or the retry \
+         filter will loop the song forever (0 < current is always true)"
+    );
+}
+
+#[tokio::test]
 async fn get_active_playlists_includes_ytlive_with_kind_custom() {
     let pool = db::create_memory_pool().await.unwrap();
     db::run_migrations(&pool).await.unwrap();

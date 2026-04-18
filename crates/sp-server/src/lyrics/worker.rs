@@ -387,6 +387,7 @@ impl LyricsWorker {
                 video_id,
                 false,
                 Some("no_source"),
+                crate::lyrics::LYRICS_PIPELINE_VERSION,
             )
             .await;
             self.clear_processing().await;

@@ -340,20 +340,32 @@ pub struct VideoLyricsRow {
     pub youtube_url: String,
 }
 
-/// Mark a video's lyrics status and source.
+/// Mark a video's lyrics status, source, AND pipeline version.
+///
+/// The pipeline_version stamp is critical on the failure path: without it, a
+/// row marked `no_source` under pipeline v5 keeps its pipeline_version at 0,
+/// and the `OR lyrics_pipeline_version < current` retry clause in
+/// `fetch_bucket_null` / `fetch_bucket_manual` then loops it forever because
+/// `0 < 5` is always true. Stamping the current version here means the song
+/// only gets retried when a NEW pipeline version ships.
 #[cfg_attr(test, mutants::skip)]
 pub async fn mark_video_lyrics(
     pool: &SqlitePool,
     video_id: i64,
     has_lyrics: bool,
     lyrics_source: Option<&str>,
+    pipeline_version: u32,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE videos SET has_lyrics = ?, lyrics_source = ? WHERE id = ?")
-        .bind(has_lyrics as i32)
-        .bind(lyrics_source)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ? \
+         WHERE id = ?",
+    )
+    .bind(has_lyrics as i32)
+    .bind(lyrics_source)
+    .bind(pipeline_version as i64)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
