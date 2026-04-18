@@ -480,4 +480,53 @@ mod tests {
                 .unwrap();
         assert_eq!(out, None);
     }
+
+    #[tokio::test]
+    async fn fetch_description_lyrics_calls_claude_and_caches_result() {
+        let dir = tempfile::tempdir().unwrap();
+        // Pre-seed ONLY the raw description so yt-dlp is skipped.
+        tokio::fs::write(
+            dir.path().join("vidCALL_description.txt"),
+            "[Verse]\nFull lyrics below:\nLine A\nLine B",
+        )
+        .await
+        .unwrap();
+
+        // wiremock stubs the Claude endpoint.
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"lines\": [\"Line A\", \"Line B\"]}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "claude-opus-4-20250514".into(),
+            system_prompt_extra: None,
+        });
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+
+        let out =
+            fetch_description_lyrics(&ai, bogus_ytdlp, "vidCALL", dir.path(), "Song", "Artist")
+                .await
+                .unwrap();
+        assert_eq!(out, Some(vec!["Line A".into(), "Line B".into()]));
+
+        // Cache should now contain the parsed result.
+        let cache = read_lyrics_cache(&dir.path().join("vidCALL_description_lyrics.json"))
+            .await
+            .unwrap();
+        assert_eq!(cache, Some(Some(vec!["Line A".into(), "Line B".into()])));
+    }
 }
