@@ -115,9 +115,11 @@ pub struct PlayVideoRequest {
     pub video_id: i64,
 }
 
-// HTTP handler: sends EngineCommand::PlayVideo to the engine. The engine
-// is responsible for all side-effects (paths lookup, current_position
-// update, pipeline play, WS broadcast).
+// HTTP handler: sends EngineCommand::PlayVideo to the engine after
+// validating (a) the playlist exists, (b) it's kind='custom', and (c) the
+// video is actually a member of the set list. Matches the 404/409 status
+// code discipline of the sibling handlers so malformed clients don't get
+// a silent 204.
 // mutants::skip: pure dispatch to engine channel; behaviour covered by play_video_sends_engine_command.
 #[cfg_attr(test, mutants::skip)]
 pub async fn post_play_video(
@@ -125,6 +127,36 @@ pub async fn post_play_video(
     Path(playlist_id): Path<i64>,
     Json(req): Json<PlayVideoRequest>,
 ) -> impl IntoResponse {
+    let kind: Option<String> = match sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
+        .bind(playlist_id)
+        .fetch_optional(&state.pool)
+        .await
+    {
+        Ok(k) => k,
+        Err(e) => {
+            warn!(playlist_id, %e, "post_play_video: kind lookup failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    match kind.as_deref() {
+        Some("custom") => {}
+        Some(_) => return (StatusCode::CONFLICT, "playlist is not custom").into_response(),
+        None => return (StatusCode::NOT_FOUND, "playlist not found").into_response(),
+    }
+
+    // Verify the video is in the set list — prevents a client from triggering
+    // playback of an arbitrary video via a custom-playlist URL.
+    match models::position_for_playlist_item(&state.pool, playlist_id, req.video_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, "video not in playlist set list").into_response();
+        }
+        Err(e) => {
+            warn!(playlist_id, video_id = req.video_id, %e, "post_play_video: position lookup failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    }
+
     let _ = state
         .engine_tx
         .send(crate::EngineCommand::PlayVideo {
@@ -132,7 +164,7 @@ pub async fn post_play_video(
             video_id: req.video_id,
         })
         .await;
-    StatusCode::NO_CONTENT
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[path = "live_tests_included.rs"]

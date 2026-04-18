@@ -207,3 +207,76 @@ async fn play_video_sends_engine_command() {
         other => panic!("unexpected command: {other:?}"),
     }
 }
+
+/// play-video against a youtube-kind playlist must return 409, not silently
+/// dispatch an engine command. Protects the 404/409 status-code discipline
+/// of the sibling handlers.
+#[tokio::test]
+async fn play_video_on_youtube_playlist_returns_409() {
+    let (pool, _, v1, _) = setup().await;
+    let yt_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='src'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let body = format!(r#"{{"video_id": {v1}}}"#);
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{yt_id}/play-video"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    // No engine command should have been dispatched.
+    assert!(engine_rx.try_recv().is_err());
+}
+
+/// play-video with a video_id that isn't in the set list must return 404,
+/// not dispatch the engine command. Prevents a client from triggering
+/// arbitrary playback via the custom-playlist URL.
+#[tokio::test]
+async fn play_video_with_unknown_video_returns_404() {
+    let (pool, ytlive_id, v1, _) = setup().await;
+    // v1 exists as a video but is NOT in the ytlive set list.
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let body = format!(r#"{{"video_id": {v1}}}"#);
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{ytlive_id}/play-video"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    assert!(engine_rx.try_recv().is_err());
+}
+
+/// play-video against a playlist that doesn't exist at all must return 404.
+#[tokio::test]
+async fn play_video_on_missing_playlist_returns_404() {
+    let (pool, _, v1, _) = setup().await;
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let body = format!(r#"{{"video_id": {v1}}}"#);
+    let resp = app
+        .oneshot(
+            Request::post("/api/v1/playlists/99999/play-video")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    assert!(engine_rx.try_recv().is_err());
+}
