@@ -40,9 +40,16 @@ pub fn build_merge_prompt(
         timing for each word.\n\n\
         CRITICAL RULES:\n\
         1. You MUST return EXACTLY {total_word_count} word entries, in reading order, \
-           one per reference word.\n\
-        2. Match provider words to reference text intelligently \
-           (contractions, ASR errors, abbreviations).\n\
+           one per reference word. A 'reference word' is a whitespace-separated \
+           token in the reference text — NOT a linguistic word. Contractions \
+           (couldn't, I'm, don't), possessives (God's), and hyphenated compounds \
+           count as ONE reference word each. Do NOT split them. Do NOT merge \
+           them. The count MUST equal {total_word_count} exactly, or the merge \
+           will be rejected and the song loses its lyrics.\n\
+        2. Provider word lists may tokenize differently from the reference \
+           (provider ASR might output 'could nt' while reference has 'couldn't'). \
+           Align them intelligently but ALWAYS emit one output entry per \
+           REFERENCE token, never per provider token.\n\
         3. Providers have DIFFERENT RELIABILITY — see each provider's \
            base_confidence. Weight timings by base_confidence^2, NOT equal average. \
            Example: qwen3 at 0.7 and autosub at 0.3 → qwen3 gets weight 0.49, autosub \
@@ -162,6 +169,19 @@ pub async fn merge_provider_results(
     let total_ref_words: usize = ref_words_per_line.iter().map(|v| v.len()).sum();
 
     if response.words.len() != total_ref_words {
+        // Previously this was a silent bail that propagated to a generic
+        // "LLM merge failed" at the orchestrator level, hiding the exact
+        // counts + response preview that an operator needs to diagnose
+        // whether Claude hallucinated extra words, the reference text was
+        // reshaped upstream, or the prompt's word-count rule wasn't
+        // followed. Log before bailing so the next failure is actionable.
+        warn!(
+            "merge: word count mismatch — Claude returned {} timings, reference has {} words. \
+             First 300 chars of cleaned response: {}",
+            response.words.len(),
+            total_ref_words,
+            &cleaned[..cleaned.len().min(300)]
+        );
         anyhow::bail!(
             "Claude returned {} word timings but reference has {} words",
             response.words.len(),
@@ -525,6 +545,33 @@ mod tests {
             "equal values must NOT trigger (strict <)"
         );
         assert!(!merge_regressed(0.7, 0.5), "higher avg must NOT trigger");
+    }
+
+    #[test]
+    fn merge_prompt_pins_reference_tokenization_on_contractions() {
+        // Regression: "Have To Have You" failed merge on 2026-04-19 because
+        // Claude tokenized contractions like "couldn't" as two words while
+        // our `split_whitespace().count()` counts it as one, producing a
+        // word-count mismatch that bailed the merge and cost the song its
+        // lyrics. The prompt MUST tell Claude that contractions are ONE
+        // reference word.
+        let providers: Vec<ProviderResult> = vec![];
+        let (system, user) = build_merge_prompt("Hello world", "yt_subs", &providers);
+        // Must mention contractions explicitly and specify they are single tokens.
+        assert!(
+            system.contains("contraction") || system.contains("Contraction"),
+            "system prompt must cover contraction tokenization: {system}"
+        );
+        assert!(
+            system.contains("whitespace"),
+            "system prompt must anchor on whitespace tokenization: {system}"
+        );
+        assert!(
+            system.contains("ONE") || system.contains("one"),
+            "system prompt must state contractions count as ONE reference word: {system}"
+        );
+        // Unused in this assertion but kept for sanity.
+        let _ = user;
     }
 
     #[tokio::test]
