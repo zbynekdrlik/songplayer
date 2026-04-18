@@ -35,7 +35,11 @@ use sp_core::lyrics::LyricsTrack;
 ///   description parsed via Claude). Targets recovering from v3 regression
 ///   (0.524 -> >= 0.65) by giving text_merge reliable reference text on
 ///   songs lacking yt_subs/lrclib coverage.
-pub const LYRICS_PIPELINE_VERSION: u32 = 4;
+/// - v5: description provider prompt reframed to software-engineering task
+///   (empty system, karaoke-app framing in user) — Claude on CLIProxyAPI OAuth
+///   was returning conversational preamble instead of JSON under the previous
+///   direct-instruction prompt, yielding 0% extraction success on production.
+pub const LYRICS_PIPELINE_VERSION: u32 = 5;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -156,9 +160,9 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v4() {
+    fn lyrics_pipeline_version_is_v5() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 4,
+            LYRICS_PIPELINE_VERSION, 5,
             "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
         );
     }
