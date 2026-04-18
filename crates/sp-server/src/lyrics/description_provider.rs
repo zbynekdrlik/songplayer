@@ -529,4 +529,50 @@ mod tests {
             .unwrap();
         assert_eq!(cache, Some(Some(vec!["Line A".into(), "Line B".into()])));
     }
+
+    #[tokio::test]
+    async fn fetch_description_lyrics_caches_null_when_claude_says_no_lyrics() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            dir.path().join("vidNULL_description.txt"),
+            "Buy my album! Subscribe! Links below.",
+        )
+        .await
+        .unwrap();
+
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {"role": "assistant", "content": "{\"lines\": null}"}
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+
+        let out =
+            fetch_description_lyrics(&ai, bogus_ytdlp, "vidNULL", dir.path(), "Song", "Artist")
+                .await
+                .unwrap();
+        assert_eq!(out, None);
+
+        let cache = read_lyrics_cache(&dir.path().join("vidNULL_description_lyrics.json"))
+            .await
+            .unwrap();
+        assert_eq!(
+            cache,
+            Some(None),
+            "null result must be cached for instant reprocess"
+        );
+    }
 }
