@@ -72,15 +72,30 @@ pub async fn is_ready(python_path: &Path) -> bool {
         return false;
     }
 
+    // IMPORTANT: do NOT set CREATE_NO_WINDOW on Windows here.
+    //
+    // On the production win-resolume machine (2026-04-19), a fresh SongPlayer
+    // restart found that invoking the venv Python with `CREATE_NO_WINDOW`
+    // (0x08000000) caused PyTorch's `torch.cuda.is_available()` to return
+    // False even though the same command run from a normal console or via
+    // PowerShell without the flag reports True. The exact interaction is
+    // unknown (likely CUDA driver/context probing that depends on a console
+    // handle), but the consequence is severe: `is_ready` returned false,
+    // bootstrap concluded the venv was broken, and kicked off a 10-15 min
+    // pip reinstall of qwen-asr + audio-separator[gpu] + torch. That
+    // repeated on every SongPlayer restart, stalling the lyrics worker.
+    //
+    // The `is_ready` probe is internal-only: there's no user-facing console
+    // to hide. Keeping the flag off costs nothing and restores reliable
+    // CUDA detection. The CREATE_NO_WINDOW flag remains on the longer-
+    // running subprocess calls (preprocess-vocals, align-chunks) where a
+    // brief window flicker during a 3-minute Demucs run would be visible.
     let mut cmd = Command::new(python_path);
     cmd.args(["-c", IS_READY_PROBE]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
-    let res = tokio::time::timeout(std::time::Duration::from_secs(15), cmd.status()).await;
+    // Longer timeout than the 15s we had — first CUDA init on a cold
+    // driver can take 10-20s on its own before torch even returns.
+    let res = tokio::time::timeout(std::time::Duration::from_secs(45), cmd.status()).await;
 
     matches!(res, Ok(Ok(s)) if s.success())
 }
