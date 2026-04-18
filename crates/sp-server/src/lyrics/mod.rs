@@ -31,7 +31,11 @@ use sp_core::lyrics::LyricsTrack;
 /// - v3 (this PR): merge prompt reworked — weight by base_confidence^2,
 ///   prefer higher-confidence provider on >1000ms disagreement. Fixes
 ///   regression seen on h-A1Tzkjsi4 (v2 got 0.48 vs baseline 0.63).
-pub const LYRICS_PIPELINE_VERSION: u32 = 3;
+/// - v4: description provider added as 4th text candidate (YouTube video
+///   description parsed via Claude). Targets recovering from v3 regression
+///   (0.524 -> >= 0.65) by giving text_merge reliable reference text on
+///   songs lacking yt_subs/lrclib coverage.
+pub const LYRICS_PIPELINE_VERSION: u32 = 4;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -149,5 +153,13 @@ mod tests {
         clean_lyrics_track(&mut track);
         assert_eq!(track.lines.len(), 1);
         assert_eq!(track.lines[0].en, "Real lyrics here");
+    }
+
+    #[test]
+    fn lyrics_pipeline_version_is_v4() {
+        assert_eq!(
+            LYRICS_PIPELINE_VERSION, 4,
+            "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
+        );
     }
 }
