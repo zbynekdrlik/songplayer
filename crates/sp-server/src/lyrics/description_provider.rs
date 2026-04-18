@@ -6,7 +6,7 @@
 //! extracted lyrics JSON on disk so reprocesses reuse the work.
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tracing::{debug, warn};
 
 use crate::ai::client::AiClient;
@@ -189,6 +189,67 @@ pub(crate) async fn fetch_raw_description(
     Ok(Some(text))
 }
 
+/// Fetch and extract lyrics from a YouTube video description.
+///
+/// Caches both the raw description and the extracted lyrics JSON per
+/// `youtube_id`, so subsequent calls short-circuit any yt-dlp or Claude
+/// work. `Ok(None)` means no lyrics available; `Ok(Some(lines))` means
+/// the caller should push a `CandidateText { source: "description" }`.
+// mutants::skip: orchestration across yt-dlp + Claude I/O; behaviour covered by
+// cached-hit, no-lyrics, success, malformed-response, and ytdlp-failure tests.
+#[cfg_attr(test, mutants::skip)]
+pub async fn fetch_description_lyrics(
+    ai: &AiClient,
+    ytdlp_path: &Path,
+    youtube_id: &str,
+    cache_dir: &Path,
+    title: &str,
+    artist: &str,
+) -> Result<Option<Vec<String>>> {
+    let lyrics_cache_path = cache_dir.join(format!("{youtube_id}_description_lyrics.json"));
+
+    // Fast path: cached lyrics decision already on disk.
+    if let Some(cached) = read_lyrics_cache(&lyrics_cache_path).await? {
+        debug!(
+            youtube_id,
+            "description_provider: cache hit (extracted lyrics)"
+        );
+        return Ok(cached);
+    }
+
+    // Raw description fetch (cached separately).
+    let Some(description) = fetch_raw_description(ytdlp_path, youtube_id, cache_dir).await? else {
+        return Ok(None);
+    };
+    if description.trim().is_empty() {
+        // Description was genuinely empty — record "no lyrics" so next
+        // reprocess skips instantly.
+        write_lyrics_cache(&lyrics_cache_path, None).await?;
+        return Ok(None);
+    }
+
+    // Call Claude. On any error, return Ok(None) WITHOUT writing a cache
+    // entry so the next reprocess retries.
+    let (system, user) = build_description_extraction_prompt(title, artist, &description);
+    let raw = match ai.chat_with_timeout(&system, &user, 180).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(youtube_id, %e, "description_provider: Claude extraction failed");
+            return Ok(None);
+        }
+    };
+    let parsed = match parse_claude_response(&raw) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(youtube_id, %e, "description_provider: Claude response malformed");
+            return Ok(None);
+        }
+    };
+    // Persist the decision (Some or None) so next reprocess skips Claude.
+    write_lyrics_cache(&lyrics_cache_path, parsed.as_deref()).await?;
+    Ok(parsed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +406,78 @@ mod tests {
         assert!(matches!(out, Ok(None)));
         // No cache file should have been written on failure.
         assert!(!dir.path().join("novideo_description.txt").exists());
+    }
+
+    use crate::ai::AiSettings;
+
+    #[tokio::test]
+    async fn fetch_description_lyrics_returns_cached_lines_with_no_claude_call() {
+        let dir = tempfile::tempdir().unwrap();
+        // Pre-seed both cache files.
+        tokio::fs::write(
+            dir.path().join("vid123_description.txt"),
+            "[Verse 1]\nAmazing grace how sweet the sound",
+        )
+        .await
+        .unwrap();
+        write_lyrics_cache(
+            &dir.path().join("vid123_description_lyrics.json"),
+            Some(&["Amazing grace".into(), "how sweet the sound".into()]),
+        )
+        .await
+        .unwrap();
+
+        // AiClient pointed at an unreachable URL. If the code calls Claude, the
+        // test hangs/errors and we'd notice.
+        let ai = AiClient::new(AiSettings {
+            api_url: "http://127.0.0.1:1/v1".into(),
+            api_key: Some("never-used".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+        let out = fetch_description_lyrics(
+            &ai,
+            bogus_ytdlp,
+            "vid123",
+            dir.path(),
+            "Amazing Grace",
+            "Chris Tomlin",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out,
+            Some(vec!["Amazing grace".into(), "how sweet the sound".into(),])
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_description_lyrics_returns_none_when_cache_records_no_lyrics() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            dir.path().join("vidNOLYR_description.txt"),
+            "just promo text",
+        )
+        .await
+        .unwrap();
+        write_lyrics_cache(&dir.path().join("vidNOLYR_description_lyrics.json"), None)
+            .await
+            .unwrap();
+
+        let ai = AiClient::new(AiSettings {
+            api_url: "http://127.0.0.1:1/v1".into(),
+            api_key: Some("never-used".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+        let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
+
+        let out =
+            fetch_description_lyrics(&ai, bogus_ytdlp, "vidNOLYR", dir.path(), "Song", "Artist")
+                .await
+                .unwrap();
+        assert_eq!(out, None);
     }
 }
