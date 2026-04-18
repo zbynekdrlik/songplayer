@@ -57,6 +57,14 @@ struct RetryBackoff {
 
 /// Free function containing the `gather_sources` logic so it can be tested
 /// without constructing a full `LyricsWorker`.
+///
+/// mutants::skip: legacy LRCLIB guards (lines 99-100) + description match guard are
+/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_claude_returns_lyrics`
+/// and `gather_sources_skips_description_when_claude_returns_empty_array` integration tests
+/// (plus the structural call-order test further down); individual mutations in these
+/// I/O-bound branches cannot be killed by unit tests without a full mock harness for
+/// yt-dlp/LRCLIB/autosub, which is out of scope.
+#[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gather_sources_impl(
     ai_client: Option<&crate::ai::client::AiClient>,
@@ -959,5 +967,90 @@ mod tests {
             ]
         );
         assert!(!ctx.candidate_texts[0].has_timing);
+    }
+
+    /// Regression: when Claude returns `{"lines": []}` for a song that has no
+    /// lyrics in its description, the description block must NOT push an empty
+    /// CandidateText. The match guard `!lines.is_empty()` prevents that. Replacing
+    /// the guard with `true` would allow an empty description candidate through,
+    /// but then candidate_texts would not be empty and the function would not bail.
+    /// This test verifies that empty-array responses are correctly skipped.
+    #[tokio::test]
+    async fn gather_sources_skips_description_when_claude_returns_empty_array() {
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+        use crate::db::models::VideoLyricsRow;
+        use crate::lyrics::worker::gather_sources_impl;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            cache_dir.path().join("vidEMPTY2_description.txt"),
+            "some description with no actual lyrics",
+        )
+        .await
+        .unwrap();
+
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"lines\": []}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let row = VideoLyricsRow {
+            id: 2,
+            youtube_id: "vidEMPTY2".into(),
+            song: "Something".into(),
+            artist: "".into(), // empty -> lrclib skipped
+            duration_ms: Some(120_000),
+            audio_file_path: None,
+            youtube_url: "https://www.youtube.com/watch?v=vidEMPTY2".into(),
+        };
+
+        let autosub_tmp = tempfile::tempdir().unwrap();
+        let reqwest_client = reqwest::Client::new();
+        let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
+
+        // gather_sources_impl should bail with "no text sources available" because:
+        // - yt_subs: yt-dlp path bogus, returns None
+        // - lrclib: artist empty, skipped
+        // - autosub: bogus path, returns None
+        // - description: Claude returns empty array, match guard skips push
+        // So candidate_texts is empty and the function bails.
+        let result = gather_sources_impl(
+            Some(&ai),
+            &bogus_ytdlp,
+            cache_dir.path(),
+            &reqwest_client,
+            &row,
+            autosub_tmp.path(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "expected bail on zero candidates, got: {:?}",
+            result
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("no text sources available"),
+            "expected 'no text sources available' error, got: {err_msg}"
+        );
     }
 }
