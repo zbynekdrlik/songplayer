@@ -468,48 +468,60 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       return Math.sqrt(variance);
     }
 
-    async function findTrack(): Promise<Track | null> {
-      const plResp = await request.get("/api/v1/playlists");
-      if (!plResp.ok()) return null;
-      const playlists: PlaylistEntry[] = await plResp.json();
-      for (const pl of playlists) {
-        const vidResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
-        if (!vidResp.ok()) continue;
-        const videos: VideoEntry[] = await vidResp.json();
-        for (const v of videos) {
-          const song = (v.song ?? "").toLowerCase();
-          const artist = (v.artist ?? "").toLowerCase();
-          if (!song.includes(SONG_NEEDLE)) continue;
-          if (!artist.includes(ARTIST_NEEDLE)) continue;
-          const lyricsResp = await request.get(`/api/v1/videos/${v.id}/lyrics`);
-          if (!lyricsResp.ok()) return null;
-          return (await lyricsResp.json()) as Track;
-        }
-      }
-      return null;
+    interface CatalogSong {
+      video_id: number;
+      song: string | null;
+      artist: string | null;
+      source: string | null;
+      pipeline_version: number;
+      has_lyrics: boolean;
+      is_stale: boolean;
+    }
+
+    async function findFreshTrack(): Promise<Track | null> {
+      // Use the catalog endpoint so we can gate on `is_stale=false`.
+      // Without this, the test reads cached v{N-1} lyrics and the
+      // content assertions fail against whatever the old pipeline
+      // produced — which might be a bare `yt_subs` fallback instead
+      // of the current-version ensemble output.
+      const sl = await request.get("/api/v1/lyrics/songs");
+      if (!sl.ok()) return null;
+      const songs: CatalogSong[] = await sl.json();
+      const hit = songs.find(
+        (s) =>
+          !s.is_stale &&
+          s.has_lyrics &&
+          (s.song ?? "").toLowerCase().includes(SONG_NEEDLE) &&
+          (s.artist ?? "").toLowerCase().includes(ARTIST_NEEDLE),
+      );
+      if (!hit) return null;
+      const lyricsResp = await request.get(`/api/v1/videos/${hit.video_id}/lyrics`);
+      if (!lyricsResp.ok()) return null;
+      return (await lyricsResp.json()) as Track;
     }
 
     await expect
       .poll(
         async () => {
-          const t = await findTrack();
+          const t = await findFreshTrack();
           console.log(
-            `[#148 poll] ${t ? `source=${t.source ?? "?"} lines=${t.lines?.length ?? 0}` : "not-yet"} @ ${new Date().toISOString()}`,
+            `[#148 poll] ${t ? `source=${t.source ?? "?"} lines=${t.lines?.length ?? 0}` : "not-yet-fresh"} @ ${new Date().toISOString()}`,
           );
           return t !== null;
         },
         {
           message:
-            `#148 "Get This Party Started" never produced lyrics in 60 min. ` +
-            `Either the song didn't sync into any playlist, or the pipeline ` +
-            `aborted before persisting. Check the server log on win-resolume.`,
+            `#148 "Get This Party Started" never produced lyrics at the ` +
+            `current pipeline version in 60 min. Either the song isn't in ` +
+            `any active playlist, the worker is stuck, or the reprocess ` +
+            `queue hasn't reached #148 yet under the current version.`,
           timeout: 60 * 60 * 1000,
           intervals: [30_000],
         },
       )
       .toBe(true);
 
-    const track = await findTrack();
+    const track = await findFreshTrack();
     expect(track, "track must exist post-poll").not.toBeNull();
 
     // Gate 1: source must be the ensemble path with qwen3 running (word-level
@@ -618,31 +630,40 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       return sumDupXWords / total;
     }
 
+    interface SongListItem {
+      video_id: number;
+      source: string | null;
+      pipeline_version: number;
+      has_lyrics: boolean;
+      is_stale: boolean;
+    }
+
     async function surveyAllYtSubsQwen3(): Promise<Map<number, number>> {
       const scored = new Map<number, number>();
-      const pls = await request.get("/api/v1/playlists");
-      if (!pls.ok()) return scored;
-      const playlists: PlaylistEntry[] = await pls.json();
-      for (const pl of playlists) {
-        const vr = await request.get(`/api/v1/playlists/${pl.id}/videos`);
-        if (!vr.ok()) continue;
-        const videos: VideoEntry[] = await vr.json();
-        for (const v of videos) {
-          if (!v.normalized) continue;
-          const lr = await request.get(`/api/v1/videos/${v.id}/lyrics`);
-          if (!lr.ok()) continue;
-          const track = (await lr.json()) as Track;
-          // Accept any ensemble source that includes qwen3 (single-provider
-          // pass-through OR 2-provider merge). Bare yt_subs/lrclib = line-level
-          // fallback, excluded from the word-level quality floor.
-          if (
-            !track.source?.startsWith("ensemble:") ||
-            !track.source.includes("qwen3")
-          ) {
-            continue;
-          }
-          scored.set(v.id, weightedDup(track));
+      // Use the catalog endpoint which exposes `pipeline_version` and
+      // `is_stale` so we can skip songs that haven't yet reprocessed
+      // under the current pipeline version. Without this filter, a
+      // post-deploy E2E right after a LYRICS_PIPELINE_VERSION bump
+      // reads v{N-1} cached lyrics (full of the garbage timings v{N}
+      // is supposed to fix) and the floor check flakes for hours.
+      const sl = await request.get("/api/v1/songs");
+      if (!sl.ok()) return scored;
+      const songs: SongListItem[] = await sl.json();
+      for (const s of songs) {
+        if (!s.has_lyrics || s.is_stale) continue;
+        // Accept any ensemble source that includes qwen3 (single-provider
+        // pass-through OR 2-provider merge). Bare yt_subs/lrclib = line-level
+        // fallback, excluded from the word-level quality floor.
+        if (
+          !s.source?.startsWith("ensemble:") ||
+          !s.source.includes("qwen3")
+        ) {
+          continue;
         }
+        const lr = await request.get(`/api/v1/videos/${s.video_id}/lyrics`);
+        if (!lr.ok()) continue;
+        const track = (await lr.json()) as Track;
+        scored.set(s.video_id, weightedDup(track));
       }
       return scored;
     }
