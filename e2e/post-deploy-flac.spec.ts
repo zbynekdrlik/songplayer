@@ -414,8 +414,11 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     // Once #148 is persisted as ensemble:qwen3 (or ensemble:qwen3+autosub),
     // a subsequent deploy at the same LYRICS_PIPELINE_VERSION reuses the
     // cached track immediately. A version bump invalidates it — the queue
-    // reprocesses and this test polls until it lands again.
-    test.setTimeout(63 * 60 * 1000);
+    // reprocesses and this test polls until it lands again. A full
+    // catalog reprocess after a pipeline bump takes ~3–4 hours on
+    // win-resolume (100+ songs, ~2-3 min per ensemble song), so the
+    // budget covers the worst case plus cold-start tool bootstrap.
+    test.setTimeout(4 * 60 * 60 * 1000);
 
     // Match by song + artist rather than YouTube ID — the track may be
     // uploaded multiple times and we just need ONE copy to hit the
@@ -512,10 +515,10 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         {
           message:
             `#148 "Get This Party Started" never produced lyrics at the ` +
-            `current pipeline version in 60 min. Either the song isn't in ` +
-            `any active playlist, the worker is stuck, or the reprocess ` +
-            `queue hasn't reached #148 yet under the current version.`,
-          timeout: 60 * 60 * 1000,
+            `current pipeline version in 3h 45m. Either the song isn't in ` +
+            `any active playlist, the worker is stuck, or reprocess is ` +
+            `catastrophically slow.`,
+          timeout: (3 * 60 + 45) * 60 * 1000,
           intervals: [30_000],
         },
       )
@@ -595,7 +598,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     // be long enough that most YT-subs songs have been processed — the
     // worker handles ~3.5 min per yt_subs song serially, and the
     // catalog on win-resolume has ~24 such songs.
-    test.setTimeout(75 * 60 * 1000);
+    test.setTimeout(4 * 60 * 60 * 1000);
 
     interface Word {
       start_ms: number;
@@ -646,7 +649,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       // post-deploy E2E right after a LYRICS_PIPELINE_VERSION bump
       // reads v{N-1} cached lyrics (full of the garbage timings v{N}
       // is supposed to fix) and the floor check flakes for hours.
-      const sl = await request.get("/api/v1/songs");
+      const sl = await request.get("/api/v1/lyrics/songs");
       if (!sl.ok()) return scored;
       const songs: SongListItem[] = await sl.json();
       for (const s of songs) {
@@ -698,8 +701,8 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         {
           message:
             `Expected at least ${MIN_SONGS} ensemble-qwen3 songs on the box, ` +
-            `got none in 75 min. Worker stalled or queue empty.`,
-          timeout: 75 * 60 * 1000,
+            `got none in 3h 45m. Worker stalled or queue empty.`,
+          timeout: (3 * 60 + 45) * 60 * 1000,
           intervals: [60_000],
         },
       )
