@@ -37,6 +37,11 @@ pub struct FakeObsState {
     /// Map of scene name → list of scene items, each tuple is
     /// `(sourceName, isGroup, inputKind)`.
     pub scene_items: HashMap<String, Vec<(String, bool, String)>>,
+    /// When true, the fake server silently drops `GetInputList` requests —
+    /// no response at all. Simulates the transient WebSocket failure that
+    /// broke scene detection on 2026-04-19 (production OBS returned
+    /// nothing for GetInputList; the old code wiped the NDI source map).
+    pub suppress_get_input_list: bool,
 }
 
 /// A fake OBS WebSocket server listening on a random localhost port.
@@ -202,6 +207,16 @@ async fn handle_client(
                     Some(Ok(Message::Text(text))) => {
                         let Ok(val) = serde_json::from_str::<Value>(&text) else { continue };
                         if val["op"] == 6 {
+                            // Simulate the 2026-04-19 transient-failure shape:
+                            // a GetInputList request goes out, OBS never responds.
+                            let req_type = val["d"]["requestType"].as_str().unwrap_or("");
+                            let suppress = {
+                                let s = state.lock().await;
+                                req_type == "GetInputList" && s.suppress_get_input_list
+                            };
+                            if suppress {
+                                continue;
+                            }
                             let response = handle_request(&val, &state).await;
                             if write.send(Message::Text(response.to_string().into())).await.is_err() {
                                 return;
