@@ -174,26 +174,24 @@ const MIN_WORD_DURATION_MS: u64 = 80;
 /// Sanitize a sequence of `(text, start_ms, end_ms)` tuples so the emitted
 /// word list has well-formed timings for karaoke display. Pure function.
 ///
+/// `floor_start_ms` is the lowest acceptable `start_ms` for the first word
+/// in the batch. Pass the previous line's last sanitized `end_ms` when
+/// sanitizing a track line-by-line so the cross-line boundary stays
+/// strictly increasing too. Pass `0` for a standalone batch.
+///
 /// Invariants enforced, in one left-to-right pass:
-///   1. Each word's `start_ms` is strictly GREATER than the previous word's
-///      `start_ms`. Ties (qwen3's "duplicate start cluster" shape) and
-///      backward jumps are lifted to `prev.end_ms`. Strict ordering is the
-///      property a karaoke renderer actually needs — without it, multiple
-///      words all "happen" at the same instant and the highlight cursor
-///      can't resolve which word is active.
-///   2. Every word has at least `MIN_WORD_DURATION_MS` of duration.
-///   3. No word extends past the next word's start (no overlap).
+/// 1. Each word's `start_ms` is strictly GREATER than the previous word's
+///    `start_ms`. Ties (qwen3's "duplicate start cluster" shape) and
+///    backward jumps are lifted to `prev.end_ms`. Strict ordering is the
+///    property a karaoke renderer actually needs.
+/// 2. Every word has at least `MIN_WORD_DURATION_MS` of duration.
+/// 3. No word extends past the next word's start (no overlap).
 ///
 /// The three shapes of garbage observed in qwen3 output during the
 /// 2026-04-19 event all fall to these rules:
-///   - zero-duration words: rule 2
-///   - backward-in-time starts: rule 1
-///   - duplicate-start clusters: rule 1 (strict, not merely monotonic)
-/// Sanitize a sequence of `(text, start_ms, end_ms)` tuples seeded with a
-/// `floor_start_ms` — the lowest acceptable `start_ms` for the first word
-/// in the batch. Pass the previous line's last sanitized `end_ms` when
-/// sanitizing a track line-by-line so the cross-line boundary stays
-/// strictly increasing too. Pass `0` when sanitizing a standalone batch.
+/// - zero-duration words: rule 2
+/// - backward-in-time starts: rule 1
+/// - duplicate-start clusters: rule 1 (strict, not merely monotonic)
 ///
 /// Without the floor, `compute_duplicate_start_pct` reports high
 /// duplicate % from words at line boundaries even though each line is
