@@ -189,16 +189,15 @@ const MIN_WORD_DURATION_MS: u64 = 80;
 ///   - zero-duration words: rule 2
 ///   - backward-in-time starts: rule 1
 ///   - duplicate-start clusters: rule 1 (strict, not merely monotonic)
-pub(crate) fn sanitize_word_timings(words: &[(String, u64, u64)]) -> Vec<(String, u64, u64)> {
-    sanitize_word_timings_from(words, 0)
-}
-
-/// Same as [`sanitize_word_timings`] but seeded with a `floor_start_ms`.
-/// Use this when sanitizing line-by-line: pass the previous line's last
-/// sanitized `end_ms` as the floor so the cross-line boundary stays
-/// strictly increasing too. Otherwise `compute_duplicate_start_pct`
-/// reports high duplicate % from words at line boundaries even though
-/// each line is individually clean.
+/// Sanitize a sequence of `(text, start_ms, end_ms)` tuples seeded with a
+/// `floor_start_ms` — the lowest acceptable `start_ms` for the first word
+/// in the batch. Pass the previous line's last sanitized `end_ms` when
+/// sanitizing a track line-by-line so the cross-line boundary stays
+/// strictly increasing too. Pass `0` when sanitizing a standalone batch.
+///
+/// Without the floor, `compute_duplicate_start_pct` reports high
+/// duplicate % from words at line boundaries even though each line is
+/// individually clean (v9 shipped with this bug — see CLAUDE.md).
 pub(crate) fn sanitize_word_timings_from(
     words: &[(String, u64, u64)],
     floor_start_ms: u64,

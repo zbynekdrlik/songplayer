@@ -46,7 +46,7 @@ fn dummy_client() -> AiClient {
 #[test]
 fn sanitize_clamps_zero_duration_word_to_minimum() {
     let input = vec![("Hallelujah".to_string(), 21760, 21760)];
-    let out = sanitize_word_timings(&input);
+    let out = sanitize_word_timings_from(&input, 0);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].1, 21760, "start preserved");
     assert!(
@@ -65,7 +65,7 @@ fn sanitize_fixes_backward_start_ms() {
         ("is".to_string(), 63715, 64355),
         ("done".to_string(), 64355, 64915),
     ];
-    let out = sanitize_word_timings(&input);
+    let out = sanitize_word_timings_from(&input, 0);
     assert_eq!(out[0].1, 63960);
     assert!(
         out[1].1 >= out[0].1,
@@ -88,7 +88,7 @@ fn sanitize_prevents_overlap_with_next_word() {
         ("Hello".to_string(), 1000, 5000),
         ("world".to_string(), 1500, 2000),
     ];
-    let out = sanitize_word_timings(&input);
+    let out = sanitize_word_timings_from(&input, 0);
     assert!(
         out[0].2 <= out[1].1,
         "word 0 end ({}) must not exceed word 1 start ({})",
@@ -103,14 +103,14 @@ fn sanitize_preserves_valid_timings_unchanged() {
         ("Hello".to_string(), 1000, 1500),
         ("world".to_string(), 1500, 2000),
     ];
-    let out = sanitize_word_timings(&input);
+    let out = sanitize_word_timings_from(&input, 0);
     assert_eq!(out[0], ("Hello".to_string(), 1000, 1500));
     assert_eq!(out[1], ("world".to_string(), 1500, 2000));
 }
 
 #[test]
 fn sanitize_handles_empty_input() {
-    let out = sanitize_word_timings(&[]);
+    let out = sanitize_word_timings_from(&[], 0);
     assert!(out.is_empty());
 }
 
@@ -153,7 +153,7 @@ fn sanitize_duplicate_start_cluster_becomes_sequential() {
         ("of".to_string(), 5000, 5000),
         ("God".to_string(), 5000, 5000),
     ];
-    let out = sanitize_word_timings(&input);
+    let out = sanitize_word_timings_from(&input, 0);
     assert_eq!(out.len(), 4);
     // First word preserves its raw start.
     assert_eq!(out[0].1, 5000);
@@ -190,7 +190,7 @@ fn sanitize_backward_jump_with_overlap_becomes_sequential() {
         ("first".to_string(), 1000, 1500),
         ("second".to_string(), 1200, 1250), // starts inside `first`, zero-ish duration
     ];
-    let out = sanitize_word_timings(&input);
+    let out = sanitize_word_timings_from(&input, 0);
     // second.start must be after first.start (strict).
     assert!(
         out[1].1 > out[0].1,
