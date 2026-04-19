@@ -172,9 +172,9 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v5() {
+    fn lyrics_pipeline_version_is_v7() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 5,
+            LYRICS_PIPELINE_VERSION, 7,
             "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
         );
     }
