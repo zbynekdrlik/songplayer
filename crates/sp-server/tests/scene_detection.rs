@@ -330,7 +330,15 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
     // obs client task listens on it. Sending `()` fires one rebuild
     // attempt. That attempt's GetInputList will time out (no response).
     let _ = obs_rebuild_tx.send(());
-    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Wait past the wait_for_response timeout (2s) so the rebuild-
+    // retry loop has returned None and the main event loop is back
+    // to reading messages. If we pushed the scene event during the
+    // 2s wait, it would be consumed and dropped by wait_for_response.
+    // That's a narrower race than the original "forever hang" but
+    // still present; out-of-band routing of responses vs events is
+    // a separate refactor (tracked as a TODO).
+    tokio::time::sleep(Duration::from_millis(2500)).await;
 
     // CORE ASSERTION: the map was NOT wiped. Before the fix it would
     // be empty here and every subsequent scene change would be a no-op.

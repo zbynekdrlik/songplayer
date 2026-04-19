@@ -84,21 +84,16 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
-    /// Whether the OBS program scene currently shows this playlist's NDI
-    /// output. Updated from `handle_scene_change`. Used by
-    /// `on_video_processed` to decide whether a freshly-normalized video
-    /// should auto-start playback. Purely engine-level bookkeeping — the
-    /// pure [`PlayState`] state machine does not track it.
+    /// OBS program scene shows this playlist's NDI output. Engine-level
+    /// bookkeeping (not tracked by the pure [`PlayState`]).
     scene_active: bool,
-    /// Abort handle for the in-flight title-show timer (1.5s after Started).
-    /// Cancelled when a new video starts so a stale timer from the previous
-    /// video can't fire mid-song after a skip.
+    /// Abort handle for the title-show timer (1.5s after Started). Cancelled
+    /// on new video so a stale timer from a skipped prior song can't fire.
     title_show_abort: Option<tokio::task::AbortHandle>,
-    /// Abort handle for the in-flight title-hide timer (3.5s before end).
+    /// Abort handle for the title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
-    /// Cached song/artist/duration from the current video, so `Position`
-    /// events can re-broadcast `NowPlaying` without re-querying the DB
-    /// on every update.
+    /// Cached song/artist/duration so `Position` events can re-broadcast
+    /// `NowPlaying` without re-querying the DB.
     cached_song: String,
     cached_artist: String,
     cached_duration_ms: u64,
@@ -231,39 +226,24 @@ impl PlaybackEngine {
         self.event_rx.recv().await
     }
 
-    /// Handle a scene change from the OBS module.
-    ///
-    /// When the scene goes on program we first fire `VideosAvailable` to
-    /// lift the pipeline out of `Idle` (the pure state machine's
-    /// `Idle + SceneOn` transition is a no-op by design), then fire
-    /// `SceneOn` which runs `SelectAndPlay`. Folding both into one
-    /// entry point guarantees every caller (OBS bridge, API, tests)
-    /// goes through the same sequence.
+    /// Handle a scene change from the OBS module. On program, fires
+    /// `VideosAvailable` then `SceneOn` (folded so every caller — OBS
+    /// bridge, API, tests — goes through the same sequence). Off
+    /// program, fires `SceneOff`.
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
-        // Engine-level bookkeeping: remember which pipelines currently
-        // own the program scene, independent of the pure state machine.
-        // `on_video_processed` reads this to decide whether a
-        // freshly-normalized video should auto-start playback.
+        // Going off-program cancels title timers and clears Resolume
+        // state (prevents last-write-wins bleed between playlists on
+        // the shared `#sp-title` / `#sp-subs` clips — 2026-04-19 event).
         let went_off_program = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            let previously_active = pp.scene_active;
+            let prev = pp.scene_active;
             pp.scene_active = on_program;
-            previously_active && !on_program
+            prev && !on_program
         } else {
             false
         };
-
-        // Going off-program: cancel any pending title timers AND hide
-        // whatever title/subs this playlist had on screen. Without this
-        // gate a background playlist keeps overwriting `#sp-title` and
-        // `#sp-subs` clips that the on-program playlist owns, which is
-        // exactly what made the 2026-04-19 event unusable (user heard
-        // playlist 4 but saw playlist 7's title because last-write-
-        // wins on the shared Resolume clip tokens).
         if went_off_program {
             if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                 pp.cancel_title_timers();
-                // Drop the lyrics state so subsequent Position events
-                // don't emit subtitles for this now-off-program playlist.
                 pp.lyrics_state = None;
             }
             let _ = self
@@ -284,23 +264,12 @@ impl PlaybackEngine {
     }
 
     /// Re-wake pipelines parked in `WaitingForScene` after the download
-    /// worker finishes normalizing a video.
-    ///
-    /// The stuck-WaitingForScene bug (shipped in 0.11.0): on first boot
-    /// after the V4 migration reset every row to `normalized = 0`, OBS
-    /// is already sitting on an `sp-*` scene when SongPlayer starts.
-    /// The scene-on event fires `SelectAndPlay`, which finds nothing
-    /// (DB is empty), so the pipeline parks in `WaitingForScene` with
-    /// `current_video_id = None`. When the download worker finally
-    /// produces a normalized video there is nothing to re-run the
-    /// selection — the engine is deaf to the download worker.
-    ///
-    /// This method is that missing listener. The `youtube_id` argument
-    /// is taken from the `processed:{id}` broadcast that
-    /// [`crate::downloader::DownloadWorker`] emits on every completed
-    /// pipeline run. We look up the playlist that owns this video id;
-    /// if that playlist's scene is currently active and no video is
-    /// playing, we re-run `SelectAndPlay` through the state machine.
+    /// worker finishes normalizing a video. Fixes the stuck-WaitingForScene
+    /// bug (0.11.0): on first boot after the V4 migration reset
+    /// `normalized = 0`, the scene-on event fires `SelectAndPlay` on an
+    /// empty DB, pipeline parks in `WaitingForScene` with no listener for
+    /// download completion. This method is that missing listener — driven
+    /// by the `processed:{id}` broadcast from `DownloadWorker`.
     pub async fn on_video_processed(&mut self, youtube_id: &str) {
         // Find the playlist that owns this just-processed video.
         let row = match sqlx::query("SELECT playlist_id FROM videos WHERE youtube_id = ?")
@@ -413,11 +382,9 @@ impl PlaybackEngine {
                 };
 
                 if let Some(video_id) = video_id_opt {
-                    // Title show after 1.5s — ONLY if this playlist's scene
-                    // is currently on program. An off-program playlist that
-                    // happens to be pre-buffering a song must NOT push its
-                    // title into the shared `#sp-title` clips (last-write-
-                    // wins bug that hit the 2026-04-19 event).
+                    // Title show after 1.5s — gated on scene_active so an
+                    // off-program playlist doesn't clobber the shared
+                    // `#sp-title` clips (2026-04-19 event).
                     let scene_active = self
                         .pipelines
                         .get(&playlist_id)
@@ -432,10 +399,7 @@ impl PlaybackEngine {
                     let show_handle = tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                         if !scene_active {
-                            debug!(
-                                playlist_id = pl_id,
-                                "title show suppressed — playlist not on program scene"
-                            );
+                            debug!(playlist_id = pl_id, "title suppressed — off program");
                             return;
                         }
                         if let Ok(Some((song, artist))) =
@@ -847,14 +811,8 @@ impl PlaybackEngine {
         if let Some(ref lyrics) = pp.lyrics_state {
             let msg = lyrics.update(playlist_id, position_ms);
             let _ = self.ws_event_tx.send(msg);
-            // Resolume subtitle update — GATED on scene_active so a
-            // background playlist (pre-buffered but off-program) does
-            // NOT clobber the Resolume subtitle text that belongs to
-            // the playlist currently on program. The 2026-04-19 event
-            // showed playlist 4 playing Planetshakers while playlist
-            // 7 overwrote Resolume titles with "Fidelidad" because
-            // both playlists write to the same `#sp-subs` /
-            // `#sp-title` clip tokens.
+            // Resolume subs gated on scene_active to prevent off-program
+            // playlists clobbering `#sp-subs` (2026-04-19 event).
             if pp.scene_active {
                 let (en, sk) = lyrics.resolume_lines(position_ms);
                 match en {
