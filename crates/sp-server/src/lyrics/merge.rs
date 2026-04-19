@@ -166,36 +166,43 @@ const MIN_WORD_DURATION_MS: u64 = 80;
 /// word list has well-formed timings for karaoke display. Pure function.
 ///
 /// Invariants enforced, in one left-to-right pass:
-///   1. `start_ms` is monotonically non-decreasing. Any backward jump is
-///      lifted to the previous word's start.
+///   1. Each word's `start_ms` is strictly GREATER than the previous word's
+///      `start_ms`. Ties (qwen3's "duplicate start cluster" shape) and
+///      backward jumps are lifted to `prev.end_ms`. Strict ordering is the
+///      property a karaoke renderer actually needs — without it, multiple
+///      words all "happen" at the same instant and the highlight cursor
+///      can't resolve which word is active.
 ///   2. Every word has at least `MIN_WORD_DURATION_MS` of duration.
-///   3. No word extends past the next word's start_ms (no overlap).
+///   3. No word extends past the next word's start (no overlap).
 ///
-/// These are the three shapes of garbage observed in qwen3 output during
-/// the 2026-04-19 event; together they produced the blinking / stuck
-/// karaoke display.
+/// The three shapes of garbage observed in qwen3 output during the
+/// 2026-04-19 event all fall to these rules:
+///   - zero-duration words: rule 2
+///   - backward-in-time starts: rule 1
+///   - duplicate-start clusters: rule 1 (strict, not merely monotonic)
 pub(crate) fn sanitize_word_timings(words: &[(String, u64, u64)]) -> Vec<(String, u64, u64)> {
     let mut out: Vec<(String, u64, u64)> = Vec::with_capacity(words.len());
     for (i, (text, raw_start, raw_end)) in words.iter().enumerate() {
-        // 1) monotonic start.
-        let prev_start = out.last().map(|w| w.1).unwrap_or(0);
-        let start_ms = (*raw_start).max(prev_start);
+        // 1) strict start: next word must start AFTER previous word ended.
+        //    `prev_end` is the sanitized end of the last emitted word, so
+        //    we don't inherit any overlap from the raw input.
+        let prev_end = out.last().map(|w| w.2).unwrap_or(0);
+        let start_ms = (*raw_start).max(prev_end);
 
         // 2) minimum duration.
         let mut end_ms = (*raw_end).max(start_ms.saturating_add(MIN_WORD_DURATION_MS));
 
-        // 3) no overlap with the next word, if a next word exists and its
-        //    raw start is after `start_ms`. We can only peek at the raw
-        //    next start — the sanitized version hasn't been computed yet.
+        // 3) no overlap with the next word, if a next word exists.
+        //    Peek at the NEXT raw start, but also lift it above our current
+        //    `start_ms` so adjacent duplicate-start words still end up
+        //    sequential rather than collapsing into a zero-duration range.
         if let Some((_, next_raw_start, _)) = words.get(i + 1) {
-            let next_start_effective = (*next_raw_start).max(start_ms);
+            let next_start_effective =
+                (*next_raw_start).max(start_ms.saturating_add(MIN_WORD_DURATION_MS));
             if end_ms > next_start_effective {
                 end_ms = next_start_effective;
             }
-            // If clamping made the word sub-minimum again, restore duration
-            // and push the effective upper bound out. A legitimate 0-gap
-            // between adjacent words is acceptable — only no-overlap is
-            // required.
+            // Preserve minimum duration if clamping made the word too short.
             if end_ms < start_ms.saturating_add(MIN_WORD_DURATION_MS) {
                 end_ms = start_ms.saturating_add(MIN_WORD_DURATION_MS);
             }

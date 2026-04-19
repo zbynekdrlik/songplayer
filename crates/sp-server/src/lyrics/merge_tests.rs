@@ -116,9 +116,12 @@ fn sanitize_handles_empty_input() {
 
 #[test]
 fn sanitize_duplicate_start_cluster_becomes_sequential() {
-    // Qwen3 sometimes emits 3-4 words all at the same start_ms.
-    // Sanitizer should at least enforce monotonic non-decreasing + min
-    // duration so each word is visibly distinct on screen.
+    // Qwen3 emits 3-4 words all at the same start_ms. The sanitizer
+    // MUST break them into a sequence with STRICTLY increasing starts
+    // so the karaoke cursor can identify which word is active — just
+    // "non-decreasing" (ties allowed) is not enough. This is the E2E
+    // regression that caught the first version of the sanitizer:
+    // duplicate_start_pct stayed at 20-37% on ensemble:qwen3 songs.
     let input = vec![
         ("The".to_string(), 5000, 5000),
         ("Lamb".to_string(), 5000, 5000),
@@ -127,7 +130,7 @@ fn sanitize_duplicate_start_cluster_becomes_sequential() {
     ];
     let out = sanitize_word_timings(&input);
     assert_eq!(out.len(), 4);
-    // First word stays at 5000.
+    // First word preserves its raw start.
     assert_eq!(out[0].1, 5000);
     // Each word has at least minimum duration.
     for w in &out {
@@ -139,13 +142,33 @@ fn sanitize_duplicate_start_cluster_becomes_sequential() {
             w.2
         );
     }
-    // Starts are non-decreasing.
+    // Starts must be STRICTLY increasing — no ties. This is the
+    // property `duplicate_start_pct` actually measures, and the
+    // E2E floor requires ≥60% of songs to land under 15% duplicates.
     for i in 1..out.len() {
         assert!(
-            out[i].1 >= out[i - 1].1,
-            "word starts must be non-decreasing"
+            out[i].1 > out[i - 1].1,
+            "word starts must be STRICTLY increasing; got {} then {}",
+            out[i - 1].1,
+            out[i].1
         );
     }
+}
+
+#[test]
+fn sanitize_backward_jump_with_overlap_becomes_sequential() {
+    // Composite real-world shape: a word starts BEFORE the prior word's
+    // sanitized end. Sanitizer must push both the start (up to prev_end)
+    // AND ensure the minimum duration, without collapsing to zero width.
+    let input = vec![
+        ("first".to_string(), 1000, 1500),
+        ("second".to_string(), 1200, 1250), // starts inside `first`, zero-ish duration
+    ];
+    let out = sanitize_word_timings(&input);
+    // second must start at or after first's end (1500).
+    assert!(out[1].1 >= 1500);
+    // second must still have minimum duration.
+    assert!(out[1].2 >= out[1].1 + MIN_WORD_DURATION_MS);
 }
 
 #[test]
