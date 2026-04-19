@@ -244,8 +244,34 @@ impl PlaybackEngine {
         // own the program scene, independent of the pure state machine.
         // `on_video_processed` reads this to decide whether a
         // freshly-normalized video should auto-start playback.
-        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+        let went_off_program = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            let previously_active = pp.scene_active;
             pp.scene_active = on_program;
+            previously_active && !on_program
+        } else {
+            false
+        };
+
+        // Going off-program: cancel any pending title timers AND hide
+        // whatever title/subs this playlist had on screen. Without this
+        // gate a background playlist keeps overwriting `#sp-title` and
+        // `#sp-subs` clips that the on-program playlist owns, which is
+        // exactly what made the 2026-04-19 event unusable (user heard
+        // playlist 4 but saw playlist 7's title because last-write-
+        // wins on the shared Resolume clip tokens).
+        if went_off_program {
+            if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                pp.cancel_title_timers();
+                // Drop the lyrics state so subsequent Position events
+                // don't emit subtitles for this now-off-program playlist.
+                pp.lyrics_state = None;
+            }
+            let _ = self
+                .resolume_tx
+                .try_send(crate::resolume::ResolumeCommand::HideTitle);
+            let _ = self
+                .resolume_tx
+                .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
         }
 
         if on_program {
@@ -387,7 +413,17 @@ impl PlaybackEngine {
                 };
 
                 if let Some(video_id) = video_id_opt {
-                    // Title show after 1.5s.
+                    // Title show after 1.5s — ONLY if this playlist's scene
+                    // is currently on program. An off-program playlist that
+                    // happens to be pre-buffering a song must NOT push its
+                    // title into the shared `#sp-title` clips (last-write-
+                    // wins bug that hit the 2026-04-19 event).
+                    let scene_active = self
+                        .pipelines
+                        .get(&playlist_id)
+                        .map(|pp| pp.scene_active)
+                        .unwrap_or(false);
+
                     let pool = self.pool.clone();
                     let obs_cmd = self.obs_cmd_tx.clone();
                     let resolume_tx = self.resolume_tx.clone();
@@ -395,6 +431,13 @@ impl PlaybackEngine {
 
                     let show_handle = tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        if !scene_active {
+                            debug!(
+                                playlist_id = pl_id,
+                                "title show suppressed — playlist not on program scene"
+                            );
+                            return;
+                        }
                         if let Ok(Some((song, artist))) =
                             get_video_title_info(&pool, video_id).await
                         {
@@ -804,18 +847,27 @@ impl PlaybackEngine {
         if let Some(ref lyrics) = pp.lyrics_state {
             let msg = lyrics.update(playlist_id, position_ms);
             let _ = self.ws_event_tx.send(msg);
-            // Resolume subtitle update
-            let (en, sk) = lyrics.resolume_lines(position_ms);
-            match en {
-                Some(en_text) => {
-                    let _ = self.resolume_tx.try_send(
-                        crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
-                    );
-                }
-                None => {
-                    let _ = self
-                        .resolume_tx
-                        .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+            // Resolume subtitle update — GATED on scene_active so a
+            // background playlist (pre-buffered but off-program) does
+            // NOT clobber the Resolume subtitle text that belongs to
+            // the playlist currently on program. The 2026-04-19 event
+            // showed playlist 4 playing Planetshakers while playlist
+            // 7 overwrote Resolume titles with "Fidelidad" because
+            // both playlists write to the same `#sp-subs` /
+            // `#sp-title` clip tokens.
+            if pp.scene_active {
+                let (en, sk) = lyrics.resolume_lines(position_ms);
+                match en {
+                    Some(en_text) => {
+                        let _ = self.resolume_tx.try_send(
+                            crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
+                        );
+                    }
+                    None => {
+                        let _ = self
+                            .resolume_tx
+                            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+                    }
                 }
             }
         }
