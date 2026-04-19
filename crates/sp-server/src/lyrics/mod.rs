@@ -66,7 +66,14 @@ use sp_core::lyrics::LyricsTrack;
 ///   post-v8 on win-resolume: `ensemble:qwen3` songs had
 ///   duplicate_start_pct 20%+ while `ensemble:autosub+qwen3` songs
 ///   were 0%. v9 applies the same sanitizer everywhere.
-pub const LYRICS_PIPELINE_VERSION: u32 = 9;
+/// - v10: sanitize threads `floor_start_ms` across line boundaries.
+///   v9 sanitized WITHIN each line but reset the floor to 0 per
+///   line, so two consecutive lines could have identical word
+///   start_ms at their boundary. `compute_duplicate_start_pct`
+///   sorts all starts globally and counts ties, so v9 audit logs
+///   reported 91% duplicates even though per-line output was clean.
+///   v10 makes cross-line boundaries strictly increasing too.
+pub const LYRICS_PIPELINE_VERSION: u32 = 10;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -187,9 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v9() {
+    fn lyrics_pipeline_version_is_v10() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 9,
+            LYRICS_PIPELINE_VERSION, 10,
             "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
         );
     }

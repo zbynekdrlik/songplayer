@@ -95,40 +95,42 @@ impl Orchestrator {
                 "single provider — passing through without LLM merge"
             );
             let pr = &results[0];
-            let lines = pr
-                .lines
-                .iter()
-                .map(|l| {
-                    // Apply the same sanitizer used by the multi-provider
-                    // merge path. Without this, qwen3's "zero-duration word"
-                    // and "duplicate start_ms cluster" shapes flow directly
-                    // into the output JSON and drive duplicate_start_pct
-                    // above 20% (2026-04-19 event).
-                    let raw: Vec<(String, u64, u64)> = l
-                        .words
-                        .iter()
-                        .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
-                        .collect();
-                    let sanitized = crate::lyrics::merge::sanitize_word_timings(&raw);
-                    let words: Vec<sp_core::lyrics::LyricsWord> = sanitized
-                        .into_iter()
-                        .map(|(text, start_ms, end_ms)| sp_core::lyrics::LyricsWord {
-                            text,
-                            start_ms,
-                            end_ms,
-                        })
-                        .collect();
-                    let line_start = words.first().map(|w| w.start_ms).unwrap_or(l.start_ms);
-                    let line_end = words.last().map(|w| w.end_ms).unwrap_or(l.end_ms);
-                    sp_core::lyrics::LyricsLine {
-                        start_ms: line_start,
-                        end_ms: line_end,
-                        en: l.text.clone(),
-                        sk: None,
-                        words: Some(words),
-                    }
-                })
-                .collect();
+            // Sanitize line-by-line but thread `floor_start_ms` across
+            // lines so the cross-line word boundaries stay strictly
+            // increasing (otherwise global `duplicate_start_pct` fires
+            // on same-ms words at line transitions — measured 91% on
+            // real v9 output before this fix).
+            let mut floor_start_ms: u64 = 0;
+            let mut lines: Vec<sp_core::lyrics::LyricsLine> = Vec::with_capacity(pr.lines.len());
+            for l in &pr.lines {
+                let raw: Vec<(String, u64, u64)> = l
+                    .words
+                    .iter()
+                    .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
+                    .collect();
+                let sanitized =
+                    crate::lyrics::merge::sanitize_word_timings_from(&raw, floor_start_ms);
+                if let Some(last) = sanitized.last() {
+                    floor_start_ms = last.2;
+                }
+                let words: Vec<sp_core::lyrics::LyricsWord> = sanitized
+                    .into_iter()
+                    .map(|(text, start_ms, end_ms)| sp_core::lyrics::LyricsWord {
+                        text,
+                        start_ms,
+                        end_ms,
+                    })
+                    .collect();
+                let line_start = words.first().map(|w| w.start_ms).unwrap_or(l.start_ms);
+                let line_end = words.last().map(|w| w.end_ms).unwrap_or(l.end_ms);
+                lines.push(sp_core::lyrics::LyricsLine {
+                    start_ms: line_start,
+                    end_ms: line_end,
+                    en: l.text.clone(),
+                    sk: None,
+                    words: Some(words),
+                });
+            }
             let track = LyricsTrack {
                 version: 2,
                 source: format!("ensemble:{}", pr.provider_name),

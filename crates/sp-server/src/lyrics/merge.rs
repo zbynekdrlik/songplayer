@@ -83,6 +83,7 @@ pub async fn merge_provider_results(
     let mut out_lines: Vec<LyricsLine> = Vec::with_capacity(primary.lines.len());
     let mut details: Vec<WordMergeDetail> = Vec::new();
     let mut word_index = 0usize;
+    let mut floor_start_ms: u64 = 0;
 
     for primary_line in &primary.lines {
         // Sanitize the primary provider's word timings before emitting.
@@ -91,6 +92,9 @@ pub async fn merge_provider_results(
         //   - words that go backward in time (start_ms < previous.start_ms)
         //   - duplicate start_ms clusters
         //   - words that extend past the next word's start
+        //   - words at line boundaries that share start_ms with the
+        //     previous line's last word (cross-line duplicate that
+        //     `compute_duplicate_start_pct` counts after sorting globally)
         // These propagate through untouched without sanitization and
         // manifest on stage as blinking / stuck / out-of-sync karaoke
         // subtitles (seen on SO BE IT during 2026-04-19 event).
@@ -99,7 +103,12 @@ pub async fn merge_provider_results(
             .iter()
             .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
             .collect();
-        let sanitized = sanitize_word_timings(&raw_words);
+        let sanitized = sanitize_word_timings_from(&raw_words, floor_start_ms);
+        // Next line's first word must start strictly AFTER this line's
+        // last sanitized end — otherwise the global dup check fires.
+        if let Some(last) = sanitized.last() {
+            floor_start_ms = last.2;
+        }
 
         let mut words: Vec<LyricsWord> = Vec::with_capacity(sanitized.len());
         for (i, (text, start_ms, end_ms)) in sanitized.iter().enumerate() {
@@ -181,12 +190,26 @@ const MIN_WORD_DURATION_MS: u64 = 80;
 ///   - backward-in-time starts: rule 1
 ///   - duplicate-start clusters: rule 1 (strict, not merely monotonic)
 pub(crate) fn sanitize_word_timings(words: &[(String, u64, u64)]) -> Vec<(String, u64, u64)> {
+    sanitize_word_timings_from(words, 0)
+}
+
+/// Same as [`sanitize_word_timings`] but seeded with a `floor_start_ms`.
+/// Use this when sanitizing line-by-line: pass the previous line's last
+/// sanitized `end_ms` as the floor so the cross-line boundary stays
+/// strictly increasing too. Otherwise `compute_duplicate_start_pct`
+/// reports high duplicate % from words at line boundaries even though
+/// each line is individually clean.
+pub(crate) fn sanitize_word_timings_from(
+    words: &[(String, u64, u64)],
+    floor_start_ms: u64,
+) -> Vec<(String, u64, u64)> {
     let mut out: Vec<(String, u64, u64)> = Vec::with_capacity(words.len());
     for (i, (text, raw_start, raw_end)) in words.iter().enumerate() {
         // 1) strict start: next word must start AFTER previous word ended.
-        //    `prev_end` is the sanitized end of the last emitted word, so
-        //    we don't inherit any overlap from the raw input.
-        let prev_end = out.last().map(|w| w.2).unwrap_or(0);
+        //    For the first word in the batch, `floor_start_ms` plays the
+        //    role of prev_end (so a new line inherits the previous line's
+        //    end as its lower bound).
+        let prev_end = out.last().map(|w| w.2).unwrap_or(floor_start_ms);
         let start_ms = (*raw_start).max(prev_end);
 
         // 2) minimum duration.

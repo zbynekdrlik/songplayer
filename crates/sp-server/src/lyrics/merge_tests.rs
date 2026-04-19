@@ -115,6 +115,31 @@ fn sanitize_handles_empty_input() {
 }
 
 #[test]
+fn sanitize_from_seeds_floor_for_cross_line_boundary() {
+    // Regression: when sanitizing line-by-line, the first word of line 2
+    // must start AFTER line 1's last word ended, otherwise the global
+    // `compute_duplicate_start_pct` (which sorts all word starts across
+    // the track) reports false duplicates. v10 fix: sanitize_word_timings_from
+    // takes a floor and propagates across line boundaries.
+    let line2 = vec![
+        ("first".to_string(), 5000, 5000),
+        ("of".to_string(), 5000, 5100),
+    ];
+    // Line 1 ended at 5080 — line 2's first word's raw start 5000 is
+    // BEHIND that. Sanitize-with-floor must push line 2's starts up.
+    let out = sanitize_word_timings_from(&line2, 5080);
+    assert!(
+        out[0].1 >= 5080,
+        "first word of line 2 must start at >= floor (5080); got {}",
+        out[0].1
+    );
+    assert!(
+        out[1].1 > out[0].1,
+        "second word must still be strictly increasing"
+    );
+}
+
+#[test]
 fn sanitize_duplicate_start_cluster_becomes_sequential() {
     // Qwen3 emits 3-4 words all at the same start_ms. The sanitizer
     // MUST break them into a sequence with STRICTLY increasing starts
