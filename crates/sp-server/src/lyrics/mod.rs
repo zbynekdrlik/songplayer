@@ -39,7 +39,12 @@ use sp_core::lyrics::LyricsTrack;
 ///   (empty system, karaoke-app framing in user) — Claude on CLIProxyAPI OAuth
 ///   was returning conversational preamble instead of JSON under the previous
 ///   direct-instruction prompt, yielding 0% extraction success on production.
-pub const LYRICS_PIPELINE_VERSION: u32 = 5;
+/// - v6: merge-layer fallback — when Claude miscounts per-word timings (1-6
+///   off vs reference split_whitespace), fall back to the highest-
+///   base-confidence provider's timings instead of dropping the song. Root
+///   cause: tokenization of contractions/possessives is inherently fuzzy for
+///   LLM output; strict count matching blocked ~40% of real production songs.
+pub const LYRICS_PIPELINE_VERSION: u32 = 6;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///

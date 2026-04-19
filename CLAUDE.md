@@ -187,6 +187,7 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 - v3 (#34/#35): merge prompt reworked — confidence-weighted, disagreement rule, compact output schema
 - v4 (#42): description provider added as 4th text candidate (raw YouTube description → Claude extraction → candidate_texts)
 - v5 (#42): description prompt reframed to software-engineering task (empty system, karaoke-app framing) — v4's direct-instruction prompt yielded 0% extraction on production because Claude via CLIProxyAPI OAuth returned conversational preamble instead of JSON
+- v6 (#42): merge-layer fallback when Claude miscounts per-word timings (typically off by 1-6 on contractions/possessives) — returns the highest-base-confidence provider's per-word timings tagged `ensemble:fallback_to_<provider>` instead of dropping the song. Fixes ~40% production song-loss observed post-v5 deploy.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

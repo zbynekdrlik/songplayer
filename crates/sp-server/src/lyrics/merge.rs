@@ -169,24 +169,23 @@ pub async fn merge_provider_results(
     let total_ref_words: usize = ref_words_per_line.iter().map(|v| v.len()).sum();
 
     if response.words.len() != total_ref_words {
-        // Previously this was a silent bail that propagated to a generic
-        // "LLM merge failed" at the orchestrator level, hiding the exact
-        // counts + response preview that an operator needs to diagnose
-        // whether Claude hallucinated extra words, the reference text was
-        // reshaped upstream, or the prompt's word-count rule wasn't
-        // followed. Log before bailing so the next failure is actionable.
+        // Claude's tokenization drifted from whitespace — contractions,
+        // possessives, and hyphenated compounds are the usual culprits. In
+        // production this blocked ~40% of songs at the merge step. Rather
+        // than drop the song, fall back to the highest-base-confidence
+        // provider's per-word timings: providers already produced valid
+        // per-reference-word alignments; Claude's job was only to reconcile
+        // them, and reconciliation is optional value-add.
         warn!(
             "merge: word count mismatch — Claude returned {} timings, reference has {} words. \
+             Falling back to best single provider. \
              First 300 chars of cleaned response: {}",
             response.words.len(),
             total_ref_words,
             &cleaned[..cleaned.len().min(300)]
         );
-        anyhow::bail!(
-            "Claude returned {} word timings but reference has {} words",
-            response.words.len(),
-            total_ref_words
-        );
+        return build_fallback_from_best_provider(provider_results)
+            .context("merge fallback: Claude miscounted AND no provider has usable word timings");
     }
 
     let mut cursor = 0;
@@ -302,6 +301,94 @@ pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
 /// helped). Used to gate the diagnostic warn log.
 pub(crate) fn merge_regressed(avg_merged: f32, best_single: f32) -> bool {
     avg_merged < best_single
+}
+
+/// Pick the provider with the highest `base_confidence` that has at least one
+/// line with at least one word. Used by the merge fallback path.
+pub(crate) fn pick_best_provider_with_words(
+    provider_results: &[ProviderResult],
+) -> Option<&ProviderResult> {
+    provider_results
+        .iter()
+        .filter(|pr| pr.lines.iter().any(|l| !l.words.is_empty()))
+        .max_by(|a, b| {
+            let bc_a = a
+                .metadata
+                .get("base_confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.7);
+            let bc_b = b
+                .metadata
+                .get("base_confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.7);
+            bc_a.partial_cmp(&bc_b).unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+/// Build a merged track by passing through the best-confidence provider's
+/// per-word timings. Invoked when the LLM merge response fails the
+/// word-count sanity check — the providers' timings are still valid, so
+/// we keep the song rather than drop it.
+fn build_fallback_from_best_provider(
+    provider_results: &[ProviderResult],
+) -> Result<(LyricsTrack, Vec<WordMergeDetail>)> {
+    let best = pick_best_provider_with_words(provider_results)
+        .ok_or_else(|| anyhow::anyhow!("no provider has usable word timings for fallback"))?;
+
+    let base_confidence = best
+        .metadata
+        .get("base_confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.7) as f32;
+    let pass_through_c = pass_through_baseline(base_confidence);
+
+    let lines: Vec<LyricsLine> = best
+        .lines
+        .iter()
+        .map(|l| LyricsLine {
+            start_ms: l.start_ms,
+            end_ms: l.end_ms,
+            en: l.text.clone(),
+            sk: None,
+            words: Some(
+                l.words
+                    .iter()
+                    .map(|w| LyricsWord {
+                        text: w.text.clone(),
+                        start_ms: w.start_ms,
+                        end_ms: w.end_ms,
+                    })
+                    .collect(),
+            ),
+        })
+        .collect();
+
+    let track = LyricsTrack {
+        version: 2,
+        source: format!("ensemble:fallback_to_{}", best.provider_name),
+        language_source: "en".into(),
+        language_translation: String::new(),
+        lines,
+    };
+
+    let details: Vec<WordMergeDetail> = best
+        .lines
+        .iter()
+        .flat_map(|l| &l.words)
+        .enumerate()
+        .map(|(i, w)| WordMergeDetail {
+            word_index: i,
+            reference_text: w.text.clone(),
+            provider_estimates: vec![(best.provider_name.clone(), w.start_ms, w.confidence)],
+            outliers_rejected: vec![],
+            merged_start_ms: w.start_ms,
+            merged_confidence: pass_through_c,
+            spread_ms: 0,
+        })
+        .collect();
+
+    Ok((track, details))
 }
 
 /// Write the audit log to disk alongside the lyrics JSON.
@@ -575,7 +662,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn merge_bails_when_word_count_mismatches_reference() {
+    async fn merge_bails_on_mismatch_when_no_provider_has_usable_words() {
+        // If Claude miscounts AND no provider emitted any per-word timings,
+        // there is no fallback to use — merge must still fail in that case.
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .respond_with(
@@ -596,12 +685,192 @@ mod tests {
             system_prompt_extra: None,
         });
         let reference = "Hello world"; // 2 words; mock returns 1
+        // Providers with NO word data — no fallback available.
         let providers = vec![ProviderResult {
             provider_name: "qwen3".into(),
             lines: vec![],
             metadata: serde_json::json!({}),
         }];
         let err = merge_provider_results(&client, reference, "m", &providers).await;
-        assert!(err.is_err(), "must bail on word-count mismatch");
+        assert!(
+            err.is_err(),
+            "mismatch + no usable fallback must still surface as error"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_falls_back_to_best_provider_when_claude_miscounts() {
+        // Regression: production ran into this on 2026-04-19 — Claude returned
+        // 136 timings for a 137-word reference (a contraction tokenization
+        // mismatch), which previously dropped the entire song. Root-cause fix:
+        // the providers already produced valid per-word timings, so fall back
+        // to the highest-base-confidence provider instead of bailing.
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            // Reference has 2 words ("Hello world"); return only 1.
+                            "content": "{\"words\":[{\"s\":1,\"e\":2,\"c\":0.5}]}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+        let client = AiClient::new(crate::ai::AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "m".into(),
+            system_prompt_extra: None,
+        });
+        let reference = "Hello world";
+        // qwen3 has real word data with higher base_confidence than autosub.
+        let providers = vec![
+            ProviderResult {
+                provider_name: "autosub".into(),
+                lines: vec![LineTiming {
+                    text: "Hello world".into(),
+                    start_ms: 500,
+                    end_ms: 2500,
+                    words: vec![
+                        WordTiming {
+                            text: "Hello".into(),
+                            start_ms: 500,
+                            end_ms: 1200,
+                            confidence: 0.3,
+                        },
+                        WordTiming {
+                            text: "world".into(),
+                            start_ms: 1200,
+                            end_ms: 2500,
+                            confidence: 0.3,
+                        },
+                    ],
+                }],
+                metadata: serde_json::json!({"base_confidence": 0.3}),
+            },
+            ProviderResult {
+                provider_name: "qwen3".into(),
+                lines: vec![LineTiming {
+                    text: "Hello world".into(),
+                    start_ms: 1000,
+                    end_ms: 2000,
+                    words: vec![
+                        WordTiming {
+                            text: "Hello".into(),
+                            start_ms: 1000,
+                            end_ms: 1500,
+                            confidence: 0.7,
+                        },
+                        WordTiming {
+                            text: "world".into(),
+                            start_ms: 1500,
+                            end_ms: 2000,
+                            confidence: 0.7,
+                        },
+                    ],
+                }],
+                metadata: serde_json::json!({"base_confidence": 0.7}),
+            },
+        ];
+        let (track, details) = merge_provider_results(&client, reference, "m", &providers)
+            .await
+            .expect("must fall back instead of bailing");
+        assert_eq!(
+            track.source, "ensemble:fallback_to_qwen3",
+            "must pick the highest-base-confidence provider's timings"
+        );
+        assert_eq!(track.lines.len(), 1, "one line in reference");
+        let words = track.lines[0].words.as_ref().unwrap();
+        assert_eq!(words.len(), 2, "both reference words timed");
+        assert_eq!(words[0].start_ms, 1000, "word 0 uses qwen3's timing");
+        assert_eq!(words[1].start_ms, 1500, "word 1 uses qwen3's timing");
+        assert_eq!(details.len(), 2);
+        assert!(
+            (details[0].merged_confidence - 0.49).abs() < 1e-4,
+            "pass-through confidence = 0.7 * 0.7 = 0.49, got {}",
+            details[0].merged_confidence
+        );
+    }
+
+    #[test]
+    fn pick_best_provider_selects_highest_base_confidence() {
+        let providers = vec![
+            ProviderResult {
+                provider_name: "autosub".into(),
+                lines: vec![LineTiming {
+                    text: "a".into(),
+                    start_ms: 0,
+                    end_ms: 1,
+                    words: vec![WordTiming {
+                        text: "a".into(),
+                        start_ms: 0,
+                        end_ms: 1,
+                        confidence: 0.3,
+                    }],
+                }],
+                metadata: serde_json::json!({"base_confidence": 0.3}),
+            },
+            ProviderResult {
+                provider_name: "qwen3".into(),
+                lines: vec![LineTiming {
+                    text: "b".into(),
+                    start_ms: 0,
+                    end_ms: 1,
+                    words: vec![WordTiming {
+                        text: "b".into(),
+                        start_ms: 0,
+                        end_ms: 1,
+                        confidence: 0.7,
+                    }],
+                }],
+                metadata: serde_json::json!({"base_confidence": 0.7}),
+            },
+        ];
+        let best = pick_best_provider_with_words(&providers).unwrap();
+        assert_eq!(best.provider_name, "qwen3");
+    }
+
+    #[test]
+    fn pick_best_provider_skips_providers_without_words() {
+        let providers = vec![
+            ProviderResult {
+                provider_name: "empty_high_conf".into(),
+                lines: vec![],
+                metadata: serde_json::json!({"base_confidence": 0.9}),
+            },
+            ProviderResult {
+                provider_name: "qwen3".into(),
+                lines: vec![LineTiming {
+                    text: "b".into(),
+                    start_ms: 0,
+                    end_ms: 1,
+                    words: vec![WordTiming {
+                        text: "b".into(),
+                        start_ms: 0,
+                        end_ms: 1,
+                        confidence: 0.7,
+                    }],
+                }],
+                metadata: serde_json::json!({"base_confidence": 0.7}),
+            },
+        ];
+        let best = pick_best_provider_with_words(&providers).unwrap();
+        assert_eq!(
+            best.provider_name, "qwen3",
+            "must skip empty providers even if they have higher base_confidence"
+        );
+    }
+
+    #[test]
+    fn pick_best_provider_returns_none_when_no_provider_has_words() {
+        let providers = vec![ProviderResult {
+            provider_name: "empty".into(),
+            lines: vec![],
+            metadata: serde_json::json!({"base_confidence": 0.9}),
+        }];
+        assert!(pick_best_provider_with_words(&providers).is_none());
     }
 }
