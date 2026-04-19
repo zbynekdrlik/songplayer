@@ -33,7 +33,8 @@ async fn handle_scene_change_off_sends_hide_title_and_subs() {
     // Force the pipeline into scene_active = true so the transition
     // downward is what we're measuring.
     if let Some(pp) = engine.pipelines.get_mut(&7) {
-        pp.scene_active = true;
+        pp.scene_active
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     engine.handle_scene_change(7, false).await;

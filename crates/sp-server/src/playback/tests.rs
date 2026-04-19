@@ -122,7 +122,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             state: PlayState::Idle,
             mode: PlaybackMode::default(),
             current_video_id: None,
-            scene_active: false,
+            scene_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             title_show_abort: Some(task.abort_handle()),
             title_hide_abort: None,
             cached_song: String::new(),
@@ -868,7 +868,8 @@ async fn processed_event_ignores_waiting_pipeline_with_inactive_scene() {
     // video was normalized. scene_active is now false.
     if let Some(pp) = engine.pipelines.get_mut(&7) {
         pp.state = PlayState::WaitingForScene;
-        pp.scene_active = false;
+        pp.scene_active
+            .store(false, std::sync::atomic::Ordering::Release);
         pp.current_video_id = None;
     }
 

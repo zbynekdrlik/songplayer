@@ -44,6 +44,81 @@ fn dummy_client() -> AiClient {
 // ---- sanitize_word_timings: 2026-04-19 event regression guards ----
 
 #[test]
+fn sanitize_track_skips_wordless_lines() {
+    // Regression guard for code-review finding I1: a LineTiming with
+    // `words: []` must NOT be emitted with fallback start_ms/end_ms that
+    // bypasses the cross-line floor. If the provider has nothing to align
+    // on that line, it's dropped so the global `duplicate_start_pct`
+    // check stays at 0% on the emitted track.
+    let provider_lines = vec![
+        LineTiming {
+            text: "line one".into(),
+            start_ms: 1000,
+            end_ms: 2000,
+            words: vec![
+                WordTiming {
+                    text: "line".into(),
+                    start_ms: 1000,
+                    end_ms: 1500,
+                    confidence: 0.7,
+                },
+                WordTiming {
+                    text: "one".into(),
+                    start_ms: 1500,
+                    end_ms: 2000,
+                    confidence: 0.7,
+                },
+            ],
+        },
+        LineTiming {
+            // Wordless "interstitial" line — must be skipped, not emitted
+            // with start_ms=1800/end_ms=1800 that would violate the
+            // strict-increasing invariant relative to line one's end.
+            text: "[instrumental]".into(),
+            start_ms: 1800,
+            end_ms: 1800,
+            words: vec![],
+        },
+        LineTiming {
+            text: "line three".into(),
+            start_ms: 2100,
+            end_ms: 3000,
+            words: vec![
+                WordTiming {
+                    text: "line".into(),
+                    start_ms: 2100,
+                    end_ms: 2500,
+                    confidence: 0.7,
+                },
+                WordTiming {
+                    text: "three".into(),
+                    start_ms: 2500,
+                    end_ms: 3000,
+                    confidence: 0.7,
+                },
+            ],
+        },
+    ];
+    let out = sanitize_track(&provider_lines);
+    assert_eq!(
+        out.len(),
+        2,
+        "wordless line must be dropped, got {} lines",
+        out.len()
+    );
+    assert_eq!(out[0].en, "line one");
+    assert_eq!(out[1].en, "line three");
+    // Cross-line monotonicity still holds: last word of line 1 ends at
+    // 2000, first word of the emitted "line three" starts at 2100.
+    let line1_last_end = out[0].words.as_ref().unwrap().last().unwrap().end_ms;
+    let line2_first_start = out[1].words.as_ref().unwrap().first().unwrap().start_ms;
+    assert!(
+        line2_first_start >= line1_last_end,
+        "next line's first word ({line2_first_start}) must start at or after prior line's last word end ({line1_last_end})"
+    );
+}
+
+#[test]
 fn sanitize_clamps_zero_duration_word_to_minimum() {
     let input = vec![("Hallelujah".to_string(), 21760, 21760)];
     let out = sanitize_word_timings_from(&input, 0);

@@ -235,6 +235,15 @@ pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
     let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
     let mut floor_start_ms: u64 = 0;
     for line in lines {
+        // Skip wordless provider lines entirely. Falling back to the raw
+        // `line.start_ms`/`end_ms` here would bypass `floor_start_ms` and
+        // regress the cross-line strict-increasing invariant v10 enforces
+        // (`compute_duplicate_start_pct` sorts globally — same-ms word
+        // starts across lines count as duplicates). A renderer can't do
+        // anything useful with a words-less karaoke line anyway.
+        if line.words.is_empty() {
+            continue;
+        }
         let raw: Vec<(String, u64, u64)> = line
             .words
             .iter()
@@ -252,8 +261,8 @@ pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
                 end_ms,
             })
             .collect();
-        let line_start = words.first().map(|w| w.start_ms).unwrap_or(line.start_ms);
-        let line_end = words.last().map(|w| w.end_ms).unwrap_or(line.end_ms);
+        let line_start = words.first().map(|w| w.start_ms).unwrap_or(0);
+        let line_end = words.last().map(|w| w.end_ms).unwrap_or(0);
         out.push(LyricsLine {
             start_ms: line_start,
             end_ms: line_end,

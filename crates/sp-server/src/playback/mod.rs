@@ -10,6 +10,8 @@ pub mod submitter;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
@@ -84,9 +86,10 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
-    /// OBS program scene shows this playlist's NDI output. Engine-level
-    /// bookkeeping (not tracked by the pure [`PlayState`]).
-    scene_active: bool,
+    /// OBS program scene shows this playlist's NDI output. `Arc<AtomicBool>`
+    /// so the detached title-show task (1.5s delay) reads the CURRENT
+    /// value at fire time, not a stale snapshot from spawn time.
+    scene_active: Arc<AtomicBool>,
     /// Abort handle for the title-show timer (1.5s after Started). Cancelled
     /// on new video so a stale timer from a skipped prior song can't fire.
     title_show_abort: Option<tokio::task::AbortHandle>,
@@ -208,7 +211,7 @@ impl PlaybackEngine {
                 state: PlayState::Idle,
                 mode: PlaybackMode::default(),
                 current_video_id: None,
-                scene_active: false,
+                scene_active: Arc::new(AtomicBool::new(false)),
                 title_show_abort: None,
                 title_hide_abort: None,
                 cached_song: String::new(),
@@ -235,8 +238,8 @@ impl PlaybackEngine {
         // state (prevents last-write-wins bleed between playlists on
         // the shared `#sp-title` / `#sp-subs` clips — 2026-04-19 event).
         let went_off_program = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            let prev = pp.scene_active;
-            pp.scene_active = on_program;
+            // Release pairs with Acquire in the title-show task.
+            let prev = pp.scene_active.swap(on_program, Ordering::Release);
             prev && !on_program
         } else {
             false
@@ -302,7 +305,7 @@ impl PlaybackEngine {
             .get(&playlist_id)
             .map(|pp| {
                 matches!(pp.state, PlayState::WaitingForScene)
-                    && pp.scene_active
+                    && pp.scene_active.load(Ordering::Acquire)
                     && pp.current_video_id.is_none()
             })
             .unwrap_or(false);
@@ -382,14 +385,12 @@ impl PlaybackEngine {
                 };
 
                 if let Some(video_id) = video_id_opt {
-                    // Title show after 1.5s — gated on scene_active so an
-                    // off-program playlist doesn't clobber the shared
-                    // `#sp-title` clips (2026-04-19 event).
+                    // Title show after 1.5s — scene_active read at FIRE time.
                     let scene_active = self
                         .pipelines
                         .get(&playlist_id)
-                        .map(|pp| pp.scene_active)
-                        .unwrap_or(false);
+                        .map(|pp| pp.scene_active.clone())
+                        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
 
                     let pool = self.pool.clone();
                     let obs_cmd = self.obs_cmd_tx.clone();
@@ -398,7 +399,7 @@ impl PlaybackEngine {
 
                     let show_handle = tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                        if !scene_active {
+                        if !scene_active.load(Ordering::Acquire) {
                             debug!(playlist_id = pl_id, "title suppressed — off program");
                             return;
                         }
@@ -813,7 +814,7 @@ impl PlaybackEngine {
             let _ = self.ws_event_tx.send(msg);
             // Resolume subs gated on scene_active to prevent off-program
             // playlists clobbering `#sp-subs` (2026-04-19 event).
-            if pp.scene_active {
+            if pp.scene_active.load(Ordering::Acquire) {
                 let (en, sk) = lyrics.resolume_lines(position_ms);
                 match en {
                     Some(en_text) => {
