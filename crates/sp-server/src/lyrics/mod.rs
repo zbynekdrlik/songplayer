@@ -44,7 +44,14 @@ use sp_core::lyrics::LyricsTrack;
 ///   base-confidence provider's timings instead of dropping the song. Root
 ///   cause: tokenization of contractions/possessives is inherently fuzzy for
 ///   LLM output; strict count matching blocked ~40% of real production songs.
-pub const LYRICS_PIPELINE_VERSION: u32 = 6;
+/// - v7: merge layer rewritten as pure Rust. Dropped the Claude call
+///   entirely — its rules (base_confidence^2 weighting, >1000ms
+///   disagreement handling, outlier rejection) are all deterministic math.
+///   New algorithm: highest-base-confidence provider is primary, other
+///   providers' timestamps (within 500ms) boost confidence to min(1.0,
+///   base * 1.2); otherwise pass-through at base * 0.7. Zero stochastic
+///   failure, zero API latency, identical output for non-failing songs.
+pub const LYRICS_PIPELINE_VERSION: u32 = 7;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///

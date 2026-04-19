@@ -139,7 +139,8 @@ impl Orchestrator {
                 .collect();
             (track, details)
         } else {
-            // 2+ providers: merge via LLM
+            // 2+ providers: deterministic Rust merge (see lyrics/merge.rs
+            // — no LLM call, pure math on provider timings).
             merge::merge_provider_results(
                 &self.ai_client,
                 &reference_text,
@@ -147,7 +148,7 @@ impl Orchestrator {
                 &results,
             )
             .await
-            .context("LLM merge failed")?
+            .context("ensemble merge failed")?
         };
 
         // Compute quality metrics
