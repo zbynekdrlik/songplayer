@@ -215,6 +215,25 @@ pub async fn start(
         ai_client: ai_client.clone(),
     };
 
+    // Auto-start the CLIProxyAPI child process if Claude is already
+    // authenticated. Without this, every SongPlayer restart (including
+    // CI deploys) leaves the proxy unstarted — the description provider,
+    // text-merge, and all other Claude calls then fail with
+    // "failed to send chat completion request" and the worker silently
+    // falls through to "no text sources available" for most songs.
+    // Observed 2026-04-19 after the v10 deploy: 100% of in-flight songs
+    // failed gather_sources until the proxy was manually started via
+    // POST /api/v1/ai/proxy/start. Best-effort; log but don't fail
+    // startup if the proxy can't start (e.g. not authenticated).
+    if state.ai_proxy.is_claude_authenticated() {
+        match state.ai_proxy.start().await {
+            Ok(()) => info!("ai_proxy: auto-started CLIProxyAPI at boot"),
+            Err(e) => warn!("ai_proxy: auto-start failed (continuing without): {e}"),
+        }
+    } else {
+        info!("ai_proxy: not authenticated, skipping auto-start");
+    }
+
     // 4. Read Gemini settings (used by download worker + reprocess worker)
     let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
         .await?
