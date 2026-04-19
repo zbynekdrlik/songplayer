@@ -189,6 +189,7 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 - v5 (#42): description prompt reframed to software-engineering task (empty system, karaoke-app framing) — v4's direct-instruction prompt yielded 0% extraction on production because Claude via CLIProxyAPI OAuth returned conversational preamble instead of JSON
 - v6 (#42): merge-layer fallback when Claude miscounts per-word timings (typically off by 1-6 on contractions/possessives) — returns the highest-base-confidence provider's per-word timings tagged `ensemble:fallback_to_<provider>` instead of dropping the song. Fixes ~40% production song-loss observed post-v5 deploy.
 - v7 (#42): merge layer rewritten as pure Rust, Claude call dropped entirely. LLMs cannot reliably emit exact-length arrays (the v5/v6 root cause); the merge rules (base_confidence^2 weighting, disagreement handling, outlier rejection) are all deterministic math. Highest-base-confidence provider is primary; other providers' timestamps within 500ms boost confidence to min(1.0, base * 1.2); otherwise pass-through at base * 0.7.
+- v8 (post-event): sanitize word timings in the merge layer — enforce monotonic start_ms, minimum 80ms per-word duration, no overlap with next word. Fixes blinking / stuck / out-of-sync karaoke observed during 2026-04-19 event. Primary provider (qwen3) sometimes emits zero-duration words, backward-in-time starts, and duplicate-start clusters; the sanitizer clamps these into well-formed timings before output.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

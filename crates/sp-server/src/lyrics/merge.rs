@@ -85,23 +85,47 @@ pub async fn merge_provider_results(
     let mut word_index = 0usize;
 
     for primary_line in &primary.lines {
-        let mut words: Vec<LyricsWord> = Vec::with_capacity(primary_line.words.len());
-        for w in &primary_line.words {
-            let confidence = word_confidence(w.start_ms, primary_base, &other_starts);
+        // Sanitize the primary provider's word timings before emitting.
+        // Qwen3's forced aligner sometimes produces:
+        //   - zero-duration words (start_ms == end_ms)
+        //   - words that go backward in time (start_ms < previous.start_ms)
+        //   - duplicate start_ms clusters
+        //   - words that extend past the next word's start
+        // These propagate through untouched without sanitization and
+        // manifest on stage as blinking / stuck / out-of-sync karaoke
+        // subtitles (seen on SO BE IT during 2026-04-19 event).
+        let raw_words: Vec<(String, u64, u64)> = primary_line
+            .words
+            .iter()
+            .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
+            .collect();
+        let sanitized = sanitize_word_timings(&raw_words);
+
+        let mut words: Vec<LyricsWord> = Vec::with_capacity(sanitized.len());
+        for (i, (text, start_ms, end_ms)) in sanitized.iter().enumerate() {
+            // Prefer the confidence computed against the RAW start timestamp
+            // (agreement with other providers is a property of the real
+            // alignment, not of our sanitized boundaries).
+            let raw_start = primary_line
+                .words
+                .get(i)
+                .map(|w| w.start_ms)
+                .unwrap_or(*start_ms);
+            let confidence = word_confidence(raw_start, primary_base, &other_starts);
             details.push(WordMergeDetail {
                 word_index,
-                reference_text: w.text.clone(),
-                provider_estimates: collect_estimates_at(provider_results, w.start_ms),
+                reference_text: text.clone(),
+                provider_estimates: collect_estimates_at(provider_results, raw_start),
                 outliers_rejected: vec![],
-                merged_start_ms: w.start_ms,
+                merged_start_ms: *start_ms,
                 merged_confidence: confidence,
                 spread_ms: 0,
             });
             word_index += 1;
             words.push(LyricsWord {
-                text: w.text.clone(),
-                start_ms: w.start_ms,
-                end_ms: w.end_ms,
+                text: text.clone(),
+                start_ms: *start_ms,
+                end_ms: *end_ms,
             });
         }
         let line_start = words.first().map(|w| w.start_ms).unwrap_or(0);
@@ -131,6 +155,55 @@ pub async fn merge_provider_results(
     };
 
     Ok((track, details))
+}
+
+/// Minimum per-word duration in ms. Zero-duration words from the forced
+/// aligner are clamped to this — below ~50 ms the karaoke highlight
+/// flickers faster than human perception can track.
+const MIN_WORD_DURATION_MS: u64 = 80;
+
+/// Sanitize a sequence of `(text, start_ms, end_ms)` tuples so the emitted
+/// word list has well-formed timings for karaoke display. Pure function.
+///
+/// Invariants enforced, in one left-to-right pass:
+///   1. `start_ms` is monotonically non-decreasing. Any backward jump is
+///      lifted to the previous word's start.
+///   2. Every word has at least `MIN_WORD_DURATION_MS` of duration.
+///   3. No word extends past the next word's start_ms (no overlap).
+///
+/// These are the three shapes of garbage observed in qwen3 output during
+/// the 2026-04-19 event; together they produced the blinking / stuck
+/// karaoke display.
+pub(crate) fn sanitize_word_timings(words: &[(String, u64, u64)]) -> Vec<(String, u64, u64)> {
+    let mut out: Vec<(String, u64, u64)> = Vec::with_capacity(words.len());
+    for (i, (text, raw_start, raw_end)) in words.iter().enumerate() {
+        // 1) monotonic start.
+        let prev_start = out.last().map(|w| w.1).unwrap_or(0);
+        let start_ms = (*raw_start).max(prev_start);
+
+        // 2) minimum duration.
+        let mut end_ms = (*raw_end).max(start_ms.saturating_add(MIN_WORD_DURATION_MS));
+
+        // 3) no overlap with the next word, if a next word exists and its
+        //    raw start is after `start_ms`. We can only peek at the raw
+        //    next start — the sanitized version hasn't been computed yet.
+        if let Some((_, next_raw_start, _)) = words.get(i + 1) {
+            let next_start_effective = (*next_raw_start).max(start_ms);
+            if end_ms > next_start_effective {
+                end_ms = next_start_effective;
+            }
+            // If clamping made the word sub-minimum again, restore duration
+            // and push the effective upper bound out. A legitimate 0-gap
+            // between adjacent words is acceptable — only no-overlap is
+            // required.
+            if end_ms < start_ms.saturating_add(MIN_WORD_DURATION_MS) {
+                end_ms = start_ms.saturating_add(MIN_WORD_DURATION_MS);
+            }
+        }
+
+        out.push((text.clone(), start_ms, end_ms));
+    }
+    out
 }
 
 /// Pick the provider with the highest `base_confidence` that has at least one

@@ -41,6 +41,113 @@ fn dummy_client() -> AiClient {
     })
 }
 
+// ---- sanitize_word_timings: 2026-04-19 event regression guards ----
+
+#[test]
+fn sanitize_clamps_zero_duration_word_to_minimum() {
+    let input = vec![("Hallelujah".to_string(), 21760, 21760)];
+    let out = sanitize_word_timings(&input);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].1, 21760, "start preserved");
+    assert!(
+        out[0].2 >= 21760 + MIN_WORD_DURATION_MS,
+        "zero-duration word must be widened to at least MIN_WORD_DURATION_MS; got end={}",
+        out[0].2
+    );
+}
+
+#[test]
+fn sanitize_fixes_backward_start_ms() {
+    // Bug shape from SO BE IT: word "is" at 63715 followed by "it" at 63960,
+    // then "is" at 63715 again (backward). Sanitize must make starts monotone.
+    let input = vec![
+        ("it".to_string(), 63960, 64200),
+        ("is".to_string(), 63715, 64355),
+        ("done".to_string(), 64355, 64915),
+    ];
+    let out = sanitize_word_timings(&input);
+    assert_eq!(out[0].1, 63960);
+    assert!(
+        out[1].1 >= out[0].1,
+        "word 1 must not start before word 0; got {} vs {}",
+        out[1].1,
+        out[0].1
+    );
+    assert!(
+        out[2].1 >= out[1].1,
+        "word 2 must not start before word 1; got {} vs {}",
+        out[2].1,
+        out[1].1
+    );
+}
+
+#[test]
+fn sanitize_prevents_overlap_with_next_word() {
+    // Previous word runs past the next word's start — clamp its end.
+    let input = vec![
+        ("Hello".to_string(), 1000, 5000),
+        ("world".to_string(), 1500, 2000),
+    ];
+    let out = sanitize_word_timings(&input);
+    assert!(
+        out[0].2 <= out[1].1,
+        "word 0 end ({}) must not exceed word 1 start ({})",
+        out[0].2,
+        out[1].1
+    );
+}
+
+#[test]
+fn sanitize_preserves_valid_timings_unchanged() {
+    let input = vec![
+        ("Hello".to_string(), 1000, 1500),
+        ("world".to_string(), 1500, 2000),
+    ];
+    let out = sanitize_word_timings(&input);
+    assert_eq!(out[0], ("Hello".to_string(), 1000, 1500));
+    assert_eq!(out[1], ("world".to_string(), 1500, 2000));
+}
+
+#[test]
+fn sanitize_handles_empty_input() {
+    let out = sanitize_word_timings(&[]);
+    assert!(out.is_empty());
+}
+
+#[test]
+fn sanitize_duplicate_start_cluster_becomes_sequential() {
+    // Qwen3 sometimes emits 3-4 words all at the same start_ms.
+    // Sanitizer should at least enforce monotonic non-decreasing + min
+    // duration so each word is visibly distinct on screen.
+    let input = vec![
+        ("The".to_string(), 5000, 5000),
+        ("Lamb".to_string(), 5000, 5000),
+        ("of".to_string(), 5000, 5000),
+        ("God".to_string(), 5000, 5000),
+    ];
+    let out = sanitize_word_timings(&input);
+    assert_eq!(out.len(), 4);
+    // First word stays at 5000.
+    assert_eq!(out[0].1, 5000);
+    // Each word has at least minimum duration.
+    for w in &out {
+        assert!(
+            w.2 >= w.1 + MIN_WORD_DURATION_MS,
+            "word {:?} duration below minimum: {} -> {}",
+            w.0,
+            w.1,
+            w.2
+        );
+    }
+    // Starts are non-decreasing.
+    for i in 1..out.len() {
+        assert!(
+            out[i].1 >= out[i - 1].1,
+            "word starts must be non-decreasing"
+        );
+    }
+}
+
 #[test]
 fn pick_best_provider_selects_highest_base_confidence() {
     let providers = vec![

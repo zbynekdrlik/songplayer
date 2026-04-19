@@ -51,7 +51,13 @@ use sp_core::lyrics::LyricsTrack;
 ///   providers' timestamps (within 500ms) boost confidence to min(1.0,
 ///   base * 1.2); otherwise pass-through at base * 0.7. Zero stochastic
 ///   failure, zero API latency, identical output for non-failing songs.
-pub const LYRICS_PIPELINE_VERSION: u32 = 7;
+/// - v8: sanitize word timings on the merge layer — enforce monotonic
+///   start_ms, minimum per-word duration (80ms), and no overlap with
+///   the next word's start. Fixes the 2026-04-19 event's blinking /
+///   stuck karaoke display, which came from qwen3 emitting
+///   zero-duration words, words that went backward in time, and
+///   duplicate start_ms clusters.
+pub const LYRICS_PIPELINE_VERSION: u32 = 8;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -172,9 +178,9 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v7() {
+    fn lyrics_pipeline_version_is_v8() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 7,
+            LYRICS_PIPELINE_VERSION, 8,
             "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
         );
     }
