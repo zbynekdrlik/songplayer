@@ -463,6 +463,24 @@ impl LyricsWorker {
         Some(compute_quality_score(avg, dup))
     }
 
+    /// Read `reference_text_source` from the per-song alignment audit
+    /// log. Surfaces the text-merge layer's decision (`description`,
+    /// `lrclib`, `yt_subs`, `merged:<a>+<b>`) so operators can see it
+    /// in the `worker: persisted` log line without having to open the
+    /// audit JSON. Returns `None` when the audit log is missing or
+    /// malformed.
+    async fn read_ref_source_from_audit(&self, youtube_id: &str) -> Option<String> {
+        let audit_path = self
+            .cache_dir
+            .join(format!("{youtube_id}_alignment_audit.json"));
+        let raw = tokio::fs::read_to_string(&audit_path).await.ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        parsed
+            .get("reference_text_source")?
+            .as_str()
+            .map(String::from)
+    }
+
     #[cfg_attr(test, mutants::skip)]
     async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
         use crate::lyrics::{
@@ -656,6 +674,15 @@ impl LyricsWorker {
         // Passing None to mark_video_lyrics_complete writes SQL NULL instead of 0.0,
         // which avoids poisoning the ORDER BY lyrics_quality_score ASC NULLS FIRST selector.
         let quality_score: Option<f32> = self.read_quality_from_audit(&youtube_id).await;
+        // Surface the reference-text source (description / lrclib / yt_subs /
+        // merged:*) in the persist log so operators can see the text-merge
+        // decision without opening the per-song audit JSON. `track.source`
+        // only names the ALIGNMENT provider (qwen3 / ensemble:*), which hides
+        // the text candidate that fed the aligner.
+        let ref_source: String = self
+            .read_ref_source_from_audit(&youtube_id)
+            .await
+            .unwrap_or_else(|| "unknown".into());
 
         crate::db::models::mark_video_lyrics_complete(
             &self.pool,
@@ -667,9 +694,10 @@ impl LyricsWorker {
         .await?;
 
         tracing::info!(
-            "worker: persisted {} (source={}, quality={}, version={})",
+            "worker: persisted {} (source={}, ref_source={}, quality={}, version={})",
             youtube_id,
             track.source,
+            ref_source,
             quality_score
                 .map(|q| format!("{q:.2}"))
                 .unwrap_or_else(|| "null".into()),
