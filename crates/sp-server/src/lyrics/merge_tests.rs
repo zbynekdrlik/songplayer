@@ -158,16 +158,30 @@ fn sanitize_duplicate_start_cluster_becomes_sequential() {
 #[test]
 fn sanitize_backward_jump_with_overlap_becomes_sequential() {
     // Composite real-world shape: a word starts BEFORE the prior word's
-    // sanitized end. Sanitizer must push both the start (up to prev_end)
-    // AND ensure the minimum duration, without collapsing to zero width.
+    // raw end. Sanitizer handles this by clamping `first`'s end DOWN to
+    // `second`'s raw start (the no-overlap rule), then `second` picks
+    // up at the clamped end. Each word keeps the minimum duration.
     let input = vec![
         ("first".to_string(), 1000, 1500),
         ("second".to_string(), 1200, 1250), // starts inside `first`, zero-ish duration
     ];
     let out = sanitize_word_timings(&input);
-    // second must start at or after first's end (1500).
-    assert!(out[1].1 >= 1500);
-    // second must still have minimum duration.
+    // second.start must be after first.start (strict).
+    assert!(
+        out[1].1 > out[0].1,
+        "second.start ({}) must be strictly greater than first.start ({})",
+        out[1].1,
+        out[0].1
+    );
+    // second.start must be at or after first.end (no overlap).
+    assert!(
+        out[1].1 >= out[0].2,
+        "second.start ({}) must be >= first.end ({})",
+        out[1].1,
+        out[0].2
+    );
+    // Each word keeps the minimum duration.
+    assert!(out[0].2 >= out[0].1 + MIN_WORD_DURATION_MS);
     assert!(out[1].2 >= out[1].1 + MIN_WORD_DURATION_MS);
 }
 
