@@ -98,21 +98,35 @@ impl Orchestrator {
             let lines = pr
                 .lines
                 .iter()
-                .map(|l| sp_core::lyrics::LyricsLine {
-                    start_ms: l.start_ms,
-                    end_ms: l.end_ms,
-                    en: l.text.clone(),
-                    sk: None,
-                    words: Some(
-                        l.words
-                            .iter()
-                            .map(|w| sp_core::lyrics::LyricsWord {
-                                text: w.text.clone(),
-                                start_ms: w.start_ms,
-                                end_ms: w.end_ms,
-                            })
-                            .collect(),
-                    ),
+                .map(|l| {
+                    // Apply the same sanitizer used by the multi-provider
+                    // merge path. Without this, qwen3's "zero-duration word"
+                    // and "duplicate start_ms cluster" shapes flow directly
+                    // into the output JSON and drive duplicate_start_pct
+                    // above 20% (2026-04-19 event).
+                    let raw: Vec<(String, u64, u64)> = l
+                        .words
+                        .iter()
+                        .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
+                        .collect();
+                    let sanitized = crate::lyrics::merge::sanitize_word_timings(&raw);
+                    let words: Vec<sp_core::lyrics::LyricsWord> = sanitized
+                        .into_iter()
+                        .map(|(text, start_ms, end_ms)| sp_core::lyrics::LyricsWord {
+                            text,
+                            start_ms,
+                            end_ms,
+                        })
+                        .collect();
+                    let line_start = words.first().map(|w| w.start_ms).unwrap_or(l.start_ms);
+                    let line_end = words.last().map(|w| w.end_ms).unwrap_or(l.end_ms);
+                    sp_core::lyrics::LyricsLine {
+                        start_ms: line_start,
+                        end_ms: line_end,
+                        en: l.text.clone(),
+                        sk: None,
+                        words: Some(words),
+                    }
                 })
                 .collect();
             let track = LyricsTrack {
@@ -122,18 +136,20 @@ impl Orchestrator {
                 language_translation: String::new(),
                 lines,
             };
-            let details: Vec<WordMergeDetail> = pr
+            // Build word_details from SANITIZED track so quality_score
+            // reflects what actually got persisted, not the raw input.
+            let details: Vec<WordMergeDetail> = track
                 .lines
                 .iter()
-                .flat_map(|l| &l.words)
+                .flat_map(|l| l.words.as_deref().unwrap_or(&[]))
                 .enumerate()
                 .map(|(i, w)| WordMergeDetail {
                     word_index: i,
                     reference_text: w.text.clone(),
-                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, w.confidence)],
+                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, 0.7)],
                     outliers_rejected: vec![],
                     merged_start_ms: w.start_ms,
-                    merged_confidence: w.confidence * 0.7,
+                    merged_confidence: 0.7 * 0.7, // pass-through baseline
                     spread_ms: 0,
                 })
                 .collect();

@@ -57,7 +57,16 @@ use sp_core::lyrics::LyricsTrack;
 ///   stuck karaoke display, which came from qwen3 emitting
 ///   zero-duration words, words that went backward in time, and
 ///   duplicate start_ms clusters.
-pub const LYRICS_PIPELINE_VERSION: u32 = 8;
+/// - v9: sanitize runs on BOTH the single-provider pass-through and
+///   the multi-provider merge. v8 had a gap: the single-provider
+///   fast-path in `orchestrator.rs` copied qwen3's raw word timings
+///   into the output without calling `sanitize_word_timings`, so
+///   songs whose autosub failed (→ `ensemble:qwen3` bare) still
+///   shipped with zero-duration / duplicate-start words. Measured
+///   post-v8 on win-resolume: `ensemble:qwen3` songs had
+///   duplicate_start_pct 20%+ while `ensemble:autosub+qwen3` songs
+///   were 0%. v9 applies the same sanitizer everywhere.
+pub const LYRICS_PIPELINE_VERSION: u32 = 9;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -178,9 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v8() {
+    fn lyrics_pipeline_version_is_v9() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 8,
+            LYRICS_PIPELINE_VERSION, 9,
             "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
         );
     }
