@@ -95,42 +95,10 @@ impl Orchestrator {
                 "single provider — passing through without LLM merge"
             );
             let pr = &results[0];
-            // Sanitize line-by-line but thread `floor_start_ms` across
-            // lines so the cross-line word boundaries stay strictly
-            // increasing (otherwise global `duplicate_start_pct` fires
-            // on same-ms words at line transitions — measured 91% on
-            // real v9 output before this fix).
-            let mut floor_start_ms: u64 = 0;
-            let mut lines: Vec<sp_core::lyrics::LyricsLine> = Vec::with_capacity(pr.lines.len());
-            for l in &pr.lines {
-                let raw: Vec<(String, u64, u64)> = l
-                    .words
-                    .iter()
-                    .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
-                    .collect();
-                let sanitized =
-                    crate::lyrics::merge::sanitize_word_timings_from(&raw, floor_start_ms);
-                if let Some(last) = sanitized.last() {
-                    floor_start_ms = last.2;
-                }
-                let words: Vec<sp_core::lyrics::LyricsWord> = sanitized
-                    .into_iter()
-                    .map(|(text, start_ms, end_ms)| sp_core::lyrics::LyricsWord {
-                        text,
-                        start_ms,
-                        end_ms,
-                    })
-                    .collect();
-                let line_start = words.first().map(|w| w.start_ms).unwrap_or(l.start_ms);
-                let line_end = words.last().map(|w| w.end_ms).unwrap_or(l.end_ms);
-                lines.push(sp_core::lyrics::LyricsLine {
-                    start_ms: line_start,
-                    end_ms: line_end,
-                    en: l.text.clone(),
-                    sk: None,
-                    words: Some(words),
-                });
-            }
+            // Single shared helper for cross-line-aware sanitize — same
+            // call site as `merge_provider_results`. Keeps the strict-
+            // increasing-starts invariant in one place.
+            let lines = crate::lyrics::merge::sanitize_track(&pr.lines);
             let track = LyricsTrack {
                 version: 2,
                 source: format!("ensemble:{}", pr.provider_name),
@@ -140,6 +108,11 @@ impl Orchestrator {
             };
             // Build word_details from SANITIZED track so quality_score
             // reflects what actually got persisted, not the raw input.
+            // Use the shared pass_through_baseline helper so the constant
+            // stays in one place (merge.rs). `base_confidence_of` reads
+            // the provider's declared base confidence; falls back to 0.7.
+            let base_conf = crate::lyrics::merge::base_confidence_of(pr);
+            let pass_through_c = crate::lyrics::merge::pass_through_baseline(base_conf);
             let details: Vec<WordMergeDetail> = track
                 .lines
                 .iter()
@@ -148,10 +121,10 @@ impl Orchestrator {
                 .map(|(i, w)| WordMergeDetail {
                     word_index: i,
                     reference_text: w.text.clone(),
-                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, 0.7)],
+                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, base_conf)],
                     outliers_rejected: vec![],
                     merged_start_ms: w.start_ms,
-                    merged_confidence: 0.7 * 0.7, // pass-through baseline
+                    merged_confidence: pass_through_c,
                     spread_ms: 0,
                 })
                 .collect();

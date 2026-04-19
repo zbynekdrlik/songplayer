@@ -215,23 +215,23 @@ pub async fn start(
         ai_client: ai_client.clone(),
     };
 
-    // Auto-start the CLIProxyAPI child process if Claude is already
-    // authenticated. Without this, every SongPlayer restart (including
-    // CI deploys) leaves the proxy unstarted — the description provider,
-    // text-merge, and all other Claude calls then fail with
-    // "failed to send chat completion request" and the worker silently
-    // falls through to "no text sources available" for most songs.
-    // Observed 2026-04-19 after the v10 deploy: 100% of in-flight songs
-    // failed gather_sources until the proxy was manually started via
-    // POST /api/v1/ai/proxy/start. Best-effort; log but don't fail
-    // startup if the proxy can't start (e.g. not authenticated).
+    // Auto-start the CLIProxyAPI child process + start a watchdog that
+    // periodically re-launches it if it dies. Without this, every
+    // SongPlayer restart (including CI deploys) leaves the proxy
+    // unstarted — the description provider, text-merge, and all other
+    // Claude calls silently fall through to "no text sources available"
+    // for most songs (2026-04-19 event: 100% of in-flight songs failed
+    // gather_sources until POST /api/v1/ai/proxy/start was hit manually).
     if state.ai_proxy.is_claude_authenticated() {
         match state.ai_proxy.start().await {
             Ok(()) => info!("ai_proxy: auto-started CLIProxyAPI at boot"),
-            Err(e) => warn!("ai_proxy: auto-start failed (continuing without): {e}"),
+            Err(e) => warn!("ai_proxy: auto-start failed (watchdog will retry): {e}"),
         }
+        let watchdog_proxy = state.ai_proxy.clone();
+        let watchdog_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(ai_proxy_watchdog(watchdog_proxy, watchdog_shutdown));
     } else {
-        info!("ai_proxy: not authenticated, skipping auto-start");
+        info!("ai_proxy: not authenticated, skipping auto-start + watchdog");
     }
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
@@ -609,6 +609,37 @@ pub async fn start(
     info!("server stopped");
 
     Ok(())
+}
+
+/// Interval between ai_proxy health checks.
+const AI_PROXY_WATCHDOG_INTERVAL_SECS: u64 = 30;
+
+/// Poll the CLIProxyAPI child every `AI_PROXY_WATCHDOG_INTERVAL_SECS` and
+/// restart it if it died. Without this, a proxy crash mid-processing
+/// leaves the worker silently falling through to "no text sources
+/// available" for every subsequent song (2026-04-19 event). Exits on
+/// shutdown broadcast.
+async fn ai_proxy_watchdog(
+    proxy: Arc<ai::proxy::ProxyManager>,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) {
+    let interval = std::time::Duration::from_secs(AI_PROXY_WATCHDOG_INTERVAL_SECS);
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = tokio::time::sleep(interval) => {
+                let status = proxy.status().await;
+                if status.running {
+                    continue;
+                }
+                warn!("ai_proxy watchdog: proxy is down, attempting restart");
+                match proxy.start().await {
+                    Ok(()) => info!("ai_proxy watchdog: restart succeeded"),
+                    Err(e) => warn!("ai_proxy watchdog: restart failed: {e}"),
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

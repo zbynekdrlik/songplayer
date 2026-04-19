@@ -80,72 +80,33 @@ pub async fn merge_provider_results(
         other_starts.len()
     );
 
-    let mut out_lines: Vec<LyricsLine> = Vec::with_capacity(primary.lines.len());
+    // Single cross-line-aware sanitize pass; the returned LyricsLines are
+    // already well-formed. Details are derived against the SANITIZED words
+    // but use the RAW start_ms for confidence lookups (agreement is a
+    // property of the real alignment, not our clamped output).
+    let out_lines = sanitize_track(&primary.lines);
     let mut details: Vec<WordMergeDetail> = Vec::new();
     let mut word_index = 0usize;
-    let mut floor_start_ms: u64 = 0;
-
-    for primary_line in &primary.lines {
-        // Sanitize the primary provider's word timings before emitting.
-        // Qwen3's forced aligner sometimes produces:
-        //   - zero-duration words (start_ms == end_ms)
-        //   - words that go backward in time (start_ms < previous.start_ms)
-        //   - duplicate start_ms clusters
-        //   - words that extend past the next word's start
-        //   - words at line boundaries that share start_ms with the
-        //     previous line's last word (cross-line duplicate that
-        //     `compute_duplicate_start_pct` counts after sorting globally)
-        // These propagate through untouched without sanitization and
-        // manifest on stage as blinking / stuck / out-of-sync karaoke
-        // subtitles (seen on SO BE IT during 2026-04-19 event).
-        let raw_words: Vec<(String, u64, u64)> = primary_line
-            .words
-            .iter()
-            .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
-            .collect();
-        let sanitized = sanitize_word_timings_from(&raw_words, floor_start_ms);
-        // Next line's first word must start strictly AFTER this line's
-        // last sanitized end — otherwise the global dup check fires.
-        if let Some(last) = sanitized.last() {
-            floor_start_ms = last.2;
-        }
-
-        let mut words: Vec<LyricsWord> = Vec::with_capacity(sanitized.len());
-        for (i, (text, start_ms, end_ms)) in sanitized.iter().enumerate() {
-            // Prefer the confidence computed against the RAW start timestamp
-            // (agreement with other providers is a property of the real
-            // alignment, not of our sanitized boundaries).
-            let raw_start = primary_line
-                .words
-                .get(i)
-                .map(|w| w.start_ms)
-                .unwrap_or(*start_ms);
+    for (line_idx, line) in out_lines.iter().enumerate() {
+        let words = line.words.as_deref().unwrap_or(&[]);
+        let raw_line = primary.lines.get(line_idx);
+        for (i, w) in words.iter().enumerate() {
+            let raw_start = raw_line
+                .and_then(|l| l.words.get(i))
+                .map(|rw| rw.start_ms)
+                .unwrap_or(w.start_ms);
             let confidence = word_confidence(raw_start, primary_base, &other_starts);
             details.push(WordMergeDetail {
                 word_index,
-                reference_text: text.clone(),
+                reference_text: w.text.clone(),
                 provider_estimates: collect_estimates_at(provider_results, raw_start),
                 outliers_rejected: vec![],
-                merged_start_ms: *start_ms,
+                merged_start_ms: w.start_ms,
                 merged_confidence: confidence,
                 spread_ms: 0,
             });
             word_index += 1;
-            words.push(LyricsWord {
-                text: text.clone(),
-                start_ms: *start_ms,
-                end_ms: *end_ms,
-            });
         }
-        let line_start = words.first().map(|w| w.start_ms).unwrap_or(0);
-        let line_end = words.last().map(|w| w.end_ms).unwrap_or(0);
-        out_lines.push(LyricsLine {
-            start_ms: line_start,
-            end_ms: line_end,
-            en: primary_line.text.clone(),
-            sk: None,
-            words: Some(words),
-        });
     }
 
     let track = LyricsTrack {
@@ -254,6 +215,54 @@ pub(crate) fn base_confidence_of(pr: &ProviderResult) -> f32 {
         .get("base_confidence")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.7) as f32
+}
+
+/// Pass-through baseline confidence = `base * PASS_THROUGH_MULTIPLIER`.
+/// Used by both the multi-provider merge (when no peer agreed) and the
+/// single-provider pass-through path in `orchestrator`.
+pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
+    base_confidence * PASS_THROUGH_MULTIPLIER
+}
+
+/// Sanitize every word across a track's lines, threading `floor_start_ms`
+/// from line to line. Returns [`LyricsLine`]s with line boundaries derived
+/// from the sanitized word timings.
+///
+/// Used by both `merge_provider_results` and the single-provider
+/// pass-through in `orchestrator` so the cross-line strict-increasing
+/// invariant is enforced in exactly one place.
+pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
+    let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
+    let mut floor_start_ms: u64 = 0;
+    for line in lines {
+        let raw: Vec<(String, u64, u64)> = line
+            .words
+            .iter()
+            .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
+            .collect();
+        let sanitized = sanitize_word_timings_from(&raw, floor_start_ms);
+        if let Some(last) = sanitized.last() {
+            floor_start_ms = last.2;
+        }
+        let words: Vec<LyricsWord> = sanitized
+            .into_iter()
+            .map(|(text, start_ms, end_ms)| LyricsWord {
+                text,
+                start_ms,
+                end_ms,
+            })
+            .collect();
+        let line_start = words.first().map(|w| w.start_ms).unwrap_or(line.start_ms);
+        let line_end = words.last().map(|w| w.end_ms).unwrap_or(line.end_ms);
+        out.push(LyricsLine {
+            start_ms: line_start,
+            end_ms: line_end,
+            en: line.text.clone(),
+            sk: None,
+            words: Some(words),
+        });
+    }
+    out
 }
 
 /// Compute the per-word confidence: boost when any non-primary provider
