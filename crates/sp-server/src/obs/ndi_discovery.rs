@@ -26,39 +26,59 @@ use crate::obs::text::{get_input_list_request, get_input_settings_request};
 /// what [`scene::check_scene_items`] compares against. The playlist's
 /// `ndi_output_name` (e.g. `"SP-fast"`) is only used as the join key against
 /// the OBS input's `ndi_source_name` setting.
+/// Rebuild the OBS-input-name → playlist-id map.
+///
+/// Returns `None` when the rebuild **cannot be trusted** — typically a
+/// transient OBS query failure. Callers MUST preserve the previously-built
+/// map in that case, otherwise a single WebSocket hiccup wipes scene
+/// detection and every `CurrentProgramSceneChanged` becomes a no-op
+/// (silent playback stall; this is what broke the 2026-04-19 event).
+///
+/// Returns `Some(HashMap)` with the fresh mapping when the rebuild ran
+/// end-to-end. An empty map is still a valid `Some`: it means the DB
+/// genuinely has no active playlists, or OBS genuinely has no NDI
+/// source inputs — both legitimate steady states.
 pub async fn rebuild_ndi_source_map(
     write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     pool: &SqlitePool,
-) -> HashMap<String, i64> {
+) -> Option<HashMap<String, i64>> {
     let mut map = HashMap::new();
 
     // 1) Load active playlists {ndi_output_name → playlist_id} from DB.
+    //    A DB read failure is a real signal something is wrong — return
+    //    None so callers keep the last good map.
     let by_ndi_name = match load_playlist_ndi_names(pool).await {
         Ok(m) => m,
         Err(e) => {
             warn!("rebuild_ndi_source_map: failed to load playlists: {e}");
-            return map;
+            return None;
         }
     };
 
     if by_ndi_name.is_empty() {
         debug!("rebuild_ndi_source_map: no active playlists with ndi_output_name");
-        return map;
+        return Some(map);
     }
 
-    // 2) Query OBS for NDI source inputs.
+    // 2) Query OBS for NDI source inputs. A `None` return means the
+    //    WebSocket response never arrived / was malformed — NOT that
+    //    OBS truly has zero inputs. Treat as failure so the stale map
+    //    survives until the next successful rebuild.
     let input_names = match fetch_ndi_input_names(write, read).await {
         Some(names) => names,
         None => {
-            warn!("rebuild_ndi_source_map: GetInputList returned nothing");
-            return map;
+            warn!(
+                "rebuild_ndi_source_map: GetInputList returned nothing; \
+                 keeping previous map so scene detection stays alive"
+            );
+            return None;
         }
     };
 
     if input_names.is_empty() {
         debug!("rebuild_ndi_source_map: OBS has no NDI source inputs");
-        return map;
+        return Some(map);
     }
 
     // 3) For each OBS NDI input, read its settings to find the NDI sender name
@@ -94,7 +114,7 @@ pub async fn rebuild_ndi_source_map(
     }
 
     info!(count = map.len(), "rebuilt NDI source map from OBS + DB");
-    map
+    Some(map)
 }
 
 /// Extract the stream portion from an NDI network name.
