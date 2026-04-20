@@ -173,7 +173,10 @@ def call_gemini(
                 {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
             ]
         }],
-        "generationConfig": {"temperature": 0.0},
+        "generationConfig": {
+            "temperature": 0.0,
+            "thinkingConfig": {"thinkingBudget": 2048},
+        },
     }
     if api_key:
         url = f"{GOOGLE_API_BASE}/v1beta/models/{model}:generateContent"
