@@ -4,6 +4,7 @@ pub mod autosub_provider;
 pub mod bootstrap;
 pub mod chunking;
 pub mod description_provider;
+pub mod gemini_prompt;
 pub mod lrclib;
 pub mod merge;
 pub mod orchestrator;
