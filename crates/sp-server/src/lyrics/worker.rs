@@ -571,16 +571,41 @@ impl LyricsWorker {
         };
         ctx.clean_vocal_path = clean_vocal;
 
-        // Build provider list. AutoSubProvider always registered; Qwen3Provider only
-        // when Python venv + clean vocal are available.
+        // Build provider list.
+        // - AutoSubProvider: always registered (cheap text candidate + autosub timing anchors).
+        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED AND a gemini_api_key is
+        //   configured. Produces line-level timings from Gemini 3.1 Pro audio transcription.
+        // - Qwen3Provider: registered only when LYRICS_QWEN3_ENABLED AND Python venv +
+        //   clean vocal are available. Parked off; revived when word-level work resumes.
+        use crate::lyrics::{
+            LYRICS_GEMINI_ENABLED, LYRICS_QWEN3_ENABLED, gemini_client::GeminiClient,
+            gemini_provider::GeminiProvider,
+        };
         let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
         providers.push(Box::new(AutoSubProvider));
-        if let Some(python) = python_for_qwen3 {
-            providers.push(Box::new(Qwen3Provider {
-                python_path: python,
-                script_path: self.script_path.clone(),
-                models_dir: self.models_dir.clone(),
+        if LYRICS_GEMINI_ENABLED && !self.gemini_api_key.is_empty() {
+            let ffmpeg_name = if cfg!(windows) {
+                "ffmpeg.exe"
+            } else {
+                "ffmpeg"
+            };
+            let ffmpeg_path = self.tools_dir.join(ffmpeg_name);
+            let model = std::env::var("GEMINI_LYRICS_MODEL")
+                .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
+            providers.push(Box::new(GeminiProvider {
+                client: GeminiClient::direct(self.gemini_api_key.clone(), model),
+                ffmpeg_path,
+                cache_dir: self.cache_dir.clone(),
             }));
+        }
+        if LYRICS_QWEN3_ENABLED {
+            if let Some(python) = python_for_qwen3 {
+                providers.push(Box::new(Qwen3Provider {
+                    python_path: python,
+                    script_path: self.script_path.clone(),
+                    models_dir: self.models_dir.clone(),
+                }));
+            }
         }
 
         self.broadcast_stage(

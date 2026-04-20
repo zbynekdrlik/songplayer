@@ -80,6 +80,16 @@ use sp_core::lyrics::LyricsTrack;
 ///   v10 makes cross-line boundaries strictly increasing too.
 pub const LYRICS_PIPELINE_VERSION: u32 = 10;
 
+/// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
+/// worker registers `GeminiProvider` in the provider list.
+pub const LYRICS_GEMINI_ENABLED: bool = true;
+
+/// Feature flag: enable the Qwen3 forced-alignment provider. When false, the
+/// worker skips registering it even if Python venv is available. Kept as a
+/// flag (not a code removal) so word-level work can revive qwen3 without a
+/// history rewrite.
+pub const LYRICS_QWEN3_ENABLED: bool = false;
+
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
 /// - Strips inline bracketed noise like `[music]`, `[applause]`, `[laughter]`
@@ -204,5 +214,11 @@ mod tests {
             LYRICS_PIPELINE_VERSION, 10,
             "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
         );
+    }
+
+    #[test]
+    fn gemini_enabled_and_qwen3_disabled_by_default() {
+        assert!(super::LYRICS_GEMINI_ENABLED);
+        assert!(!super::LYRICS_QWEN3_ENABLED);
     }
 }
