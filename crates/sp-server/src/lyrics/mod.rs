@@ -8,6 +8,7 @@ pub mod gemini_chunks;
 pub mod gemini_client;
 pub mod gemini_parse;
 pub mod gemini_prompt;
+pub mod gemini_provider;
 pub mod lrclib;
 pub mod merge;
 pub mod orchestrator;
