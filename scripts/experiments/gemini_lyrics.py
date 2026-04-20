@@ -9,6 +9,7 @@ overlap, then merges and writes a LyricsTrack-shaped JSON into the cache dir.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,48 @@ def resolve_paths(cache_dir: Path, youtube_id: str) -> dict:
     return {"audio": audio, "vocal": vocal, "description": description}
 
 
+def probe_duration_ms(audio: Path, ffmpeg: Path) -> int:
+    """Probe audio duration using ffmpeg."""
+    proc = subprocess.run(
+        [str(ffmpeg), "-i", str(audio), "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    # Duration appears in combined output like: Duration: HH:MM:SS.ms
+    combined = proc.stdout + proc.stderr
+    match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", combined)
+    if match:
+        h, m, s = match.groups()
+        total_s = int(h) * 3600 + int(m) * 60 + float(s)
+        return int(total_s * 1000)
+    raise ValueError(f"Could not parse duration from ffmpeg output.\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
+
+
+def chunk_audio(vocal: Path, duration_ms: int, out_dir: Path, ffmpeg: Path) -> list[dict]:
+    """Split vocal WAV into 60s chunks with 10s overlap. Returns list of chunk specs."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    chunks = []
+    idx = 0
+    start_ms = 0
+    while start_ms < duration_ms:
+        end_ms = min(start_ms + CHUNK_DURATION_S * 1000, duration_ms)
+        name = f"chunk{idx:02d}_{start_ms}_{end_ms}.wav"
+        path = out_dir / name
+        subprocess.check_call([
+            str(ffmpeg), "-y", "-loglevel", "error",
+            "-ss", str(start_ms / 1000.0),
+            "-t", str((end_ms - start_ms) / 1000.0),
+            "-i", str(vocal),
+            "-c:a", "pcm_s16le",
+            str(path),
+        ])
+        chunks.append({"idx": idx, "start_ms": start_ms, "end_ms": end_ms, "path": path})
+        idx += 1
+        if end_ms >= duration_ms:
+            break
+        start_ms += CHUNK_STRIDE_S * 1000
+    return chunks
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video-id", required=True, help="YouTube video id")
@@ -52,6 +95,17 @@ def main():
     print(f"  description: {paths['description']}  (exists={paths['description'].exists()})")
     print(f"  proxy:       {args.proxy_url}")
     print(f"  model:       {args.model}")
+
+    ffmpeg = DEFAULT_TOOLS / "ffmpeg.exe"
+    duration_ms = probe_duration_ms(paths["audio"], ffmpeg)
+    print(f"  duration:    {duration_ms} ms ({duration_ms/1000:.1f} s)")
+
+    chunk_dir = cache / "gemini_chunks" / args.video_id
+    chunks = chunk_audio(paths["vocal"], duration_ms, chunk_dir, ffmpeg)
+    print(f"[chunk] produced {len(chunks)} chunks:")
+    for c in chunks:
+        print(f"  {c['idx']:>2}: {c['start_ms']/1000:>6.1f}s..{c['end_ms']/1000:>6.1f}s  {c['path'].name}")
+
     if args.dry_run:
         print("[dry-run] exiting before any API calls")
         return
