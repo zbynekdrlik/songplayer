@@ -7,6 +7,7 @@
 //! and scene-driven playback never fired (issue #11).
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
@@ -18,6 +19,13 @@ use tracing::{debug, info, warn};
 
 use crate::obs::text::{get_input_list_request, get_input_settings_request};
 
+/// Total wall-clock cap on `wait_for_response`. Without this bound the
+/// rebuild-retry loop would hang on `read.next().await` when OBS drops
+/// a response, silently consuming unrelated messages that arrived
+/// later (scene changes, events). Keep short — a healthy OBS responds
+/// in milliseconds; 2 seconds is generous.
+const WAIT_FOR_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Query OBS for its NDI inputs and return a map of
 /// `OBS input name → playlist_id` for the playlists whose `ndi_output_name`
 /// matches an input's `ndi_source_name` setting.
@@ -26,39 +34,59 @@ use crate::obs::text::{get_input_list_request, get_input_settings_request};
 /// what [`scene::check_scene_items`] compares against. The playlist's
 /// `ndi_output_name` (e.g. `"SP-fast"`) is only used as the join key against
 /// the OBS input's `ndi_source_name` setting.
+/// Rebuild the OBS-input-name → playlist-id map.
+///
+/// Returns `None` when the rebuild **cannot be trusted** — typically a
+/// transient OBS query failure. Callers MUST preserve the previously-built
+/// map in that case, otherwise a single WebSocket hiccup wipes scene
+/// detection and every `CurrentProgramSceneChanged` becomes a no-op
+/// (silent playback stall; this is what broke the 2026-04-19 event).
+///
+/// Returns `Some(HashMap)` with the fresh mapping when the rebuild ran
+/// end-to-end. An empty map is still a valid `Some`: it means the DB
+/// genuinely has no active playlists, or OBS genuinely has no NDI
+/// source inputs — both legitimate steady states.
 pub async fn rebuild_ndi_source_map(
     write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     pool: &SqlitePool,
-) -> HashMap<String, i64> {
+) -> Option<HashMap<String, i64>> {
     let mut map = HashMap::new();
 
     // 1) Load active playlists {ndi_output_name → playlist_id} from DB.
+    //    A DB read failure is a real signal something is wrong — return
+    //    None so callers keep the last good map.
     let by_ndi_name = match load_playlist_ndi_names(pool).await {
         Ok(m) => m,
         Err(e) => {
             warn!("rebuild_ndi_source_map: failed to load playlists: {e}");
-            return map;
+            return None;
         }
     };
 
     if by_ndi_name.is_empty() {
         debug!("rebuild_ndi_source_map: no active playlists with ndi_output_name");
-        return map;
+        return Some(map);
     }
 
-    // 2) Query OBS for NDI source inputs.
+    // 2) Query OBS for NDI source inputs. A `None` return means the
+    //    WebSocket response never arrived / was malformed — NOT that
+    //    OBS truly has zero inputs. Treat as failure so the stale map
+    //    survives until the next successful rebuild.
     let input_names = match fetch_ndi_input_names(write, read).await {
         Some(names) => names,
         None => {
-            warn!("rebuild_ndi_source_map: GetInputList returned nothing");
-            return map;
+            warn!(
+                "rebuild_ndi_source_map: GetInputList returned nothing; \
+                 keeping previous map so scene detection stays alive"
+            );
+            return None;
         }
     };
 
     if input_names.is_empty() {
         debug!("rebuild_ndi_source_map: OBS has no NDI source inputs");
-        return map;
+        return Some(map);
     }
 
     // 3) For each OBS NDI input, read its settings to find the NDI sender name
@@ -94,7 +122,7 @@ pub async fn rebuild_ndi_source_map(
     }
 
     info!(count = map.len(), "rebuilt NDI source map from OBS + DB");
-    map
+    Some(map)
 }
 
 /// Extract the stream portion from an NDI network name.
@@ -202,13 +230,30 @@ async fn fetch_input_ndi_sender_name(
 
 /// Read incoming WebSocket messages until a `RequestResponse` (op 7) with the
 /// given request ID is found, then return it. Skips events and mismatched
-/// responses. Returns `None` on close or after 100 iterations.
+/// responses. Returns `None` on close, 100-iteration cap, or a total wall-
+/// clock timeout of `WAIT_FOR_RESPONSE_TIMEOUT`.
+///
+/// The timeout matters in the transient-failure case that broke the
+/// 2026-04-19 event: when OBS drops a request's response, the old
+/// implementation would block on `read.next().await` indefinitely and
+/// silently consume any OTHER messages that arrived (including scene
+/// change events). Bounding the total wait means rebuild-failure no
+/// longer eats adjacent events.
 async fn wait_for_response(
     read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     request_id: &str,
 ) -> Option<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + WAIT_FOR_RESPONSE_TIMEOUT;
     for _ in 0..100 {
-        match read.next().await {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        let next = match tokio::time::timeout(remaining, read.next()).await {
+            Ok(msg) => msg,
+            Err(_) => return None,
+        };
+        match next {
             Some(Ok(Message::Text(text))) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                     let op = json["op"].as_u64().unwrap_or(u64::MAX);

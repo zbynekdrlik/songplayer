@@ -23,6 +23,34 @@ use crate::obs::ndi_discovery::rebuild_ndi_source_map;
 use crate::obs::scene::check_scene_items;
 use crate::obs::text::get_current_scene_request;
 
+/// Apply a rebuild result to the shared NDI source map.
+///
+/// Writes the new map only when `result` is `Some`. A `None` result means
+/// the rebuild could not be trusted (typically a transient OBS query
+/// failure) and the previous map — even if stale — is kept so scene
+/// detection continues to work until the next successful rebuild.
+///
+/// This is the exact bug that broke the 2026-04-19 event: the old code
+/// wrote `new_map` unconditionally, so one failed `GetInputList`
+/// wiped the mapping and every subsequent `CurrentProgramSceneChanged`
+/// matched against an empty map (→ no engine command → no playback).
+pub(crate) async fn apply_rebuild_result(
+    ndi_sources: &RwLock<HashMap<String, i64>>,
+    result: Option<HashMap<String, i64>>,
+) {
+    if let Some(new_map) = result {
+        let mut guard = ndi_sources.write().await;
+        *guard = new_map;
+    } else {
+        warn!(
+            "apply_rebuild_result: rebuild returned None, preserving \
+             previous NDI source map (size = {}) so scene detection \
+             keeps working on stale data rather than silently breaking",
+            ndi_sources.read().await.len()
+        );
+    }
+}
+
 /// Shared OBS connection state.
 #[derive(Debug, Clone, Default)]
 pub struct ObsState {
@@ -237,11 +265,13 @@ async fn connect_and_run(
     // Rebuild the NDI source map from the DB + OBS inputs before we start
     // listening for scene-change events, so the very first scene lookup
     // already knows which OBS input names correspond to which playlists.
-    let new_map = rebuild_ndi_source_map(&mut write, &mut read, pool).await;
-    {
-        let mut guard = ndi_sources.write().await;
-        *guard = new_map;
-    }
+    // If the rebuild fails (transient OBS query error), `apply_rebuild_result`
+    // preserves the previous map instead of wiping it.
+    apply_rebuild_result(
+        ndi_sources,
+        rebuild_ndi_source_map(&mut write, &mut read, pool).await,
+    )
+    .await;
 
     // Fetch initial scene.
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -286,20 +316,22 @@ async fn connect_and_run(
                 match rebuild_result {
                     Ok(()) => {
                         debug!("received rebuild signal, refreshing NDI source map");
-                        let new_map =
-                            rebuild_ndi_source_map(&mut write, &mut read, pool).await;
-                        let mut guard = ndi_sources.write().await;
-                        *guard = new_map;
+                        apply_rebuild_result(
+                            ndi_sources,
+                            rebuild_ndi_source_map(&mut write, &mut read, pool).await,
+                        )
+                        .await;
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!(
                             "rebuild signal channel lagged by {n} messages, \
                              refreshing NDI source map once"
                         );
-                        let new_map =
-                            rebuild_ndi_source_map(&mut write, &mut read, pool).await;
-                        let mut guard = ndi_sources.write().await;
-                        *guard = new_map;
+                        apply_rebuild_result(
+                            ndi_sources,
+                            rebuild_ndi_source_map(&mut write, &mut read, pool).await,
+                        )
+                        .await;
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         // Channel closed — ignore, the shutdown path will catch it.
@@ -567,5 +599,66 @@ mod tests {
 
         assert_eq!(hello["op"].as_u64(), Some(0));
         assert!(hello["d"]["authentication"].as_object().is_none());
+    }
+
+    // ---- apply_rebuild_result: preserve-on-None regression guard ----
+    //
+    // These tests encode the fix for the 2026-04-19 event outage: the
+    // NDI source map was built at startup, then a later rebuild returned
+    // empty (OBS `GetInputList` responded with nothing), and the old
+    // code overwrote the map. Every scene change after that matched
+    // against the empty map and the engine received no commands.
+    // Switching OBS scenes became a silent no-op for hours.
+
+    #[tokio::test]
+    async fn apply_rebuild_result_writes_when_rebuild_succeeds() {
+        let lock = RwLock::new(HashMap::new());
+        let mut new_map = HashMap::new();
+        new_map.insert("sp-fast_video".into(), 7i64);
+
+        apply_rebuild_result(&lock, Some(new_map.clone())).await;
+
+        let guard = lock.read().await;
+        assert_eq!(*guard, new_map);
+    }
+
+    #[tokio::test]
+    async fn apply_rebuild_result_preserves_existing_map_when_rebuild_returns_none() {
+        // Seed the map with production-shaped data — what startup built.
+        let mut seed = HashMap::new();
+        seed.insert("sp-warmup_video".into(), 2i64);
+        seed.insert("sp-fast_video".into(), 7i64);
+        seed.insert("sp-worship_video".into(), 6i64);
+        let lock = RwLock::new(seed.clone());
+
+        // Simulate a transient OBS failure: rebuild returned None.
+        apply_rebuild_result(&lock, None).await;
+
+        let guard = lock.read().await;
+        assert_eq!(
+            *guard, seed,
+            "None result MUST preserve the previous map — overwriting \
+             with empty on query failure is what broke the 2026-04-19 \
+             event"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_rebuild_result_replaces_map_with_empty_when_rebuild_legitimately_empty() {
+        // A Some(empty) is a real signal: DB truly has no active playlists
+        // or OBS truly has no NDI inputs. That SHOULD wipe the map.
+        // (Contrast with None, which means the query failed.)
+        let mut seed = HashMap::new();
+        seed.insert("sp-fast_video".into(), 7i64);
+        let lock = RwLock::new(seed);
+
+        apply_rebuild_result(&lock, Some(HashMap::new())).await;
+
+        let guard = lock.read().await;
+        assert!(
+            guard.is_empty(),
+            "a legitimate empty rebuild (user removed all inputs) MUST \
+             wipe the map so scene detection reflects current reality"
+        );
     }
 }

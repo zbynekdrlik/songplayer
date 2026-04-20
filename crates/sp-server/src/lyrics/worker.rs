@@ -1,33 +1,28 @@
-//! Lyrics worker orchestrator.
+//! Lyrics worker orchestrator — unified ensemble pipeline.
 //!
-//! Per-song decision tree:
-//!   1. acquire_lyrics: YT manual subs first, then LRCLIB fallback, else bail.
-//!   2. If source == "yt_subs": run chunked Qwen3 alignment.
-//!   3. Gemini SK translation.
-//!   4. Persist JSON + DB row.
+//! Every song goes through the same path:
+//!   1. gather_sources: YT manual subs + LRCLIB + autosub json3 in parallel.
+//!   2. Vocal isolation (Qwen3 provider; best-effort).
+//!   3. Orchestrator::process_song → LyricsTrack.
+//!   4. SK translation (Claude → Gemini fallback).
+//!   5. Persist JSON + DB row with pipeline_version + quality_score.
 
 use anyhow::Result;
 use reqwest::Client;
 use sp_core::lyrics::LyricsTrack;
+use sp_core::ws::{LyricsProcessingState, ServerMsg};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     ai::client::AiClient,
-    db::models::{
-        get_next_video_missing_translation, get_next_video_without_lyrics, mark_video_lyrics,
-    },
-    lyrics::{
-        aligner, assembly, chunking, lrclib, orchestrator::Orchestrator, provider::CandidateText,
-        provider::SongContext, quality, qwen3_provider::Qwen3Provider, translator, youtube_subs,
-    },
+    db::models::get_next_video_missing_translation,
+    lyrics::{aligner, lrclib, translator, youtube_subs},
 };
-
-const DUPLICATE_START_WARN_PCT: f64 = 50.0;
 
 #[allow(dead_code)]
 pub struct LyricsWorker {
@@ -41,17 +36,170 @@ pub struct LyricsWorker {
     models_dir: PathBuf,
     gemini_api_key: String,
     gemini_model: String,
-    /// Claude Opus AI client for translation + future ensemble merge.
+    /// Claude Opus AI client for translation + ensemble merge.
     /// None if CLIProxyAPI is not configured.
     ai_client: Option<Arc<AiClient>>,
     venv_python: tokio::sync::RwLock<Option<PathBuf>>,
     retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+    /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
+    /// event channel so messages reach all dashboard WS subscribers.
+    events_tx: broadcast::Sender<ServerMsg>,
+    /// Shared state read by `queue_update_loop` so the broadcast `processing`
+    /// field reflects the current song being aligned.
+    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
 }
 
 #[derive(Default)]
 struct RetryBackoff {
     silent_until: Option<Instant>,
     consecutive_failures: u32,
+}
+
+/// Free function containing the `gather_sources` logic so it can be tested
+/// without constructing a full `LyricsWorker`.
+///
+/// mutants::skip: legacy LRCLIB guards (lines 99-100) + description match guard are
+/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_claude_returns_lyrics`
+/// and `gather_sources_skips_description_when_claude_returns_empty_array` integration tests
+/// (plus the structural call-order test further down); individual mutations in these
+/// I/O-bound branches cannot be killed by unit tests without a full mock harness for
+/// yt-dlp/LRCLIB/autosub, which is out of scope.
+#[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn gather_sources_impl(
+    ai_client: Option<&crate::ai::client::AiClient>,
+    ytdlp_path: &std::path::Path,
+    cache_dir: &std::path::Path,
+    client: &reqwest::Client,
+    row: &crate::db::models::VideoLyricsRow,
+    autosub_tmp_dir: &std::path::Path,
+) -> Result<crate::lyrics::provider::SongContext> {
+    use crate::lyrics::autosub_provider::fetch_autosub;
+    use crate::lyrics::provider::{CandidateText, SongContext};
+
+    let youtube_id = row.youtube_id.clone();
+    let audio_path = row
+        .audio_file_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_default();
+
+    // 1. Manual yt_subs
+    let yt_tmp = std::env::temp_dir().join("sp_yt_subs");
+    let _ = tokio::fs::create_dir_all(&yt_tmp).await;
+    let yt_subs_track = match youtube_subs::fetch_subtitles(ytdlp_path, &youtube_id, &yt_tmp).await
+    {
+        Ok(Some(track)) => {
+            info!("gather: YT manual subs hit for {youtube_id}");
+            Some(track)
+        }
+        Ok(None) => {
+            debug!("gather: no YT manual subs for {youtube_id}");
+            None
+        }
+        Err(e) => {
+            warn!("gather: YT sub fetch error for {youtube_id}: {e}");
+            None
+        }
+    };
+
+    // 2. LRCLIB (if song/artist known)
+    let lrclib_track = if !row.song.is_empty() && !row.artist.is_empty() {
+        let duration_s = row.duration_ms.map(|ms| (ms / 1000) as u32).unwrap_or(0);
+        match lrclib::fetch_lyrics(client, &row.artist, &row.song, duration_s).await {
+            Ok(Some(track)) => {
+                info!("gather: LRCLIB hit for {youtube_id}");
+                Some(track)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                warn!("gather: LRCLIB error for {youtube_id}: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // 3. Auto-sub json3
+    let autosub_json3 = match fetch_autosub(ytdlp_path, &youtube_id, autosub_tmp_dir).await {
+        Ok(Some(p)) => Some(p),
+        Ok(None) => None,
+        Err(e) => {
+            warn!("gather: autosub fetch error for {youtube_id}: {e}");
+            None
+        }
+    };
+
+    let mut candidate_texts: Vec<CandidateText> = Vec::new();
+    if let Some(t) = &yt_subs_track {
+        candidate_texts.push(CandidateText {
+            source: "yt_subs".into(),
+            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
+            has_timing: true,
+            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
+        });
+    }
+    if let Some(t) = &lrclib_track {
+        candidate_texts.push(CandidateText {
+            source: "lrclib".into(),
+            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
+            has_timing: true,
+            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
+        });
+    }
+
+    // 4. YouTube description lyrics (LLM-extracted). Best-effort.
+    if let Some(ai) = ai_client {
+        let description_lines = match crate::lyrics::description_provider::fetch_description_lyrics(
+            ai,
+            ytdlp_path,
+            &youtube_id,
+            cache_dir,
+            &row.song,
+            &row.artist,
+        )
+        .await
+        {
+            Ok(Some(lines)) if !lines.is_empty() => {
+                info!(
+                    youtube_id = %youtube_id,
+                    line_count = lines.len(),
+                    "gather: description lyrics hit"
+                );
+                Some(lines)
+            }
+            Ok(_) => {
+                debug!("gather: no description lyrics for {youtube_id}");
+                None
+            }
+            Err(e) => {
+                warn!("gather: description fetch error for {youtube_id}: {e}");
+                None
+            }
+        };
+        if let Some(lines) = description_lines {
+            candidate_texts.push(CandidateText {
+                source: "description".into(),
+                lines,
+                has_timing: false,
+                line_timings: None,
+            });
+        }
+    }
+
+    if candidate_texts.is_empty() {
+        anyhow::bail!("no text sources available for {youtube_id}");
+    }
+
+    Ok(SongContext {
+        video_id: youtube_id,
+        audio_path,
+        clean_vocal_path: None, // filled by process_song before orchestrator call
+        candidate_texts,
+        autosub_json3,
+        duration_ms: row.duration_ms.unwrap_or(0) as u64,
+    })
 }
 
 impl LyricsWorker {
@@ -65,6 +213,7 @@ impl LyricsWorker {
         gemini_api_key: String,
         gemini_model: String,
         ai_client: Option<Arc<AiClient>>,
+        events_tx: broadcast::Sender<ServerMsg>,
     ) -> Self {
         let script_path = tools_dir.join("lyrics_worker.py");
         let models_dir = tools_dir.join("hf_models");
@@ -82,7 +231,55 @@ impl LyricsWorker {
             ai_client,
             venv_python: tokio::sync::RwLock::new(None),
             retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
+            events_tx,
+            current_processing: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Snapshot the current processing state for use by queue_update_loop.
+    // Arc clone; returning the shared handle has no behavior beyond reference-counting.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn current_processing(&self) -> Arc<RwLock<Option<LyricsProcessingState>>> {
+        self.current_processing.clone()
+    }
+
+    // I/O-only: updates shared RwLock + sends on broadcast channel. Fire-and-forget; no return value to assert.
+    #[cfg_attr(test, mutants::skip)]
+    #[allow(clippy::too_many_arguments)]
+    async fn broadcast_stage(
+        &self,
+        video_id: i64,
+        youtube_id: &str,
+        song: &str,
+        artist: &str,
+        stage: &str,
+        provider: Option<&str>,
+        started_at_unix_ms: i64,
+    ) {
+        let state = LyricsProcessingState {
+            video_id,
+            youtube_id: youtube_id.into(),
+            song: song.into(),
+            artist: artist.into(),
+            stage: stage.into(),
+            provider: provider.map(|s| s.to_string()),
+            started_at_unix_ms,
+        };
+        // Update shared state so the queue_update_loop's LyricsQueueUpdate carries it.
+        *self.current_processing.write().await = Some(state.clone());
+        // Fire the stage event for subscribers that want immediate transitions.
+        let _ = self.events_tx.send(ServerMsg::LyricsProcessingStage {
+            video_id,
+            youtube_id: state.youtube_id,
+            stage: state.stage,
+            provider: state.provider,
+        });
+    }
+
+    // Writes None to shared RwLock. Side effect verified via broadcast_stage/queue_update_loop integration.
+    #[cfg_attr(test, mutants::skip)]
+    async fn clear_processing(&self) {
+        *self.current_processing.write().await = None;
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -96,6 +293,17 @@ impl LyricsWorker {
         )
         .await?;
         tracing::info!("lyrics_worker: wrote {}", self.script_path.display());
+
+        // Deploy the quality measurement script alongside the worker so CI
+        // can run it on win-resolume to snapshot baseline vs post-deploy state.
+        let measure_path = self.tools_dir.join("measure_lyrics_quality.py");
+        tokio::fs::write(
+            &measure_path,
+            include_str!("../../../../scripts/measure_lyrics_quality.py"),
+        )
+        .await?;
+        tracing::info!("lyrics_worker: wrote {}", measure_path.display());
+
         Ok(())
     }
 
@@ -151,168 +359,69 @@ impl LyricsWorker {
 
     #[cfg_attr(test, mutants::skip)]
     async fn process_next(&self) {
-        let row = match get_next_video_without_lyrics(&self.pool).await {
+        use crate::lyrics::{LYRICS_PIPELINE_VERSION, reprocess::get_next_video_for_lyrics};
+        let row = match get_next_video_for_lyrics(&self.pool, LYRICS_PIPELINE_VERSION).await {
             Ok(Some(r)) => r,
             Ok(None) => {
                 self.retry_missing_translations().await;
-                debug!("lyrics_worker: no pending videos");
+                debug!("worker: nothing in priority queue");
                 return;
             }
             Err(e) => {
-                error!("lyrics_worker: DB query failed: {e}");
+                error!("worker: selector failed: {e}");
                 return;
             }
         };
-
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
         tracing::info!(
-            "lyrics_worker: processing video {} ({} - {})",
+            "worker: processing {} ({} - {})",
             youtube_id,
             row.artist,
             row.song
         );
-
-        match self.process_song(row).await {
-            Ok(()) => {}
-            Err(e) => {
-                debug!("lyrics_worker: no lyrics for {youtube_id}: {e}");
-                if let Err(db_err) =
-                    mark_video_lyrics(&self.pool, video_id, false, Some("no_source")).await
-                {
-                    error!("lyrics_worker: failed to mark video {youtube_id} as failed: {db_err}");
-                }
-            }
+        if let Err(e) = self.process_song(row).await {
+            debug!("worker: processing failed for {youtube_id}: {e}");
+            let _ = crate::db::models::mark_video_lyrics(
+                &self.pool,
+                video_id,
+                false,
+                Some("no_source"),
+                crate::lyrics::LYRICS_PIPELINE_VERSION,
+            )
+            .await;
+            self.clear_processing().await;
         }
     }
 
+    /// Gather every available text + timing source for a song.
+    /// Returns a `SongContext` ready for orchestrator. Never bails on a single
+    /// source failure — collects what it can and returns; if zero text candidates
+    /// were gathered, bails.
+    #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub`
+    async fn gather_sources(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        autosub_tmp_dir: &std::path::Path,
+    ) -> Result<crate::lyrics::provider::SongContext> {
+        gather_sources_impl(
+            self.ai_client.as_deref(),
+            &self.ytdlp_path,
+            &self.cache_dir,
+            &self.client,
+            row,
+            autosub_tmp_dir,
+        )
+        .await
+    }
+
+    /// Extract SK translation logic. Claude first (framed as localization task), Gemini fallback.
+    // Orchestrates Claude-then-Gemini translator calls; each underlying translator has its own test surface.
     #[cfg_attr(test, mutants::skip)]
-    async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
-        let video_id = row.id;
-        let youtube_id = row.youtube_id.clone();
-
-        // Step 1: Acquire lyrics. YT subs first, LRCLIB fallback.
-        let (track, acquired_source) = self.acquire_lyrics(&row).await?;
-
-        // Step 2: Run alignment — ensemble orchestrator when AI client is
-        // available, direct Qwen3 pipeline otherwise.
-        let (mut track, final_source) = if acquired_source == "yt_subs" {
-            let venv_python = self.venv_python.read().await.clone();
-            let audio_path = row.audio_file_path.as_ref().map(PathBuf::from);
-            if let (Some(python), Some(audio)) = (venv_python.as_ref(), audio_path.as_ref()) {
-                if audio.exists() {
-                    // Try ensemble orchestrator (AI client + Qwen3 provider)
-                    if let Some(ai_client) = &self.ai_client {
-                        let candidate = CandidateText {
-                            source: acquired_source.clone(),
-                            lines: track.lines.iter().map(|l| l.en.clone()).collect(),
-                            has_timing: track.lines.iter().any(|l| l.start_ms > 0),
-                            line_timings: Some(
-                                track.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect(),
-                            ),
-                        };
-
-                        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-                        // Preprocess vocals first (needed by Qwen3Provider)
-                        let clean_vocal = match aligner::preprocess_vocals(
-                            python,
-                            &self.script_path,
-                            &self.models_dir,
-                            audio,
-                            &wav_path,
-                        )
-                        .await
-                        {
-                            Ok(p) => Some(p),
-                            Err(e) => {
-                                warn!(
-                                    "lyrics_worker: vocal isolation failed for {youtube_id}: {e}"
-                                );
-                                None
-                            }
-                        };
-
-                        let ctx = SongContext {
-                            video_id: youtube_id.clone(),
-                            audio_path: audio.clone(),
-                            clean_vocal_path: clean_vocal,
-                            candidate_texts: vec![candidate],
-                            autosub_json3: None,
-                            duration_ms: row.duration_ms.unwrap_or(0) as u64,
-                        };
-
-                        let qwen3 = Qwen3Provider {
-                            python_path: python.clone(),
-                            script_path: self.script_path.clone(),
-                            models_dir: self.models_dir.clone(),
-                        };
-
-                        let orch = Orchestrator::new(
-                            vec![Box::new(qwen3)],
-                            ai_client.clone(),
-                            self.cache_dir.clone(),
-                        );
-
-                        match orch.process_song(&ctx).await {
-                            Ok(merged) => {
-                                // Clean up scratch WAV
-                                let _ = tokio::fs::remove_file(&wav_path).await;
-                                let src = merged.source.clone();
-                                (merged, src)
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "lyrics_worker: ensemble alignment failed for {youtube_id}, \
-                                     falling back to direct Qwen3: {e}"
-                                );
-                                let _ = tokio::fs::remove_file(&wav_path).await;
-                                // Fall back to direct Qwen3
-                                match self
-                                    .run_chunked_alignment(python, audio, &youtube_id, track)
-                                    .await
-                                {
-                                    Ok(t) => (t, "yt_subs+qwen3".to_string()),
-                                    Err((original, e2)) => {
-                                        warn!(
-                                            "lyrics_worker: direct Qwen3 also failed for {youtube_id}: {e2}"
-                                        );
-                                        (original, "yt_subs".to_string())
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // No AI client — direct Qwen3 path
-                        match self
-                            .run_chunked_alignment(python, audio, &youtube_id, track)
-                            .await
-                        {
-                            Ok(t) => (t, "yt_subs+qwen3".to_string()),
-                            Err((original, e)) => {
-                                warn!(
-                                    "lyrics_worker: chunked alignment failed for {youtube_id}: {e}"
-                                );
-                                (original, "yt_subs".to_string())
-                            }
-                        }
-                    }
-                } else {
-                    debug!("lyrics_worker: alignment skipped for {youtube_id} (audio missing)");
-                    (track, "yt_subs".to_string())
-                }
-            } else {
-                debug!("lyrics_worker: alignment skipped for {youtube_id} (no venv or audio)");
-                (track, "yt_subs".to_string())
-            }
-        } else {
-            (track, acquired_source)
-        };
-        track.source = final_source.clone();
-
-        // Step 3: SK translation — Claude first (via CLIProxyAPI), Gemini fallback.
+    async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
         let mut translated = false;
         if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, &track).await {
+            match translator::translate_via_claude(ai_client, track).await {
                 Ok(translations) => {
                     for (line, sk_text) in track.lines.iter_mut().zip(translations) {
                         line.sk = if sk_text.is_empty() {
@@ -321,150 +430,311 @@ impl LyricsWorker {
                             Some(sk_text)
                         };
                     }
-                    track.language_translation = "sk".to_string();
+                    track.language_translation = "sk".into();
                     translated = true;
-                    debug!("lyrics_worker: Claude translation succeeded for {youtube_id}");
                 }
                 Err(e) => {
-                    warn!(
-                        "lyrics_worker: Claude translation failed for {youtube_id}, trying Gemini: {e}"
-                    );
+                    warn!("worker: Claude translation failed for {youtube_id}: {e}");
                 }
             }
         }
         if !translated && !self.gemini_api_key.is_empty() {
             if let Err(e) =
-                translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track)
-                    .await
+                translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, track).await
             {
-                warn!(
-                    "lyrics_worker: translation failed for {youtube_id}, persisting EN only: {e}"
-                );
+                warn!("worker: Gemini translation fallback failed for {youtube_id}: {e}");
             }
         }
+    }
 
-        // Step 4: Persist.
+    /// Read quality score from the audit log written by the orchestrator.
+    // Reads a JSON audit log file; graceful fallback to None on any error. Path/shape covered by orchestrator tests.
+    #[cfg_attr(test, mutants::skip)]
+    async fn read_quality_from_audit(&self, youtube_id: &str) -> Option<f32> {
+        use crate::lyrics::reprocess::compute_quality_score;
+        let audit_path = self
+            .cache_dir
+            .join(format!("{youtube_id}_alignment_audit.json"));
+        let raw = tokio::fs::read_to_string(&audit_path).await.ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let qm = parsed.get("quality_metrics")?;
+        let avg = qm.get("avg_confidence")?.as_f64()? as f32;
+        let dup = qm.get("duplicate_start_pct")?.as_f64()? as f32;
+        Some(compute_quality_score(avg, dup))
+    }
+
+    /// Read `reference_text_source` from the per-song alignment audit
+    /// log. Surfaces the text-merge layer's decision (`description`,
+    /// `lrclib`, `yt_subs`, `merged:<a>+<b>`) so operators can see it
+    /// in the `worker: persisted` log line without having to open the
+    /// audit JSON. Returns `None` when the audit log is missing or
+    /// malformed.
+    // Thin I/O wrapper around tokio::fs::read_to_string + serde_json;
+    // mutation-testing can't meaningfully pin the error paths without a
+    // real audit file fixture — behaviour covered by production logs.
+    #[cfg_attr(test, mutants::skip)]
+    async fn read_ref_source_from_audit(&self, youtube_id: &str) -> Option<String> {
+        let audit_path = self
+            .cache_dir
+            .join(format!("{youtube_id}_alignment_audit.json"));
+        let raw = tokio::fs::read_to_string(&audit_path).await.ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        parsed
+            .get("reference_text_source")?
+            .as_str()
+            .map(String::from)
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
+        use crate::lyrics::{
+            LYRICS_PIPELINE_VERSION, autosub_provider::AutoSubProvider, orchestrator::Orchestrator,
+            qwen3_provider::Qwen3Provider,
+        };
+
+        let video_id = row.id;
+        let youtube_id = row.youtube_id.clone();
+        let song = row.song.clone();
+        let artist = row.artist.clone();
+
+        let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
+        let start_instant = std::time::Instant::now();
+
+        let ai_client = self.ai_client.clone().ok_or_else(|| {
+            anyhow::anyhow!("ai_client not configured; ensemble pipeline requires Claude")
+        })?;
+
+        // Dedicated per-song tmp dir for autosub json3 — cleaned on success.
+        let autosub_tmp = std::env::temp_dir().join(format!("sp_autosub_{youtube_id}"));
+        let _ = tokio::fs::create_dir_all(&autosub_tmp).await;
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "gathering",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
+        let mut ctx = match self.gather_sources(&row, &autosub_tmp).await {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
+                self.clear_processing().await;
+                return Err(e);
+            }
+        };
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "text_merge",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
+        // Preprocess vocals for Qwen3 provider (best-effort; Qwen3 is skipped if this fails).
+        let venv_python = self.venv_python.read().await.clone();
+        let (python_for_qwen3, clean_vocal) = if let (Some(python), Some(audio_path)) = (
+            venv_python.as_ref(),
+            row.audio_file_path.as_ref().map(PathBuf::from),
+        ) {
+            if audio_path.exists() {
+                let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
+                let clean_vocal = match aligner::preprocess_vocals(
+                    python,
+                    &self.script_path,
+                    &self.models_dir,
+                    &audio_path,
+                    &wav_path,
+                )
+                .await
+                {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        warn!("worker: vocal isolation failed for {youtube_id}: {e}");
+                        None
+                    }
+                };
+                (Some(python.clone()), clean_vocal)
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+        ctx.clean_vocal_path = clean_vocal;
+
+        // Build provider list. AutoSubProvider always registered; Qwen3Provider only
+        // when Python venv + clean vocal are available.
+        let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
+        providers.push(Box::new(AutoSubProvider));
+        if let Some(python) = python_for_qwen3 {
+            providers.push(Box::new(Qwen3Provider {
+                python_path: python,
+                script_path: self.script_path.clone(),
+                models_dir: self.models_dir.clone(),
+            }));
+        }
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "aligning",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
+        let orch = Orchestrator::new(providers, ai_client.clone(), self.cache_dir.clone());
+        let mut track = match orch.process_song(&ctx).await {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("worker: ensemble failed for {youtube_id}: {e}");
+                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
+
+                // Zero-provider fallback: emit a line-level track from the first
+                // candidate with line timings. Preserves legacy LRCLIB-line-level behavior.
+                let fallback = ctx
+                    .candidate_texts
+                    .iter()
+                    .find(|c| c.has_timing && c.line_timings.is_some());
+                let Some(c) = fallback else {
+                    self.clear_processing().await;
+                    return Err(e);
+                };
+                info!(
+                    "worker: zero-provider fallback for {youtube_id} using source={}",
+                    c.source
+                );
+                let timings = c.line_timings.as_ref().unwrap();
+                let lines: Vec<sp_core::lyrics::LyricsLine> = c
+                    .lines
+                    .iter()
+                    .zip(timings.iter())
+                    .map(|(text, (start, end))| sp_core::lyrics::LyricsLine {
+                        start_ms: *start,
+                        end_ms: *end,
+                        en: text.clone(),
+                        sk: None,
+                        words: None,
+                    })
+                    .collect();
+                sp_core::lyrics::LyricsTrack {
+                    version: 2,
+                    source: c.source.clone(),
+                    language_source: "en".into(),
+                    language_translation: String::new(),
+                    lines,
+                }
+            }
+        };
+
+        // Cleanup scratch files.
+        let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
+        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
+        let _ = tokio::fs::remove_file(&wav_path).await;
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "translating",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
+        // SK translation (Claude → Gemini fallback) — unchanged logic, just extracted.
+        self.translate_track(&mut track, &youtube_id).await;
+
+        self.broadcast_stage(
+            video_id,
+            &youtube_id,
+            &song,
+            &artist,
+            "persisting",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
+        // Persist JSON + DB row with pipeline_version + quality_score.
         let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let json_bytes = serde_json::to_vec(&track)?;
         tokio::fs::write(&json_path, &json_bytes).await?;
-        mark_video_lyrics(&self.pool, video_id, true, Some(&final_source)).await?;
 
-        tracing::info!("lyrics_worker: persisted lyrics for {youtube_id} (source={final_source})");
+        // Recover quality from the audit log the orchestrator wrote.
+        // None is returned when the audit log is absent (e.g. ensemble timeout fallback).
+        // Passing None to mark_video_lyrics_complete writes SQL NULL instead of 0.0,
+        // which avoids poisoning the ORDER BY lyrics_quality_score ASC NULLS FIRST selector.
+        let quality_score: Option<f32> = self.read_quality_from_audit(&youtube_id).await;
+        // Surface the reference-text source (description / lrclib / yt_subs /
+        // merged:*) in the persist log so operators can see the text-merge
+        // decision without opening the per-song audit JSON. `track.source`
+        // only names the ALIGNMENT provider (qwen3 / ensemble:*), which hides
+        // the text candidate that fed the aligner.
+        let ref_source: String = self
+            .read_ref_source_from_audit(&youtube_id)
+            .await
+            .unwrap_or_else(|| "unknown".into());
+
+        crate::db::models::mark_video_lyrics_complete(
+            &self.pool,
+            video_id,
+            &track.source,
+            LYRICS_PIPELINE_VERSION,
+            quality_score,
+        )
+        .await?;
+
+        tracing::info!(
+            "worker: persisted {} (source={}, ref_source={}, quality={}, version={})",
+            youtube_id,
+            track.source,
+            ref_source,
+            quality_score
+                .map(|q| format!("{q:.2}"))
+                .unwrap_or_else(|| "null".into()),
+            LYRICS_PIPELINE_VERSION
+        );
+
+        // Broadcast completion and clear processing state.
+        let provider_count = tokio::fs::read_to_string(
+            &self
+                .cache_dir
+                .join(format!("{youtube_id}_alignment_audit.json")),
+        )
+        .await
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("providers_run")
+                .and_then(|p| p.as_array())
+                .map(|a| a.len())
+        })
+        .unwrap_or(0) as u8;
+        let duration_ms = start_instant.elapsed().as_millis() as u64;
+        let _ = self.events_tx.send(ServerMsg::LyricsCompleted {
+            video_id,
+            youtube_id: youtube_id.clone(),
+            source: track.source.clone(),
+            quality_score: quality_score.unwrap_or(0.0),
+            provider_count,
+            duration_ms,
+        });
+        self.clear_processing().await;
+
         Ok(())
-    }
-
-    /// Plan chunks → preprocess vocals → align → assemble.
-    ///
-    /// The unusual `Result<LyricsTrack, (LyricsTrack, anyhow::Error)>`
-    /// signature is a deliberate borrow-checker workaround. `track` is
-    /// moved into `assembly::assemble` on success. When one of the
-    /// subprocess steps fails partway through, we still need the
-    /// original `track` back so the caller can persist it as a
-    /// line-level `yt_subs` entry (the LRCLIB-quality fallback) rather
-    /// than losing the song entirely. Cloning the track on entry would
-    /// avoid the tuple return, but tracks can contain hundreds of
-    /// `LyricsLine`s with nested word vectors — cheaper to shuttle the
-    /// owned value back through the error channel.
-    #[cfg_attr(test, mutants::skip)]
-    async fn run_chunked_alignment(
-        &self,
-        python: &std::path::Path,
-        audio: &std::path::Path,
-        youtube_id: &str,
-        track: LyricsTrack,
-    ) -> std::result::Result<LyricsTrack, (LyricsTrack, anyhow::Error)> {
-        let requests = chunking::plan_chunks(&track);
-        if requests.is_empty() {
-            return Ok(track);
-        }
-
-        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-        if let Err(e) = aligner::preprocess_vocals(
-            python,
-            &self.script_path,
-            &self.models_dir,
-            audio,
-            &wav_path,
-        )
-        .await
-        {
-            return Err((track, e));
-        }
-
-        let chunks_path = self.cache_dir.join(format!("{youtube_id}_chunks.json"));
-        let out_path = self.cache_dir.join(format!("{youtube_id}_align_out.json"));
-        let results = match aligner::align_chunks(
-            python,
-            &self.script_path,
-            &wav_path,
-            &requests,
-            &chunks_path,
-            &out_path,
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => return Err((track, e)),
-        };
-
-        // Best-effort cleanup of the scratch WAV.
-        let _ = tokio::fs::remove_file(&wav_path).await;
-
-        let assembled = assembly::assemble(track, results);
-        self.warn_on_degenerate_lines(&assembled, youtube_id);
-        Ok(assembled)
-    }
-
-    /// Pure observability — emits a `warn!` per line whose alignment came
-    /// back collapsed enough to suspect Mel-Roformer or the aligner failed.
-    /// Skipped by mutation testing because the only behaviour is logging,
-    /// which we don't unit-test against captured trace output.
-    #[cfg_attr(test, mutants::skip)]
-    fn warn_on_degenerate_lines(&self, track: &LyricsTrack, youtube_id: &str) {
-        for (idx, line) in track.lines.iter().enumerate() {
-            let pct = quality::duplicate_start_pct(line);
-            if pct > DUPLICATE_START_WARN_PCT {
-                warn!(
-                    "lyrics_worker: degenerate alignment on {youtube_id} line {idx} ({pct:.1}% duplicate starts)"
-                );
-            }
-        }
-    }
-
-    /// YT manual subs first, LRCLIB second, else bail.
-    #[cfg_attr(test, mutants::skip)]
-    async fn acquire_lyrics(
-        &self,
-        row: &crate::db::models::VideoLyricsRow,
-    ) -> Result<(LyricsTrack, String)> {
-        let youtube_id = &row.youtube_id;
-
-        // 1. YouTube manual subs (skip on non-Windows / if ytdlp missing).
-        let tmp = std::env::temp_dir().join("sp_yt_subs");
-        let _ = tokio::fs::create_dir_all(&tmp).await;
-        match youtube_subs::fetch_subtitles(&self.ytdlp_path, youtube_id, &tmp).await {
-            Ok(Some(track)) => {
-                info!("lyrics_worker: YT manual subs hit for {youtube_id}");
-                return Ok((track, "yt_subs".to_string()));
-            }
-            Ok(None) => debug!("lyrics_worker: no YT manual subs for {youtube_id}"),
-            Err(e) => warn!("lyrics_worker: YT sub fetch error for {youtube_id}: {e}"),
-        }
-
-        // 2. LRCLIB.
-        if !row.song.is_empty() && !row.artist.is_empty() {
-            let duration_s = row.duration_ms.map(|ms| (ms / 1000) as u32).unwrap_or(0);
-            match lrclib::fetch_lyrics(&self.client, &row.artist, &row.song, duration_s).await {
-                Ok(Some(track)) => {
-                    info!("lyrics_worker: LRCLIB hit for {youtube_id}");
-                    return Ok((track, "lrclib".to_string()));
-                }
-                Ok(None) => debug!("lyrics_worker: LRCLIB miss for {youtube_id}"),
-                Err(e) => warn!("lyrics_worker: LRCLIB error for {youtube_id}: {e}"),
-            }
-        }
-
-        anyhow::bail!("no lyrics source for {youtube_id}")
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -555,59 +825,38 @@ impl LyricsWorker {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    /// Audit: retired symbols must not appear in this file.
-    ///
-    /// NOTE: banned symbol names are split across two string literals joined
-    /// at runtime so this test file does not contain the verbatim string it is
-    /// checking for (which would cause the test to always fail on itself).
-    #[test]
-    fn worker_has_no_retired_symbols() {
-        let src = include_str!("worker.rs");
-        let banned = [
-            ["retry_missing", "_alignment"].concat(),
-            ["count_duplicate", "_start_ms"].concat(),
-            ["merge_word", "_timings"].concat(),
-            ["ensure_progressive", "_words"].concat(),
-            ["set_video", "_lyrics_source"].concat(),
-            ["get_next_video_missing", "_alignment"].concat(),
-        ];
-        for sym in &banned {
-            assert!(
-                !src.contains(sym.as_str()),
-                "worker.rs must not contain retired symbol `{sym}`"
-            );
+/// Broadcast lyrics queue counts on a 2-second interval until shutdown.
+/// Consumed by the dashboard /lyrics page via WebSocket.
+#[cfg_attr(test, mutants::skip)] // I/O-only; covered by end-to-end tests
+pub async fn queue_update_loop(
+    pool: sqlx::SqlitePool,
+    events_tx: tokio::sync::broadcast::Sender<sp_core::ws::ServerMsg>,
+    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) {
+    use crate::lyrics::LYRICS_PIPELINE_VERSION;
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.recv() => break,
+            _ = interval.tick() => {
+                if let Ok((b0, b1, b2)) =
+                    crate::api::lyrics::fetch_queue_counts(&pool, LYRICS_PIPELINE_VERSION).await
+                {
+                    let processing = current_processing.read().await.clone();
+                    let _ = events_tx.send(sp_core::ws::ServerMsg::LyricsQueueUpdate {
+                        bucket0_count: b0,
+                        bucket1_count: b1,
+                        bucket2_count: b2,
+                        pipeline_version: LYRICS_PIPELINE_VERSION,
+                        processing,
+                    });
+                }
+            }
         }
-        // The retired lyrics_source value must not appear as a literal.
-        // Split to avoid self-match.
-        let retired_source = ["\"lrclib", "+qwen3\""].concat();
-        assert!(
-            !src.contains(retired_source.as_str()),
-            "worker.rs must not write the retired 'lrclib+qwen3' source literal"
-        );
-    }
-
-    /// `acquire_lyrics` must call YouTube manual subs BEFORE LRCLIB. This
-    /// is the single most important ordering decision in the pipeline —
-    /// if LRCLIB wins for a song that has YT manual subs, the #148 E2E
-    /// gate fails because `source == "lrclib"` instead of `yt_subs+qwen3`.
-    #[test]
-    fn acquire_lyrics_calls_youtube_subs_before_lrclib() {
-        let src = include_str!("worker.rs");
-        let body_start = src
-            .find("async fn acquire_lyrics")
-            .expect("acquire_lyrics must exist");
-        let body = &src[body_start..];
-        let yt_pos = body
-            .find("youtube_subs::fetch_subtitles")
-            .expect("acquire_lyrics must call youtube_subs::fetch_subtitles");
-        let lrclib_pos = body
-            .find("lrclib::fetch_lyrics")
-            .expect("acquire_lyrics must call lrclib::fetch_lyrics");
-        assert!(
-            yt_pos < lrclib_pos,
-            "YouTube subs fetch must happen before LRCLIB fetch in acquire_lyrics"
-        );
     }
 }
+
+#[path = "worker_tests.rs"]
+#[cfg(test)]
+mod tests;

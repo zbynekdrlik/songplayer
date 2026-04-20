@@ -147,6 +147,8 @@ mod tests {
             created_at: None,
             updated_at: None,
             karaoke_enabled: true,
+            kind: "youtube".into(),
+            current_position: 0,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: models::Playlist = serde_json::from_str(&json).unwrap();

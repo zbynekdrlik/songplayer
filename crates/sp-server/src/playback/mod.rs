@@ -10,6 +10,8 @@ pub mod submitter;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
@@ -84,21 +86,17 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
-    /// Whether the OBS program scene currently shows this playlist's NDI
-    /// output. Updated from `handle_scene_change`. Used by
-    /// `on_video_processed` to decide whether a freshly-normalized video
-    /// should auto-start playback. Purely engine-level bookkeeping — the
-    /// pure [`PlayState`] state machine does not track it.
-    scene_active: bool,
-    /// Abort handle for the in-flight title-show timer (1.5s after Started).
-    /// Cancelled when a new video starts so a stale timer from the previous
-    /// video can't fire mid-song after a skip.
+    /// OBS program scene shows this playlist's NDI output. `Arc<AtomicBool>`
+    /// so the detached title-show task (1.5s delay) reads the CURRENT
+    /// value at fire time, not a stale snapshot from spawn time.
+    scene_active: Arc<AtomicBool>,
+    /// Abort handle for the title-show timer (1.5s after Started). Cancelled
+    /// on new video so a stale timer from a skipped prior song can't fire.
     title_show_abort: Option<tokio::task::AbortHandle>,
-    /// Abort handle for the in-flight title-hide timer (3.5s before end).
+    /// Abort handle for the title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
-    /// Cached song/artist/duration from the current video, so `Position`
-    /// events can re-broadcast `NowPlaying` without re-querying the DB
-    /// on every update.
+    /// Cached song/artist/duration so `Position` events can re-broadcast
+    /// `NowPlaying` without re-querying the DB.
     cached_song: String,
     cached_artist: String,
     cached_duration_ms: u64,
@@ -213,7 +211,7 @@ impl PlaybackEngine {
                 state: PlayState::Idle,
                 mode: PlaybackMode::default(),
                 current_video_id: None,
-                scene_active: false,
+                scene_active: Arc::new(AtomicBool::new(false)),
                 title_show_abort: None,
                 title_hide_abort: None,
                 cached_song: String::new(),
@@ -231,21 +229,32 @@ impl PlaybackEngine {
         self.event_rx.recv().await
     }
 
-    /// Handle a scene change from the OBS module.
-    ///
-    /// When the scene goes on program we first fire `VideosAvailable` to
-    /// lift the pipeline out of `Idle` (the pure state machine's
-    /// `Idle + SceneOn` transition is a no-op by design), then fire
-    /// `SceneOn` which runs `SelectAndPlay`. Folding both into one
-    /// entry point guarantees every caller (OBS bridge, API, tests)
-    /// goes through the same sequence.
+    /// Handle a scene change from the OBS module. On program, fires
+    /// `VideosAvailable` then `SceneOn` (folded so every caller — OBS
+    /// bridge, API, tests — goes through the same sequence). Off
+    /// program, fires `SceneOff`.
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
-        // Engine-level bookkeeping: remember which pipelines currently
-        // own the program scene, independent of the pure state machine.
-        // `on_video_processed` reads this to decide whether a
-        // freshly-normalized video should auto-start playback.
-        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            pp.scene_active = on_program;
+        // Going off-program cancels title timers and clears Resolume
+        // state (prevents last-write-wins bleed between playlists on
+        // the shared `#sp-title` / `#sp-subs` clips — 2026-04-19 event).
+        let went_off_program = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            // Release pairs with Acquire in the title-show task.
+            let prev = pp.scene_active.swap(on_program, Ordering::Release);
+            prev && !on_program
+        } else {
+            false
+        };
+        if went_off_program {
+            if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                pp.cancel_title_timers();
+                pp.lyrics_state = None;
+            }
+            let _ = self
+                .resolume_tx
+                .try_send(crate::resolume::ResolumeCommand::HideTitle);
+            let _ = self
+                .resolume_tx
+                .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
         }
 
         if on_program {
@@ -258,23 +267,12 @@ impl PlaybackEngine {
     }
 
     /// Re-wake pipelines parked in `WaitingForScene` after the download
-    /// worker finishes normalizing a video.
-    ///
-    /// The stuck-WaitingForScene bug (shipped in 0.11.0): on first boot
-    /// after the V4 migration reset every row to `normalized = 0`, OBS
-    /// is already sitting on an `sp-*` scene when SongPlayer starts.
-    /// The scene-on event fires `SelectAndPlay`, which finds nothing
-    /// (DB is empty), so the pipeline parks in `WaitingForScene` with
-    /// `current_video_id = None`. When the download worker finally
-    /// produces a normalized video there is nothing to re-run the
-    /// selection — the engine is deaf to the download worker.
-    ///
-    /// This method is that missing listener. The `youtube_id` argument
-    /// is taken from the `processed:{id}` broadcast that
-    /// [`crate::downloader::DownloadWorker`] emits on every completed
-    /// pipeline run. We look up the playlist that owns this video id;
-    /// if that playlist's scene is currently active and no video is
-    /// playing, we re-run `SelectAndPlay` through the state machine.
+    /// worker finishes normalizing a video. Fixes the stuck-WaitingForScene
+    /// bug (0.11.0): on first boot after the V4 migration reset
+    /// `normalized = 0`, the scene-on event fires `SelectAndPlay` on an
+    /// empty DB, pipeline parks in `WaitingForScene` with no listener for
+    /// download completion. This method is that missing listener — driven
+    /// by the `processed:{id}` broadcast from `DownloadWorker`.
     pub async fn on_video_processed(&mut self, youtube_id: &str) {
         // Find the playlist that owns this just-processed video.
         let row = match sqlx::query("SELECT playlist_id FROM videos WHERE youtube_id = ?")
@@ -307,7 +305,7 @@ impl PlaybackEngine {
             .get(&playlist_id)
             .map(|pp| {
                 matches!(pp.state, PlayState::WaitingForScene)
-                    && pp.scene_active
+                    && pp.scene_active.load(Ordering::Acquire)
                     && pp.current_video_id.is_none()
             })
             .unwrap_or(false);
@@ -387,7 +385,13 @@ impl PlaybackEngine {
                 };
 
                 if let Some(video_id) = video_id_opt {
-                    // Title show after 1.5s.
+                    // Title show after 1.5s — scene_active read at FIRE time.
+                    let scene_active = self
+                        .pipelines
+                        .get(&playlist_id)
+                        .map(|pp| pp.scene_active.clone())
+                        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+
                     let pool = self.pool.clone();
                     let obs_cmd = self.obs_cmd_tx.clone();
                     let resolume_tx = self.resolume_tx.clone();
@@ -395,6 +399,10 @@ impl PlaybackEngine {
 
                     let show_handle = tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        if !scene_active.load(Ordering::Acquire) {
+                            debug!(playlist_id = pl_id, "title suppressed — off program");
+                            return;
+                        }
                         if let Ok(Some((song, artist))) =
                             get_video_title_info(&pool, video_id).await
                         {
@@ -565,6 +573,82 @@ impl PlaybackEngine {
         }
     }
 
+    /// Jump to a specific video within a playlist and start playing it.
+    ///
+    /// For custom playlists this also updates `playlists.current_position` so
+    /// the next `Skip` advances to position+1. For youtube playlists the
+    /// column is ignored by the selector — only the pipeline command is
+    /// relevant. The previously-playing video (if any) is pushed onto the
+    /// history stack so `Previous` still walks the history.
+    // mutants::skip: I/O-heavy orchestrator — covered by handle_play_video integration tests in playback/tests.rs.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn handle_play_video(&mut self, playlist_id: i64, video_id: i64) {
+        // Resolve paths first — if the video row is unknown, no side-effects.
+        let paths = match crate::db::models::get_song_paths(&self.pool, video_id).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                warn!(
+                    playlist_id,
+                    video_id, "PlayVideo: no paths for video; ignoring"
+                );
+                return;
+            }
+            Err(e) => {
+                warn!(playlist_id, video_id, %e, "PlayVideo: DB lookup failed; ignoring");
+                return;
+            }
+        };
+
+        // For custom playlists, bump current_position to the clicked item's
+        // position so Skip continues from the right place.
+        let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
+            .bind(playlist_id)
+            .fetch_optional(&self.pool)
+            .await
+            .unwrap_or_default();
+        if kind.as_deref() == Some("custom") {
+            if let Ok(Some(pos)) =
+                crate::db::models::position_for_playlist_item(&self.pool, playlist_id, video_id)
+                    .await
+            {
+                let _ = sqlx::query("UPDATE playlists SET current_position = ? WHERE id = ?")
+                    .bind(pos)
+                    .bind(playlist_id)
+                    .execute(&self.pool)
+                    .await;
+            }
+        }
+
+        // Send the pipeline command and update engine bookkeeping.
+        let (video_path, audio_path) = paths;
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            if let Some(prev) = pp.current_video_id {
+                if prev != video_id {
+                    pp.history.push_back(prev);
+                }
+            }
+            pp.current_video_id = Some(video_id);
+            pp.state = PlayState::Playing { video_id };
+            info!(
+                playlist_id,
+                video_id, %video_path, %audio_path,
+                "PlayVideo → jumping to clicked song"
+            );
+            pp.pipeline.send(PipelineCommand::Play {
+                video: video_path.into(),
+                audio: audio_path.into(),
+            });
+
+            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                playlist_id,
+                state: WsPlaybackState::Playing,
+                mode: pp.mode,
+            });
+        } else {
+            warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
+        }
+    }
+
     /// Run the engine event loop until shutdown.
     pub async fn run(mut self, mut shutdown: broadcast::Receiver<()>) {
         info!("playback engine started");
@@ -728,18 +812,21 @@ impl PlaybackEngine {
         if let Some(ref lyrics) = pp.lyrics_state {
             let msg = lyrics.update(playlist_id, position_ms);
             let _ = self.ws_event_tx.send(msg);
-            // Resolume subtitle update
-            let (en, sk) = lyrics.resolume_lines(position_ms);
-            match en {
-                Some(en_text) => {
-                    let _ = self.resolume_tx.try_send(
-                        crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
-                    );
-                }
-                None => {
-                    let _ = self
-                        .resolume_tx
-                        .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+            // Resolume subs gated on scene_active to prevent off-program
+            // playlists clobbering `#sp-subs` (2026-04-19 event).
+            if pp.scene_active.load(Ordering::Acquire) {
+                let (en, sk) = lyrics.resolume_lines(position_ms);
+                match en {
+                    Some(en_text) => {
+                        let _ = self.resolume_tx.try_send(
+                            crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
+                        );
+                    }
+                    None => {
+                        let _ = self
+                            .resolume_tx
+                            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+                    }
                 }
             }
         }
@@ -905,3 +992,9 @@ async fn load_lyrics_for_video(
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "tests_play_video.rs"]
+mod tests_play_video;
+#[cfg(test)]
+#[path = "tests_scene_change.rs"]
+mod tests_scene_change;

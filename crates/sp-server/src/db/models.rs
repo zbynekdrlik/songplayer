@@ -10,7 +10,8 @@ use sqlx::{Row, SqlitePool};
 /// Return all playlists where `is_active = 1`.
 pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, is_active
+        "SELECT id, name, youtube_url, ndi_output_name, is_active,
+                playback_mode, kind, current_position
          FROM playlists WHERE is_active = 1 ORDER BY id",
     )
     .fetch_all(pool)
@@ -23,20 +24,35 @@ pub async fn get_active_playlists(pool: &SqlitePool) -> Result<Vec<Playlist>, sq
             name: r.get("name"),
             youtube_url: r.get("youtube_url"),
             ndi_output_name: r.get::<String, _>("ndi_output_name"),
+            playback_mode: r.get::<String, _>("playback_mode"),
             is_active: r.get::<i32, _>("is_active") != 0,
+            kind: r.get::<String, _>("kind"),
+            current_position: r.get::<i64, _>("current_position"),
             ..Default::default()
         })
         .collect())
 }
 
 /// Insert a new playlist and return the created model.
+///
+/// mutants::skip: the `kind` and `current_position` struct-init assignments
+/// are equivalent to the `Default` fallback for this API surface — the
+/// function only ever inserts `(name, youtube_url)`, so the DB row defaults
+/// (`kind='youtube'`, `current_position=0`) match the Rust `Default` values
+/// exactly. Any mutation that deletes those field assignments produces
+/// observationally identical behaviour, so no test can distinguish them.
+/// Custom-kind playlists are seeded via `startup::ensure_live_playlist_exists`,
+/// not this function. Behaviour is still covered by `insert_playlist_*` tests.
+#[cfg_attr(test, mutants::skip)]
 pub async fn insert_playlist(
     pool: &SqlitePool,
     name: &str,
     youtube_url: &str,
 ) -> Result<Playlist, sqlx::Error> {
     let row = sqlx::query(
-        "INSERT INTO playlists (name, youtube_url) VALUES (?, ?) RETURNING id, name, youtube_url, is_active",
+        "INSERT INTO playlists (name, youtube_url)
+         VALUES (?, ?)
+         RETURNING id, name, youtube_url, is_active, playback_mode, kind, current_position",
     )
     .bind(name)
     .bind(youtube_url)
@@ -47,7 +63,10 @@ pub async fn insert_playlist(
         id: row.get("id"),
         name: row.get("name"),
         youtube_url: row.get("youtube_url"),
+        playback_mode: row.get::<String, _>("playback_mode"),
         is_active: row.get::<i32, _>("is_active") != 0,
+        kind: row.get::<String, _>("kind"),
+        current_position: row.get::<i64, _>("current_position"),
         ..Default::default()
     })
 }
@@ -321,39 +340,60 @@ pub struct VideoLyricsRow {
     pub youtube_url: String,
 }
 
-/// Return the next normalized video (in an active playlist) that has no lyrics yet.
-#[cfg_attr(test, mutants::skip)]
-pub async fn get_next_video_without_lyrics(
-    pool: &SqlitePool,
-) -> Result<Option<VideoLyricsRow>, sqlx::Error> {
-    sqlx::query_as::<_, VideoLyricsRow>(
-        "SELECT v.id, v.youtube_id, COALESCE(v.song, '') as song, \
-         COALESCE(v.artist, '') as artist, v.duration_ms, v.audio_file_path, \
-         p.youtube_url \
-         FROM videos v \
-         JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.normalized = 1 AND v.has_lyrics = 0 AND p.is_active = 1 \
-         AND (v.lyrics_source IS NULL OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source')) \
-         ORDER BY v.id LIMIT 1",
-    )
-    .fetch_optional(pool)
-    .await
-}
-
-/// Mark a video's lyrics status and source.
+/// Mark a video's lyrics status, source, AND pipeline version.
+///
+/// The pipeline_version stamp is critical on the failure path: without it, a
+/// row marked `no_source` under pipeline v5 keeps its pipeline_version at 0,
+/// and the `OR lyrics_pipeline_version < current` retry clause in
+/// `fetch_bucket_null` / `fetch_bucket_manual` then loops it forever because
+/// `0 < 5` is always true. Stamping the current version here means the song
+/// only gets retried when a NEW pipeline version ships.
 #[cfg_attr(test, mutants::skip)]
 pub async fn mark_video_lyrics(
     pool: &SqlitePool,
     video_id: i64,
     has_lyrics: bool,
     lyrics_source: Option<&str>,
+    pipeline_version: u32,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE videos SET has_lyrics = ?, lyrics_source = ? WHERE id = ?")
-        .bind(has_lyrics as i32)
-        .bind(lyrics_source)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ? \
+         WHERE id = ?",
+    )
+    .bind(has_lyrics as i32)
+    .bind(lyrics_source)
+    .bind(pipeline_version as i64)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Persist a successful lyrics processing run: sets has_lyrics=1, records source,
+/// pipeline_version, quality_score, and clears manual_priority — all in one query.
+///
+/// `quality_score` is `None` for fallback paths (e.g. ensemble timeout) to avoid
+/// writing 0.0 which would poison the `ORDER BY lyrics_quality_score ASC NULLS FIRST`
+/// stale-bucket selector — songs with 0.0 score sort before all real scores.
+#[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration test below
+pub async fn mark_video_lyrics_complete(
+    pool: &SqlitePool,
+    video_id: i64,
+    source: &str,
+    pipeline_version: u32,
+    quality_score: Option<f32>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
+         lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
+         lyrics_manual_priority = 0 WHERE id = ?",
+    )
+    .bind(source)
+    .bind(pipeline_version as i64)
+    .bind(quality_score.map(|q| q as f64))
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -420,158 +460,141 @@ pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), 
 }
 
 // ---------------------------------------------------------------------------
+// Custom playlist items
+// ---------------------------------------------------------------------------
+
+/// A single item in a custom playlist's set list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct PlaylistItem {
+    pub position: i64,
+    pub video_id: i64,
+}
+
+/// Append a video to a custom playlist's set list. Returns the assigned
+/// position. Errors if `(playlist_id, video_id)` already exists.
+pub async fn append_playlist_item(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let next_pos: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_items WHERE playlist_id = ?",
+    )
+    .bind(playlist_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)")
+        .bind(playlist_id)
+        .bind(video_id)
+        .bind(next_pos)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(next_pos)
+}
+
+/// Remove a video from a custom playlist's set list and compact positions
+/// so there are no gaps afterwards.
+pub async fn remove_playlist_item(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?")
+        .bind(playlist_id)
+        .bind(video_id)
+        .execute(&mut *tx)
+        .await?;
+
+    // Compact: rewrite positions 0..N-1 preserving order. Two-step to avoid
+    // PRIMARY KEY collisions: first negate all positions, then assign
+    // sequential non-negative positions based on the negated ordering.
+    sqlx::query(
+        "UPDATE playlist_items SET position = -position - 1
+         WHERE playlist_id = ?",
+    )
+    .bind(playlist_id)
+    .execute(&mut *tx)
+    .await?;
+    let rows = sqlx::query(
+        "SELECT video_id FROM playlist_items
+         WHERE playlist_id = ? ORDER BY position DESC",
+    )
+    .bind(playlist_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (new_pos, r) in rows.iter().enumerate() {
+        let vid: i64 = r.get("video_id");
+        sqlx::query(
+            "UPDATE playlist_items SET position = ?
+             WHERE playlist_id = ? AND video_id = ?",
+        )
+        .bind(new_pos as i64)
+        .bind(playlist_id)
+        .bind(vid)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Clamp current_position to the new valid range.
+    sqlx::query(
+        "UPDATE playlists
+         SET current_position = MIN(current_position,
+             COALESCE((SELECT MAX(position) FROM playlist_items WHERE playlist_id = ?), 0))
+         WHERE id = ?",
+    )
+    .bind(playlist_id)
+    .bind(playlist_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// List all items of a custom playlist in position order.
+pub async fn list_playlist_items(
+    pool: &SqlitePool,
+    playlist_id: i64,
+) -> Result<Vec<PlaylistItem>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT position, video_id FROM playlist_items
+         WHERE playlist_id = ? ORDER BY position",
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| PlaylistItem {
+            position: r.get("position"),
+            video_id: r.get("video_id"),
+        })
+        .collect())
+}
+
+/// Look up the position of a video within a custom playlist.
+pub async fn position_for_playlist_item(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT position FROM playlist_items
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .fetch_optional(pool)
+    .await
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
+#[path = "models_tests.rs"]
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db;
-
-    async fn setup_with_video() -> (SqlitePool, i64) {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        // Insert an unnormalized video row; the tests will mark it processed.
-        sqlx::query(
-            "INSERT INTO videos (playlist_id, youtube_id, title, normalized) VALUES (1, 'yt123', 't', 0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        let row = sqlx::query("SELECT id FROM videos WHERE youtube_id = 'yt123'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let id: i64 = row.get("id");
-        (pool, id)
-    }
-
-    #[tokio::test]
-    async fn mark_video_processed_pair_writes_both_sidecar_paths() {
-        let (pool, id) = setup_with_video().await;
-
-        mark_video_processed_pair(
-            &pool,
-            id,
-            "Amazing Grace",
-            "Chris Tomlin",
-            "gemini",
-            false,
-            "/cache/S_A_yt12345678_normalized_video.mp4",
-            "/cache/S_A_yt12345678_normalized_audio.flac",
-        )
-        .await
-        .unwrap();
-
-        let row = sqlx::query(
-            "SELECT song, artist, metadata_source, gemini_failed, file_path, audio_file_path, normalized
-             FROM videos WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        assert_eq!(row.get::<String, _>("song"), "Amazing Grace");
-        assert_eq!(row.get::<String, _>("artist"), "Chris Tomlin");
-        assert_eq!(row.get::<String, _>("metadata_source"), "gemini");
-        assert_eq!(row.get::<i64, _>("gemini_failed"), 0);
-        assert_eq!(
-            row.get::<String, _>("file_path"),
-            "/cache/S_A_yt12345678_normalized_video.mp4"
-        );
-        assert_eq!(
-            row.get::<String, _>("audio_file_path"),
-            "/cache/S_A_yt12345678_normalized_audio.flac"
-        );
-        assert_eq!(row.get::<i64, _>("normalized"), 1);
-    }
-
-    #[tokio::test]
-    async fn mark_video_processed_pair_stores_gemini_failed_flag() {
-        let (pool, id) = setup_with_video().await;
-        mark_video_processed_pair(
-            &pool,
-            id,
-            "S",
-            "A",
-            "parser",
-            true,
-            "/cache/v.mp4",
-            "/cache/a.flac",
-        )
-        .await
-        .unwrap();
-        let gf: i64 = sqlx::query("SELECT gemini_failed FROM videos WHERE id = ?")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap()
-            .get("gemini_failed");
-        assert_eq!(gf, 1);
-    }
-
-    #[tokio::test]
-    async fn get_song_paths_returns_both_when_normalized() {
-        let (pool, id) = setup_with_video().await;
-        mark_video_processed_pair(
-            &pool,
-            id,
-            "S",
-            "A",
-            "parser",
-            false,
-            "/cache/video-path.mp4",
-            "/cache/audio-path.flac",
-        )
-        .await
-        .unwrap();
-
-        let result = get_song_paths(&pool, id).await.unwrap();
-        assert_eq!(
-            result,
-            Some((
-                "/cache/video-path.mp4".to_string(),
-                "/cache/audio-path.flac".to_string()
-            ))
-        );
-    }
-
-    #[tokio::test]
-    async fn get_song_paths_returns_none_when_unnormalized() {
-        let (pool, id) = setup_with_video().await;
-        // Row is unnormalized by default from setup_with_video.
-        let result = get_song_paths(&pool, id).await.unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[tokio::test]
-    async fn get_song_paths_returns_none_when_audio_missing() {
-        let (pool, id) = setup_with_video().await;
-        // Mark normalized with only the video path; leave audio_file_path NULL.
-        sqlx::query(
-            "UPDATE videos SET normalized = 1, file_path = '/cache/v.mp4', audio_file_path = NULL
-             WHERE id = ?",
-        )
-        .bind(id)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let result = get_song_paths(&pool, id).await.unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[tokio::test]
-    async fn get_song_paths_returns_none_for_nonexistent_id() {
-        let (pool, _) = setup_with_video().await;
-        let result = get_song_paths(&pool, 9999).await.unwrap();
-        assert_eq!(result, None);
-    }
-}
+mod tests;

@@ -235,3 +235,151 @@ async fn scene_change_to_scene_without_ndi_source_yields_empty_active() {
     let _ = shutdown_tx.send(());
     fake_obs.shutdown().await;
 }
+
+/// 2026-04-19 event regression: when the NDI-source-map rebuild fails
+/// transiently (OBS drops its `GetInputList` response), the map MUST
+/// NOT be wiped. The old code ran `*guard = rebuild_result` even when
+/// the rebuild returned empty, which silently killed scene detection
+/// for hours until a service restart.
+///
+/// This test:
+/// 1. Seeds a DB + OBS state so the initial rebuild succeeds (map has
+///    one entry).
+/// 2. Flips `suppress_get_input_list = true` on the fake OBS.
+/// 3. Fires a rebuild signal.
+/// 4. Asserts the map still contains the original entry AND a
+///    subsequent `CurrentProgramSceneChanged` still propagates to
+///    `ObsEvent::SceneChanged` with the correct active playlist.
+#[tokio::test]
+async fn rebuild_failure_does_not_wipe_ndi_source_map() {
+    let pool = db::create_memory_pool().await.unwrap();
+    db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active)
+         VALUES (7, 'ytfast', 'https://youtube.com/playlist?list=PLfast', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut fake_state = FakeObsState::default();
+    fake_state
+        .inputs
+        .insert("sp-fast_video".into(), "ndi_source".into());
+    fake_state.input_settings.insert(
+        "sp-fast_video".into(),
+        serde_json::json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
+    );
+    fake_state.scene_items.insert(
+        "sp-fast".into(),
+        vec![("sp-fast_video".into(), false, "ndi_source".into())],
+    );
+
+    let fake_obs = FakeObsServer::spawn_with_state(fake_state).await;
+
+    let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
+    let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
+    let (obs_event_tx, mut obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+    let (obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
+
+    let _client = obs::ObsClient::spawn(
+        obs::ObsConfig {
+            url: fake_obs.url(),
+            password: None,
+        },
+        pool.clone(),
+        ndi_sources.clone(),
+        obs_state.clone(),
+        obs_event_tx.clone(),
+        obs_rebuild_rx,
+        shutdown_rx,
+    );
+
+    // Wait for the initial (successful) rebuild to populate the map.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if obs_state.read().await.connected {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("ObsClient did not connect within 5s");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    // Precondition: map is populated by the initial rebuild.
+    {
+        let map = ndi_sources.read().await;
+        assert_eq!(
+            map.get("sp-fast_video"),
+            Some(&7),
+            "initial rebuild must populate the map, got {map:?}"
+        );
+    }
+
+    // Flip the fake OBS into "drop GetInputList requests" mode — the
+    // exact transient failure shape that broke the event.
+    fake_obs
+        .update_state(|s| s.suppress_get_input_list = true)
+        .await;
+
+    // Trigger a rebuild. The rebuild_rx is a broadcast channel; the
+    // obs client task listens on it. Sending `()` fires one rebuild
+    // attempt. That attempt's GetInputList will time out (no response).
+    let _ = obs_rebuild_tx.send(());
+
+    // Wait past the wait_for_response timeout (2s) so the rebuild-
+    // retry loop has returned None and the main event loop is back
+    // to reading messages. If we pushed the scene event during the
+    // 2s wait, it would be consumed and dropped by wait_for_response.
+    // That's a narrower race than the original "forever hang" but
+    // still present; out-of-band routing of responses vs events is
+    // a separate refactor (tracked as a TODO).
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+
+    // CORE ASSERTION: the map was NOT wiped. Before the fix it would
+    // be empty here and every subsequent scene change would be a no-op.
+    {
+        let map = ndi_sources.read().await;
+        assert_eq!(
+            map.get("sp-fast_video"),
+            Some(&7),
+            "map MUST be preserved when GetInputList rebuild fails; \
+             got {map:?}. This is the 2026-04-19 event regression."
+        );
+    }
+
+    // Drain any prior events.
+    while obs_event_rx.try_recv().is_ok() {}
+
+    // Follow-up assertion: scene detection still WORKS after the
+    // failed rebuild. Fire a scene change and confirm the correct
+    // active playlist is reported.
+    fake_obs.push_program_scene_change("sp-fast").await;
+    let scene_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let active_ids = loop {
+        let remaining = scene_deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, obs_event_rx.recv()).await {
+            Ok(Ok(obs::ObsEvent::SceneChanged {
+                scene_name,
+                active_playlist_ids,
+            })) if scene_name == "sp-fast" => break active_playlist_ids,
+            Ok(Ok(_)) => continue,
+            Ok(Err(e)) => panic!("event channel error: {e}"),
+            Err(_) => panic!(
+                "did not receive SceneChanged within 3s after failed rebuild — \
+                 scene detection is broken even though the map should be stale-but-valid"
+            ),
+        }
+    };
+    assert!(
+        active_ids.contains(&7),
+        "active playlists must still match after failed rebuild, got {active_ids:?}"
+    );
+
+    let _ = shutdown_tx.send(());
+    fake_obs.shutdown().await;
+}

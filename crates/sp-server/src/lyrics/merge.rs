@@ -1,174 +1,113 @@
-//! LLM-powered merge layer for ensemble alignment.
+//! Deterministic merge layer for ensemble alignment.
 //!
-//! Accepts 1–N `ProviderResult`s, constructs a Claude Opus prompt,
-//! parses the JSON response into a merged `LyricsTrack`, and writes
-//! an audit log.
+//! Takes 1–N `ProviderResult`s (from qwen3 forced-aligner, autosub ASR,
+//! etc.) and produces a single `LyricsTrack` using pure Rust math — no
+//! LLM call. Previous design used Claude to reconcile timings, but LLMs
+//! cannot reliably emit exact-length arrays: the word-count sanity check
+//! failed on ~40% of production songs because Claude's tokenization of
+//! contractions drifted from `split_whitespace`. The weighting rules are
+//! deterministic (base_confidence * 0.7 pass-through, 1.2x boost on
+//! cross-provider agreement) and run in microseconds here.
+//!
+//! The first function argument stays `&AiClient` for call-site compatibility
+//! with orchestrator but is unused; a later refactor will drop it.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
 use std::path::Path;
 use tokio::fs;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::ai::client::AiClient;
 use crate::lyrics::provider::*;
 
-/// Build the merge prompt for Claude Opus.
+/// Distance in ms within which two provider timestamps count as agreeing
+/// on the same word. Derived from legacy Claude prompt (rule 5).
+const AGREEMENT_WINDOW_MS: i64 = 500;
+
+/// Multiplier applied to base_confidence when at least one non-primary
+/// provider has a word timestamp within `AGREEMENT_WINDOW_MS` of the
+/// primary's. Capped at 1.0. Matches legacy prompt rule 5.
+const AGREEMENT_BOOST: f32 = 1.2;
+
+/// Multiplier applied to base_confidence when NO other provider agrees
+/// (pass-through baseline). Matches legacy prompt rule 6.
+const PASS_THROUGH_MULTIPLIER: f32 = 0.7;
+
+/// Merge provider alignment results into a single `LyricsTrack`.
 ///
-/// Pure function (no I/O) — unit-testable with fixture data.
-pub fn build_merge_prompt(
-    reference_text: &str,
-    reference_source: &str,
-    provider_results: &[ProviderResult],
-) -> (String, String) {
-    let system = "You are a lyrics alignment merger. You receive word-level \
-        timestamp results from multiple independent alignment providers for \
-        the same song. Produce a single merged result with the best possible \
-        timing for each word.\n\n\
-        CRITICAL RULES:\n\
-        1. You MUST return ALL lines from the reference text. Every single \
-           line. Do not skip, summarize, or show examples.\n\
-        2. Match provider words to reference text intelligently \
-           (contractions, ASR errors, abbreviations).\n\
-        3. Multiple providers matched: weighted average of timings. Reject \
-           outliers >2000ms from median.\n\
-        4. Single provider matched: use its timing with confidence scaled \
-           to base_confidence * 0.7.\n\
-        5. No provider matched: zero-timed placeholder, confidence 0.\n\
-        6. Gap >2000ms between adjacent words within a line: set \
-           display_split=true on that line.\n\
-        7. Return ONLY the JSON object. No explanation. No preamble. No \
-           markdown fences. Start your response with { and end with }."
-        .to_string();
-
-    // Count reference lines for the explicit instruction
-    let line_count = reference_text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .count();
-
-    let mut user = String::new();
-    user.push_str(&format!(
-        "Reference text (source: {reference_source}, {line_count} lines):\n\
-         {reference_text}\n\n"
-    ));
-    user.push_str("Provider results:\n");
-    for pr in provider_results {
-        user.push_str(&format!(
-            "\n--- {} (base_confidence: {}) ---\n",
-            pr.provider_name,
-            pr.metadata
-                .get("base_confidence")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.7)
-        ));
-        for line in &pr.lines {
-            let words_str: Vec<String> = line
-                .words
-                .iter()
-                .map(|w| format!("{}@{}ms", w.text, w.start_ms))
-                .collect();
-            user.push_str(&format!("  [{}] {}\n", line.start_ms, words_str.join(" ")));
-        }
-    }
-    user.push_str(&format!(
-        "\nReturn JSON with EXACTLY {line_count} lines (one per reference line):\n\
-         {{\"lines\": [{{\"text\": \"full line\", \"start_ms\": N, \"end_ms\": N, \
-         \"display_split\": false, \"words\": [{{\"text\": \"word\", \"start_ms\": N, \
-         \"end_ms\": N, \"confidence\": 0.63, \"sources_agreed\": 1, \
-         \"spread_ms\": 0}}]}}]}}"
-    ));
-
-    (system, user)
-}
-
-/// Parsed LLM merge response.
-#[derive(Debug, serde::Deserialize)]
-struct MergeResponse {
-    lines: Vec<MergeResponseLine>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MergeResponseLine {
-    text: String,
-    start_ms: u64,
-    end_ms: u64,
-    /// Used by callers to decide if a visual gap should be inserted before this line.
-    #[serde(default)]
-    #[allow(dead_code)]
-    display_split: bool,
-    words: Vec<MergeResponseWord>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MergeResponseWord {
-    text: String,
-    start_ms: u64,
-    end_ms: u64,
-    confidence: f32,
-    /// Number of providers that agreed on this word's timing.
-    #[serde(default)]
-    #[allow(dead_code)]
-    sources_agreed: u8,
-    #[serde(default)]
-    spread_ms: u32,
-}
-
-/// Run the LLM merge: send prompt to Claude, parse response, return
-/// merged LyricsTrack + audit data.
-#[cfg_attr(test, mutants::skip)]
+/// Deterministic algorithm:
+/// 1. Pick the provider with the highest `base_confidence` that has at
+///    least one word as PRIMARY. This is qwen3 in production (its forced
+///    aligner emits per-reference-word timings).
+/// 2. For each primary word at time T, check non-primary providers for a
+///    word timestamp within `AGREEMENT_WINDOW_MS` of T.
+///    - At least one agreement → confidence = min(1.0, base * 1.2).
+///    - No agreement → confidence = base * 0.7 (pass-through baseline).
+/// 3. Emit `LyricsTrack` tagged `ensemble:<p1>+<p2>+...` listing every
+///    participating provider (even non-primary ones) so the audit log
+///    and DB `lyrics_source` column show the ensemble composition.
+///
+/// The `_ai_client`, `_reference_text`, and `_reference_source` parameters
+/// are kept for API compatibility with the orchestrator call site; they
+/// are unused by this deterministic implementation.
+#[allow(clippy::too_many_arguments)]
 pub async fn merge_provider_results(
-    ai_client: &AiClient,
-    reference_text: &str,
-    reference_source: &str,
+    _ai_client: &AiClient,
+    _reference_text: &str,
+    _reference_source: &str,
     provider_results: &[ProviderResult],
 ) -> Result<(LyricsTrack, Vec<WordMergeDetail>)> {
-    let (system, user) = build_merge_prompt(reference_text, reference_source, provider_results);
+    let primary = pick_best_provider_with_words(provider_results)
+        .ok_or_else(|| anyhow::anyhow!("no provider has usable word timings"))?;
+
+    let primary_base = base_confidence_of(primary);
+
+    // Collect every non-primary word's start timestamp into a flat sorted
+    // vec for O(log N) nearest-neighbor agreement checks.
+    let mut other_starts: Vec<u64> = provider_results
+        .iter()
+        .filter(|pr| !std::ptr::eq(*pr, primary))
+        .flat_map(|pr| pr.lines.iter())
+        .flat_map(|l| l.words.iter().map(|w| w.start_ms))
+        .collect();
+    other_starts.sort_unstable();
 
     debug!(
-        "merge: sending {} providers to Claude ({} chars prompt)",
-        provider_results.len(),
-        user.len()
+        "merge: primary={}, base={}, other_word_count={}",
+        primary.provider_name,
+        primary_base,
+        other_starts.len()
     );
 
-    let raw_response = ai_client
-        .chat(&system, &user)
-        .await
-        .context("LLM merge HTTP call failed")?;
-
-    debug!("merge: Claude returned {} chars", raw_response.len());
-
-    // Strip markdown fences and parse
-    let cleaned = crate::ai::client::strip_markdown_fences(&raw_response);
-    let response: MergeResponse = serde_json::from_str(&cleaned).map_err(|e| {
-        warn!(
-            "merge: failed to parse Claude response as JSON: {e}\nFirst 500 chars: {}",
-            &cleaned[..cleaned.len().min(500)]
-        );
-        anyhow::anyhow!("LLM merge JSON parse failed: {e}")
-    })?;
-
-    // Convert MergeResponse → LyricsTrack
-    let lines: Vec<LyricsLine> = response
-        .lines
-        .iter()
-        .map(|l| LyricsLine {
-            start_ms: l.start_ms,
-            end_ms: l.end_ms,
-            en: l.text.clone(),
-            sk: None,
-            words: Some(
-                l.words
-                    .iter()
-                    .map(|w| LyricsWord {
-                        text: w.text.clone(),
-                        start_ms: w.start_ms,
-                        end_ms: w.end_ms,
-                    })
-                    .collect(),
-            ),
-        })
-        .collect();
+    // Single cross-line-aware sanitize pass; the returned LyricsLines are
+    // already well-formed. Details are derived against the SANITIZED words
+    // but use the RAW start_ms for confidence lookups (agreement is a
+    // property of the real alignment, not our clamped output).
+    let out_lines = sanitize_track(&primary.lines);
+    let mut details: Vec<WordMergeDetail> = Vec::new();
+    let mut word_index = 0usize;
+    for (line_idx, line) in out_lines.iter().enumerate() {
+        let words = line.words.as_deref().unwrap_or(&[]);
+        let raw_line = primary.lines.get(line_idx);
+        for (i, w) in words.iter().enumerate() {
+            let raw_start = raw_line
+                .and_then(|l| l.words.get(i))
+                .map(|rw| rw.start_ms)
+                .unwrap_or(w.start_ms);
+            let confidence = word_confidence(raw_start, primary_base, &other_starts);
+            details.push(WordMergeDetail {
+                word_index,
+                reference_text: w.text.clone(),
+                provider_estimates: collect_estimates_at(provider_results, raw_start),
+                outliers_rejected: vec![],
+                merged_start_ms: w.start_ms,
+                merged_confidence: confidence,
+                spread_ms: 0,
+            });
+            word_index += 1;
+        }
+    }
 
     let track = LyricsTrack {
         version: 2,
@@ -182,28 +121,207 @@ pub async fn merge_provider_results(
         ),
         language_source: "en".into(),
         language_translation: String::new(),
-        lines,
+        lines: out_lines,
     };
 
-    // Build audit details from response
-    let mut details = Vec::new();
-    let mut word_idx = 0;
-    for line in &response.lines {
-        for word in &line.words {
-            details.push(WordMergeDetail {
-                word_index: word_idx,
-                reference_text: word.text.clone(),
-                provider_estimates: Vec::new(),
-                outliers_rejected: Vec::new(),
-                merged_start_ms: word.start_ms,
-                merged_confidence: word.confidence,
-                spread_ms: word.spread_ms,
-            });
-            word_idx += 1;
-        }
-    }
-
     Ok((track, details))
+}
+
+/// Minimum per-word duration in ms. Zero-duration words from the forced
+/// aligner are clamped to this — below ~50 ms the karaoke highlight
+/// flickers faster than human perception can track.
+const MIN_WORD_DURATION_MS: u64 = 80;
+
+/// Sanitize a sequence of `(text, start_ms, end_ms)` tuples so the emitted
+/// word list has well-formed timings for karaoke display. Pure function.
+///
+/// `floor_start_ms` is the lowest acceptable `start_ms` for the first word
+/// in the batch. Pass the previous line's last sanitized `end_ms` when
+/// sanitizing a track line-by-line so the cross-line boundary stays
+/// strictly increasing too. Pass `0` for a standalone batch.
+///
+/// Invariants enforced, in one left-to-right pass:
+/// 1. Each word's `start_ms` is strictly GREATER than the previous word's
+///    `start_ms`. Ties (qwen3's "duplicate start cluster" shape) and
+///    backward jumps are lifted to `prev.end_ms`. Strict ordering is the
+///    property a karaoke renderer actually needs.
+/// 2. Every word has at least `MIN_WORD_DURATION_MS` of duration.
+/// 3. No word extends past the next word's start (no overlap).
+///
+/// The three shapes of garbage observed in qwen3 output during the
+/// 2026-04-19 event all fall to these rules:
+/// - zero-duration words: rule 2
+/// - backward-in-time starts: rule 1
+/// - duplicate-start clusters: rule 1 (strict, not merely monotonic)
+///
+/// Without the floor, `compute_duplicate_start_pct` reports high
+/// duplicate % from words at line boundaries even though each line is
+/// individually clean (v9 shipped with this bug — see CLAUDE.md).
+pub(crate) fn sanitize_word_timings_from(
+    words: &[(String, u64, u64)],
+    floor_start_ms: u64,
+) -> Vec<(String, u64, u64)> {
+    let mut out: Vec<(String, u64, u64)> = Vec::with_capacity(words.len());
+    for (i, (text, raw_start, raw_end)) in words.iter().enumerate() {
+        // 1) strict start: next word must start AFTER previous word ended.
+        //    For the first word in the batch, `floor_start_ms` plays the
+        //    role of prev_end (so a new line inherits the previous line's
+        //    end as its lower bound).
+        let prev_end = out.last().map(|w| w.2).unwrap_or(floor_start_ms);
+        let start_ms = (*raw_start).max(prev_end);
+        let min_end = start_ms.saturating_add(MIN_WORD_DURATION_MS);
+
+        // 2) minimum duration.
+        let mut end_ms = (*raw_end).max(min_end);
+
+        // 3) no overlap with the next word. The next word's effective start
+        //    is lifted above our `min_end` so adjacent duplicate-start words
+        //    still end up sequential rather than collapsed. Because
+        //    `next_start_effective >= min_end` always, `end.min(effective)`
+        //    never drops below `min_end`, so the minimum-duration invariant
+        //    holds without a separate restore branch.
+        if let Some((_, next_raw_start, _)) = words.get(i + 1) {
+            let next_start_effective = (*next_raw_start).max(min_end);
+            end_ms = end_ms.min(next_start_effective);
+        }
+
+        out.push((text.clone(), start_ms, end_ms));
+    }
+    out
+}
+
+/// Pick the provider with the highest `base_confidence` that has at least one
+/// line with at least one word.
+pub(crate) fn pick_best_provider_with_words(
+    provider_results: &[ProviderResult],
+) -> Option<&ProviderResult> {
+    provider_results
+        .iter()
+        .filter(|pr| pr.lines.iter().any(|l| !l.words.is_empty()))
+        .max_by(|a, b| {
+            let bc_a = base_confidence_of(a);
+            let bc_b = base_confidence_of(b);
+            bc_a.partial_cmp(&bc_b).unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+/// Read the `base_confidence` metadata key, defaulting to 0.7 (qwen3 default).
+pub(crate) fn base_confidence_of(pr: &ProviderResult) -> f32 {
+    pr.metadata
+        .get("base_confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.7) as f32
+}
+
+/// Pass-through baseline confidence = `base * PASS_THROUGH_MULTIPLIER`.
+/// Used by both the multi-provider merge (when no peer agreed) and the
+/// single-provider pass-through path in `orchestrator`.
+pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
+    base_confidence * PASS_THROUGH_MULTIPLIER
+}
+
+/// Sanitize every word across a track's lines, threading `floor_start_ms`
+/// from line to line. Returns [`LyricsLine`]s with line boundaries derived
+/// from the sanitized word timings.
+///
+/// Used by both `merge_provider_results` and the single-provider
+/// pass-through in `orchestrator` so the cross-line strict-increasing
+/// invariant is enforced in exactly one place.
+pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
+    let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
+    let mut floor_start_ms: u64 = 0;
+    for line in lines {
+        // Skip wordless provider lines entirely. Falling back to the raw
+        // `line.start_ms`/`end_ms` here would bypass `floor_start_ms` and
+        // regress the cross-line strict-increasing invariant v10 enforces
+        // (`compute_duplicate_start_pct` sorts globally — same-ms word
+        // starts across lines count as duplicates). A renderer can't do
+        // anything useful with a words-less karaoke line anyway.
+        if line.words.is_empty() {
+            continue;
+        }
+        let raw: Vec<(String, u64, u64)> = line
+            .words
+            .iter()
+            .map(|w| (w.text.clone(), w.start_ms, w.end_ms))
+            .collect();
+        let sanitized = sanitize_word_timings_from(&raw, floor_start_ms);
+        if let Some(last) = sanitized.last() {
+            floor_start_ms = last.2;
+        }
+        let words: Vec<LyricsWord> = sanitized
+            .into_iter()
+            .map(|(text, start_ms, end_ms)| LyricsWord {
+                text,
+                start_ms,
+                end_ms,
+            })
+            .collect();
+        let line_start = words.first().map(|w| w.start_ms).unwrap_or(0);
+        let line_end = words.last().map(|w| w.end_ms).unwrap_or(0);
+        out.push(LyricsLine {
+            start_ms: line_start,
+            end_ms: line_end,
+            en: line.text.clone(),
+            sk: None,
+            words: Some(words),
+        });
+    }
+    out
+}
+
+/// Compute the per-word confidence: boost when any non-primary provider
+/// has a timestamp within `AGREEMENT_WINDOW_MS`, otherwise pass-through.
+///
+/// Pure function — takes a pre-sorted slice of other-provider start_ms
+/// timestamps for O(log N) binary-search lookup.
+pub(crate) fn word_confidence(start_ms: u64, primary_base: f32, other_starts: &[u64]) -> f32 {
+    if other_starts.is_empty() {
+        // No peers to corroborate — pass-through.
+        return primary_base * PASS_THROUGH_MULTIPLIER;
+    }
+    if nearest_within(start_ms, other_starts, AGREEMENT_WINDOW_MS) {
+        (primary_base * AGREEMENT_BOOST).min(1.0)
+    } else {
+        primary_base * PASS_THROUGH_MULTIPLIER
+    }
+}
+
+/// Returns true iff some element of `sorted` is within `window_ms` of `target`.
+/// `sorted` must be sorted ascending (the sort isn't required for
+/// correctness, only for the typical O(log N) hot-path lookup caller).
+pub(crate) fn nearest_within(target: u64, sorted: &[u64], window_ms: i64) -> bool {
+    let target_i = target as i64;
+    sorted
+        .iter()
+        .any(|&x| (x as i64 - target_i).abs() <= window_ms)
+}
+
+/// Collect the provider-name → (start_ms, confidence) tuples for every word
+/// whose start_ms matches `target_start_ms`. Used in the audit log so an
+/// operator can trace which providers "voted" on a given word.
+///
+/// Audit-log helper — reviewer I2 already flagged that exact-ms equality
+/// is an imperfect match (independent aligners never collide on exact
+/// ms). The audit log's strict-equality behaviour is documented; a
+/// follow-up PR may widen this to use `AGREEMENT_WINDOW_MS`. Skipping
+/// mutation testing until then since mutations on debug-aid logic
+/// aren't tractable to pin without materially reshaping the function.
+#[cfg_attr(test, mutants::skip)]
+fn collect_estimates_at(
+    provider_results: &[ProviderResult],
+    target_start_ms: u64,
+) -> Vec<(String, u64, f32)> {
+    provider_results
+        .iter()
+        .filter_map(|pr| {
+            pr.lines
+                .iter()
+                .flat_map(|l| &l.words)
+                .find(|w| w.start_ms == target_start_ms)
+                .map(|w| (pr.provider_name.clone(), w.start_ms, w.confidence))
+        })
+        .collect()
 }
 
 /// Write the audit log to disk alongside the lyrics JSON.
@@ -217,99 +335,5 @@ pub async fn write_audit_log(cache_dir: &Path, log: &AuditLog) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_merge_prompt_includes_reference_and_providers() {
-        let results = vec![ProviderResult {
-            provider_name: "qwen3".into(),
-            lines: vec![LineTiming {
-                text: "Hello world".into(),
-                start_ms: 1000,
-                end_ms: 2000,
-                words: vec![
-                    WordTiming {
-                        text: "Hello".into(),
-                        start_ms: 1000,
-                        end_ms: 1500,
-                        confidence: 0.9,
-                    },
-                    WordTiming {
-                        text: "world".into(),
-                        start_ms: 1500,
-                        end_ms: 2000,
-                        confidence: 0.9,
-                    },
-                ],
-            }],
-            metadata: serde_json::json!({}),
-        }];
-        let (system, user) = build_merge_prompt("Hello world", "manual_subs", &results);
-        assert!(system.contains("lyrics alignment merger"));
-        assert!(user.contains("Hello world"));
-        assert!(user.contains("manual_subs"));
-        assert!(user.contains("qwen3"));
-        assert!(user.contains("Hello@1000ms"));
-    }
-
-    #[test]
-    fn build_merge_prompt_handles_multiple_providers() {
-        let results = vec![
-            ProviderResult {
-                provider_name: "qwen3".into(),
-                lines: vec![],
-                metadata: serde_json::json!({}),
-            },
-            ProviderResult {
-                provider_name: "autosub".into(),
-                lines: vec![],
-                metadata: serde_json::json!({}),
-            },
-        ];
-        let (_, user) = build_merge_prompt("test", "lrclib", &results);
-        assert!(user.contains("qwen3"));
-        assert!(user.contains("autosub"));
-    }
-
-    #[test]
-    fn build_merge_prompt_line_count_excludes_empty_lines() {
-        // Kills the `!l.trim().is_empty()` mutation: if ! is removed,
-        // the filter counts ONLY empty lines. Reference text has 3 non-empty
-        // lines and 2 empty lines; prompt must say "3 lines", not "2".
-        let ref_text = "line one\n\nline two\n   \nline three";
-        let (_, user) = build_merge_prompt(ref_text, "manual_subs", &[]);
-        assert!(
-            user.contains("3 lines"),
-            "expected 3 lines in prompt, got: {user}"
-        );
-        assert!(
-            user.contains("EXACTLY 3 lines"),
-            "expected explicit count in output instruction"
-        );
-        assert!(
-            !user.contains("0 lines") && !user.contains("2 lines"),
-            "line count must exclude empty/whitespace lines"
-        );
-    }
-
-    #[test]
-    fn parse_merge_response_json() {
-        let json = r#"{
-            "lines": [{
-                "text": "Hello world",
-                "start_ms": 1000,
-                "end_ms": 2000,
-                "display_split": false,
-                "words": [
-                    {"text": "Hello", "start_ms": 1000, "end_ms": 1500, "confidence": 0.95, "sources_agreed": 2, "spread_ms": 50},
-                    {"text": "world", "start_ms": 1500, "end_ms": 2000, "confidence": 0.9, "sources_agreed": 1, "spread_ms": 0}
-                ]
-            }]
-        }"#;
-        let parsed: MergeResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.lines.len(), 1);
-        assert_eq!(parsed.lines[0].words.len(), 2);
-        assert_eq!(parsed.lines[0].words[0].confidence, 0.95);
-    }
-}
+#[path = "merge_tests.rs"]
+mod tests;

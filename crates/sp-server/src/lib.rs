@@ -83,6 +83,16 @@ pub enum EngineCommand {
         playlist_id: i64,
         mode: PlaybackMode,
     },
+    /// Jump to a specific video within a playlist and start playing it
+    /// immediately. For custom playlists, also updates
+    /// `playlists.current_position` so subsequent Skip advances from the
+    /// new position. For youtube playlists it behaves like Previous
+    /// (plays the given video but does not affect the random-unplayed
+    /// selector; the next Skip will pick a fresh random video).
+    PlayVideo {
+        playlist_id: i64,
+        video_id: i64,
+    },
 }
 
 /// Status of external tool availability.
@@ -148,6 +158,7 @@ pub async fn start(
     // 1. Database
     let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
     db::run_migrations(&pool).await?;
+    startup::ensure_live_playlist_exists(&pool).await?;
     info!("database ready");
 
     // Self-heal cache: delete legacy single-mp4s, delete orphans,
@@ -203,6 +214,25 @@ pub async fn start(
         )),
         ai_client: ai_client.clone(),
     };
+
+    // Auto-start the CLIProxyAPI child process + start a watchdog that
+    // periodically re-launches it if it dies. Without this, every
+    // SongPlayer restart (including CI deploys) leaves the proxy
+    // unstarted — the description provider, text-merge, and all other
+    // Claude calls silently fall through to "no text sources available"
+    // for most songs (2026-04-19 event: 100% of in-flight songs failed
+    // gather_sources until POST /api/v1/ai/proxy/start was hit manually).
+    if state.ai_proxy.is_claude_authenticated() {
+        match state.ai_proxy.start().await {
+            Ok(()) => info!("ai_proxy: auto-started CLIProxyAPI at boot"),
+            Err(e) => warn!("ai_proxy: auto-start failed (watchdog will retry): {e}"),
+        }
+        let watchdog_proxy = state.ai_proxy.clone();
+        let watchdog_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(ai_proxy_watchdog(watchdog_proxy, watchdog_shutdown));
+    } else {
+        info!("ai_proxy: not authenticated, skipping auto-start + watchdog");
+    }
 
     // 4. Read Gemini settings (used by download worker + reprocess worker)
     let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
@@ -301,6 +331,7 @@ pub async fn start(
                 info!("download worker started");
 
                 // Lyrics worker
+                let lyrics_pool_for_loop = lyrics_pool.clone();
                 let lyrics_worker = lyrics::LyricsWorker::new(
                     lyrics_pool,
                     lyrics_cache_dir,
@@ -310,9 +341,19 @@ pub async fn start(
                     lyrics_gemini_key,
                     lyrics_gemini_model,
                     Some(ai_client_for_dl),
+                    tools_event_tx.clone(),
                 );
+                let current_processing_handle = lyrics_worker.current_processing();
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                 info!("lyrics worker started");
+
+                // Lyrics queue-update broadcast loop (every 2s → WS clients)
+                tokio::spawn(crate::lyrics::worker::queue_update_loop(
+                    lyrics_pool_for_loop,
+                    tools_event_tx.clone(),
+                    current_processing_handle,
+                    lyrics_shutdown.subscribe(),
+                ));
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -510,6 +551,9 @@ pub async fn start(
                         EngineCommand::SetMode { playlist_id, mode } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
                         }
+                        EngineCommand::PlayVideo { playlist_id, video_id } => {
+                            engine.handle_play_video(playlist_id, video_id).await;
+                        }
                         EngineCommand::SceneChanged { playlist_id, on_program } => {
                             // VideosAvailable + SceneOn (on program) or
                             // SceneOff (off program) are folded into
@@ -565,6 +609,37 @@ pub async fn start(
     info!("server stopped");
 
     Ok(())
+}
+
+/// Interval between ai_proxy health checks.
+const AI_PROXY_WATCHDOG_INTERVAL_SECS: u64 = 30;
+
+/// Poll the CLIProxyAPI child every `AI_PROXY_WATCHDOG_INTERVAL_SECS` and
+/// restart it if it died. Without this, a proxy crash mid-processing
+/// leaves the worker silently falling through to "no text sources
+/// available" for every subsequent song (2026-04-19 event). Exits on
+/// shutdown broadcast.
+async fn ai_proxy_watchdog(
+    proxy: Arc<ai::proxy::ProxyManager>,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) {
+    let interval = std::time::Duration::from_secs(AI_PROXY_WATCHDOG_INTERVAL_SECS);
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = tokio::time::sleep(interval) => {
+                let status = proxy.status().await;
+                if status.running {
+                    continue;
+                }
+                warn!("ai_proxy watchdog: proxy is down, attempting restart");
+                match proxy.start().await {
+                    Ok(()) => info!("ai_proxy watchdog: restart succeeded"),
+                    Err(e) => warn!("ai_proxy watchdog: restart failed: {e}"),
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

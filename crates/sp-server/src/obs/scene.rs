@@ -104,9 +104,26 @@ async fn wait_for_response(
     read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     request_id: &str,
 ) -> Option<serde_json::Value> {
-    // Limit iterations to avoid infinite loop on broken connections.
+    use std::time::Duration;
+    // Bounded wait. Without the timeout, a dropped OBS response would block
+    // this task on `read.next().await` and silently consume any next
+    // message that arrived — including scene change events (see the
+    // `rebuild_failure_does_not_wipe_ndi_source_map` regression test).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     for _ in 0..100 {
-        match read.next().await {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            warn!("timed out waiting for response {request_id}");
+            return None;
+        }
+        let next = match tokio::time::timeout(remaining, read.next()).await {
+            Ok(msg) => msg,
+            Err(_) => {
+                warn!("timed out waiting for response {request_id}");
+                return None;
+            }
+        };
+        match next {
             Some(Ok(Message::Text(text))) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                     let op = json["op"].as_u64().unwrap_or(u64::MAX);

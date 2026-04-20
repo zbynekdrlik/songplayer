@@ -165,6 +165,34 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 
 **Follow existing patterns** from similar projects (restreamer, iem-mixer) for consistency in error handling, logging (tracing), and state management.
 
+## Pipeline versioning (lyrics)
+
+`crates/sp-server/src/lyrics/mod.rs::LYRICS_PIPELINE_VERSION` is a monotonic integer identifying the lyrics processing output format. Every song's lyrics JSON + DB row records the version it was produced under. On worker startup, songs with `lyrics_pipeline_version < LYRICS_PIPELINE_VERSION` are re-queued for reprocessing (stale bucket, worst-quality-first).
+
+**Bump the constant when:**
+- Adding or removing an `AlignmentProvider` from the worker registration
+- Changing a provider's algorithm (chunking, matcher, density gate thresholds)
+- Changing either Claude merge prompt (text reconciliation or timing merge)
+- Changing the reference-text-selection algorithm
+
+**Do NOT bump for:**
+- Bug fixes that produce identical output
+- Refactoring, renaming, logging changes
+- UI/dashboard-only changes
+- Performance optimizations with identical output
+
+**History:**
+- v1 (pre-#33): single-path yt_subs→Qwen3 or lrclib-line-level
+- v2 (#34/#35): ensemble orchestrator + AutoSubProvider + Claude text-merge
+- v3 (#34/#35): merge prompt reworked — confidence-weighted, disagreement rule, compact output schema
+- v4 (#42): description provider added as 4th text candidate (raw YouTube description → Claude extraction → candidate_texts)
+- v5 (#42): description prompt reframed to software-engineering task (empty system, karaoke-app framing) — v4's direct-instruction prompt yielded 0% extraction on production because Claude via CLIProxyAPI OAuth returned conversational preamble instead of JSON
+- v6 (#42): merge-layer fallback when Claude miscounts per-word timings (typically off by 1-6 on contractions/possessives) — returns the highest-base-confidence provider's per-word timings tagged `ensemble:fallback_to_<provider>` instead of dropping the song. Fixes ~40% production song-loss observed post-v5 deploy.
+- v7 (#42): merge layer rewritten as pure Rust, Claude call dropped entirely. LLMs cannot reliably emit exact-length arrays (the v5/v6 root cause); the merge rules (base_confidence^2 weighting, disagreement handling, outlier rejection) are all deterministic math. Highest-base-confidence provider is primary; other providers' timestamps within 500ms boost confidence to min(1.0, base * 1.2); otherwise pass-through at base * 0.7.
+- v8 (post-event): sanitize word timings in the merge layer — enforce monotonic start_ms, minimum 80ms per-word duration, no overlap with next word. Fixes blinking / stuck / out-of-sync karaoke observed during 2026-04-19 event. Primary provider (qwen3) sometimes emits zero-duration words, backward-in-time starts, and duplicate-start clusters; the sanitizer clamps these into well-formed timings before output.
+- v9 (post-event fixup): extend the sanitizer to the single-provider pass-through in the orchestrator. v8 only sanitized the multi-provider merge path, so `ensemble:qwen3` songs (autosub dropped) still shipped raw duplicate-start / zero-duration words. v9 calls `sanitize_word_timings` on both paths; measured post-v9, `duplicate_start_pct` converges to 0% across the whole catalog.
+- v10 (post-event fixup 2): thread `floor_start_ms` across line boundaries when sanitizing. v9 sanitized per-line but reset the start floor to 0 for each line, so two consecutive lines could share a word start_ms at their boundary. Since `compute_duplicate_start_pct` sorts word starts globally then counts ties, v9 audit logs reported 91% duplicates even though each line's output was individually clean. v10 makes cross-line boundaries strictly increasing.
+
 ## Legacy OBS YouTube Player (obsytplayer)
 
 SongPlayer is the Rust replacement for the legacy Python OBS YouTube Player at `/home/newlevel/devel/obsytplayer/`. **Always reference the legacy code when implementing features** — it contains battle-tested logic for:

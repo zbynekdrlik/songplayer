@@ -40,8 +40,9 @@ impl Orchestrator {
             "orchestrator: starting ensemble alignment"
         );
 
-        // Pick best reference text
-        let (reference_text, reference_source) = self.select_reference_text(ctx);
+        // Reconcile candidate texts into one canonical reference via Claude text-merge
+        let (reference_text, reference_source, _per_line_sources) =
+            self.reconcile_reference_text(ctx).await?;
 
         // Run providers sequentially (cheapest first, ordered by registration)
         let mut results: Vec<ProviderResult> = Vec::new();
@@ -94,26 +95,10 @@ impl Orchestrator {
                 "single provider — passing through without LLM merge"
             );
             let pr = &results[0];
-            let lines = pr
-                .lines
-                .iter()
-                .map(|l| sp_core::lyrics::LyricsLine {
-                    start_ms: l.start_ms,
-                    end_ms: l.end_ms,
-                    en: l.text.clone(),
-                    sk: None,
-                    words: Some(
-                        l.words
-                            .iter()
-                            .map(|w| sp_core::lyrics::LyricsWord {
-                                text: w.text.clone(),
-                                start_ms: w.start_ms,
-                                end_ms: w.end_ms,
-                            })
-                            .collect(),
-                    ),
-                })
-                .collect();
+            // Single shared helper for cross-line-aware sanitize — same
+            // call site as `merge_provider_results`. Keeps the strict-
+            // increasing-starts invariant in one place.
+            let lines = crate::lyrics::merge::sanitize_track(&pr.lines);
             let track = LyricsTrack {
                 version: 2,
                 source: format!("ensemble:{}", pr.provider_name),
@@ -121,24 +106,32 @@ impl Orchestrator {
                 language_translation: String::new(),
                 lines,
             };
-            let details: Vec<WordMergeDetail> = pr
+            // Build word_details from SANITIZED track so quality_score
+            // reflects what actually got persisted, not the raw input.
+            // Use the shared pass_through_baseline helper so the constant
+            // stays in one place (merge.rs). `base_confidence_of` reads
+            // the provider's declared base confidence; falls back to 0.7.
+            let base_conf = crate::lyrics::merge::base_confidence_of(pr);
+            let pass_through_c = crate::lyrics::merge::pass_through_baseline(base_conf);
+            let details: Vec<WordMergeDetail> = track
                 .lines
                 .iter()
-                .flat_map(|l| &l.words)
+                .flat_map(|l| l.words.as_deref().unwrap_or(&[]))
                 .enumerate()
                 .map(|(i, w)| WordMergeDetail {
                     word_index: i,
                     reference_text: w.text.clone(),
-                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, w.confidence)],
+                    provider_estimates: vec![(pr.provider_name.clone(), w.start_ms, base_conf)],
                     outliers_rejected: vec![],
                     merged_start_ms: w.start_ms,
-                    merged_confidence: w.confidence * 0.7,
+                    merged_confidence: pass_through_c,
                     spread_ms: 0,
                 })
                 .collect();
             (track, details)
         } else {
-            // 2+ providers: merge via LLM
+            // 2+ providers: deterministic Rust merge (see lyrics/merge.rs
+            // — no LLM call, pure math on provider timings).
             merge::merge_provider_results(
                 &self.ai_client,
                 &reference_text,
@@ -146,7 +139,7 @@ impl Orchestrator {
                 &results,
             )
             .await
-            .context("LLM merge failed")?
+            .context("ensemble merge failed")?
         };
 
         // Compute quality metrics
@@ -189,20 +182,55 @@ impl Orchestrator {
         Ok(track)
     }
 
-    /// Select the best reference text from candidates.
-    /// Priority: ccli > manual_subs > description > lrclib > autosub
-    fn select_reference_text(&self, ctx: &SongContext) -> (String, String) {
-        let priority = ["ccli", "manual_subs", "description", "lrclib", "autosub"];
-        for source in &priority {
-            if let Some(ct) = ctx.candidate_texts.iter().find(|c| c.source == *source) {
-                return (ct.lines.join("\n"), ct.source.clone());
+    /// Reconcile candidate texts into one canonical reference via Claude text-merge.
+    /// 0 candidates → error; 1 candidate → pass-through; 2+ → Claude merge.
+    ///
+    /// Returns `(joined_text, aggregated_source_label, per_line_sources)`:
+    /// - `joined_text` — one string with lines separated by `\n`, suitable for
+    ///   passing to the timing-merge prompt or a single-provider pass-through
+    /// - `aggregated_source_label` — if all reconciled lines came from the same
+    ///   candidate source, that source; otherwise `"merged:<s1>+<s2>+..."`
+    /// - `per_line_sources` — same length as reconciled lines; useful for
+    ///   audit-log provenance
+    async fn reconcile_reference_text(
+        &self,
+        ctx: &SongContext,
+    ) -> anyhow::Result<(String, String, Vec<String>)> {
+        use crate::lyrics::text_merge::merge_candidate_texts;
+        if ctx.candidate_texts.is_empty() {
+            anyhow::bail!(
+                "reconcile_reference_text: no candidates for {}",
+                ctx.video_id
+            );
+        }
+        let lines = merge_candidate_texts(&self.ai_client, &ctx.candidate_texts).await?;
+        let joined = lines
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Aggregate per-line sources into the reference_source label.
+        let agg_source = {
+            let mut uniq: Vec<&String> = Vec::new();
+            for l in &lines {
+                if !uniq.contains(&&l.source) {
+                    uniq.push(&l.source);
+                }
             }
-        }
-        // Fallback: first available
-        if let Some(ct) = ctx.candidate_texts.first() {
-            return (ct.lines.join("\n"), ct.source.clone());
-        }
-        (String::new(), "none".into())
+            if uniq.len() == 1 {
+                uniq[0].clone()
+            } else {
+                format!(
+                    "merged:{}",
+                    uniq.iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join("+")
+                )
+            }
+        };
+        let per_line_sources = lines.iter().map(|l| l.source.clone()).collect();
+        Ok((joined, agg_source, per_line_sources))
     }
 }
 
@@ -252,41 +280,8 @@ fn compute_gap_stddev_ms(track: &LyricsTrack) -> f32 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn select_reference_text_priority() {
-        let orch = Orchestrator {
-            providers: vec![],
-            ai_client: Arc::new(AiClient::new(crate::ai::AiSettings::default())),
-            cache_dir: PathBuf::from("/tmp"),
-        };
-        let ctx = SongContext {
-            video_id: "test".into(),
-            audio_path: PathBuf::from("/tmp/test.flac"),
-            clean_vocal_path: None,
-            candidate_texts: vec![
-                CandidateText {
-                    source: "autosub".into(),
-                    lines: vec!["autosub text".into()],
-                    has_timing: false,
-                    line_timings: None,
-                },
-                CandidateText {
-                    source: "manual_subs".into(),
-                    lines: vec!["manual text".into()],
-                    has_timing: true,
-                    line_timings: None,
-                },
-            ],
-            autosub_json3: None,
-            duration_ms: 180000,
-        };
-        let (text, source) = orch.select_reference_text(&ctx);
-        assert_eq!(source, "manual_subs");
-        assert_eq!(text, "manual text");
-    }
-
-    #[test]
-    fn select_reference_text_fallback() {
+    #[tokio::test]
+    async fn reconcile_reference_text_single_candidate_short_circuits() {
         let orch = Orchestrator {
             providers: vec![],
             ai_client: Arc::new(AiClient::new(crate::ai::AiSettings::default())),
@@ -297,17 +292,89 @@ mod tests {
             audio_path: PathBuf::from("/tmp/test.flac"),
             clean_vocal_path: None,
             candidate_texts: vec![CandidateText {
-                source: "unknown_source".into(),
-                lines: vec!["fallback text".into()],
+                source: "lrclib".into(),
+                lines: vec!["only text".into()],
                 has_timing: false,
                 line_timings: None,
             }],
             autosub_json3: None,
-            duration_ms: 180000,
+            duration_ms: 180_000,
         };
-        let (text, source) = orch.select_reference_text(&ctx);
-        assert_eq!(source, "unknown_source");
-        assert_eq!(text, "fallback text");
+        let (text, source, _) = orch.reconcile_reference_text(&ctx).await.unwrap();
+        assert_eq!(text, "only text");
+        assert_eq!(source, "lrclib");
+    }
+
+    #[tokio::test]
+    async fn reconcile_reference_text_empty_is_error() {
+        let orch = Orchestrator {
+            providers: vec![],
+            ai_client: Arc::new(AiClient::new(crate::ai::AiSettings::default())),
+            cache_dir: PathBuf::from("/tmp"),
+        };
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![],
+            autosub_json3: None,
+            duration_ms: 180_000,
+        };
+        assert!(orch.reconcile_reference_text(&ctx).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn reconcile_reference_text_multi_source_produces_merged_label() {
+        // Two candidates → Claude mocked to return lines from different sources.
+        // Verifies the aggregate-source label is "merged:lrclib+yt_subs".
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {"content": "{\"lines\":[{\"text\":\"line one\",\"source\":\"lrclib\"},{\"text\":\"line two\",\"source\":\"yt_subs\"}]}"}
+                }]
+            })))
+            .mount(&mock).await;
+
+        let orch = Orchestrator {
+            providers: vec![],
+            ai_client: Arc::new(AiClient::new(crate::ai::AiSettings {
+                api_url: format!("{}/v1", mock.uri()),
+                api_key: Some("test".into()),
+                model: "claude-opus-4-20250514".into(),
+                system_prompt_extra: None,
+            })),
+            cache_dir: PathBuf::from("/tmp"),
+        };
+        let ctx = SongContext {
+            video_id: "test".into(),
+            audio_path: PathBuf::from("/tmp/test.flac"),
+            clean_vocal_path: None,
+            candidate_texts: vec![
+                CandidateText {
+                    source: "lrclib".into(),
+                    lines: vec!["line one".into(), "line two".into()],
+                    has_timing: false,
+                    line_timings: None,
+                },
+                CandidateText {
+                    source: "yt_subs".into(),
+                    lines: vec!["line one".into(), "line two".into()],
+                    has_timing: false,
+                    line_timings: None,
+                },
+            ],
+            autosub_json3: None,
+            duration_ms: 180_000,
+        };
+        let (text, source, per_line) = orch.reconcile_reference_text(&ctx).await.unwrap();
+        assert_eq!(text, "line one\nline two");
+        assert_eq!(
+            source, "merged:lrclib+yt_subs",
+            "multi-source aggregation must produce merged:x+y label"
+        );
+        assert_eq!(per_line, vec!["lrclib".to_string(), "yt_subs".to_string()]);
     }
 
     #[test]

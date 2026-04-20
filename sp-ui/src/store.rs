@@ -7,6 +7,44 @@ use sp_core::models::*;
 use sp_core::playback::*;
 use sp_core::ws::ServerMsg;
 
+/// Lyrics pipeline queue state reflected from server WebSocket updates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LyricsQueueInfo {
+    pub bucket0: i64,
+    pub bucket1: i64,
+    pub bucket2: i64,
+    pub pipeline_version: u32,
+    pub processing: Option<LyricsProcessingState>,
+}
+
+/// Processing state for a single song currently in the lyrics pipeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LyricsProcessingState {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub song: String,
+    pub artist: String,
+    pub stage: String,
+    pub provider: Option<String>,
+    pub started_at_unix_ms: i64,
+}
+
+/// A single row from the `/api/v1/lyrics/songs` endpoint.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct LyricsSongEntry {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub title: Option<String>,
+    pub song: Option<String>,
+    pub artist: Option<String>,
+    pub source: Option<String>,
+    pub pipeline_version: i64,
+    pub quality_score: Option<f64>,
+    pub has_lyrics: bool,
+    pub is_stale: bool,
+    pub manual_priority: bool,
+}
+
 /// Information about what is currently playing on a playlist.
 #[derive(Debug, Clone)]
 pub struct NowPlayingInfo {
@@ -47,6 +85,8 @@ pub struct DashboardStore {
     pub errors: RwSignal<Vec<String>>,
     pub settings: RwSignal<HashMap<String, String>>,
     pub resolume_hosts: RwSignal<Vec<ResolumeHost>>,
+    pub lyrics_queue: RwSignal<Option<LyricsQueueInfo>>,
+    pub lyrics_songs: RwSignal<Vec<LyricsSongEntry>>,
 }
 
 impl DashboardStore {
@@ -61,6 +101,8 @@ impl DashboardStore {
             errors: RwSignal::new(vec![]),
             settings: RwSignal::new(HashMap::new()),
             resolume_hosts: RwSignal::new(vec![]),
+            lyrics_queue: RwSignal::new(None),
+            lyrics_songs: RwSignal::new(vec![]),
         }
     }
 
@@ -186,6 +228,65 @@ impl DashboardStore {
                         info.next_line_en = next_line_en;
                         info.active_word_index = active_word_index;
                         info.word_count = word_count;
+                    }
+                });
+            }
+            ServerMsg::LyricsQueueUpdate {
+                bucket0_count,
+                bucket1_count,
+                bucket2_count,
+                pipeline_version,
+                processing,
+            } => {
+                self.lyrics_queue.set(Some(LyricsQueueInfo {
+                    bucket0: bucket0_count,
+                    bucket1: bucket1_count,
+                    bucket2: bucket2_count,
+                    pipeline_version,
+                    processing: processing.map(|p| LyricsProcessingState {
+                        video_id: p.video_id,
+                        youtube_id: p.youtube_id,
+                        song: p.song,
+                        artist: p.artist,
+                        stage: p.stage,
+                        provider: p.provider,
+                        started_at_unix_ms: p.started_at_unix_ms,
+                    }),
+                }));
+            }
+            ServerMsg::LyricsProcessingStage {
+                video_id,
+                youtube_id,
+                stage,
+                provider,
+            } => {
+                self.lyrics_queue.update(|q| {
+                    if let Some(info) = q {
+                        info.processing = Some(LyricsProcessingState {
+                            video_id,
+                            youtube_id,
+                            song: String::new(),
+                            artist: String::new(),
+                            stage,
+                            provider,
+                            started_at_unix_ms: 0,
+                        });
+                    }
+                });
+            }
+            ServerMsg::LyricsCompleted {
+                video_id,
+                source,
+                quality_score,
+                ..
+            } => {
+                self.lyrics_songs.update(|list| {
+                    if let Some(entry) = list.iter_mut().find(|e| e.video_id == video_id) {
+                        entry.source = Some(source);
+                        entry.quality_score = Some(quality_score as f64);
+                        entry.has_lyrics = true;
+                        entry.is_stale = false;
+                        entry.manual_priority = false;
                     }
                 });
             }

@@ -9,7 +9,9 @@ use crate::store::DashboardStore;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Dashboard,
+    Live,
     Settings,
+    Lyrics,
 }
 
 impl Default for Page {
@@ -39,6 +41,18 @@ pub fn App() -> impl IntoView {
                 "Dashboard"
             </button>
             <button
+                class:active=move || page.get() == Page::Live
+                on:click=move |_| page.set(Page::Live)
+            >
+                "Live"
+            </button>
+            <button
+                class:active=move || page.get() == Page::Lyrics
+                on:click=move |_| page.set(Page::Lyrics)
+            >
+                "Lyrics"
+            </button>
+            <button
                 class:active=move || page.get() == Page::Settings
                 on:click=move |_| page.set(Page::Settings)
             >
@@ -57,7 +71,9 @@ pub fn App() -> impl IntoView {
         <main class="content">
             {move || match page.get() {
                 Page::Dashboard => pages::dashboard::DashboardPage().into_any(),
+                Page::Live => pages::live::LivePage().into_any(),
                 Page::Settings => pages::settings::SettingsPage().into_any(),
+                Page::Lyrics => pages::lyrics::LyricsPage().into_any(),
             }}
         </main>
     }
