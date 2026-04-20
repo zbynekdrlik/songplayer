@@ -60,11 +60,9 @@ pub fn normalize_text(s: &str) -> String {
         if c.is_alphanumeric() || c == '\'' {
             out.push(c);
             prev_space = false;
-        } else if c.is_whitespace() {
-            if !prev_space {
-                out.push(' ');
-                prev_space = true;
-            }
+        } else if c.is_whitespace() && !prev_space {
+            out.push(' ');
+            prev_space = true;
         }
         // else: drop punctuation
     }
@@ -77,6 +75,7 @@ pub fn normalize_text(s: &str) -> String {
 /// considered the same sung phrase when
 ///   - `normalize_text(a.text) == normalize_text(b.text)`, AND
 ///   - `|a.start_ms - b.start_ms| <= AGREEMENT_MS` (1500 ms)
+///
 /// When a pair is found, KEEP the one whose start is FURTHER from the chunk
 /// boundary (less boundary effect — the other chunk had more context).
 ///
