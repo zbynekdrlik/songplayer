@@ -78,7 +78,12 @@ use sp_core::lyrics::LyricsTrack;
 ///   sorts all starts globally and counts ties, so v9 audit logs
 ///   reported 91% duplicates even though per-line output was clean.
 ///   v10 makes cross-line boundaries strictly increasing too.
-pub const LYRICS_PIPELINE_VERSION: u32 = 10;
+/// - v11: Gemini chunked lyrics provider (GeminiProvider) replaces
+///   qwen3 as the primary forced-alignment source. Provides more
+///   robust per-word timing on low-quality/noisy audio and better
+///   handling of edge cases. Existing songs with v10 or earlier
+///   output are re-queued for reprocessing under the new provider.
+pub const LYRICS_PIPELINE_VERSION: u32 = 11;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -209,10 +214,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v10() {
+    fn lyrics_pipeline_version_is_v11() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 10,
-            "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
+            LYRICS_PIPELINE_VERSION, 11,
+            "v11 = Gemini chunked lyrics provider replaces qwen3 for line timing"
         );
     }
 
