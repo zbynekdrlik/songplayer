@@ -157,7 +157,7 @@ def call_gemini(
     *,
     proxy_url: str | None = None,
     api_key: str | None = None,
-    timeout_s: int = 120,
+    timeout_s: int = 300,
 ) -> str:
     """Call Gemini at /v1beta/models/{model}:generateContent.
 
@@ -246,11 +246,34 @@ def normalize_for_dedup(s: str) -> str:
     return "".join(out_chars).strip()
 
 
+def load_cached_chunks(cache_path: Path) -> list[list[dict]] | None:
+    """Load previously-cached per-chunk lines. Returns None if cache missing/invalid."""
+    if not cache_path.exists():
+        return None
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return [c["lines"] for c in data["chunks"]]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
 def process_all_chunks(chunks: list[dict], reference: str, full_duration_ms: int,
-                       model: str, proxy_url: str | None, api_key: str | None) -> list[list[dict]]:
-    """Call Gemini per chunk. Returns list-of-lists of {start_ms,end_ms,text} (LOCAL ms)."""
+                       model: str, proxy_url: str | None, api_key: str | None,
+                       cached: list[list[dict]] | None = None) -> list[list[dict]]:
+    """Call Gemini per chunk. Returns list-of-lists of {start_ms,end_ms,text} (LOCAL ms).
+
+    If `cached` is provided and has the same length as chunks, chunks with a
+    non-empty cached line list are skipped (reused). Only empty-cached or
+    missing chunks are re-called. Saves API calls when retrying failed runs.
+    """
+    use_cache = cached is not None and len(cached) == len(chunks)
     results = []
-    for c in chunks:
+    for i, c in enumerate(chunks):
+        cached_lines = cached[i] if use_cache else None
+        if cached_lines:
+            print(f"[chunk {c['idx']:>2}] using cached {len(cached_lines)} lines")
+            results.append(cached_lines)
+            continue
         prompt = build_prompt(reference, c["start_ms"], c["end_ms"], full_duration_ms)
         print(f"[chunk {c['idx']:>2}] calling Gemini ({c['start_ms']/1000:.0f}s..{c['end_ms']/1000:.0f}s)...")
         try:
@@ -392,6 +415,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="skip API calls, print plan")
     ap.add_argument("--one-chunk-test", type=int, default=None,
                     help="call Gemini on only this chunk index and print raw output")
+    ap.add_argument("--retry-from-cache", action="store_true",
+                    help="load {id}_gemini_chunks.json and only re-call chunks with empty lines")
     args = ap.parse_args()
 
     api_key: str | None = None
@@ -451,15 +476,25 @@ def main():
     reference = load_description_reference(paths["description"])
     print(f"[reference] {len(reference.splitlines())} description lines loaded")
 
+    chunks_cache_path = cache / f"{args.video_id}_gemini_chunks.json"
+    cached: list[list[dict]] | None = None
+    if args.retry_from_cache:
+        cached = load_cached_chunks(chunks_cache_path)
+        if cached is None:
+            print(f"[retry-from-cache] no cache at {chunks_cache_path}, full run")
+        else:
+            empties = sum(1 for c in cached if not c)
+            print(f"[retry-from-cache] loaded cache ({len(cached)} chunks, {empties} empty — will re-call only those)")
+
     per_chunk = process_all_chunks(
         chunks, reference, duration_ms,
         args.model,
         None if api_key else args.proxy_url,
         api_key,
+        cached=cached,
     )
 
     # Cache raw per-chunk parsed outputs for later re-merging without re-calling Gemini
-    chunks_cache_path = cache / f"{args.video_id}_gemini_chunks.json"
     chunks_cache_path.write_text(
         json.dumps({"chunks": [{"start_ms": c["start_ms"], "end_ms": c["end_ms"], "lines": l}
                                for c, l in zip(chunks, per_chunk)]}, indent=2),
