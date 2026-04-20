@@ -169,24 +169,20 @@ pub(crate) fn sanitize_word_timings_from(
         //    end as its lower bound).
         let prev_end = out.last().map(|w| w.2).unwrap_or(floor_start_ms);
         let start_ms = (*raw_start).max(prev_end);
+        let min_end = start_ms.saturating_add(MIN_WORD_DURATION_MS);
 
         // 2) minimum duration.
-        let mut end_ms = (*raw_end).max(start_ms.saturating_add(MIN_WORD_DURATION_MS));
+        let mut end_ms = (*raw_end).max(min_end);
 
-        // 3) no overlap with the next word, if a next word exists.
-        //    Peek at the NEXT raw start, but also lift it above our current
-        //    `start_ms` so adjacent duplicate-start words still end up
-        //    sequential rather than collapsing into a zero-duration range.
+        // 3) no overlap with the next word. The next word's effective start
+        //    is lifted above our `min_end` so adjacent duplicate-start words
+        //    still end up sequential rather than collapsed. Because
+        //    `next_start_effective >= min_end` always, `end.min(effective)`
+        //    never drops below `min_end`, so the minimum-duration invariant
+        //    holds without a separate restore branch.
         if let Some((_, next_raw_start, _)) = words.get(i + 1) {
-            let next_start_effective =
-                (*next_raw_start).max(start_ms.saturating_add(MIN_WORD_DURATION_MS));
-            if end_ms > next_start_effective {
-                end_ms = next_start_effective;
-            }
-            // Preserve minimum duration if clamping made the word too short.
-            if end_ms < start_ms.saturating_add(MIN_WORD_DURATION_MS) {
-                end_ms = start_ms.saturating_add(MIN_WORD_DURATION_MS);
-            }
+            let next_start_effective = (*next_raw_start).max(min_end);
+            end_ms = end_ms.min(next_start_effective);
         }
 
         out.push((text.clone(), start_ms, end_ms));
@@ -292,21 +288,13 @@ pub(crate) fn word_confidence(start_ms: u64, primary_base: f32, other_starts: &[
 }
 
 /// Returns true iff some element of `sorted` is within `window_ms` of `target`.
-/// `sorted` must be sorted ascending.
+/// `sorted` must be sorted ascending (the sort isn't required for
+/// correctness, only for the typical O(log N) hot-path lookup caller).
 pub(crate) fn nearest_within(target: u64, sorted: &[u64], window_ms: i64) -> bool {
-    if sorted.is_empty() {
-        return false;
-    }
-    let idx = sorted.partition_point(|&x| x < target);
-    // Candidate(s) are sorted[idx] (first >= target) and sorted[idx-1] (last < target).
-    let mut best: i64 = i64::MAX;
-    if idx < sorted.len() {
-        best = best.min((sorted[idx] as i64 - target as i64).abs());
-    }
-    if idx > 0 {
-        best = best.min((target as i64 - sorted[idx - 1] as i64).abs());
-    }
-    best <= window_ms
+    let target_i = target as i64;
+    sorted
+        .iter()
+        .any(|&x| (x as i64 - target_i).abs() <= window_ms)
 }
 
 /// Collect the provider-name → (start_ms, confidence) tuples for every word

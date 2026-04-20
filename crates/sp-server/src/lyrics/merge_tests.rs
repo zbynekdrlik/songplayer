@@ -70,19 +70,23 @@ fn nearest_within_strict_boundary_is_inclusive() {
 }
 
 #[test]
-fn sanitize_clamp_triggers_only_on_strict_overlap() {
-    // Mutation-pin for merge.rs:183 `if end_ms > next_start_effective`.
-    // The `>` (not `>=`, not `==`, not `<`) means: if end_ms equals
-    // next_start_effective exactly, no clamp. If it exceeds, clamp.
-    // Input: word 0 ends exactly at word 1's start — no overlap, leave
-    // alone.
+fn sanitize_no_overlap_preserves_boundary_timings() {
+    // Word 0 ends exactly at word 1's start — already no overlap, no
+    // clamp needed. `end_ms.min(next_start_effective)` with both equal
+    // is a no-op.
     let no_overlap = vec![("a".to_string(), 1000, 1080), ("b".to_string(), 1080, 1160)];
     let out = sanitize_word_timings_from(&no_overlap, 0);
-    assert_eq!(out[0].2, 1080, "equal boundary must NOT trigger clamp");
+    assert_eq!(out[0].2, 1080, "no overlap → word 0 end preserved");
     assert_eq!(out[1].1, 1080);
+}
 
-    // Input: word 0's raw end is AFTER word 1's start — clamp fires.
-    let overlap = vec![("a".to_string(), 1000, 1500), ("b".to_string(), 1200, 1300)];
+#[test]
+fn sanitize_overlap_clamps_word_end_down_preserves_min_duration() {
+    // Word 0's raw end exceeds word 1's start — `end_ms.min(next_effective)`
+    // clamps word 0 down. Because `next_effective = max(next_raw, start+MIN)`,
+    // the clamped end is always >= `start + MIN_WORD_DURATION_MS`, so the
+    // minimum-duration invariant holds without a separate restore branch.
+    let overlap = vec![("a".to_string(), 1000, 5000), ("b".to_string(), 1200, 1300)];
     let out = sanitize_word_timings_from(&overlap, 0);
     assert!(
         out[0].2 <= out[1].1,
@@ -90,100 +94,40 @@ fn sanitize_clamp_triggers_only_on_strict_overlap() {
         out[0].2,
         out[1].1
     );
-}
-
-#[test]
-fn sanitize_min_duration_restore_triggers_only_when_below_min() {
-    // Mutation-pin for merge.rs:187 `if end_ms < start_ms + MIN_DUR`.
-    // The `<` (not `<=`, not `==`) means: when end_ms equals the min,
-    // no restore fires. Only STRICTLY below triggers restore.
-    //
-    // Shape to exercise this cleanly: two adjacent duplicate-start
-    // words where clamping word 0's end to word 1's effective start
-    // lands exactly at start_ms + MIN_WORD_DURATION_MS.
-    let input = vec![
-        ("a".to_string(), 1000, 5000), // wants to end at 5000
-        ("b".to_string(), 1000, 1100), // duplicate start; next_effective = 1080
-    ];
-    let out = sanitize_word_timings_from(&input, 0);
-    // word 0: start=1000, raw_end=5000. next_start_effective = max(1000, 1000+80) = 1080.
-    // 5000 > 1080 → clamp to 1080. Then check if 1080 < 1000+80=1080 → NO (equal).
-    // So end stays at 1080 = min duration boundary.
-    assert_eq!(out[0].2, 1080, "end must land exactly at start+MIN");
     assert!(
         out[0].2 >= out[0].1 + MIN_WORD_DURATION_MS,
-        "min-duration invariant must hold"
+        "clamped word must still have at least MIN_WORD_DURATION_MS of width"
     );
 }
 
-#[test]
-fn merge_word_index_monotonic_across_multiple_lines() {
+#[tokio::test]
+async fn merge_provider_results_word_index_increments_by_one_per_word() {
     // Mutation-pin for merge.rs:108 `word_index += 1`. If the `+=` is
-    // replaced with `*=`, word_index stays 0 forever. Assert the sequence
-    // is 0..N to catch that specific mutation.
-    // (Use a synthetic 2-line, 4-word fixture via the public sanitize_track
-    // plus detail-building logic; exercising via merge_provider_results
-    // directly needs AI client mocks.)
-    let lines = vec![
-        LineTiming {
-            text: "a b".into(),
-            start_ms: 1000,
-            end_ms: 1500,
-            words: vec![
-                WordTiming {
-                    text: "a".into(),
-                    start_ms: 1000,
-                    end_ms: 1250,
-                    confidence: 0.7,
-                },
-                WordTiming {
-                    text: "b".into(),
-                    start_ms: 1250,
-                    end_ms: 1500,
-                    confidence: 0.7,
-                },
-            ],
-        },
-        LineTiming {
-            text: "c d".into(),
-            start_ms: 1600,
-            end_ms: 2100,
-            words: vec![
-                WordTiming {
-                    text: "c".into(),
-                    start_ms: 1600,
-                    end_ms: 1850,
-                    confidence: 0.7,
-                },
-                WordTiming {
-                    text: "d".into(),
-                    start_ms: 1850,
-                    end_ms: 2100,
-                    confidence: 0.7,
-                },
-            ],
-        },
-    ];
-    let out = sanitize_track(&lines);
-    let total_words: usize = out
-        .iter()
-        .map(|l| l.words.as_ref().map(|w| w.len()).unwrap_or(0))
-        .sum();
-    assert_eq!(total_words, 4, "sanity — 4 words expected");
-    // Reconstruct the word_index sequence the same way the merge path
-    // does (flatten lines → words → enumerate). Mutation `*=` would
-    // produce [0,0,0,0]; `+=` produces [0,1,2,3].
-    let reconstructed: Vec<usize> = out
-        .iter()
-        .flat_map(|l| l.words.as_deref().unwrap_or(&[]))
-        .enumerate()
-        .map(|(i, _)| i)
-        .collect();
-    assert_eq!(
-        reconstructed,
-        vec![0, 1, 2, 3],
-        "word_index counter must increment by +1 per word"
-    );
+    // replaced with `*=`, word_index stays at 0 for every entry. Assert
+    // the emitted `details[i].word_index == i` sequence directly from
+    // `merge_provider_results`, which is where the counter lives.
+    let providers = vec![make_provider(
+        "qwen3",
+        0.7,
+        &[
+            ("a", 1000, 1250, 0.7),
+            ("b", 1250, 1500, 0.7),
+            ("c", 1600, 1850, 0.7),
+            ("d", 1850, 2100, 0.7),
+        ],
+    )];
+    let client = dummy_client();
+    let (_track, details) = merge_provider_results(&client, "a b c d", "test", &providers)
+        .await
+        .unwrap();
+    assert_eq!(details.len(), 4);
+    for (i, d) in details.iter().enumerate() {
+        assert_eq!(
+            d.word_index, i,
+            "word_index sequence must be 0..N; got details[{i}].word_index = {}",
+            d.word_index
+        );
+    }
 }
 
 // ---- sanitize_word_timings: 2026-04-19 event regression guards ----
