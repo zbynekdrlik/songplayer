@@ -5,6 +5,7 @@ pub mod bootstrap;
 pub mod chunking;
 pub mod description_provider;
 pub mod gemini_chunks;
+pub mod gemini_client;
 pub mod gemini_parse;
 pub mod gemini_prompt;
 pub mod lrclib;
