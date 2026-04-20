@@ -76,19 +76,13 @@ fn sanitize_clamp_triggers_only_on_strict_overlap() {
     // next_start_effective exactly, no clamp. If it exceeds, clamp.
     // Input: word 0 ends exactly at word 1's start — no overlap, leave
     // alone.
-    let no_overlap = vec![
-        ("a".to_string(), 1000, 1080),
-        ("b".to_string(), 1080, 1160),
-    ];
+    let no_overlap = vec![("a".to_string(), 1000, 1080), ("b".to_string(), 1080, 1160)];
     let out = sanitize_word_timings_from(&no_overlap, 0);
     assert_eq!(out[0].2, 1080, "equal boundary must NOT trigger clamp");
     assert_eq!(out[1].1, 1080);
 
     // Input: word 0's raw end is AFTER word 1's start — clamp fires.
-    let overlap = vec![
-        ("a".to_string(), 1000, 1500),
-        ("b".to_string(), 1200, 1300),
-    ];
+    let overlap = vec![("a".to_string(), 1000, 1500), ("b".to_string(), 1200, 1300)];
     let out = sanitize_word_timings_from(&overlap, 0);
     assert!(
         out[0].2 <= out[1].1,
