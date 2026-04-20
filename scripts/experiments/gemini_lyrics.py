@@ -229,6 +229,155 @@ def parse_timed_lines(raw: str) -> list[dict]:
     return out
 
 
+def normalize_for_dedup(s: str) -> str:
+    """Normalize line text for overlap dedup: lowercase, strip non-word chars except
+    apostrophes, collapse whitespace."""
+    lower = s.lower()
+    out_chars = []
+    prev_space = True
+    for c in lower:
+        if c.isalnum() or c == "'":
+            out_chars.append(c)
+            prev_space = False
+        elif c.isspace():
+            if not prev_space:
+                out_chars.append(" ")
+                prev_space = True
+    return "".join(out_chars).strip()
+
+
+def process_all_chunks(chunks: list[dict], reference: str, full_duration_ms: int,
+                       model: str, proxy_url: str | None, api_key: str | None) -> list[list[dict]]:
+    """Call Gemini per chunk. Returns list-of-lists of {start_ms,end_ms,text} (LOCAL ms)."""
+    results = []
+    for c in chunks:
+        prompt = build_prompt(reference, c["start_ms"], c["end_ms"], full_duration_ms)
+        print(f"[chunk {c['idx']:>2}] calling Gemini ({c['start_ms']/1000:.0f}s..{c['end_ms']/1000:.0f}s)...")
+        try:
+            raw = call_gemini(model, prompt, c["path"], proxy_url=proxy_url, api_key=api_key)
+        except Exception as e:
+            print(f"[chunk {c['idx']:>2}] FAILED: {e}")
+            results.append([])
+            continue
+        parsed = parse_timed_lines(raw)
+        print(f"[chunk {c['idx']:>2}] {len(parsed)} lines parsed")
+        results.append(parsed)
+    return results
+
+
+def merge_overlap(chunks: list[dict], per_chunk_lines: list[list[dict]]) -> list[dict]:
+    """Merge per-chunk LOCAL lines into a single ordered global-ms list.
+
+    Algorithm (Appendix B of the design spec):
+    1. Shift each chunk's local timestamps by chunk.start_ms to get global ms.
+    2. Walk adjacent chunk pairs (N, N+1). In the overlap region (last ~10s of N,
+       first ~10s of N+1), find pairs of entries whose normalized text matches AND
+       whose global start_ms are within 1500ms of each other. These are duplicates.
+       Keep the one whose start is FURTHER from the chunk boundary (less boundary
+       effect — the other chunk had more context for that timing).
+    3. Flatten + sort by start_ms.
+    """
+    AGREEMENT_MS = 1500
+
+    # Shift each chunk's lines to global
+    globals_per_chunk = []
+    for c, lines in zip(chunks, per_chunk_lines):
+        shifted = [{"start_ms": l["start_ms"] + c["start_ms"],
+                    "end_ms": l["end_ms"] + c["start_ms"],
+                    "text": l["text"]} for l in lines]
+        globals_per_chunk.append(shifted)
+
+    # Walk adjacent chunk pairs; record drop indices per chunk
+    drop_per_chunk = [set() for _ in chunks]
+    for i in range(len(chunks) - 1):
+        overlap_start = chunks[i + 1]["start_ms"]
+        overlap_end = chunks[i]["end_ms"]
+        if overlap_end <= overlap_start:
+            continue
+        a_idx = [k for k, l in enumerate(globals_per_chunk[i]) if l["end_ms"] > overlap_start]
+        b_idx = [k for k, l in enumerate(globals_per_chunk[i + 1]) if l["start_ms"] < overlap_end]
+        for ia in a_idx:
+            if ia in drop_per_chunk[i]:
+                continue
+            la = globals_per_chunk[i][ia]
+            la_norm = normalize_for_dedup(la["text"])
+            for ib in b_idx:
+                if ib in drop_per_chunk[i + 1]:
+                    continue
+                lb = globals_per_chunk[i + 1][ib]
+                if normalize_for_dedup(lb["text"]) != la_norm:
+                    continue
+                if abs(la["start_ms"] - lb["start_ms"]) > AGREEMENT_MS:
+                    continue
+                # Distance from the chunk boundary — keep the one further away
+                a_dist = abs(la["start_ms"] - overlap_end)
+                b_dist = abs(lb["start_ms"] - overlap_start)
+                if a_dist >= b_dist:
+                    drop_per_chunk[i + 1].add(ib)
+                else:
+                    drop_per_chunk[i].add(ia)
+                break  # one b per a
+
+    flat = []
+    for i, lines in enumerate(globals_per_chunk):
+        for k, l in enumerate(lines):
+            if k in drop_per_chunk[i]:
+                continue
+            flat.append(l)
+    flat.sort(key=lambda l: l["start_ms"])
+    return flat
+
+
+def write_lyrics_json(out_path: Path, lines: list[dict], full_duration_ms: int) -> None:
+    """Write LyricsTrack-schema JSON.
+
+    For each line:
+    - start_ms = Gemini's line.start_ms (no shift applied; if user wants global
+      offset they can edit)
+    - end_ms = min(Gemini's end_ms, next_line.start_ms - 50) — extends so the
+      line displays continuously until the next one starts (avoid flicker),
+      unless Gemini's explicit end is earlier (preserve sung-pause gaps)
+    - words: evenly distributed across the line (word-level timing is out of
+      Phase 0 scope; the Rust dashboard still expects word entries to drive the
+      karaoke highlighter, so we synthesize evenly-spaced ones)
+    """
+    entries = []
+    for i, l in enumerate(lines):
+        # If next line starts before Gemini's end, clip. Else keep Gemini's end.
+        next_start = lines[i + 1]["start_ms"] if i + 1 < len(lines) else full_duration_ms
+        end_ms = l["end_ms"]
+        if next_start < end_ms:
+            end_ms = max(l["start_ms"] + 200, next_start - 50)
+        if end_ms <= l["start_ms"]:
+            end_ms = l["start_ms"] + 500
+        words = l["text"].split()
+        if words:
+            wdur = max(200, (end_ms - l["start_ms"]) // len(words))
+            t = l["start_ms"]
+            word_objs = []
+            for k, w in enumerate(words):
+                w_end = t + wdur if k < len(words) - 1 else end_ms
+                word_objs.append({"text": w, "start_ms": t, "end_ms": w_end})
+                t = w_end
+        else:
+            word_objs = []
+        entries.append({
+            "start_ms": l["start_ms"],
+            "end_ms": end_ms,
+            "en": l["text"],
+            "sk": None,
+            "words": word_objs,
+        })
+    out_data = {
+        "version": 2,
+        "source": "gemini-chunked-prototype",
+        "language_source": "en",
+        "language_translation": "",
+        "lines": entries,
+    }
+    out_path.write_text(json.dumps(out_data, indent=2), encoding="utf-8")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video-id", required=True, help="YouTube video id")
@@ -297,6 +446,38 @@ def main():
     if args.dry_run:
         print("[dry-run] exiting before any API calls")
         return
+
+    # Full song: call Gemini on all chunks, merge, write _lyrics.json
+    reference = load_description_reference(paths["description"])
+    print(f"[reference] {len(reference.splitlines())} description lines loaded")
+
+    per_chunk = process_all_chunks(
+        chunks, reference, duration_ms,
+        args.model,
+        None if api_key else args.proxy_url,
+        api_key,
+    )
+
+    # Cache raw per-chunk parsed outputs for later re-merging without re-calling Gemini
+    chunks_cache_path = cache / f"{args.video_id}_gemini_chunks.json"
+    chunks_cache_path.write_text(
+        json.dumps({"chunks": [{"start_ms": c["start_ms"], "end_ms": c["end_ms"], "lines": l}
+                               for c, l in zip(chunks, per_chunk)]}, indent=2),
+        encoding="utf-8",
+    )
+    print(f"[cache] wrote raw chunks to {chunks_cache_path}")
+
+    merged = merge_overlap(chunks, per_chunk)
+    raw_total = sum(len(x) for x in per_chunk)
+    print(f"[merge] {raw_total} raw lines -> {len(merged)} after overlap dedup")
+
+    out_path = cache / f"{args.video_id}_lyrics.json"
+    write_lyrics_json(out_path, merged, duration_ms)
+    if merged:
+        print(f"[write] {out_path} ({len(merged)} entries, span "
+              f"{merged[0]['start_ms']/1000:.1f}s..{merged[-1]['end_ms']/1000:.1f}s)")
+    else:
+        print(f"[write] {out_path} (EMPTY — every chunk failed)")
 
 
 if __name__ == "__main__":
