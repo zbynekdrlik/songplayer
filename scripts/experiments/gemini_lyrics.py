@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +26,23 @@ DEFAULT_CACHE = Path(r"C:\ProgramData\SongPlayer\cache")
 DEFAULT_TOOLS = DEFAULT_CACHE / "tools"
 DEFAULT_PROXY = "http://127.0.0.1:18787"
 DEFAULT_MODEL = "gemini-3-pro-preview"
+DEFAULT_DB = Path(r"C:\ProgramData\SongPlayer\songplayer.db")
+GOOGLE_API_BASE = "https://generativelanguage.googleapis.com"
+
+
+def load_gemini_api_key(db_path: Path) -> str | None:
+    """Read gemini_api_key from the SongPlayer settings table."""
+    import sqlite3
+    if not db_path.exists():
+        return None
+    con = sqlite3.connect(str(db_path))
+    try:
+        row = con.execute(
+            "SELECT value FROM settings WHERE key = 'gemini_api_key'"
+        ).fetchone()
+        return row[0] if row and row[0] else None
+    finally:
+        con.close()
 
 
 def resolve_paths(cache_dir: Path, youtube_id: str) -> dict:
@@ -132,8 +150,21 @@ def build_prompt(reference: str, chunk_start_ms: int, chunk_end_ms: int, full_du
     )
 
 
-def call_gemini(proxy_url: str, model: str, prompt: str, audio_path: Path, timeout_s: int = 60) -> str:
-    """Call Gemini via CLIProxy /v1beta/models/{model}:generateContent. Returns raw text body."""
+def call_gemini(
+    model: str,
+    prompt: str,
+    audio_path: Path,
+    *,
+    proxy_url: str | None = None,
+    api_key: str | None = None,
+    timeout_s: int = 120,
+) -> str:
+    """Call Gemini at /v1beta/models/{model}:generateContent.
+
+    If api_key is set, go direct to Google's generativelanguage.googleapis.com
+    (pay-as-you-go billing on user's project). Otherwise use proxy_url (CLIProxy
+    OAuth free tier).
+    """
     audio_b64 = base64.b64encode(audio_path.read_bytes()).decode("ascii")
     body = {
         "contents": [{
@@ -144,15 +175,26 @@ def call_gemini(proxy_url: str, model: str, prompt: str, audio_path: Path, timeo
         }],
         "generationConfig": {"temperature": 0.0},
     }
-    url = f"{proxy_url}/v1beta/models/{model}:generateContent"
+    if api_key:
+        url = f"{GOOGLE_API_BASE}/v1beta/models/{model}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    else:
+        if not proxy_url:
+            raise ValueError("either api_key or proxy_url must be provided")
+        url = f"{proxy_url}/v1beta/models/{model}:generateContent"
+        headers = {"Content-Type": "application/json"}
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        raw = resp.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {e.code}: {err_body[:500]}") from e
     doc = json.loads(raw)
     try:
         return doc["candidates"][0]["content"]["parts"][0]["text"]
@@ -166,10 +208,23 @@ def main():
     ap.add_argument("--cache-dir", default=str(DEFAULT_CACHE))
     ap.add_argument("--proxy-url", default=DEFAULT_PROXY)
     ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--direct-api", action="store_true",
+                    help="call Google generativelanguage.googleapis.com directly using SongPlayer's gemini_api_key (bypass CLIProxy)")
+    ap.add_argument("--api-key", default=None,
+                    help="override Gemini API key (defaults to SongPlayer DB's gemini_api_key when --direct-api)")
+    ap.add_argument("--db-path", default=str(DEFAULT_DB))
     ap.add_argument("--dry-run", action="store_true", help="skip API calls, print plan")
     ap.add_argument("--one-chunk-test", type=int, default=None,
                     help="call Gemini on only this chunk index and print raw output")
     args = ap.parse_args()
+
+    api_key: str | None = None
+    if args.direct_api:
+        api_key = args.api_key or load_gemini_api_key(Path(args.db_path))
+        if not api_key:
+            print("ERROR: --direct-api set but no API key found (pass --api-key or ensure SongPlayer DB has gemini_api_key)",
+                  file=sys.stderr)
+            sys.exit(2)
 
     cache = Path(args.cache_dir)
     paths = resolve_paths(cache, args.video_id)
@@ -177,7 +232,10 @@ def main():
     print(f"  audio:       {paths['audio']}")
     print(f"  vocal:       {paths['vocal']}  (exists={paths['vocal'].exists()})")
     print(f"  description: {paths['description']}  (exists={paths['description'].exists()})")
-    print(f"  proxy:       {args.proxy_url}")
+    if api_key:
+        print(f"  api mode:    direct (Google generativelanguage.googleapis.com)")
+    else:
+        print(f"  api mode:    proxy ({args.proxy_url})")
     print(f"  model:       {args.model}")
 
     ffmpeg = DEFAULT_TOOLS / "ffmpeg.exe"
@@ -195,7 +253,11 @@ def main():
         c = chunks[args.one_chunk_test]
         prompt = build_prompt(reference, c["start_ms"], c["end_ms"], duration_ms)
         print(f"[one-chunk-test] chunk {c['idx']} prompt length={len(prompt)} chars")
-        out = call_gemini(args.proxy_url, args.model, prompt, c["path"])
+        out = call_gemini(
+            args.model, prompt, c["path"],
+            proxy_url=None if api_key else args.proxy_url,
+            api_key=api_key,
+        )
         print(f"\n=== RAW GEMINI RESPONSE (chunk {c['idx']}) ===")
         print(out)
         print("=== END ===")
