@@ -25,7 +25,7 @@ CHUNK_STRIDE_S = CHUNK_DURATION_S - CHUNK_OVERLAP_S  # 50
 DEFAULT_CACHE = Path(r"C:\ProgramData\SongPlayer\cache")
 DEFAULT_TOOLS = DEFAULT_CACHE / "tools"
 DEFAULT_PROXY = "http://127.0.0.1:18787"
-DEFAULT_MODEL = "gemini-3-pro-preview"
+DEFAULT_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_DB = Path(r"C:\ProgramData\SongPlayer\songplayer.db")
 GOOGLE_API_BASE = "https://generativelanguage.googleapis.com"
 
@@ -202,6 +202,33 @@ def call_gemini(
         raise RuntimeError(f"unexpected Gemini response shape: {raw[:500]}") from e
 
 
+TIMED_LINE_RE = re.compile(
+    r"^\((\d{1,2}):(\d{1,2}(?:\.\d+)?)\s*-->\s*(\d{1,2}):(\d{1,2}(?:\.\d+)?)\)\s*(.+)$"
+)
+
+
+def parse_timed_lines(raw: str) -> list[dict]:
+    """Parse Gemini's `(MM:SS.x --> MM:SS.x) text` format.
+
+    Returns a list of {start_ms, end_ms, text} dicts. Lines that don't match
+    the timing regex (prose, markdown fences, `# no vocals`, blank lines) are
+    silently skipped — chunked merge will simply treat those chunks as empty.
+    """
+    out = []
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = TIMED_LINE_RE.match(line)
+        if not m:
+            continue
+        s_min, s_sec, e_min, e_sec, text = m.groups()
+        start_ms = int((int(s_min) * 60 + float(s_sec)) * 1000)
+        end_ms = int((int(e_min) * 60 + float(e_sec)) * 1000)
+        out.append({"start_ms": start_ms, "end_ms": end_ms, "text": text.strip()})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video-id", required=True, help="YouTube video id")
@@ -261,6 +288,10 @@ def main():
         print(f"\n=== RAW GEMINI RESPONSE (chunk {c['idx']}) ===")
         print(out)
         print("=== END ===")
+        parsed = parse_timed_lines(out)
+        print(f"\n=== PARSED ({len(parsed)} lines) ===")
+        for p in parsed:
+            print(f"  {p['start_ms']/1000:>6.2f}..{p['end_ms']/1000:>6.2f}s  '{p['text']}'")
         return
 
     if args.dry_run:
