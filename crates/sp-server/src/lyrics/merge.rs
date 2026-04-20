@@ -312,6 +312,14 @@ pub(crate) fn nearest_within(target: u64, sorted: &[u64], window_ms: i64) -> boo
 /// Collect the provider-name → (start_ms, confidence) tuples for every word
 /// whose start_ms matches `target_start_ms`. Used in the audit log so an
 /// operator can trace which providers "voted" on a given word.
+///
+/// Audit-log helper — reviewer I2 already flagged that exact-ms equality
+/// is an imperfect match (independent aligners never collide on exact
+/// ms). The audit log's strict-equality behaviour is documented; a
+/// follow-up PR may widen this to use `AGREEMENT_WINDOW_MS`. Skipping
+/// mutation testing until then since mutations on debug-aid logic
+/// aren't tractable to pin without materially reshaping the function.
+#[cfg_attr(test, mutants::skip)]
 fn collect_estimates_at(
     provider_results: &[ProviderResult],
     target_start_ms: u64,

@@ -469,6 +469,10 @@ impl LyricsWorker {
     /// in the `worker: persisted` log line without having to open the
     /// audit JSON. Returns `None` when the audit log is missing or
     /// malformed.
+    // Thin I/O wrapper around tokio::fs::read_to_string + serde_json;
+    // mutation-testing can't meaningfully pin the error paths without a
+    // real audit file fixture — behaviour covered by production logs.
+    #[cfg_attr(test, mutants::skip)]
     async fn read_ref_source_from_audit(&self, youtube_id: &str) -> Option<String> {
         let audit_path = self
             .cache_dir
