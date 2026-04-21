@@ -90,7 +90,18 @@ use sp_core::lyrics::LyricsTrack;
 ///   to end up with `source="ensemble:autosub"` instead of
 ///   `ensemble:gemini` and ~95 with `no_source`. v12 re-queues the
 ///   entire catalog for a clean Gemini pass.
-pub const LYRICS_PIPELINE_VERSION: u32 = 12;
+/// - v13: Gemini alignment calls move from the direct API endpoint
+///   (billed against `gemini_api_key`) to the local CLIProxyAPI
+///   (`http://127.0.0.1:18787`), which is backed by an AI-Pro OAuth
+///   login. Quota is no longer the €10 API cap — it is the paid
+///   subscription tier via OAuth, which sustained the full-catalog
+///   reprocess in practice. Output format is byte-identical to v12;
+///   the stale bucket in `reprocess.rs::fetch_bucket_stale` adds
+///   `NOT (lyrics_source LIKE '%gemini%' AND lyrics_pipeline_version
+///   >= 12)` so songs whose v12 Gemini result was already good stay
+///   untouched. Only autosub-fallback and no_source failures from v12
+///   are retried under v13.
+pub const LYRICS_PIPELINE_VERSION: u32 = 13;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -221,10 +232,11 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v12() {
+    fn lyrics_pipeline_version_is_v13() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 12,
-            "v12 = Gemini 429 retry + inter-chunk pacing (fixes v11's silent quota drops)"
+            LYRICS_PIPELINE_VERSION, 13,
+            "v13 = Gemini alignment via CLIProxy OAuth (paid AI-Pro) instead of direct API + \
+             smart stale skip so successful v12 Gemini songs are not reprocessed"
         );
     }
 

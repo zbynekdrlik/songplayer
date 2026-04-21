@@ -209,6 +209,16 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   (Google's bulk-reprocess quota), causing ~18 songs to end up with
   `source="ensemble:autosub"` instead of `ensemble:gemini` and ~95 with
   `no_source`. v12 re-queues the entire catalog for a clean Gemini pass.
+- v13 (#TBD): Gemini alignment routes through the local CLIProxyAPI
+  (`http://127.0.0.1:18787`) instead of the direct Gemini API. CLIProxy
+  carries an AI-Pro OAuth login so quota is the paid subscription tier
+  instead of the €10 API cap that capped v12 mid-catalog. Output format
+  is byte-identical to v12, so the stale bucket in
+  `reprocess.rs::fetch_bucket_stale` skips any row where
+  `lyrics_source LIKE '%gemini%' AND lyrics_pipeline_version >= 12` —
+  songs Gemini already produced correctly under v12 stay untouched, only
+  autosub-fallback and `no_source` failures from v12 are retried under
+  v13. Override: `GEMINI_PROXY_URL` env var.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

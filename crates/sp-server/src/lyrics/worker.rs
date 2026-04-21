@@ -573,8 +573,10 @@ impl LyricsWorker {
 
         // Build provider list.
         // - AutoSubProvider: always registered (cheap text candidate + autosub timing anchors).
-        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED AND a gemini_api_key is
-        //   configured. Produces line-level timings from Gemini 3.1 Pro audio transcription.
+        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED. v13 routes every call
+        //   through the local CLIProxyAPI (OAuth-backed) instead of the direct Gemini
+        //   API, so no `gemini_api_key` is required anymore — the proxy auth is
+        //   transparent.
         // - Qwen3Provider: registered only when LYRICS_QWEN3_ENABLED AND Python venv +
         //   clean vocal are available. Parked off; revived when word-level work resumes.
         use crate::lyrics::{
@@ -583,7 +585,7 @@ impl LyricsWorker {
         };
         let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
         providers.push(Box::new(AutoSubProvider));
-        if LYRICS_GEMINI_ENABLED && !self.gemini_api_key.is_empty() {
+        if LYRICS_GEMINI_ENABLED {
             let ffmpeg_name = if cfg!(windows) {
                 "ffmpeg.exe"
             } else {
@@ -592,8 +594,10 @@ impl LyricsWorker {
             let ffmpeg_path = self.tools_dir.join(ffmpeg_name);
             let model = std::env::var("GEMINI_LYRICS_MODEL")
                 .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
+            let proxy_url = std::env::var("GEMINI_PROXY_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:18787".to_string());
             providers.push(Box::new(GeminiProvider {
-                client: GeminiClient::direct(self.gemini_api_key.clone(), model),
+                client: GeminiClient::proxy(proxy_url, model),
                 ffmpeg_path,
                 cache_dir: self.cache_dir.clone(),
             }));
