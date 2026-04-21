@@ -229,13 +229,29 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   the next key on HTTP 429 — starts at a sticky index so subsequent
   chunks skip already-exhausted keys. Moves EN→SK translation from
   Gemini to Claude (CLIProxyAPI) with a short neutral prompt
-  (`translator.rs::build_prompt`). The verbose "karaoke subtitles for a
-  church" framing from v5 tripped Claude's content-policy layer; the
-  user verified a minimal prompt ("translate these lines to Slovak,
-  keep numbering") works reliably. Gemini quota is now reserved
-  entirely for alignment. Gemini-successful rows from v12/v13 are still
-  protected by the `%gemini% AND version >= 12` smart-skip clause; only
-  autosub-fallback and `no_source` failures are retried.
+  (`translator.rs::build_prompt`).
+- v15 (#TBD): **Critical data-loss fix for Gemini output.**
+  `merge.rs::sanitize_track` had a `continue` branch that silently
+  dropped every `LineTiming` with `words: []`, and `GeminiProvider`
+  produces wordless lines (line-level only — word-level is deferred).
+  Every v11-v14 Gemini-only song shipped with `lines: []` despite
+  being marked `has_lyrics=1` in the DB. 17 of 31 Gemini rows on
+  win-resolume were empty JSONs at deploy time; the other 14 only had
+  content because autosub contributed words via the multi-provider
+  merge path. v15 emits wordless lines with their line-level timing
+  (floor-clamped for the strict-increasing invariant). The smart-skip
+  clause in `reprocess.rs::fetch_bucket_stale` is tightened from
+  `version >= 12` to `version >= 15` so every pre-v15 Gemini row is
+  retried regardless of line count. Regression tests assert wordless
+  lines now pass through (`sanitize_track_emits_wordless_lines_with_
+  line_level_timing`, `sanitize_track_all_wordless_lines_all_emitted`,
+  `sanitize_track_wordless_line_clamps_start_to_floor`). Root cause:
+  sanitize_track was written for qwen3 (word-level) and its wordless-
+  skip guard was never updated when Gemini (line-level) was added in
+  v11. Verification gap: no integration test compared the final
+  `_lyrics.json` on disk against Python-prototype output for the same
+  song — a single file diff would have caught the empty-lines bug in
+  v11.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

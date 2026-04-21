@@ -231,13 +231,25 @@ pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
     let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
     let mut floor_start_ms: u64 = 0;
     for line in lines {
-        // Skip wordless provider lines entirely. Falling back to the raw
-        // `line.start_ms`/`end_ms` here would bypass `floor_start_ms` and
-        // regress the cross-line strict-increasing invariant v10 enforces
-        // (`compute_duplicate_start_pct` sorts globally — same-ms word
-        // starts across lines count as duplicates). A renderer can't do
-        // anything useful with a words-less karaoke line anyway.
         if line.words.is_empty() {
+            // Line-level-only provider (e.g., Gemini). Emit a wordless
+            // LyricsLine using the provider's line timing. Clamp start to
+            // `floor_start_ms` so the cross-line strict-increasing invariant
+            // holds — pre-v15 this branch was a `continue` that silently
+            // discarded every Gemini line; the earlier comment claimed "a
+            // renderer can't do anything useful with a wordless line" which
+            // is false (the renderer consumes line-level timing for line
+            // karaoke; word-level highlighting is optional).
+            let line_start = line.start_ms.max(floor_start_ms);
+            let line_end = line.end_ms.max(line_start.saturating_add(80));
+            floor_start_ms = line_end;
+            out.push(LyricsLine {
+                start_ms: line_start,
+                end_ms: line_end,
+                en: line.text.clone(),
+                sk: None,
+                words: None,
+            });
             continue;
         }
         let raw: Vec<(String, u64, u64)> = line

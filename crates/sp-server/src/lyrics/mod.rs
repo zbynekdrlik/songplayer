@@ -115,11 +115,27 @@ use sp_core::lyrics::LyricsTrack;
 ///   translation from Gemini to Claude via CLIProxyAPI using a
 ///   short neutral prompt (no "lyrics"/"song"/"karaoke"/"church"
 ///   wording — those tripped Claude's policy layer in v5). Gemini
-///   quota is now reserved entirely for alignment. Output format is
-///   still byte-identical to v12/v13 for Gemini-successful rows, so
-///   the same `%gemini% AND version >= 12` smart-skip clause keeps
-///   them protected from reprocessing.
-pub const LYRICS_PIPELINE_VERSION: u32 = 14;
+///   quota is reserved entirely for alignment.
+/// - v15: **Critical data-loss fix.** Every v11-v14 Gemini-only song
+///   shipped with `lines: []` in the persisted `_lyrics.json` file.
+///   `merge.rs::sanitize_track` had a `continue` branch that silently
+///   dropped every `LineTiming` whose `words` vector was empty — and
+///   `GeminiProvider` produces wordless lines (line-level timings
+///   only, word-level is deferred). 17 of 31 v11-v14 Gemini rows on
+///   win-resolume were empty as a result; the remaining 14 only had
+///   non-empty output because the multi-provider merge path
+///   contributed words from autosub. v15 changes the wordless
+///   branch to emit `LyricsLine { start_ms, end_ms, en, words: None }`
+///   with floor-clamped start for the cross-line strict-increasing
+///   invariant. The smart-skip clause in
+///   `reprocess.rs::fetch_bucket_stale` is tightened to require
+///   `version >= 15`, so every pre-v15 Gemini row is retried
+///   regardless of apparent line count (can't be trusted without
+///   re-reading the JSON). Regression tests:
+///   `sanitize_track_emits_wordless_lines_with_line_level_timing`,
+///   `sanitize_track_all_wordless_lines_all_emitted`,
+///   `sanitize_track_wordless_line_clamps_start_to_floor`.
+pub const LYRICS_PIPELINE_VERSION: u32 = 15;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -250,11 +266,11 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v14() {
+    fn lyrics_pipeline_version_is_v15() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 14,
-            "v14 = direct API + multi-key rotation for Gemini alignment + Claude (neutral \
-             prompt) for EN→SK translation; Gemini quota reserved for alignment"
+            LYRICS_PIPELINE_VERSION, 15,
+            "v15 = critical fix: sanitize_track no longer drops wordless lines; every \
+             pre-v15 Gemini row must be retried (they shipped with lines=[] silently)"
         );
     }
 

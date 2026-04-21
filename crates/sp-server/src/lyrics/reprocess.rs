@@ -90,12 +90,16 @@ async fn fetch_bucket_stale(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // v13 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 12)`.
-    // v13 changed only the Gemini transport layer (direct API → CLIProxy OAuth);
-    // output for any song that Gemini already succeeded on under v12 is byte-
-    // identical. Reprocessing those rows would burn subscription quota for no
-    // benefit. Rows that failed over to autosub or produced `no_source` at v12
-    // still ride the normal stale path (they do not match the skip clause).
+    // v15 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 15)`.
+    // v11-v14 Gemini output cannot be trusted — `merge.rs::sanitize_track`
+    // dropped every wordless `LineTiming`, which meant every Gemini-only
+    // song shipped `lines: []` despite the DB row being marked `has_lyrics=1`.
+    // 17 of 31 v11-v14 Gemini rows on production were empty. v15 fixes
+    // the sanitizer (wordless lines now emit line-level timing) and
+    // protects ONLY v15+ Gemini output; every pre-v15 Gemini row is
+    // reprocessed, even the 14 that appeared to have non-empty lines
+    // (those got words via the multi-provider merge path — still worth
+    // regenerating under v15 for consistency).
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -104,7 +108,7 @@ async fn fetch_bucket_stale(
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 \
-               AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 12) \
+               AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 15) \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, v.id ASC LIMIT 1",
     )
@@ -397,55 +401,50 @@ mod tests {
 
     #[tokio::test]
     async fn stale_bucket_skips_songs_already_produced_by_gemini() {
-        // v13 introduced transport-only change (direct API → CLIProxy OAuth) —
-        // output is identical for any song that Gemini already succeeded on.
-        // To avoid wasting quota, the stale bucket must skip rows where
-        // lyrics_source contains 'gemini' AND the song was produced under v12+
-        // (when the Gemini provider existed). Rows produced by autosub fallback
-        // or any pre-v12 output must still be retried.
+        // v15 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 15)`.
+        // v11-v14 Gemini output can't be trusted (pre-v15 `sanitize_track`
+        // dropped every wordless line), so every pre-v15 Gemini row must be
+        // retried. Only v15+ Gemini rows are protected.
         let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
              lyrics_source, lyrics_pipeline_version, lyrics_quality_score) VALUES \
-                 (1, 1, 'gemini_ok',    1, 1, 'ensemble:gemini',         12, 0.9), \
-                 (2, 1, 'gemini_multi', 1, 1, 'ensemble:autosub+gemini', 12, 0.8), \
-                 (3, 1, 'autosub_only', 1, 1, 'ensemble:autosub',        12, 0.4), \
-                 (4, 1, 'old_gemini',   1, 1, 'ensemble:gemini',         10, 0.2)",
+                 (1, 1, 'gemini_v15',   1, 1, 'ensemble:gemini',         15, 0.9), \
+                 (2, 1, 'gemini_multi', 1, 1, 'ensemble:autosub+gemini', 15, 0.8), \
+                 (3, 1, 'autosub_only', 1, 1, 'ensemble:autosub',        15, 0.4), \
+                 (4, 1, 'old_gemini',   1, 1, 'ensemble:gemini',         14, 0.2)",
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        // Running under v13 — gemini_ok and gemini_multi must be skipped
-        // (already correct); autosub_only and old_gemini must be picked.
-        let row1 = fetch_bucket_stale(&pool, 13).await.unwrap().unwrap();
+        // Running under v16 — only v15+ Gemini rows are protected; every
+        // pre-v15 Gemini row plus any non-Gemini row must come back.
+        let row1 = fetch_bucket_stale(&pool, 16).await.unwrap().unwrap();
         assert!(
             row1.youtube_id == "old_gemini" || row1.youtube_id == "autosub_only",
             "must pick a retry-eligible row, got {}",
             row1.youtube_id
         );
-        // Mark the first pick done, pick again.
-        sqlx::query("UPDATE videos SET lyrics_pipeline_version = 13 WHERE youtube_id = ?")
+        sqlx::query("UPDATE videos SET lyrics_pipeline_version = 16 WHERE youtube_id = ?")
             .bind(&row1.youtube_id)
             .execute(&pool)
             .await
             .unwrap();
-        let row2 = fetch_bucket_stale(&pool, 13).await.unwrap().unwrap();
+        let row2 = fetch_bucket_stale(&pool, 16).await.unwrap().unwrap();
         assert!(
             row2.youtube_id == "old_gemini" || row2.youtube_id == "autosub_only",
             "must pick the other retry-eligible row, got {}",
             row2.youtube_id
         );
-        // Mark it done too — now stale bucket must be empty because
-        // gemini_ok and gemini_multi are protected by the skip clause.
-        sqlx::query("UPDATE videos SET lyrics_pipeline_version = 13 WHERE youtube_id = ?")
+        sqlx::query("UPDATE videos SET lyrics_pipeline_version = 16 WHERE youtube_id = ?")
             .bind(&row2.youtube_id)
             .execute(&pool)
             .await
             .unwrap();
         assert!(
-            fetch_bucket_stale(&pool, 13).await.unwrap().is_none(),
-            "Gemini-successful v12 rows must not appear in stale bucket under v13"
+            fetch_bucket_stale(&pool, 16).await.unwrap().is_none(),
+            "v15+ Gemini-successful rows must not appear in stale bucket"
         );
     }
 
