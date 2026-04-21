@@ -481,8 +481,7 @@ impl LyricsWorker {
     #[cfg_attr(test, mutants::skip)]
     async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
         use crate::lyrics::{
-            LYRICS_PIPELINE_VERSION, autosub_provider::AutoSubProvider, orchestrator::Orchestrator,
-            qwen3_provider::Qwen3Provider,
+            LYRICS_PIPELINE_VERSION, orchestrator::Orchestrator, qwen3_provider::Qwen3Provider,
         };
 
         let video_id = row.id;
@@ -565,19 +564,25 @@ impl LyricsWorker {
         ctx.clean_vocal_path = clean_vocal;
 
         // Build provider list.
-        // - AutoSubProvider: always registered (cheap text candidate + autosub timing anchors).
-        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED. v13 routes every call
-        //   through the local CLIProxyAPI (OAuth-backed) instead of the direct Gemini
-        //   API, so no `gemini_api_key` is required anymore — the proxy auth is
-        //   transparent.
+        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED AND at least one
+        //   direct-API key is configured in `gemini_api_key` (comma-separated list).
+        //   v14 transcribe_rotating cycles keys on HTTP 429.
         // - Qwen3Provider: registered only when LYRICS_QWEN3_ENABLED AND Python venv +
         //   clean vocal are available. Parked off; revived when word-level work resumes.
+        // - AutoSubProvider: NOT registered as an alignment source (v16). Autosub's
+        //   timing on sung music is unreliable and contaminated ensemble outputs
+        //   in v11-v15; per user direction it is banned from alignment.
         use crate::lyrics::{
             LYRICS_GEMINI_ENABLED, LYRICS_QWEN3_ENABLED, gemini_client::GeminiClient,
             gemini_provider::GeminiProvider,
         };
         let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
-        providers.push(Box::new(AutoSubProvider));
+        // v16: AutoSubProvider is NOT registered as an alignment provider.
+        // YouTube auto-captions have unreliable timing on sung music and
+        // contaminate `ensemble:*` source tags. Autosub stays available for
+        // text-candidate gathering in `gather_sources` (where it feeds the
+        // description/text pool), but NEVER as an alignment source. See the
+        // `feedback_no_autosub` memory for the user's explicit direction.
         if LYRICS_GEMINI_ENABLED {
             let ffmpeg_name = if cfg!(windows) {
                 "ffmpeg.exe"

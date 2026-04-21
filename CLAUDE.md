@@ -232,26 +232,22 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   (`translator.rs::build_prompt`).
 - v15 (#TBD): **Critical data-loss fix for Gemini output.**
   `merge.rs::sanitize_track` had a `continue` branch that silently
-  dropped every `LineTiming` with `words: []`, and `GeminiProvider`
-  produces wordless lines (line-level only — word-level is deferred).
-  Every v11-v14 Gemini-only song shipped with `lines: []` despite
-  being marked `has_lyrics=1` in the DB. 17 of 31 Gemini rows on
-  win-resolume were empty JSONs at deploy time; the other 14 only had
-  content because autosub contributed words via the multi-provider
-  merge path. v15 emits wordless lines with their line-level timing
-  (floor-clamped for the strict-increasing invariant). The smart-skip
-  clause in `reprocess.rs::fetch_bucket_stale` is tightened from
-  `version >= 12` to `version >= 15` so every pre-v15 Gemini row is
-  retried regardless of line count. Regression tests assert wordless
-  lines now pass through (`sanitize_track_emits_wordless_lines_with_
-  line_level_timing`, `sanitize_track_all_wordless_lines_all_emitted`,
-  `sanitize_track_wordless_line_clamps_start_to_floor`). Root cause:
-  sanitize_track was written for qwen3 (word-level) and its wordless-
-  skip guard was never updated when Gemini (line-level) was added in
-  v11. Verification gap: no integration test compared the final
-  `_lyrics.json` on disk against Python-prototype output for the same
-  song — a single file diff would have caught the empty-lines bug in
-  v11.
+  dropped every `LineTiming` with `words: []`. Every v11-v14
+  Gemini-only song shipped with `lines: []`. v15 emits wordless
+  lines with their line-level timing (floor-clamped for the
+  strict-increasing invariant). Superseded by v16 for production
+  (v15 still allowed AutoSubProvider in ensemble).
+- v16 (#TBD): `AutoSubProvider` unregistered from alignment. YouTube
+  autosub has unreliable timing on sung music; with autosub in the
+  ensemble every Gemini-era row picked up either `ensemble:autosub`
+  (Gemini missing/429) or `ensemble:autosub+gemini` (Gemini present
+  but output diluted by autosub word timings). Per explicit user
+  direction autosub is banned from alignment. Gemini is now the
+  sole alignment provider — if its keys are exhausted or missing,
+  the song returns `no_source` rather than autosub-fallback.
+  Smart-skip clause tightened from `version >= 15` to
+  `version >= 16` so every pre-v16 Gemini row is retried (v15 rows
+  may still carry autosub contamination).
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

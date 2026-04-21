@@ -127,15 +127,24 @@ use sp_core::lyrics::LyricsTrack;
 ///   contributed words from autosub. v15 changes the wordless
 ///   branch to emit `LyricsLine { start_ms, end_ms, en, words: None }`
 ///   with floor-clamped start for the cross-line strict-increasing
-///   invariant. The smart-skip clause in
-///   `reprocess.rs::fetch_bucket_stale` is tightened to require
-///   `version >= 15`, so every pre-v15 Gemini row is retried
-///   regardless of apparent line count (can't be trusted without
-///   re-reading the JSON). Regression tests:
-///   `sanitize_track_emits_wordless_lines_with_line_level_timing`,
-///   `sanitize_track_all_wordless_lines_all_emitted`,
-///   `sanitize_track_wordless_line_clamps_start_to_floor`.
-pub const LYRICS_PIPELINE_VERSION: u32 = 15;
+///   invariant.
+/// - v16: Unregister `AutoSubProvider` from the worker's alignment
+///   provider list. YouTube autosub has unreliable timing on sung
+///   music and its presence in the ensemble merge path contaminated
+///   every pre-v16 output with `ensemble:autosub+*` source tags. Per
+///   explicit user direction (see memory
+///   `feedback_no_autosub.md`), autosub is permanently banned from
+///   alignment. Gemini is now the sole alignment provider — if its
+///   keys are exhausted or missing, the song returns `no_source`
+///   rather than falling back to autosub. AutoSubProvider remains
+///   defined in `autosub_provider.rs` for tests; `autosub_json3`
+///   is still fetched in `gather_sources` (harmless — no longer
+///   consumed by any registered provider, cleanup deferred).
+///   Smart-skip clause in `reprocess.rs::fetch_bucket_stale` moves
+///   from `version >= 15` to `version >= 16` so every pre-v16
+///   Gemini row is retried (v15 rows may contain autosub timings
+///   from the multi-provider merge path).
+pub const LYRICS_PIPELINE_VERSION: u32 = 16;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -266,11 +275,11 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v15() {
+    fn lyrics_pipeline_version_is_v16() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 15,
-            "v15 = critical fix: sanitize_track no longer drops wordless lines; every \
-             pre-v15 Gemini row must be retried (they shipped with lines=[] silently)"
+            LYRICS_PIPELINE_VERSION, 16,
+            "v16 = AutoSubProvider unregistered from alignment; Gemini sole provider; \
+             pre-v16 Gemini rows must be retried (they may contain autosub contamination)"
         );
     }
 
