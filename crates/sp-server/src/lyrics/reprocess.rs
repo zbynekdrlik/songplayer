@@ -67,6 +67,11 @@ async fn fetch_bucket_null(
     // Exception: if a row's recorded failure is from an OLDER pipeline version,
     // allow it through — the worker may have new capability (e.g., a new
     // provider added in the version bump) that succeeds where prior runs failed.
+    //
+    // ORDER BY RANDOM(): prior `v.id ASC` starved higher-id playlists (#47).
+    // Seeded-earlier playlists drained entirely before any newer playlist
+    // got a pickup. Uniform-random spreads coverage across playlists so a
+    // live event has lyrics for all scenes, not just the oldest one.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -78,7 +83,7 @@ async fn fetch_bucket_null(
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
-         ORDER BY v.id ASC LIMIT 1",
+         ORDER BY RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)
     .fetch_optional(pool)
@@ -113,7 +118,7 @@ async fn fetch_bucket_stale(
                AND v.lyrics_manual_priority = 0 \
                AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 18) \
                AND p.is_active = 1 AND v.normalized = 1 \
-         ORDER BY v.lyrics_quality_score ASC NULLS FIRST, v.id ASC LIMIT 1",
+         ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)
     .fetch_optional(pool)
@@ -444,23 +449,109 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_bucket_tiebreaks_by_id_when_quality_equal() {
+    async fn stale_bucket_spreads_ties_across_playlists_not_locked_to_low_id() {
+        // Regression for #47: prior `v.id ASC` tiebreaker always picked the
+        // lowest-id row on quality ties, which drained ytslow entirely before
+        // any other playlist saw a pickup. RANDOM() tiebreak spreads picks
+        // uniformly when quality is equal.
         let pool = setup().await;
-        // Both rows have identical quality score; lower id must win.
+        // 20 rows all tied on quality_score=0.5. Half in pl1 with low ids,
+        // half in pl1 with high ids (same playlist to isolate the tiebreaker
+        // from the playlist filter — all that matters is id ordering).
+        let mut stmt = String::from(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_quality_score) VALUES ",
+        );
+        for i in 0..10 {
+            stmt.push_str(&format!("({}, 1, 'low_{}', 1, 1, 1, 0.5),", i + 1, i));
+        }
+        for i in 0..10 {
+            stmt.push_str(&format!("({}, 1, 'hi_{}',  1, 1, 1, 0.5)", i + 100, i));
+            if i < 9 {
+                stmt.push(',');
+            }
+        }
+        sqlx::query(&stmt).execute(&pool).await.unwrap();
+
+        let mut hi_picks = 0;
+        for _ in 0..100 {
+            let row = fetch_bucket_stale(&pool, 2).await.unwrap().unwrap();
+            if row.youtube_id.starts_with("hi_") {
+                hi_picks += 1;
+            }
+        }
+        assert!(
+            hi_picks > 10,
+            "high-id rows must not be starved on quality ties; got {hi_picks}/100 (expected ~50)"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_bucket_quality_primary_sort_still_holds() {
+        // Quality ordering must remain the PRIMARY sort; random tiebreak
+        // only kicks in when quality is equal. A lower-quality row at a
+        // high id must still beat a higher-quality row at a low id.
+        let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
-             lyrics_pipeline_version, lyrics_quality_score) \
-             VALUES \
-                 (10, 1, 'same_q_hi_id', 1, 1, 1, 0.5), \
-                 (5,  1, 'same_q_lo_id', 1, 1, 1, 0.5)",
+             lyrics_pipeline_version, lyrics_quality_score) VALUES \
+                 (1,   1, 'high_q_low_id', 1, 1, 1, 0.9), \
+                 (100, 1, 'low_q_high_id', 1, 1, 1, 0.1)",
         )
         .execute(&pool)
         .await
         .unwrap();
-        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
-        assert_eq!(
-            row.youtube_id, "same_q_lo_id",
-            "when quality scores tie, lower v.id must win"
+        for _ in 0..20 {
+            let row = fetch_bucket_stale(&pool, 2).await.unwrap().unwrap();
+            assert_eq!(
+                row.youtube_id, "low_q_high_id",
+                "worst quality must win regardless of id"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn null_bucket_does_not_starve_higher_id_playlists() {
+        // Regression for #47: `v.id ASC` on fetch_bucket_null meant the
+        // playlist with the lowest-id videos (ytslow in production) got
+        // picked exclusively until drained, starving ytfast / ytpresence
+        // entirely during live events. RANDOM() spreads coverage so every
+        // active playlist sees pickups in parallel.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (10, 'low_ids_pl', 'u', 'n', 1), (20, 'high_ids_pl', 'u', 'n', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut stmt = String::from(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version) VALUES ",
+        );
+        // 50 low-id rows on playlist 10
+        for i in 0..50 {
+            stmt.push_str(&format!("({}, 10, 'low_{}', 1, 0, 0),", i + 1, i));
+        }
+        // 50 high-id rows on playlist 20
+        for i in 0..50 {
+            stmt.push_str(&format!("({}, 20, 'high_{}', 1, 0, 0)", i + 10000, i));
+            if i < 49 {
+                stmt.push(',');
+            }
+        }
+        sqlx::query(&stmt).execute(&pool).await.unwrap();
+
+        let mut high_picks = 0;
+        for _ in 0..100 {
+            let row = fetch_bucket_null(&pool, 2).await.unwrap().unwrap();
+            if row.youtube_id.starts_with("high_") {
+                high_picks += 1;
+            }
+        }
+        assert!(
+            high_picks > 10,
+            "higher-id playlist must not be starved; got {high_picks}/100 (expected ~50)"
         );
     }
 
