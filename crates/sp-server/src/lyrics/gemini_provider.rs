@@ -105,14 +105,35 @@ impl AlignmentProvider for GeminiProvider {
             }
             let prompt = build_prompt(&reference, plan.start_ms, plan.end_ms, ctx.duration_ms);
             debug!(chunk = plan.idx, "gemini: calling Gemini for chunk");
-            match transcribe_rotating(
-                &self.clients,
-                self.current_key_idx.as_ref(),
-                &prompt,
-                &chunk_wav,
-            )
-            .await
-            {
+            // v19: one retry per chunk on failure. A single transient 5-minute
+            // timeout (observed on Not Guilty chunk 2) was dropping the whole
+            // chunk → 40 s gap in the rendered lyrics mid-song. Retrying once
+            // usually succeeds because timeouts are not correlated. On a real
+            // 429 the rotation inside `transcribe_rotating` already moved past
+            // the exhausted key, so the retry starts from a fresh key.
+            let mut attempt = 0;
+            let outcome = loop {
+                attempt += 1;
+                match transcribe_rotating(
+                    &self.clients,
+                    self.current_key_idx.as_ref(),
+                    &prompt,
+                    &chunk_wav,
+                )
+                .await
+                {
+                    Ok(raw) => break Ok(raw),
+                    Err(e) if attempt < 2 => {
+                        warn!(
+                            chunk = plan.idx,
+                            attempt, "gemini: chunk failed, retrying once: {e}"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Err(e) => break Err(e),
+                }
+            };
+            match outcome {
                 Ok(raw) => {
                     let parsed = parse_timed_lines(&raw);
                     debug!(
@@ -128,7 +149,7 @@ impl AlignmentProvider for GeminiProvider {
                     });
                 }
                 Err(e) => {
-                    warn!("gemini: chunk {} call failed: {e}", plan.idx);
+                    warn!("gemini: chunk {} call failed after retry: {e}", plan.idx);
                     per_chunk.push(Vec::new());
                     raw_cache_entries.push(RawChunk {
                         start_ms: plan.start_ms,
