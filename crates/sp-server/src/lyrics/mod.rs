@@ -96,11 +96,11 @@ use sp_core::lyrics::LyricsTrack;
 ///   login. Quota is no longer the €10 API cap — it is the paid
 ///   subscription tier via OAuth, which sustained the full-catalog
 ///   reprocess in practice. Output format is byte-identical to v12;
-///   the stale bucket in `reprocess.rs::fetch_bucket_stale` adds
-///   `NOT (lyrics_source LIKE '%gemini%' AND lyrics_pipeline_version
-///   >= 12)` so songs whose v12 Gemini result was already good stay
-///   untouched. Only autosub-fallback and no_source failures from v12
-///   are retried under v13.
+///   the stale bucket in `reprocess.rs::fetch_bucket_stale` adds a
+///   skip clause for rows where the source matches `%gemini%` and the
+///   pipeline version is already at 12 or higher, so songs whose v12
+///   Gemini result was already good stay untouched. Only autosub-
+///   fallback and no_source failures from v12 are retried under v13.
 pub const LYRICS_PIPELINE_VERSION: u32 = 13;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
