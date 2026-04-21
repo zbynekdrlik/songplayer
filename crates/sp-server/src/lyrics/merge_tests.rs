@@ -200,20 +200,15 @@ fn sanitize_track_emits_wordless_lines_with_line_level_timing() {
     assert_eq!(out[1].en, "[instrumental]");
     assert_eq!(out[2].en, "line three");
 
-    // v18: wordless lines carry line-level timing with `words: None`.
-    // Per-word synthesis was removed — user direction is line-level focus;
-    // fake per-word timing (linear distribution) caused the karaoke
-    // highlighter to animate at wrong moments.
+    // v22: wordless line end_ms is Gemini's value verbatim (no clipping
+    // to next_start-50, no extending into gaps). Input end_ms=3500.
     assert_eq!(out[1].start_ms, 2500);
-    assert_eq!(out[1].end_ms, 3500, "gemini raw end < next_start-50");
-    assert!(
-        out[1].words.is_none(),
-        "wordless input must produce `words: None`; got {:?}",
-        out[1].words
+    assert_eq!(
+        out[1].end_ms, 3500,
+        "end_ms is Gemini's verbatim value; got {}",
+        out[1].end_ms
     );
-
-    let line1_last_end = out[0].words.as_ref().unwrap().last().unwrap().end_ms;
-    assert!(out[1].start_ms >= line1_last_end);
+    assert!(out[1].words.is_none());
 }
 
 #[test]
@@ -249,8 +244,10 @@ fn sanitize_track_all_wordless_lines_all_emitted() {
     );
     assert_eq!(out[0].en, "first line");
     assert_eq!(out[0].start_ms, 1000);
+    // v22: Gemini's end_ms values pass through verbatim (no clip, no extend).
     assert_eq!(out[0].end_ms, 3000);
-    // v18: wordless input → `words: None` (no per-word synthesis).
+    assert_eq!(out[1].end_ms, 5500);
+    assert_eq!(out[2].end_ms, 8000);
     assert!(out[0].words.is_none());
     assert!(out[1].words.is_none());
     assert!(out[2].words.is_none());
@@ -261,10 +258,12 @@ fn sanitize_track_all_wordless_lines_all_emitted() {
 }
 
 #[test]
-fn sanitize_track_clips_wordless_line_end_to_next_start_minus_50ms() {
-    // Ports the Python prototype's end_ms clip. Without this two adjacent
-    // lines can overlap visually on Resolume: Gemini raw end=4000 while
-    // next line starts at 3800 would leave 200 ms of visual overlap.
+fn sanitize_track_wordless_line_uses_gemini_end_verbatim_even_if_overlap() {
+    // v22: the sanitizer no longer clips end_ms against next_start. Per
+    // user direction, line should stay visible until it's sung (Gemini's
+    // end_ms) — gaps between lines are fine; overlap with the next line
+    // is also acceptable (rare in practice; common when two vocalists
+    // trade off). Trust Gemini's timing.
     let provider_lines = vec![
         LineTiming {
             text: "first".into(),
@@ -281,13 +280,9 @@ fn sanitize_track_clips_wordless_line_end_to_next_start_minus_50ms() {
     ];
     let out = sanitize_track(&provider_lines, 10_000);
     assert_eq!(out.len(), 2);
-    assert_eq!(
-        out[0].end_ms, 3750,
-        "end_ms must clip to next_start-50 (3800-50=3750); got {}",
-        out[0].end_ms
-    );
-    // And the second line's start must be at or after the clipped end.
-    assert!(out[1].start_ms >= out[0].end_ms);
+    assert_eq!(out[0].end_ms, 4000, "Gemini's end_ms verbatim");
+    assert_eq!(out[1].start_ms, 3800, "Gemini's start_ms verbatim");
+    assert_eq!(out[1].end_ms, 5000);
 }
 
 #[test]
@@ -306,31 +301,28 @@ fn sanitize_track_wordless_input_never_emits_synthetic_words() {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].en, "amazing grace how sweet");
     assert_eq!(out[0].start_ms, 10_000);
+    // v22: end_ms is Gemini's value verbatim (no extend).
     assert_eq!(out[0].end_ms, 14_000);
-    assert!(
-        out[0].words.is_none(),
-        "synthesis is forbidden per user direction; got {:?}",
-        out[0].words
-    );
+    assert!(out[0].words.is_none());
 }
 
 #[test]
-fn sanitize_track_last_wordless_line_clips_against_duration() {
-    // Last line has no "next" line, so the end clip uses full song duration.
+fn sanitize_track_last_wordless_line_caps_at_song_duration() {
+    // v22: end_ms passes through verbatim EXCEPT when it would extend past
+    // the song duration — that's a pure sanity cap (prevents invalid
+    // timestamps in the persisted JSON), not a gap-control heuristic.
     let provider_lines = vec![LineTiming {
         text: "final word".into(),
         start_ms: 100_000,
-        end_ms: 200_000, // would extend past song end
+        end_ms: 200_000, // way past song end
         words: vec![],
     }];
-    // Song duration 120s — last line must clip to 120_000 - 50 = 119_950.
     let out = sanitize_track(&provider_lines, 120_000);
-    assert!(
-        out[0].end_ms <= 120_000,
-        "last line end_ms must not exceed song duration (120000); got {}",
+    assert_eq!(
+        out[0].end_ms, 120_000,
+        "end must cap at song duration, not extend past it; got {}",
         out[0].end_ms
     );
-    assert_eq!(out[0].end_ms, 119_950);
 }
 
 #[test]

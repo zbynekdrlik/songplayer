@@ -231,7 +231,7 @@ pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
 pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<LyricsLine> {
     let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
     let mut floor_start_ms: u64 = 0;
-    for (i, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         if line.words.is_empty() {
             // Line-level-only provider (e.g., Gemini). v18 intentionally
             // emits `words: None` instead of synthesizing per-word timings
@@ -242,29 +242,26 @@ pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<Lyri
             // duration under linear interpolation. Better to show no
             // per-word highlight than a wrong one.
             //
-            // Still apply the Python prototype's line-level finalize:
-            //   1. Clamp start to `floor_start_ms` (cross-line monotonic).
-            //   2. End clip `end_ms = min(raw_end, next_start - 50)` so
-            //      consecutive lines don't overlap visually; falls back to
-            //      `duration_ms` for the last line so it doesn't extend
-            //      past song end.
-            //   3. If the resulting span is inverted or too short, floor
-            //      to 500 ms so the renderer always has something to show.
+            // Line-level finalize (per user direction):
+            //   1. Clamp start to `floor_start_ms` so lines never run
+            //      backwards in time (sanitizer invariant).
+            //   2. End = Gemini's end_ms verbatim. Gemini's rule 4 sets
+            //      end when singing stops; we trust that. Do NOT clip
+            //      based on next line's start, do NOT extend into gaps —
+            //      gaps between lines are fine; the line shows while it
+            //      is sung and hides when singing ends. The only safety
+            //      floor is a minimum 80 ms duration so the renderer has
+            //      something to display; anything shorter is a provider
+            //      bug we mask to avoid a zero-ms line.
+            //   3. Last line end is also verbatim unless it extends past
+            //      the song; in that case cap at `duration_ms` — not to
+            //      control gap, just to avoid invalid timestamps.
             let line_start = line.start_ms.max(floor_start_ms);
-            let next_start = lines
-                .get(i + 1)
-                .map(|n| n.start_ms.max(line_start))
-                .unwrap_or(duration_ms.max(line_start));
-            let tentative = line.end_ms.min(
-                next_start
-                    .saturating_sub(50)
-                    .max(line_start.saturating_add(200)),
-            );
-            let line_end = if tentative > line_start {
-                tentative.max(line_start.saturating_add(80))
-            } else {
-                line_start.saturating_add(500)
-            };
+            let max_allowed_end = duration_ms.max(line_start.saturating_add(80));
+            let line_end = line
+                .end_ms
+                .max(line_start.saturating_add(80))
+                .min(max_allowed_end);
             floor_start_ms = line_end;
             out.push(LyricsLine {
                 start_ms: line_start,
