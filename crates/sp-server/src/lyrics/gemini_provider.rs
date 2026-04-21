@@ -59,7 +59,14 @@ impl AlignmentProvider for GeminiProvider {
             Vec::with_capacity(plans.len());
         let mut raw_cache_entries: Vec<RawChunk> = Vec::with_capacity(plans.len());
 
-        for plan in &plans {
+        for (chunk_idx, plan) in plans.iter().enumerate() {
+            // Pace between chunks: sleep 1 s before every chunk except the first.
+            // This keeps the steady-state Gemini request rate at ~60 RPM, fitting
+            // both free and paid quota tiers. (Retry backoff in GeminiClient may
+            // briefly exceed this during a retry sequence — that is expected.)
+            if chunk_idx > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            }
             let chunk_wav = tmp.path().join(format!("chunk_{:02}.wav", plan.idx));
             if let Err(e) = slice_chunk(
                 &self.ffmpeg_path,

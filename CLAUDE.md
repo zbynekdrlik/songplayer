@@ -203,6 +203,12 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   agreement. Word-level timings deferred; qwen3 parked behind
   `LYRICS_QWEN3_ENABLED=false`. Addresses the song-230 collapse from v10 where
   untimed reference text caused qwen3 to cram an 11-min song into 10 s.
+- v12 (#TBD): Gemini provider gains HTTP 429/500/503 retry with exponential
+  backoff (base 10 s, cap 60 s, max 4 attempts, honors Retry-After header)
+  plus 1 s inter-chunk pacing. v11 silently dropped chunks on first 429
+  (Google's bulk-reprocess quota), causing ~18 songs to end up with
+  `source="ensemble:autosub"` instead of `ensemble:gemini` and ~95 with
+  `no_source`. v12 re-queues the entire catalog for a clean Gemini pass.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

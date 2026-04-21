@@ -83,7 +83,14 @@ use sp_core::lyrics::LyricsTrack;
 ///   robust per-word timing on low-quality/noisy audio and better
 ///   handling of edge cases. Existing songs with v10 or earlier
 ///   output are re-queued for reprocessing under the new provider.
-pub const LYRICS_PIPELINE_VERSION: u32 = 11;
+/// - v12: Gemini provider gains HTTP 429/500/503 retry with exponential
+///   backoff (base 10 s, cap 60 s, max 4 attempts, honors Retry-After
+///   header) plus 1 s inter-chunk pacing. v11 silently dropped chunks
+///   on first 429 (Google's bulk-reprocess quota), causing ~18 songs
+///   to end up with `source="ensemble:autosub"` instead of
+///   `ensemble:gemini` and ~95 with `no_source`. v12 re-queues the
+///   entire catalog for a clean Gemini pass.
+pub const LYRICS_PIPELINE_VERSION: u32 = 12;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -214,10 +221,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v11() {
+    fn lyrics_pipeline_version_is_v12() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 11,
-            "v11 = Gemini chunked lyrics provider replaces qwen3 for line timing"
+            LYRICS_PIPELINE_VERSION, 12,
+            "v12 = Gemini 429 retry + inter-chunk pacing (fixes v11's silent quota drops)"
         );
     }
 
