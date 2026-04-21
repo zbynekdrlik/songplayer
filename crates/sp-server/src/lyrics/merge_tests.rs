@@ -281,7 +281,11 @@ fn sanitize_track_wordless_line_uses_gemini_end_verbatim_even_if_overlap() {
     let out = sanitize_track(&provider_lines, 10_000);
     assert_eq!(out.len(), 2);
     assert_eq!(out[0].end_ms, 4000, "Gemini's end_ms verbatim");
-    assert_eq!(out[1].start_ms, 3800, "Gemini's start_ms verbatim");
+    // Line 1's raw start=3800 is BEFORE line 0's end (4000). Cross-line
+    // monotonic invariant clamps start to floor (4000) — renderer never
+    // sees backwards-in-time starts, which a naive karaoke reader
+    // cannot sanely render. End stays at Gemini's 5000.
+    assert_eq!(out[1].start_ms, 4000, "start clamped to prev end (floor)");
     assert_eq!(out[1].end_ms, 5000);
 }
 

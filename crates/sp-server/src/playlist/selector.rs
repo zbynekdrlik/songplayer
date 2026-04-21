@@ -326,32 +326,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn custom_continuous_advances_through_items_then_stops() {
+    async fn custom_continuous_advances_then_wraps_to_start() {
         let (pool, custom_id) = setup_custom_playlist_with_items(&[10, 20, 30]).await;
 
-        // First call: no current video → return item at position 0 (10).
+        // First call: no current video → item at position 0 (10).
         let v1 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, None)
             .await
             .unwrap();
         assert_eq!(v1, Some(10));
 
-        // Second call: after playing 10 → advance to 20.
         let v2 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(10))
             .await
             .unwrap();
         assert_eq!(v2, Some(20));
 
-        // Third call: 20 → 30.
         let v3 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(20))
             .await
             .unwrap();
         assert_eq!(v3, Some(30));
 
-        // Past end — return None.
+        // v21: past last position → WRAP to position 0. Pre-v21 this
+        // returned None permanently and scene detection silently broke
+        // on ytlive when its current_position reached MAX(position).
         let v4 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(30))
             .await
             .unwrap();
-        assert_eq!(v4, None);
+        assert_eq!(v4, Some(10), "past-end must wrap to first item");
+
+        // And one more step to prove the wrap keeps rolling.
+        let v5 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(v5, Some(20));
     }
 
     #[tokio::test]
