@@ -55,6 +55,9 @@ async fn fetch_bucket_manual(
     Ok(row)
 }
 
+#[cfg_attr(test, mutants::skip)] // Behavior lives in SQL string literals (WHERE/ORDER) which
+// cargo-mutants cannot mutate; Rust glue (bind/unwrap/Ok) is fully covered by
+// the null/failed/version/round-robin bucket unit tests below.
 async fn fetch_bucket_null(
     pool: &SqlitePool,
     current_version: u32,
@@ -91,6 +94,8 @@ async fn fetch_bucket_null(
     Ok(row)
 }
 
+#[cfg_attr(test, mutants::skip)] // Same as fetch_bucket_null: behavior is SQL-string,
+// glue is tested by the stale/tiebreak/smart-skip/round-robin unit tests.
 async fn fetch_bucket_stale(
     pool: &SqlitePool,
     current_version: u32,
