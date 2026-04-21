@@ -360,6 +360,24 @@ impl LyricsWorker {
     #[cfg_attr(test, mutants::skip)]
     async fn process_next(&self) {
         use crate::lyrics::{LYRICS_PIPELINE_VERSION, reprocess::get_next_video_for_lyrics};
+
+        // Operational kill-switch. Read each tick so a live flip takes
+        // effect within the 5 s worker poll window — essential during
+        // events where Demucs/Gemini contention for CPU+GPU on the
+        // shared win-resolume PC has caused reboots. Default "true" so
+        // existing deploys and upgrades preserve current behavior.
+        let enabled = crate::db::models::get_setting(&self.pool, "lyrics_worker_enabled")
+            .await
+            .ok()
+            .flatten()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .map(|v| !(v == "false" || v == "0" || v == "off" || v == "no"))
+            .unwrap_or(true);
+        if !enabled {
+            debug!("worker: lyrics_worker_enabled=false, skipping this tick");
+            return;
+        }
+
         let row = match get_next_video_for_lyrics(&self.pool, LYRICS_PIPELINE_VERSION).await {
             Ok(Some(r)) => r,
             Ok(None) => {
