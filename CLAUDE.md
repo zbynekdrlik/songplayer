@@ -219,6 +219,23 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   songs Gemini already produced correctly under v12 stay untouched, only
   autosub-fallback and `no_source` failures from v12 are retried under
   v13. Override: `GEMINI_PROXY_URL` env var.
+- v14 (#TBD): Reverts alignment transport from CLIProxyAPI OAuth back to
+  the direct `generativelanguage.googleapis.com` API — the OAuth path
+  turned out globally capped by Google (`MODEL_CAPACITY_EXHAUSTED` on
+  `cloudcode-pa.googleapis.com` for 3.x Pro preview models; public issue
+  in google-gemini/gemini-cli #24004 and #24159). Adds multi-key Gemini
+  rotation: `gemini_api_key` is now a comma-separated list of direct-API
+  keys, and `transcribe_rotating` in `gemini_provider.rs` advances to
+  the next key on HTTP 429 — starts at a sticky index so subsequent
+  chunks skip already-exhausted keys. Moves EN→SK translation from
+  Gemini to Claude (CLIProxyAPI) with a short neutral prompt
+  (`translator.rs::build_prompt`). The verbose "karaoke subtitles for a
+  church" framing from v5 tripped Claude's content-policy layer; the
+  user verified a minimal prompt ("translate these lines to Slovak,
+  keep numbering") works reliably. Gemini quota is now reserved
+  entirely for alignment. Gemini-successful rows from v12/v13 are still
+  protected by the `%gemini% AND version >= 12` smart-skip clause; only
+  autosub-fallback and `no_source` failures are retried.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

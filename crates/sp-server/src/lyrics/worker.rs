@@ -4,7 +4,7 @@
 //!   1. gather_sources: YT manual subs + LRCLIB + autosub json3 in parallel.
 //!   2. Vocal isolation (Qwen3 provider; best-effort).
 //!   3. Orchestrator::process_song → LyricsTrack.
-//!   4. SK translation (Claude → Gemini fallback).
+//!   4. SK translation (Claude only; Gemini quota reserved for alignment).
 //!   5. Persist JSON + DB row with pipeline_version + quality_score.
 
 use anyhow::Result;
@@ -415,34 +415,27 @@ impl LyricsWorker {
         .await
     }
 
-    /// Extract SK translation logic. Claude first (framed as localization task), Gemini fallback.
-    // Orchestrates Claude-then-Gemini translator calls; each underlying translator has its own test surface.
+    /// EN→SK translation via Claude. No Gemini fallback — Gemini quota is
+    /// reserved for alignment (which dominates call volume). If Claude fails,
+    /// the track ships without translation; the UI degrades gracefully.
     #[cfg_attr(test, mutants::skip)]
     async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
-        let mut translated = false;
-        if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, track).await {
-                Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                        line.sk = if sk_text.is_empty() {
-                            None
-                        } else {
-                            Some(sk_text)
-                        };
-                    }
-                    track.language_translation = "sk".into();
-                    translated = true;
+        let Some(ai_client) = &self.ai_client else {
+            return;
+        };
+        match translator::translate_via_claude(ai_client, track).await {
+            Ok(translations) => {
+                for (line, sk_text) in track.lines.iter_mut().zip(translations) {
+                    line.sk = if sk_text.is_empty() {
+                        None
+                    } else {
+                        Some(sk_text)
+                    };
                 }
-                Err(e) => {
-                    warn!("worker: Claude translation failed for {youtube_id}: {e}");
-                }
+                track.language_translation = "sk".into();
             }
-        }
-        if !translated && !self.gemini_api_key.is_empty() {
-            if let Err(e) =
-                translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, track).await
-            {
-                warn!("worker: Gemini translation fallback failed for {youtube_id}: {e}");
+            Err(e) => {
+                warn!("worker: Claude translation failed for {youtube_id}: {e}");
             }
         }
     }
@@ -594,13 +587,42 @@ impl LyricsWorker {
             let ffmpeg_path = self.tools_dir.join(ffmpeg_name);
             let model = std::env::var("GEMINI_LYRICS_MODEL")
                 .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
-            let proxy_url = std::env::var("GEMINI_PROXY_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:18787".to_string());
-            providers.push(Box::new(GeminiProvider {
-                client: GeminiClient::proxy(proxy_url, model),
-                ffmpeg_path,
-                cache_dir: self.cache_dir.clone(),
-            }));
+            // v14: direct API with one client per key. The `gemini_api_key`
+            // DB setting is a comma-separated list of API keys; empty entries
+            // and whitespace are stripped. `max_attempts=1` per client so a
+            // 429 fails fast and the provider-level rotation in
+            // `transcribe_rotating` advances to the next key immediately.
+            let keys: Vec<String> = self
+                .gemini_api_key
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let clients: Vec<GeminiClient> = keys
+                .into_iter()
+                .map(|k| {
+                    let mut c = GeminiClient::direct(k, model.clone());
+                    c.max_attempts = 1;
+                    c
+                })
+                .collect();
+            if !clients.is_empty() {
+                tracing::info!(
+                    "gemini: registered {} API key(s) for alignment rotation",
+                    clients.len()
+                );
+                providers.push(Box::new(GeminiProvider {
+                    clients,
+                    current_key_idx: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                    ffmpeg_path,
+                    cache_dir: self.cache_dir.clone(),
+                }));
+            } else {
+                tracing::warn!(
+                    "gemini: LYRICS_GEMINI_ENABLED is true but gemini_api_key setting is empty \
+                     — Gemini provider not registered"
+                );
+            }
         }
         if LYRICS_QWEN3_ENABLED {
             if let Some(python) = python_for_qwen3 {
@@ -768,7 +790,7 @@ impl LyricsWorker {
 
     #[cfg_attr(test, mutants::skip)]
     async fn retry_missing_translations(&self) {
-        if self.ai_client.is_none() && self.gemini_api_key.is_empty() {
+        if self.ai_client.is_none() {
             return;
         }
         {
@@ -801,32 +823,23 @@ impl LyricsWorker {
         };
         info!("lyrics_worker: retrying translation for {youtube_id}");
 
-        // Claude first (framed as localization task), Gemini fallback
-        let result = if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, &track).await {
-                Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                        line.sk = if sk_text.is_empty() {
-                            None
-                        } else {
-                            Some(sk_text)
-                        };
-                    }
-                    track.language_translation = "sk".to_string();
-                    Ok(())
+        // Claude-only. Gemini quota is reserved for alignment.
+        let Some(ai_client) = &self.ai_client else {
+            return;
+        };
+        let result = match translator::translate_via_claude(ai_client, &track).await {
+            Ok(translations) => {
+                for (line, sk_text) in track.lines.iter_mut().zip(translations) {
+                    line.sk = if sk_text.is_empty() {
+                        None
+                    } else {
+                        Some(sk_text)
+                    };
                 }
-                Err(e) => {
-                    warn!("lyrics retry: Claude failed for {youtube_id}, trying Gemini: {e}");
-                    translator::translate_lyrics(
-                        &self.gemini_api_key,
-                        &self.gemini_model,
-                        &mut track,
-                    )
-                    .await
-                }
+                track.language_translation = "sk".to_string();
+                Ok(())
             }
-        } else {
-            translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track).await
+            Err(e) => Err(e),
         };
 
         match result {

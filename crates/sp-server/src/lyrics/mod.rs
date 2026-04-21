@@ -101,7 +101,25 @@ use sp_core::lyrics::LyricsTrack;
 ///   pipeline version is already at 12 or higher, so songs whose v12
 ///   Gemini result was already good stay untouched. Only autosub-
 ///   fallback and no_source failures from v12 are retried under v13.
-pub const LYRICS_PIPELINE_VERSION: u32 = 13;
+/// - v14: (a) Reverts alignment transport from CLIProxyAPI OAuth back
+///   to the direct `generativelanguage.googleapis.com` API. The OAuth
+///   path turned out to be capped globally on Google's side
+///   (`MODEL_CAPACITY_EXHAUSTED` on `cloudcode-pa.googleapis.com` for
+///   the 3.x Pro preview models, public issue discussed in
+///   google-gemini/gemini-cli #24004/#24159 and AI Developers Forum
+///   thread 137168). (b) Introduces multi-key Gemini rotation — the
+///   `gemini_api_key` DB setting is now a comma-separated list of
+///   direct-API keys; `transcribe_rotating` in `gemini_provider.rs`
+///   starts at a sticky index, moves to the next key on HTTP 429,
+///   and fails only when every key is exhausted. (c) Moves EN→SK
+///   translation from Gemini to Claude via CLIProxyAPI using a
+///   short neutral prompt (no "lyrics"/"song"/"karaoke"/"church"
+///   wording — those tripped Claude's policy layer in v5). Gemini
+///   quota is now reserved entirely for alignment. Output format is
+///   still byte-identical to v12/v13 for Gemini-successful rows, so
+///   the same `%gemini% AND version >= 12` smart-skip clause keeps
+///   them protected from reprocessing.
+pub const LYRICS_PIPELINE_VERSION: u32 = 14;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -232,11 +250,11 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v13() {
+    fn lyrics_pipeline_version_is_v14() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 13,
-            "v13 = Gemini alignment via CLIProxy OAuth (paid AI-Pro) instead of direct API + \
-             smart stale skip so successful v12 Gemini songs are not reprocessed"
+            LYRICS_PIPELINE_VERSION, 14,
+            "v14 = direct API + multi-key rotation for Gemini alignment + Claude (neutral \
+             prompt) for EN→SK translation; Gemini quota reserved for alignment"
         );
     }
 

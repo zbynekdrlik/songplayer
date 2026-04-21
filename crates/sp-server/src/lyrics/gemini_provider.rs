@@ -1,8 +1,16 @@
 //! Gemini-based AlignmentProvider. Slices the Demucs-dereverbed vocal WAV
-//! into 60s chunks with 10s overlap, calls Gemini 3.1 Pro per chunk via the
+//! into 60 s chunks with 10 s overlap, calls Gemini 3.x Pro per chunk via the
 //! `GeminiClient`, parses responses with `parse_timed_lines`, and merges per
 //! `merge_overlap`. Produces line-level timings only (word vectors empty for
 //! MVP — word-level work is deferred to a later PR).
+//!
+//! **v14 multi-key rotation:** `clients: Vec<GeminiClient>` holds one direct-API
+//! client per configured `gemini_api_key`. `transcribe_rotating` tries the
+//! last-successful key first; on HTTP 429 it advances to the next key and
+//! retries. On non-quota errors it fails immediately. An `AtomicUsize` tracks
+//! the last-successful key so subsequent chunks skip already-exhausted keys
+//! within the same song. Restart starts from key 0 again (one extra 429 burst
+//! on cold start — acceptable).
 
 use crate::lyrics::gemini_chunks::{merge_overlap, plan_chunks};
 use crate::lyrics::gemini_client::GeminiClient;
@@ -15,10 +23,20 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, warn};
 
 pub struct GeminiProvider {
-    pub client: GeminiClient,
+    /// One client per configured API key. Rotation picks the next available
+    /// key on HTTP 429. An empty list means "Gemini disabled"; the provider's
+    /// `can_provide` still returns true if a vocal is present, and `align`
+    /// fails explicitly so the orchestrator records the attempt as a miss
+    /// rather than silently no-oping.
+    pub clients: Vec<GeminiClient>,
+    /// Sticky index — points to the last-successful key so the next chunk
+    /// starts from that key instead of always re-trying key 0 first.
+    pub current_key_idx: Arc<AtomicUsize>,
     pub ffmpeg_path: PathBuf,
     pub cache_dir: PathBuf,
 }
@@ -39,31 +57,30 @@ impl AlignmentProvider for GeminiProvider {
     }
 
     // I/O-heavy orchestrator — per-chunk call+parse+merge pipeline. Individual
-    // pieces (prompt builder, parser, chunk planner, merger, HTTP client) are
-    // exhaustively unit-tested. The body here is glue + ffmpeg subprocess.
+    // pieces (prompt builder, parser, chunk planner, merger, HTTP client, key
+    // rotation) are exhaustively unit-tested. The body here is glue + ffmpeg
+    // subprocess.
     #[cfg_attr(test, mutants::skip)]
     async fn align(&self, ctx: &SongContext) -> Result<ProviderResult> {
         let vocal = ctx
             .clean_vocal_path
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("gemini: clean_vocal_path missing"))?;
+        if self.clients.is_empty() {
+            anyhow::bail!("gemini: no API keys configured");
+        }
         let reference = gather_reference_text(&ctx.candidate_texts);
         let plans = plan_chunks(ctx.duration_ms);
         if plans.is_empty() {
             anyhow::bail!("gemini: duration_ms is 0, nothing to transcribe");
         }
 
-        // Per-song tmp dir for chunk WAVs; cleaned on drop.
         let tmp = tempfile::tempdir().context("create chunk tmp dir")?;
         let mut per_chunk: Vec<Vec<crate::lyrics::gemini_parse::ParsedLine>> =
             Vec::with_capacity(plans.len());
         let mut raw_cache_entries: Vec<RawChunk> = Vec::with_capacity(plans.len());
 
         for (chunk_idx, plan) in plans.iter().enumerate() {
-            // Pace between chunks: sleep 1 s before every chunk except the first.
-            // This keeps the steady-state Gemini request rate at ~60 RPM, fitting
-            // both free and paid quota tiers. (Retry backoff in GeminiClient may
-            // briefly exceed this during a retry sequence — that is expected.)
             if chunk_idx > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             }
@@ -88,7 +105,14 @@ impl AlignmentProvider for GeminiProvider {
             }
             let prompt = build_prompt(&reference, plan.start_ms, plan.end_ms, ctx.duration_ms);
             debug!(chunk = plan.idx, "gemini: calling Gemini for chunk");
-            match self.client.transcribe_chunk(&prompt, &chunk_wav).await {
+            match transcribe_rotating(
+                &self.clients,
+                self.current_key_idx.as_ref(),
+                &prompt,
+                &chunk_wav,
+            )
+            .await
+            {
                 Ok(raw) => {
                     let parsed = parse_timed_lines(&raw);
                     debug!(
@@ -115,7 +139,6 @@ impl AlignmentProvider for GeminiProvider {
             }
         }
 
-        // Write raw cache (best-effort; don't fail align on cache write error).
         if let Err(e) = write_raw_cache(&self.cache_dir, &ctx.video_id, &raw_cache_entries).await {
             warn!("gemini: raw cache write failed: {e}");
         }
@@ -141,9 +164,63 @@ impl AlignmentProvider for GeminiProvider {
             metadata: serde_json::json!({
                 "base_confidence": self.base_confidence(),
                 "chunks": plans.len(),
+                "keys_configured": self.clients.len(),
             }),
         })
     }
+}
+
+/// Try to transcribe a chunk, rotating across `clients` on HTTP 429.
+///
+/// Starts at `start_idx` (wrapping). On 429 from a key, moves to the next
+/// key and retries. On success, updates `start_idx` to the successful key
+/// so the next call starts from there. On non-quota errors, bails
+/// immediately — server-side issues won't be fixed by trying another key.
+///
+/// Returns an error iff every key returned 429 (or the list is empty).
+pub async fn transcribe_rotating(
+    clients: &[GeminiClient],
+    start_idx: &AtomicUsize,
+    prompt: &str,
+    audio: &Path,
+) -> Result<String> {
+    if clients.is_empty() {
+        anyhow::bail!("transcribe_rotating: no clients");
+    }
+    let start = start_idx.load(Ordering::Relaxed) % clients.len();
+    let mut last_err: Option<anyhow::Error> = None;
+    for offset in 0..clients.len() {
+        let idx = (start + offset) % clients.len();
+        match clients[idx].transcribe_chunk(prompt, audio).await {
+            Ok(s) => {
+                start_idx.store(idx, Ordering::Relaxed);
+                return Ok(s);
+            }
+            Err(e) => {
+                // Only rotate on 429 (per-key quota). Every other error is
+                // server-side or programming — more keys won't help.
+                if is_quota_429(&e) {
+                    warn!(
+                        key_idx = idx,
+                        total = clients.len(),
+                        "gemini: key {} exhausted (429), rotating",
+                        idx
+                    );
+                    last_err = Some(e);
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("all {} gemini keys exhausted", clients.len())))
+}
+
+/// True if the error message contains a 429 signature (either the raw status
+/// line from `GeminiClient` or a RESOURCE_EXHAUSTED body).
+pub fn is_quota_429(e: &anyhow::Error) -> bool {
+    let s = format!("{e}");
+    s.contains("HTTP 429") || s.contains("RESOURCE_EXHAUSTED")
 }
 
 /// Pick the best reference text from candidate_texts. Prefers `source="description"`
@@ -208,8 +285,6 @@ struct RawChunk {
     raw: String,
 }
 
-// Disk I/O — mutation skip. Covered by manual test (file exists on disk after run)
-// and by the raw-chunk integration with the retry-from-cache path.
 #[cfg_attr(test, mutants::skip)]
 async fn write_raw_cache(cache_dir: &Path, video_id: &str, chunks: &[RawChunk]) -> Result<()> {
     let path = cache_dir.join(format!("{video_id}_gemini_chunks.json"));
@@ -256,5 +331,200 @@ mod tests {
     fn gather_reference_text_all_empty_returns_placeholder() {
         let cands = vec![ctext("description", vec![]), ctext("autosub", vec![])];
         assert!(gather_reference_text(&cands).contains("no reference"));
+    }
+
+    #[test]
+    fn is_quota_429_matches_common_shapes() {
+        assert!(is_quota_429(&anyhow::anyhow!("HTTP 429: quota exhausted")));
+        assert!(is_quota_429(&anyhow::anyhow!("status: RESOURCE_EXHAUSTED")));
+        assert!(!is_quota_429(&anyhow::anyhow!("HTTP 500 server error")));
+        assert!(!is_quota_429(&anyhow::anyhow!("connection refused")));
+    }
+
+    /// First key returns 429, second key returns 200 — rotation must try both
+    /// and return the second key's successful response.
+    #[tokio::test]
+    async fn rotation_advances_on_429_and_returns_next_key_success() {
+        use tempfile::NamedTempFile;
+        use wiremock::matchers::{header, method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Key "BAD" → 429
+        Mock::given(method("POST"))
+            .and(path_regex(r"/v1beta/models/.*:generateContent"))
+            .and(header("x-goog-api-key", "BAD"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
+                "error": {"code": 429, "status": "RESOURCE_EXHAUSTED"}
+            })))
+            .mount(&server)
+            .await;
+        // Key "GOOD" → 200 with a parseable response
+        Mock::given(method("POST"))
+            .and(path_regex(r"/v1beta/models/.*:generateContent"))
+            .and(header("x-goog-api-key", "GOOD"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{
+                    "content": {"parts": [{"text": "(00:00 --> 00:05) hello"}]}
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        // Two clients sharing the same mock URL, different keys. max_attempts=1
+        // so 429 fails fast and the provider-level rotation takes over.
+        let mk = |key: &str| GeminiClient {
+            base_url: server.uri(),
+            model: "gemini-3.1-pro-preview".to_string(),
+            api_key: Some(key.to_string()),
+            timeout_s: 10,
+            base_retry_ms: 1,
+            max_attempts: 1,
+        };
+        let clients = vec![mk("BAD"), mk("GOOD")];
+        let idx = AtomicUsize::new(0);
+
+        // Tiny WAV placeholder — GeminiClient only reads bytes + base64s.
+        let wav = NamedTempFile::new().unwrap();
+        std::fs::write(wav.path(), b"fake-wav").unwrap();
+
+        let result = transcribe_rotating(&clients, &idx, "hi", wav.path()).await;
+        assert!(result.is_ok(), "rotation must succeed, got {result:?}");
+        assert!(result.unwrap().contains("hello"));
+        // Sticky index now points to the successful key.
+        assert_eq!(idx.load(Ordering::Relaxed), 1);
+    }
+
+    /// All keys return 429 — rotation must try each once, then give up.
+    #[tokio::test]
+    async fn rotation_fails_when_every_key_429s() {
+        use tempfile::NamedTempFile;
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/v1beta/models/.*:generateContent"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
+                "error": {"code": 429, "status": "RESOURCE_EXHAUSTED"}
+            })))
+            .expect(3) // 3 keys, each tried exactly once
+            .mount(&server)
+            .await;
+
+        let mk = |key: &str| GeminiClient {
+            base_url: server.uri(),
+            model: "m".to_string(),
+            api_key: Some(key.to_string()),
+            timeout_s: 10,
+            base_retry_ms: 1,
+            max_attempts: 1,
+        };
+        let clients = vec![mk("K1"), mk("K2"), mk("K3")];
+        let idx = AtomicUsize::new(0);
+        let wav = NamedTempFile::new().unwrap();
+        std::fs::write(wav.path(), b"fake-wav").unwrap();
+
+        let result = transcribe_rotating(&clients, &idx, "hi", wav.path()).await;
+        assert!(result.is_err(), "all-429 must fail");
+    }
+
+    /// Non-429 error (e.g. 500) must NOT rotate — server-side issue, more
+    /// keys won't help. Fail fast on the first key's response.
+    #[tokio::test]
+    async fn rotation_does_not_advance_on_server_error() {
+        use tempfile::NamedTempFile;
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/v1beta/models/.*:generateContent"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1) // only the first key should be tried
+            .mount(&server)
+            .await;
+
+        let mk = |key: &str| GeminiClient {
+            base_url: server.uri(),
+            model: "m".to_string(),
+            api_key: Some(key.to_string()),
+            timeout_s: 10,
+            base_retry_ms: 1,
+            max_attempts: 1,
+        };
+        let clients = vec![mk("K1"), mk("K2")];
+        let idx = AtomicUsize::new(0);
+        let wav = NamedTempFile::new().unwrap();
+        std::fs::write(wav.path(), b"fake-wav").unwrap();
+
+        let result = transcribe_rotating(&clients, &idx, "hi", wav.path()).await;
+        assert!(result.is_err(), "500 must propagate");
+        assert!(
+            !is_quota_429(&result.unwrap_err()),
+            "error must not be tagged as quota"
+        );
+    }
+
+    /// After a successful call, the sticky index stays on the working key so
+    /// the next chunk starts there instead of re-hitting an exhausted key.
+    #[tokio::test]
+    async fn rotation_sticky_index_reuses_working_key() {
+        use tempfile::NamedTempFile;
+        use wiremock::matchers::{header, method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // K1 always 429
+        Mock::given(method("POST"))
+            .and(path_regex(r"/v1beta/models/.*:generateContent"))
+            .and(header("x-goog-api-key", "K1"))
+            .respond_with(ResponseTemplate::new(429))
+            .expect(1) // only hit on the first call; second call skips K1
+            .mount(&server)
+            .await;
+        // K2 always 200
+        Mock::given(method("POST"))
+            .and(path_regex(r"/v1beta/models/.*:generateContent"))
+            .and(header("x-goog-api-key", "K2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}]
+            })))
+            .expect(2) // hit on both calls
+            .mount(&server)
+            .await;
+
+        let mk = |key: &str| GeminiClient {
+            base_url: server.uri(),
+            model: "m".to_string(),
+            api_key: Some(key.to_string()),
+            timeout_s: 10,
+            base_retry_ms: 1,
+            max_attempts: 1,
+        };
+        let clients = vec![mk("K1"), mk("K2")];
+        let idx = AtomicUsize::new(0);
+        let wav = NamedTempFile::new().unwrap();
+        std::fs::write(wav.path(), b"fake-wav").unwrap();
+
+        // First chunk: 0→429 on K1, rotate → K2 → 200. idx sticks to 1.
+        let r1 = transcribe_rotating(&clients, &idx, "c1", wav.path()).await;
+        assert!(r1.is_ok());
+        assert_eq!(idx.load(Ordering::Relaxed), 1);
+
+        // Second chunk: starts at idx=1 → K2 → 200 directly. K1 not retried.
+        let r2 = transcribe_rotating(&clients, &idx, "c2", wav.path()).await;
+        assert!(r2.is_ok());
+        assert_eq!(idx.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn rotation_rejects_empty_client_list() {
+        use tempfile::NamedTempFile;
+        let idx = AtomicUsize::new(0);
+        let wav = NamedTempFile::new().unwrap();
+        let result = transcribe_rotating(&[], &idx, "x", wav.path()).await;
+        assert!(result.is_err());
     }
 }
