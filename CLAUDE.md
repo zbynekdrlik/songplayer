@@ -244,30 +244,22 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   but output diluted by autosub word timings). Per explicit user
   direction autosub is banned from alignment. Gemini is now the
   sole alignment provider.
-- v17 (#TBD): Port the Python prototype (`scripts/experiments/
-  gemini_lyrics.py`) `write_lyrics_json` finalize logic into
-  `merge.rs::sanitize_track`. Three divergences silently shipped
-  since v11 and only surfaced under user verification: (1) end_ms
-  clipping — wordless lines now clip to `min(gemini_end,
-  next_line.start_ms - 50)` or `duration_ms - 50` for the last
-  line. Pre-v17 Gemini lines could extend past the next line's
-  start → visual overlap on the Resolume LED wall. (2) Synthetic
-  word entries — evenly distribute words from line text over the
-  line duration so the dashboard karaoke highlighter has per-word
-  timing to animate. Pre-v17 `words: None` silently disabled
-  per-word karaoke for every Gemini song. (3) `merge_overlap`
-  inner-loop `break` — Python has `break` after one dedup pair
-  per A-line; Rust was missing it and could over-drop B-lines
-  when multiple B-lines normalize-matched the same A-line within
-  the 1500 ms window. Smart-skip tightened to `version >= 17`;
-  every pre-v17 Gemini row reprocessed. Verification gap that
-  let v11-v16 ship broken: no integration test compared
-  `sanitize_track` output against the Python prototype's
-  `_lyrics.json` for the same input. Tests added for the three
-  new behaviors: `sanitize_track_clips_wordless_line_end_to_next_
-  start_minus_50ms`, `sanitize_track_synthesized_words_fill_line_
-  duration_exactly`, `sanitize_track_last_wordless_line_clips_
-  against_duration`.
+- v17 (#TBD): Port Python prototype's `write_lyrics_json` finalize
+  logic (end_ms clip, synthesized words, merge break). Superseded
+  by v18 — the word synthesis piece was reverted.
+- v18 (#TBD): Drop synthesized per-word timings. Per explicit user
+  direction (`feedback_line_timing_only.md`), the lyrics pipeline
+  focus is line-level timing only. v17's even-distribution word
+  synthesis caused the karaoke highlighter to animate at wrong
+  moments on the wall — a 0.2-second word and a 2-second word got
+  the same duration under linear interpolation, so the highlight
+  drifted from the actual sung timing within every line. v18
+  emits `LyricsLine.words = None` for wordless provider output;
+  the renderer falls back to line-level display. The v17 end_ms
+  clip and `merge_overlap` break fixes remain — those don't
+  depend on word-level data. Smart-skip tightened to
+  `version >= 18`; every pre-v18 Gemini row is reprocessed so
+  the persisted JSON drops its synthetic word arrays.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

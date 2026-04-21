@@ -200,19 +200,17 @@ fn sanitize_track_emits_wordless_lines_with_line_level_timing() {
     assert_eq!(out[1].en, "[instrumental]");
     assert_eq!(out[2].en, "line three");
 
-    // v17: wordless lines now get synthesized words + clipped end_ms so the
-    // dashboard karaoke highlighter has something to animate. The line
-    // text is a single token, so synthesis produces exactly one word.
+    // v18: wordless lines carry line-level timing with `words: None`.
+    // Per-word synthesis was removed — user direction is line-level focus;
+    // fake per-word timing (linear distribution) caused the karaoke
+    // highlighter to animate at wrong moments.
     assert_eq!(out[1].start_ms, 2500);
     assert_eq!(out[1].end_ms, 3500, "gemini raw end < next_start-50");
-    let w = out[1]
-        .words
-        .as_ref()
-        .expect("wordless line must have synthesized words");
-    assert_eq!(w.len(), 1);
-    assert_eq!(w[0].text, "[instrumental]");
-    assert_eq!(w[0].start_ms, 2500);
-    assert_eq!(w[0].end_ms, 3500);
+    assert!(
+        out[1].words.is_none(),
+        "wordless input must produce `words: None`; got {:?}",
+        out[1].words
+    );
 
     let line1_last_end = out[0].words.as_ref().unwrap().last().unwrap().end_ms;
     assert!(out[1].start_ms >= line1_last_end);
@@ -252,12 +250,10 @@ fn sanitize_track_all_wordless_lines_all_emitted() {
     assert_eq!(out[0].en, "first line");
     assert_eq!(out[0].start_ms, 1000);
     assert_eq!(out[0].end_ms, 3000);
-    // v17: synthesized words on wordless Gemini lines.
-    assert_eq!(
-        out[0].words.as_ref().unwrap().len(),
-        2,
-        "2 words for 'first line'"
-    );
+    // v18: wordless input → `words: None` (no per-word synthesis).
+    assert!(out[0].words.is_none());
+    assert!(out[1].words.is_none());
+    assert!(out[2].words.is_none());
     assert_eq!(out[1].start_ms, 3500);
     assert_eq!(out[2].start_ms, 6000);
     assert!(out[0].start_ms < out[1].start_ms);
@@ -295,9 +291,11 @@ fn sanitize_track_clips_wordless_line_end_to_next_start_minus_50ms() {
 }
 
 #[test]
-fn sanitize_track_synthesized_words_fill_line_duration_exactly() {
-    // Synthesis invariant: words are contiguous, first starts at line_start,
-    // last ends at line_end.
+fn sanitize_track_wordless_input_never_emits_synthetic_words() {
+    // v18 regression guard: wordless Gemini input must NEVER produce
+    // `words: Some(...)`. Per-word synthesis was removed because even-
+    // distribution across the line duration caused the karaoke
+    // highlighter to fire at wrong moments on the wall.
     let provider_lines = vec![LineTiming {
         text: "amazing grace how sweet".into(),
         start_ms: 10_000,
@@ -305,18 +303,15 @@ fn sanitize_track_synthesized_words_fill_line_duration_exactly() {
         words: vec![],
     }];
     let out = sanitize_track(&provider_lines, 20_000);
-    let words = out[0].words.as_ref().unwrap();
-    assert_eq!(words.len(), 4);
-    assert_eq!(words[0].start_ms, 10_000);
-    assert_eq!(words[3].end_ms, 14_000);
-    for i in 1..words.len() {
-        assert_eq!(
-            words[i].start_ms,
-            words[i - 1].end_ms,
-            "word {i} must start where word {} ends",
-            i - 1
-        );
-    }
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].en, "amazing grace how sweet");
+    assert_eq!(out[0].start_ms, 10_000);
+    assert_eq!(out[0].end_ms, 14_000);
+    assert!(
+        out[0].words.is_none(),
+        "synthesis is forbidden per user direction; got {:?}",
+        out[0].words
+    );
 }
 
 #[test]

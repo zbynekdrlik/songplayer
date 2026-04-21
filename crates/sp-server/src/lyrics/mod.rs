@@ -130,28 +130,22 @@ use sp_core::lyrics::LyricsTrack;
 ///   invariant.
 /// - v16: Unregister `AutoSubProvider` from the worker's alignment
 ///   provider list. Autosub has unreliable timing on sung music.
-/// - v17: **Port Python prototype's `write_lyrics_json` finalize
-///   logic into `sanitize_track`.** Three Python-parity fixes:
-///   (1) **End-ms clipping** — clip each wordless line's `end_ms`
-///   to `min(gemini_end, next_line.start_ms - 50)` (or to
-///   `duration_ms - 50` for the last line). Pre-v17 Gemini lines
-///   could extend past the next line's start, causing visual
-///   overlap on the Resolume LED wall.
-///   (2) **Synthetic word entries** — evenly distribute words from
-///   the line text over the line duration, so the dashboard
-///   karaoke highlighter has per-word entries to animate. Pre-v17
-///   wordless Gemini output had `words: None`, which broke the
-///   highlighter. The synthesized timings are heuristic but the
-///   Python prototype validated this approach at 99% accuracy on
-///   song 230.
-///   (3) **Merge-overlap `break`** — Python has `break` after the
-///   first dedup match per A-line; Rust was missing it and could
-///   over-drop B-lines when multiple B-lines matched the same A.
-///   Smart-skip tightened from `version >= 16` to `version >= 17`
-///   so every pre-v17 Gemini row is reprocessed (they're the only
-///   affected rows; non-Gemini rows were already excluded from the
-///   clause).
-pub const LYRICS_PIPELINE_VERSION: u32 = 17;
+/// - v17: Port Python prototype's `write_lyrics_json` finalize
+///   (end_ms clip, synthesized words, merge break).
+/// - v18: **Drop synthesized per-word timings.** Per explicit user
+///   direction the lyrics focus is line-level timing only. v17's
+///   even-distribution word synthesis caused the karaoke highlighter
+///   to animate at wrong moments on the wall — a 0.2 s word and a
+///   2 s word received the same duration under linear interpolation.
+///   v18 emits `words: None` for wordless provider output; the
+///   renderer falls back to line-level display (line text shown
+///   between `line.start_ms` and `line.end_ms`, no per-word
+///   highlight). The v17 end_ms clip and merge-break fixes stay in
+///   place — those are correct and don't depend on word-level data.
+///   Smart-skip tightened to `version >= 18`; every pre-v18 Gemini
+///   row is reprocessed so the persisted JSON drops the synthetic
+///   word arrays.
+pub const LYRICS_PIPELINE_VERSION: u32 = 18;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -282,10 +276,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v17() {
+    fn lyrics_pipeline_version_is_v18() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 17,
-            "v17 = Python prototype parity: end_ms clip, synthetic words, merge break"
+            LYRICS_PIPELINE_VERSION, 18,
+            "v18 = drop synthetic per-word timings; ship words=None for wordless providers"
         );
     }
 

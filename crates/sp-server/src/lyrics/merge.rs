@@ -233,22 +233,23 @@ pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<Lyri
     let mut floor_start_ms: u64 = 0;
     for (i, line) in lines.iter().enumerate() {
         if line.words.is_empty() {
-            // Line-level-only provider (e.g., Gemini). Ports the Python
-            // prototype's `write_lyrics_json` finalize step so the Rust
-            // output is byte-comparable to the validated prototype:
+            // Line-level-only provider (e.g., Gemini). v18 intentionally
+            // emits `words: None` instead of synthesizing per-word timings
+            // by even-distribution. Per user direction the lyrics pipeline
+            // focus is line-level timing; fake per-word timings caused the
+            // karaoke highlighter to animate at wrong moments on the wall
+            // because a 0.2 s word and a 2 s word received the same
+            // duration under linear interpolation. Better to show no
+            // per-word highlight than a wrong one.
+            //
+            // Still apply the Python prototype's line-level finalize:
             //   1. Clamp start to `floor_start_ms` (cross-line monotonic).
-            //   2. End clipping — `end_ms = min(raw_end, next_start - 50)`
-            //      prevents visual line overlap; falls back to
+            //   2. End clip `end_ms = min(raw_end, next_start - 50)` so
+            //      consecutive lines don't overlap visually; falls back to
             //      `duration_ms` for the last line so it doesn't extend
             //      past song end.
-            //   3. If the resulting span is too short or inverted, enforce
-            //      a 500 ms floor so the renderer always has something to
-            //      highlight.
-            //   4. Synthesize evenly-spaced word entries from the line
-            //      text so the dashboard karaoke highlighter has
-            //      per-word timing to animate. Word-level quality is
-            //      heuristic (no real per-word timing), but the
-            //      alternative — `words: None` — breaks the highlighter.
+            //   3. If the resulting span is inverted or too short, floor
+            //      to 500 ms so the renderer always has something to show.
             let line_start = line.start_ms.max(floor_start_ms);
             let next_start = lines
                 .get(i + 1)
@@ -264,14 +265,13 @@ pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<Lyri
             } else {
                 line_start.saturating_add(500)
             };
-            let words = synthesize_words(&line.text, line_start, line_end);
             floor_start_ms = line_end;
             out.push(LyricsLine {
                 start_ms: line_start,
                 end_ms: line_end,
                 en: line.text.clone(),
                 sk: None,
-                words: if words.is_empty() { None } else { Some(words) },
+                words: None,
             });
             continue;
         }
@@ -301,41 +301,6 @@ pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<Lyri
             sk: None,
             words: Some(words),
         });
-    }
-    out
-}
-
-/// Synthesize evenly-spaced word entries from a line's text. Matches the
-/// Python prototype's `write_lyrics_json` logic so the Rust output is
-/// renderable by the karaoke highlighter even when the provider (Gemini)
-/// only supplies line-level timing.
-///
-/// - Splits on whitespace.
-/// - Each word gets `(line_end - line_start) / word_count` ms, clamped to
-///   a 200 ms minimum so the highlighter can actually animate.
-/// - Words are sequential: each word starts where the previous ended.
-/// - The last word ends exactly at `line_end` so no drift accumulates.
-fn synthesize_words(text: &str, line_start: u64, line_end: u64) -> Vec<LyricsWord> {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.is_empty() || line_end <= line_start {
-        return Vec::new();
-    }
-    let total = line_end - line_start;
-    let per_word = (total / words.len() as u64).max(200);
-    let mut out = Vec::with_capacity(words.len());
-    let mut t = line_start;
-    for (k, w) in words.iter().enumerate() {
-        let w_end = if k + 1 < words.len() {
-            (t + per_word).min(line_end)
-        } else {
-            line_end
-        };
-        out.push(LyricsWord {
-            text: (*w).to_string(),
-            start_ms: t,
-            end_ms: w_end,
-        });
-        t = w_end;
     }
     out
 }
