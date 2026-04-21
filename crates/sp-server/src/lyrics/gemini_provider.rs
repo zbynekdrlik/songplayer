@@ -75,12 +75,40 @@ impl AlignmentProvider for GeminiProvider {
             anyhow::bail!("gemini: duration_ms is 0, nothing to transcribe");
         }
 
+        // v20: retry-from-cache. Load the song's previous `_gemini_chunks.json`
+        // if any. For each planned chunk, if the cached raw is non-empty we
+        // reuse it (no Gemini call); if the cached raw is empty or missing,
+        // we call Gemini fresh. This saves quota + time on songs where only
+        // 1 or 2 chunks previously failed. Matches the Python prototype's
+        // `--retry-from-cache` behavior.
+        let cached = load_cached_chunks(&self.cache_dir, &ctx.video_id, &plans).await;
+
         let tmp = tempfile::tempdir().context("create chunk tmp dir")?;
         let mut per_chunk: Vec<Vec<crate::lyrics::gemini_parse::ParsedLine>> =
             Vec::with_capacity(plans.len());
         let mut raw_cache_entries: Vec<RawChunk> = Vec::with_capacity(plans.len());
 
         for (chunk_idx, plan) in plans.iter().enumerate() {
+            // If the cache already has this chunk, reuse it and skip the
+            // Gemini call entirely.
+            if let Some(raw) = cached.get(chunk_idx).and_then(|s| s.as_ref())
+                && !raw.is_empty()
+            {
+                let parsed = parse_timed_lines(raw);
+                debug!(
+                    chunk = plan.idx,
+                    parsed = parsed.len(),
+                    "gemini: chunk reused from cache"
+                );
+                per_chunk.push(parsed);
+                raw_cache_entries.push(RawChunk {
+                    start_ms: plan.start_ms,
+                    end_ms: plan.end_ms,
+                    raw: raw.clone(),
+                });
+                continue;
+            }
+
             if chunk_idx > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             }
@@ -107,10 +135,8 @@ impl AlignmentProvider for GeminiProvider {
             debug!(chunk = plan.idx, "gemini: calling Gemini for chunk");
             // v19: one retry per chunk on failure. A single transient 5-minute
             // timeout (observed on Not Guilty chunk 2) was dropping the whole
-            // chunk → 40 s gap in the rendered lyrics mid-song. Retrying once
-            // usually succeeds because timeouts are not correlated. On a real
-            // 429 the rotation inside `transcribe_rotating` already moved past
-            // the exhausted key, so the retry starts from a fresh key.
+            // chunk → 40 s gap in the rendered lyrics. Retrying once usually
+            // succeeds because timeouts are not correlated.
             let mut attempt = 0;
             let outcome = loop {
                 attempt += 1;
@@ -158,6 +184,34 @@ impl AlignmentProvider for GeminiProvider {
                     });
                 }
             }
+        }
+
+        // v20: fail the whole alignment if any chunk is still empty after
+        // retry. Persisting partial output creates visible gaps in the
+        // rendered lyrics on Resolume ("lyrics totally left and again
+        // appear"), which looks broken to the audience. Failing here keeps
+        // the song `has_lyrics = 0` so the worker retries it later from
+        // cache (empty chunks will be re-called; good ones reused).
+        let empty_chunks: Vec<usize> = raw_cache_entries
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.raw.is_empty())
+            .map(|(i, _)| i)
+            .collect();
+        if !empty_chunks.is_empty() {
+            // Still write the raw cache so the NEXT attempt can reuse the
+            // chunks that did succeed this time around.
+            if let Err(e) =
+                write_raw_cache(&self.cache_dir, &ctx.video_id, &raw_cache_entries).await
+            {
+                warn!("gemini: raw cache write failed: {e}");
+            }
+            anyhow::bail!(
+                "gemini: {} of {} chunks failed after retry (indices {:?}); not persisting",
+                empty_chunks.len(),
+                plans.len(),
+                empty_chunks
+            );
         }
 
         if let Err(e) = write_raw_cache(&self.cache_dir, &ctx.video_id, &raw_cache_entries).await {
@@ -312,6 +366,45 @@ async fn write_raw_cache(cache_dir: &Path, video_id: &str, chunks: &[RawChunk]) 
     let body = serde_json::json!({"chunks": chunks});
     tokio::fs::write(&path, serde_json::to_string_pretty(&body)?).await?;
     Ok(())
+}
+
+/// Load previously-cached per-chunk raw responses for this song.
+///
+/// Returns `Vec<Option<String>>` aligned 1:1 with `plans` — `Some(raw)` means
+/// the cache had a response for that chunk boundary (empty string = previous
+/// run failed and needs retry; non-empty = reuse). `None` means the cache did
+/// not contain a matching chunk plan (e.g. first run, or a different chunking
+/// scheme was used before). On any read/parse error, returns a vec of `None`
+/// so the caller falls through to fresh Gemini calls.
+#[cfg_attr(test, mutants::skip)]
+async fn load_cached_chunks(
+    cache_dir: &Path,
+    video_id: &str,
+    plans: &[crate::lyrics::gemini_chunks::ChunkPlan],
+) -> Vec<Option<String>> {
+    let path = cache_dir.join(format!("{video_id}_gemini_chunks.json"));
+    let Ok(bytes) = tokio::fs::read(&path).await else {
+        return vec![None; plans.len()];
+    };
+    let Ok(doc) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return vec![None; plans.len()];
+    };
+    let Some(cached) = doc.get("chunks").and_then(|c| c.as_array()) else {
+        return vec![None; plans.len()];
+    };
+    plans
+        .iter()
+        .map(|p| {
+            cached.iter().find_map(|c| {
+                let start = c.get("start_ms")?.as_u64()?;
+                let end = c.get("end_ms")?.as_u64()?;
+                if start != p.start_ms || end != p.end_ms {
+                    return None;
+                }
+                Some(c.get("raw")?.as_str()?.to_string())
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
