@@ -452,7 +452,11 @@ jobs:
           # helper functions are glue around external library APIs that can only
           # be validated against real files on the target platform. Both are
           # exercised by integration tests against committed fixtures.
-          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
+          # --jobs 1: observed 2026-04-21 that parallel mutant workers caused
+          # GitHub-hosted runner to interrupt the job ~3 min after baseline
+          # (exact same pattern across 3 runs). Serializing avoids whatever
+          # resource contention is triggering the interrupt.
+          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
             --exclude-re 'sp-server/src/downloader/' \
