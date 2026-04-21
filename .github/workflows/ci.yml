@@ -817,13 +817,30 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          $settings = @{
+          # Read current settings first so we only seed what's missing.
+          # gemini_api_key in particular: the user maintains a comma-separated
+          # SET of keys for multi-key rotation (v14+). Overwriting it with the
+          # single GitHub secret every deploy destroys that rotation. Seed only
+          # when empty. (#44)
+          $current = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings"
+
+          $seed = @{
             obs_websocket_url = "ws://localhost:4455"
             cache_dir = "C:\ProgramData\SongPlayer\cache"
-            gemini_api_key = $env:GEMINI_API_KEY
-            gemini_model = "gemini-2.0-flash"
           }
-          $body = $settings | ConvertTo-Json -Compress
+          if ([string]::IsNullOrEmpty($current.gemini_api_key)) {
+            $seed.gemini_api_key = $env:GEMINI_API_KEY
+            Write-Host "Seeding gemini_api_key from secret (was empty)"
+          } else {
+            Write-Host "Preserving existing gemini_api_key (length $($current.gemini_api_key.Length))"
+          }
+          # Seed the target model directly — seeding 'gemini-2.0-flash' here
+          # used to bounce through the stale-model migration at server startup,
+          # producing confusing logs. Write the correct value the first time.
+          if ([string]::IsNullOrEmpty($current.gemini_model)) {
+            $seed.gemini_model = "gemini-3.1-pro-preview"
+          }
+          $body = $seed | ConvertTo-Json -Compress
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $bytes -ContentType "application/json" -UseBasicParsing | Out-Null
           Write-Host "Settings seeded"
