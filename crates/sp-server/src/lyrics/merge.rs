@@ -57,6 +57,7 @@ pub async fn merge_provider_results(
     _reference_text: &str,
     _reference_source: &str,
     provider_results: &[ProviderResult],
+    duration_ms: u64,
 ) -> Result<(LyricsTrack, Vec<WordMergeDetail>)> {
     let primary = pick_best_provider_with_words(provider_results)
         .ok_or_else(|| anyhow::anyhow!("no provider has usable word timings"))?;
@@ -84,7 +85,7 @@ pub async fn merge_provider_results(
     // already well-formed. Details are derived against the SANITIZED words
     // but use the RAW start_ms for confidence lookups (agreement is a
     // property of the real alignment, not our clamped output).
-    let out_lines = sanitize_track(&primary.lines);
+    let out_lines = sanitize_track(&primary.lines, duration_ms);
     let mut details: Vec<WordMergeDetail> = Vec::new();
     let mut word_index = 0usize;
     for (line_idx, line) in out_lines.iter().enumerate() {
@@ -227,28 +228,50 @@ pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
 /// Used by both `merge_provider_results` and the single-provider
 /// pass-through in `orchestrator` so the cross-line strict-increasing
 /// invariant is enforced in exactly one place.
-pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
+pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<LyricsLine> {
     let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
     let mut floor_start_ms: u64 = 0;
-    for line in lines {
+    for (i, line) in lines.iter().enumerate() {
         if line.words.is_empty() {
-            // Line-level-only provider (e.g., Gemini). Emit a wordless
-            // LyricsLine using the provider's line timing. Clamp start to
-            // `floor_start_ms` so the cross-line strict-increasing invariant
-            // holds — pre-v15 this branch was a `continue` that silently
-            // discarded every Gemini line; the earlier comment claimed "a
-            // renderer can't do anything useful with a wordless line" which
-            // is false (the renderer consumes line-level timing for line
-            // karaoke; word-level highlighting is optional).
+            // Line-level-only provider (e.g., Gemini). Ports the Python
+            // prototype's `write_lyrics_json` finalize step so the Rust
+            // output is byte-comparable to the validated prototype:
+            //   1. Clamp start to `floor_start_ms` (cross-line monotonic).
+            //   2. End clipping — `end_ms = min(raw_end, next_start - 50)`
+            //      prevents visual line overlap; falls back to
+            //      `duration_ms` for the last line so it doesn't extend
+            //      past song end.
+            //   3. If the resulting span is too short or inverted, enforce
+            //      a 500 ms floor so the renderer always has something to
+            //      highlight.
+            //   4. Synthesize evenly-spaced word entries from the line
+            //      text so the dashboard karaoke highlighter has
+            //      per-word timing to animate. Word-level quality is
+            //      heuristic (no real per-word timing), but the
+            //      alternative — `words: None` — breaks the highlighter.
             let line_start = line.start_ms.max(floor_start_ms);
-            let line_end = line.end_ms.max(line_start.saturating_add(80));
+            let next_start = lines
+                .get(i + 1)
+                .map(|n| n.start_ms.max(line_start))
+                .unwrap_or(duration_ms.max(line_start));
+            let tentative = line.end_ms.min(
+                next_start
+                    .saturating_sub(50)
+                    .max(line_start.saturating_add(200)),
+            );
+            let line_end = if tentative > line_start {
+                tentative.max(line_start.saturating_add(80))
+            } else {
+                line_start.saturating_add(500)
+            };
+            let words = synthesize_words(&line.text, line_start, line_end);
             floor_start_ms = line_end;
             out.push(LyricsLine {
                 start_ms: line_start,
                 end_ms: line_end,
                 en: line.text.clone(),
                 sk: None,
-                words: None,
+                words: if words.is_empty() { None } else { Some(words) },
             });
             continue;
         }
@@ -278,6 +301,41 @@ pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
             sk: None,
             words: Some(words),
         });
+    }
+    out
+}
+
+/// Synthesize evenly-spaced word entries from a line's text. Matches the
+/// Python prototype's `write_lyrics_json` logic so the Rust output is
+/// renderable by the karaoke highlighter even when the provider (Gemini)
+/// only supplies line-level timing.
+///
+/// - Splits on whitespace.
+/// - Each word gets `(line_end - line_start) / word_count` ms, clamped to
+///   a 200 ms minimum so the highlighter can actually animate.
+/// - Words are sequential: each word starts where the previous ended.
+/// - The last word ends exactly at `line_end` so no drift accumulates.
+fn synthesize_words(text: &str, line_start: u64, line_end: u64) -> Vec<LyricsWord> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() || line_end <= line_start {
+        return Vec::new();
+    }
+    let total = line_end - line_start;
+    let per_word = (total / words.len() as u64).max(200);
+    let mut out = Vec::with_capacity(words.len());
+    let mut t = line_start;
+    for (k, w) in words.iter().enumerate() {
+        let w_end = if k + 1 < words.len() {
+            (t + per_word).min(line_end)
+        } else {
+            line_end
+        };
+        out.push(LyricsWord {
+            text: (*w).to_string(),
+            start_ms: t,
+            end_ms: w_end,
+        });
+        t = w_end;
     }
     out
 }

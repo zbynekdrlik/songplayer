@@ -90,15 +90,19 @@ async fn fetch_bucket_stale(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // v16 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 16)`.
-    // Pre-v16 Gemini output cannot be trusted:
+    // v17 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 17)`.
+    // Pre-v17 Gemini output is degraded in one or more ways:
     //   - v11-v14: sanitize_track dropped wordless lines → empty JSONs.
-    //   - v15: sanitize fixed, but AutoSubProvider was still registered, so
-    //     `ensemble:autosub+gemini` rows carried autosub timings. Autosub
-    //     timing on sung music is unreliable.
-    //   - v16+: AutoSubProvider unregistered; Gemini sole provider.
-    //     Source is exclusively `ensemble:gemini`, timings are pure.
-    // Skipping only v16+ Gemini rows forces a full pre-v16 retry.
+    //   - v15: sanitize fixed, but AutoSubProvider still registered →
+    //     autosub contamination in ensemble source tags.
+    //   - v16: AutoSub removed, but `sanitize_track` skipped the Python
+    //     prototype's end_ms clipping + synthetic word entries. Lines
+    //     could overlap visually on Resolume and the dashboard karaoke
+    //     highlighter had no word entries to animate.
+    //   - v17+: `sanitize_track` ports the Python `write_lyrics_json`
+    //     finalize step verbatim (end_ms clip, synthesized words) AND
+    //     matches the Python merge-overlap `break` semantics.
+    //     Output is byte-comparable to the validated Python prototype.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -107,7 +111,7 @@ async fn fetch_bucket_stale(
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 \
-               AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 16) \
+               AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 17) \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, v.id ASC LIMIT 1",
     )
@@ -400,15 +404,14 @@ mod tests {
 
     #[tokio::test]
     async fn stale_bucket_skips_songs_already_produced_by_gemini() {
-        // v16 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 16)`.
-        // v11-v15 Gemini output can't be trusted (pre-v15 dropped wordless lines;
-        // v15 had autosub contamination via ensemble merge). Only v16+ pure
-        // Gemini rows are protected.
+        // v17 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 17)`.
+        // Pre-v17 Gemini output is degraded (empty lines, autosub contamination,
+        // missing end_ms clip, missing synthetic words). Only v17+ rows trusted.
         let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
              lyrics_source, lyrics_pipeline_version, lyrics_quality_score) VALUES \
-                 (1, 1, 'gemini_v16',   1, 1, 'ensemble:gemini',         16, 0.9), \
+                 (1, 1, 'gemini_v17',   1, 1, 'ensemble:gemini',         17, 0.9), \
                  (2, 1, 'gemini_v15',   1, 1, 'ensemble:autosub+gemini', 15, 0.8), \
                  (3, 1, 'autosub_only', 1, 1, 'ensemble:autosub',        15, 0.4), \
                  (4, 1, 'old_gemini',   1, 1, 'ensemble:gemini',         14, 0.2)",
@@ -417,26 +420,26 @@ mod tests {
         .await
         .unwrap();
 
-        // Running under v17 — only the v16 pure-Gemini row is protected; all
-        // pre-v16 rows (including v15 mixed-autosub gemini) must come back.
+        // Running under v18 — only the v17 pure-Gemini row is protected; all
+        // pre-v17 rows must come back.
         let mut remaining = vec!["gemini_v15", "autosub_only", "old_gemini"];
         while !remaining.is_empty() {
-            let row = fetch_bucket_stale(&pool, 17).await.unwrap().unwrap();
+            let row = fetch_bucket_stale(&pool, 18).await.unwrap().unwrap();
             assert!(
                 remaining.contains(&row.youtube_id.as_str()),
                 "unexpected row picked: {}",
                 row.youtube_id
             );
             remaining.retain(|&id| id != row.youtube_id.as_str());
-            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 17 WHERE youtube_id = ?")
+            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 18 WHERE youtube_id = ?")
                 .bind(&row.youtube_id)
                 .execute(&pool)
                 .await
                 .unwrap();
         }
         assert!(
-            fetch_bucket_stale(&pool, 17).await.unwrap().is_none(),
-            "v16+ pure-Gemini rows must not appear in stale bucket"
+            fetch_bucket_stale(&pool, 18).await.unwrap().is_none(),
+            "v17+ pure-Gemini rows must not appear in stale bucket"
         );
     }
 

@@ -129,22 +129,29 @@ use sp_core::lyrics::LyricsTrack;
 ///   with floor-clamped start for the cross-line strict-increasing
 ///   invariant.
 /// - v16: Unregister `AutoSubProvider` from the worker's alignment
-///   provider list. YouTube autosub has unreliable timing on sung
-///   music and its presence in the ensemble merge path contaminated
-///   every pre-v16 output with `ensemble:autosub+*` source tags. Per
-///   explicit user direction (see memory
-///   `feedback_no_autosub.md`), autosub is permanently banned from
-///   alignment. Gemini is now the sole alignment provider — if its
-///   keys are exhausted or missing, the song returns `no_source`
-///   rather than falling back to autosub. AutoSubProvider remains
-///   defined in `autosub_provider.rs` for tests; `autosub_json3`
-///   is still fetched in `gather_sources` (harmless — no longer
-///   consumed by any registered provider, cleanup deferred).
-///   Smart-skip clause in `reprocess.rs::fetch_bucket_stale` moves
-///   from `version >= 15` to `version >= 16` so every pre-v16
-///   Gemini row is retried (v15 rows may contain autosub timings
-///   from the multi-provider merge path).
-pub const LYRICS_PIPELINE_VERSION: u32 = 16;
+///   provider list. Autosub has unreliable timing on sung music.
+/// - v17: **Port Python prototype's `write_lyrics_json` finalize
+///   logic into `sanitize_track`.** Three Python-parity fixes:
+///   (1) **End-ms clipping** — clip each wordless line's `end_ms`
+///   to `min(gemini_end, next_line.start_ms - 50)` (or to
+///   `duration_ms - 50` for the last line). Pre-v17 Gemini lines
+///   could extend past the next line's start, causing visual
+///   overlap on the Resolume LED wall.
+///   (2) **Synthetic word entries** — evenly distribute words from
+///   the line text over the line duration, so the dashboard
+///   karaoke highlighter has per-word entries to animate. Pre-v17
+///   wordless Gemini output had `words: None`, which broke the
+///   highlighter. The synthesized timings are heuristic but the
+///   Python prototype validated this approach at 99% accuracy on
+///   song 230.
+///   (3) **Merge-overlap `break`** — Python has `break` after the
+///   first dedup match per A-line; Rust was missing it and could
+///   over-drop B-lines when multiple B-lines matched the same A.
+///   Smart-skip tightened from `version >= 16` to `version >= 17`
+///   so every pre-v17 Gemini row is reprocessed (they're the only
+///   affected rows; non-Gemini rows were already excluded from the
+///   clause).
+pub const LYRICS_PIPELINE_VERSION: u32 = 17;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -275,11 +282,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v16() {
+    fn lyrics_pipeline_version_is_v17() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 16,
-            "v16 = AutoSubProvider unregistered from alignment; Gemini sole provider; \
-             pre-v16 Gemini rows must be retried (they may contain autosub contamination)"
+            LYRICS_PIPELINE_VERSION, 17,
+            "v17 = Python prototype parity: end_ms clip, synthetic words, merge break"
         );
     }
 

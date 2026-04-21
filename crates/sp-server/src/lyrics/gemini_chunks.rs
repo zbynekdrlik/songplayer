@@ -127,8 +127,11 @@ pub fn merge_overlap(plans: &[ChunkPlan], per_chunk: &[Vec<ParsedLine>]) -> Vec<
         let mut drop_a: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut drop_b: std::collections::HashSet<usize> = std::collections::HashSet::new();
         for &ia in &a_indices {
+            if drop_a.contains(&ia) {
+                continue;
+            }
             for &ib in &b_indices {
-                if drop_a.contains(&ia) || drop_b.contains(&ib) {
+                if drop_b.contains(&ib) {
                     continue;
                 }
                 let la = &globals[i][ia];
@@ -148,6 +151,10 @@ pub fn merge_overlap(plans: &[ChunkPlan], per_chunk: &[Vec<ParsedLine>]) -> Vec<
                 } else {
                     drop_a.insert(ia);
                 }
+                // Match Python prototype: one B pairing per A. Without this break
+                // a single A could drop multiple Bs when several normalize-match AND
+                // are within the 1500ms window — over-deduping.
+                break;
             }
         }
         globals[i] = globals[i]

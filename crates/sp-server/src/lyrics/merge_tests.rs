@@ -117,7 +117,7 @@ async fn merge_provider_results_word_index_increments_by_one_per_word() {
         ],
     )];
     let client = dummy_client();
-    let (_track, details) = merge_provider_results(&client, "a b c d", "test", &providers)
+    let (_track, details) = merge_provider_results(&client, "a b c d", "test", &providers, 0)
         .await
         .unwrap();
     assert_eq!(details.len(), 4);
@@ -189,7 +189,7 @@ fn sanitize_track_emits_wordless_lines_with_line_level_timing() {
             ],
         },
     ];
-    let out = sanitize_track(&provider_lines);
+    let out = sanitize_track(&provider_lines, 10_000);
     assert_eq!(
         out.len(),
         3,
@@ -200,13 +200,20 @@ fn sanitize_track_emits_wordless_lines_with_line_level_timing() {
     assert_eq!(out[1].en, "[instrumental]");
     assert_eq!(out[2].en, "line three");
 
-    // Wordless line: words must stay None, line-level timing carried through.
-    assert!(out[1].words.is_none(), "wordless line must have words=None");
+    // v17: wordless lines now get synthesized words + clipped end_ms so the
+    // dashboard karaoke highlighter has something to animate. The line
+    // text is a single token, so synthesis produces exactly one word.
     assert_eq!(out[1].start_ms, 2500);
-    assert_eq!(out[1].end_ms, 3500);
+    assert_eq!(out[1].end_ms, 3500, "gemini raw end < next_start-50");
+    let w = out[1]
+        .words
+        .as_ref()
+        .expect("wordless line must have synthesized words");
+    assert_eq!(w.len(), 1);
+    assert_eq!(w[0].text, "[instrumental]");
+    assert_eq!(w[0].start_ms, 2500);
+    assert_eq!(w[0].end_ms, 3500);
 
-    // Cross-line monotonicity still holds: wordless line starts after the
-    // previous line's last word end.
     let line1_last_end = out[0].words.as_ref().unwrap().last().unwrap().end_ms;
     assert!(out[1].start_ms >= line1_last_end);
 }
@@ -236,7 +243,7 @@ fn sanitize_track_all_wordless_lines_all_emitted() {
             words: vec![],
         },
     ];
-    let out = sanitize_track(&provider_lines);
+    let out = sanitize_track(&provider_lines, 10_000);
     assert_eq!(
         out.len(),
         3,
@@ -245,12 +252,90 @@ fn sanitize_track_all_wordless_lines_all_emitted() {
     assert_eq!(out[0].en, "first line");
     assert_eq!(out[0].start_ms, 1000);
     assert_eq!(out[0].end_ms, 3000);
-    assert!(out[0].words.is_none());
+    // v17: synthesized words on wordless Gemini lines.
+    assert_eq!(
+        out[0].words.as_ref().unwrap().len(),
+        2,
+        "2 words for 'first line'"
+    );
     assert_eq!(out[1].start_ms, 3500);
     assert_eq!(out[2].start_ms, 6000);
-    // Strict-increasing starts across the whole track.
     assert!(out[0].start_ms < out[1].start_ms);
     assert!(out[1].start_ms < out[2].start_ms);
+}
+
+#[test]
+fn sanitize_track_clips_wordless_line_end_to_next_start_minus_50ms() {
+    // Ports the Python prototype's end_ms clip. Without this two adjacent
+    // lines can overlap visually on Resolume: Gemini raw end=4000 while
+    // next line starts at 3800 would leave 200 ms of visual overlap.
+    let provider_lines = vec![
+        LineTiming {
+            text: "first".into(),
+            start_ms: 1000,
+            end_ms: 4000,
+            words: vec![],
+        },
+        LineTiming {
+            text: "second".into(),
+            start_ms: 3800,
+            end_ms: 5000,
+            words: vec![],
+        },
+    ];
+    let out = sanitize_track(&provider_lines, 10_000);
+    assert_eq!(out.len(), 2);
+    assert_eq!(
+        out[0].end_ms, 3750,
+        "end_ms must clip to next_start-50 (3800-50=3750); got {}",
+        out[0].end_ms
+    );
+    // And the second line's start must be at or after the clipped end.
+    assert!(out[1].start_ms >= out[0].end_ms);
+}
+
+#[test]
+fn sanitize_track_synthesized_words_fill_line_duration_exactly() {
+    // Synthesis invariant: words are contiguous, first starts at line_start,
+    // last ends at line_end.
+    let provider_lines = vec![LineTiming {
+        text: "amazing grace how sweet".into(),
+        start_ms: 10_000,
+        end_ms: 14_000,
+        words: vec![],
+    }];
+    let out = sanitize_track(&provider_lines, 20_000);
+    let words = out[0].words.as_ref().unwrap();
+    assert_eq!(words.len(), 4);
+    assert_eq!(words[0].start_ms, 10_000);
+    assert_eq!(words[3].end_ms, 14_000);
+    for i in 1..words.len() {
+        assert_eq!(
+            words[i].start_ms,
+            words[i - 1].end_ms,
+            "word {i} must start where word {} ends",
+            i - 1
+        );
+    }
+}
+
+#[test]
+fn sanitize_track_last_wordless_line_clips_against_duration() {
+    // Last line has no "next" line, so the end clip uses full song duration.
+    let provider_lines = vec![LineTiming {
+        text: "final word".into(),
+        start_ms: 100_000,
+        end_ms: 200_000, // would extend past song end
+        words: vec![],
+    }];
+    // Song duration 120s — last line must clip to 120_000 - 50 = 119_950.
+    let out = sanitize_track(&provider_lines, 120_000);
+    assert!(
+        out[0].end_ms <= 120_000,
+        "last line end_ms must not exceed song duration (120000); got {}",
+        out[0].end_ms
+    );
+    assert_eq!(out[0].end_ms, 119_950);
 }
 
 #[test]
@@ -278,14 +363,13 @@ fn sanitize_track_wordless_line_clamps_start_to_floor() {
             words: vec![],
         },
     ];
-    let out = sanitize_track(&provider_lines);
+    let out = sanitize_track(&provider_lines, 10_000);
     assert_eq!(out.len(), 2);
     assert_eq!(
         out[1].start_ms, 2000,
         "wordless line must clamp start to prior line's end (2000), got {}",
         out[1].start_ms
     );
-    // end_ms stays at or above clamped start + 80ms minimum.
     assert!(out[1].end_ms >= out[1].start_ms + 80);
 }
 
@@ -565,7 +649,7 @@ async fn merge_with_single_provider_passes_through_at_0_7x_base() {
         &[("Hello", 1000, 1500, 0.7), ("world", 1500, 2000, 0.7)],
     )];
     let client = dummy_client();
-    let (track, details) = merge_provider_results(&client, "Hello world", "lrclib", &providers)
+    let (track, details) = merge_provider_results(&client, "Hello world", "lrclib", &providers, 0)
         .await
         .unwrap();
     assert_eq!(track.source, "ensemble:qwen3");
@@ -598,7 +682,7 @@ async fn merge_boosts_confidence_when_providers_agree_on_timing() {
         ),
     ];
     let client = dummy_client();
-    let (track, details) = merge_provider_results(&client, "Hello world", "lrclib", &providers)
+    let (track, details) = merge_provider_results(&client, "Hello world", "lrclib", &providers, 0)
         .await
         .unwrap();
     assert_eq!(
@@ -627,7 +711,7 @@ async fn merge_no_agreement_stays_at_pass_through() {
         ),
     ];
     let client = dummy_client();
-    let (_, details) = merge_provider_results(&client, "Hello world", "lrclib", &providers)
+    let (_, details) = merge_provider_results(&client, "Hello world", "lrclib", &providers, 0)
         .await
         .unwrap();
     for d in &details {
@@ -652,7 +736,7 @@ async fn merge_uses_qwen3_line_structure_even_with_autosub_present() {
         make_provider("qwen3", 0.7, &[("Hello", 1000, 1500, 0.7)]),
     ];
     let client = dummy_client();
-    let (track, _) = merge_provider_results(&client, "Hello", "lrclib", &providers)
+    let (track, _) = merge_provider_results(&client, "Hello", "lrclib", &providers, 0)
         .await
         .unwrap();
     assert_eq!(
@@ -670,7 +754,7 @@ async fn merge_bails_when_no_provider_has_words() {
     // No usable data → error (not silent zero-word output).
     let providers = vec![make_provider("empty", 0.7, &[])];
     let client = dummy_client();
-    let err = merge_provider_results(&client, "anything", "lrclib", &providers).await;
+    let err = merge_provider_results(&client, "anything", "lrclib", &providers, 0).await;
     assert!(err.is_err());
 }
 
@@ -687,7 +771,7 @@ async fn merge_does_not_call_ai_client() {
         system_prompt_extra: None,
     });
     let providers = vec![make_provider("qwen3", 0.7, &[("word", 100, 200, 0.7)])];
-    let result = merge_provider_results(&client, "word", "lrclib", &providers).await;
+    let result = merge_provider_results(&client, "word", "lrclib", &providers, 0).await;
     assert!(
         result.is_ok(),
         "deterministic merge must not touch the AI client; got err: {:?}",
