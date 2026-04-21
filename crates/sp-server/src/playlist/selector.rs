@@ -76,14 +76,38 @@ impl VideoSelector {
                 .fetch_optional(pool)
                 .await?;
 
-                if next_vid.is_some() {
+                if let Some(vid) = next_vid {
                     sqlx::query("UPDATE playlists SET current_position = ? WHERE id = ?")
                         .bind(next_pos)
                         .bind(playlist_id)
                         .execute(pool)
                         .await?;
+                    return Ok(Some(vid));
                 }
-                Ok(next_vid)
+
+                // Past the last item → wrap to position 0 so the playlist
+                // loops back to the start. Without this, a custom playlist
+                // at `current_position == MAX(position)` stays permanently
+                // at "no videos available for selection" — the user hit
+                // this on ytlive (scene detection found the playlist but
+                // selector returned None forever).
+                if next_pos > 0 {
+                    let first_vid: Option<i64> = sqlx::query_scalar(
+                        "SELECT video_id FROM playlist_items
+                         WHERE playlist_id = ? AND position = 0",
+                    )
+                    .bind(playlist_id)
+                    .fetch_optional(pool)
+                    .await?;
+                    if first_vid.is_some() {
+                        sqlx::query("UPDATE playlists SET current_position = 0 WHERE id = ?")
+                            .bind(playlist_id)
+                            .execute(pool)
+                            .await?;
+                    }
+                    return Ok(first_vid);
+                }
+                Ok(None)
             }
         }
     }

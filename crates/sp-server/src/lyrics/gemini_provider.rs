@@ -343,8 +343,12 @@ async fn slice_chunk(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
+        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000.
+        // Keeps CPU budget for the live video/audio path on the shared
+        // event PC.
+        cmd.creation_flags(0x08000000 | 0x00004000);
     }
+    cmd.kill_on_drop(true);
     let output = cmd.output().await.context("run ffmpeg for chunk slice")?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);

@@ -14,13 +14,12 @@ pub fn build_prompt(
          Rules:\n\n\
          1. Timestamps are LOCAL to this audio chunk, starting at 00:00. Do NOT offset.\n\n\
          2. COVERAGE — Output a timed line for EVERY sung phrase. Do NOT skip or collapse repeated choruses or refrains. If a phrase is sung 5 times, output 5 separate lines. Do not summarize.\n\n\
-         3. SHORT LINES — Break long phrases into short, separately timed lines.\n\
-            - Break at every comma, semicolon, or breath pause.\n\
+         3. SHORT LINES — HARD LIMIT: every output line must contain at most 8 words. If a sung phrase contains more than 8 words, you MUST split it into multiple timed lines. Split at commas, conjunctions (and/or/but), and breath pauses. A line longer than 8 words is a protocol violation.\n\
             - Example: \"To know Your heart, oh it's the goal of my life, it's the aim of my life\" MUST be 3 separate lines:\n\
               (07:23.0 --> 07:25.5) To know Your heart\n\
               (07:26.0 --> 07:30.0) Oh it's the goal of my life\n\
               (07:31.0 --> 07:34.0) It's the aim of my life\n\
-            - Aim for <= 8 words per output line where the phrasing allows.\n\n\
+            - Count words before emitting each line. If >8, split NOW.\n\n\
          4. PRECISION — Line start_time = the exact moment the first syllable BEGINS being sung (not the breath before, not a preceding beat). Line end_time = the last syllable finishes, before the next silence.\n\n\
          5. SILENCE — If the chunk has no vocals (instrumental only, or pre-roll silence), output exactly: # no vocals\n\n\
          6. OUTPUT FORMAT — Output ONLY timed lines. No intro text, no commentary, no markdown fences, no summary at the end.\n\n\

@@ -118,8 +118,18 @@ pub async fn preprocess_vocals(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000.
+        // Below-normal priority means Demucs + PyTorch leave CPU cycles for
+        // the live video/audio path and for OBS/Resolume on the same PC.
+        // Without this, processing competes with playback and the shared
+        // event PC can overload (observed reboot on 2026-04-21).
+        cmd.creation_flags(0x08000000 | 0x00004000);
     }
+    // Kill the Python child if the Command handle is dropped (worker
+    // shutdown, error path, timeout). Prevents orphan Demucs processes
+    // from holding ~1-2 GB of GPU model weights across SongPlayer
+    // restarts.
+    cmd.kill_on_drop(true);
 
     debug!(
         "running preprocess-vocals: {} --audio {} --output {}",
