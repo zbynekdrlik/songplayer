@@ -65,6 +65,13 @@ struct ChunkResultFile {
 /// Run Mel-Roformer vocal isolation + anvuew de-reverb + 16 kHz mono float32
 /// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
 /// the same path on success.
+///
+/// **Cache (v18):** if `wav_out` already exists and is larger than 1 MB,
+/// skip Demucs entirely and return the existing path. Demucs on a 10-min
+/// song can take 5–10 min on CPU; re-running it unnecessarily on every
+/// worker pick-up was timing out at 600 s and blocking the entire pipeline.
+/// The Python prototype's `scripts/experiments/gemini_lyrics.py` also
+/// relied on caller-side caching of the vocals WAV.
 #[cfg_attr(test, mutants::skip)]
 pub async fn preprocess_vocals(
     python_path: &Path,
@@ -73,6 +80,20 @@ pub async fn preprocess_vocals(
     audio_in: &Path,
     wav_out: &Path,
 ) -> Result<PathBuf> {
+    // Cache check: reuse an existing vocals WAV if it looks complete.
+    // 1 MB minimum avoids reusing truncated/aborted files from a previous
+    // run — a real Demucs output for a song of any length is always much
+    // larger (≥ ~6 MB for a 60 s chunk at 16 kHz float32).
+    if let Ok(meta) = tokio::fs::metadata(wav_out).await {
+        if meta.is_file() && meta.len() > 1_000_000 {
+            debug!(
+                "preprocess-vocals: cache hit, reusing existing WAV: {} ({} bytes)",
+                wav_out.display(),
+                meta.len()
+            );
+            return Ok(wav_out.to_path_buf());
+        }
+    }
     let mut cmd = Command::new(python_path);
     cmd.args([
         script_path.as_os_str(),
