@@ -49,9 +49,11 @@ impl AlignmentProvider for YtManualSubsProvider {
     }
 }
 
-fn find_yt_subs_with_timing(
-    candidates: &[CandidateText],
-) -> Option<(Vec<String>, Vec<(u64, u64)>)> {
+/// Parallel `lines` + `line_timings` for a yt_subs candidate.
+/// Named to keep clippy::type_complexity happy on the return type.
+type YtSubsTimedLines = (Vec<String>, Vec<(u64, u64)>);
+
+fn find_yt_subs_with_timing(candidates: &[CandidateText]) -> Option<YtSubsTimedLines> {
     candidates.iter().find_map(|c| {
         if c.source == "yt_subs" && c.has_timing {
             let timings = c.line_timings.clone()?;
