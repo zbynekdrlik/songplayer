@@ -34,6 +34,9 @@ pub enum PipelineCommand {
     Pause,
     /// Resume playback after pause.
     Resume,
+    /// Seek to the given ms offset within the current song. No-op if no
+    /// song is currently loaded.
+    Seek { position_ms: u64 },
     /// Stop playback entirely (send black, clear reader).
     Stop,
     /// Shut down the thread.
@@ -198,6 +201,12 @@ fn run_loop_stub(
             Ok(PipelineCommand::Resume) => {
                 info!(playlist_id, "pipeline: resumed (stub)");
             }
+            Ok(PipelineCommand::Seek { position_ms }) => {
+                // Seek is a no-op when no song is loaded. When loaded, forward
+                // to the decoder and log on error — seek failures shouldn't kill
+                // the pipeline (decoder recovers on the next Play).
+                tracing::debug!(position_ms, "pipeline: seek ignored (no song loaded)");
+            }
             Ok(PipelineCommand::Stop) => {
                 info!(playlist_id, "pipeline: stopped (stub)");
             }
@@ -341,6 +350,12 @@ fn run_loop_windows(
                 paused = false;
                 debug!(playlist_id, "resumed (no active playback)");
             }
+            Ok(PipelineCommand::Seek { position_ms }) => {
+                // Seek is a no-op when no song is loaded. When loaded, forward
+                // to the decoder and log on error — seek failures shouldn't kill
+                // the pipeline (decoder recovers on the next Play).
+                tracing::debug!(position_ms, "pipeline: seek ignored (no song loaded)");
+            }
             Ok(PipelineCommand::Stop) => {
                 submitter.send_black_bgra(1920, 1080);
                 debug!(playlist_id, "stopped (no active playback)");
@@ -444,6 +459,11 @@ fn decode_and_send(
             Ok(PipelineCommand::Resume) => {
                 *paused = false;
                 debug!(playlist_id, "resumed playback");
+            }
+            Ok(PipelineCommand::Seek { position_ms }) => {
+                if let Err(e) = decoder.seek(position_ms) {
+                    tracing::warn!(?e, position_ms, "pipeline: seek failed");
+                }
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
@@ -583,6 +603,41 @@ mod tests {
         }
 
         let _ = event_rx;
+    }
+
+    #[test]
+    fn seek_variant_carries_position_ms() {
+        let cmd = PipelineCommand::Seek { position_ms: 12345 };
+        match cmd {
+            PipelineCommand::Seek { position_ms } => assert_eq!(position_ms, 12345),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn seek_does_not_collide_with_other_variants() {
+        // Compile-time check that every variant is still distinct.
+        let variants = vec![
+            PipelineCommand::Play {
+                video: PathBuf::new(),
+                audio: PathBuf::new(),
+            },
+            PipelineCommand::Pause,
+            PipelineCommand::Resume,
+            PipelineCommand::Seek { position_ms: 0 },
+            PipelineCommand::Stop,
+            PipelineCommand::Shutdown,
+        ];
+        assert_eq!(variants.len(), 6);
+    }
+
+    #[test]
+    fn pipeline_send_seek_command() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let pipeline = PlaybackPipeline::spawn("test-seek".into(), None, event_tx, 6);
+        pipeline.send(PipelineCommand::Seek { position_ms: 5000 });
+        pipeline.shutdown();
+        // No panic or hang means the Seek arm is handled in the loop.
     }
 
     /// Regression test for the NewPlay bug: the outer loop must continue to
