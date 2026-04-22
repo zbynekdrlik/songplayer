@@ -734,3 +734,34 @@ async fn list_lyrics_songs_exposes_suppress_resolume_en() {
         "video 2 must serialize suppress_resolume_en=false"
     );
 }
+
+// Mutation-testing regression: the `Ok(res) if res.rows_affected() == 0`
+// guard was replaced with `false` and not caught, meaning a PATCH to a
+// non-existent video_id returned 204 instead of 404. Pin the 404 outcome.
+#[tokio::test]
+async fn patch_video_returns_404_for_missing_video_id() {
+    let state = test_state().await;
+    let app = app(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/videos/99999")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&serde_json::json!({
+                        "suppress_resolume_en": true
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "PATCH on a non-existent video must 404, not 204"
+    );
+}
