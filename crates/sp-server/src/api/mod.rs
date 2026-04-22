@@ -38,6 +38,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/playlists/{id}/videos",
             axum::routing::get(routes::list_videos),
         )
+        .route(
+            "/api/v1/videos/{id}",
+            axum::routing::patch(routes::patch_video),
+        )
         // Playback
         .route(
             "/api/v1/playback/{playlist_id}/play",

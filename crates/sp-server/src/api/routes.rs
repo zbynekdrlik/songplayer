@@ -328,6 +328,43 @@ pub async fn list_videos(State(state): State<AppState>, Path(id): Path<i64>) -> 
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PatchVideoReq {
+    #[serde(default)]
+    pub suppress_resolume_en: Option<bool>,
+}
+
+/// Update mutable per-video flags. Today: only `suppress_resolume_en`.
+/// Returns 204 on success, 404 if the video id doesn't exist, 400 if the
+/// request body has no actionable fields.
+pub async fn patch_video(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<PatchVideoReq>,
+) -> impl IntoResponse {
+    let Some(flag) = req.suppress_resolume_en else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "request body must include at least one patchable field",
+        )
+            .into_response();
+    };
+    match sqlx::query("UPDATE videos SET suppress_resolume_en = ? WHERE id = ?")
+        .bind(flag as i32)
+        .bind(video_id)
+        .execute(&state.pool)
+        .await
+    {
+        Ok(res) if res.rows_affected() == 0 => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Playback endpoints
 // ---------------------------------------------------------------------------

@@ -517,3 +517,37 @@ async fn position_for_video_lookup() {
         .unwrap();
     assert_eq!(missing, None);
 }
+
+#[tokio::test]
+async fn video_row_carries_suppress_resolume_en() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, suppress_resolume_en) \
+         VALUES (1, 'yes_abc', 1), (1, 'no_xyz', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let videos = crate::db::models::get_videos_for_playlist(&pool, 1)
+        .await
+        .expect("fetch");
+    let yes = videos
+        .iter()
+        .find(|v| v.youtube_id == "yes_abc")
+        .expect("yes row");
+    assert!(yes.suppress_resolume_en, "yes_abc must have flag=true");
+    let no = videos
+        .iter()
+        .find(|v| v.youtube_id == "no_xyz")
+        .expect("no row");
+    assert!(!no.suppress_resolume_en, "no_xyz must have flag=false");
+}

@@ -82,7 +82,8 @@ pub async fn get_videos_for_playlist(
 ) -> Result<Vec<Video>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, playlist_id, youtube_id, title, song, artist,
-                duration_ms, file_path, normalized, gemini_failed
+                duration_ms, file_path, normalized, gemini_failed,
+                suppress_resolume_en
          FROM videos WHERE playlist_id = ? ORDER BY id",
     )
     .bind(playlist_id)
@@ -105,7 +106,8 @@ pub async fn upsert_video(
          VALUES (?, ?, ?)
          ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title
          RETURNING id, playlist_id, youtube_id, title, song, artist,
-                   duration_ms, file_path, normalized, gemini_failed",
+                   duration_ms, file_path, normalized, gemini_failed,
+                   suppress_resolume_en",
     )
     .bind(playlist_id)
     .bind(youtube_id)
@@ -128,6 +130,7 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         cached: r.get::<Option<String>, _>("file_path").is_some(),
         normalized: r.get::<i32, _>("normalized") != 0,
         gemini_failed: r.get::<i32, _>("gemini_failed") != 0,
+        suppress_resolume_en: r.get::<i32, _>("suppress_resolume_en") != 0,
     }
 }
 
