@@ -4,6 +4,11 @@ pub mod autosub_provider;
 pub mod bootstrap;
 pub mod chunking;
 pub mod description_provider;
+pub mod gemini_chunks;
+pub mod gemini_client;
+pub mod gemini_parse;
+pub mod gemini_prompt;
+pub mod gemini_provider;
 pub mod lrclib;
 pub mod merge;
 pub mod orchestrator;
@@ -73,7 +78,84 @@ use sp_core::lyrics::LyricsTrack;
 ///   sorts all starts globally and counts ties, so v9 audit logs
 ///   reported 91% duplicates even though per-line output was clean.
 ///   v10 makes cross-line boundaries strictly increasing too.
-pub const LYRICS_PIPELINE_VERSION: u32 = 10;
+/// - v11: Gemini chunked lyrics provider (GeminiProvider) replaces
+///   qwen3 as the primary forced-alignment source. Provides more
+///   robust per-word timing on low-quality/noisy audio and better
+///   handling of edge cases. Existing songs with v10 or earlier
+///   output are re-queued for reprocessing under the new provider.
+/// - v12: Gemini provider gains HTTP 429/500/503 retry with exponential
+///   backoff (base 10 s, cap 60 s, max 4 attempts, honors Retry-After
+///   header) plus 1 s inter-chunk pacing. v11 silently dropped chunks
+///   on first 429 (Google's bulk-reprocess quota), causing ~18 songs
+///   to end up with `source="ensemble:autosub"` instead of
+///   `ensemble:gemini` and ~95 with `no_source`. v12 re-queues the
+///   entire catalog for a clean Gemini pass.
+/// - v13: Gemini alignment calls move from the direct API endpoint
+///   (billed against `gemini_api_key`) to the local CLIProxyAPI
+///   (`http://127.0.0.1:18787`), which is backed by an AI-Pro OAuth
+///   login. Quota is no longer the €10 API cap — it is the paid
+///   subscription tier via OAuth, which sustained the full-catalog
+///   reprocess in practice. Output format is byte-identical to v12;
+///   the stale bucket in `reprocess.rs::fetch_bucket_stale` adds a
+///   skip clause for rows where the source matches `%gemini%` and the
+///   pipeline version is already at 12 or higher, so songs whose v12
+///   Gemini result was already good stay untouched. Only autosub-
+///   fallback and no_source failures from v12 are retried under v13.
+/// - v14: (a) Reverts alignment transport from CLIProxyAPI OAuth back
+///   to the direct `generativelanguage.googleapis.com` API. The OAuth
+///   path turned out to be capped globally on Google's side
+///   (`MODEL_CAPACITY_EXHAUSTED` on `cloudcode-pa.googleapis.com` for
+///   the 3.x Pro preview models, public issue discussed in
+///   google-gemini/gemini-cli #24004/#24159 and AI Developers Forum
+///   thread 137168). (b) Introduces multi-key Gemini rotation — the
+///   `gemini_api_key` DB setting is now a comma-separated list of
+///   direct-API keys; `transcribe_rotating` in `gemini_provider.rs`
+///   starts at a sticky index, moves to the next key on HTTP 429,
+///   and fails only when every key is exhausted. (c) Moves EN→SK
+///   translation from Gemini to Claude via CLIProxyAPI using a
+///   short neutral prompt (no "lyrics"/"song"/"karaoke"/"church"
+///   wording — those tripped Claude's policy layer in v5). Gemini
+///   quota is reserved entirely for alignment.
+/// - v15: **Critical data-loss fix.** Every v11-v14 Gemini-only song
+///   shipped with `lines: []` in the persisted `_lyrics.json` file.
+///   `merge.rs::sanitize_track` had a `continue` branch that silently
+///   dropped every `LineTiming` whose `words` vector was empty — and
+///   `GeminiProvider` produces wordless lines (line-level timings
+///   only, word-level is deferred). 17 of 31 v11-v14 Gemini rows on
+///   win-resolume were empty as a result; the remaining 14 only had
+///   non-empty output because the multi-provider merge path
+///   contributed words from autosub. v15 changes the wordless
+///   branch to emit `LyricsLine { start_ms, end_ms, en, words: None }`
+///   with floor-clamped start for the cross-line strict-increasing
+///   invariant.
+/// - v16: Unregister `AutoSubProvider` from the worker's alignment
+///   provider list. Autosub has unreliable timing on sung music.
+/// - v17: Port Python prototype's `write_lyrics_json` finalize
+///   (end_ms clip, synthesized words, merge break).
+/// - v18: **Drop synthesized per-word timings.** Per explicit user
+///   direction the lyrics focus is line-level timing only. v17's
+///   even-distribution word synthesis caused the karaoke highlighter
+///   to animate at wrong moments on the wall — a 0.2 s word and a
+///   2 s word received the same duration under linear interpolation.
+///   v18 emits `words: None` for wordless provider output; the
+///   renderer falls back to line-level display (line text shown
+///   between `line.start_ms` and `line.end_ms`, no per-word
+///   highlight). The v17 end_ms clip and merge-break fixes stay in
+///   place — those are correct and don't depend on word-level data.
+///   Smart-skip tightened to `version >= 18`; every pre-v18 Gemini
+///   row is reprocessed so the persisted JSON drops the synthetic
+///   word arrays.
+pub const LYRICS_PIPELINE_VERSION: u32 = 18;
+
+/// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
+/// worker registers `GeminiProvider` in the provider list.
+pub const LYRICS_GEMINI_ENABLED: bool = true;
+
+/// Feature flag: enable the Qwen3 forced-alignment provider. When false, the
+/// worker skips registering it even if Python venv is available. Kept as a
+/// flag (not a code removal) so word-level work can revive qwen3 without a
+/// history rewrite.
+pub const LYRICS_QWEN3_ENABLED: bool = false;
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -194,10 +276,16 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v10() {
+    fn lyrics_pipeline_version_is_v18() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 10,
-            "version bump is the signal for catalog auto-reprocess; see CLAUDE.md history"
+            LYRICS_PIPELINE_VERSION, 18,
+            "v18 = drop synthetic per-word timings; ship words=None for wordless providers"
         );
+    }
+
+    #[test]
+    fn gemini_enabled_and_qwen3_disabled_by_default() {
+        assert!(super::LYRICS_GEMINI_ENABLED);
+        assert!(!super::LYRICS_QWEN3_ENABLED);
     }
 }

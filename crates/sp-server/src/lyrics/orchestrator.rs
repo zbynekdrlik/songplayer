@@ -98,7 +98,7 @@ impl Orchestrator {
             // Single shared helper for cross-line-aware sanitize — same
             // call site as `merge_provider_results`. Keeps the strict-
             // increasing-starts invariant in one place.
-            let lines = crate::lyrics::merge::sanitize_track(&pr.lines);
+            let lines = crate::lyrics::merge::sanitize_track(&pr.lines, ctx.duration_ms);
             let track = LyricsTrack {
                 version: 2,
                 source: format!("ensemble:{}", pr.provider_name),
@@ -137,6 +137,7 @@ impl Orchestrator {
                 &reference_text,
                 &reference_source,
                 &results,
+                ctx.duration_ms,
             )
             .await
             .context("ensemble merge failed")?

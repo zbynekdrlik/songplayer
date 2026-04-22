@@ -174,6 +174,7 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 - Changing a provider's algorithm (chunking, matcher, density gate thresholds)
 - Changing either Claude merge prompt (text reconciliation or timing merge)
 - Changing the reference-text-selection algorithm
+- Switching alignment-provider registration (e.g. toggling `LYRICS_GEMINI_ENABLED` or `LYRICS_QWEN3_ENABLED` in `mod.rs`)
 
 **Do NOT bump for:**
 - Bug fixes that produce identical output
@@ -192,6 +193,73 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
 - v8 (post-event): sanitize word timings in the merge layer — enforce monotonic start_ms, minimum 80ms per-word duration, no overlap with next word. Fixes blinking / stuck / out-of-sync karaoke observed during 2026-04-19 event. Primary provider (qwen3) sometimes emits zero-duration words, backward-in-time starts, and duplicate-start clusters; the sanitizer clamps these into well-formed timings before output.
 - v9 (post-event fixup): extend the sanitizer to the single-provider pass-through in the orchestrator. v8 only sanitized the multi-provider merge path, so `ensemble:qwen3` songs (autosub dropped) still shipped raw duplicate-start / zero-duration words. v9 calls `sanitize_word_timings` on both paths; measured post-v9, `duplicate_start_pct` converges to 0% across the whole catalog.
 - v10 (post-event fixup 2): thread `floor_start_ms` across line boundaries when sanitizing. v9 sanitized per-line but reset the start floor to 0 for each line, so two consecutive lines could share a word start_ms at their boundary. Since `compute_duplicate_start_pct` sorts word starts globally then counts ties, v9 audit logs reported 91% duplicates even though each line's output was individually clean. v10 makes cross-line boundaries strictly increasing.
+- v11 (#TBD): Gemini 3 Pro chunked transcription replaces qwen3 forced alignment
+  for line-level timing. Demucs-dereverbed vocal WAV is sliced into 60 s chunks
+  with 10 s overlap, each chunk transcribed independently via Google's
+  generativelanguage.googleapis.com API using the existing gemini_api_key.
+  `thinkingConfig.thinkingBudget = 2048` limits Gemini's reasoning budget to
+  avoid hallucinated-duplicate loops + timeouts observed on dense chorus audio.
+  Overlapping regions deduplicated by normalized-text match + 1.5 s start-time
+  agreement. Word-level timings deferred; qwen3 parked behind
+  `LYRICS_QWEN3_ENABLED=false`. Addresses the song-230 collapse from v10 where
+  untimed reference text caused qwen3 to cram an 11-min song into 10 s.
+- v12 (#TBD): Gemini provider gains HTTP 429/500/503 retry with exponential
+  backoff (base 10 s, cap 60 s, max 4 attempts, honors Retry-After header)
+  plus 1 s inter-chunk pacing. v11 silently dropped chunks on first 429
+  (Google's bulk-reprocess quota), causing ~18 songs to end up with
+  `source="ensemble:autosub"` instead of `ensemble:gemini` and ~95 with
+  `no_source`. v12 re-queues the entire catalog for a clean Gemini pass.
+- v13 (#TBD): Gemini alignment routes through the local CLIProxyAPI
+  (`http://127.0.0.1:18787`) instead of the direct Gemini API. CLIProxy
+  carries an AI-Pro OAuth login so quota is the paid subscription tier
+  instead of the €10 API cap that capped v12 mid-catalog. Output format
+  is byte-identical to v12, so the stale bucket in
+  `reprocess.rs::fetch_bucket_stale` skips any row where
+  `lyrics_source LIKE '%gemini%' AND lyrics_pipeline_version >= 12` —
+  songs Gemini already produced correctly under v12 stay untouched, only
+  autosub-fallback and `no_source` failures from v12 are retried under
+  v13. Override: `GEMINI_PROXY_URL` env var.
+- v14 (#TBD): Reverts alignment transport from CLIProxyAPI OAuth back to
+  the direct `generativelanguage.googleapis.com` API — the OAuth path
+  turned out globally capped by Google (`MODEL_CAPACITY_EXHAUSTED` on
+  `cloudcode-pa.googleapis.com` for 3.x Pro preview models; public issue
+  in google-gemini/gemini-cli #24004 and #24159). Adds multi-key Gemini
+  rotation: `gemini_api_key` is now a comma-separated list of direct-API
+  keys, and `transcribe_rotating` in `gemini_provider.rs` advances to
+  the next key on HTTP 429 — starts at a sticky index so subsequent
+  chunks skip already-exhausted keys. Moves EN→SK translation from
+  Gemini to Claude (CLIProxyAPI) with a short neutral prompt
+  (`translator.rs::build_prompt`).
+- v15 (#TBD): **Critical data-loss fix for Gemini output.**
+  `merge.rs::sanitize_track` had a `continue` branch that silently
+  dropped every `LineTiming` with `words: []`. Every v11-v14
+  Gemini-only song shipped with `lines: []`. v15 emits wordless
+  lines with their line-level timing (floor-clamped for the
+  strict-increasing invariant). Superseded by v16 for production
+  (v15 still allowed AutoSubProvider in ensemble).
+- v16 (#TBD): `AutoSubProvider` unregistered from alignment. YouTube
+  autosub has unreliable timing on sung music; with autosub in the
+  ensemble every Gemini-era row picked up either `ensemble:autosub`
+  (Gemini missing/429) or `ensemble:autosub+gemini` (Gemini present
+  but output diluted by autosub word timings). Per explicit user
+  direction autosub is banned from alignment. Gemini is now the
+  sole alignment provider.
+- v17 (#TBD): Port Python prototype's `write_lyrics_json` finalize
+  logic (end_ms clip, synthesized words, merge break). Superseded
+  by v18 — the word synthesis piece was reverted.
+- v18 (#TBD): Drop synthesized per-word timings. Per explicit user
+  direction (`feedback_line_timing_only.md`), the lyrics pipeline
+  focus is line-level timing only. v17's even-distribution word
+  synthesis caused the karaoke highlighter to animate at wrong
+  moments on the wall — a 0.2-second word and a 2-second word got
+  the same duration under linear interpolation, so the highlight
+  drifted from the actual sung timing within every line. v18
+  emits `LyricsLine.words = None` for wordless provider output;
+  the renderer falls back to line-level display. The v17 end_ms
+  clip and `merge_overlap` break fixes remain — those don't
+  depend on word-level data. Smart-skip tightened to
+  `version >= 18`; every pre-v18 Gemini row is reprocessed so
+  the persisted JSON drops its synthetic word arrays.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 

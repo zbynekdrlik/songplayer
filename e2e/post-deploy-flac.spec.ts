@@ -307,418 +307,97 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     }
   });
 
-  test("at least one lyrics JSON has word-level timestamps", async ({ request }) => {
-    // Post-deploy, the lyrics worker needs time to bootstrap the Python venv,
-    // download the 1.2 GB Qwen3-ForcedAligner model, and align the first song.
-    // Poll for up to 18 minutes; if no song ever produces word-level timestamps,
-    // fail loudly — the aligner is broken.
-    test.setTimeout(20 * 60 * 1000);
-
-    const hasWordLevel = async (): Promise<{ checked: number; found: boolean }> => {
-      const playlistsResp = await request.get("/api/v1/playlists");
-      if (!playlistsResp.ok()) return { checked: 0, found: false };
-      const playlists: PlaylistEntry[] = await playlistsResp.json();
-
-      let checked = 0;
-      for (const pl of playlists) {
-        const videosResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
-        if (!videosResp.ok()) continue;
-        const videos: VideoEntry[] = await videosResp.json();
-
-        for (const v of videos) {
-          if (checked >= 30) return { checked, found: false };
-          const lyricsResp = await request.get(`/api/v1/videos/${v.id}/lyrics`);
-          if (!lyricsResp.ok()) continue;
-          checked++;
-
-          const track = await lyricsResp.json();
-          if (!Array.isArray(track.lines)) continue;
-
-          // Strong assertion: at least one line must have ≥3 words with
-          // strictly increasing start_ms AND the first word's start_ms
-          // within a reasonable window of the line's own start_ms. This
-          // catches the bug where the aligner emits runs of identical
-          // timestamps (degenerate karaoke — jumps from first word to
-          // last with nothing in between) that a naive `end_ms >= start_ms`
-          // check passes.
-          const hasProgressiveWords = track.lines.some((l: any) => {
-            if (!Array.isArray(l.words) || l.words.length < 3) return false;
-            const w = l.words;
-            // All words well-formed
-            for (const ww of w) {
-              if (
-                typeof ww.text !== "string" ||
-                typeof ww.start_ms !== "number" ||
-                typeof ww.end_ms !== "number" ||
-                ww.end_ms < ww.start_ms
-              ) {
-                return false;
-              }
-            }
-            // Strictly increasing start_ms across the whole line
-            for (let i = 1; i < w.length; i++) {
-              if (w[i].start_ms <= w[i - 1].start_ms) return false;
-            }
-            // First word within ±2s of the LRCLIB line start
-            if (typeof l.start_ms === "number") {
-              const delta = Math.abs(w[0].start_ms - l.start_ms);
-              if (delta > 2000) return false;
-            }
-            // Inter-word gaps must vary: real singing has irregular timing,
-            // a post-processor that synthesizes perfectly-even spacing has
-            // stddev ≈ 0. Require ≥30 ms stddev so the synthetic fallback
-            // can never satisfy this assertion on its own.
-            const gaps: number[] = [];
-            for (let i = 1; i < w.length; i++) {
-              gaps.push(w[i].start_ms - w[i - 1].start_ms);
-            }
-            const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-            const variance =
-              gaps.map((g) => (g - mean) ** 2).reduce((a, b) => a + b, 0) /
-              gaps.length;
-            const stddev = Math.sqrt(variance);
-            if (stddev < 30) return false;
-            return true;
-          });
-          if (hasProgressiveWords) return { checked, found: true };
-        }
-      }
-      return { checked, found: false };
-    };
-
-    await expect
-      .poll(
-        async () => {
-          const { checked, found } = await hasWordLevel();
-          console.log(
-            `[word-level poll] checked=${checked} found=${found} @ ${new Date().toISOString()}`,
-          );
-          return found;
-        },
-        {
-          message:
-            "No video had word-level timestamps after polling for 18 minutes. " +
-            "If the aligner ran, at least one song should have track.lines[i].words populated.",
-          timeout: 18 * 60 * 1000,
-          intervals: [30_000],
-        },
-      )
-      .toBe(true);
-  });
-
-  test("song #148 Planetshakers 'Get This Party Started' has real word-level alignment", async ({
+  test("at least one song has v18+ Gemini line-level lyrics (replaces the qwen3 tests)", async ({
     request,
   }) => {
-    // Poll budget covers cold-start bootstrap (~7 min for model downloads)
-    // PLUS the worker chewing through the queue serially up to id 148.
-    // Once #148 is persisted as ensemble:qwen3 (or ensemble:qwen3+autosub),
-    // a subsequent deploy at the same LYRICS_PIPELINE_VERSION reuses the
-    // Short wall-clock budget. Previously 63 min (race with reprocess
-    // after version bump); now 3 min — if #148 isn't already at the
-    // current pipeline version when the test runs, we SKIP rather
-    // than block CI for hours waiting on a live reprocess queue.
-    // Correctness of the sanitizer is proven by unit tests on
-    // `sanitize_word_timings`; this E2E only adds value when it can
-    // run against a fresh song without blocking deploys.
+    // Post-PR #48 (v18+) the pipeline is line-level only and single-
+    // provider Gemini. This test asserts the new architecture is actually
+    // producing usable output on the deployed server:
+    //   - at least one track has `source` starting with "ensemble:gemini"
+    //     (confirms the Gemini provider registered and ran)
+    //   - line timings are well-formed: monotonic start_ms, end_ms >=
+    //     start_ms, non-empty `en` text
+    //   - `words` is absent / null for these tracks (confirms v18's drop
+    //     of synthesized per-word timings — if this ever flips back, the
+    //     karaoke wall will drift again)
+    //
+    // Runs the same way as the other post-deploy tests: read catalog
+    // one-shot, skip gracefully if the reprocess queue hasn't reached
+    // any song yet, otherwise assert the shape of what's persisted.
     test.setTimeout(3 * 60 * 1000);
 
-    // Match by song + artist rather than YouTube ID — the track may be
-    // uploaded multiple times and we just need ONE copy to hit the
-    // YT-subs chunked path.
-    const SONG_NEEDLE = "party started";
-    const ARTIST_NEEDLE = "planetshaker";
-    // Empirically observed on win-resolume against the live YT manual
-    // subtitles: 27 SRT events, 214 words. Thresholds set below the
-    // observed counts so a small upstream subtitle edit doesn't flake.
-    const MIN_LINES = 25;
-    const MIN_TOTAL_WORDS = 200;
-    const MAX_DUPLICATE_PCT = 10;
-    const MIN_STDDEV_LINES = 10;
-    const MIN_STDDEV_MS = 50;
-
     interface Word {
-      text: string;
       start_ms: number;
       end_ms: number;
     }
     interface Line {
       start_ms?: number;
       end_ms?: number;
-      en: string;
-      words?: Word[];
+      en?: string;
+      words?: Word[] | null;
     }
     interface Track {
       source?: string;
-      lines: Line[];
+      lines?: Line[];
     }
-
-    function duplicateStartPct(line: Line): number {
-      const w = line.words ?? [];
-      if (w.length < 2) return 0;
-      let dup = 0;
-      for (let i = 1; i < w.length; i++) {
-        if (w[i].start_ms === w[i - 1].start_ms) dup += 1;
-      }
-      return (100 * dup) / (w.length - 1);
-    }
-
-    function gapStddevMs(line: Line): number {
-      const w = line.words ?? [];
-      if (w.length < 3) return 0;
-      const gaps: number[] = [];
-      for (let i = 1; i < w.length; i++) gaps.push(w[i].start_ms - w[i - 1].start_ms);
-      const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-      const variance =
-        gaps.map((g) => (g - mean) ** 2).reduce((a, b) => a + b, 0) / gaps.length;
-      return Math.sqrt(variance);
-    }
-
     interface CatalogSong {
       video_id: number;
-      song: string | null;
-      artist: string | null;
       source: string | null;
       pipeline_version: number;
       has_lyrics: boolean;
       is_stale: boolean;
     }
 
-    async function findFreshTrack(): Promise<Track | null> {
-      // Use the catalog endpoint so we can gate on `is_stale=false`.
-      // Without this, the test reads cached v{N-1} lyrics and the
-      // content assertions fail against whatever the old pipeline
-      // produced — which might be a bare `yt_subs` fallback instead
-      // of the current-version ensemble output.
-      const sl = await request.get("/api/v1/lyrics/songs");
-      if (!sl.ok()) return null;
-      const songs: CatalogSong[] = await sl.json();
-      const hit = songs.find(
-        (s) =>
-          !s.is_stale &&
-          s.has_lyrics &&
-          (s.song ?? "").toLowerCase().includes(SONG_NEEDLE) &&
-          (s.artist ?? "").toLowerCase().includes(ARTIST_NEEDLE),
-      );
-      if (!hit) return null;
-      const lyricsResp = await request.get(`/api/v1/videos/${hit.video_id}/lyrics`);
-      if (!lyricsResp.ok()) return null;
-      return (await lyricsResp.json()) as Track;
-    }
-
-    // Read the current state once — NO poll-and-wait. If #148 hasn't
-    // reprocessed under the current pipeline version yet (reprocess
-    // queue hasn't reached it), skip gracefully.
-    const track = await findFreshTrack();
-    test.skip(
-      track === null,
-      "#148 not yet at current pipeline version — reprocess queue hasn't " +
-        "reached it (expected after a LYRICS_PIPELINE_VERSION bump). " +
-        "Sanitizer correctness is covered by sanitize_word_timings unit " +
-        "tests; this E2E only validates live output when available.",
+    const sl = await request.get("/api/v1/lyrics/songs");
+    expect(sl.status()).toBe(200);
+    const songs: CatalogSong[] = await sl.json();
+    const geminiSongs = songs.filter(
+      (s) =>
+        s.has_lyrics &&
+        !s.is_stale &&
+        typeof s.source === "string" &&
+        s.source.startsWith("ensemble:gemini"),
     );
 
-    // Gate 1: source must be the ensemble path with qwen3 running (word-level
-    // alignment). Post-PR#38 the source label is `ensemble:qwen3` (single
-    // provider) or `ensemble:qwen3+autosub` / `ensemble:autosub+qwen3` (2-provider
-    // merge). A bare `yt_subs` or `lrclib` means the worker fell back to
-    // line-level lyrics with no word timings — that's the failure mode we gate
-    // against.
-    expect(
-      track!.source?.includes("qwen3") && track!.source?.startsWith("ensemble:"),
-      `Expected ensemble source including qwen3 (proves word-level ran). Got "${track!.source}". ` +
-        `A bare "yt_subs" or "lrclib" means #148 did NOT get word-level karaoke.`,
-    ).toBe(true);
+    test.skip(
+      geminiSongs.length === 0,
+      "no ensemble:gemini song at current pipeline version yet — reprocess " +
+        "queue hasn't produced any. Sanitizer correctness is covered by " +
+        "unit tests in crates/sp-server/src/lyrics/merge_tests.rs.",
+    );
 
-    // Gate 2: line count plausible for this song.
-    expect(track!.lines.length).toBeGreaterThanOrEqual(MIN_LINES);
+    const tested: string[] = [];
+    for (const s of geminiSongs.slice(0, 3)) {
+      const lr = await request.get(`/api/v1/videos/${s.video_id}/lyrics`);
+      expect(lr.status()).toBe(200);
+      const track: Track = await lr.json();
 
-    // Gate 3: every line must have a populated words array.
-    for (const [i, line] of track!.lines.entries()) {
+      expect(track.source, `video ${s.video_id} source on track payload`).toMatch(
+        /^ensemble:gemini/,
+      );
       expect(
-        Array.isArray(line.words) && line.words!.length > 0,
-        `Line ${i} ("${line.en}") has no words — assembly/align failed for this chunk.`,
+        Array.isArray(track.lines) && track.lines.length > 0,
+        `video ${s.video_id} must have at least one line`,
       ).toBe(true);
-    }
 
-    // Gate 4: total word count >= threshold.
-    const totalWords = track!.lines.reduce(
-      (sum, l) => sum + (l.words?.length ?? 0),
-      0,
-    );
-    expect(
-      totalWords,
-      `Total word count ${totalWords} below threshold ${MIN_TOTAL_WORDS}`,
-    ).toBeGreaterThanOrEqual(MIN_TOTAL_WORDS);
-
-    // Gate 5: duplicate-start percentage across the whole track < threshold.
-    const perLinePcts = track!.lines.map(duplicateStartPct);
-    const allDuplicate =
-      perLinePcts.reduce(
-        (s, p, i) => s + p * (track!.lines[i].words?.length ?? 0),
-        0,
-      ) / Math.max(1, totalWords);
-    expect(
-      allDuplicate,
-      `Weighted duplicate_start_pct ${allDuplicate.toFixed(2)}% exceeds ${MAX_DUPLICATE_PCT}% — ` +
-        `alignment is degenerate (multiple words share start_ms on many lines).`,
-    ).toBeLessThan(MAX_DUPLICATE_PCT);
-
-    // Gate 6: >= MIN_STDDEV_LINES lines show real inter-word timing variation.
-    const stddevLines = track!.lines.filter(
-      (l) => gapStddevMs(l) >= MIN_STDDEV_MS,
-    ).length;
-    expect(
-      stddevLines,
-      `Only ${stddevLines} lines have gap_stddev >= ${MIN_STDDEV_MS}ms ` +
-        `(need >= ${MIN_STDDEV_LINES}). Even spacing is a signature of a synthetic ` +
-        `post-processor, not a real aligner.`,
-    ).toBeGreaterThanOrEqual(MIN_STDDEV_LINES);
-
-    console.log(
-      `#148 alignment OK: lines=${track!.lines.length} ` +
-        `words=${totalWords} dup%=${allDuplicate.toFixed(2)} ` +
-        `stddev_lines=${stddevLines}`,
-    );
-  });
-
-  test("YT-subs quality floor: at least 60% of ensemble-qwen3 songs have weighted duplicate < 15%", async ({
-    request,
-  }) => {
-    // Populate gradually as the worker processes the queue. Budget must
-    // be long enough that most YT-subs songs have been processed — the
-    // worker handles ~3.5 min per yt_subs song serially, and the
-    // catalog on win-resolume has ~24 such songs.
-    // Short wall-clock budget. The floor check is valuable WHEN there
-    // are enough fresh-version songs to score; when there aren't (right
-    // after a pipeline-version bump), skip gracefully rather than
-    // block CI waiting on live reprocess. Sanitizer correctness lives
-    // in unit tests on `sanitize_word_timings`.
-    test.setTimeout(3 * 60 * 1000);
-
-    interface Word {
-      start_ms: number;
-      end_ms: number;
-    }
-    interface Line {
-      en: string;
-      words?: Word[];
-    }
-    interface Track {
-      source?: string;
-      lines: Line[];
-    }
-
-    function weightedDup(track: Track): number {
-      const total = track.lines.reduce(
-        (s, l) => s + (l.words?.length ?? 0),
-        0,
-      );
-      if (total === 0) return 0;
-      let sumDupXWords = 0;
-      for (const l of track.lines) {
-        const w = l.words ?? [];
-        if (w.length < 2) continue;
-        let dup = 0;
-        for (let i = 1; i < w.length; i++) {
-          if (w[i].start_ms === w[i - 1].start_ms) dup += 1;
-        }
-        const pct = (100 * dup) / (w.length - 1);
-        sumDupXWords += pct * w.length;
+      let prev = -1;
+      for (const [i, l] of track.lines!.entries()) {
+        expect(typeof l.en === "string" && l.en.length > 0, `line ${i} empty`).toBe(true);
+        expect(typeof l.start_ms === "number", `line ${i} missing start_ms`).toBe(true);
+        expect(typeof l.end_ms === "number", `line ${i} missing end_ms`).toBe(true);
+        expect(l.end_ms! >= l.start_ms!, `line ${i} end before start`).toBe(true);
+        expect(l.start_ms! >= prev, `line ${i} start_ms non-monotonic`).toBe(true);
+        // v18 invariant: wordless providers emit words=None (serialized
+        // as absent / null). If a future change re-synthesizes per-word
+        // timings by even-distribution, the karaoke wall regresses.
+        expect(
+          l.words === undefined || l.words === null,
+          `line ${i} has unexpected words field (v18+ must be line-level only)`,
+        ).toBe(true);
+        prev = l.start_ms!;
       }
-      return sumDupXWords / total;
+      tested.push(`#${s.video_id}`);
     }
-
-    interface SongListItem {
-      video_id: number;
-      source: string | null;
-      pipeline_version: number;
-      has_lyrics: boolean;
-      is_stale: boolean;
-    }
-
-    async function surveyAllYtSubsQwen3(): Promise<Map<number, number>> {
-      const scored = new Map<number, number>();
-      // Use the catalog endpoint which exposes `pipeline_version` and
-      // `is_stale` so we can skip songs that haven't yet reprocessed
-      // under the current pipeline version. Without this filter, a
-      // post-deploy E2E right after a LYRICS_PIPELINE_VERSION bump
-      // reads v{N-1} cached lyrics (full of the garbage timings v{N}
-      // is supposed to fix) and the floor check flakes for hours.
-      const sl = await request.get("/api/v1/lyrics/songs");
-      if (!sl.ok()) return scored;
-      const songs: SongListItem[] = await sl.json();
-      for (const s of songs) {
-        if (!s.has_lyrics || s.is_stale) continue;
-        // Accept any ensemble source that includes qwen3 (single-provider
-        // pass-through OR 2-provider merge). Bare yt_subs/lrclib = line-level
-        // fallback, excluded from the word-level quality floor.
-        if (
-          !s.source?.startsWith("ensemble:") ||
-          !s.source.includes("qwen3")
-        ) {
-          continue;
-        }
-        const lr = await request.get(`/api/v1/videos/${s.video_id}/lyrics`);
-        if (!lr.ok()) continue;
-        const track = (await lr.json()) as Track;
-        scored.set(s.video_id, weightedDup(track));
-      }
-      return scored;
-    }
-
-    // Wait for at least 8 ensemble-qwen3 songs before scoring the floor
-    // — any fewer and the ratio is too noisy. Given ~24 YT-subs songs
-    // in the cache, 8 is 1/3 of the set.
-    //
-    // FLOOR_PASS_RATIO was 0.8 when the filter matched only `yt_subs+qwen3`
-    // (the OLD golden path: manual YT subtitles + Qwen3 alignment). Post-PR #38
-    // the set broadened to include LRCLIB-sourced songs that now also get
-    // word-level alignment — and LRCLIB lyric text doesn't always match the
-    // sung audio perfectly, so alignment is genuinely messier on that subset.
-    // Measured on win-resolume after v3 deploy: 69.2% pass. Floor lowered to
-    // 60% to match the new broader baseline. Should climb back up as the
-    // confidence-weighted merge (v3) rolls through and Claude text-merge
-    // improves reference text quality on LRCLIB-sourced songs.
-    const MIN_SONGS = 8;
-    const FLOOR_QUALITY_PCT = 15.0;
-    const FLOOR_PASS_RATIO = 0.6;
-
-    let scored = new Map<number, number>();
-    // One-shot survey — don't block CI polling for the queue to drain.
-    scored = await surveyAllYtSubsQwen3();
-    console.log(
-      `[yt-subs floor] ${scored.size} ensemble-qwen3 songs at current pipeline version`,
-    );
-    test.skip(
-      scored.size < MIN_SONGS,
-      `Only ${scored.size} < ${MIN_SONGS} ensemble-qwen3 songs at current ` +
-        `pipeline version; floor is too noisy to measure. Likely a recent ` +
-        `LYRICS_PIPELINE_VERSION bump — reprocess queue hasn't converged yet. ` +
-        `Sanitizer correctness is proven by sanitize_word_timings unit tests; ` +
-        `this floor check only runs when the live sample is big enough.`,
-    );
-
-    const passing: string[] = [];
-    const failing: string[] = [];
-    for (const [id, dup] of scored.entries()) {
-      const bucket = dup < FLOOR_QUALITY_PCT ? passing : failing;
-      bucket.push(`#${id}:${dup.toFixed(1)}%`);
-    }
-    const ratio = passing.length / scored.size;
-    console.log(
-      `yt-subs floor: ${passing.length}/${scored.size} = ${(ratio * 100).toFixed(1)}% ` +
-        `of ensemble-qwen3 songs have weighted dup < ${FLOOR_QUALITY_PCT}%`,
-    );
-    console.log(`  PASSING (${passing.length}): ${passing.join(", ")}`);
-    if (failing.length > 0) {
-      console.log(`  FAILING (${failing.length}): ${failing.join(", ")}`);
-    }
-
-    expect(
-      ratio,
-      `Only ${(ratio * 100).toFixed(1)}% of ensemble-qwen3 songs clear the ` +
-        `${FLOOR_QUALITY_PCT}% duplicate-start threshold (floor requires ${FLOOR_PASS_RATIO * 100}%). ` +
-        `Failing: ${failing.join(", ")}`,
-    ).toBeGreaterThanOrEqual(FLOOR_PASS_RATIO);
+    console.log(`v18+ Gemini check OK on: ${tested.join(", ")}`);
   });
 });

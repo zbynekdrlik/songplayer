@@ -118,7 +118,13 @@ impl ObsClient {
         let loop_event_tx = event_tx.clone();
 
         tokio::spawn(async move {
+            // Aggressive reconnect policy. During a live event, OBS may blip
+            // (scene collection switch, briefly unresponsive, etc.) and a
+            // 30-second hold-off means lyrics + titles + scene detection are
+            // dark for 30+ seconds every time. Cap at 5 s so reconnect is
+            // human-imperceptible. First attempt is immediate (start=1 s).
             let mut backoff = Duration::from_secs(1);
+            const MAX_BACKOFF: Duration = Duration::from_secs(5);
 
             loop {
                 tokio::select! {
@@ -158,7 +164,7 @@ impl ObsClient {
 
                 info!("Reconnecting to OBS in {backoff:?}");
                 tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(Duration::from_secs(30));
+                backoff = (backoff * 2).min(MAX_BACKOFF);
             }
         });
 
@@ -263,15 +269,33 @@ async fn connect_and_run(
     let _ = event_tx.send(ObsEvent::Connected);
 
     // Rebuild the NDI source map from the DB + OBS inputs before we start
-    // listening for scene-change events, so the very first scene lookup
-    // already knows which OBS input names correspond to which playlists.
-    // If the rebuild fails (transient OBS query error), `apply_rebuild_result`
-    // preserves the previous map instead of wiping it.
-    apply_rebuild_result(
-        ndi_sources,
-        rebuild_ndi_source_map(&mut write, &mut read, pool).await,
-    )
-    .await;
+    // listening for scene-change events.
+    //
+    // Retry-on-empty: observed in production — immediately after OBS
+    // reconnect (or after win-resolume reboot when OBS is still coming
+    // up), the first GetInputList call can return nothing or an empty
+    // input array while OBS finishes populating its state. Without retry
+    // the map stays at size=0, scene detection silently fails, and the
+    // only fix was a manual SongPlayer restart — unacceptable mid-event.
+    // Up to 5 attempts with 2 s spacing (10 s total) gives OBS time to
+    // settle without blocking startup if it legitimately has no inputs.
+    for attempt in 1..=5 {
+        let result = rebuild_ndi_source_map(&mut write, &mut read, pool).await;
+        let is_empty = result.as_ref().map(|m| m.is_empty()).unwrap_or(true);
+        apply_rebuild_result(ndi_sources, result).await;
+        if !is_empty {
+            break;
+        }
+        if attempt < 5 {
+            warn!("NDI source map empty after rebuild (attempt {attempt}/5); retrying in 2s");
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        } else {
+            warn!(
+                "NDI source map still empty after 5 rebuild attempts — scene \
+                 detection will not work until the next external rebuild signal"
+            );
+        }
+    }
 
     // Fetch initial scene.
     let request_id = uuid::Uuid::new_v4().to_string();

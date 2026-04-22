@@ -4,7 +4,7 @@
 //!   1. gather_sources: YT manual subs + LRCLIB + autosub json3 in parallel.
 //!   2. Vocal isolation (Qwen3 provider; best-effort).
 //!   3. Orchestrator::process_song → LyricsTrack.
-//!   4. SK translation (Claude → Gemini fallback).
+//!   4. SK translation (Claude only; Gemini quota reserved for alignment).
 //!   5. Persist JSON + DB row with pipeline_version + quality_score.
 
 use anyhow::Result;
@@ -360,6 +360,24 @@ impl LyricsWorker {
     #[cfg_attr(test, mutants::skip)]
     async fn process_next(&self) {
         use crate::lyrics::{LYRICS_PIPELINE_VERSION, reprocess::get_next_video_for_lyrics};
+
+        // Operational kill-switch. Read each tick so a live flip takes
+        // effect within the 5 s worker poll window — essential during
+        // events where Demucs/Gemini contention for CPU+GPU on the
+        // shared win-resolume PC has caused reboots. Default "true" so
+        // existing deploys and upgrades preserve current behavior.
+        let enabled = crate::db::models::get_setting(&self.pool, "lyrics_worker_enabled")
+            .await
+            .ok()
+            .flatten()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .map(|v| !(v == "false" || v == "0" || v == "off" || v == "no"))
+            .unwrap_or(true);
+        if !enabled {
+            debug!("worker: lyrics_worker_enabled=false, skipping this tick");
+            return;
+        }
+
         let row = match get_next_video_for_lyrics(&self.pool, LYRICS_PIPELINE_VERSION).await {
             Ok(Some(r)) => r,
             Ok(None) => {
@@ -415,34 +433,27 @@ impl LyricsWorker {
         .await
     }
 
-    /// Extract SK translation logic. Claude first (framed as localization task), Gemini fallback.
-    // Orchestrates Claude-then-Gemini translator calls; each underlying translator has its own test surface.
+    /// EN→SK translation via Claude. No Gemini fallback — Gemini quota is
+    /// reserved for alignment (which dominates call volume). If Claude fails,
+    /// the track ships without translation; the UI degrades gracefully.
     #[cfg_attr(test, mutants::skip)]
     async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
-        let mut translated = false;
-        if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, track).await {
-                Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                        line.sk = if sk_text.is_empty() {
-                            None
-                        } else {
-                            Some(sk_text)
-                        };
-                    }
-                    track.language_translation = "sk".into();
-                    translated = true;
+        let Some(ai_client) = &self.ai_client else {
+            return;
+        };
+        match translator::translate_via_claude(ai_client, track).await {
+            Ok(translations) => {
+                for (line, sk_text) in track.lines.iter_mut().zip(translations) {
+                    line.sk = if sk_text.is_empty() {
+                        None
+                    } else {
+                        Some(sk_text)
+                    };
                 }
-                Err(e) => {
-                    warn!("worker: Claude translation failed for {youtube_id}: {e}");
-                }
+                track.language_translation = "sk".into();
             }
-        }
-        if !translated && !self.gemini_api_key.is_empty() {
-            if let Err(e) =
-                translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, track).await
-            {
-                warn!("worker: Gemini translation fallback failed for {youtube_id}: {e}");
+            Err(e) => {
+                warn!("worker: Claude translation failed for {youtube_id}: {e}");
             }
         }
     }
@@ -488,8 +499,7 @@ impl LyricsWorker {
     #[cfg_attr(test, mutants::skip)]
     async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
         use crate::lyrics::{
-            LYRICS_PIPELINE_VERSION, autosub_provider::AutoSubProvider, orchestrator::Orchestrator,
-            qwen3_provider::Qwen3Provider,
+            LYRICS_PIPELINE_VERSION, orchestrator::Orchestrator, qwen3_provider::Qwen3Provider,
         };
 
         let video_id = row.id;
@@ -571,16 +581,80 @@ impl LyricsWorker {
         };
         ctx.clean_vocal_path = clean_vocal;
 
-        // Build provider list. AutoSubProvider always registered; Qwen3Provider only
-        // when Python venv + clean vocal are available.
+        // Build provider list.
+        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED AND at least one
+        //   direct-API key is configured in `gemini_api_key` (comma-separated list).
+        //   v14 transcribe_rotating cycles keys on HTTP 429.
+        // - Qwen3Provider: registered only when LYRICS_QWEN3_ENABLED AND Python venv +
+        //   clean vocal are available. Parked off; revived when word-level work resumes.
+        // - AutoSubProvider: NOT registered as an alignment source (v16). Autosub's
+        //   timing on sung music is unreliable and contaminated ensemble outputs
+        //   in v11-v15; per user direction it is banned from alignment.
+        use crate::lyrics::{
+            LYRICS_GEMINI_ENABLED, LYRICS_QWEN3_ENABLED, gemini_client::GeminiClient,
+            gemini_provider::GeminiProvider,
+        };
         let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
-        providers.push(Box::new(AutoSubProvider));
-        if let Some(python) = python_for_qwen3 {
-            providers.push(Box::new(Qwen3Provider {
-                python_path: python,
-                script_path: self.script_path.clone(),
-                models_dir: self.models_dir.clone(),
-            }));
+        // v16: AutoSubProvider is NOT registered as an alignment provider.
+        // YouTube auto-captions have unreliable timing on sung music and
+        // contaminate `ensemble:*` source tags. Autosub stays available for
+        // text-candidate gathering in `gather_sources` (where it feeds the
+        // description/text pool), but NEVER as an alignment source. See the
+        // `feedback_no_autosub` memory for the user's explicit direction.
+        if LYRICS_GEMINI_ENABLED {
+            let ffmpeg_name = if cfg!(windows) {
+                "ffmpeg.exe"
+            } else {
+                "ffmpeg"
+            };
+            let ffmpeg_path = self.tools_dir.join(ffmpeg_name);
+            let model = std::env::var("GEMINI_LYRICS_MODEL")
+                .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
+            // v14: direct API with one client per key. The `gemini_api_key`
+            // DB setting is a comma-separated list of API keys; empty entries
+            // and whitespace are stripped. `max_attempts=1` per client so a
+            // 429 fails fast and the provider-level rotation in
+            // `transcribe_rotating` advances to the next key immediately.
+            let keys: Vec<String> = self
+                .gemini_api_key
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let clients: Vec<GeminiClient> = keys
+                .into_iter()
+                .map(|k| {
+                    let mut c = GeminiClient::direct(k, model.clone());
+                    c.max_attempts = 1;
+                    c
+                })
+                .collect();
+            if !clients.is_empty() {
+                tracing::info!(
+                    "gemini: registered {} API key(s) for alignment rotation",
+                    clients.len()
+                );
+                providers.push(Box::new(GeminiProvider {
+                    clients,
+                    current_key_idx: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                    ffmpeg_path,
+                    cache_dir: self.cache_dir.clone(),
+                }));
+            } else {
+                tracing::warn!(
+                    "gemini: LYRICS_GEMINI_ENABLED is true but gemini_api_key setting is empty \
+                     — Gemini provider not registered"
+                );
+            }
+        }
+        if LYRICS_QWEN3_ENABLED {
+            if let Some(python) = python_for_qwen3 {
+                providers.push(Box::new(Qwen3Provider {
+                    python_path: python,
+                    script_path: self.script_path.clone(),
+                    models_dir: self.models_dir.clone(),
+                }));
+            }
         }
 
         self.broadcast_stage(
@@ -739,7 +813,7 @@ impl LyricsWorker {
 
     #[cfg_attr(test, mutants::skip)]
     async fn retry_missing_translations(&self) {
-        if self.ai_client.is_none() && self.gemini_api_key.is_empty() {
+        if self.ai_client.is_none() {
             return;
         }
         {
@@ -772,32 +846,23 @@ impl LyricsWorker {
         };
         info!("lyrics_worker: retrying translation for {youtube_id}");
 
-        // Claude first (framed as localization task), Gemini fallback
-        let result = if let Some(ai_client) = &self.ai_client {
-            match translator::translate_via_claude(ai_client, &track).await {
-                Ok(translations) => {
-                    for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                        line.sk = if sk_text.is_empty() {
-                            None
-                        } else {
-                            Some(sk_text)
-                        };
-                    }
-                    track.language_translation = "sk".to_string();
-                    Ok(())
+        // Claude-only. Gemini quota is reserved for alignment.
+        let Some(ai_client) = &self.ai_client else {
+            return;
+        };
+        let result = match translator::translate_via_claude(ai_client, &track).await {
+            Ok(translations) => {
+                for (line, sk_text) in track.lines.iter_mut().zip(translations) {
+                    line.sk = if sk_text.is_empty() {
+                        None
+                    } else {
+                        Some(sk_text)
+                    };
                 }
-                Err(e) => {
-                    warn!("lyrics retry: Claude failed for {youtube_id}, trying Gemini: {e}");
-                    translator::translate_lyrics(
-                        &self.gemini_api_key,
-                        &self.gemini_model,
-                        &mut track,
-                    )
-                    .await
-                }
+                track.language_translation = "sk".to_string();
+                Ok(())
             }
-        } else {
-            translator::translate_lyrics(&self.gemini_api_key, &self.gemini_model, &mut track).await
+            Err(e) => Err(e),
         };
 
         match result {

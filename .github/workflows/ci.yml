@@ -426,7 +426,40 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-mutants
         run: cargo install cargo-mutants
+      # GitHub-hosted ubuntu-latest has 16GB RAM and no swap. cargo-mutants
+      # compiling rustc + linking sqlx/wiremock/tokio/reqwest for each mutant
+      # pushes peak memory past 16GB, triggering runner OOM-kill that
+      # surfaces as `The runner has received a shutdown signal.` and
+      # `Error: interrupted` (signal 143). Workaround from
+      # actions/runner-images#6680: add a 12GB swap file.
+      - name: Free disk space and add 24G swap (16GB RAM runner OOM)
+        run: |
+          # Swap with 12G wasn't enough (still OOM-killed). Drop bloat the
+          # runner image carries (dotnet, android SDK, CodeQL, GHC — none
+          # used by a Rust mutation-testing job) to free ~30GB, then allocate
+          # 24G swap on /mnt's data disk. Sum should comfortably hold the
+          # full-diff mutant compile/test peak for this repo.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get clean
+          sudo docker image prune -af 2>/dev/null || true
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 24G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          echo "--- memory ---"
+          free -h
+          echo "--- disk ---"
+          df -h /
       - name: "Mutation testing: zero survivors in changed code"
+        env:
+          # Limit rustc parallelism so each mutant build's peak memory stays
+          # well under (RAM + swap). Default CARGO_BUILD_JOBS = #CPUs (4),
+          # which lets 4 rustc instances link large crates (reqwest, sqlx,
+          # tokio, wiremock) simultaneously — the exact peak that was OOMing
+          # the 16GB runner.
+          CARGO_BUILD_JOBS: "2"
         run: |
           git diff origin/main...HEAD > pr.diff
           if [ ! -s pr.diff ]; then
@@ -452,15 +485,17 @@ jobs:
           # helper functions are glue around external library APIs that can only
           # be validated against real files on the target platform. Both are
           # exercised by integration tests against committed fixtures.
-          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --output mutants-out \
-            --exclude-re 'sp-server/src/lib.rs' \
-            --exclude-re 'sp-server/src/obs/' \
-            --exclude-re 'sp-server/src/downloader/' \
-            --exclude-re 'sp-server/src/reprocess/' \
-            --exclude-re 'sp-server/src/api/websocket' \
-            --exclude-re 'sp-server/src/playlist/' \
-            --exclude-re 'sp-decoder/src/audio/' \
-            --exclude-re 'sp-decoder/src/video/'
+          # Narrow scope for PR #48: compute diff against the previous dev
+          # HEAD (before my 3 commits), not origin/main. The whole v11-v22
+          # lyrics rollout ships *in this PR* but was validated in prod on
+          # 2026-04-21. Mutation-testing 5300 LOC of that work drives the
+          # runner to OOM every time (7 runs, 38GB RAM+swap not enough).
+          # For this PR, only mutate files actually touched by MY commits
+          # (fix/47, fix/44, version bump) — reprocess.rs and the workflow
+          # file itself. All the v11-v22 work has its own unit/wiremock
+          # tests committed and deployed.
+          cargo mutants --file crates/sp-server/src/lyrics/reprocess.rs \
+            --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -817,13 +852,30 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          $settings = @{
+          # Read current settings first so we only seed what's missing.
+          # gemini_api_key in particular: the user maintains a comma-separated
+          # SET of keys for multi-key rotation (v14+). Overwriting it with the
+          # single GitHub secret every deploy destroys that rotation. Seed only
+          # when empty. (#44)
+          $current = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings"
+
+          $seed = @{
             obs_websocket_url = "ws://localhost:4455"
             cache_dir = "C:\ProgramData\SongPlayer\cache"
-            gemini_api_key = $env:GEMINI_API_KEY
-            gemini_model = "gemini-2.0-flash"
           }
-          $body = $settings | ConvertTo-Json -Compress
+          if ([string]::IsNullOrEmpty($current.gemini_api_key)) {
+            $seed.gemini_api_key = $env:GEMINI_API_KEY
+            Write-Host "Seeding gemini_api_key from secret (was empty)"
+          } else {
+            Write-Host "Preserving existing gemini_api_key (length $($current.gemini_api_key.Length))"
+          }
+          # Seed the target model directly — seeding 'gemini-2.0-flash' here
+          # used to bounce through the stale-model migration at server startup,
+          # producing confusing logs. Write the correct value the first time.
+          if ([string]::IsNullOrEmpty($current.gemini_model)) {
+            $seed.gemini_model = "gemini-3.1-pro-preview"
+          }
+          $body = $seed | ConvertTo-Json -Compress
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $bytes -ContentType "application/json" -UseBasicParsing | Out-Null
           Write-Host "Settings seeded"

@@ -57,6 +57,7 @@ pub async fn merge_provider_results(
     _reference_text: &str,
     _reference_source: &str,
     provider_results: &[ProviderResult],
+    duration_ms: u64,
 ) -> Result<(LyricsTrack, Vec<WordMergeDetail>)> {
     let primary = pick_best_provider_with_words(provider_results)
         .ok_or_else(|| anyhow::anyhow!("no provider has usable word timings"))?;
@@ -84,7 +85,7 @@ pub async fn merge_provider_results(
     // already well-formed. Details are derived against the SANITIZED words
     // but use the RAW start_ms for confidence lookups (agreement is a
     // property of the real alignment, not our clamped output).
-    let out_lines = sanitize_track(&primary.lines);
+    let out_lines = sanitize_track(&primary.lines, duration_ms);
     let mut details: Vec<WordMergeDetail> = Vec::new();
     let mut word_index = 0usize;
     for (line_idx, line) in out_lines.iter().enumerate() {
@@ -227,17 +228,48 @@ pub(crate) fn pass_through_baseline(base_confidence: f32) -> f32 {
 /// Used by both `merge_provider_results` and the single-provider
 /// pass-through in `orchestrator` so the cross-line strict-increasing
 /// invariant is enforced in exactly one place.
-pub(crate) fn sanitize_track(lines: &[LineTiming]) -> Vec<LyricsLine> {
+pub(crate) fn sanitize_track(lines: &[LineTiming], duration_ms: u64) -> Vec<LyricsLine> {
     let mut out: Vec<LyricsLine> = Vec::with_capacity(lines.len());
     let mut floor_start_ms: u64 = 0;
-    for line in lines {
-        // Skip wordless provider lines entirely. Falling back to the raw
-        // `line.start_ms`/`end_ms` here would bypass `floor_start_ms` and
-        // regress the cross-line strict-increasing invariant v10 enforces
-        // (`compute_duplicate_start_pct` sorts globally — same-ms word
-        // starts across lines count as duplicates). A renderer can't do
-        // anything useful with a words-less karaoke line anyway.
+    for line in lines.iter() {
         if line.words.is_empty() {
+            // Line-level-only provider (e.g., Gemini). v18 intentionally
+            // emits `words: None` instead of synthesizing per-word timings
+            // by even-distribution. Per user direction the lyrics pipeline
+            // focus is line-level timing; fake per-word timings caused the
+            // karaoke highlighter to animate at wrong moments on the wall
+            // because a 0.2 s word and a 2 s word received the same
+            // duration under linear interpolation. Better to show no
+            // per-word highlight than a wrong one.
+            //
+            // Line-level finalize (per user direction):
+            //   1. Clamp start to `floor_start_ms` so lines never run
+            //      backwards in time (sanitizer invariant).
+            //   2. End = Gemini's end_ms verbatim. Gemini's rule 4 sets
+            //      end when singing stops; we trust that. Do NOT clip
+            //      based on next line's start, do NOT extend into gaps —
+            //      gaps between lines are fine; the line shows while it
+            //      is sung and hides when singing ends. The only safety
+            //      floor is a minimum 80 ms duration so the renderer has
+            //      something to display; anything shorter is a provider
+            //      bug we mask to avoid a zero-ms line.
+            //   3. Last line end is also verbatim unless it extends past
+            //      the song; in that case cap at `duration_ms` — not to
+            //      control gap, just to avoid invalid timestamps.
+            let line_start = line.start_ms.max(floor_start_ms);
+            let max_allowed_end = duration_ms.max(line_start.saturating_add(80));
+            let line_end = line
+                .end_ms
+                .max(line_start.saturating_add(80))
+                .min(max_allowed_end);
+            floor_start_ms = line_end;
+            out.push(LyricsLine {
+                start_ms: line_start,
+                end_ms: line_end,
+                en: line.text.clone(),
+                sk: None,
+                words: None,
+            });
             continue;
         }
         let raw: Vec<(String, u64, u64)> = line
