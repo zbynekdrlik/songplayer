@@ -110,6 +110,10 @@ struct PlaylistPipeline {
     /// Active lyrics state for karaoke display. Loaded when a video with
     /// lyrics starts; cleared when the video ends.
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
+    /// Last line text pushed to the Presenter stage display for this
+    /// pipeline. Used to debounce — we only PUT when the line actually
+    /// changes, not on every 500 ms position tick.
+    last_presenter_text: Option<String>,
 }
 
 impl PlaylistPipeline {
@@ -148,6 +152,9 @@ pub struct PlaybackEngine {
     /// WebSocket broadcast — forwards `NowPlaying` and `PlaybackStateChanged`
     /// messages to the dashboard.
     ws_event_tx: broadcast::Sender<ServerMsg>,
+    /// Presenter HTTP client for pushing stage-display text on every line
+    /// change. `None` when disabled via settings — the push hook is a no-op.
+    presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
 }
 
 impl PlaybackEngine {
@@ -159,6 +166,7 @@ impl PlaybackEngine {
         obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
         ws_event_tx: broadcast::Sender<ServerMsg>,
+        presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -190,6 +198,7 @@ impl PlaybackEngine {
             obs_event_tx,
             resolume_tx,
             ws_event_tx,
+            presenter_client,
         }
     }
 
@@ -220,6 +229,7 @@ impl PlaybackEngine {
                 last_now_playing_broadcast: None,
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
+                last_presenter_text: None,
             }
         });
     }
@@ -827,6 +837,40 @@ impl PlaybackEngine {
                             .resolume_tx
                             .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
                     }
+                }
+            }
+        }
+
+        // Presenter stage-display push. Fires only when the current line
+        // changes — otherwise we'd spam ~120 identical requests per song.
+        // Fire-and-forget: we never block playback on the Presenter.
+        if let (Some(client), Some(lyrics)) = (&self.presenter_client, &pp.lyrics_state) {
+            if let Some((current_en, next_en)) = lyrics.presenter_lines(position_ms) {
+                let needs_push = match &pp.last_presenter_text {
+                    Some(prev) => prev != &current_en,
+                    None => true,
+                };
+                if needs_push {
+                    pp.last_presenter_text = Some(current_en.clone());
+                    let song = pp.cached_song.clone();
+                    let artist = pp.cached_artist.clone();
+                    let current_song = if artist.is_empty() {
+                        song.clone()
+                    } else {
+                        format!("{song} - {artist}")
+                    };
+                    let payload = crate::presenter::PresenterPayload {
+                        current_text: current_en,
+                        next_text: next_en,
+                        current_song,
+                        next_song: String::new(),
+                    };
+                    let client = client.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = client.push(payload).await {
+                            tracing::warn!(?e, "presenter push failed (non-fatal)");
+                        }
+                    });
                 }
             }
         }

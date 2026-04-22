@@ -28,6 +28,7 @@ fn engine_construction() {
             None,
             resolume_tx,
             ws_tx,
+            None,
         );
         assert!(engine.pipelines.is_empty());
     });
@@ -52,6 +53,7 @@ fn engine_ensure_pipeline_creates_entry() {
             None,
             resolume_tx,
             ws_tx,
+            None,
         );
 
         engine.ensure_pipeline(1, "TestNDI");
@@ -82,6 +84,7 @@ fn engine_ensure_pipeline_multiple_playlists() {
             None,
             resolume_tx,
             ws_tx,
+            None,
         );
 
         engine.ensure_pipeline(1, "NDI-1");
@@ -131,6 +134,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             last_now_playing_broadcast: None,
             history: std::collections::VecDeque::new(),
             lyrics_state: None,
+            last_presenter_text: None,
         };
 
         assert!(pp.title_show_abort.is_some());
@@ -228,6 +232,7 @@ async fn pipeline_started_event_broadcasts_now_playing() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "SP-p");
 
@@ -341,6 +346,7 @@ async fn maybe_broadcast_position_update_uses_cached_duration_when_zero() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "TestNDI");
     if let Some(pp) = engine.pipelines.get_mut(&99) {
@@ -409,6 +415,7 @@ async fn apply_event_triggers_state_change_and_broadcast() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "TestNDI");
 
@@ -457,6 +464,7 @@ async fn apply_event_no_broadcast_when_state_unchanged() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "TestNDI");
 
@@ -508,6 +516,7 @@ async fn position_events_are_throttled() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "SP-p");
     if let Some(pp) = engine.pipelines.get_mut(&99) {
@@ -591,6 +600,7 @@ async fn handle_previous_with_empty_history_is_noop() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "TestNDI");
 
@@ -647,6 +657,7 @@ async fn handle_previous_pops_history_and_plays() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "TestNDI");
 
@@ -721,6 +732,7 @@ async fn history_capacity_is_bounded() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(99, "TestNDI");
 
@@ -783,6 +795,7 @@ async fn processed_event_rewakes_waiting_pipeline_with_new_video() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(7, "SP-fast");
 
@@ -859,6 +872,7 @@ async fn processed_event_ignores_waiting_pipeline_with_inactive_scene() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(7, "SP-fast");
 
@@ -930,6 +944,7 @@ async fn processed_event_does_not_play_inactive_scene() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(7, "SP-fast");
     engine.ensure_pipeline(3, "SP-presence");

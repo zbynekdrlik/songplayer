@@ -62,6 +62,27 @@ impl LyricsState {
             Some((_, line)) => (Some(line.en.clone()), line.sk.clone()),
         }
     }
+
+    /// Returns `Some((current_en, next_en))` for the Presenter push when
+    /// playback position is on a line. `next_en` is the empty string when
+    /// the current line is the last line of the track. Returns `None`
+    /// between lines so the caller can hold off pushing a duplicate.
+    pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
+        let (idx, line) = self.track.line_at(position_ms)?;
+        let next = self
+            .track
+            .lines
+            .get(idx + 1)
+            .map(|l| l.en.clone())
+            .unwrap_or_default();
+        Some((line.en.clone(), next))
+    }
+
+    /// Read-only accessor for the underlying [`LyricsTrack`]. Used in tests
+    /// and by callers that need metadata about lines without a position.
+    pub fn track(&self) -> &sp_core::lyrics::LyricsTrack {
+        &self.track
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +247,36 @@ mod tests {
         let (en, sk) = state.resolume_lines(500);
         assert_eq!(en, None);
         assert_eq!(sk, None);
+    }
+
+    #[test]
+    fn presenter_lines_returns_current_and_next() {
+        let st = LyricsState::new(test_track());
+        // First line starts at 1000 ms per `test_track()`.
+        let (cur, nxt) = st.presenter_lines(1500).expect("on line 0");
+        assert_eq!(cur, "Hello world");
+        // next_en should be line 1's text.
+        assert!(!nxt.is_empty(), "expected a next line");
+    }
+
+    #[test]
+    fn presenter_lines_returns_empty_next_for_last_line() {
+        let st = LyricsState::new(test_track());
+        // Jump to a timestamp guaranteed to be on the LAST line of
+        // test_track(); empty next indicates end-of-song for the push.
+        let last_line = st.track().lines.last().expect("track non-empty");
+        let mid = (last_line.start_ms + last_line.end_ms) / 2;
+        let (_cur, nxt) = st.presenter_lines(mid).expect("on last line");
+        assert!(
+            nxt.is_empty(),
+            "last line's next must be empty, got {nxt:?}"
+        );
+    }
+
+    #[test]
+    fn presenter_lines_returns_none_between_lines() {
+        let st = LyricsState::new(test_track());
+        // position 0 is before first line (which starts at 1000 ms)
+        assert!(st.presenter_lines(0).is_none());
     }
 }

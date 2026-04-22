@@ -526,6 +526,7 @@ pub async fn start(
         obs_cmd_tx,
         resolume_cmd_tx,
         event_tx.clone(),
+        presenter_client,
     );
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.

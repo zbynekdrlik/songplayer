@@ -27,6 +27,7 @@ async fn handle_scene_change_off_sends_hide_title_and_subs() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
 
     engine.ensure_pipeline(7, "SP-fast");
@@ -77,6 +78,7 @@ async fn handle_scene_change_off_noop_when_already_off_program() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
 
     engine.ensure_pipeline(7, "SP-fast");
