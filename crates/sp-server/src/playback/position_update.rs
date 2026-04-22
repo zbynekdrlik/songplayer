@@ -1,8 +1,16 @@
 //! Extracted from mod.rs to keep the file under the 1000-line cap.
-//! Pure delegate — same method, same behavior, accessed via `PlaybackEngine::maybe_broadcast_position_update`.
+//! Pure delegate — same method, same behavior, accessed via
+//! `PlaybackEngine::maybe_broadcast_position_update`.
+
+use std::sync::atomic::Ordering;
+use std::time::Instant;
+
+use sp_core::ws::ServerMsg;
+
+use super::should_send_position_update;
 
 impl super::PlaybackEngine {
-    fn maybe_broadcast_position_update(
+    pub(super) fn maybe_broadcast_position_update(
         &mut self,
         playlist_id: i64,
         position_ms: u64,
