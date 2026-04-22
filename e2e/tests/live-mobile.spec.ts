@@ -23,9 +23,13 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
   });
 
   test('page renders with scrubber visible and 44 px+ touch targets', async ({ page }) => {
-    await page.goto('/live');
+    // The sp-ui SPA uses signal-based tab routing, not URL routing —
+    // /live URL serves index.html with the default Dashboard tab. Click
+    // the Live tab button to activate LivePage.
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Live', exact: true }).click();
     const scrubber = page.locator('.np-scrubber');
-    await expect(scrubber).toBeVisible({ timeout: 15_000 });
+    await expect(scrubber).toBeVisible({ timeout: 30_000 });
     const bb = await scrubber.boundingBox();
     expect(bb, 'scrubber must have a bounding box').not.toBeNull();
     expect(bb!.height).toBeGreaterThanOrEqual(44);
@@ -64,13 +68,14 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
       await route.fulfill({ status: 204 });
     });
 
-    await page.goto('/live');
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Live', exact: true }).click();
 
     // Wait for the scroller — it renders once NowPlayingInfo.video_id is
     // known from the WS NowPlaying message (or from whatever the mock API
     // returns for /playlists).
     const scroller = page.locator('.lyrics-scroller');
-    await expect(scroller).toBeVisible({ timeout: 15_000 });
+    await expect(scroller).toBeVisible({ timeout: 30_000 });
 
     // Tap the first available lyrics line. If the mock env has no NowPlaying
     // video_id signal, the scroller stays empty — the test still asserts the

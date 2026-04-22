@@ -57,9 +57,13 @@ test("playlists endpoint returns data", async ({ request }) => {
   const resp = await request.get("/api/v1/playlists");
   expect(resp.status()).toBe(200);
   const json = await resp.json();
-  expect(json).toHaveLength(2);
-  expect(json[0]).toHaveProperty("name", "Worship");
-  expect(json[1]).toHaveProperty("name", "Background");
+  // Mock-api ships 3 playlists — Worship, Background, and the ytlive
+  // custom playlist added in v0.22.0 to exercise the /live page.
+  expect(json).toHaveLength(3);
+  const names = json.map((p: { name: string }) => p.name);
+  expect(names).toContain("Worship");
+  expect(names).toContain("Background");
+  expect(names).toContain("ytlive");
 });
 
 test("settings endpoint returns data", async ({ request }) => {
