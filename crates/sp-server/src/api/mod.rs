@@ -150,6 +150,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/playlists/{id}/play-video",
             axum::routing::post(live::post_play_video),
         )
+        .route(
+            "/api/v1/playlists/{id}/seek",
+            axum::routing::post(routes::post_seek),
+        )
         // Middleware
         .layer(CorsLayer::permissive())
         .with_state(state);

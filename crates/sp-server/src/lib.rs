@@ -96,6 +96,12 @@ pub enum EngineCommand {
         playlist_id: i64,
         video_id: i64,
     },
+    /// Seek the currently-playing song on the given playlist to `position_ms`.
+    /// No-op when no pipeline exists or no song is loaded.
+    Seek {
+        playlist_id: i64,
+        position_ms: u64,
+    },
 }
 
 /// Status of external tool availability.
@@ -565,6 +571,9 @@ pub async fn start(
                             // handle_scene_change so every caller goes
                             // through the same sequence.
                             engine.handle_scene_change(playlist_id, on_program).await;
+                        }
+                        EngineCommand::Seek { playlist_id, position_ms } => {
+                            engine.seek(playlist_id, position_ms);
                         }
                     }
                 }

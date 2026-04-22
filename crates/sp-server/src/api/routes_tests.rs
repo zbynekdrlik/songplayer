@@ -41,6 +41,7 @@ async fn test_state() -> AppState {
         ai_client: std::sync::Arc::new(crate::ai::client::AiClient::new(
             crate::ai::AiSettings::default(),
         )),
+        presenter_client: None,
     }
 }
 
@@ -331,6 +332,63 @@ async fn playback_previous_returns_no_content() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn post_seek_returns_204_and_forwards_to_engine() {
+    let pool = db::create_memory_pool().await.unwrap();
+    db::run_migrations(&pool).await.unwrap();
+    let (event_tx, _) = broadcast::channel(16);
+    let (engine_tx, mut engine_rx) = mpsc::channel(16);
+    let (sync_tx, _) = mpsc::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (obs_rebuild_tx, _) = broadcast::channel(4);
+    let state = AppState {
+        pool,
+        event_tx,
+        engine_tx,
+        obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        tools_status: Arc::new(RwLock::new(crate::ToolsStatus::default())),
+        tool_paths: Arc::new(RwLock::new(None)),
+        sync_tx,
+        resolume_tx,
+        obs_rebuild_tx,
+        cache_dir: std::path::PathBuf::from("/tmp/cache"),
+        ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
+            std::path::PathBuf::from("/tmp/cache"),
+            crate::ai::proxy::ProxyManager::default_port(),
+        )),
+        ai_client: std::sync::Arc::new(crate::ai::client::AiClient::new(
+            crate::ai::AiSettings::default(),
+        )),
+        presenter_client: None,
+    };
+
+    let body = serde_json::json!({"position_ms": 45000});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/playlists/42/seek")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let resp = app(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let cmd = engine_rx
+        .recv()
+        .await
+        .expect("engine must receive a command");
+    match cmd {
+        crate::EngineCommand::Seek {
+            playlist_id,
+            position_ms,
+        } => {
+            assert_eq!(playlist_id, 42);
+            assert_eq!(position_ms, 45000);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
 }
 
 /// Regression for issue #8: the dashboard used to POST to

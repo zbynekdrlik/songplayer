@@ -149,6 +149,18 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
                 .send(EngineCommand::SetMode { playlist_id, mode })
                 .await;
         }
+        ClientMsg::Seek {
+            playlist_id,
+            position_ms,
+        } => {
+            let _ = state
+                .engine_tx
+                .send(crate::EngineCommand::Seek {
+                    playlist_id,
+                    position_ms,
+                })
+                .await;
+        }
         ClientMsg::SyncPlaylist { playlist_id: _ } => {
             // Playlist sync would be triggered via a dedicated channel.
             // For now, log it.

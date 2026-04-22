@@ -39,6 +39,12 @@ pub enum ClientMsg {
     SyncPlaylist {
         playlist_id: i64,
     },
+    /// Seek current playback on the given playlist to `position_ms`.
+    /// v0.22.0 addition to support mobile scrubber + tap-a-line UI.
+    Seek {
+        playlist_id: i64,
+        position_ms: u64,
+    },
     Ping,
 }
 

@@ -584,6 +584,17 @@ impl PlaybackEngine {
         }
     }
 
+    /// Seek to `position_ms` within the currently-playing song on the given
+    /// playlist. No-op when no pipeline exists for that playlist or when no
+    /// song is loaded — the pipeline's own Seek handler ignores it.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn seek(&self, playlist_id: i64, position_ms: u64) {
+        if let Some(pp) = self.pipelines.get(&playlist_id) {
+            pp.pipeline
+                .send(crate::playback::pipeline::PipelineCommand::Seek { position_ms });
+        }
+    }
+
     /// Jump to a specific video within a playlist and start playing it.
     ///
     /// For custom playlists this also updates `playlists.current_position` so
