@@ -161,20 +161,63 @@ claude-oauth:
         Ok(())
     }
 
+    /// Probe the configured port for a healthy CLIProxyAPI instance.
+    ///
+    /// Returns true iff `GET /v1/models` responds with 2xx within a short
+    /// timeout. Used by `start()` to adopt an existing proxy (e.g., an
+    /// orphan from a previous SongPlayer that didn't get cleaned up, or
+    /// an externally-managed proxy) and by `is_running()` as a fallback
+    /// when our internal child handle is empty.
+    async fn probe_port(&self) -> bool {
+        let url = format!("http://127.0.0.1:{}/v1/models", self.port);
+        match reqwest::Client::new()
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+        {
+            Ok(resp) => resp.status().is_success(),
+            Err(_) => false,
+        }
+    }
+
     /// Start the CLIProxyAPI process and wait for it to become ready.
     ///
+    /// Order of operations:
+    /// 1. If our own child handle is alive → return Ok.
+    /// 2. If the port is already serving `/v1/models` (healthy orphan
+    ///    from a previous SongPlayer or externally-managed proxy) →
+    ///    adopt, return Ok without spawning.
+    /// 3. Otherwise spawn a fresh child and poll readiness (10 × 1 s).
+    ///
     /// Returns Err if:
-    /// - Binary not found
+    /// - No existing proxy to adopt AND binary not found
     /// - Spawn fails
-    /// - Process exits immediately (config error, missing auth)
+    /// - Process exits immediately (config error, missing auth, or the
+    ///   port got bound by something unhealthy between the probe and
+    ///   the spawn — rare)
     /// - Health check (`/v1/models`) doesn't respond within ~10 seconds
     ///
     /// On any failure, the stale child handle is cleared so a subsequent
     /// `status()` correctly reports `running: false`.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start(&self) -> anyhow::Result<()> {
-        // Already running?
+        // 1. Already running?
         if self.is_running().await {
+            return Ok(());
+        }
+
+        // 2. Is something else already serving on our port? Adopt it.
+        //    This closes the orphan-CLIProxyAPI bug observed after the
+        //    2026-04-22 0.20.0 deploy where a previous SongPlayer's
+        //    subprocess kept port 18787 bound and the new SongPlayer's
+        //    watchdog loop tried to spawn its own every 30 s — each spawn
+        //    immediately exiting status 0 because the port was taken.
+        if self.probe_port().await {
+            info!(
+                port = self.port,
+                "CLIProxyAPI already running externally, adopting existing instance"
+            );
             return Ok(());
         }
 
@@ -297,20 +340,24 @@ claude-oauth:
         }
     }
 
-    #[cfg_attr(test, mutants::skip)]
     async fn is_running(&self) -> bool {
-        let mut guard = self.child.write().await;
-        if let Some(ref mut child) = *guard {
-            match child.try_wait() {
-                Ok(None) => true,
-                _ => {
-                    *guard = None;
-                    false
+        // Check our own child handle first — fastest and authoritative
+        // for children WE spawned.
+        {
+            let mut guard = self.child.write().await;
+            if let Some(ref mut child) = *guard {
+                match child.try_wait() {
+                    Ok(None) => return true,
+                    _ => {
+                        *guard = None;
+                    }
                 }
             }
-        } else {
-            false
         }
+        // Fallback: probe the port. Catches externally-managed or orphan
+        // proxies that we should treat as "already running" to avoid the
+        // watchdog spawning a duplicate that can't bind the port.
+        self.probe_port().await
     }
 
     // ── Claude Login via CLIProxyAPI ──
@@ -513,4 +560,113 @@ pub fn default_data_dir() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Parse `port` from a wiremock `http://127.0.0.1:PORT` URI.
+    fn mock_port(mock: &MockServer) -> u16 {
+        let uri = mock.uri();
+        let after_colon = uri.rsplit(':').next().expect("mock uri has port segment");
+        after_colon.parse().expect("mock port parses as u16")
+    }
+
+    /// Regression for the orphan-CLIProxyAPI bug (observed after
+    /// 2026-04-22 0.20.0 deploy):
+    ///
+    /// When a previous SongPlayer exited without killing its CLIProxyAPI
+    /// subprocess, the orphan kept port 18787 bound. The new SongPlayer's
+    /// `start()` didn't probe the port first — it tried to spawn a child
+    /// which immediately exited with status 0 (port already in use), and
+    /// the watchdog loop logged "restart failed" every 30s forever. The
+    /// orphan was responding healthily to `/v1/models`; we just never
+    /// asked.
+    ///
+    /// Fix: `start()` probes `GET /v1/models` before spawning. If an
+    /// existing healthy proxy answers 200 we adopt it — no spawn, no
+    /// watchdog churn, no need for the binary even to exist.
+    #[tokio::test]
+    async fn start_adopts_existing_healthy_proxy_without_spawning() {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "object": "list",
+                "data": []
+            })))
+            .mount(&mock)
+            .await;
+
+        // data_dir points at a temp dir that does NOT contain a binary —
+        // if the implementation tries to spawn, binary_path() will return
+        // None and the whole start() path will fail. Adopting short-
+        // circuits BEFORE binary_path() is consulted.
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let manager = ProxyManager::new(tmp.path().to_path_buf(), mock_port(&mock));
+
+        manager
+            .start()
+            .await
+            .expect("start() must succeed by adopting the healthy proxy");
+
+        // Confirm we did NOT spawn a child of our own.
+        let guard = manager.child.read().await;
+        assert!(
+            guard.is_none(),
+            "start() must not spawn a child when an existing healthy proxy is present"
+        );
+    }
+
+    /// When no proxy is serving on the port, and the binary is missing,
+    /// `start()` must surface a real error rather than silently adopting
+    /// nothing. Guards against "probe returned false → forgot to fall
+    /// through" logic errors in the implementation.
+    #[tokio::test]
+    async fn start_errors_when_no_existing_proxy_and_no_binary() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        // Pick a port that almost certainly has nothing listening. 1 is
+        // privileged on Unix and the OS will refuse to connect; on
+        // Windows the probe will time out → both paths produce the
+        // "nothing healthy here" branch.
+        let manager = ProxyManager::new(tmp.path().to_path_buf(), 1);
+
+        let err = manager
+            .start()
+            .await
+            .expect_err("start() must fail when no adopt target and no binary");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("binary not found")
+                || msg.contains("CLIProxyAPI failed to respond")
+                || msg.contains("exited during startup"),
+            "unexpected error shape: {msg}"
+        );
+    }
+
+    /// `is_running()` must fall back to a port probe so the watchdog
+    /// doesn't churn restarts when an externally-managed healthy proxy
+    /// is already serving requests. Without this fallback, a fresh
+    /// SongPlayer process (internal `child` handle = None) thinks the
+    /// proxy is down even when the port is alive.
+    #[tokio::test]
+    async fn is_running_returns_true_for_externally_managed_healthy_proxy() {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock)
+            .await;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let manager = ProxyManager::new(tmp.path().to_path_buf(), mock_port(&mock));
+
+        assert!(
+            manager.is_running().await,
+            "is_running() must return true when the port is serving /v1/models"
+        );
+    }
 }

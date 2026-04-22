@@ -663,6 +663,25 @@ jobs:
           }
           Start-Sleep -Seconds 2
 
+          # Also kill CLIProxyAPI.exe — on Windows, subprocess of an exited
+          # parent is NOT auto-killed. Orphans left behind by the previous
+          # SongPlayer keep port 18787 bound, which blocks the new
+          # SongPlayer's proxy watchdog from spawning a fresh instance
+          # (spawn exits status 0 because port is taken → watchdog loops).
+          # The runtime now ADOPTS a healthy orphan on start(), but we
+          # still prefer a clean slate on deploy so the new config + auth
+          # takes effect immediately. Matches the intent of also killing
+          # SongPlayer above.
+          Write-Host "=== Stopping CLIProxyAPI (if orphaned) ==="
+          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
+          $elapsed = 0
+          while ($elapsed -lt 5) {
+            $proc = Get-Process -Name "CLIProxyAPI" -ErrorAction SilentlyContinue
+            if (-not $proc) { break }
+            Start-Sleep -Seconds 1
+            $elapsed++
+          }
+
           $DataDir = "C:\ProgramData\SongPlayer"
           Remove-Item "$DataDir\songplayer.db-wal" -Force -ErrorAction SilentlyContinue
           Remove-Item "$DataDir\songplayer.db-shm" -Force -ErrorAction SilentlyContinue
@@ -814,6 +833,10 @@ jobs:
           # SongPlayer may have been started before OBS and be in backoff.
           # Restart it now that OBS is confirmed running so it connects immediately.
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          # Clean orphan CLIProxyAPI here too for the same reason as the
+          # first deploy step — the restart can otherwise land on an
+          # orphan holding port 18787.
+          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 3
           schtasks.exe /run /tn SongPlayer
           Start-Sleep -Seconds 10
@@ -1194,6 +1217,60 @@ jobs:
             exit 1
           }
           Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"
+
+      - name: Verify AI proxy healthy and not churning
+        shell: powershell
+        run: |
+          # Regression gate for the 2026-04-22 orphan-CLIProxyAPI bug:
+          # after deploy, the old SongPlayer's subprocess stayed on port
+          # 18787 and the new SongPlayer's watchdog spawned dead children
+          # every 30s forever. All previous CI was green and yet the app
+          # was broken. This step fails if the proxy is down, if the
+          # watchdog is churning, or if the proxy owner doesn't respond.
+
+          # 1. SongPlayer's own view of the proxy must report running.
+          $ai = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/ai/status" -TimeoutSec 10
+          Write-Host "ai status: running=$($ai.running) pid=$($ai.pid) authenticated=$($ai.authenticated)"
+          if (-not $ai.running) {
+            Write-Error "FAIL: /api/v1/ai/status reports running=false after deploy"
+            exit 1
+          }
+          if (-not $ai.pid) {
+            Write-Error "FAIL: /api/v1/ai/status reports pid=null (should be the adopted or spawned PID)"
+            exit 1
+          }
+
+          # 2. /v1/models on the proxy port must respond 200.
+          $models = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/models" -UseBasicParsing -TimeoutSec 10
+          if ($models.StatusCode -ne 200) {
+            Write-Error "FAIL: CLIProxyAPI /v1/models returned $($models.StatusCode)"
+            exit 1
+          }
+
+          # 3. Watchdog must not be logging restart-failed in the last
+          # 2 min (indicates an orphan keeping the port while our spawn
+          # immediately dies). Tail the log and count.
+          $log = "C:\ProgramData\SongPlayer\songplayer.log"
+          if (Test-Path $log) {
+            $cutoff = (Get-Date).AddMinutes(-2)
+            $failures = Get-Content $log -Tail 500 | Where-Object {
+              $_ -match 'ai_proxy watchdog: restart failed'
+            } | ForEach-Object {
+              if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
+                try {
+                  $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
+                  if ($ts -gt $cutoff) { $_ }
+                } catch { $_ }
+              }
+            }
+            if ($failures.Count -gt 0) {
+              Write-Host "Recent 'restart failed' entries:"
+              $failures | ForEach-Object { Write-Host "  $_" }
+              Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
+              exit 1
+            }
+          }
+          Write-Host "OK: AI proxy healthy, watchdog quiet, /v1/models responding."
 
       - name: Verify download worker produces a split-file pair
         shell: powershell
