@@ -5,6 +5,7 @@ pub mod live_setlist;
 pub mod karaoke_panel;
 pub mod lyrics_playlist_section;
 pub mod lyrics_queue_card;
+pub mod lyrics_scroller;
 pub mod lyrics_song_detail;
 pub mod lyrics_song_row;
 pub mod now_playing_card;

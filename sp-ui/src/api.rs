@@ -223,6 +223,14 @@ pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), Str
     .await
 }
 
+/// GET the lyrics track for a video. Returns the full `LyricsTrack`
+/// JSON — used by the LyricsScroller on /live to render a tappable
+/// line list. 404 signals "no lyrics yet", surfaced as an Err string
+/// so the UI can show an empty state.
+pub async fn get_video_lyrics(video_id: i64) -> Result<sp_core::lyrics::LyricsTrack, String> {
+    get(&format!("/api/v1/videos/{video_id}/lyrics")).await
+}
+
 // ── Import (v0.22.0) ──────────────────────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]

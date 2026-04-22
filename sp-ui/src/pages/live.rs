@@ -6,9 +6,13 @@ use crate::api;
 use crate::components::import_url_box::ImportUrlBox;
 use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
+use crate::components::lyrics_scroller::LyricsScroller;
+use crate::components::now_playing_card::NowPlayingCard;
+use crate::store::DashboardStore;
 
 #[component]
 pub fn LivePage() -> impl IntoView {
+    let store = expect_context::<DashboardStore>();
     let ytlive_id = RwSignal::new(None::<i64>);
     let set_list_version = RwSignal::new(0u64);
     let error_msg = RwSignal::new(String::new());
@@ -54,6 +58,8 @@ pub fn LivePage() -> impl IntoView {
                                 set_list_version.update(|v| *v += 1);
                             })
                         />
+                        <NowPlayingCard playlist_id=id store=store.clone() />
+                        <LyricsScroller playlist_id=id store=store.clone() />
                         <div class="live-page-grid">
                             <LiveCatalog
                                 target_playlist_id=id
