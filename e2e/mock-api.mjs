@@ -37,6 +37,19 @@ const playlists = [
     created_at: "2026-01-01 00:00:00",
     updated_at: "2026-01-01 00:00:00",
   },
+  // v0.22.0 addition — /live page resolves the ytlive playlist by name,
+  // so the mock must expose one for the mobile-live Playwright test.
+  {
+    id: 184,
+    name: "ytlive",
+    youtube_url: "",
+    ndi_output_name: "SP-live",
+    playback_mode: "continuous",
+    is_active: true,
+    kind: "custom",
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  },
 ];
 
 const videos = [

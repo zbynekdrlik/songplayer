@@ -34,8 +34,8 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
   test('tap a lyrics line fires a seek request', async ({ page }) => {
     // Mock the NowPlaying and Lyrics API so the LyricsScroller is guaranteed
     // to render tappable lines in every environment (pre-deploy mock, post-
-    // deploy live). Airuleset forbids test.skip() — the test must always
-    // exercise the tap-to-seek path.
+    // deploy live). The test always exercises the tap-to-seek path — no
+    // conditional bypass (per airuleset no-skip rule).
     await page.route('**/api/v1/videos/*/lyrics', async route => {
       await route.fulfill({
         status: 200,
