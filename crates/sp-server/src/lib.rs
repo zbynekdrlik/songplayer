@@ -56,6 +56,11 @@ pub struct AppState {
     pub cache_dir: PathBuf,
     pub ai_proxy: Arc<ai::proxy::ProxyManager>,
     pub ai_client: Arc<ai::client::AiClient>,
+    /// Presenter HTTP client for pushing `currentText/nextText/currentSong/
+    /// nextSong` to the stage-display API at configured URL (default
+    /// `http://10.77.9.205/api/stage`). `None` when disabled via settings;
+    /// the playback engine's line-change hook skips the push silently.
+    pub presenter_client: Option<Arc<presenter::PresenterClient>>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -198,6 +203,28 @@ pub async fn start(
     };
     let ai_client = Arc::new(ai::client::AiClient::new(ai_settings));
 
+    // Presenter stage-display push. Optional — disabled via
+    // presenter_enabled=false leaves the engine hook a no-op.
+    let presenter_url = db::models::get_setting(&pool, "presenter_url")
+        .await?
+        .unwrap_or_else(|| "http://10.77.9.205/api/stage".to_string());
+    let presenter_enabled = db::models::get_setting(&pool, "presenter_enabled")
+        .await?
+        .map(|s| {
+            !matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "false" | "0" | "off" | "no"
+            )
+        })
+        .unwrap_or(true);
+    let presenter_client = if presenter_enabled {
+        tracing::info!(url = %presenter_url, "presenter: push enabled");
+        Some(Arc::new(presenter::PresenterClient::new(presenter_url)))
+    } else {
+        tracing::info!("presenter: push DISABLED via settings");
+        None
+    };
+
     let state = AppState {
         pool: pool.clone(),
         event_tx: event_tx.clone(),
@@ -214,6 +241,7 @@ pub async fn start(
             ai::proxy::ProxyManager::default_port(),
         )),
         ai_client: ai_client.clone(),
+        presenter_client: presenter_client.clone(),
     };
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
@@ -713,6 +741,7 @@ mod tests {
                 ai::proxy::ProxyManager::default_port(),
             )),
             ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
+            presenter_client: None,
         };
 
         // Verify the router can be built.
@@ -989,6 +1018,7 @@ mod tests {
                 ai::proxy::ProxyManager::default_port(),
             )),
             ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
+            presenter_client: None,
         };
 
         // Verify clone works.
