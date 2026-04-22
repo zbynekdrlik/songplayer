@@ -787,11 +787,8 @@ impl PlaybackEngine {
             .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
     }
 
-    /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
-    ///
-    /// Skips the broadcast if less than
-    /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
-    /// broadcast for the same playlist.
+    // `maybe_broadcast_position_update` lives in `position_update.rs`
+    // (extracted to keep this file under the 1000-line cap).
 
     /// Execute a [`PlayAction`] produced by the state machine.
     ///

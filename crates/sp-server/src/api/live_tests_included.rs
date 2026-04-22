@@ -64,6 +64,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
         ai_client: Arc::new(crate::ai::client::AiClient::new(
             crate::ai::AiSettings::default(),
         )),
+        presenter_client: None,
     }
 }
 
