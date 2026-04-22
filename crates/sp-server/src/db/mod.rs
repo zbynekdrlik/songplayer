@@ -22,6 +22,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (11, MIGRATION_V11),
     (12, MIGRATION_V12),
     (13, MIGRATION_V13),
+    (14, MIGRATION_V14),
 ];
 
 const MIGRATION_V1: &str = "
@@ -199,6 +200,15 @@ CREATE TABLE playlist_items (
 );
 CREATE UNIQUE INDEX idx_playlist_items_playlist_video
     ON playlist_items (playlist_id, video_id);
+";
+
+// V14 adds per-song suppress_resolume_en flag. Songs whose YouTube video
+// has lyrics baked in (visual subtitles inside the video frame) set this
+// to 1 to tell Resolume to skip the #sp-subs EN push — otherwise the same
+// line shows twice on the wall. SK subs + Presenter current_text remain
+// unaffected.
+const MIGRATION_V14: &str = "
+ALTER TABLE videos ADD COLUMN suppress_resolume_en INTEGER NOT NULL DEFAULT 0;
 ";
 
 /// Create a connection pool backed by a file.

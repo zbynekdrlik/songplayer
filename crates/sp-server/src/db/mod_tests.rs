@@ -14,7 +14,7 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 13);
+    assert_eq!(ver, 14);
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 13);
+    assert_eq!(ver, 14);
 }
 
 #[tokio::test]
@@ -745,11 +745,11 @@ async fn migration_v12_adds_pipeline_version_quality_and_priority() {
 }
 
 #[tokio::test]
-async fn schema_version_reaches_12() {
+async fn schema_version_reaches_14() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 13);
+    assert_eq!(ver, 14);
 }
 
 #[tokio::test]
@@ -778,4 +778,53 @@ async fn migration_v13_creates_playlist_items_table() {
             .await
             .unwrap();
     assert!(row.is_some(), "playlist_items table should exist");
+}
+
+#[tokio::test]
+async fn migration_v14_adds_suppress_resolume_en_column() {
+    let pool = create_memory_pool().await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, suppress_resolume_en) \
+         VALUES (1, 'abc', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let flag: i64 =
+        sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE youtube_id = 'abc'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(flag, 1);
+}
+
+#[tokio::test]
+async fn migration_v14_defaults_suppress_resolume_en_to_zero() {
+    let pool = create_memory_pool().await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO videos (playlist_id, youtube_id) VALUES (1, 'xyz')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let flag: i64 =
+        sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE youtube_id = 'xyz'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(flag, 0);
 }
