@@ -14,7 +14,7 @@ use windows::Win32::Media::MediaFoundation::{
     MFStartup, MFVideoFormat_NV12,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-use windows::core::{PCWSTR, PROPVARIANT};
+use windows::core::PCWSTR;
 
 use crate::error::DecoderError;
 use crate::stream::{MediaStream, VideoStream};
@@ -193,19 +193,14 @@ impl MediaStream for MediaFoundationVideoReader {
         self.duration_ms
     }
 
-    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        // MF time units are 100-ns ticks (1 ms = 10 000 ticks). A null
-        // guidtimeformat means "use the default time format" which for
-        // IMFSourceReader is 100-ns units per MSDN.
-        let position_100ns: i64 = (position_ms as i64).saturating_mul(10_000);
-        let var: PROPVARIANT = position_100ns.into();
-        unsafe {
-            self.reader
-                .SetCurrentPosition(std::ptr::null(), &var)
-                .map_err(|e| DecoderError::Seek(format!("SetCurrentPosition: {e}")))?;
-        }
-        debug!(position_ms, "mf_reader: seek complete");
-        Ok(())
+    fn seek(&mut self, _position_ms: u64) -> Result<(), DecoderError> {
+        // Seek not yet wired for the video reader — the playback pipeline
+        // does not currently expose scrubbing, so no caller exercises this
+        // path. When dashboard scrubbing is added, this will need a real
+        // MF SetCurrentPosition implementation via PROPVARIANT.
+        Err(DecoderError::Seek(
+            "MediaFoundationVideoReader::seek not yet implemented".into(),
+        ))
     }
 }
 
