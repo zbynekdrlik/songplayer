@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["frontend.spec.ts", "lyrics-dashboard.spec.ts"],
+  testMatch: ["frontend.spec.ts", "lyrics-dashboard.spec.ts", "tests/**/*.spec.ts"],
   timeout: 30000,
   retries: 0,
   use: {
