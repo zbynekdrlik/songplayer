@@ -595,6 +595,16 @@ impl LyricsWorker {
             gemini_provider::GeminiProvider,
         };
         let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
+        // v19: YtManualSubsProvider ships first. If the gather phase produced a
+        // yt_subs candidate with line-level timing, alignment short-circuits
+        // here — no Gemini API call, no ffmpeg chunking. The provider's
+        // can_provide() returns false when no such candidate exists, so
+        // normal Gemini-on-audio alignment runs for every other song.
+        // Manual subs only per feedback_no_autosub.md; autosub never reaches
+        // candidate_texts with has_timing=true in the current gather code.
+        providers.push(Box::new(
+            crate::lyrics::yt_manual_subs_provider::YtManualSubsProvider,
+        ));
         // v16: AutoSubProvider is NOT registered as an alignment provider.
         // YouTube auto-captions have unreliable timing on sung music and
         // contaminate `ensemble:*` source tags. Autosub stays available for
