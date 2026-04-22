@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 
 use crate::api;
+use crate::components::import_url_box::ImportUrlBox;
 use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
 
@@ -46,18 +47,26 @@ pub fn LivePage() -> impl IntoView {
             {move || match ytlive_id.get() {
                 None => view! { <div>"Loading ytlive playlist…"</div> }.into_any(),
                 Some(id) => view! {
-                    <div class="live-page-grid">
-                        <LiveCatalog
-                            target_playlist_id=id
-                            _set_list_version=Signal::from(set_list_version)
-                            on_added=bump_after_add
-                        />
-                        <LiveSetList
+                    <>
+                        <ImportUrlBox
                             playlist_id=id
-                            refresh=Signal::from(set_list_version)
-                            on_changed=bump
+                            on_imported=Callback::new(move |(_vid, _title)| {
+                                set_list_version.update(|v| *v += 1);
+                            })
                         />
-                    </div>
+                        <div class="live-page-grid">
+                            <LiveCatalog
+                                target_playlist_id=id
+                                _set_list_version=Signal::from(set_list_version)
+                                on_added=bump_after_add
+                            />
+                            <LiveSetList
+                                playlist_id=id
+                                refresh=Signal::from(set_list_version)
+                                on_changed=bump
+                            />
+                        </div>
+                    </>
                 }.into_any(),
             }}
         </div>

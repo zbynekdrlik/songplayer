@@ -210,3 +210,25 @@ pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(),
     )
     .await
 }
+
+// ── Import (v0.22.0) ──────────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ImportedVideo {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub title: String,
+}
+
+/// POST a bare YouTube URL to the import endpoint. Returns 201 + the new
+/// video_id on success. yt-dlp does the metadata fetch server-side.
+pub async fn import_video(
+    youtube_url: String,
+    playlist_id: i64,
+) -> Result<ImportedVideo, String> {
+    let body = serde_json::json!({
+        "youtube_url": youtube_url,
+        "playlist_id": playlist_id,
+    });
+    post_json("/api/v1/videos/import", &body).await
+}
