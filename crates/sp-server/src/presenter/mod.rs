@@ -6,6 +6,8 @@
 //! Prod host: http://10.77.9.205/api/stage
 //! Dev host:  http://10.77.8.134:8080/api/stage
 
+pub mod client;
 pub mod payload;
 
+pub use client::{PresenterClient, PresenterError};
 pub use payload::PresenterPayload;
