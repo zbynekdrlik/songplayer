@@ -1159,6 +1159,39 @@ jobs:
 
           Write-Host "OK: All $($titleClips.Count) #sp-title clips have non-empty, clean title text."
 
+          # --- #sp-subs-next regression gate (v0.22.0) ---
+          # SongPlayer must push the upcoming line to any #sp-subs-next clip
+          # in parallel with the current line on #sp-subs. If both tokens'
+          # clips carry the SAME text, the lookahead push isn't wired.
+          $subsClips = @()
+          $subsNextClips = @()
+          foreach ($layer in $comp.layers) {
+            foreach ($clip in $layer.clips) {
+              $n = $clip.name.value
+              if ($n -match '#sp-subs-next') {
+                $subsNextClips += $clip.video.sourceparams.Text.value
+              } elseif ($n -match '#sp-subs(?!sk)') {
+                $subsClips += $clip.video.sourceparams.Text.value
+              }
+            }
+          }
+          if ($subsNextClips.Count -eq 0) {
+            Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project — skipping lookahead gate"
+          } else {
+            Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips"
+            $identical = $true
+            foreach ($t in $subsNextClips) {
+              if (-not ($subsClips -contains $t)) { $identical = $false; break }
+            }
+            # Identical-only-if BOTH sets match AND the subsClips set has
+            # text to compare against in the first place.
+            if ($subsClips.Count -gt 0 -and $identical) {
+              Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text — lookahead push not wired"
+              exit 1
+            }
+            Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
+          }
+
       - name: Verify NDI output names configured
         shell: powershell
         run: |
