@@ -669,4 +669,47 @@ mod tests {
             "is_running() must return true when the port is serving /v1/models"
         );
     }
+
+    /// When we own a live spawned child, `is_running()` must return
+    /// true from the `Ok(None)` (still running) arm WITHOUT consulting
+    /// the port probe. If the probe is the only thing keeping this
+    /// assertion true (e.g., the `Ok(None)` arm is removed), a watchdog
+    /// on a machine with no externally-bound port would think its own
+    /// healthy proxy is dead and try to double-spawn.
+    ///
+    /// Regression guard for the cargo-mutants survivor
+    /// `delete match arm Ok(None) in ProxyManager::is_running` (caught
+    /// 2026-04-22 on PR #50).
+    #[tokio::test]
+    async fn is_running_returns_true_for_owned_live_child_even_when_probe_fails() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        // Port 1 is privileged and unbound on the CI runner — probe()
+        // will return false. The only way is_running() can return true
+        // is via the `Ok(None)` arm on our live child.
+        let manager = ProxyManager::new(tmp.path().to_path_buf(), 1);
+
+        // Spawn a long-living no-op child. We don't need a real
+        // CLIProxyAPI — just something whose try_wait() returns
+        // `Ok(None)` for a while.
+        #[cfg(windows)]
+        let mut cmd = tokio::process::Command::new("cmd");
+        #[cfg(windows)]
+        cmd.args(["/c", "ping -n 30 127.0.0.1 > nul"]);
+        #[cfg(not(windows))]
+        let mut cmd = tokio::process::Command::new("sh");
+        #[cfg(not(windows))]
+        cmd.args(["-c", "sleep 30"]);
+        cmd.kill_on_drop(true);
+        let child = cmd.spawn().expect("spawn no-op child");
+        *manager.child.write().await = Some(child);
+
+        assert!(
+            manager.is_running().await,
+            "is_running() must return true via Ok(None) arm when we own a live child, \
+             regardless of whether the port probe would succeed"
+        );
+
+        // Cleanup: drop the child (kill_on_drop handles the actual kill).
+        *manager.child.write().await = None;
+    }
 }
