@@ -454,15 +454,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_bucket_spreads_ties_across_playlists_not_locked_to_low_id() {
+    async fn stale_bucket_spreads_ties_across_id_range_not_locked_to_low_id() {
         // Regression for #47: prior `v.id ASC` tiebreaker always picked the
         // lowest-id row on quality ties, which drained ytslow entirely before
         // any other playlist saw a pickup. RANDOM() tiebreak spreads picks
         // uniformly when quality is equal.
+        //
+        // Statistical reasoning for `hi_picks > 10`: the 20 tied rows are
+        // 50% low_* / 50% hi_*; each of the 100 draws is an independent
+        // Bernoulli(p=0.5). E[hi_picks] = 50, σ ≈ 5. The floor 10 sits
+        // ≈8σ below the mean; P(hi_picks ≤ 10) < 10⁻¹⁶ under uniform RANDOM().
+        // With `v.id ASC` the prior behavior, hi_picks is always 0 — the
+        // test fails deterministically.
         let pool = setup().await;
-        // 20 rows all tied on quality_score=0.5. Half in pl1 with low ids,
-        // half in pl1 with high ids (same playlist to isolate the tiebreaker
-        // from the playlist filter — all that matters is id ordering).
+        // All 20 rows on playlist 1 — we want to isolate the id-range
+        // tiebreaker from the playlist filter. Half low ids, half high ids.
         let mut stmt = String::from(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
              lyrics_pipeline_version, lyrics_quality_score) VALUES ",
@@ -487,7 +493,7 @@ mod tests {
         }
         assert!(
             hi_picks > 10,
-            "high-id rows must not be starved on quality ties; got {hi_picks}/100 (expected ~50)"
+            "high-id rows must not be starved on quality ties; got {hi_picks}/100 (E=50, σ≈5)"
         );
     }
 
@@ -547,6 +553,13 @@ mod tests {
         }
         sqlx::query(&stmt).execute(&pool).await.unwrap();
 
+        // Statistical reasoning for `high_picks > 10`: 100 rows tied on
+        // eligibility, 50% on playlist 10 (low ids 1-50), 50% on playlist 20
+        // (high ids 10000-10049). Each RANDOM()-ordered draw is Bernoulli(p=0.5).
+        // E[high_picks] = 50, σ ≈ 5. The floor 10 is ≈8σ below the mean so
+        // P(high_picks ≤ 10) < 10⁻¹⁶ under uniform RANDOM(). Under the prior
+        // `v.id ASC` behavior, high_picks is deterministically 0 — the test
+        // fails every time.
         let mut high_picks = 0;
         for _ in 0..100 {
             let row = fetch_bucket_null(&pool, 2).await.unwrap().unwrap();
@@ -556,7 +569,7 @@ mod tests {
         }
         assert!(
             high_picks > 10,
-            "higher-id playlist must not be starved; got {high_picks}/100 (expected ~50)"
+            "higher-id playlist must not be starved; got {high_picks}/100 (E=50, σ≈5)"
         );
     }
 

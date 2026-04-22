@@ -306,4 +306,98 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       }
     }
   });
+
+  test("at least one song has v18+ Gemini line-level lyrics (replaces the qwen3 tests)", async ({
+    request,
+  }) => {
+    // Post-PR #48 (v18+) the pipeline is line-level only and single-
+    // provider Gemini. This test asserts the new architecture is actually
+    // producing usable output on the deployed server:
+    //   - at least one track has `source` starting with "ensemble:gemini"
+    //     (confirms the Gemini provider registered and ran)
+    //   - line timings are well-formed: monotonic start_ms, end_ms >=
+    //     start_ms, non-empty `en` text
+    //   - `words` is absent / null for these tracks (confirms v18's drop
+    //     of synthesized per-word timings — if this ever flips back, the
+    //     karaoke wall will drift again)
+    //
+    // Runs the same way as the other post-deploy tests: read catalog
+    // one-shot, skip gracefully if the reprocess queue hasn't reached
+    // any song yet, otherwise assert the shape of what's persisted.
+    test.setTimeout(3 * 60 * 1000);
+
+    interface Word {
+      start_ms: number;
+      end_ms: number;
+    }
+    interface Line {
+      start_ms?: number;
+      end_ms?: number;
+      en?: string;
+      words?: Word[] | null;
+    }
+    interface Track {
+      source?: string;
+      lines?: Line[];
+    }
+    interface CatalogSong {
+      video_id: number;
+      source: string | null;
+      pipeline_version: number;
+      has_lyrics: boolean;
+      is_stale: boolean;
+    }
+
+    const sl = await request.get("/api/v1/lyrics/songs");
+    expect(sl.status()).toBe(200);
+    const songs: CatalogSong[] = await sl.json();
+    const geminiSongs = songs.filter(
+      (s) =>
+        s.has_lyrics &&
+        !s.is_stale &&
+        typeof s.source === "string" &&
+        s.source.startsWith("ensemble:gemini"),
+    );
+
+    test.skip(
+      geminiSongs.length === 0,
+      "no ensemble:gemini song at current pipeline version yet — reprocess " +
+        "queue hasn't produced any. Sanitizer correctness is covered by " +
+        "unit tests in crates/sp-server/src/lyrics/merge_tests.rs.",
+    );
+
+    const tested: string[] = [];
+    for (const s of geminiSongs.slice(0, 3)) {
+      const lr = await request.get(`/api/v1/videos/${s.video_id}/lyrics`);
+      expect(lr.status()).toBe(200);
+      const track: Track = await lr.json();
+
+      expect(track.source, `video ${s.video_id} source on track payload`).toMatch(
+        /^ensemble:gemini/,
+      );
+      expect(
+        Array.isArray(track.lines) && track.lines.length > 0,
+        `video ${s.video_id} must have at least one line`,
+      ).toBe(true);
+
+      let prev = -1;
+      for (const [i, l] of track.lines!.entries()) {
+        expect(typeof l.en === "string" && l.en.length > 0, `line ${i} empty`).toBe(true);
+        expect(typeof l.start_ms === "number", `line ${i} missing start_ms`).toBe(true);
+        expect(typeof l.end_ms === "number", `line ${i} missing end_ms`).toBe(true);
+        expect(l.end_ms! >= l.start_ms!, `line ${i} end before start`).toBe(true);
+        expect(l.start_ms! >= prev, `line ${i} start_ms non-monotonic`).toBe(true);
+        // v18 invariant: wordless providers emit words=None (serialized
+        // as absent / null). If a future change re-synthesizes per-word
+        // timings by even-distribution, the karaoke wall regresses.
+        expect(
+          l.words === undefined || l.words === null,
+          `line ${i} has unexpected words field (v18+ must be line-level only)`,
+        ).toBe(true);
+        prev = l.start_ms!;
+      }
+      tested.push(`#${s.video_id}`);
+    }
+    console.log(`v18+ Gemini check OK on: ${tested.join(", ")}`);
+  });
 });
