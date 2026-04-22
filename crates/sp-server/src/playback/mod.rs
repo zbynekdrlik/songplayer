@@ -100,6 +100,10 @@ struct PlaylistPipeline {
     cached_song: String,
     cached_artist: String,
     cached_duration_ms: u64,
+    /// Cached per-video flag: when true, skip EN Resolume pushes (`#sp-subs`
+    /// and `#sp-subs-next`) because the video already has baked-in EN lyrics
+    /// in the frame. SK clips still receive their text.
+    cached_suppress_en: bool,
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
     last_now_playing_broadcast: Option<Instant>,
@@ -226,6 +230,7 @@ impl PlaybackEngine {
                 cached_song: String::new(),
                 cached_artist: String::new(),
                 cached_duration_ms: 0,
+                cached_suppress_en: false,
                 last_now_playing_broadcast: None,
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
@@ -733,11 +738,21 @@ impl PlaybackEngine {
             Ok(Some(pair)) => pair,
             _ => (String::new(), String::new()),
         };
+        let suppress_en: bool =
+            sqlx::query_scalar::<_, i64>("SELECT suppress_resolume_en FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten()
+                .map(|v| v != 0)
+                .unwrap_or(false);
 
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.cached_song = song.clone();
             pp.cached_artist = artist.clone();
             pp.cached_duration_ms = duration_ms;
+            pp.cached_suppress_en = suppress_en;
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
@@ -825,11 +840,16 @@ impl PlaybackEngine {
             // Resolume subs gated on scene_active to prevent off-program
             // playlists clobbering `#sp-subs` (2026-04-19 event).
             if pp.scene_active.load(Ordering::Acquire) {
-                let (en, sk) = lyrics.resolume_lines(position_ms);
-                match en {
-                    Some(en_text) => {
+                match lyrics.resolume_lines_with_next(position_ms) {
+                    Some((en, next_en, sk, next_sk)) => {
                         let _ = self.resolume_tx.try_send(
-                            crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
+                            crate::resolume::ResolumeCommand::ShowSubtitles {
+                                en,
+                                next_en,
+                                sk,
+                                next_sk,
+                                suppress_en: pp.cached_suppress_en,
+                            },
                         );
                     }
                     None => {

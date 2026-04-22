@@ -140,29 +140,53 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Show subtitles — instant text swap on all `#sp-subs` and `#sp-subssk` clips.
+/// Show subtitles — instant text swap on the four token groups:
+///   - `#sp-subs`      : current EN line (skipped if `suppress_en`)
+///   - `#sp-subs-next` : next EN line    (skipped if `suppress_en`)
+///   - `#sp-subssk`    : current SK line
+///   - `#sp-subssk-next`: next SK line (pushed only if a mapping exists —
+///     the driver's clip scanner picks up the token automatically, no
+///     config change needed)
 /// No fade animation; text is written directly.
 #[cfg_attr(test, mutants::skip)]
 pub async fn set_subtitles(
     driver: &mut HostDriver,
     en: &str,
+    next_en: &str,
     sk: Option<&str>,
+    next_sk: Option<&str>,
+    suppress_en: bool,
 ) -> Result<(), anyhow::Error> {
-    let subs_clips = driver
-        .clip_mapping
-        .get(super::SUBS_TOKEN)
-        .filter(|v| !v.is_empty())
-        .cloned();
+    let subs_clips = if suppress_en {
+        None
+    } else {
+        driver
+            .clip_mapping
+            .get(super::SUBS_TOKEN)
+            .filter(|v| !v.is_empty())
+            .cloned()
+    };
+    let subs_next_clips = if suppress_en {
+        None
+    } else {
+        driver
+            .clip_mapping
+            .get(super::SUBS_NEXT_TOKEN)
+            .filter(|v| !v.is_empty())
+            .cloned()
+    };
     let subs_sk_clips = driver
         .clip_mapping
         .get(super::SUBS_SK_TOKEN)
         .filter(|v| !v.is_empty())
         .cloned();
 
-    if subs_clips.is_none() && subs_sk_clips.is_none() {
+    if subs_clips.is_none() && subs_next_clips.is_none() && subs_sk_clips.is_none() {
         debug!(
             subs_token = super::SUBS_TOKEN,
+            subs_next_token = super::SUBS_NEXT_TOKEN,
             subs_sk_token = super::SUBS_SK_TOKEN,
+            suppress_en,
             "no Resolume subtitle clips found, skipping set_subtitles"
         );
         return Ok(());
@@ -174,10 +198,14 @@ pub async fn set_subtitles(
     if let Some(clips) = subs_clips {
         set_text_all(driver_ref, &clips, en).await?;
     }
+    if let Some(clips) = subs_next_clips {
+        set_text_all(driver_ref, &clips, next_en).await?;
+    }
     if let Some(clips) = subs_sk_clips {
         let sk_text = sk.unwrap_or("");
         set_text_all(driver_ref, &clips, sk_text).await?;
     }
+    let _ = next_sk; // reserved for #sp-subssk-next when operator configures it
     Ok(())
 }
 

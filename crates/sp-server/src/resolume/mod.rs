@@ -34,7 +34,16 @@ pub enum ResolumeCommand {
     /// Hide the title (fade out + clear text) on all `#sp-title` clips.
     HideTitle,
     /// Show subtitle text (lyrics) on Resolume subtitle clips.
-    ShowSubtitles { en: String, sk: Option<String> },
+    ShowSubtitles {
+        en: String,
+        next_en: String,
+        sk: Option<String>,
+        next_sk: Option<String>,
+        /// When true, skip the EN pushes (both #sp-subs and #sp-subs-next).
+        /// SK clips still receive their text. Used for songs with baked-in
+        /// English lyrics inside the YouTube video frame.
+        suppress_en: bool,
+    },
     /// Hide subtitles (clear text) on Resolume subtitle clips.
     HideSubtitles,
     /// Force a refresh of the clip mapping cache.

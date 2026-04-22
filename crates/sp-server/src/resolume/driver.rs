@@ -148,8 +148,23 @@ impl HostDriver {
                     warn!(host = %self.host, %e, "hide_title failed");
                 }
             }
-            ResolumeCommand::ShowSubtitles { en, sk } => {
-                if let Err(e) = handlers::set_subtitles(self, &en, sk.as_deref()).await {
+            ResolumeCommand::ShowSubtitles {
+                en,
+                next_en,
+                sk,
+                next_sk,
+                suppress_en,
+            } => {
+                if let Err(e) = handlers::set_subtitles(
+                    self,
+                    &en,
+                    &next_en,
+                    sk.as_deref(),
+                    next_sk.as_deref(),
+                    suppress_en,
+                )
+                .await
+                {
                     warn!(host = %self.host, %e, "subtitle set failed");
                 }
             }

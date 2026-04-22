@@ -63,6 +63,21 @@ impl LyricsState {
         }
     }
 
+    /// Returns `(current_en, next_en, current_sk, next_sk)` for the Resolume
+    /// dual-line push. `next_en` is the empty string when the current line is
+    /// the last line of the track. `next_sk` is `None` when the current line
+    /// is last or when the next line has no SK translation.
+    pub fn resolume_lines_with_next(
+        &self,
+        position_ms: u64,
+    ) -> Option<(String, String, Option<String>, Option<String>)> {
+        let (idx, line) = self.track.line_at(position_ms)?;
+        let next_line = self.track.lines.get(idx + 1);
+        let next_en = next_line.map(|l| l.en.clone()).unwrap_or_default();
+        let next_sk = next_line.and_then(|l| l.sk.clone());
+        Some((line.en.clone(), next_en, line.sk.clone(), next_sk))
+    }
+
     /// Returns `Some((current_en, next_en))` for the Presenter push when
     /// playback position is on a line. `next_en` is the empty string when
     /// the current line is the last line of the track. Returns `None`
@@ -278,5 +293,26 @@ mod tests {
         let st = LyricsState::new(test_track());
         // position 0 is before first line (which starts at 1000 ms)
         assert!(st.presenter_lines(0).is_none());
+    }
+
+    #[test]
+    fn resolume_lines_with_next_returns_all_four() {
+        let st = LyricsState::new(test_track());
+        let (cur_en, next_en, cur_sk, _next_sk) =
+            st.resolume_lines_with_next(1500).expect("on line 0");
+        assert_eq!(cur_en, "Hello world");
+        assert!(!next_en.is_empty(), "expected a next line text");
+        assert!(cur_sk.is_some(), "current line has SK in test_track()");
+    }
+
+    #[test]
+    fn resolume_lines_with_next_returns_empty_next_on_last_line() {
+        let st = LyricsState::new(test_track());
+        let last = test_track().lines.last().cloned().expect("non-empty");
+        let mid = (last.start_ms + last.end_ms) / 2;
+        let (_cur, next_en, _cur_sk, next_sk) =
+            st.resolume_lines_with_next(mid).expect("on last line");
+        assert!(next_en.is_empty(), "last-line next_en must be empty");
+        assert!(next_sk.is_none(), "last-line next_sk must be None");
     }
 }
