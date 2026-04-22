@@ -426,6 +426,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-mutants
         run: cargo install cargo-mutants
+      # GitHub-hosted ubuntu-latest has 16GB RAM and no swap. cargo-mutants
+      # compiling rustc + linking sqlx/wiremock/tokio/reqwest for each mutant
+      # pushes peak memory past 16GB, triggering runner OOM-kill that
+      # surfaces as `The runner has received a shutdown signal.` and
+      # `Error: interrupted` (signal 143). Workaround from
+      # actions/runner-images#6680: add a 12GB swap file.
+      - name: Add swap file (workaround for 16GB OOM)
+        run: |
+          sudo fallocate -l 12G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
       - name: "Mutation testing: zero survivors in changed code"
         run: |
           git diff origin/main...HEAD > pr.diff
@@ -452,18 +465,7 @@ jobs:
           # helper functions are glue around external library APIs that can only
           # be validated against real files on the target platform. Both are
           # exercised by integration tests against committed fixtures.
-          # stdbuf -oL -eL forces line-buffered output from cargo-mutants so
-          # each tested mutant appears in the log immediately. Without it,
-          # cargo-mutants' TTY progress bar buffers all per-mutant output
-          # and the job log shows only "Found N mutants" and "Unmutated
-          # baseline" — making it impossible to identify which mutant hangs.
-          # Observed 2026-04-21: the job was externally cancelled on 5
-          # consecutive runs at unpredictable points (3 min to 14 min post-
-          # baseline) despite --jobs 1, mutants::skip, and file excludes.
-          # Hypothesis: one specific mutant causes a test-subprocess hang
-          # that eventually triggers the GitHub Actions runner's idle kill.
-          # stdbuf lets us see which mutant is in flight when the kill fires.
-          stdbuf -oL -eL cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
+          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
             --exclude-re 'sp-server/src/downloader/' \
