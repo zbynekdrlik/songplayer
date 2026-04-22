@@ -252,3 +252,29 @@ pub async fn import_video(
     });
     post_json("/api/v1/videos/import", &body).await
 }
+
+/// PATCH `/api/v1/videos/{id}` with the `suppress_resolume_en` flag. Server
+/// replies 204 on success. Used by the /live setlist "EN off" checkbox so
+/// operators can flip the flag for songs that bake English lyrics into the
+/// video (so SongPlayer won't push them again to Resolume's `#sp-subs` /
+/// `#sp-subs-next` clips).
+pub async fn patch_video_suppress_en(video_id: i64, suppress: bool) -> Result<(), String> {
+    let body = serde_json::json!({ "suppress_resolume_en": suppress });
+    patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
+}
+
+/// PATCH JSON to `path` and discard the response body. Mirror of
+/// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
+/// Content`.
+async fn patch_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
+    let resp = Request::patch(path)
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("PATCH {} → {}", path, resp.status()));
+    }
+    Ok(())
+}

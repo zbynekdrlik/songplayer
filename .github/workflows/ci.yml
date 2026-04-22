@@ -207,6 +207,13 @@ jobs:
         run: cargo build --workspace
       - name: Run tests
         run: cargo test --workspace --verbose
+      # Release-mode decoder tests — the Tauri shipped binary is a release
+      # build, and the 2026-04-22 seek regression (commit 5977a9d) passed
+      # debug-mode cargo test but broke MF ReadSample under release LTO.
+      # sp-decoder is the only crate with Windows-specific release-sensitive
+      # code paths, so we gate only that crate here to keep CI time bounded.
+      - name: Run sp-decoder tests (release mode)
+        run: cargo test -p sp-decoder --release --verbose
 
   test-integrity:
     name: Test Integrity Check

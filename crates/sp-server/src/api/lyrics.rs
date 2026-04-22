@@ -84,6 +84,10 @@ pub struct SongListItem {
     pub has_lyrics: bool,
     pub is_stale: bool,
     pub manual_priority: bool,
+    /// `videos.suppress_resolume_en` — when true, the playback engine skips
+    /// pushing the English lyric line to Resolume's `#sp-subs` / `#sp-subs-next`
+    /// clips. The /live setlist UI renders a checkbox bound to this field.
+    pub suppress_resolume_en: bool,
 }
 
 // HTTP handler: behavior covered by integration tests in Task 14 Playwright + is_stale/manual_priority cast logic verified via API shape tests.
@@ -95,7 +99,8 @@ pub async fn list_songs(
     use crate::lyrics::LYRICS_PIPELINE_VERSION;
     let mut sql = String::from(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
-         lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority \
+         lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
+         suppress_resolume_en \
          FROM videos WHERE normalized = 1",
     );
     if q.playlist_id.is_some() {
@@ -120,6 +125,7 @@ pub async fn list_songs(
             let pv: i64 = r.get("lyrics_pipeline_version");
             let hl: i64 = r.get("has_lyrics");
             let mp: i64 = r.get("lyrics_manual_priority");
+            let sre: i64 = r.get("suppress_resolume_en");
             SongListItem {
                 video_id: r.get("id"),
                 youtube_id: r.get("youtube_id"),
@@ -132,6 +138,7 @@ pub async fn list_songs(
                 has_lyrics: hl == 1,
                 is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
                 manual_priority: mp == 1,
+                suppress_resolume_en: sre != 0,
             }
         })
         .collect();
@@ -154,7 +161,8 @@ pub async fn get_song_detail(
     use crate::lyrics::LYRICS_PIPELINE_VERSION;
     let row = match sqlx::query(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
-         lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority \
+         lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
+         suppress_resolume_en \
          FROM videos WHERE id = ? AND normalized = 1",
     )
     .bind(video_id)
@@ -171,6 +179,7 @@ pub async fn get_song_detail(
     let pv: i64 = row.get("lyrics_pipeline_version");
     let hl: i64 = row.get("has_lyrics");
     let mp: i64 = row.get("lyrics_manual_priority");
+    let sre: i64 = row.get("suppress_resolume_en");
     let youtube_id: String = row.get("youtube_id");
     let list_item = SongListItem {
         video_id: row.get("id"),
@@ -184,6 +193,7 @@ pub async fn get_song_detail(
         has_lyrics: hl == 1,
         is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
         manual_priority: mp == 1,
+        suppress_resolume_en: sre != 0,
     };
     let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let audit_path = state

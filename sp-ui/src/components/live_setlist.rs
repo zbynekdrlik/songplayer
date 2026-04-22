@@ -58,6 +58,7 @@ pub fn LiveSetList(
                         <th>"#"</th>
                         <th>"Song"</th>
                         <th>"Artist"</th>
+                        <th title="Suppress pushing the English lyric line to Resolume #sp-subs clips. Enable for songs with baked-in English subtitles in the video.">"EN off"</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -70,11 +71,31 @@ pub fn LiveSetList(
                             let video_id = item["video_id"].as_i64().unwrap_or(0);
                             let song = meta["song"].as_str().unwrap_or("—").to_string();
                             let artist = meta["artist"].as_str().unwrap_or("—").to_string();
+                            let suppress_initial = meta["suppress_resolume_en"]
+                                .as_bool()
+                                .unwrap_or(false);
                             view! {
                                 <tr>
                                     <td>{position + 1}</td>
                                     <td>{song}</td>
                                     <td>{artist}</td>
+                                    <td class="live-setlist-suppress-en">
+                                        <input
+                                            type="checkbox"
+                                            prop:checked=suppress_initial
+                                            on:change=move |ev| {
+                                                let checked = event_target_checked(&ev);
+                                                leptos::task::spawn_local(async move {
+                                                    match api::patch_video_suppress_en(
+                                                        video_id, checked,
+                                                    ).await {
+                                                        Ok(()) => on_changed.run(()),
+                                                        Err(e) => error_msg.set(e),
+                                                    }
+                                                });
+                                            }
+                                        />
+                                    </td>
                                     <td>
                                         <button on:click=move |_| {
                                             leptos::task::spawn_local(async move {

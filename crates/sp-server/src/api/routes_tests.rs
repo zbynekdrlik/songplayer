@@ -561,3 +561,176 @@ async fn delete_playlist_sends_obs_rebuild_signal() {
         .expect("rebuild signal should arrive within 200ms")
         .expect("rebuild channel should still be open");
 }
+
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/videos/{id} — suppress_resolume_en toggle (for /live setlist)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_video_sets_suppress_resolume_en_true() {
+    let state = test_state().await;
+
+    // Seed a playlist + video with the flag off.
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, suppress_resolume_en) \
+         VALUES (42, 1, 'yt-abc', 1, 0)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let pool = state.pool.clone();
+    let app = app(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/videos/42")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&serde_json::json!({
+                        "suppress_resolume_en": true
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let after: i64 = sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE id = 42")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(after, 1, "DB column must flip to 1 after PATCH true");
+}
+
+#[tokio::test]
+async fn patch_video_sets_suppress_resolume_en_false_then_true_roundtrip() {
+    let state = test_state().await;
+
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, suppress_resolume_en) \
+         VALUES (77, 1, 'yt-xyz', 1, 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let pool = state.pool.clone();
+    let app = app(state);
+
+    // Turn OFF.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/videos/77")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&serde_json::json!({
+                        "suppress_resolume_en": false
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let off: i64 = sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE id = 77")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(off, 0, "DB column must be 0 after PATCH false");
+
+    // Turn back ON.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/videos/77")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&serde_json::json!({
+                        "suppress_resolume_en": true
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let on: i64 = sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE id = 77")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(on, 1, "DB column must flip back to 1 after PATCH true");
+}
+
+#[tokio::test]
+async fn list_lyrics_songs_exposes_suppress_resolume_en() {
+    // The /live setlist UI reads this field from the lyrics-songs response
+    // to decide the initial checkbox state. Guarantee it's serialized.
+    let state = test_state().await;
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p', 'u', 1)")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, suppress_resolume_en) \
+         VALUES (1, 1, 'yt-on', 1, 1), (2, 1, 'yt-off', 1, 0)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let app = app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/lyrics/songs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(items.len(), 2);
+
+    let on = items
+        .iter()
+        .find(|v| v["video_id"] == 1)
+        .expect("row for video 1");
+    let off = items
+        .iter()
+        .find(|v| v["video_id"] == 2)
+        .expect("row for video 2");
+    assert_eq!(
+        on["suppress_resolume_en"],
+        serde_json::Value::Bool(true),
+        "video 1 must serialize suppress_resolume_en=true"
+    );
+    assert_eq!(
+        off["suppress_resolume_en"],
+        serde_json::Value::Bool(false),
+        "video 2 must serialize suppress_resolume_en=false"
+    );
+}

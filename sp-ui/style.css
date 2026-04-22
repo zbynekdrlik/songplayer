@@ -453,6 +453,12 @@ body {
     margin-top: 0.75rem;
 }
 
+/* Per-row "EN off" checkbox column. The checkbox flips
+   videos.suppress_resolume_en via PATCH /api/v1/videos/{id}. */
+.live-setlist-suppress-en {
+    text-align: center;
+}
+
 .live-page-error,
 .live-catalog-error,
 .live-setlist-error {

@@ -193,14 +193,36 @@ impl MediaStream for MediaFoundationVideoReader {
         self.duration_ms
     }
 
-    fn seek(&mut self, _position_ms: u64) -> Result<(), DecoderError> {
-        // Seek not yet wired for the video reader — the playback pipeline
-        // does not currently expose scrubbing, so no caller exercises this
-        // path. When dashboard scrubbing is added, this will need a real
-        // MF SetCurrentPosition implementation via PROPVARIANT.
-        Err(DecoderError::Seek(
-            "MediaFoundationVideoReader::seek not yet implemented".into(),
-        ))
+    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
+        // MF time units are 100-ns ticks (1 ms = 10 000 ticks). A null
+        // guidtimeformat means "use the default time format" which for
+        // IMFSourceReader is 100-ns units per MSDN.
+        //
+        // We construct the PROPVARIANT manually as a 24-byte stack buffer
+        // (vt=VT_I8 at offset 0, hVal at offset 8) rather than via
+        // `windows::core::PROPVARIANT::from(i64)`. The wrapper type has a
+        // `Drop` impl that calls `PropVariantClear` from ole32.dll. In the
+        // 2026-04-22 worship-training deploy (commit 5977a9d), merely linking
+        // in that Drop path on Windows release builds caused subsequent
+        // `ReadSample` calls to return EOS immediately on fresh decoders —
+        // every song played for zero frames. Using raw bytes avoids the
+        // wrapper entirely; for VT_I8 there is nothing to free anyway.
+        let position_100ns: i64 = (position_ms as i64).saturating_mul(10_000);
+        const VT_I8: u16 = 20;
+        let mut raw: [u64; 3] = [0; 3]; // 24 bytes, 8-byte aligned for i64
+        let raw_ptr = raw.as_mut_ptr().cast::<u8>();
+        unsafe {
+            raw_ptr.cast::<u16>().write(VT_I8);
+            raw_ptr.add(8).cast::<i64>().write(position_100ns);
+        }
+        let var_ptr = raw.as_ptr().cast::<windows::core::PROPVARIANT>();
+        unsafe {
+            self.reader
+                .SetCurrentPosition(std::ptr::null(), var_ptr)
+                .map_err(|e| DecoderError::Seek(format!("SetCurrentPosition: {e}")))?;
+        }
+        debug!(position_ms, "mf_reader: seek complete");
+        Ok(())
     }
 }
 
