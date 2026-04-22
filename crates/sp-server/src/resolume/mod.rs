@@ -17,6 +17,12 @@ pub const TITLE_TOKEN: &str = "#sp-title";
 /// Resolume clip tag for English subtitle text delivery.
 pub const SUBS_TOKEN: &str = "#sp-subs";
 
+/// Clip name token for the lookahead "next line" display.
+/// Paired with `SUBS_TOKEN`; receives `line[i+1]` every time `SUBS_TOKEN`
+/// receives `line[i]`. v0.22.0 addition so audience can read the upcoming
+/// line before it's sung.
+pub const SUBS_NEXT_TOKEN: &str = "#sp-subs-next";
+
 /// Resolume clip tag for Slovak subtitle text delivery.
 pub const SUBS_SK_TOKEN: &str = "#sp-subssk";
 
@@ -212,5 +218,10 @@ mod tests {
         }
 
         let _ = shutdown_tx.send(());
+    }
+
+    #[test]
+    fn subs_next_token_matches_agreed_clip_name() {
+        assert_eq!(super::SUBS_NEXT_TOKEN, "#sp-subs-next");
     }
 }
