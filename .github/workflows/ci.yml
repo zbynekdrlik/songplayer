@@ -1081,7 +1081,7 @@ jobs:
         shell: powershell
         run: |
           # Check if Resolume API is reachable. If not, the operator hasn't
-          # started Resolume — log INFO and skip (do not fail CI on operator
+          # started Resolume - log INFO and skip (do not fail CI on operator
           # environment issues).
           try {
             $null = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/product" -TimeoutSec 5
@@ -1176,7 +1176,7 @@ jobs:
             }
           }
           if ($subsNextClips.Count -eq 0) {
-            Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project — skipping lookahead gate"
+            Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project - skipping lookahead gate"
           } else {
             Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips"
             $identical = $true
@@ -1186,7 +1186,7 @@ jobs:
             # Identical-only-if BOTH sets match AND the subsClips set has
             # text to compare against in the first place.
             if ($subsClips.Count -gt 0 -and $identical) {
-              Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text — lookahead push not wired"
+              Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
               exit 1
             }
             Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
@@ -1320,12 +1320,12 @@ jobs:
         run: |
           # Regression gate for the 2026-04-22 worship-training bundle.
           # SongPlayer's line-change hook must be able to PUT to the
-          # configured Presenter URL — band singers depend on the stage
+          # configured Presenter URL - band singers depend on the stage
           # display during live worship. This step fails deploy if the
           # Presenter endpoint is down or returns non-204.
           $settings = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings" -TimeoutSec 10
           if ($settings.presenter_enabled -ne "true") {
-            Write-Host "presenter_enabled = '$($settings.presenter_enabled)' — skipping reachability check"
+            Write-Host "presenter_enabled = '$($settings.presenter_enabled)' - skipping reachability check"
             exit 0
           }
           $url = $settings.presenter_url
