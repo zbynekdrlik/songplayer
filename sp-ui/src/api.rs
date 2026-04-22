@@ -211,6 +211,18 @@ pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(),
     .await
 }
 
+/// POST seek to a playlist: `POST /api/v1/playlists/{id}/seek {"position_ms":...}`.
+/// Server returns 204 on success. v0.22.0 addition for the /live scrubber +
+/// tap-a-line UI.
+pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), String> {
+    let body = serde_json::json!({ "position_ms": position_ms });
+    post_json_empty(
+        &format!("/api/v1/playlists/{playlist_id}/seek"),
+        &body,
+    )
+    .await
+}
+
 // ── Import (v0.22.0) ──────────────────────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
