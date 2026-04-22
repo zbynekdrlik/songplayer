@@ -21,6 +21,7 @@ pub mod text_merge;
 pub mod translator;
 pub mod worker;
 pub mod youtube_subs;
+pub mod yt_manual_subs_provider;
 pub use worker::LyricsWorker;
 pub use worker::queue_update_loop;
 
