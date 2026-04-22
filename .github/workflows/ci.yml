@@ -434,10 +434,15 @@ jobs:
       # actions/runner-images#6680: add a 12GB swap file.
       - name: Add swap file (workaround for 16GB OOM)
         run: |
-          sudo fallocate -l 12G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # Ubuntu 24.04 runner already has /swapfile mounted; detach it
+          # first before creating a larger one. /mnt is on the data disk
+          # with ~80GB free, so we can comfortably allocate 12G there.
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           free -h
       - name: "Mutation testing: zero survivors in changed code"
         run: |
