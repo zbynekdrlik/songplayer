@@ -226,6 +226,97 @@ async fn which_python(name: &str) -> Result<PathBuf, anyhow::Error> {
 }
 
 // ---------------------------------------------------------------------------
+// YouTube URL helpers
+// ---------------------------------------------------------------------------
+
+/// Parse an 11-character YouTube video id from any of the supported URL forms
+/// (`youtu.be/<id>`, `youtube.com/watch?v=<id>`, m.youtube.com, embedded
+/// playlist params). Returns None for non-YouTube URLs or malformed input.
+pub fn extract_youtube_id(url: &str) -> Option<String> {
+    // youtu.be/<id>[?...]
+    if let Some(rest) = url
+        .strip_prefix("https://youtu.be/")
+        .or_else(|| url.strip_prefix("http://youtu.be/"))
+    {
+        let id = rest.split(['?', '/', '&']).next()?;
+        return is_yt_id(id).then(|| id.to_string());
+    }
+    // *youtube.com/watch?v=<id>&...
+    if url.contains("youtube.com/watch") {
+        let query = url.split_once('?')?.1;
+        for part in query.split('&') {
+            if let Some(id) = part.strip_prefix("v=") {
+                return is_yt_id(id).then(|| id.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_yt_id(s: &str) -> bool {
+    s.len() == 11
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Minimal metadata extracted via `yt-dlp --dump-json --no-playlist --skip-download`.
+/// Thumbnails and full descriptions are intentionally dropped — they land later
+/// when the worker processes the row through the normal download path.
+#[derive(Debug, Clone)]
+pub struct ImportedVideo {
+    pub youtube_id: String,
+    pub title: String,
+    pub duration_ms: Option<u64>,
+}
+
+#[cfg_attr(test, mutants::skip)] // subprocess I/O glue; pure logic (URL parse) is covered by extract_youtube_id tests
+pub async fn fetch_video_metadata(
+    ytdlp_path: &std::path::Path,
+    url: &str,
+) -> anyhow::Result<ImportedVideo> {
+    use tokio::process::Command;
+    let youtube_id = extract_youtube_id(url)
+        .ok_or_else(|| anyhow::anyhow!("could not parse YouTube id from URL: {url}"))?;
+    let mut cmd = Command::new(ytdlp_path);
+    cmd.args([
+        "--dump-json",
+        "--no-playlist",
+        "--skip-download",
+        "--no-warnings",
+        url,
+    ])
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let output = cmd.output().await?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "yt-dlp dump-json failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let title = json
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let duration_ms = json
+        .get("duration")
+        .and_then(|v| v.as_f64())
+        .map(|d| (d * 1000.0) as u64);
+    Ok(ImportedVideo {
+        youtube_id,
+        title,
+        duration_ms,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Platform helpers
 // ---------------------------------------------------------------------------
 
@@ -297,5 +388,40 @@ mod tests {
         let url = ytdlp_download_url();
         assert!(url.starts_with("https://"));
         assert!(url.contains("yt-dlp"));
+    }
+
+    #[test]
+    fn extract_youtube_id_from_short_url() {
+        let cases = [
+            ("https://youtu.be/AvWOCj48pGw", "AvWOCj48pGw"),
+            ("https://youtu.be/BW_vUblj_RA?si=foo", "BW_vUblj_RA"),
+            (
+                "https://www.youtube.com/watch?v=xrhVLX6vwPk&list=PLx",
+                "xrhVLX6vwPk",
+            ),
+            ("https://m.youtube.com/watch?v=cej4vn4sWtE", "cej4vn4sWtE"),
+            ("http://youtu.be/cej4vn4sWtE", "cej4vn4sWtE"),
+        ];
+        for (url, expected) in cases {
+            assert_eq!(
+                super::extract_youtube_id(url).unwrap(),
+                expected,
+                "url = {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_youtube_id_rejects_non_youtube() {
+        assert!(super::extract_youtube_id("https://vimeo.com/123").is_none());
+        assert!(super::extract_youtube_id("not a url").is_none());
+        assert!(
+            super::extract_youtube_id("https://youtu.be/tooshort").is_none(),
+            "11-char id guard"
+        );
+        assert!(
+            super::extract_youtube_id("https://youtube.com/watch?v=").is_none(),
+            "empty v= guard"
+        );
     }
 }

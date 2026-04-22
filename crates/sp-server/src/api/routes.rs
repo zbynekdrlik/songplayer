@@ -366,6 +366,92 @@ pub async fn patch_video(
 }
 
 // ---------------------------------------------------------------------------
+// Video import endpoint
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct ImportVideoReq {
+    pub youtube_url: String,
+    pub playlist_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportVideoResp {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub title: String,
+}
+
+/// Import a YouTube URL into a playlist. Runs `yt-dlp --dump-json` to fetch
+/// title/duration, inserts a `videos` row with `normalized=0` (download
+/// worker picks it up within 5s), and returns the new id.
+pub async fn import_video(
+    State(state): State<AppState>,
+    Json(req): Json<ImportVideoReq>,
+) -> impl IntoResponse {
+    use crate::downloader::tools::{extract_youtube_id, fetch_video_metadata};
+
+    // Fast reject obviously non-YouTube URLs before shelling out.
+    if extract_youtube_id(&req.youtube_url).is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "URL does not look like a YouTube video link",
+        )
+            .into_response();
+    }
+
+    let ytdlp_path = {
+        let guard = state.tool_paths.read().await;
+        match guard.as_ref() {
+            Some(tp) => tp.ytdlp.clone(),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "yt-dlp not ready yet on this server",
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let meta = match fetch_video_metadata(&ytdlp_path, &req.youtube_url).await {
+        Ok(m) => m,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("yt-dlp failed: {e}")).into_response();
+        }
+    };
+
+    let row = sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, title, duration_ms, normalized) \
+         VALUES (?, ?, ?, ?, 0) \
+         ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title \
+         RETURNING id",
+    )
+    .bind(req.playlist_id)
+    .bind(&meta.youtube_id)
+    .bind(&meta.title)
+    .bind(meta.duration_ms.map(|ms| ms as i64))
+    .fetch_one(&state.pool)
+    .await;
+
+    match row {
+        Ok(r) => {
+            let id: i64 = r.get(0);
+            (
+                StatusCode::CREATED,
+                Json(ImportVideoResp {
+                    video_id: id,
+                    youtube_id: meta.youtube_id,
+                    title: meta.title,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Playback endpoints
 // ---------------------------------------------------------------------------
 
