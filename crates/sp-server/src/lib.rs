@@ -10,6 +10,7 @@ pub mod obs;
 mod obs_bridge;
 pub mod playback;
 pub mod playlist;
+pub mod presenter;
 pub mod reprocess;
 pub mod resolume;
 pub mod startup;
