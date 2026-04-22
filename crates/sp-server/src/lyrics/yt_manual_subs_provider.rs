@@ -164,4 +164,55 @@ mod tests {
         };
         assert!(find_yt_subs_with_timing(&[bad]).is_none());
     }
+
+    // Pin the name + confidence values: mutation tests caught that empty-string
+    // / zeroed-out replacements passed through unnoticed because the only
+    // callers that care (orchestrator reporting + merge weighting) are not
+    // exercised in this file. These tests fail the mutants directly.
+    #[test]
+    fn name_is_yt_subs_literal() {
+        let p = YtManualSubsProvider;
+        assert_eq!(p.name(), "yt_subs", "provider name must be 'yt_subs'");
+        assert!(!p.name().is_empty(), "name must not be empty");
+    }
+
+    #[test]
+    fn base_confidence_is_point_nine_five() {
+        let p = YtManualSubsProvider;
+        let c = p.base_confidence();
+        assert!(
+            (c - 0.95).abs() < f32::EPSILON,
+            "base_confidence must be 0.95, got {c}"
+        );
+    }
+
+    // Pin the `&&` guard in find_yt_subs_with_timing: a mutant flipped it to
+    // `||` and was not caught because no test distinguished "wrong source +
+    // has_timing" from "right source + no timing" outcomes.
+    #[tokio::test]
+    async fn find_yt_subs_requires_both_source_and_timing_flag() {
+        // Wrong source but has_timing=true — must be rejected.
+        let wrong_source = CandidateText {
+            source: "description".to_string(),
+            lines: vec!["only text".into()],
+            has_timing: true,
+            line_timings: Some(vec![(0, 1000)]),
+        };
+        assert!(
+            find_yt_subs_with_timing(&[wrong_source]).is_none(),
+            "non-yt_subs source must be rejected even if timing present"
+        );
+
+        // Right source but has_timing=false — must be rejected.
+        let no_timing_flag = CandidateText {
+            source: "yt_subs".to_string(),
+            lines: vec!["only text".into()],
+            has_timing: false,
+            line_timings: Some(vec![(0, 1000)]),
+        };
+        assert!(
+            find_yt_subs_with_timing(&[no_timing_flag]).is_none(),
+            "yt_subs with has_timing=false must be rejected even if line_timings Some"
+        );
+    }
 }
