@@ -485,17 +485,19 @@ jobs:
           # helper functions are glue around external library APIs that can only
           # be validated against real files on the target platform. Both are
           # exercised by integration tests against committed fixtures.
-          # Narrow scope for PR #48: compute diff against the previous dev
-          # HEAD (before my 3 commits), not origin/main. The whole v11-v22
-          # lyrics rollout ships *in this PR* but was validated in prod on
-          # 2026-04-21. Mutation-testing 5300 LOC of that work drives the
-          # runner to OOM every time (7 runs, 38GB RAM+swap not enough).
-          # For this PR, only mutate files actually touched by MY commits
-          # (fix/47, fix/44, version bump) — reprocess.rs and the workflow
-          # file itself. All the v11-v22 work has its own unit/wiremock
-          # tests committed and deployed.
-          cargo mutants --file crates/sp-server/src/lyrics/reprocess.rs \
-            --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out
+          # Post-PR #48: dev now equals main, so --in-diff pr.diff is back
+          # to a normal small-diff scope on future PRs. The swap + disk
+          # cleanup + CARGO_BUILD_JOBS=2 stay as belt-and-braces for any
+          # future large-diff PR that might OOM the 16GB runner.
+          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
+            --exclude-re 'sp-server/src/lib.rs' \
+            --exclude-re 'sp-server/src/obs/' \
+            --exclude-re 'sp-server/src/downloader/' \
+            --exclude-re 'sp-server/src/reprocess/' \
+            --exclude-re 'sp-server/src/api/websocket' \
+            --exclude-re 'sp-server/src/playlist/' \
+            --exclude-re 'sp-decoder/src/audio/' \
+            --exclude-re 'sp-decoder/src/video/'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
