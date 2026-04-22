@@ -194,19 +194,22 @@ impl MediaStream for MediaFoundationVideoReader {
     }
 
     fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        // MF time units are 100-ns ticks (1 ms = 10 000 ticks). A null
-        // guidtimeformat means "use the default time format" which for
-        // IMFSourceReader is 100-ns units per MSDN.
+        // MSDN IMFSourceReader::SetCurrentPosition:
+        //   `guidtimeformat` must point to a GUID that identifies the time
+        //   format. Use a pointer to GUID_NULL for 100-ns units — the call
+        //   dereferences the GUID, so a null pointer causes an access
+        //   violation on release-mode MF.
+        //
+        //   `varPosition` must be a PROPVARIANT of type VT_I8 (or VT_UI8).
         //
         // We construct the PROPVARIANT manually as a 24-byte stack buffer
         // (vt=VT_I8 at offset 0, hVal at offset 8) rather than via
         // `windows::core::PROPVARIANT::from(i64)`. The wrapper type has a
-        // `Drop` impl that calls `PropVariantClear` from ole32.dll. In the
-        // 2026-04-22 worship-training deploy (commit 5977a9d), merely linking
-        // in that Drop path on Windows release builds caused subsequent
-        // `ReadSample` calls to return EOS immediately on fresh decoders —
-        // every song played for zero frames. Using raw bytes avoids the
-        // wrapper entirely; for VT_I8 there is nothing to free anyway.
+        // `Drop` impl that calls `PropVariantClear` from ole32.dll. For
+        // VT_I8 there is nothing to free and avoiding the wrapper keeps
+        // the release-mode LTO path clean (prior retry of this fix left
+        // MF in a state where `ReadSample` returned EOS immediately on
+        // fresh decoders — see the 2026-04-22 worship-training deploy).
         let position_100ns: i64 = (position_ms as i64).saturating_mul(10_000);
         const VT_I8: u16 = 20;
         let mut raw: [u64; 3] = [0; 3]; // 24 bytes, 8-byte aligned for i64
@@ -216,9 +219,12 @@ impl MediaStream for MediaFoundationVideoReader {
             raw_ptr.add(8).cast::<i64>().write(position_100ns);
         }
         let var_ptr = raw.as_ptr().cast::<windows::core::PROPVARIANT>();
+        // GUID_NULL is the all-zero GUID; stack-allocated so the pointer is
+        // valid for the duration of the call.
+        let guid_null = windows::core::GUID::from_u128(0);
         unsafe {
             self.reader
-                .SetCurrentPosition(std::ptr::null(), var_ptr)
+                .SetCurrentPosition(&guid_null, var_ptr)
                 .map_err(|e| DecoderError::Seek(format!("SetCurrentPosition: {e}")))?;
         }
         debug!(position_ms, "mf_reader: seek complete");
