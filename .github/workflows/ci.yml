@@ -900,6 +900,16 @@ jobs:
           if ([string]::IsNullOrEmpty($current.gemini_model)) {
             $seed.gemini_model = "gemini-3.1-pro-preview"
           }
+          if ([string]::IsNullOrEmpty($current.presenter_url)) {
+            $seed.presenter_url = "http://10.77.9.205/api/stage"
+            Write-Host "Seeding presenter_url (was empty)"
+          } else {
+            Write-Host "Preserving existing presenter_url ($($current.presenter_url))"
+          }
+          if ([string]::IsNullOrEmpty($current.presenter_enabled)) {
+            $seed.presenter_enabled = "true"
+            Write-Host "Seeding presenter_enabled=true (was empty)"
+          }
           $body = $seed | ConvertTo-Json -Compress
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/settings" -Method Patch -Body $bytes -ContentType "application/json" -UseBasicParsing | Out-Null
@@ -1271,6 +1281,45 @@ jobs:
             }
           }
           Write-Host "OK: AI proxy healthy, watchdog quiet, /v1/models responding."
+
+      - name: Verify Presenter reachable
+        shell: powershell
+        run: |
+          # Regression gate for the 2026-04-22 worship-training bundle.
+          # SongPlayer's line-change hook must be able to PUT to the
+          # configured Presenter URL — band singers depend on the stage
+          # display during live worship. This step fails deploy if the
+          # Presenter endpoint is down or returns non-204.
+          $settings = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings" -TimeoutSec 10
+          if ($settings.presenter_enabled -ne "true") {
+            Write-Host "presenter_enabled = '$($settings.presenter_enabled)' — skipping reachability check"
+            exit 0
+          }
+          $url = $settings.presenter_url
+          if ([string]::IsNullOrEmpty($url)) {
+            Write-Error "FAIL: presenter_enabled=true but presenter_url is empty"
+            exit 1
+          }
+          Write-Host "Probing Presenter at $url"
+          try {
+            $probe = @{
+              currentText = "[CI PROBE]"
+              nextText = ""
+              currentSong = ""
+              nextSong = ""
+            } | ConvertTo-Json -Compress
+            $resp = Invoke-WebRequest -Uri $url -Method Put `
+              -ContentType "application/json" `
+              -Body $probe -UseBasicParsing -TimeoutSec 10
+            if ($resp.StatusCode -ne 204) {
+              Write-Error "FAIL: Presenter at $url returned $($resp.StatusCode), expected 204"
+              exit 1
+            }
+            Write-Host "OK: Presenter at $url responded 204 to probe PUT"
+          } catch {
+            Write-Error "FAIL: Presenter unreachable at ${url}: $_"
+            exit 1
+          }
 
       - name: Verify download worker produces a split-file pair
         shell: powershell
