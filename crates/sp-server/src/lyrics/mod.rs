@@ -146,7 +146,18 @@ use sp_core::lyrics::LyricsTrack;
 ///   Smart-skip tightened to `version >= 18`; every pre-v18 Gemini
 ///   row is reprocessed so the persisted JSON drops the synthetic
 ///   word arrays.
-pub const LYRICS_PIPELINE_VERSION: u32 = 18;
+/// - v19 (#TBD): YtManualSubsProvider registered as AlignmentProvider
+///   ahead of Gemini. When gather_sources produces a yt_subs candidate
+///   with `has_timing=true`, alignment short-circuits — no Gemini API
+///   call, no ffmpeg chunking — and the track ships as
+///   `source="yt_subs"` directly. Per `feedback_no_autosub.md` this is
+///   MANUAL subs only (autosub never reaches candidate_texts with
+///   has_timing=true). Pipeline-version bump re-queues pre-v19 rows in
+///   the stale bucket so existing Gemini-only songs are re-evaluated
+///   against the new fast path; the smart-skip clause in
+///   `reprocess.rs::fetch_bucket_stale` keeps pure-Gemini v19+ output
+///   protected once generated.
+pub const LYRICS_PIPELINE_VERSION: u32 = 19;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -277,10 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v18() {
+    fn lyrics_pipeline_version_is_v19() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 18,
-            "v18 = drop synthetic per-word timings; ship words=None for wordless providers"
+            LYRICS_PIPELINE_VERSION, 19,
+            "v19 = YtManualSubsProvider short-circuit before Gemini"
         );
     }
 
