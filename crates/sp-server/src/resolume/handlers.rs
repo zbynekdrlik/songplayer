@@ -147,6 +147,7 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
 ///   - `#sp-subssk-next`: next SK line (pushed only if a mapping exists —
 ///     the driver's clip scanner picks up the token automatically, no
 ///     config change needed)
+///
 /// No fade animation; text is written directly.
 #[cfg_attr(test, mutants::skip)]
 pub async fn set_subtitles(

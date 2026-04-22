@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::*;
 
     #[test]
     fn server_config_default() {

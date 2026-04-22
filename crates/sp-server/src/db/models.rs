@@ -134,6 +134,20 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
     }
 }
 
+/// Fast single-column read of `videos.suppress_resolume_en` by id. Used by
+/// the playback engine hot path to decide whether to skip the Resolume EN
+/// push. Returns None when the row doesn't exist.
+pub async fn get_video_suppress_resolume_en(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<bool, sqlx::Error> {
+    let v: Option<i64> = sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(v.map(|n| n != 0).unwrap_or(false))
+}
+
 // ---------------------------------------------------------------------------
 // Play history
 // ---------------------------------------------------------------------------

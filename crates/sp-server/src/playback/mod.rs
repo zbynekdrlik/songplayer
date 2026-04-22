@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 pub mod pipeline;
+mod position_update;
 pub mod state;
 pub mod submitter;
 
@@ -100,9 +101,7 @@ struct PlaylistPipeline {
     cached_song: String,
     cached_artist: String,
     cached_duration_ms: u64,
-    /// Cached per-video flag: when true, skip EN Resolume pushes (`#sp-subs`
-    /// and `#sp-subs-next`) because the video already has baked-in EN lyrics
-    /// in the frame. SK clips still receive their text.
+    /// v0.22.0: skip EN Resolume when true (baked-in video lyrics).
     cached_suppress_en: bool,
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
@@ -114,9 +113,7 @@ struct PlaylistPipeline {
     /// Active lyrics state for karaoke display. Loaded when a video with
     /// lyrics starts; cleared when the video ends.
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
-    /// Last line text pushed to the Presenter stage display for this
-    /// pipeline. Used to debounce — we only PUT when the line actually
-    /// changes, not on every 500 ms position tick.
+    /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
 }
 
@@ -156,8 +153,7 @@ pub struct PlaybackEngine {
     /// WebSocket broadcast — forwards `NowPlaying` and `PlaybackStateChanged`
     /// messages to the dashboard.
     ws_event_tx: broadcast::Sender<ServerMsg>,
-    /// Presenter HTTP client for pushing stage-display text on every line
-    /// change. `None` when disabled via settings — the push hook is a no-op.
+    /// Presenter stage-display client; None = push disabled.
     presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
 }
 
@@ -738,15 +734,9 @@ impl PlaybackEngine {
             Ok(Some(pair)) => pair,
             _ => (String::new(), String::new()),
         };
-        let suppress_en: bool =
-            sqlx::query_scalar::<_, i64>("SELECT suppress_resolume_en FROM videos WHERE id = ?")
-                .bind(video_id)
-                .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten()
-                .map(|v| v != 0)
-                .unwrap_or(false);
+        let suppress_en = crate::db::models::get_video_suppress_resolume_en(&self.pool, video_id)
+            .await
+            .unwrap_or(false);
 
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.cached_song = song.clone();
@@ -791,110 +781,6 @@ impl PlaybackEngine {
     /// Skips the broadcast if less than
     /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
     /// broadcast for the same playlist.
-    fn maybe_broadcast_position_update(
-        &mut self,
-        playlist_id: i64,
-        position_ms: u64,
-        duration_ms: u64,
-    ) {
-        let pp = match self.pipelines.get_mut(&playlist_id) {
-            Some(pp) => pp,
-            None => return,
-        };
-
-        let now = Instant::now();
-        let should_send = match pp.last_now_playing_broadcast {
-            Some(t) => should_send_position_update(now.duration_since(t).as_millis() as u64),
-            None => true,
-        };
-        if !should_send {
-            return;
-        }
-        pp.last_now_playing_broadcast = Some(now);
-
-        let video_id = match pp.current_video_id {
-            Some(id) => id,
-            None => return,
-        };
-        let song = pp.cached_song.clone();
-        let artist = pp.cached_artist.clone();
-        let dur = if duration_ms > 0 {
-            duration_ms
-        } else {
-            pp.cached_duration_ms
-        };
-
-        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
-            playlist_id,
-            video_id,
-            song,
-            artist,
-            position_ms,
-            duration_ms: dur,
-        });
-
-        // Emit lyrics update for karaoke display
-        if let Some(ref lyrics) = pp.lyrics_state {
-            let msg = lyrics.update(playlist_id, position_ms);
-            let _ = self.ws_event_tx.send(msg);
-            // Resolume subs gated on scene_active to prevent off-program
-            // playlists clobbering `#sp-subs` (2026-04-19 event).
-            if pp.scene_active.load(Ordering::Acquire) {
-                match lyrics.resolume_lines_with_next(position_ms) {
-                    Some((en, next_en, sk, next_sk)) => {
-                        let _ = self.resolume_tx.try_send(
-                            crate::resolume::ResolumeCommand::ShowSubtitles {
-                                en,
-                                next_en,
-                                sk,
-                                next_sk,
-                                suppress_en: pp.cached_suppress_en,
-                            },
-                        );
-                    }
-                    None => {
-                        let _ = self
-                            .resolume_tx
-                            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
-                    }
-                }
-            }
-        }
-
-        // Presenter stage-display push. Fires only when the current line
-        // changes — otherwise we'd spam ~120 identical requests per song.
-        // Fire-and-forget: we never block playback on the Presenter.
-        if let (Some(client), Some(lyrics)) = (&self.presenter_client, &pp.lyrics_state) {
-            if let Some((current_en, next_en)) = lyrics.presenter_lines(position_ms) {
-                let needs_push = match &pp.last_presenter_text {
-                    Some(prev) => prev != &current_en,
-                    None => true,
-                };
-                if needs_push {
-                    pp.last_presenter_text = Some(current_en.clone());
-                    let song = pp.cached_song.clone();
-                    let artist = pp.cached_artist.clone();
-                    let current_song = if artist.is_empty() {
-                        song.clone()
-                    } else {
-                        format!("{song} - {artist}")
-                    };
-                    let payload = crate::presenter::PresenterPayload {
-                        current_text: current_en,
-                        next_text: next_en,
-                        current_song,
-                        next_song: String::new(),
-                    };
-                    let client = client.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = client.push(payload).await {
-                            tracing::warn!(?e, "presenter push failed (non-fatal)");
-                        }
-                    });
-                }
-            }
-        }
-    }
 
     /// Execute a [`PlayAction`] produced by the state machine.
     ///

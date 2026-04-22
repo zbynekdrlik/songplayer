@@ -43,3 +43,42 @@ pub async fn build_from_settings(
         Ok(None)
     }
 }
+
+/// Line-change push helper used by the playback engine hot path. Spawns a
+/// fire-and-forget `tokio::spawn(client.push(...))` when `current_en`
+/// differs from `last_seen`, and returns the new `last_seen` for the caller
+/// to persist. No-op when `client` is None (push disabled).
+#[cfg_attr(test, mutants::skip)]
+pub fn maybe_push_line(
+    client: Option<&Arc<PresenterClient>>,
+    last_seen: Option<String>,
+    current_en: String,
+    next_en: String,
+    song: &str,
+    artist: &str,
+) -> Option<String> {
+    let Some(client) = client else {
+        return last_seen;
+    };
+    if last_seen.as_deref() == Some(current_en.as_str()) {
+        return last_seen;
+    }
+    let current_song = if artist.is_empty() {
+        song.to_string()
+    } else {
+        format!("{song} - {artist}")
+    };
+    let payload = PresenterPayload {
+        current_text: current_en.clone(),
+        next_text: next_en,
+        current_song,
+        next_song: String::new(),
+    };
+    let client = client.clone();
+    tokio::spawn(async move {
+        if let Err(e) = client.push(payload).await {
+            tracing::warn!(?e, "presenter push failed (non-fatal)");
+        }
+    });
+    Some(current_en)
+}
