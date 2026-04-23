@@ -45,7 +45,9 @@ fn worker_has_no_retired_symbols() {
 /// miss (autosub) last.
 #[test]
 fn gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub() {
-    let src = include_str!("worker.rs");
+    // gather_sources_impl was extracted from worker.rs into the sibling
+    // `gather.rs` module to keep both files under the 1000-line airuleset cap.
+    let src = include_str!("gather.rs");
     let body_start = src
         .find("async fn gather_sources")
         .expect("gather_sources exists");
