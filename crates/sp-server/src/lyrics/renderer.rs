@@ -1,6 +1,13 @@
 use sp_core::lyrics::LyricsTrack;
 use sp_core::ws::ServerMsg;
 
+/// Lead time applied to the Presenter (stage-display) push — the lookup is
+/// shifted forward by this many milliseconds so singers see the next line
+/// ~1 s before the audio reaches it. Only affects the Presenter path; the
+/// dashboard, Resolume, and karaoke highlighter still align to the real
+/// playback position.
+pub const PRESENTER_LEAD_MS: u64 = 1_000;
+
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
@@ -82,8 +89,12 @@ impl LyricsState {
     /// playback position is on a line. `next_en` is the empty string when
     /// the current line is the last line of the track. Returns `None`
     /// between lines so the caller can hold off pushing a duplicate.
+    ///
+    /// The lookup is shifted forward by `PRESENTER_LEAD_MS` so singers on
+    /// stage-display get the next line ~1 s before the audio reaches it.
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
-        let (idx, line) = self.track.line_at(position_ms)?;
+        let lookahead = position_ms.saturating_add(PRESENTER_LEAD_MS);
+        let (idx, line) = self.track.line_at(lookahead)?;
         let next = self
             .track
             .lines
@@ -277,11 +288,10 @@ mod tests {
     #[test]
     fn presenter_lines_returns_empty_next_for_last_line() {
         let st = LyricsState::new(test_track());
-        // Jump to a timestamp guaranteed to be on the LAST line of
-        // test_track(); empty next indicates end-of-song for the push.
-        let last_line = st.track().lines.last().expect("track non-empty");
-        let mid = (last_line.start_ms + last_line.end_ms) / 2;
-        let (_cur, nxt) = st.presenter_lines(mid).expect("on last line");
+        // Pick a position where `position + PRESENTER_LEAD_MS` is still
+        // inside the last line. test_track()'s last line is 3000..5000,
+        // so position 3200 + 1000 = 4200 is safely inside.
+        let (_cur, nxt) = st.presenter_lines(3200).expect("on last line");
         assert!(
             nxt.is_empty(),
             "last line's next must be empty, got {nxt:?}"
@@ -289,9 +299,37 @@ mod tests {
     }
 
     #[test]
-    fn presenter_lines_returns_none_between_lines() {
+    fn presenter_lines_applies_1s_lead_time() {
+        // The lead time pulls the lookup forward so singers see the next
+        // line ~1 s before the audio reaches it. At position 0, the line
+        // at `0 + PRESENTER_LEAD_MS = 1000 ms` (start of line 0) is
+        // already active.
         let st = LyricsState::new(test_track());
-        // position 0 is before first line (which starts at 1000 ms)
+        let (cur, _nxt) = st
+            .presenter_lines(0)
+            .expect("1s lead should pull lookup onto line 0");
+        assert_eq!(cur, "Hello world");
+    }
+
+    #[test]
+    fn presenter_lines_returns_none_before_first_line_even_with_lead() {
+        // Build a track whose first line starts far enough in the future
+        // that even the 1 s lead cannot reach it yet.
+        let track = LyricsTrack {
+            version: 1,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines: vec![LyricsLine {
+                start_ms: 5_000,
+                end_ms: 7_000,
+                en: "Later".into(),
+                sk: None,
+                words: None,
+            }],
+        };
+        let st = LyricsState::new(track);
+        // position 0 + lead 1000 = 1000 ms, still before 5000 ms.
         assert!(st.presenter_lines(0).is_none());
     }
 
