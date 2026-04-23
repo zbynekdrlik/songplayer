@@ -121,6 +121,32 @@ pub(crate) async fn gather_sources_impl(
         None
     };
 
+    // 2a. Genius (unauthenticated search + public lyric-page scrape).
+    //     Returns plain text (no timing); becomes candidate_texts entry so
+    //     Gemini can align it to audio. Only runs when song/artist known.
+    let genius_track = if !row.song.is_empty() && !row.artist.is_empty() {
+        match genius::fetch_lyrics(client, &row.artist, &row.song).await {
+            Ok(Some(track)) => {
+                info!(
+                    youtube_id = %youtube_id,
+                    line_count = track.lines.len(),
+                    "gather: Genius hit"
+                );
+                Some(track)
+            }
+            Ok(None) => {
+                debug!("gather: no Genius hit for {youtube_id}");
+                None
+            }
+            Err(e) => {
+                warn!("gather: Genius error for {youtube_id}: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // 3. Auto-sub json3
     let autosub_json3 = match fetch_autosub(ytdlp_path, &youtube_id, autosub_tmp_dir).await {
         Ok(Some(p)) => Some(p),
@@ -132,6 +158,31 @@ pub(crate) async fn gather_sources_impl(
     };
 
     let mut candidate_texts: Vec<CandidateText> = Vec::new();
+
+    // 0. Operator-provided override (V15). Highest priority — when an
+    //    operator has pasted lyrics for a song, they expect those lines
+    //    to drive alignment, not whatever yt_subs/LRCLIB/description the
+    //    gather paths produce. Empty/whitespace override is ignored.
+    if let Some(raw) = row.lyrics_override_text.as_ref() {
+        let lines: Vec<String> = raw
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !lines.is_empty() {
+            info!(
+                youtube_id = %youtube_id,
+                line_count = lines.len(),
+                "gather: operator lyrics override present"
+            );
+            candidate_texts.push(CandidateText {
+                source: "override".into(),
+                lines,
+                has_timing: false,
+                line_timings: None,
+            });
+        }
+    }
     if let Some(t) = &yt_subs_track {
         candidate_texts.push(CandidateText {
             source: "yt_subs".into(),
@@ -146,6 +197,14 @@ pub(crate) async fn gather_sources_impl(
             lines: t.lines.iter().map(|l| l.en.clone()).collect(),
             has_timing: true,
             line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
+        });
+    }
+    if let Some(t) = &genius_track {
+        candidate_texts.push(CandidateText {
+            source: "genius".into(),
+            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
+            has_timing: false,
+            line_timings: None,
         });
     }
 

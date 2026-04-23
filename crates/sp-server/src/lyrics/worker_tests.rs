@@ -112,6 +112,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         duration_ms: Some(180_000),
         audio_file_path: None,
         youtube_url: "https://www.youtube.com/watch?v=vidDESC".into(),
+        lyrics_override_text: None,
     };
 
     let autosub_tmp = tempfile::tempdir().unwrap();
@@ -200,6 +201,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         duration_ms: Some(120_000),
         audio_file_path: None,
         youtube_url: "https://www.youtube.com/watch?v=vidEMPTY2".into(),
+        lyrics_override_text: None,
     };
 
     let autosub_tmp = tempfile::tempdir().unwrap();

@@ -9,6 +9,7 @@ pub mod gemini_client;
 pub mod gemini_parse;
 pub mod gemini_prompt;
 pub mod gemini_provider;
+pub mod genius;
 pub mod lrclib;
 pub mod merge;
 pub mod orchestrator;
@@ -157,7 +158,7 @@ use sp_core::lyrics::LyricsTrack;
 ///   against the new fast path; the smart-skip clause in
 ///   `reprocess.rs::fetch_bucket_stale` keeps pure-Gemini v19+ output
 ///   protected once generated.
-pub const LYRICS_PIPELINE_VERSION: u32 = 19;
+pub const LYRICS_PIPELINE_VERSION: u32 = 20;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.

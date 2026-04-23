@@ -23,6 +23,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (12, MIGRATION_V12),
     (13, MIGRATION_V13),
     (14, MIGRATION_V14),
+    (15, MIGRATION_V15),
 ];
 
 const MIGRATION_V1: &str = "
@@ -209,6 +210,17 @@ CREATE UNIQUE INDEX idx_playlist_items_playlist_video
 // unaffected.
 const MIGRATION_V14: &str = "
 ALTER TABLE videos ADD COLUMN suppress_resolume_en INTEGER NOT NULL DEFAULT 0;
+";
+
+// V15 — operator-provided lyrics override. For songs where YouTube has
+// no manual subs, no lyrics in description, and no LRCLIB match, the
+// Gemini alignment path has no reference text and the song ships as
+// `source=no_source`. Giving operators a field to paste lyrics text
+// unblocks Gemini alignment for those songs without cache-file hacks.
+// The worker's `gather_sources` picks this up as the highest-priority
+// candidate when non-empty.
+const MIGRATION_V15: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_override_text TEXT;
 ";
 
 /// Create a connection pool backed by a file.

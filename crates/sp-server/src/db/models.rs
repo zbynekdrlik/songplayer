@@ -355,6 +355,11 @@ pub struct VideoLyricsRow {
     pub duration_ms: Option<i64>,
     pub audio_file_path: Option<String>,
     pub youtube_url: String,
+    /// Operator-provided lyrics text (V15 migration). When Some(non-empty),
+    /// `gather_sources` uses it as the top-priority candidate, bypassing
+    /// the yt_subs / description / LRCLIB fetch paths. Populated via
+    /// `PATCH /api/v1/videos/{id}` with `lyrics_override_text`.
+    pub lyrics_override_text: Option<String>,
 }
 
 /// Mark a video's lyrics status, source, AND pipeline version.

@@ -332,29 +332,58 @@ pub async fn list_videos(State(state): State<AppState>, Path(id): Path<i64>) -> 
 pub struct PatchVideoReq {
     #[serde(default)]
     pub suppress_resolume_en: Option<bool>,
+    /// Operator-provided lyrics text. When Some(non-empty), the lyrics
+    /// worker uses it as the top-priority reference for Gemini alignment,
+    /// bypassing yt_subs / description / LRCLIB gather paths. Pass
+    /// `Some("")` to clear the override.
+    #[serde(default)]
+    pub lyrics_override_text: Option<String>,
 }
 
-/// Update mutable per-video flags. Today: only `suppress_resolume_en`.
-/// Returns 204 on success, 404 if the video id doesn't exist, 400 if the
-/// request body has no actionable fields.
+/// Update mutable per-video flags. Currently supports `suppress_resolume_en`
+/// and `lyrics_override_text`. Returns 204 on success, 404 if the video
+/// id doesn't exist, 400 if the request body has no actionable fields.
 pub async fn patch_video(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
     Json(req): Json<PatchVideoReq>,
 ) -> impl IntoResponse {
-    let Some(flag) = req.suppress_resolume_en else {
+    // Require at least one field so empty-body PATCHes are a clear error.
+    if req.suppress_resolume_en.is_none() && req.lyrics_override_text.is_none() {
         return (
             StatusCode::BAD_REQUEST,
             "request body must include at least one patchable field",
         )
             .into_response();
-    };
-    match sqlx::query("UPDATE videos SET suppress_resolume_en = ? WHERE id = ?")
-        .bind(flag as i32)
-        .bind(video_id)
-        .execute(&state.pool)
-        .await
-    {
+    }
+
+    // Build a dynamic UPDATE to touch only the columns the caller provided;
+    // avoids clobbering unrelated fields across successive PATCHes.
+    let mut sets: Vec<&'static str> = Vec::new();
+    if req.suppress_resolume_en.is_some() {
+        sets.push("suppress_resolume_en = ?");
+    }
+    if req.lyrics_override_text.is_some() {
+        sets.push("lyrics_override_text = ?");
+    }
+    let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
+
+    let mut q = sqlx::query(&sql);
+    if let Some(flag) = req.suppress_resolume_en {
+        q = q.bind(flag as i32);
+    }
+    if let Some(text) = req.lyrics_override_text.as_ref() {
+        // Store NULL when the caller passes an empty string so a blank
+        // override doesn't silently short-circuit the gather paths.
+        if text.trim().is_empty() {
+            q = q.bind::<Option<String>>(None);
+        } else {
+            q = q.bind::<Option<String>>(Some(text.clone()));
+        }
+    }
+    q = q.bind(video_id);
+
+    match q.execute(&state.pool).await {
         Ok(res) if res.rows_affected() == 0 => (
             StatusCode::NOT_FOUND,
             format!("no video with id {video_id}"),
