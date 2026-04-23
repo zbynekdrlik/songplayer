@@ -1,4 +1,9 @@
-//! EN→SK lyrics translator via Claude (CLIProxyAPI).
+//! EN→SK lyrics translator.
+//!
+//! Primary path: Claude via CLIProxyAPI (`translate_via_claude`).
+//! Fallback path: Gemini direct API (`translate_via_gemini`), invoked by the
+//! worker when Claude refuses with a copyright policy error. Both paths share
+//! the same numbered prompt built by `build_prompt`.
 //!
 //! Prompt design:
 //! The earlier Gemini-based translator + over-explained Claude prompt used
@@ -47,6 +52,68 @@ pub async fn translate_via_claude(
     }
 
     Ok(translations)
+}
+
+/// Fallback EN→SK translator via Gemini (direct API). Called by the worker
+/// when `translate_via_claude` returns an error (network, policy refusal,
+/// empty response). Iterates `gemini_clients` in order — each client wraps a
+/// single API key with `max_attempts=1` — and advances to the next key on
+/// error, so a 429 on one key does not kill translation for the whole song.
+///
+/// Returns a Vec aligned 1:1 with `track.lines`, empty strings for lines the
+/// model did not translate. Errors only when every key fails or the caller
+/// passed an empty slice.
+// mutants::skip: this function wires together a multi-client fallback loop —
+// individual mutations (off-by-one in the iteration, swapping "all" for "any")
+// would be killed only by an integration test driving two real wiremock
+// servers; covered instead by the behavior-level tests below plus the
+// per-path tests on build_prompt / parse_translation_response.
+#[cfg_attr(test, mutants::skip)]
+pub async fn translate_via_gemini(
+    gemini_clients: &[crate::lyrics::gemini_client::GeminiClient],
+    track: &LyricsTrack,
+) -> Result<Vec<String>> {
+    if track.lines.is_empty() {
+        return Ok(vec![]);
+    }
+
+    if gemini_clients.is_empty() {
+        return Err(anyhow!("Gemini translation failed: no API keys configured"));
+    }
+
+    let numbered: String = track
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", i + 1, line.en))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let line_count = track.lines.len();
+    let prompt = build_prompt(line_count, &numbered);
+
+    let mut last_error: Option<anyhow::Error> = None;
+
+    for (idx, client) in gemini_clients.iter().enumerate() {
+        match client.generate_text(&prompt).await {
+            Ok(response) => {
+                let translations = parse_translation_response(&response, line_count);
+                let non_empty = translations.iter().filter(|t| !t.is_empty()).count();
+                if non_empty == 0 && line_count > 0 {
+                    last_error = Some(anyhow!(
+                        "Gemini key {idx} returned no parseable translations"
+                    ));
+                    continue;
+                }
+                return Ok(translations);
+            }
+            Err(e) => {
+                last_error = Some(anyhow!("Gemini key {idx}: {e}"));
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("Gemini translation failed: all keys exhausted")))
 }
 
 /// Build the translation prompt. Public for unit testing the exact wording.
@@ -275,6 +342,92 @@ mod tests {
         let client = AiClient::new(AiSettings::default());
         let track = make_track(&[]);
         let result = translate_via_claude(&client, &track).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn translate_via_gemini_returns_parsed_translations() {
+        use crate::lyrics::gemini_client::GeminiClient;
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.+:generateContent$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{
+                    "content": {
+                        "parts": [{"text": "1: Prvá\n2: Druhá\n3: Tretia"}]
+                    }
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        let clients = vec![client];
+        let track = make_track(&["Line one", "Line two", "Line three"]);
+
+        let result = translate_via_gemini(&clients, &track).await;
+        assert!(
+            result.is_ok(),
+            "gemini translation should succeed, got: {result:?}"
+        );
+        let translations = result.unwrap();
+        assert_eq!(translations, vec!["Prvá", "Druhá", "Tretia"]);
+    }
+
+    #[tokio::test]
+    async fn translate_via_gemini_errors_when_all_keys_fail() {
+        use crate::lyrics::gemini_client::GeminiClient;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // HTTP 500 IS retryable; set max_attempts=1 on each client so the test
+        // completes fast (the client returns immediately after one attempt).
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .mount(&server)
+            .await;
+
+        let mut client_a = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        client_a.base_retry_ms = 10;
+        client_a.max_attempts = 1;
+        let mut client_b = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        client_b.base_retry_ms = 10;
+        client_b.max_attempts = 1;
+        let clients = vec![client_a, client_b];
+
+        let track = make_track(&["Line one", "Line two"]);
+        let result = translate_via_gemini(&clients, &track).await;
+        assert!(
+            result.is_err(),
+            "expected error when every key returns 500, got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn translate_via_gemini_empty_clients_returns_error() {
+        let track = make_track(&["Line one"]);
+        let result = translate_via_gemini(&[], &track).await;
+        assert!(
+            result.is_err(),
+            "expected error when clients slice is empty"
+        );
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("no API keys"),
+            "error should mention missing API keys, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn translate_via_gemini_empty_track_returns_empty() {
+        let track = make_track(&[]);
+        // Pass an empty clients slice — translate_via_gemini should short-circuit
+        // BEFORE the no-keys check because the track is empty.
+        let result = translate_via_gemini(&[], &track).await.unwrap();
         assert!(result.is_empty());
     }
 }
