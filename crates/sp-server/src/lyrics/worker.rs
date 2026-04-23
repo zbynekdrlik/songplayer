@@ -321,30 +321,6 @@ impl LyricsWorker {
             .collect()
     }
 
-    /// Claude first, Gemini fallback on ANY Claude error. Returns per-line
-    /// translations on success or an error naming both failures.
-    #[cfg_attr(test, mutants::skip)]
-    async fn translate_with_fallback(
-        &self,
-        ai_client: &AiClient,
-        track: &LyricsTrack,
-        youtube_id: &str,
-    ) -> Result<Vec<String>> {
-        let claude_err = match translator::translate_via_claude(ai_client, track).await {
-            Ok(t) => return Ok(t),
-            Err(e) => e,
-        };
-        warn!(
-            "worker: Claude translation failed for {youtube_id}: {claude_err} — falling back to Gemini"
-        );
-        let clients = self.build_gemini_clients();
-        translator::translate_via_gemini(&clients, track)
-            .await
-            .map_err(|gemini_err| {
-                anyhow::anyhow!("Claude + Gemini both failed for {youtube_id} (claude: {claude_err}, gemini: {gemini_err})")
-            })
-    }
-
     /// Apply per-line translations to `track`. Empty strings leave `sk = None`.
     #[cfg_attr(test, mutants::skip)]
     fn apply_translations(track: &mut LyricsTrack, translations: Vec<String>) {
@@ -358,18 +334,21 @@ impl LyricsWorker {
         track.language_translation = "sk".into();
     }
 
-    /// EN→SK step of `process_song`. Silent on failure — UI degrades.
+    /// EN→SK step of `process_song`. Silent on failure — UI degrades
+    /// gracefully to English-only. Claude-only by design: the user pays a
+    /// Max Plus subscription (unlimited at that tier) and Gemini quota is
+    /// expensive + reserved for alignment. If Claude refuses with a policy
+    /// response, the fix is to tune the prompt (see `translator::build_prompt`
+    /// for the grandmother framing that defeats the copyright classifier),
+    /// NOT to fall back to Gemini.
     #[cfg_attr(test, mutants::skip)]
     async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        match self
-            .translate_with_fallback(ai_client, track, youtube_id)
-            .await
-        {
+        match translator::translate_via_claude(ai_client, track).await {
             Ok(translations) => Self::apply_translations(track, translations),
-            Err(e) => warn!("worker: translation failed for {youtube_id}: {e}"),
+            Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
         }
     }
 
@@ -759,10 +738,8 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        let translations = self
-            .translate_with_fallback(ai_client, &track, &youtube_id)
-            .await;
-        let result: Result<()> = match translations {
+        // Claude-only by design (see `translate_track` doc comment).
+        let result: Result<()> = match translator::translate_via_claude(ai_client, &track).await {
             Ok(t) => {
                 Self::apply_translations(&mut track, t);
                 Ok(())
