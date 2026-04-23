@@ -767,10 +767,12 @@ impl PlaybackEngine {
         });
     }
 
-    /// Send empty lyrics to dashboard and Resolume to clear stale display.
-    ///
-    /// Called when switching to a song without subtitles so the previous
-    /// song's lyrics don't linger on screen.
+    /// Send empty lyrics to dashboard, Resolume AND Presenter to clear
+    /// stale display when the previous song ends or the operator switches
+    /// to a song without lyrics. Without the Presenter clear, the stage
+    /// display kept showing the last line of the previous song until the
+    /// next song's first line pushed — cue for singers got stuck on an
+    /// old verse.
     #[cfg_attr(test, mutants::skip)]
     fn clear_lyrics_display(&self, playlist_id: i64) {
         let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
@@ -785,6 +787,17 @@ impl PlaybackEngine {
         let _ = self
             .resolume_tx
             .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+        if let Some(client) = &self.presenter_client {
+            let client = client.clone();
+            tokio::spawn(async move {
+                if let Err(e) = client
+                    .push(crate::presenter::PresenterPayload::empty())
+                    .await
+                {
+                    tracing::warn!(?e, "presenter clear on song-end failed (non-fatal)");
+                }
+            });
+        }
     }
 
     // `maybe_broadcast_position_update` lives in `position_update.rs`
