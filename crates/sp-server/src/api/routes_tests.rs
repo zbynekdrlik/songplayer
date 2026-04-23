@@ -16,6 +16,10 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use tower::ServiceExt;
 
 async fn test_state() -> AppState {
+    test_state_with_cache_dir(std::path::PathBuf::from("/tmp/cache")).await
+}
+
+async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
     let pool = db::create_memory_pool().await.unwrap();
     db::run_migrations(&pool).await.unwrap();
     let (event_tx, _) = broadcast::channel(16);
@@ -33,9 +37,9 @@ async fn test_state() -> AppState {
         sync_tx,
         resolume_tx,
         obs_rebuild_tx,
-        cache_dir: std::path::PathBuf::from("/tmp/cache"),
+        cache_dir: cache_dir.clone(),
         ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
-            std::path::PathBuf::from("/tmp/cache"),
+            cache_dir,
             crate::ai::proxy::ProxyManager::default_port(),
         )),
         ai_client: std::sync::Arc::new(crate::ai::client::AiClient::new(
@@ -764,4 +768,126 @@ async fn patch_video_returns_404_for_missing_video_id() {
         StatusCode::NOT_FOUND,
         "PATCH on a non-existent video must 404, not 204"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Gemini audit endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn gemini_audit_endpoint_returns_empty_when_file_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state_with_cache_dir(tmp.path().to_path_buf()).await;
+    let app = app(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/gemini-audit")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v.is_array(), "expected array, got {v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn gemini_audit_endpoint_applies_video_id_filter() {
+    use crate::lyrics::gemini_audit::{GeminiAuditEntry, append};
+    let tmp = tempfile::tempdir().unwrap();
+    // Seed three entries: two with video_id "wantMe", one with "other".
+    let mk = |ts: &str, vid: &str| GeminiAuditEntry {
+        timestamp: ts.to_string(),
+        video_id: Some(vid.to_string()),
+        chunk_idx: Some(0),
+        key_idx: 0,
+        key_prefix: "AIza".to_string(),
+        model: "m".to_string(),
+        status: 200,
+        duration_ms: 1,
+        prompt_tokens: None,
+        candidates_tokens: None,
+        total_tokens: None,
+        error: None,
+    };
+    append(tmp.path(), &mk("2026-04-23T12:00:00Z", "wantMe"))
+        .await
+        .unwrap();
+    append(tmp.path(), &mk("2026-04-23T12:00:01Z", "other"))
+        .await
+        .unwrap();
+    append(tmp.path(), &mk("2026-04-23T12:00:02Z", "wantMe"))
+        .await
+        .unwrap();
+
+    let state = test_state_with_cache_dir(tmp.path().to_path_buf()).await;
+    let app = app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/gemini-audit?video_id=wantMe")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(entries.len(), 2);
+    for e in &entries {
+        assert_eq!(e["video_id"], "wantMe");
+    }
+}
+
+#[tokio::test]
+async fn gemini_audit_endpoint_applies_limit() {
+    use crate::lyrics::gemini_audit::{GeminiAuditEntry, append};
+    let tmp = tempfile::tempdir().unwrap();
+    for i in 0..10u32 {
+        let entry = GeminiAuditEntry {
+            timestamp: format!("2026-04-23T12:00:{i:02}Z"),
+            video_id: Some(format!("v{i}")),
+            chunk_idx: Some(0),
+            key_idx: 0,
+            key_prefix: "AIza".to_string(),
+            model: "m".to_string(),
+            status: 200,
+            duration_ms: 1,
+            prompt_tokens: None,
+            candidates_tokens: None,
+            total_tokens: None,
+            error: None,
+        };
+        append(tmp.path(), &entry).await.unwrap();
+    }
+    let state = test_state_with_cache_dir(tmp.path().to_path_buf()).await;
+    let app = app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/gemini-audit?limit=3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(entries.len(), 3);
+    // The truncate keeps the first N after filter — oldest first by file order.
+    assert_eq!(entries[0]["video_id"], "v0");
+    assert_eq!(entries[2]["video_id"], "v2");
 }
