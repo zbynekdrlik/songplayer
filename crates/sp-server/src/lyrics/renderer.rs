@@ -1,22 +1,35 @@
 use sp_core::lyrics::LyricsTrack;
 use sp_core::ws::ServerMsg;
 
-/// Lead time applied to the Presenter (stage-display) push AND the Resolume
-/// LED-wall push — both lookups are shifted forward by this many
+/// Default lead time applied to the Presenter (stage-display) push AND the
+/// Resolume LED-wall push — both lookups are shifted forward by this many
 /// milliseconds so singers / the audience see the next line ~1 s before
 /// the audio reaches it. Only the live-lyric paths use this lead; the
 /// dashboard karaoke highlighter still aligns to the real playback
 /// position so the current-word animation stays synced to what's actually
 /// being sung.
-pub const LYRICS_LEAD_MS: u64 = 1_000;
+///
+/// Used as the fallback when the `lyrics_lead_ms` setting is absent or
+/// unparseable. Operators override per-installation via
+/// `PATCH /api/v1/settings {"lyrics_lead_ms": "500"}` — needed because
+/// 1 s is too aggressive for fast songs (≈1.5 s line durations: the
+/// next-line preview clobbers the currently-sung line).
+pub const DEFAULT_LYRICS_LEAD_MS: u64 = 1_000;
+
+/// DB key used by `build_lyrics_state_settings` to read the configured lead.
+pub const LYRICS_LEAD_SETTING_KEY: &str = "lyrics_lead_ms";
 
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
     track: LyricsTrack,
+    /// Lead time (ms) shifted into every stage-display / LED-wall lookup.
+    /// `0` for raw paths (`update`, `resolume_lines`) preserves the
+    /// dashboard-highlighter-aligns-to-real-audio invariant.
+    lead_ms: u64,
     /// Per-song time-axis shift in ms (from `videos.lyrics_time_offset_ms`).
     /// Applied at render time: every lookup searches
-    /// `position_ms + LYRICS_LEAD_MS - offset_ms`. Positive delays the
+    /// `position_ms + lead_ms - offset_ms`. Positive delays the
     /// displayed line (shorter effective lead); negative advances it
     /// (longer effective lead). Arithmetic is saturating u64 — lookups
     /// clamp at 0 so large positive offsets early in playback don't
@@ -28,7 +41,7 @@ pub struct LyricsState {
 /// lookup. Returns `position_ms + lead_ms - offset_ms`, saturating at 0 for
 /// both positive-overflow and negative-underflow.
 ///
-/// `lead_ms = LYRICS_LEAD_MS` for the stage-display / LED-wall paths
+/// `lead_ms = self.lead_ms` for the stage-display / LED-wall paths
 /// (`presenter_lines`, `resolume_lines_with_next`). `lead_ms = 0` for the
 /// dashboard-highlighter paths (`update`, `resolume_lines`) per the
 /// CLAUDE.md note that the dashboard must align to real playback.
@@ -46,14 +59,30 @@ impl LyricsState {
     pub fn new(track: LyricsTrack) -> Self {
         Self {
             track,
+            lead_ms: DEFAULT_LYRICS_LEAD_MS,
             offset_ms: 0,
         }
     }
 
     /// Construct a state with a per-song offset applied to every render
-    /// lookup. See `offset_ms` field docstring.
+    /// lookup. See `offset_ms` field docstring. Uses the default lead.
     pub fn with_offset(track: LyricsTrack, offset_ms: i64) -> Self {
-        Self { track, offset_ms }
+        Self {
+            track,
+            lead_ms: DEFAULT_LYRICS_LEAD_MS,
+            offset_ms,
+        }
+    }
+
+    /// Construct a state with an explicit lead AND per-song offset — used
+    /// when the operator has set `lyrics_lead_ms` in DB settings to
+    /// something other than the default 1000 ms.
+    pub fn with_lead_and_offset(track: LyricsTrack, lead_ms: u64, offset_ms: i64) -> Self {
+        Self {
+            track,
+            lead_ms,
+            offset_ms,
+        }
     }
 
     /// Compute the [`ServerMsg::LyricsUpdate`] for the given playback position.
@@ -120,14 +149,15 @@ impl LyricsState {
     /// the last line of the track. `next_sk` is `None` when the current line
     /// is last or when the next line has no SK translation.
     ///
-    /// The lookup is shifted forward by `LYRICS_LEAD_MS` so the LED wall
-    /// shows each line ~1 s before the audio reaches it — late subtitles
-    /// were causing the band to doubt their cue and hesitate.
+    /// The lookup is shifted forward by `self.lead_ms` (default
+    /// [`DEFAULT_LYRICS_LEAD_MS`]) so the LED wall shows each line
+    /// ~1 s before the audio reaches it — late subtitles were causing
+    /// the band to doubt their cue and hesitate.
     pub fn resolume_lines_with_next(
         &self,
         position_ms: u64,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
-        let lookahead = effective_lookup(position_ms, LYRICS_LEAD_MS, self.offset_ms);
+        let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next_line = self.track.lines.get(idx + 1);
         let next_en = next_line.map(|l| l.en.clone()).unwrap_or_default();
@@ -140,10 +170,11 @@ impl LyricsState {
     /// the current line is the last line of the track. Returns `None`
     /// between lines so the caller can hold off pushing a duplicate.
     ///
-    /// The lookup is shifted forward by `LYRICS_LEAD_MS` so singers on
-    /// stage-display get the next line ~1 s before the audio reaches it.
+    /// The lookup is shifted forward by `self.lead_ms` (default
+    /// [`DEFAULT_LYRICS_LEAD_MS`]) so singers on stage-display get the
+    /// next line ~1 s before the audio reaches it.
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
-        let lookahead = effective_lookup(position_ms, LYRICS_LEAD_MS, self.offset_ms);
+        let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next = self
             .track
@@ -338,7 +369,7 @@ mod tests {
     #[test]
     fn presenter_lines_returns_empty_next_for_last_line() {
         let st = LyricsState::new(test_track());
-        // Pick a position where `position + LYRICS_LEAD_MS` is still
+        // Pick a position where `position + DEFAULT_LYRICS_LEAD_MS` is still
         // inside the last line. test_track()'s last line is 3000..5000,
         // so position 3200 + 1000 = 4200 is safely inside.
         let (_cur, nxt) = st.presenter_lines(3200).expect("on last line");
@@ -352,7 +383,7 @@ mod tests {
     fn presenter_lines_applies_1s_lead_time() {
         // The lead time pulls the lookup forward so singers see the next
         // line ~1 s before the audio reaches it. At position 0, the line
-        // at `0 + LYRICS_LEAD_MS = 1000 ms` (start of line 0) is
+        // at `0 + DEFAULT_LYRICS_LEAD_MS = 1000 ms` (start of line 0) is
         // already active.
         let st = LyricsState::new(test_track());
         let (cur, _nxt) = st
@@ -396,7 +427,7 @@ mod tests {
     #[test]
     fn resolume_lines_with_next_returns_empty_next_on_last_line() {
         let st = LyricsState::new(test_track());
-        // Pick a position where `position + LYRICS_LEAD_MS` is still inside
+        // Pick a position where `position + DEFAULT_LYRICS_LEAD_MS` is still inside
         // the last line. test_track()'s last line is 3000..5000, so
         // position 3200 + 1000 = 4200 is safely inside.
         let (_cur, next_en, _cur_sk, next_sk) =
@@ -501,5 +532,32 @@ mod tests {
                 "resolume_lines_with_next must match at position {pos}"
             );
         }
+    }
+
+    /// Constructor `with_lead_and_offset` parameterizes the stage-display
+    /// lead. With lead=500 and no offset, position 500 + lead 500 = 1000
+    /// which is exactly line 0's start — `presenter_lines(500)` must
+    /// return the line. Under the default 1000 ms lead the same call
+    /// would also hit (position 500 + 1000 = 1500); the discriminator is
+    /// testing a case that works ONLY with the overridden lead.
+    ///
+    /// Position 499 + lead 500 = 999 < 1000 → None (just below line 0 start).
+    /// Position 500 + lead 500 = 1000 = line 0 start → Some.
+    /// Under default 1000 ms lead, position 499 would hit 1499 → Some.
+    /// So line 0 being Some at pos 500 AND None at pos 499 proves the
+    /// lead is 500, not 1000.
+    #[test]
+    fn lead_ms_is_applied_from_state() {
+        let st = LyricsState::with_lead_and_offset(test_track(), 500, 0);
+        let (cur, _nxt) = st
+            .presenter_lines(500)
+            .expect("500 + lead(500) = 1000 = line 0 start, expected a line");
+        assert_eq!(cur, "Hello world");
+        // With lead=500 (not default 1000), position 499 must NOT reach
+        // line 0 at 1000. Under the default lead this would hit.
+        assert!(
+            st.presenter_lines(499).is_none(),
+            "lead=500: pos 499 + 500 = 999 < 1000 line-start, must be None"
+        );
     }
 }
