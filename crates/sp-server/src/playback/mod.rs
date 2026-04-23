@@ -949,3 +949,6 @@ mod tests_play_video;
 #[cfg(test)]
 #[path = "tests_scene_change.rs"]
 mod tests_scene_change;
+#[cfg(test)]
+#[path = "tests_song_end.rs"]
+mod tests_song_end;
