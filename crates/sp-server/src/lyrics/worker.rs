@@ -122,23 +122,14 @@ pub(crate) async fn gather_sources_impl(
         None
     };
 
-    // 2a. Genius (unauthenticated search + public lyric-page scrape).
-    //     Returns plain text (no timing); becomes candidate_texts entry so
-    //     Gemini can align it to audio. Only runs when song/artist known.
+    // 2a. Genius (documented API + public lyric-page scrape). No timing.
     let genius_track = if !row.song.is_empty() && !row.artist.is_empty() {
         match genius::fetch_lyrics(client, genius_access_token, &row.artist, &row.song).await {
-            Ok(Some(track)) => {
-                info!(
-                    youtube_id = %youtube_id,
-                    line_count = track.lines.len(),
-                    "gather: Genius hit"
-                );
-                Some(track)
+            Ok(Some(t)) => {
+                info!(%youtube_id, line_count = t.lines.len(), "gather: Genius hit");
+                Some(t)
             }
-            Ok(None) => {
-                debug!("gather: no Genius hit for {youtube_id}");
-                None
-            }
+            Ok(None) => None,
             Err(e) => {
                 warn!("gather: Genius error for {youtube_id}: {e}");
                 None

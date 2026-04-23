@@ -289,10 +289,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v19() {
+    fn lyrics_pipeline_version_is_v20() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 19,
-            "v19 = YtManualSubsProvider short-circuit before Gemini"
+            LYRICS_PIPELINE_VERSION, 20,
+            "v20 = Genius text source + lyrics_override_text gather paths"
         );
     }
 
