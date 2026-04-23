@@ -362,10 +362,15 @@ impl PlaybackEngine {
                         let cache_dir = self.cache_dir.clone();
                         let pool = self.pool.clone();
                         match load_lyrics_for_video(&pool, &cache_dir, video_id).await {
-                            Ok(Some(track)) => {
+                            Ok(Some((track, offset_ms))) => {
                                 pp.lyrics_state =
-                                    Some(crate::lyrics::renderer::LyricsState::new(track));
-                                debug!(playlist_id, video_id, "lyrics loaded for karaoke");
+                                    Some(crate::lyrics::renderer::LyricsState::with_offset(
+                                        track, offset_ms,
+                                    ));
+                                debug!(
+                                    playlist_id,
+                                    video_id, offset_ms, "lyrics loaded for karaoke"
+                                );
                             }
                             Ok(None) => {
                                 pp.lyrics_state = None;
@@ -926,18 +931,23 @@ impl PlaybackEngine {
     }
 }
 
-/// Load lyrics JSON for a video from the cache directory, if available.
+/// Load lyrics JSON and per-song render-offset for a video from the cache
+/// directory, if available. Returns `(track, offset_ms)` where `offset_ms`
+/// comes from `videos.lyrics_time_offset_ms` (V16 migration) — defaults to
+/// 0 when the column is NULL or the row is absent.
 #[cfg_attr(test, mutants::skip)]
 async fn load_lyrics_for_video(
     pool: &SqlitePool,
     cache_dir: &Path,
     video_id: i64,
-) -> Result<Option<sp_core::lyrics::LyricsTrack>, anyhow::Error> {
+) -> Result<Option<(sp_core::lyrics::LyricsTrack, i64)>, anyhow::Error> {
     use sqlx::Row;
-    let row = sqlx::query("SELECT youtube_id, has_lyrics FROM videos WHERE id = ?")
-        .bind(video_id)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(
+        "SELECT youtube_id, has_lyrics, lyrics_time_offset_ms FROM videos WHERE id = ?",
+    )
+    .bind(video_id)
+    .fetch_optional(pool)
+    .await?;
     let row = match row {
         Some(r) => r,
         None => return Ok(None),
@@ -947,13 +957,14 @@ async fn load_lyrics_for_video(
         return Ok(None);
     }
     let youtube_id: String = row.get("youtube_id");
+    let offset_ms: i64 = row.try_get("lyrics_time_offset_ms").unwrap_or(0);
     let lyrics_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
     if !lyrics_path.exists() {
         return Ok(None);
     }
     let content = tokio::fs::read_to_string(&lyrics_path).await?;
     let track: sp_core::lyrics::LyricsTrack = serde_json::from_str(&content)?;
-    Ok(Some(track))
+    Ok(Some((track, offset_ms)))
 }
 
 // ---------------------------------------------------------------------------

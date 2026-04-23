@@ -14,11 +14,46 @@ pub const LYRICS_LEAD_MS: u64 = 1_000;
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
     track: LyricsTrack,
+    /// Per-song time-axis shift in ms (from `videos.lyrics_time_offset_ms`).
+    /// Applied at render time: every lookup searches
+    /// `position_ms + LYRICS_LEAD_MS - offset_ms`. Positive delays the
+    /// displayed line (shorter effective lead); negative advances it
+    /// (longer effective lead). Arithmetic is saturating u64 — lookups
+    /// clamp at 0 so large positive offsets early in playback don't
+    /// underflow.
+    offset_ms: i64,
+}
+
+/// Apply the (per-method-lead + offset) transform used by every render-side
+/// lookup. Returns `position_ms + lead_ms - offset_ms`, saturating at 0 for
+/// both positive-overflow and negative-underflow.
+///
+/// `lead_ms = LYRICS_LEAD_MS` for the stage-display / LED-wall paths
+/// (`presenter_lines`, `resolume_lines_with_next`). `lead_ms = 0` for the
+/// dashboard-highlighter paths (`update`, `resolume_lines`) per the
+/// CLAUDE.md note that the dashboard must align to real playback.
+#[inline]
+fn effective_lookup(position_ms: u64, lead_ms: u64, offset_ms: i64) -> u64 {
+    let after_lead = position_ms.saturating_add(lead_ms);
+    if offset_ms >= 0 {
+        after_lead.saturating_sub(offset_ms as u64)
+    } else {
+        after_lead.saturating_add(offset_ms.unsigned_abs())
+    }
 }
 
 impl LyricsState {
     pub fn new(track: LyricsTrack) -> Self {
-        Self { track }
+        Self {
+            track,
+            offset_ms: 0,
+        }
+    }
+
+    /// Construct a state with a per-song offset applied to every render
+    /// lookup. See `offset_ms` field docstring.
+    pub fn with_offset(track: LyricsTrack, offset_ms: i64) -> Self {
+        Self { track, offset_ms }
     }
 
     /// Compute the [`ServerMsg::LyricsUpdate`] for the given playback position.
@@ -26,7 +61,11 @@ impl LyricsState {
     /// Returns a message with all-`None` fields when the position falls between
     /// lines, so the dashboard can clear itself.
     pub fn update(&self, playlist_id: i64, position_ms: u64) -> ServerMsg {
-        let result = self.track.line_at(position_ms);
+        // Dashboard path: no lead so the karaoke highlighter aligns with the
+        // actual audio position. Still honors `offset_ms` so operator shifts
+        // are visible to the web dashboard, not just the stage display.
+        let lookup = effective_lookup(position_ms, 0, self.offset_ms);
+        let result = self.track.line_at(lookup);
 
         match result {
             None => ServerMsg::LyricsUpdate {
@@ -39,7 +78,7 @@ impl LyricsState {
                 word_count: None,
             },
             Some((idx, line)) => {
-                let active_word_index = self.track.word_index_at(line, position_ms);
+                let active_word_index = self.track.word_index_at(line, lookup);
                 let word_count = line.words.as_ref().map(|w| w.len());
 
                 let prev_line_en = if idx > 0 {
@@ -65,8 +104,12 @@ impl LyricsState {
 
     /// Returns `(en_text, sk_text)` for the line active at `position_ms`.
     /// Returns `(None, None)` when between lines.
+    ///
+    /// Dashboard/raw path: no lead, but the per-song `offset_ms` is applied
+    /// so operator shifts affect the wall playthrough consistently.
     pub fn resolume_lines(&self, position_ms: u64) -> (Option<String>, Option<String>) {
-        match self.track.line_at(position_ms) {
+        let lookup = effective_lookup(position_ms, 0, self.offset_ms);
+        match self.track.line_at(lookup) {
             None => (None, None),
             Some((_, line)) => (Some(line.en.clone()), line.sk.clone()),
         }
@@ -84,7 +127,7 @@ impl LyricsState {
         &self,
         position_ms: u64,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
-        let lookahead = position_ms.saturating_add(LYRICS_LEAD_MS);
+        let lookahead = effective_lookup(position_ms, LYRICS_LEAD_MS, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next_line = self.track.lines.get(idx + 1);
         let next_en = next_line.map(|l| l.en.clone()).unwrap_or_default();
@@ -100,7 +143,7 @@ impl LyricsState {
     /// The lookup is shifted forward by `LYRICS_LEAD_MS` so singers on
     /// stage-display get the next line ~1 s before the audio reaches it.
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
-        let lookahead = position_ms.saturating_add(LYRICS_LEAD_MS);
+        let lookahead = effective_lookup(position_ms, LYRICS_LEAD_MS, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next = self
             .track
@@ -373,5 +416,90 @@ mod tests {
             .resolume_lines_with_next(0)
             .expect("1s lead should pull lookup onto line 0");
         assert_eq!(cur_en, "Hello world");
+    }
+
+    /// Track with a single line starting at 1000 ms, offset_ms = +500.
+    /// At playback position 0 ms: effective lookup = 0 + lead(1000) - offset(500)
+    /// = 500 ms — still before the 1000 ms line start, so `presenter_lines`
+    /// must return None. Kills the `offset subtracted` mutant: if the offset
+    /// were ignored (or added in the wrong direction), the lookup would be
+    /// 1000 ms and the line WOULD be returned.
+    #[test]
+    fn applies_positive_offset_delays_line_start() {
+        let track = LyricsTrack {
+            version: 1,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines: vec![LyricsLine {
+                start_ms: 1_000,
+                end_ms: 3_000,
+                en: "Offset line".into(),
+                sk: None,
+                words: None,
+            }],
+        };
+        let st = LyricsState::with_offset(track, 500);
+        assert!(
+            st.presenter_lines(0).is_none(),
+            "positive offset must delay — lookup 0+1000-500=500 is before line start 1000"
+        );
+    }
+
+    /// Negative offset advances the displayed line: offset_ms = -500
+    /// effectively adds to the lead. At position 200 ms: effective lookup
+    /// = 200 + lead(1000) - (-500) = 1700 ms — inside the first line
+    /// (1000..3000), so the line must be returned. Without the negative
+    /// offset, lookup would be 1200 ms which would also hit the line, so
+    /// the useful test is to pick a line that's further out.
+    #[test]
+    fn applies_negative_offset_advances_line_start() {
+        let track = LyricsTrack {
+            version: 1,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines: vec![LyricsLine {
+                start_ms: 2_000,
+                end_ms: 4_000,
+                en: "Advanced line".into(),
+                sk: None,
+                words: None,
+            }],
+        };
+        // Without offset: 200 + 1000 = 1200 → before line start 2000 → None.
+        // With offset -500: 200 + 1000 - (-500) = 1700 → still before 2000 → None.
+        // With offset -1500: 200 + 1000 - (-1500) = 2700 → inside line → Some.
+        let st = LyricsState::with_offset(track, -1_500);
+        let (cur, _nxt) = st
+            .presenter_lines(200)
+            .expect("negative offset must advance lookup onto the line");
+        assert_eq!(cur, "Advanced line");
+    }
+
+    /// With offset 0, `LyricsState::with_offset` must behave identically to
+    /// `LyricsState::new`. Kills any mutant that folds the offset branch
+    /// into a different path when offset == 0.
+    #[test]
+    fn offset_zero_behaves_identically_to_no_offset() {
+        let st_new = LyricsState::new(test_track());
+        let st_off = LyricsState::with_offset(test_track(), 0);
+        for pos in [0u64, 500, 1500, 3200, 4500] {
+            assert_eq!(
+                st_new.presenter_lines(pos),
+                st_off.presenter_lines(pos),
+                "presenter_lines must match at position {pos}"
+            );
+            assert_eq!(
+                st_new.resolume_lines(pos),
+                st_off.resolume_lines(pos),
+                "resolume_lines must match at position {pos}"
+            );
+            assert_eq!(
+                st_new.resolume_lines_with_next(pos),
+                st_off.resolume_lines_with_next(pos),
+                "resolume_lines_with_next must match at position {pos}"
+            );
+        }
     }
 }
