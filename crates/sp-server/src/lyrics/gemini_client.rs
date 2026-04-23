@@ -89,6 +89,36 @@ impl GeminiClient {
             }
         });
 
+        self.post_with_retries(&body).await
+    }
+
+    /// Send a text-only prompt to Gemini, return the text body from the first
+    /// candidate. Used for translation when Claude refuses with a copyright
+    /// policy error. Same retry semantics as `transcribe_chunk`.
+    ///
+    /// `temperature = 0.3` gives the model a small amount of flexibility on
+    /// word choice (Slovak has multiple valid renderings for many English
+    /// phrases) while remaining deterministic enough for regression testing.
+    pub async fn generate_text(&self, prompt: &str) -> Result<String> {
+        let body = json!({
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "temperature": 0.3,
+                "thinkingConfig": {"thinkingBudget": 1024}
+            }
+        });
+
+        self.post_with_retries(&body).await
+    }
+
+    /// Shared HTTP loop used by `transcribe_chunk` and `generate_text`. Builds
+    /// the URL from `base_url` + `model`, adds the `x-goog-api-key` header when
+    /// `api_key` is `Some`, and retries on HTTP 429/500/503 with exponential
+    /// backoff (capped at 60 s, `Retry-After` header honored when present).
+    /// Returns the string at `/candidates/0/content/parts/0/text` on success.
+    async fn post_with_retries(&self, body: &serde_json::Value) -> Result<String> {
         let url = format!(
             "{}/v1beta/models/{}:generateContent",
             self.base_url.trim_end_matches('/'),
@@ -102,7 +132,7 @@ impl GeminiClient {
         let mut last_error: Option<anyhow::Error> = None;
 
         for attempt in 1..=self.max_attempts {
-            let mut req = client.post(&url).json(&body);
+            let mut req = client.post(&url).json(body);
             if let Some(key) = &self.api_key {
                 req = req.header("x-goog-api-key", key.as_str());
             }
@@ -155,7 +185,7 @@ impl GeminiClient {
         }
 
         // Unreachable in practice (loop always returns or bails), but satisfies the compiler.
-        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("transcribe_chunk failed")))
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("post_with_retries failed")))
     }
 }
 
@@ -375,6 +405,60 @@ mod tests {
             count.load(Ordering::SeqCst),
             1,
             "must not retry 4xx non-429"
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_text_extracts_text_from_first_candidate() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.+:generateContent$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{
+                    "content": {
+                        "parts": [{"text": "hello"}]
+                    }
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        let out = client.generate_text("translate these lines").await.unwrap();
+        assert_eq!(out, "hello");
+    }
+
+    #[tokio::test]
+    async fn generate_text_retries_on_429_then_succeeds() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let server = MockServer::start().await;
+        let count = Arc::new(AtomicU32::new(0));
+        let count_cloned = count.clone();
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.+:generateContent$"))
+            .respond_with(move |_: &wiremock::Request| {
+                let n = count_cloned.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    ResponseTemplate::new(429).set_body_string("rate limited")
+                } else {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "candidates": [{"content": {"parts": [{"text": "ok after retry"}]}}]
+                    }))
+                }
+            })
+            .mount(&server)
+            .await;
+
+        let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        // Shrink retry delays so the test runs fast.
+        client.base_retry_ms = 10;
+        let out = client.generate_text("prompt").await.unwrap();
+        assert_eq!(out, "ok after retry");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "expected 3 attempts (2 retries + final success)"
         );
     }
 }
