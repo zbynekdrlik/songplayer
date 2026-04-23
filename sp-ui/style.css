@@ -769,11 +769,21 @@ body {
     gap: 1rem;
   }
 
-  /* Hide the secondary columns (↕ reorder + EN-off) on narrow screens.
-     Operators can flip those on a wider screen later; the ▶ / ✕ primary
-     actions + Song name are what matter mid-set. */
-  .live-setlist-col-secondary {
+  /* Only EN-off hides on narrow screens. Reorder ↕ stays — operators
+     need to reshuffle the set mid-event, especially on phones. ▶ / ✕
+     stay pinned left via the column order. */
+  .live-setlist-col-enoff {
     display: none;
+  }
+
+  /* Compact reorder buttons on mobile so they stack in ~48 px but
+     leave Song enough room. */
+  .live-setlist-reorder {
+    white-space: nowrap;
+  }
+  .live-setlist-btn-move {
+    min-width: 36px;
+    padding: 0 0.25rem;
   }
 
   .live-setlist-song {

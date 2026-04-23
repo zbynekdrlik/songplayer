@@ -91,8 +91,8 @@ pub fn LiveSetList(
                         <th>"#"</th>
                         <th class="live-setlist-col-actions">""</th>
                         <th>"Song"</th>
-                        <th class="live-setlist-col-secondary">"↕"</th>
-                        <th class="live-setlist-col-secondary" title="Suppress pushing the English lyric line to Resolume #sp-subs clips. Enable for songs with baked-in English subtitles in the video.">"EN off"</th>
+                        <th class="live-setlist-col-reorder">"↕"</th>
+                        <th class="live-setlist-col-enoff" title="Suppress pushing the English lyric line to Resolume #sp-subs clips. Enable for songs with baked-in English subtitles in the video.">"EN off"</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -153,7 +153,7 @@ pub fn LiveSetList(
                                         >"✕"</button>
                                     </td>
                                     <td class="live-setlist-song">{song}</td>
-                                    <td class="live-setlist-col-secondary live-setlist-reorder">
+                                    <td class="live-setlist-col-reorder live-setlist-reorder">
                                         <button
                                             class="live-setlist-btn live-setlist-btn-move"
                                             title="Move up"
@@ -183,7 +183,7 @@ pub fn LiveSetList(
                                             }
                                         >"▼"</button>
                                     </td>
-                                    <td class="live-setlist-col-secondary live-setlist-suppress-en">
+                                    <td class="live-setlist-col-enoff live-setlist-suppress-en">
                                         <input
                                             type="checkbox"
                                             prop:checked=suppress_initial
