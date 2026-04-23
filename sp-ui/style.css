@@ -690,10 +690,38 @@ body {
   display: block;
 }
 
-/* Per-row play/remove buttons — thumb-sized. */
-.live-setlist-actions {
+/* Per-row action cells. Play sits on the left (.live-setlist-col-play),
+   secondary cluster (reorder + EN toggle + remove) sits on the right
+   (.live-setlist-col-secondary). */
+.live-setlist-col-play {
+  white-space: nowrap;
+  text-align: left;
+  width: 1%;
+}
+
+.live-setlist-secondary {
   white-space: nowrap;
   text-align: right;
+}
+
+.live-setlist-secondary > * {
+  vertical-align: middle;
+}
+
+.live-setlist-enoff-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0.4rem;
+  font-size: 0.85rem;
+  color: #bbb;
+  cursor: pointer;
+}
+
+.live-setlist-enoff-inline input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
 }
 
 .live-setlist-btn {
@@ -769,21 +797,27 @@ body {
     gap: 1rem;
   }
 
-  /* Only EN-off hides on narrow screens. Reorder ↕ stays — operators
-     need to reshuffle the set mid-event, especially on phones. ▶ / ✕
-     stay pinned left via the column order. */
-  .live-setlist-col-enoff {
-    display: none;
-  }
-
-  /* Compact reorder buttons on mobile so they stack in ~48 px but
-     leave Song enough room. */
-  .live-setlist-reorder {
-    white-space: nowrap;
-  }
+  /* On mobile, give the secondary cell (reorder + EN + ✕) a tight
+     layout so everything stays on one row without pushing the Song
+     column off-screen. Reorder buttons shrink; EN-off label hides
+     its text to save space but keeps the checkbox tappable. */
   .live-setlist-btn-move {
     min-width: 36px;
     padding: 0 0.25rem;
+  }
+  .live-setlist-enoff-inline {
+    margin: 0 0.2rem;
+  }
+  .live-setlist-enoff-inline span,
+  .live-setlist-enoff-inline::after {
+    display: none;
+  }
+  .live-setlist-song {
+    /* Truncate long song titles so the row never forces horizontal scroll. */
+    max-width: 40vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .live-setlist-song {

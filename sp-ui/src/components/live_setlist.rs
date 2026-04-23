@@ -89,10 +89,9 @@ pub fn LiveSetList(
                 <thead>
                     <tr>
                         <th>"#"</th>
-                        <th class="live-setlist-col-actions">""</th>
+                        <th class="live-setlist-col-play">""</th>
                         <th>"Song"</th>
-                        <th class="live-setlist-col-reorder">"↕"</th>
-                        <th class="live-setlist-col-enoff" title="Suppress pushing the English lyric line to Resolume #sp-subs clips. Enable for songs with baked-in English subtitles in the video.">"EN off"</th>
+                        <th class="live-setlist-col-secondary"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -110,7 +109,7 @@ pub fn LiveSetList(
                             view! {
                                 <tr>
                                     <td>{position + 1}</td>
-                                    <td class="live-setlist-actions">
+                                    <td class="live-setlist-col-play">
                                         <button
                                             class="live-setlist-btn live-setlist-btn-play"
                                             title="Play this song"
@@ -129,31 +128,9 @@ pub fn LiveSetList(
                                                 });
                                             }
                                         >"▶"</button>
-                                        <button
-                                            class="live-setlist-btn live-setlist-btn-remove"
-                                            title="Remove from set list"
-                                            on:click=move |_| {
-                                                // Confirm so a stray tap during a live set doesn't
-                                                // silently drop a song the band still needs.
-                                                let ok = web_sys::window()
-                                                    .and_then(|w| w.confirm_with_message(
-                                                        &format!("Remove \"{song_for_confirm}\" from the set list?"),
-                                                    ).ok())
-                                                    .unwrap_or(false);
-                                                if !ok { return; }
-                                                leptos::task::spawn_local(async move {
-                                                    match api::delete_live_item(
-                                                        playlist_id, video_id,
-                                                    ).await {
-                                                        Ok(()) => on_changed.run(()),
-                                                        Err(e) => error_msg.set(e),
-                                                    }
-                                                });
-                                            }
-                                        >"✕"</button>
                                     </td>
                                     <td class="live-setlist-song">{song}</td>
-                                    <td class="live-setlist-col-reorder live-setlist-reorder">
+                                    <td class="live-setlist-col-secondary live-setlist-secondary">
                                         <button
                                             class="live-setlist-btn live-setlist-btn-move"
                                             title="Move up"
@@ -182,23 +159,49 @@ pub fn LiveSetList(
                                                 });
                                             }
                                         >"▼"</button>
-                                    </td>
-                                    <td class="live-setlist-col-enoff live-setlist-suppress-en">
-                                        <input
-                                            type="checkbox"
-                                            prop:checked=suppress_initial
-                                            on:change=move |ev| {
-                                                let checked = event_target_checked(&ev);
+                                        <label
+                                            class="live-setlist-enoff-inline"
+                                            title="Suppress pushing the English lyric line to Resolume #sp-subs clips"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                prop:checked=suppress_initial
+                                                on:change=move |ev| {
+                                                    let checked = event_target_checked(&ev);
+                                                    leptos::task::spawn_local(async move {
+                                                        match api::patch_video_suppress_en(
+                                                            video_id, checked,
+                                                        ).await {
+                                                            Ok(()) => on_changed.run(()),
+                                                            Err(e) => error_msg.set(e),
+                                                        }
+                                                    });
+                                                }
+                                            />
+                                            "EN"
+                                        </label>
+                                        <button
+                                            class="live-setlist-btn live-setlist-btn-remove"
+                                            title="Remove from set list"
+                                            on:click=move |_| {
+                                                // Confirm so a stray tap during a live set doesn't
+                                                // silently drop a song the band still needs.
+                                                let ok = web_sys::window()
+                                                    .and_then(|w| w.confirm_with_message(
+                                                        &format!("Remove \"{song_for_confirm}\" from the set list?"),
+                                                    ).ok())
+                                                    .unwrap_or(false);
+                                                if !ok { return; }
                                                 leptos::task::spawn_local(async move {
-                                                    match api::patch_video_suppress_en(
-                                                        video_id, checked,
+                                                    match api::delete_live_item(
+                                                        playlist_id, video_id,
                                                     ).await {
                                                         Ok(()) => on_changed.run(()),
                                                         Err(e) => error_msg.set(e),
                                                     }
                                                 });
                                             }
-                                        />
+                                        >"✕"</button>
                                     </td>
                                 </tr>
                             }
