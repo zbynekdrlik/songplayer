@@ -1,12 +1,14 @@
 use sp_core::lyrics::LyricsTrack;
 use sp_core::ws::ServerMsg;
 
-/// Lead time applied to the Presenter (stage-display) push — the lookup is
-/// shifted forward by this many milliseconds so singers see the next line
-/// ~1 s before the audio reaches it. Only affects the Presenter path; the
-/// dashboard, Resolume, and karaoke highlighter still align to the real
-/// playback position.
-pub const PRESENTER_LEAD_MS: u64 = 1_000;
+/// Lead time applied to the Presenter (stage-display) push AND the Resolume
+/// LED-wall push — both lookups are shifted forward by this many
+/// milliseconds so singers / the audience see the next line ~1 s before
+/// the audio reaches it. Only the live-lyric paths use this lead; the
+/// dashboard karaoke highlighter still aligns to the real playback
+/// position so the current-word animation stays synced to what's actually
+/// being sung.
+pub const LYRICS_LEAD_MS: u64 = 1_000;
 
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
@@ -74,11 +76,16 @@ impl LyricsState {
     /// dual-line push. `next_en` is the empty string when the current line is
     /// the last line of the track. `next_sk` is `None` when the current line
     /// is last or when the next line has no SK translation.
+    ///
+    /// The lookup is shifted forward by `LYRICS_LEAD_MS` so the LED wall
+    /// shows each line ~1 s before the audio reaches it — late subtitles
+    /// were causing the band to doubt their cue and hesitate.
     pub fn resolume_lines_with_next(
         &self,
         position_ms: u64,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
-        let (idx, line) = self.track.line_at(position_ms)?;
+        let lookahead = position_ms.saturating_add(LYRICS_LEAD_MS);
+        let (idx, line) = self.track.line_at(lookahead)?;
         let next_line = self.track.lines.get(idx + 1);
         let next_en = next_line.map(|l| l.en.clone()).unwrap_or_default();
         let next_sk = next_line.and_then(|l| l.sk.clone());
@@ -90,10 +97,10 @@ impl LyricsState {
     /// the current line is the last line of the track. Returns `None`
     /// between lines so the caller can hold off pushing a duplicate.
     ///
-    /// The lookup is shifted forward by `PRESENTER_LEAD_MS` so singers on
+    /// The lookup is shifted forward by `LYRICS_LEAD_MS` so singers on
     /// stage-display get the next line ~1 s before the audio reaches it.
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
-        let lookahead = position_ms.saturating_add(PRESENTER_LEAD_MS);
+        let lookahead = position_ms.saturating_add(LYRICS_LEAD_MS);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next = self
             .track
@@ -288,7 +295,7 @@ mod tests {
     #[test]
     fn presenter_lines_returns_empty_next_for_last_line() {
         let st = LyricsState::new(test_track());
-        // Pick a position where `position + PRESENTER_LEAD_MS` is still
+        // Pick a position where `position + LYRICS_LEAD_MS` is still
         // inside the last line. test_track()'s last line is 3000..5000,
         // so position 3200 + 1000 = 4200 is safely inside.
         let (_cur, nxt) = st.presenter_lines(3200).expect("on last line");
@@ -302,7 +309,7 @@ mod tests {
     fn presenter_lines_applies_1s_lead_time() {
         // The lead time pulls the lookup forward so singers see the next
         // line ~1 s before the audio reaches it. At position 0, the line
-        // at `0 + PRESENTER_LEAD_MS = 1000 ms` (start of line 0) is
+        // at `0 + LYRICS_LEAD_MS = 1000 ms` (start of line 0) is
         // already active.
         let st = LyricsState::new(test_track());
         let (cur, _nxt) = st
@@ -346,11 +353,25 @@ mod tests {
     #[test]
     fn resolume_lines_with_next_returns_empty_next_on_last_line() {
         let st = LyricsState::new(test_track());
-        let last = test_track().lines.last().cloned().expect("non-empty");
-        let mid = (last.start_ms + last.end_ms) / 2;
+        // Pick a position where `position + LYRICS_LEAD_MS` is still inside
+        // the last line. test_track()'s last line is 3000..5000, so
+        // position 3200 + 1000 = 4200 is safely inside.
         let (_cur, next_en, _cur_sk, next_sk) =
-            st.resolume_lines_with_next(mid).expect("on last line");
+            st.resolume_lines_with_next(3200).expect("on last line");
         assert!(next_en.is_empty(), "last-line next_en must be empty");
         assert!(next_sk.is_none(), "last-line next_sk must be None");
+    }
+
+    #[test]
+    fn resolume_lines_with_next_applies_1s_lead_time() {
+        // At position 0, the lead pulls the lookup onto line 0 (starts at
+        // 1000 ms). This matches the Presenter lead so the wall and
+        // stage-display switch lines at the same moment, ~1 s before the
+        // audio reaches the new line.
+        let st = LyricsState::new(test_track());
+        let (cur_en, _next_en, _cur_sk, _next_sk) = st
+            .resolume_lines_with_next(0)
+            .expect("1s lead should pull lookup onto line 0");
+        assert_eq!(cur_en, "Hello world");
     }
 }
