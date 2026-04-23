@@ -268,6 +268,15 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   `feedback_no_autosub.md`. LYRICS_PIPELINE_VERSION bump re-queues
   pre-v19 rows in the stale bucket; the smart-skip clause keeps
   pure-Gemini v19+ output protected once generated.
+- Claude-refusal mitigation (no version bump): translator gains Gemini
+  fallback. When Claude via CLIProxyAPI OAuth refuses with "copyrighted
+  material" policy (observed on "THE DEEP" / Youth Alive 2026-04-23),
+  the worker now tries Gemini 3.x Pro as a second translator before
+  giving up. Output format unchanged. `translator::translate_via_gemini`
+  reuses the same numbered prompt as Claude and iterates the
+  comma-separated `gemini_api_key` list, advancing on error so a 429 on
+  one key does not kill translation for the song. Wired into both
+  `translate_track` and `retry_missing_translations`.
 
 ## Legacy OBS YouTube Player (obsytplayer)
 
