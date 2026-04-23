@@ -14,7 +14,10 @@
 //! Retry policy: HTTP 429/500/503 are retried with exponential backoff (base
 //! `base_retry_ms`, cap 60 s, max `max_attempts` total attempts).  If the
 //! response carries a `Retry-After` header its value (seconds) is used instead
-//! of the computed backoff.
+//! of the computed backoff — BUT any value above the 60 s cap causes the
+//! call to bail immediately instead of sleeping. Daily-quota 429s carry
+//! `retry-after` values of hours; sleeping through them per chunk × per
+//! key × per retry cycle burned 1076 retry-storm events on 2026-04-23.
 //!
 //! Audit trail: every attempt (success, retryable failure, or terminal failure)
 //! emits one `GeminiAuditEntry` when `ctx.cache_dir` is set. A single chunk
@@ -34,6 +37,13 @@ pub const DEFAULT_THINKING_BUDGET: i32 = 2048;
 
 /// HTTP statuses that are retried.
 const RETRYABLE_STATUSES: &[u16] = &[429, 500, 503];
+
+/// Upper bound on the `Retry-After` header we'll actually honor. When
+/// Google's daily quota hits, `retry-after` is measured in hours
+/// (10 000+ seconds). The 2026-04-23 event burned 1076 retry-storm
+/// events when this wasn't clamped. Anything above this cap is treated
+/// as "not worth waiting, switch keys or give up now".
+const RETRY_AFTER_CAP_MS: u64 = 60_000;
 
 pub struct GeminiClient {
     pub base_url: String,
@@ -287,8 +297,23 @@ impl GeminiClient {
                 anyhow::bail!("{err_msg}");
             }
 
+            // Daily-quota guard: when retry-after exceeds the cap, don't
+            // sleep through it — bail immediately so the caller can
+            // rotate keys or give up. Otherwise the retry loop wastes
+            // wall-clock time on dead keys (observed 1076× on 2026-04-23).
+            if let Some(ms) = retry_after_ms
+                && ms > RETRY_AFTER_CAP_MS
+            {
+                anyhow::bail!(
+                    "HTTP {status_u16} retry-after={}s (exceeds {}s cap)",
+                    ms / 1000,
+                    RETRY_AFTER_CAP_MS / 1000
+                );
+            }
+
             // Compute delay: Retry-After header takes precedence over computed backoff.
-            let computed_backoff = (self.base_retry_ms * (1u64 << (attempt - 1))).min(60_000);
+            let computed_backoff =
+                (self.base_retry_ms * (1u64 << (attempt - 1))).min(RETRY_AFTER_CAP_MS);
             let delay_ms = retry_after_ms.unwrap_or(computed_backoff);
 
             tracing::warn!(
@@ -814,6 +839,55 @@ mod tests {
         assert!(e.error.as_deref().unwrap().contains("HTTP 429"));
         assert!(e.total_tokens.is_none());
         assert_eq!(e.key_prefix, "proxy"); // proxy mode
+    }
+
+    /// When Google's daily quota hits, the Retry-After header is measured
+    /// in hours (10 000+ seconds). Sleeping through that per-chunk ×
+    /// per-key × per-retry-cycle burned 1076 retry-storm events on the
+    /// 2026-04-23 event. Bail immediately on Retry-After > 60 s instead
+    /// of consuming another attempt slot + minutes of wall-clock sleep.
+    #[tokio::test]
+    async fn bails_fast_when_retry_after_exceeds_cap() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let server = MockServer::start().await;
+        let count = Arc::new(AtomicU32::new(0));
+        let count_cloned = count.clone();
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.+:generateContent$"))
+            .respond_with(move |_: &wiremock::Request| {
+                count_cloned.fetch_add(1, Ordering::SeqCst);
+                // Retry-After = 35 000 s (≈ 9.7 h) — above the 60 s cap.
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "35000")
+                    .set_body_string("daily quota exceeded")
+            })
+            .mount(&server)
+            .await;
+
+        let tmp = write_tmp_wav();
+        let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        // Base retry is already small; the test is about the cap, not backoff.
+        client.base_retry_ms = 10;
+        let started = std::time::Instant::now();
+        let err = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap_err();
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "must bail without sleeping (< 2 s), got {elapsed:?}"
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "must make only one attempt, not consume the retry budget"
+        );
+        assert!(
+            format!("{err}").contains("retry-after"),
+            "error must explain why we bailed, got: {err}"
+        );
     }
 
     #[tokio::test]
