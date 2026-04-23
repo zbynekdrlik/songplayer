@@ -96,26 +96,34 @@ pub fn LiveSetList(
                                             }
                                         />
                                     </td>
-                                    <td>
-                                        <button on:click=move |_| {
-                                            leptos::task::spawn_local(async move {
-                                                if let Err(e) = api::post_live_play_video(
-                                                    playlist_id, video_id,
-                                                ).await {
-                                                    error_msg.set(e);
-                                                }
-                                            });
-                                        }>"▶"</button>
-                                        <button on:click=move |_| {
-                                            leptos::task::spawn_local(async move {
-                                                match api::delete_live_item(
-                                                    playlist_id, video_id,
-                                                ).await {
-                                                    Ok(()) => on_changed.run(()),
-                                                    Err(e) => error_msg.set(e),
-                                                }
-                                            });
-                                        }>"✕"</button>
+                                    <td class="live-setlist-actions">
+                                        <button
+                                            class="live-setlist-btn live-setlist-btn-play"
+                                            title="Play this song"
+                                            on:click=move |_| {
+                                                leptos::task::spawn_local(async move {
+                                                    if let Err(e) = api::post_live_play_video(
+                                                        playlist_id, video_id,
+                                                    ).await {
+                                                        error_msg.set(e);
+                                                    }
+                                                });
+                                            }
+                                        >"▶"</button>
+                                        <button
+                                            class="live-setlist-btn live-setlist-btn-remove"
+                                            title="Remove from set list"
+                                            on:click=move |_| {
+                                                leptos::task::spawn_local(async move {
+                                                    match api::delete_live_item(
+                                                        playlist_id, video_id,
+                                                    ).await {
+                                                        Ok(()) => on_changed.run(()),
+                                                        Err(e) => error_msg.set(e),
+                                                    }
+                                                });
+                                            }
+                                        >"✕"</button>
                                     </td>
                                 </tr>
                             }
@@ -124,34 +132,46 @@ pub fn LiveSetList(
                 </tbody>
             </table>
             <div class="live-setlist-controls">
-                <button on:click=move |_| {
-                    leptos::task::spawn_local(async move {
-                        let _ = api::post_empty(
-                            &format!("/api/v1/playback/{playlist_id}/play"),
-                        ).await;
-                    });
-                }>"▶ Play"</button>
-                <button on:click=move |_| {
-                    leptos::task::spawn_local(async move {
-                        let _ = api::post_empty(
-                            &format!("/api/v1/playback/{playlist_id}/pause"),
-                        ).await;
-                    });
-                }>"⏸"</button>
-                <button on:click=move |_| {
-                    leptos::task::spawn_local(async move {
-                        let _ = api::post_empty(
-                            &format!("/api/v1/playback/{playlist_id}/skip"),
-                        ).await;
-                    });
-                }>"⏭"</button>
-                <button on:click=move |_| {
-                    leptos::task::spawn_local(async move {
-                        let _ = api::post_empty(
-                            &format!("/api/v1/playback/{playlist_id}/previous"),
-                        ).await;
-                    });
-                }>"⏮"</button>
+                <button
+                    class="live-setlist-control-btn"
+                    on:click=move |_| {
+                        leptos::task::spawn_local(async move {
+                            let _ = api::post_empty(
+                                &format!("/api/v1/playback/{playlist_id}/play"),
+                            ).await;
+                        });
+                    }
+                >"▶ Play"</button>
+                <button
+                    class="live-setlist-control-btn"
+                    on:click=move |_| {
+                        leptos::task::spawn_local(async move {
+                            let _ = api::post_empty(
+                                &format!("/api/v1/playback/{playlist_id}/pause"),
+                            ).await;
+                        });
+                    }
+                >"⏸"</button>
+                <button
+                    class="live-setlist-control-btn"
+                    on:click=move |_| {
+                        leptos::task::spawn_local(async move {
+                            let _ = api::post_empty(
+                                &format!("/api/v1/playback/{playlist_id}/skip"),
+                            ).await;
+                        });
+                    }
+                >"⏭"</button>
+                <button
+                    class="live-setlist-control-btn"
+                    on:click=move |_| {
+                        leptos::task::spawn_local(async move {
+                            let _ = api::post_empty(
+                                &format!("/api/v1/playback/{playlist_id}/previous"),
+                            ).await;
+                        });
+                    }
+                >"⏮"</button>
             </div>
         </div>
     }

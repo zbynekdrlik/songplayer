@@ -640,9 +640,135 @@ body {
   font-style: italic;
 }
 
+/* ---- v0.23 /live mobile-first rework ----
+
+   The /live page drives a worship set on a phone in the operator's hand.
+   Everything below is sized for thumb taps, not mouse clicks: 48×48 px
+   minimum targets (Apple HIG recommends 44 pt, we round up for margin),
+   font ≥ 1rem, generous gaps between adjacent buttons so a sloppy tap
+   lands cleanly. Desktop stays usable — these rules only beef up the
+   mobile case, never shrink anything.
+*/
+
+.live-section {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  background: #181818;
+}
+
+.live-section-setlist {
+  /* Primary control surface — prominent border, more breathing room. */
+  border-color: #3a5a4a;
+  padding: 0.75rem;
+}
+
+.live-section-player {
+  background: #1a1a1e;
+}
+
+.live-section-add .live-add-toggle {
+  width: 100%;
+  min-height: 48px;
+  font-size: 1rem;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: #222;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.live-section-add .live-add-body {
+  display: none;
+  margin-top: 0.75rem;
+}
+
+.live-section-add .live-add-body.open {
+  display: block;
+}
+
+/* Per-row play/remove buttons — thumb-sized. */
+.live-setlist-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.live-setlist-btn {
+  min-width: 48px;
+  min-height: 48px;
+  margin-left: 0.5rem;
+  font-size: 1.25rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.live-setlist-btn-play {
+  border-color: #4a7a5a;
+  background: #2a4a3a;
+}
+
+.live-setlist-btn-remove {
+  border-color: #7a4a4a;
+  background: #3a2a2a;
+}
+
+.live-setlist-btn:active {
+  transform: scale(0.95);
+}
+
+/* Global controls row (▶ Play / ⏸ / ⏭ / ⏮). */
+.live-setlist-control-btn {
+  min-width: 64px;
+  min-height: 48px;
+  font-size: 1rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* Setlist rows — taller, easier to read + tap. */
+.live-setlist-table th,
+.live-setlist-table td {
+  padding: 0.6rem 0.5rem;
+}
+
+.live-setlist-suppress-en input[type="checkbox"] {
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
 @media (max-width: 768px) {
   .live-page-grid {
     grid-template-columns: 1fr !important;
     gap: 1rem;
+  }
+
+  /* Hide the Artist column on narrow screens — Song is the identifier
+     operators actually scan for. */
+  .live-setlist-table th:nth-child(3),
+  .live-setlist-table td:nth-child(3) {
+    display: none;
+  }
+
+  .live-section {
+    padding: 0.5rem;
+  }
+
+  /* Stack global playback controls on mobile so each stays full-tap-width. */
+  .live-setlist-controls {
+    flex-wrap: wrap;
+  }
+
+  .live-setlist-control-btn {
+    flex: 1 1 45%;
   }
 }
