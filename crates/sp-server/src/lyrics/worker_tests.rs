@@ -126,6 +126,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         &reqwest_client,
         &row,
         autosub_tmp.path(),
+        "", // no genius token in tests — skip Genius source
     )
     .await
     .unwrap();
@@ -221,6 +222,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         &reqwest_client,
         &row,
         autosub_tmp.path(),
+        "", // no genius token in tests — skip Genius source
     )
     .await;
 

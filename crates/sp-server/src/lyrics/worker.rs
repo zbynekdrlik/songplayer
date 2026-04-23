@@ -21,7 +21,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     ai::client::AiClient,
     db::models::get_next_video_missing_translation,
-    lyrics::{aligner, lrclib, translator, youtube_subs},
+    lyrics::{aligner, genius, lrclib, translator, youtube_subs},
 };
 
 #[allow(dead_code)]
@@ -73,6 +73,7 @@ pub(crate) async fn gather_sources_impl(
     client: &reqwest::Client,
     row: &crate::db::models::VideoLyricsRow,
     autosub_tmp_dir: &std::path::Path,
+    genius_access_token: &str,
 ) -> Result<crate::lyrics::provider::SongContext> {
     use crate::lyrics::autosub_provider::fetch_autosub;
     use crate::lyrics::provider::{CandidateText, SongContext};
@@ -125,7 +126,7 @@ pub(crate) async fn gather_sources_impl(
     //     Returns plain text (no timing); becomes candidate_texts entry so
     //     Gemini can align it to audio. Only runs when song/artist known.
     let genius_track = if !row.song.is_empty() && !row.artist.is_empty() {
-        match genius::fetch_lyrics(client, &row.artist, &row.song).await {
+        match genius::fetch_lyrics(client, genius_access_token, &row.artist, &row.song).await {
             Ok(Some(track)) => {
                 info!(
                     youtube_id = %youtube_id,
@@ -481,6 +482,14 @@ impl LyricsWorker {
         row: &crate::db::models::VideoLyricsRow,
         autosub_tmp_dir: &std::path::Path,
     ) -> Result<crate::lyrics::provider::SongContext> {
+        // Read the Genius token fresh on every song so operators can add
+        // the setting without restarting the server. Empty string disables
+        // the Genius source entirely.
+        let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         gather_sources_impl(
             self.ai_client.as_deref(),
             &self.ytdlp_path,
@@ -488,6 +497,7 @@ impl LyricsWorker {
             &self.client,
             row,
             autosub_tmp_dir,
+            &genius_token,
         )
         .await
     }
