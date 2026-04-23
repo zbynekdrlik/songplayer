@@ -4,6 +4,7 @@ pub mod autosub_provider;
 pub mod bootstrap;
 pub mod chunking;
 pub mod description_provider;
+pub mod gather;
 pub mod gemini_chunks;
 pub mod gemini_client;
 pub mod gemini_parse;
