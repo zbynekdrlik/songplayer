@@ -266,8 +266,15 @@ pub async fn transcribe_rotating(
     let mut last_err: Option<anyhow::Error> = None;
     for offset in 0..clients.len() {
         let idx = (start + offset) % clients.len();
-        match clients[idx].transcribe_chunk(prompt, audio).await {
-            Ok(s) => {
+        // Task 2 placeholder — Task 3 threads real video_id + chunk_idx context.
+        let ctx = crate::lyrics::gemini_client::AuditCtx {
+            cache_dir: None,
+            video_id: None,
+            chunk_idx: None,
+            key_idx: idx,
+        };
+        match clients[idx].transcribe_chunk(prompt, audio, ctx).await {
+            Ok((s, _usage)) => {
                 start_idx.store(idx, Ordering::Relaxed);
                 return Ok(s);
             }

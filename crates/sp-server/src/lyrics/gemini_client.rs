@@ -15,12 +15,20 @@
 //! `base_retry_ms`, cap 60 s, max `max_attempts` total attempts).  If the
 //! response carries a `Retry-After` header its value (seconds) is used instead
 //! of the computed backoff.
+//!
+//! Audit trail: every attempt (success, retryable failure, or terminal failure)
+//! emits one `GeminiAuditEntry` when `ctx.cache_dir` is set. A single chunk
+//! that succeeds on attempt 3 after two 429s produces three audit lines. Audit
+//! write errors are logged and swallowed — a disk-full condition should not
+//! mask a successful Gemini call.
 
+use crate::lyrics::gemini_audit::{self, GeminiAuditEntry};
 use anyhow::{Context, Result};
 use base64::Engine as _;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_THINKING_BUDGET: i32 = 2048;
 
@@ -37,6 +45,28 @@ pub struct GeminiClient {
     pub base_retry_ms: u64,
     /// Total number of attempts (first try + retries). Default: 4.
     pub max_attempts: u32,
+}
+
+/// Parsed `usageMetadata` from a Gemini response body. Each field is the number
+/// of tokens Google bills for that segment; `total` is usually `prompt + candidates`
+/// but some models add a small thinking-budget overhead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub prompt: u32,
+    pub candidates: u32,
+    pub total: u32,
+}
+
+/// Context carried from the caller through `post_with_retries` to the audit
+/// logger. `cache_dir = None` disables audit writing entirely — used by
+/// wiremock unit tests that don't want to touch the filesystem, and as a
+/// placeholder for translator calls that haven't been wired up yet.
+#[derive(Debug, Clone, Default)]
+pub struct AuditCtx {
+    pub cache_dir: Option<PathBuf>,
+    pub video_id: Option<String>,
+    pub chunk_idx: Option<u32>,
+    pub key_idx: usize,
 }
 
 impl GeminiClient {
@@ -70,7 +100,12 @@ impl GeminiClient {
     /// Retries on HTTP 429/500/503 with exponential backoff. Honors `Retry-After`
     /// response header when present. Non-retryable errors (4xx other than 429) are
     /// returned immediately without retrying.
-    pub async fn transcribe_chunk(&self, prompt: &str, audio_wav: &Path) -> Result<String> {
+    pub async fn transcribe_chunk(
+        &self,
+        prompt: &str,
+        audio_wav: &Path,
+        ctx: AuditCtx,
+    ) -> Result<(String, Option<TokenUsage>)> {
         let bytes = tokio::fs::read(audio_wav)
             .await
             .with_context(|| format!("read chunk audio {audio_wav:?}"))?;
@@ -89,7 +124,7 @@ impl GeminiClient {
             }
         });
 
-        self.post_with_retries(&body).await
+        self.post_with_retries(&body, &ctx).await
     }
 
     /// Send a text-only prompt to Gemini, return the text body from the first
@@ -99,7 +134,11 @@ impl GeminiClient {
     /// `temperature = 0.3` gives the model a small amount of flexibility on
     /// word choice (Slovak has multiple valid renderings for many English
     /// phrases) while remaining deterministic enough for regression testing.
-    pub async fn generate_text(&self, prompt: &str) -> Result<String> {
+    pub async fn generate_text(
+        &self,
+        prompt: &str,
+        ctx: AuditCtx,
+    ) -> Result<(String, Option<TokenUsage>)> {
         let body = json!({
             "contents": [{
                 "parts": [{"text": prompt}]
@@ -110,15 +149,45 @@ impl GeminiClient {
             }
         });
 
-        self.post_with_retries(&body).await
+        self.post_with_retries(&body, &ctx).await
+    }
+
+    /// First 12 chars of the API key — used as `key_prefix` in audit entries.
+    /// Returns `proxy` for proxy mode (no key) so operators can tell the two
+    /// apart when inspecting the log.
+    fn key_prefix(&self) -> String {
+        match &self.api_key {
+            Some(k) => k.chars().take(12).collect(),
+            None => "proxy".to_string(),
+        }
+    }
+
+    /// Write one audit entry. Write failures are logged and swallowed — we do
+    /// NOT want a full disk to fail legitimate Gemini calls.
+    async fn write_audit(&self, ctx: &AuditCtx, entry: GeminiAuditEntry) {
+        let Some(cache_dir) = ctx.cache_dir.as_ref() else {
+            return;
+        };
+        if let Err(e) = gemini_audit::append(cache_dir, &entry).await {
+            tracing::warn!("gemini: audit append failed: {e}");
+        }
     }
 
     /// Shared HTTP loop used by `transcribe_chunk` and `generate_text`. Builds
     /// the URL from `base_url` + `model`, adds the `x-goog-api-key` header when
     /// `api_key` is `Some`, and retries on HTTP 429/500/503 with exponential
     /// backoff (capped at 60 s, `Retry-After` header honored when present).
-    /// Returns the string at `/candidates/0/content/parts/0/text` on success.
-    async fn post_with_retries(&self, body: &serde_json::Value) -> Result<String> {
+    /// Returns the string at `/candidates/0/content/parts/0/text` on success,
+    /// plus the parsed `usageMetadata` if the response carried it.
+    ///
+    /// Every attempt emits one audit entry — success, retryable failure, and
+    /// terminal failure alike. A three-attempt sequence (429, 429, 200)
+    /// produces three audit lines.
+    async fn post_with_retries(
+        &self,
+        body: &serde_json::Value,
+        ctx: &AuditCtx,
+    ) -> Result<(String, Option<TokenUsage>)> {
         let url = format!(
             "{}/v1beta/models/{}:generateContent",
             self.base_url.trim_end_matches('/'),
@@ -130,25 +199,59 @@ impl GeminiClient {
             .context("build reqwest client")?;
 
         let mut last_error: Option<anyhow::Error> = None;
+        let key_prefix = self.key_prefix();
 
         for attempt in 1..=self.max_attempts {
+            let attempt_start = Instant::now();
             let mut req = client.post(&url).json(body);
             if let Some(key) = &self.api_key {
                 req = req.header("x-goog-api-key", key.as_str());
             }
-            let resp = req.send().await.context("POST to Gemini")?;
+            let resp_result = req.send().await;
+
+            // Transport error (DNS, TCP, TLS, timeout): log with status=0 and
+            // bubble up — transport failures are not retried (the retry loop
+            // only handles HTTP status-level failures per the existing contract).
+            let resp = match resp_result {
+                Ok(r) => r,
+                Err(e) => {
+                    let elapsed_ms = attempt_start.elapsed().as_millis() as u64;
+                    let err_msg = format!("transport: {e}");
+                    self.write_audit(
+                        ctx,
+                        self.build_entry(
+                            ctx,
+                            &key_prefix,
+                            0,
+                            elapsed_ms,
+                            None,
+                            Some(err_msg.clone()),
+                        ),
+                    )
+                    .await;
+                    return Err(e).context("POST to Gemini");
+                }
+            };
+
             let status = resp.status();
             let status_u16 = status.as_u16();
 
             if status.is_success() {
                 let text = resp.text().await.context("read response body")?;
+                let elapsed_ms = attempt_start.elapsed().as_millis() as u64;
                 let doc: serde_json::Value =
                     serde_json::from_str(&text).with_context(|| format!("parse JSON: {text}"))?;
+                let usage = parse_usage_metadata(&doc);
+                self.write_audit(
+                    ctx,
+                    self.build_entry(ctx, &key_prefix, status_u16, elapsed_ms, usage, None),
+                )
+                .await;
                 let out = doc
                     .pointer("/candidates/0/content/parts/0/text")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("no text in candidates[0]: {text}"))?;
-                return Ok(out.to_string());
+                return Ok((out.to_string(), usage));
             }
 
             // Check if this status is retryable.
@@ -163,7 +266,22 @@ impl GeminiClient {
                 .map(|secs| secs * 1000);
 
             let text = resp.text().await.context("read response body")?;
+            let elapsed_ms = attempt_start.elapsed().as_millis() as u64;
             let err_msg = format!("HTTP {status_u16}: {}", &text[..text.len().min(500)]);
+
+            // Audit this failed attempt (retryable or terminal).
+            self.write_audit(
+                ctx,
+                self.build_entry(
+                    ctx,
+                    &key_prefix,
+                    status_u16,
+                    elapsed_ms,
+                    None,
+                    Some(err_msg.clone()),
+                ),
+            )
+            .await;
 
             if !is_retryable || attempt >= self.max_attempts {
                 anyhow::bail!("{err_msg}");
@@ -187,6 +305,47 @@ impl GeminiClient {
         // Unreachable in practice (loop always returns or bails), but satisfies the compiler.
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("post_with_retries failed")))
     }
+
+    fn build_entry(
+        &self,
+        ctx: &AuditCtx,
+        key_prefix: &str,
+        status: u16,
+        duration_ms: u64,
+        usage: Option<TokenUsage>,
+        error: Option<String>,
+    ) -> GeminiAuditEntry {
+        GeminiAuditEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            video_id: ctx.video_id.clone(),
+            chunk_idx: ctx.chunk_idx,
+            key_idx: ctx.key_idx,
+            key_prefix: key_prefix.to_string(),
+            model: self.model.clone(),
+            status,
+            duration_ms,
+            prompt_tokens: usage.map(|u| u.prompt),
+            candidates_tokens: usage.map(|u| u.candidates),
+            total_tokens: usage.map(|u| u.total),
+            error,
+        }
+    }
+}
+
+/// Pull `usageMetadata.{promptTokenCount, candidatesTokenCount, totalTokenCount}`
+/// out of a Gemini response body. All three are optional per Google's schema —
+/// if any one is missing we return `None` (rather than defaulting to zero,
+/// which would lie about the spend).
+fn parse_usage_metadata(doc: &serde_json::Value) -> Option<TokenUsage> {
+    let usage = doc.get("usageMetadata")?;
+    let prompt = usage.get("promptTokenCount")?.as_u64()? as u32;
+    let candidates = usage.get("candidatesTokenCount")?.as_u64()? as u32;
+    let total = usage.get("totalTokenCount")?.as_u64()? as u32;
+    Some(TokenUsage {
+        prompt,
+        candidates,
+        total,
+    })
 }
 
 #[cfg(test)]
@@ -199,6 +358,12 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), &[0u8; 16]).unwrap();
         tmp
+    }
+
+    /// No-audit context — disables audit writes so tests that don't care
+    /// about the audit file can ignore the filesystem.
+    fn noaudit() -> AuditCtx {
+        AuditCtx::default()
     }
 
     #[tokio::test]
@@ -220,8 +385,12 @@ mod tests {
 
         let tmp = write_tmp_wav();
         let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
-        let out = client.transcribe_chunk("prompt", tmp.path()).await.unwrap();
+        let (out, usage) = client
+            .transcribe_chunk("prompt", tmp.path(), noaudit())
+            .await
+            .unwrap();
         assert_eq!(out, "(00:01.0 --> 00:02.0) hello");
+        assert!(usage.is_none(), "no usageMetadata in mock response");
     }
 
     #[tokio::test]
@@ -235,7 +404,10 @@ mod tests {
         let tmp = write_tmp_wav();
         let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
         client.base_retry_ms = 10;
-        let err = client.transcribe_chunk("p", tmp.path()).await.unwrap_err();
+        let err = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap_err();
         assert!(format!("{err}").contains("HTTP 400"), "err = {err}");
     }
 
@@ -248,7 +420,10 @@ mod tests {
             .await;
         let tmp = write_tmp_wav();
         let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
-        let err = client.transcribe_chunk("p", tmp.path()).await.unwrap_err();
+        let err = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap_err();
         assert!(
             format!("{err}").contains("no text in candidates"),
             "err = {err}"
@@ -277,7 +452,10 @@ mod tests {
             base_retry_ms: 10,
             max_attempts: 4,
         };
-        let out = client.transcribe_chunk("p", tmp.path()).await.unwrap();
+        let (out, _usage) = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
         assert_eq!(out, "ok");
     }
 
@@ -302,7 +480,10 @@ mod tests {
 
         let tmp = write_tmp_wav();
         let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
-        let out = client.transcribe_chunk("p", tmp.path()).await.unwrap();
+        let (out, _usage) = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
         assert_eq!(out, "ok");
     }
 
@@ -332,7 +513,10 @@ mod tests {
         let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
         // Shrink retry delays so the test runs fast
         client.base_retry_ms = 10;
-        let out = client.transcribe_chunk("p", tmp.path()).await.unwrap();
+        let (out, _usage) = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
         assert_eq!(out, "ok after retry");
         assert_eq!(
             count.load(Ordering::SeqCst),
@@ -364,7 +548,10 @@ mod tests {
         let tmp = write_tmp_wav();
         let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
         client.base_retry_ms = 10;
-        let _ = client.transcribe_chunk("p", tmp.path()).await.unwrap();
+        let _ = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 
@@ -378,7 +565,10 @@ mod tests {
         let tmp = write_tmp_wav();
         let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
         client.base_retry_ms = 10;
-        let err = client.transcribe_chunk("p", tmp.path()).await.unwrap_err();
+        let err = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap_err();
         assert!(format!("{err}").contains("HTTP 429"), "err = {err}");
     }
 
@@ -399,7 +589,10 @@ mod tests {
         let tmp = write_tmp_wav();
         let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
         client.base_retry_ms = 10;
-        let err = client.transcribe_chunk("p", tmp.path()).await.unwrap_err();
+        let err = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap_err();
         assert!(format!("{err}").contains("HTTP 400"), "err = {err}");
         assert_eq!(
             count.load(Ordering::SeqCst),
@@ -424,7 +617,10 @@ mod tests {
             .await;
 
         let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
-        let out = client.generate_text("translate these lines").await.unwrap();
+        let (out, _usage) = client
+            .generate_text("translate these lines", noaudit())
+            .await
+            .unwrap();
         assert_eq!(out, "hello");
     }
 
@@ -453,12 +649,221 @@ mod tests {
         let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
         // Shrink retry delays so the test runs fast.
         client.base_retry_ms = 10;
-        let out = client.generate_text("prompt").await.unwrap();
+        let (out, _usage) = client.generate_text("prompt", noaudit()).await.unwrap();
         assert_eq!(out, "ok after retry");
         assert_eq!(
             count.load(Ordering::SeqCst),
             3,
             "expected 3 attempts (2 retries + final success)"
         );
+    }
+
+    // --- Audit / usageMetadata tests (Task 2) --------------------------------
+
+    #[tokio::test]
+    async fn post_parses_usage_metadata_when_present() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 1234,
+                    "candidatesTokenCount": 567,
+                    "totalTokenCount": 1801
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let tmp = write_tmp_wav();
+        let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        let (_out, usage) = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
+        let usage = usage.expect("usageMetadata must be parsed when present");
+        assert_eq!(usage.prompt, 1234);
+        assert_eq!(usage.candidates, 567);
+        assert_eq!(usage.total, 1801);
+    }
+
+    #[tokio::test]
+    async fn post_returns_none_usage_when_field_missing() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let tmp = write_tmp_wav();
+        let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        let (_out, usage) = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
+        assert!(usage.is_none());
+    }
+
+    #[tokio::test]
+    async fn post_returns_none_usage_when_field_partial() {
+        // All three tokens must be present; missing any one = None, to avoid
+        // silently reporting zero when Google schema shifts.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 10
+                    // missing candidatesTokenCount and totalTokenCount
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let tmp = write_tmp_wav();
+        let client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        let (_out, usage) = client
+            .transcribe_chunk("p", tmp.path(), noaudit())
+            .await
+            .unwrap();
+        assert!(usage.is_none());
+    }
+
+    #[tokio::test]
+    async fn post_writes_audit_entry_with_cache_dir_set() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 5,
+                    "totalTokenCount": 15
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let tmp_wav = write_tmp_wav();
+        let cache = tempfile::tempdir().unwrap();
+        let client = GeminiClient {
+            base_url: server.uri(),
+            model: "gemini-test".to_string(),
+            api_key: Some("AIzaSyTESTKEY1234".to_string()),
+            timeout_s: 10,
+            base_retry_ms: 10,
+            max_attempts: 4,
+        };
+        let ctx = AuditCtx {
+            cache_dir: Some(cache.path().to_path_buf()),
+            video_id: Some("vidX".to_string()),
+            chunk_idx: Some(2),
+            key_idx: 1,
+        };
+        let _ = client
+            .transcribe_chunk("p", tmp_wav.path(), ctx)
+            .await
+            .unwrap();
+
+        let entries = crate::lyrics::gemini_audit::read_entries(cache.path(), None, None)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e.status, 200);
+        assert_eq!(e.video_id.as_deref(), Some("vidX"));
+        assert_eq!(e.chunk_idx, Some(2));
+        assert_eq!(e.key_idx, 1);
+        assert_eq!(e.key_prefix, "AIzaSyTESTKE"); // first 12 chars
+        assert_eq!(e.model, "gemini-test");
+        assert_eq!(e.prompt_tokens, Some(10));
+        assert_eq!(e.candidates_tokens, Some(5));
+        assert_eq!(e.total_tokens, Some(15));
+        assert!(e.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn post_writes_audit_entry_on_http_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
+            .mount(&server)
+            .await;
+
+        let tmp_wav = write_tmp_wav();
+        let cache = tempfile::tempdir().unwrap();
+        let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        client.base_retry_ms = 1; // make retries instant
+        client.max_attempts = 1; // only one attempt so the test is bounded
+        let ctx = AuditCtx {
+            cache_dir: Some(cache.path().to_path_buf()),
+            video_id: Some("v".to_string()),
+            chunk_idx: Some(0),
+            key_idx: 0,
+        };
+        let _ = client.transcribe_chunk("p", tmp_wav.path(), ctx).await;
+
+        let entries = crate::lyrics::gemini_audit::read_entries(cache.path(), None, None)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e.status, 429);
+        assert!(e.error.as_deref().unwrap().contains("HTTP 429"));
+        assert!(e.total_tokens.is_none());
+        assert_eq!(e.key_prefix, "proxy"); // proxy mode
+    }
+
+    #[tokio::test]
+    async fn post_writes_one_audit_entry_per_attempt_on_retry_then_success() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let server = MockServer::start().await;
+        let count = Arc::new(AtomicU32::new(0));
+        let count_cloned = count.clone();
+        Mock::given(method("POST"))
+            .respond_with(move |_: &wiremock::Request| {
+                let n = count_cloned.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    ResponseTemplate::new(429).set_body_string("rate limited")
+                } else {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+                        "usageMetadata": {
+                            "promptTokenCount": 1,
+                            "candidatesTokenCount": 2,
+                            "totalTokenCount": 3
+                        }
+                    }))
+                }
+            })
+            .mount(&server)
+            .await;
+
+        let tmp_wav = write_tmp_wav();
+        let cache = tempfile::tempdir().unwrap();
+        let mut client = GeminiClient::proxy(server.uri(), "gemini-3.1-pro-preview");
+        client.base_retry_ms = 1;
+        let ctx = AuditCtx {
+            cache_dir: Some(cache.path().to_path_buf()),
+            video_id: Some("v".to_string()),
+            chunk_idx: Some(0),
+            key_idx: 0,
+        };
+        let _ = client
+            .transcribe_chunk("p", tmp_wav.path(), ctx)
+            .await
+            .unwrap();
+
+        let entries = crate::lyrics::gemini_audit::read_entries(cache.path(), None, None)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 3, "one audit row per attempt");
+        assert_eq!(entries[0].status, 429);
+        assert_eq!(entries[1].status, 429);
+        assert_eq!(entries[2].status, 200);
+        assert_eq!(entries[2].total_tokens, Some(3));
     }
 }
