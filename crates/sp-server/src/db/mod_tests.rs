@@ -14,7 +14,7 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 15);
+    assert_eq!(ver, 16);
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 15);
+    assert_eq!(ver, 16);
 }
 
 #[tokio::test]
@@ -745,11 +745,44 @@ async fn migration_v12_adds_pipeline_version_quality_and_priority() {
 }
 
 #[tokio::test]
-async fn schema_version_reaches_15() {
+async fn schema_version_reaches_16() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 15);
+    assert_eq!(ver, 16);
+}
+
+#[tokio::test]
+async fn migration_v16_adds_lyrics_time_offset_column() {
+    let pool = setup().await;
+    let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+    assert!(
+        cols.contains(&"lyrics_time_offset_ms".to_string()),
+        "V16 must add lyrics_time_offset_ms column; got: {cols:?}"
+    );
+    // New rows default to 0 (no time shift).
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (888, 1, 'yt')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let offset: i64 = sqlx::query_scalar("SELECT lyrics_time_offset_ms FROM videos WHERE id = 888")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(offset, 0, "new rows default to 0 offset");
 }
 
 #[tokio::test]

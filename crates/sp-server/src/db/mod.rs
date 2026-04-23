@@ -24,6 +24,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (13, MIGRATION_V13),
     (14, MIGRATION_V14),
     (15, MIGRATION_V15),
+    (16, MIGRATION_V16),
 ];
 
 const MIGRATION_V1: &str = "
@@ -221,6 +222,16 @@ ALTER TABLE videos ADD COLUMN suppress_resolume_en INTEGER NOT NULL DEFAULT 0;
 // candidate when non-empty.
 const MIGRATION_V15: &str = "
 ALTER TABLE videos ADD COLUMN lyrics_override_text TEXT;
+";
+
+// V16 — per-song lyrics time-axis shift. Applied at render time so the
+// operator can correct systematic lead/lag on a single song without
+// reprocessing (e.g. Gemini's uniform-duration hallucinations observed
+// during the 2026-04-23 event). Signed: positive = delay display
+// (effectively shorter lead), negative = advance display (longer lead).
+// Defaults to 0 for existing rows so untouched songs behave identically.
+const MIGRATION_V16: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_time_offset_ms INTEGER NOT NULL DEFAULT 0;
 ";
 
 /// Create a connection pool backed by a file.

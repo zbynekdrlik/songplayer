@@ -360,6 +360,11 @@ pub struct VideoLyricsRow {
     /// the yt_subs / description / LRCLIB fetch paths. Populated via
     /// `PATCH /api/v1/videos/{id}` with `lyrics_override_text`.
     pub lyrics_override_text: Option<String>,
+    /// Per-song time-axis shift applied at render time; preserves real Gemini
+    /// alignment while letting the operator correct systematic lead/lag.
+    /// Signed: positive = delay display (effectively shorter lead),
+    /// negative = advance display (longer lead). V16 migration.
+    pub lyrics_time_offset_ms: i64,
 }
 
 /// Mark a video's lyrics status, source, AND pipeline version.
