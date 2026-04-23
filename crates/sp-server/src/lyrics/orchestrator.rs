@@ -95,6 +95,30 @@ impl Orchestrator {
                 "single provider — passing through without LLM merge"
             );
             let pr = &results[0];
+            // Quality gate: reject Gemini's uniform-duration hallucinations
+            // before they reach the wall. "Saints" (80 lines, 11 unique
+            // durations) and similar fabrications get short-circuited here
+            // so the song ships as `no_source` instead of fake timings.
+            if !duration_histogram_ok(&pr.lines) {
+                let mut uniques: Vec<u64> =
+                    pr.lines.iter().map(|l| l.end_ms - l.start_ms).collect();
+                uniques.sort_unstable();
+                uniques.dedup();
+                warn!(
+                    video_id = %ctx.video_id,
+                    provider = %pr.provider_name,
+                    total_lines = pr.lines.len(),
+                    unique_durations = uniques.len(),
+                    "rejecting provider output: duration histogram too collapsed \
+                     (Gemini hallucination signature)"
+                );
+                anyhow::bail!(
+                    "duration histogram failed for {} ({} lines, {} unique durations)",
+                    ctx.video_id,
+                    pr.lines.len(),
+                    uniques.len()
+                );
+            }
             // Single shared helper for cross-line-aware sanitize — same
             // call site as `merge_provider_results`. Keeps the strict-
             // increasing-starts invariant in one place.
@@ -233,6 +257,26 @@ impl Orchestrator {
         let per_line_sources = lines.iter().map(|l| l.source.clone()).collect();
         Ok((joined, agg_source, per_line_sources))
     }
+}
+
+/// Quality gate against Gemini duration-hallucination. Returns `false` when
+/// the provider produced 20+ lines with ≤ 8 distinct `(end_ms - start_ms)`
+/// values — the signature of an LLM that fabricated uniform timings
+/// instead of listening to audio (the 2026-04-23 "Saints" failure mode:
+/// 80 lines all at 1400 ms). Below the 20-line floor the metric is too
+/// noisy to be meaningful so we pass through.
+///
+/// Keeping the gate this lenient: real alignments on 60+ lines routinely
+/// produce 30+ distinct durations; anything under 9 uniques is a smell
+/// regardless of content.
+fn duration_histogram_ok(lines: &[LineTiming]) -> bool {
+    if lines.len() < 20 {
+        return true;
+    }
+    let mut durations: Vec<u64> = lines.iter().map(|l| l.end_ms - l.start_ms).collect();
+    durations.sort_unstable();
+    durations.dedup();
+    durations.len() > 8
 }
 
 /// Compute the percentage of words sharing the same start_ms within a track.
@@ -477,6 +521,92 @@ mod tests {
         assert!(
             (stddev - 81.65).abs() < 0.1,
             "expected ~81.65, got {stddev}"
+        );
+    }
+
+    /// 80 lines all with the exact same 1400 ms duration — the "Saints"
+    /// signature from 2026-04-23 event where Gemini fabricated uniform
+    /// timings. Must be rejected so the song ships as `no_source` instead
+    /// of going out on the wall with fake timings.
+    #[test]
+    fn duration_histogram_ok_rejects_uniform_1400ms() {
+        let lines: Vec<LineTiming> = (0..80)
+            .map(|i| LineTiming {
+                text: format!("line {i}"),
+                start_ms: i * 1400,
+                end_ms: i * 1400 + 1400,
+                words: vec![],
+            })
+            .collect();
+        assert!(
+            !duration_histogram_ok(&lines),
+            "80 lines with 1 unique duration must fail the gate"
+        );
+    }
+
+    /// 84 lines across 11 round durations (multiples of 100 ms). Still fails
+    /// the ≤ 8 threshold. This protects against a Gemini failure mode
+    /// somewhere between "all lines 1.4s" and "legitimately varied".
+    #[test]
+    fn duration_histogram_ok_rejects_eleven_round_values() {
+        let durations = [
+            1400u64, 2000, 1500, 1000, 500, 2500, 3000, 3500, 400, 700, 1800,
+        ];
+        // Produce at least 20 lines so the 20-line floor doesn't short-circuit.
+        let lines: Vec<LineTiming> = (0..84)
+            .map(|i| {
+                let dur = durations[i % durations.len()];
+                LineTiming {
+                    text: format!("l{i}"),
+                    start_ms: (i as u64) * 4_000,
+                    end_ms: (i as u64) * 4_000 + dur,
+                    words: vec![],
+                }
+            })
+            .collect();
+        assert!(
+            !duration_histogram_ok(&lines),
+            "84 lines across 11 round multiples of 100 ms must fail the gate"
+        );
+    }
+
+    /// 80 lines with 20+ distinct durations — what a real alignment looks
+    /// like when Gemini is actually listening to the audio. Must pass.
+    #[test]
+    fn duration_histogram_ok_accepts_varied_alignment() {
+        let lines: Vec<LineTiming> = (0..80)
+            .map(|i| LineTiming {
+                text: format!("l{i}"),
+                start_ms: (i as u64) * 3_000,
+                // 42 distinct durations by varying i in a non-repeating mod
+                // pattern — 800 ms base + 0..41 * 37 ms.
+                end_ms: (i as u64) * 3_000 + 800 + (i as u64 % 42) * 37,
+                words: vec![],
+            })
+            .collect();
+        assert!(
+            duration_histogram_ok(&lines),
+            "80 lines with 20+ unique durations must pass"
+        );
+    }
+
+    /// Below the 20-line floor, the metric isn't meaningful. A short song
+    /// with 12 lines all at 1400 ms should NOT be rejected — we have no
+    /// evidence it's a Gemini hallucination (real short interludes do have
+    /// repetitive timings).
+    #[test]
+    fn duration_histogram_ok_passes_through_short_tracks() {
+        let lines: Vec<LineTiming> = (0..12)
+            .map(|i| LineTiming {
+                text: format!("l{i}"),
+                start_ms: (i as u64) * 1_500,
+                end_ms: (i as u64) * 1_500 + 1_400,
+                words: vec![],
+            })
+            .collect();
+        assert!(
+            duration_histogram_ok(&lines),
+            "< 20 lines should pass through without the metric being applied"
         );
     }
 
