@@ -262,25 +262,32 @@ mod tests {
         assert_eq!(out[0], entry);
     }
 
+    /// Regression: the read path must tolerate a truncated / partially-
+    /// written line. On crash mid-write or a disk-full event, the audit
+    /// file can end with a half-line that serde_json cannot parse.
+    /// `read_entries` must skip it instead of panicking so the dashboard
+    /// endpoint still works on a partially-corrupt log.
     #[tokio::test]
     async fn read_entries_skips_malformed_lines() {
         let tmp = tempfile::tempdir().unwrap();
-        // Write a good line, then a garbage line, then another good line
-        let good = make_entry("2026-04-23T12:00:00Z", Some("x"));
-        append(tmp.path(), &good).await.unwrap();
-        // Manually append a bogus line
         let path = tmp.path().join("gemini_audit.jsonl");
-        let mut f = tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .await
-            .unwrap();
-        f.write_all(b"not json\n").await.unwrap();
-        f.flush().await.unwrap();
-        append(tmp.path(), &good).await.unwrap();
+        // Build the three-line payload: valid, {"broken, valid.
+        // Using `tokio::fs::write` (one-shot) matches the task spec.
+        let good = make_entry("2026-04-23T12:00:00Z", Some("x"));
+        let good2 = make_entry("2026-04-23T12:00:01Z", Some("y"));
+        let good_line = serde_json::to_string(&good).unwrap();
+        let good_line2 = serde_json::to_string(&good2).unwrap();
+        let payload = format!("{good_line}\n{{\"broken\n{good_line2}\n");
+        tokio::fs::write(&path, payload).await.unwrap();
 
         let out = read_entries(tmp.path(), None, None).await.unwrap();
-        assert_eq!(out.len(), 2); // garbage skipped
+        assert_eq!(
+            out.len(),
+            2,
+            "{{\"broken must be skipped; valid entries preserved"
+        );
+        assert_eq!(out[0].video_id.as_deref(), Some("x"));
+        assert_eq!(out[1].video_id.as_deref(), Some("y"));
     }
 
     #[tokio::test]
