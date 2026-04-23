@@ -10,6 +10,70 @@
 
 use serde::Serialize;
 
+/// Maximum characters per visual line on the Presenter stage display before
+/// we force a line break. Many source lyrics are long narrative lines that
+/// wrap awkwardly on a phone/tablet stage display. Splitting at word
+/// boundaries around this width keeps each visual line readable at a
+/// glance without redesigning the upstream lyrics pipeline.
+pub const PRESENTER_WRAP_WIDTH: usize = 30;
+
+/// Wrap `text` so no visual line exceeds `PRESENTER_WRAP_WIDTH` characters,
+/// breaking at the last whitespace before the limit when possible. Existing
+/// newlines in `text` are preserved — each pre-existing line is wrapped
+/// independently. A word longer than the limit is left intact on its own
+/// line (we never split mid-word; the display just renders it slightly
+/// wider than ideal, which is still more readable than a mid-word break).
+pub fn wrap_for_presenter(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(text.len() + 4);
+    let mut first_chunk = true;
+    for raw_line in text.split('\n') {
+        if !first_chunk {
+            out.push('\n');
+        }
+        first_chunk = false;
+        out.push_str(&wrap_single_line(raw_line, PRESENTER_WRAP_WIDTH));
+    }
+    out
+}
+
+/// Greedy word-wrap for a single line. UTF-8 safe: we measure width in
+/// Unicode scalar values (`.chars().count()`) rather than bytes so multi-
+/// byte Slovak characters count as 1 each, matching what a reader sees.
+fn wrap_single_line(line: &str, max: usize) -> String {
+    let char_count = line.chars().count();
+    if char_count <= max {
+        return line.to_string();
+    }
+    let words: Vec<&str> = line.split_whitespace().collect();
+    if words.is_empty() {
+        return line.to_string();
+    }
+
+    let mut out = String::with_capacity(line.len() + 4);
+    let mut cur_len = 0usize;
+    for (i, word) in words.iter().enumerate() {
+        let word_len = word.chars().count();
+        let need = if cur_len == 0 {
+            word_len
+        } else {
+            cur_len + 1 + word_len
+        };
+        if i > 0 && need > max {
+            out.push('\n');
+            cur_len = 0;
+        } else if i > 0 {
+            out.push(' ');
+            cur_len += 1;
+        }
+        out.push_str(word);
+        cur_len += word_len;
+    }
+    out
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PresenterPayload {
@@ -75,5 +139,75 @@ mod tests {
         assert!(p.next_text.is_empty());
         assert!(p.current_song.is_empty());
         assert!(p.next_song.is_empty());
+    }
+
+    // ---- wrap_for_presenter tests -----------------------------------
+
+    #[test]
+    fn wrap_passes_through_short_text_unchanged() {
+        let s = "Haleluja, haleluja";
+        assert_eq!(s.chars().count(), 18);
+        assert_eq!(wrap_for_presenter(s), s);
+    }
+
+    #[test]
+    fn wrap_passes_through_text_at_exact_limit() {
+        // 30 chars exactly — no break.
+        let s = "a".repeat(30);
+        assert_eq!(s.chars().count(), 30);
+        assert_eq!(wrap_for_presenter(&s), s);
+    }
+
+    #[test]
+    fn wrap_breaks_at_word_boundary_before_limit() {
+        // "I want to hold my breath forever" is 32 chars — must break.
+        let input = "I want to hold my breath forever";
+        let wrapped = wrap_for_presenter(input);
+        assert!(
+            wrapped.contains('\n'),
+            "expected a line break in: {wrapped:?}"
+        );
+        for line in wrapped.split('\n') {
+            assert!(
+                line.chars().count() <= PRESENTER_WRAP_WIDTH,
+                "line `{line}` exceeds {PRESENTER_WRAP_WIDTH} chars"
+            );
+        }
+        // No whitespace should have been dropped; re-joining with a space
+        // gives back the normalized original.
+        let rejoined: String = wrapped.replace('\n', " ");
+        assert_eq!(rejoined, input);
+    }
+
+    #[test]
+    fn wrap_handles_utf8_slovak_diacritics_as_single_chars() {
+        // Slovak "ž", "ť" etc. are 2 bytes but 1 display char. A byte-based
+        // wrapper would break too early here. This line is 25 Unicode chars,
+        // so it must pass through untouched.
+        let s = "Nedokážem pochopiť tvoju lás"; // 28 chars
+        assert_eq!(s.chars().count(), 28);
+        assert_eq!(wrap_for_presenter(s), s);
+    }
+
+    #[test]
+    fn wrap_never_breaks_mid_word_even_if_word_is_too_long() {
+        // 40-char single word. No whitespace to break at — emit as-is on
+        // its own line (readable, just slightly wider than ideal).
+        let long = "a".repeat(40);
+        let wrapped = wrap_for_presenter(&long);
+        assert_eq!(wrapped, long, "must not split a lone long word");
+    }
+
+    #[test]
+    fn wrap_preserves_existing_newlines() {
+        // Source text with explicit line breaks — each is wrapped
+        // independently, and the existing break is preserved.
+        let input = "short line\nanother short one";
+        assert_eq!(wrap_for_presenter(input), input);
+    }
+
+    #[test]
+    fn wrap_handles_empty_string() {
+        assert_eq!(wrap_for_presenter(""), "");
     }
 }

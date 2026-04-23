@@ -69,8 +69,12 @@ pub fn maybe_push_line(
         format!("{song} - {artist}")
     };
     let payload = PresenterPayload {
-        current_text: current_en.clone(),
-        next_text: next_en,
+        // Wrap long lyric lines so they don't overflow the stage display;
+        // many source lines are 40-60 chars and become unreadable on a
+        // phone/tablet without breaks. Only the live-lyric fields are
+        // wrapped — `currentSong` stays one line on purpose.
+        current_text: payload::wrap_for_presenter(&current_en),
+        next_text: payload::wrap_for_presenter(&next_en),
         current_song,
         next_song: String::new(),
     };
