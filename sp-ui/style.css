@@ -769,11 +769,19 @@ body {
     gap: 1rem;
   }
 
-  /* Hide the Artist column on narrow screens — Song is the identifier
-     operators actually scan for. */
-  .live-setlist-table th:nth-child(3),
-  .live-setlist-table td:nth-child(3) {
+  /* Hide the secondary columns (↕ reorder + EN-off) on narrow screens.
+     Operators can flip those on a wider screen later; the ▶ / ✕ primary
+     actions + Song name are what matter mid-set. */
+  .live-setlist-col-secondary {
     display: none;
+  }
+
+  .live-setlist-song {
+    /* Truncate long song titles so the row never forces horizontal scroll. */
+    max-width: 55vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .live-section {

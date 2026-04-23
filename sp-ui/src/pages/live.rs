@@ -67,6 +67,7 @@ pub fn LivePage() -> impl IntoView {
                                 playlist_id=id
                                 refresh=Signal::from(set_list_version)
                                 on_changed=bump
+                                store=store.clone()
                             />
                         </section>
 
