@@ -147,6 +147,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::delete(live::delete_item),
         )
         .route(
+            "/api/v1/playlists/{id}/items/{video_id}/move",
+            axum::routing::post(live::post_move_item),
+        )
+        .route(
             "/api/v1/playlists/{id}/play-video",
             axum::routing::post(live::post_play_video),
         )

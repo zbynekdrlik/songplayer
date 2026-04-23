@@ -576,6 +576,93 @@ pub async fn remove_playlist_item(
     Ok(())
 }
 
+/// Move a playlist item one slot up or down. `direction` must be `-1`
+/// (up / earlier) or `+1` (down / later). At the boundary (top-most item
+/// moved up, bottom-most moved down) this is a no-op — we silently return
+/// Ok so the UI doesn't have to pre-check bounds.
+///
+/// Implementation note: SQLite's primary key on `(playlist_id, position)`
+/// means a straight-forward two-UPDATE swap collides mid-transaction. We
+/// stage the moved row at `position = -1` (a sentinel outside the valid
+/// `0..N` range) first, swap the neighbour into the vacated slot, then
+/// move the staged row to its final slot.
+pub async fn move_playlist_item_step(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+    direction: i64,
+) -> Result<(), sqlx::Error> {
+    if direction != 1 && direction != -1 {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin().await?;
+
+    let cur_pos: Option<i64> = sqlx::query_scalar(
+        "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(cur_pos) = cur_pos else {
+        return Ok(());
+    };
+    let target_pos = cur_pos + direction;
+    if target_pos < 0 {
+        return Ok(());
+    }
+
+    let neighbor_vid: Option<i64> = sqlx::query_scalar(
+        "SELECT video_id FROM playlist_items WHERE playlist_id = ? AND position = ?",
+    )
+    .bind(playlist_id)
+    .bind(target_pos)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(neighbor_vid) = neighbor_vid else {
+        // Moved item is at the boundary — nothing to swap with.
+        return Ok(());
+    };
+
+    // Stage the moved row at a sentinel position.
+    sqlx::query(
+        "UPDATE playlist_items SET position = -1
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Neighbour slides into the vacated slot.
+    sqlx::query(
+        "UPDATE playlist_items SET position = ?
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(cur_pos)
+    .bind(playlist_id)
+    .bind(neighbor_vid)
+    .execute(&mut *tx)
+    .await?;
+
+    // Moved row lands on its target.
+    sqlx::query(
+        "UPDATE playlist_items SET position = ?
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(target_pos)
+    .bind(playlist_id)
+    .bind(video_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 /// List all items of a custom playlist in position order.
 pub async fn list_playlist_items(
     pool: &SqlitePool,

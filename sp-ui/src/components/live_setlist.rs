@@ -31,6 +31,24 @@ pub fn LiveSetList(
         });
     });
 
+    // On mount default the ytlive playlist to "single" so the engine stops
+    // after each song instead of auto-advancing — operators drive song
+    // transitions manually during worship/training sets. They can still
+    // flip the dropdown below to "continuous" or "loop" for a given song.
+    let _default_mode = Effect::new(move |prev_run: Option<()>| {
+        if prev_run.is_some() {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            let body = serde_json::json!({ "mode": "single" });
+            let _ = api::put_json_empty(
+                &format!("/api/v1/playback/{playlist_id}/mode"),
+                &body,
+            )
+            .await;
+        });
+    });
+
     let enriched = move || {
         let idx: std::collections::HashMap<i64, serde_json::Value> = songs
             .get()
@@ -97,6 +115,34 @@ pub fn LiveSetList(
                                         />
                                     </td>
                                     <td class="live-setlist-actions">
+                                        <button
+                                            class="live-setlist-btn live-setlist-btn-move"
+                                            title="Move up"
+                                            on:click=move |_| {
+                                                leptos::task::spawn_local(async move {
+                                                    match api::post_live_move_item(
+                                                        playlist_id, video_id, "up",
+                                                    ).await {
+                                                        Ok(()) => on_changed.run(()),
+                                                        Err(e) => error_msg.set(e),
+                                                    }
+                                                });
+                                            }
+                                        >"▲"</button>
+                                        <button
+                                            class="live-setlist-btn live-setlist-btn-move"
+                                            title="Move down"
+                                            on:click=move |_| {
+                                                leptos::task::spawn_local(async move {
+                                                    match api::post_live_move_item(
+                                                        playlist_id, video_id, "down",
+                                                    ).await {
+                                                        Ok(()) => on_changed.run(()),
+                                                        Err(e) => error_msg.set(e),
+                                                    }
+                                                });
+                                            }
+                                        >"▼"</button>
                                         <button
                                             class="live-setlist-btn live-setlist-btn-play"
                                             title="Play this song"
@@ -172,6 +218,30 @@ pub fn LiveSetList(
                         });
                     }
                 >"⏮"</button>
+                // Playback mode: "single" stops the engine when the current
+                // song ends (no auto-advance to the next set-list row) —
+                // exactly what the operator wants during a training/worship
+                // set where they drive song flow manually. "continuous"
+                // auto-selects the next row. "loop" replays the current
+                // song until the operator intervenes.
+                <select
+                    class="live-setlist-mode"
+                    title="Playback mode (single = stop after current)"
+                    on:change=move |ev| {
+                        let val = event_target_value(&ev);
+                        leptos::task::spawn_local(async move {
+                            let body = serde_json::json!({ "mode": val });
+                            let _ = api::put_json_empty(
+                                &format!("/api/v1/playback/{playlist_id}/mode"),
+                                &body,
+                            ).await;
+                        });
+                    }
+                >
+                    <option value="single" selected=true>"Single (stop after)"</option>
+                    <option value="continuous">"Continuous (auto-next)"</option>
+                    <option value="loop">"Loop current"</option>
+                </select>
             </div>
         </div>
     }

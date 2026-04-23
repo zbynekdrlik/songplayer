@@ -734,6 +734,23 @@ body {
   cursor: pointer;
 }
 
+/* Playback-mode dropdown in the set-list controls row. */
+.live-setlist-mode {
+  min-height: 48px;
+  font-size: 1rem;
+  padding: 0 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.live-setlist-btn-move {
+  border-color: #555;
+  background: #2a2a2a;
+}
+
 /* Setlist rows — taller, easier to read + tap. */
 .live-setlist-table th,
 .live-setlist-table td {

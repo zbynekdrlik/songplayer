@@ -202,6 +202,20 @@ pub async fn delete_live_item(playlist_id: i64, video_id: i64) -> Result<(), Str
     delete(&format!("/api/v1/playlists/{playlist_id}/items/{video_id}")).await
 }
 
+/// POST one-step reorder of a set-list row. `direction` must be `"up"`
+/// (move earlier) or `"down"` (move later).
+pub async fn post_live_move_item(
+    playlist_id: i64,
+    video_id: i64,
+    direction: &str,
+) -> Result<(), String> {
+    post_json_empty(
+        &format!("/api/v1/playlists/{playlist_id}/items/{video_id}/move"),
+        &serde_json::json!({ "direction": direction }),
+    )
+    .await
+}
+
 /// POST to jump-and-play a specific video on a custom playlist.
 pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(), String> {
     post_json_empty(
