@@ -617,6 +617,78 @@ mod tests {
         );
     }
 
+    /// Boundary test for the `< 20` short-circuit in `duration_histogram_ok`.
+    /// Exactly 20 lines with ONE unique duration — below the floor the
+    /// metric must NOT apply, so this must still be rejected by the
+    /// sparsity check (required=8, unique=1 → 1 > 8 is false → reject).
+    /// This kills the `<` → `<=` mutant on line 273 (with `<=`, 20 lines
+    /// would short-circuit as "too short to evaluate" and return true,
+    /// letting uniform timings ship).
+    #[test]
+    fn duration_histogram_ok_boundary_at_twenty_lines_is_evaluated() {
+        let lines: Vec<LineTiming> = (0..20)
+            .map(|i| LineTiming {
+                text: format!("line {i}"),
+                start_ms: (i as u64) * 1400,
+                end_ms: (i as u64) * 1400 + 1400, // uniform 1400 ms
+                words: vec![],
+            })
+            .collect();
+        assert!(
+            !duration_histogram_ok(&lines),
+            "at exactly 20 lines the histogram gate MUST evaluate — 1 unique duration must fail"
+        );
+    }
+
+    /// Boundary test for the `unique.len() > required` comparison on line
+    /// 286. With 48 lines, `required = max(48/6, 8) = 8`. Build exactly 8
+    /// unique durations. Real: `8 > 8` is false → reject. Mutant `>=`:
+    /// `8 >= 8` is true → accept (wrong — this is the Gemini failure mode
+    /// boundary we built the gate to catch).
+    #[test]
+    fn duration_histogram_ok_rejects_exactly_required_unique_count() {
+        let durations = [1000u64, 1200, 1400, 1600, 1800, 2000, 2200, 2400];
+        assert_eq!(durations.len(), 8);
+        let lines: Vec<LineTiming> = (0..48)
+            .map(|i| {
+                let dur = durations[i % durations.len()];
+                LineTiming {
+                    text: format!("l{i}"),
+                    start_ms: (i as u64) * 4_000,
+                    end_ms: (i as u64) * 4_000 + dur,
+                    words: vec![],
+                }
+            })
+            .collect();
+        // 48 / 6 = 8, max(8, 8) = 8; unique count is also 8, so strictly
+        // 8 > 8 is false → reject. Mutant `>=` would accept.
+        assert!(
+            !duration_histogram_ok(&lines),
+            "48 lines with exactly 8 unique durations (=required) must be rejected by strict >"
+        );
+    }
+
+    /// Partner test to the `< 20` boundary — 19 lines (just under the floor)
+    /// MUST short-circuit to true regardless of uniqueness. Documents the
+    /// intended short-circuit behavior but does NOT kill the `<=` mutant
+    /// alone (on `<=` 19 is still <= 20 → true). Kept for completeness with
+    /// the 20-line test above; together they pin both sides of the boundary.
+    #[test]
+    fn duration_histogram_ok_boundary_at_nineteen_lines_short_circuits() {
+        let lines: Vec<LineTiming> = (0..19)
+            .map(|i| LineTiming {
+                text: format!("line {i}"),
+                start_ms: (i as u64) * 1400,
+                end_ms: (i as u64) * 1400 + 1400,
+                words: vec![],
+            })
+            .collect();
+        assert!(
+            duration_histogram_ok(&lines),
+            "19 lines must short-circuit to true — below the 20-line evaluation floor"
+        );
+    }
+
     #[test]
     fn compute_gap_stddev_uniform_gaps_is_zero() {
         use sp_core::lyrics::{LyricsLine, LyricsWord};
