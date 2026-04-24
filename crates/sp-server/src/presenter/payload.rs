@@ -210,4 +210,79 @@ mod tests {
     fn wrap_handles_empty_string() {
         assert_eq!(wrap_for_presenter(""), "");
     }
+
+    /// Precise boundary test for the `need > max` comparison. Input is
+    /// crafted so that after 5 five-char words + spaces (`cur_len = 29`),
+    /// adding a 1-char word makes `need = 29 + 1 + 1 = 31 > 30` → break.
+    ///
+    /// Kills both `+` → `*` arithmetic mutants on line 62 (either mutation
+    /// makes `need = 30` instead of `31`, which doesn't exceed `max`, so
+    /// the break never happens → output has zero `\n`).
+    /// Also kills `>` → `<` on line 64 (inverting makes almost every word
+    /// break → many `\n`, not exactly 1).
+    #[test]
+    fn wrap_single_line_breaks_when_space_tips_over_max() {
+        // "aaaaa bbbbb ccccc ddddd eeeee f" = 5+1+5+1+5+1+5+1+5+1+1 = 35 chars
+        let input = "aaaaa bbbbb ccccc ddddd eeeee f";
+        assert_eq!(input.chars().count(), 35);
+        let wrapped = wrap_for_presenter(input);
+        assert_eq!(
+            wrapped.matches('\n').count(),
+            1,
+            "expected exactly 1 break in: {wrapped:?}"
+        );
+        // The break must be right before "f" — first line is the 29-char
+        // prefix of five 5-char words with single spaces.
+        let (first, rest) = wrapped.split_once('\n').expect("has one break");
+        assert_eq!(first, "aaaaa bbbbb ccccc ddddd eeeee");
+        assert_eq!(rest, "f");
+    }
+
+    /// Precise test for the `need > max` vs `need >= max` boundary. Input
+    /// is crafted so the 6th word lands `need = cur_len + 1 + word_len =
+    /// 24 + 1 + 5 = 30`, which is exactly `max`. Strict `>` must NOT
+    /// break (first line ends up 30 chars). `>=` mutant would break here,
+    /// producing a 24-char first line.
+    ///
+    /// We need a 7th word to force entry into the wrap loop (total char
+    /// count must exceed max).
+    #[test]
+    fn wrap_single_line_first_line_fills_to_exactly_max() {
+        // "aaaa bbbb cccc dddd eeee fffff g" = 4+1+4+1+4+1+4+1+4+1+5+1+1 = 32 chars
+        let input = "aaaa bbbb cccc dddd eeee fffff g";
+        assert_eq!(input.chars().count(), 32);
+        let wrapped = wrap_for_presenter(input);
+        let first_line = wrapped.split('\n').next().expect("has lines");
+        assert_eq!(
+            first_line.chars().count(),
+            PRESENTER_WRAP_WIDTH,
+            "first line must fill to exactly max=30 chars; got {first_line:?}"
+        );
+        assert_eq!(first_line, "aaaa bbbb cccc dddd eeee fffff");
+    }
+
+    /// Test for the `cur_len += word_len` accumulator. With `*=` mutant,
+    /// `cur_len` grows multiplicatively instead of additively, producing
+    /// a DIFFERENT number of breaks than real addition. Ten 5-char words
+    /// with max=30 yields exactly ONE break in reality (break after
+    /// word 5 at cur_len=29+1+5=35>30). The mutant produces more breaks
+    /// because `cur_len *= 5` hits 30 faster.
+    ///
+    /// Asserts the exact output so any arithmetic change in the
+    /// accumulator is caught.
+    #[test]
+    fn wrap_single_line_uses_additive_cur_len_increment() {
+        // 10 × "hello" separated by spaces: 5 + 9*(1+5) = 5 + 54 = 59 chars
+        let input = "hello hello hello hello hello hello hello hello hello hello";
+        assert_eq!(input.chars().count(), 59);
+        let wrapped = wrap_for_presenter(input);
+        // Real `+=` trace: break happens after exactly 5 words (cur_len
+        // reaches 29, 6th word pushes need to 35 > 30 → break). Words
+        // 6-10 fit on the second line (cur_len reaches 29 again but
+        // there's no 11th word to trigger another break).
+        assert_eq!(
+            wrapped, "hello hello hello hello hello\nhello hello hello hello hello",
+            "additive increment must produce exactly 1 break after 5 words on each half"
+        );
+    }
 }
