@@ -45,6 +45,17 @@ const RETRYABLE_STATUSES: &[u16] = &[429, 500, 503];
 /// as "not worth waiting, switch keys or give up now".
 const RETRY_AFTER_CAP_MS: u64 = 60_000;
 
+/// Exponential backoff for retryable failures. `attempt` is 1-indexed
+/// (first retry = 1). Returns `min(base_retry_ms * 2^(attempt-1), cap_ms)`.
+///
+/// Extracted from the inline retry loop so the arithmetic can be pinned
+/// with concrete value assertions in unit tests — tokio sleep durations
+/// are too jittery in CI to assert on, but the underlying formula is
+/// deterministic.
+fn compute_backoff(base_retry_ms: u64, attempt: u32, cap_ms: u64) -> u64 {
+    (base_retry_ms * (1u64 << (attempt - 1))).min(cap_ms)
+}
+
 pub struct GeminiClient {
     pub base_url: String,
     pub model: String,
@@ -312,8 +323,7 @@ impl GeminiClient {
             }
 
             // Compute delay: Retry-After header takes precedence over computed backoff.
-            let computed_backoff =
-                (self.base_retry_ms * (1u64 << (attempt - 1))).min(RETRY_AFTER_CAP_MS);
+            let computed_backoff = compute_backoff(self.base_retry_ms, attempt, RETRY_AFTER_CAP_MS);
             let delay_ms = retry_after_ms.unwrap_or(computed_backoff);
 
             tracing::warn!(
@@ -389,6 +399,41 @@ mod tests {
     /// about the audit file can ignore the filesystem.
     fn noaudit() -> AuditCtx {
         AuditCtx::default()
+    }
+
+    /// Pins the exponential-backoff formula with concrete values. Kills
+    /// the four arithmetic mutants on the `<<`, `-`, and `*` operators
+    /// in `compute_backoff` — attempt=2 is the first value that
+    /// distinguishes all four mutations from the real formula, and the
+    /// cap test exercises the `.min(cap_ms)` branch.
+    #[test]
+    fn compute_backoff_pins_exponential_formula_and_cap() {
+        // attempt=1: base_retry * 2^0 = base_retry (well below cap).
+        // Does NOT distinguish `<<` → `>>` or `*` → `/` (identity when
+        // shift amount is 0) but DOES kill both `-` mutants (`-` → `+`
+        // yields 40; `-` → `/` yields 20).
+        assert_eq!(compute_backoff(10, 1, 60_000), 10);
+
+        // attempt=2: base_retry * 2^1 = 20.
+        // - real: 20
+        // - `<<` → `>>`: 10 * (1 >> 1) = 0
+        // - `*` → `/`:   10 / 2          = 5
+        // - `-` → `+`:   10 * (1 << 3)   = 80
+        // - `-` → `/`:   10 * (1 << 2)   = 40
+        // Kills all four mutants.
+        assert_eq!(compute_backoff(10, 2, 60_000), 20);
+
+        // attempt=3: 10 * 4 = 40. Reinforces the doubling growth pattern.
+        assert_eq!(compute_backoff(10, 3, 60_000), 40);
+
+        // attempt=14 with base=10: 10 * 2^13 = 81_920 → clamped to
+        // cap=60_000. Kills `<<` and `*` at the cap boundary (both
+        // mutants collapse the product to 0, which doesn't equal the
+        // cap). Note: `-` → `+` and `-` → `/` both still over-shift
+        // here, producing products > cap that also min-to cap, so this
+        // specific assertion does not add coverage for the `-` mutants
+        // — that's what the attempt=1/2 assertions above are for.
+        assert_eq!(compute_backoff(10, 14, 60_000), 60_000);
     }
 
     #[tokio::test]
