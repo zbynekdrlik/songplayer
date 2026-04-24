@@ -222,9 +222,9 @@ mod tests {
     /// break → many `\n`, not exactly 1).
     #[test]
     fn wrap_single_line_breaks_when_space_tips_over_max() {
-        // "aaaaa bbbbb ccccc ddddd eeeee f" = 5+1+5+1+5+1+5+1+5+1+1 = 35 chars
+        // "aaaaa bbbbb ccccc ddddd eeeee f" = 5×5 + 5×1 + 1 = 31 chars
         let input = "aaaaa bbbbb ccccc ddddd eeeee f";
-        assert_eq!(input.chars().count(), 35);
+        assert_eq!(input.chars().count(), 31);
         let wrapped = wrap_for_presenter(input);
         assert_eq!(
             wrapped.matches('\n').count(),
