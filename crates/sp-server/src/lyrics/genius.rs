@@ -437,6 +437,97 @@ mod tests {
         );
     }
 
+    /// Kills the `+=` → `-=`, `+=` → `*=` TIMEOUT mutants on line 257, and
+    /// the `+` → `*` MISSED mutant on `close_rel + 1` (line 257:28). Real
+    /// output is `"foo\nbar\nbaz"`; any arithmetic change either hangs
+    /// (TIMEOUT) or produces a different string (off-by-one leaves `>`
+    /// characters, or miscounts `close_rel + 1`).
+    #[test]
+    fn replace_case_insensitive_tag_handles_mixed_case_br() {
+        let input = "foo<br>bar<BR>baz<Br/>end";
+        let out = replace_case_insensitive_tag(input, "br", "\n");
+        assert_eq!(out, "foo\nbar\nbaz\nend");
+    }
+
+    /// Kills `+=` → TIMEOUT mutants on line 263 (the non-tag char-advance
+    /// path). Exercised by any input that contains non-`<br` characters,
+    /// but we assert the exact output so the `+` → `*` MISSED mutant
+    /// on `close_rel + 1` is also killed on inputs with interleaved tags.
+    ///
+    /// Multi-byte UTF-8 exercises `c.len_utf8()` — Slovak `á` is 2 bytes,
+    /// so mutations to the char-advance arithmetic would corrupt the
+    /// string slice or infinite-loop.
+    #[test]
+    fn replace_case_insensitive_tag_preserves_utf8_between_tags() {
+        let input = "náš<br>dom";
+        let out = replace_case_insensitive_tag(input, "br", "\n");
+        assert_eq!(out, "náš\ndom");
+    }
+
+    /// Kills the three mutants on `replace_case_insensitive_close_tag`
+    /// (line 278: `+=` → `-=`/`*=` + `+` → `*`; line 283: `+=` → `*=`).
+    /// Real output is `"a\nb\nc"`; any mutation either hangs or produces
+    /// garbage output.
+    #[test]
+    fn replace_case_insensitive_close_tag_handles_closing_paragraph() {
+        let input = "a</p>b</P>c";
+        let out = replace_case_insensitive_close_tag(input, "p", "\n");
+        assert_eq!(out, "a\nb\nc");
+    }
+
+    /// UTF-8 variant for the close-tag function — guards line 283
+    /// (`i += c.len_utf8()`) against mutants that would corrupt
+    /// multi-byte char boundaries.
+    #[test]
+    fn replace_case_insensitive_close_tag_preserves_utf8() {
+        let input = "ľúto</p>sme";
+        let out = replace_case_insensitive_close_tag(input, "p", "\n");
+        assert_eq!(out, "ľúto\nsme");
+    }
+
+    /// Kills `&&` → `||` on `is_section_label` line 290. Under `||`,
+    /// any line starting with `[` OR ending with `]` would be labelled
+    /// as a section (and filtered out of lyrics). This test covers
+    /// inputs that match exactly one of the two conditions — they
+    /// must NOT be labelled.
+    #[test]
+    fn is_section_label_requires_both_brackets() {
+        // Starts with `[` but does not end with `]` — NOT a section label.
+        assert!(
+            !is_section_label("[Verse 1"),
+            "missing closing `]` must not be a section label"
+        );
+        // Ends with `]` but does not start with `[` — NOT a section label.
+        assert!(
+            !is_section_label("Verse 1]"),
+            "missing opening `[` must not be a section label"
+        );
+        // Neither — obvious non-label.
+        assert!(!is_section_label("just a lyric line"));
+        // Both — correctly labelled.
+        assert!(is_section_label("[Chorus]"));
+    }
+
+    /// Kills the line 190:29 `+` → `-` mutant on
+    /// `search_from = close + "</div>".len()`. With `-`, `search_from`
+    /// moves BACKWARD, which either infinite-loops or re-processes the
+    /// same div. Two-container input with distinct content lets us
+    /// assert the exact line order.
+    #[test]
+    fn extract_lyrics_from_two_containers_advances_correctly() {
+        let html = r#"
+        <div data-lyrics-container="true">alpha<br>bravo</div>
+        <div data-lyrics-container="true">charlie<br>delta</div>
+        "#;
+        let track = extract_lyrics_from_html(html).expect("found lyrics");
+        let lines: Vec<&str> = track.lines.iter().map(|l| l.en.as_str()).collect();
+        assert_eq!(
+            lines,
+            vec!["alpha", "bravo", "charlie", "delta"],
+            "two containers must be extracted in order with no duplicates"
+        );
+    }
+
     #[test]
     fn pick_song_url_skips_non_song_hit_types() {
         // Genius returns other hit types (e.g. "lyric", "album"); we must
