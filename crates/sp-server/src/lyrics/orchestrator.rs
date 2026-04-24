@@ -273,10 +273,17 @@ fn duration_histogram_ok(lines: &[LineTiming]) -> bool {
     if lines.len() < 20 {
         return true;
     }
-    let mut durations: Vec<u64> = lines.iter().map(|l| l.end_ms - l.start_ms).collect();
-    durations.sort_unstable();
-    durations.dedup();
-    durations.len() > 8
+    // Gemini's native output is decisecond-precision (`(MM:SS.x)`), so every
+    // legitimate duration is already a multiple of 100 ms — the signal we
+    // use isn't "roundness" but *sparsity* of distinct values relative to
+    // the number of lines. A real 80-line song has 30+ distinct durations;
+    // the Saints hallucination had only 11. Threshold scales with line
+    // count so short tracks with unavoidable chorus repetition still pass.
+    let mut unique: Vec<u64> = lines.iter().map(|l| l.end_ms - l.start_ms).collect();
+    unique.sort_unstable();
+    unique.dedup();
+    let required = (lines.len() / 6).max(8);
+    unique.len() > required
 }
 
 /// Compute the percentage of words sharing the same start_ms within a track.
