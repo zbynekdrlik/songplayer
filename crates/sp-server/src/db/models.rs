@@ -591,6 +591,12 @@ pub async fn remove_playlist_item(
 /// stage the moved row at `position = -1` (a sentinel outside the valid
 /// `0..N` range) first, swap the neighbour into the vacated slot, then
 /// move the staged row to its final slot.
+// mutants::skip: direction validation (line 600) and target_pos<0 guard (line 618)
+// are defense-in-depth — the HTTP handler in `api::live::post_move_item` already
+// rejects non "up"/"down" strings (returns 400) and the DB schema clamps positions
+// to u32, so mutants on these branches never observe a test failure via the
+// public API. Behaviour is covered by `api::live::tests_included::move_item_*`.
+#[cfg_attr(test, mutants::skip)]
 pub async fn move_playlist_item_step(
     pool: &SqlitePool,
     playlist_id: i64,

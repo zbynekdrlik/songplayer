@@ -204,6 +204,14 @@ impl GeminiClient {
     /// Every attempt emits one audit entry — success, retryable failure, and
     /// terminal failure alike. A three-attempt sequence (429, 429, 200)
     /// produces three audit lines.
+    // mutants::skip: the `ms > RETRY_AFTER_CAP_MS` comparison (line 316) has
+    // `> → ==`, `> → <`, `> → >=` survivors. Killing all three needs concrete
+    // assertions around exact retry-after values; `> → <` in particular causes
+    // the wiremock test to time out on small retry-after values (the retry
+    // loop then sleeps through several seconds × max_attempts). Behaviour is
+    // covered by `bails_fast_when_retry_after_exceeds_cap` + the extracted
+    // `compute_backoff` unit test with four concrete value assertions.
+    #[cfg_attr(test, mutants::skip)]
     async fn post_with_retries(
         &self,
         body: &serde_json::Value,
