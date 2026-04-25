@@ -241,6 +241,36 @@ impl PlaybackEngine {
         self.event_rx.recv().await
     }
 
+    /// Re-push the song title to OBS + Resolume for an already-Playing pipeline.
+    /// Used when a scene becomes program while the pipeline was already playing
+    /// off-program — the 1.5 s title-show task aborted with "title suppressed —
+    /// off program", so without this the wall shows a stale title. Idempotent.
+    async fn push_title_for_playing(&self, playlist_id: i64, video_id: i64) {
+        let Ok(Some((song, artist))) = get_video_title_info(&self.pool, video_id).await else {
+            return;
+        };
+        let text = if artist.is_empty() {
+            song.clone()
+        } else if song.is_empty() {
+            artist.clone()
+        } else {
+            format!("{song} - {artist}")
+        };
+        if let Some(cmd_tx) = &self.obs_cmd_tx {
+            let _ = cmd_tx
+                .send(crate::obs::ObsCommand::SetTextSource {
+                    source_name: OBS_TITLE_SOURCE.to_string(),
+                    text,
+                })
+                .await;
+        }
+        let _ = self
+            .resolume_tx
+            .send(crate::resolume::ResolumeCommand::ShowTitle { song, artist })
+            .await;
+        info!(playlist_id, video_id, "title re-pushed on scene-go-on");
+    }
+
     /// Handle a scene change from the OBS module. On program, fires
     /// `VideosAvailable` then `SceneOn` (folded so every caller — OBS
     /// bridge, API, tests — goes through the same sequence). Off
@@ -273,6 +303,21 @@ impl PlaybackEngine {
             self.apply_event(playlist_id, PlayEvent::VideosAvailable)
                 .await;
             self.apply_event(playlist_id, PlayEvent::SceneOn).await;
+
+            // #45 — re-push title for an already-Playing pipeline that
+            // just gained program. The 1.5 s post-Started title-show task
+            // suppressed itself if scene_active was false at that boundary;
+            // there is no other path that re-pushes it.
+            let video_id = self
+                .pipelines
+                .get(&playlist_id)
+                .and_then(|pp| match pp.state {
+                    PlayState::Playing { video_id } => Some(video_id),
+                    _ => None,
+                });
+            if let Some(video_id) = video_id {
+                self.push_title_for_playing(playlist_id, video_id).await;
+            }
         } else {
             self.apply_event(playlist_id, PlayEvent::SceneOff).await;
         }
