@@ -58,6 +58,13 @@ async fn fetch_bucket_manual(
 #[cfg_attr(test, mutants::skip)] // Behavior lives in SQL string literals (WHERE/ORDER) which
 // cargo-mutants cannot mutate; Rust glue (bind/unwrap/Ok) is fully covered by
 // the null/failed/version/round-robin bucket unit tests below.
+//
+// MAINTAINERS: if you add ANY non-SQL branch here (early-return, post-query
+// filter, transformation of `current_version` before bind, retry loop, etc.)
+// REMOVE this skip — the justification only holds while the body stays as
+// pure SQL + thin bind/await/Ok glue. The integration tests below bind
+// concrete versions and assert on specific row IDs, so removing the skip
+// without a code change should also pass mutation testing.
 async fn fetch_bucket_null(
     pool: &SqlitePool,
     current_version: u32,
@@ -96,6 +103,7 @@ async fn fetch_bucket_null(
 
 #[cfg_attr(test, mutants::skip)] // Same as fetch_bucket_null: behavior is SQL-string,
 // glue is tested by the stale/tiebreak/smart-skip/round-robin unit tests.
+// Same maintainer warning applies — see fetch_bucket_null above.
 async fn fetch_bucket_stale(
     pool: &SqlitePool,
     current_version: u32,
