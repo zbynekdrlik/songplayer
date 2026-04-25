@@ -586,45 +586,6 @@ jobs:
           Write-Host "=== WASM frontend ==="
           Get-ChildItem artifacts/dist/ | Select-Object Name
 
-      - name: Snapshot baseline quality BEFORE binary replacement
-        shell: powershell
-        run: |
-          $cacheDir = "C:\ProgramData\SongPlayer\cache"
-          $toolsDir = "C:\ProgramData\SongPlayer\cache\tools"
-          $outFile  = "C:\ProgramData\SongPlayer\baseline_before.json"
-          $pyScript = "$toolsDir\measure_lyrics_quality.py"
-          if (-not (Test-Path $pyScript)) {
-            Write-Host "INFO: measure_lyrics_quality.py not yet deployed -- skipping baseline snapshot"
-            exit 0
-          }
-          if (-not (Test-Path $cacheDir)) {
-            Write-Host "INFO: cache dir missing -- skipping baseline snapshot"
-            exit 0
-          }
-          $py = Get-Command python -ErrorAction SilentlyContinue
-          if (-not $py) {
-            Write-Host "INFO: python not on PATH -- skipping baseline snapshot"
-            exit 0
-          }
-          python $pyScript --cache-dir $cacheDir --out $outFile
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "FAIL: baseline snapshot exited $LASTEXITCODE"
-            exit 1
-          }
-          Write-Host "Baseline snapshot written to $outFile"
-
-      - name: Record baseline snapshot path
-        shell: powershell
-        run: |
-          # Baseline JSON written to a known path on the self-hosted runner.
-          # lyrics-quality-report reads it directly without artifact round-trip.
-          $f = "C:\ProgramData\SongPlayer\baseline_before.json"
-          if (Test-Path $f) {
-            Write-Host "Baseline snapshot present: $f"
-          } else {
-            Write-Host "INFO: no baseline snapshot (first deploy or no lyrics yet)"
-          }
-
       - name: Install WebView2 runtime
         shell: powershell
         run: |
