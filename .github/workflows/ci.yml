@@ -207,6 +207,13 @@ jobs:
         run: cargo build --workspace
       - name: Run tests
         run: cargo test --workspace --verbose
+      # Release-mode decoder tests — the Tauri shipped binary is a release
+      # build, and the 2026-04-22 seek regression (commit 5977a9d) passed
+      # debug-mode cargo test but broke MF ReadSample under release LTO.
+      # sp-decoder is the only crate with Windows-specific release-sensitive
+      # code paths, so we gate only that crate here to keep CI time bounded.
+      - name: Run sp-decoder tests (release mode)
+        run: cargo test -p sp-decoder --release --verbose
 
   test-integrity:
     name: Test Integrity Check
@@ -485,17 +492,19 @@ jobs:
           # helper functions are glue around external library APIs that can only
           # be validated against real files on the target platform. Both are
           # exercised by integration tests against committed fixtures.
-          # Narrow scope for PR #48: compute diff against the previous dev
-          # HEAD (before my 3 commits), not origin/main. The whole v11-v22
-          # lyrics rollout ships *in this PR* but was validated in prod on
-          # 2026-04-21. Mutation-testing 5300 LOC of that work drives the
-          # runner to OOM every time (7 runs, 38GB RAM+swap not enough).
-          # For this PR, only mutate files actually touched by MY commits
-          # (fix/47, fix/44, version bump) — reprocess.rs and the workflow
-          # file itself. All the v11-v22 work has its own unit/wiremock
-          # tests committed and deployed.
-          cargo mutants --file crates/sp-server/src/lyrics/reprocess.rs \
-            --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out
+          # Post-PR #48: dev now equals main, so --in-diff pr.diff is back
+          # to a normal small-diff scope on future PRs. The swap + disk
+          # cleanup + CARGO_BUILD_JOBS=2 stay as belt-and-braces for any
+          # future large-diff PR that might OOM the 16GB runner.
+          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
+            --exclude-re 'sp-server/src/lib.rs' \
+            --exclude-re 'sp-server/src/obs/' \
+            --exclude-re 'sp-server/src/downloader/' \
+            --exclude-re 'sp-server/src/reprocess/' \
+            --exclude-re 'sp-server/src/api/websocket' \
+            --exclude-re 'sp-server/src/playlist/' \
+            --exclude-re 'sp-decoder/src/audio/' \
+            --exclude-re 'sp-decoder/src/video/'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -661,6 +670,25 @@ jobs:
           }
           Start-Sleep -Seconds 2
 
+          # Also kill CLIProxyAPI.exe — on Windows, subprocess of an exited
+          # parent is NOT auto-killed. Orphans left behind by the previous
+          # SongPlayer keep port 18787 bound, which blocks the new
+          # SongPlayer's proxy watchdog from spawning a fresh instance
+          # (spawn exits status 0 because port is taken → watchdog loops).
+          # The runtime now ADOPTS a healthy orphan on start(), but we
+          # still prefer a clean slate on deploy so the new config + auth
+          # takes effect immediately. Matches the intent of also killing
+          # SongPlayer above.
+          Write-Host "=== Stopping CLIProxyAPI (if orphaned) ==="
+          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
+          $elapsed = 0
+          while ($elapsed -lt 5) {
+            $proc = Get-Process -Name "CLIProxyAPI" -ErrorAction SilentlyContinue
+            if (-not $proc) { break }
+            Start-Sleep -Seconds 1
+            $elapsed++
+          }
+
           $DataDir = "C:\ProgramData\SongPlayer"
           Remove-Item "$DataDir\songplayer.db-wal" -Force -ErrorAction SilentlyContinue
           Remove-Item "$DataDir\songplayer.db-shm" -Force -ErrorAction SilentlyContinue
@@ -812,6 +840,10 @@ jobs:
           # SongPlayer may have been started before OBS and be in backoff.
           # Restart it now that OBS is confirmed running so it connects immediately.
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          # Clean orphan CLIProxyAPI here too for the same reason as the
+          # first deploy step — the restart can otherwise land on an
+          # orphan holding port 18787.
+          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 3
           schtasks.exe /run /tn SongPlayer
           Start-Sleep -Seconds 10
@@ -874,6 +906,16 @@ jobs:
           # producing confusing logs. Write the correct value the first time.
           if ([string]::IsNullOrEmpty($current.gemini_model)) {
             $seed.gemini_model = "gemini-3.1-pro-preview"
+          }
+          if ([string]::IsNullOrEmpty($current.presenter_url)) {
+            $seed.presenter_url = "http://10.77.9.205/api/stage"
+            Write-Host "Seeding presenter_url (was empty)"
+          } else {
+            Write-Host "Preserving existing presenter_url ($($current.presenter_url))"
+          }
+          if ([string]::IsNullOrEmpty($current.presenter_enabled)) {
+            $seed.presenter_enabled = "true"
+            Write-Host "Seeding presenter_enabled=true (was empty)"
           }
           $body = $seed | ConvertTo-Json -Compress
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
@@ -1046,7 +1088,7 @@ jobs:
         shell: powershell
         run: |
           # Check if Resolume API is reachable. If not, the operator hasn't
-          # started Resolume — log INFO and skip (do not fail CI on operator
+          # started Resolume - log INFO and skip (do not fail CI on operator
           # environment issues).
           try {
             $null = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/product" -TimeoutSec 5
@@ -1124,6 +1166,39 @@ jobs:
 
           Write-Host "OK: All $($titleClips.Count) #sp-title clips have non-empty, clean title text."
 
+          # --- #sp-subs-next regression gate (v0.22.0) ---
+          # SongPlayer must push the upcoming line to any #sp-subs-next clip
+          # in parallel with the current line on #sp-subs. If both tokens'
+          # clips carry the SAME text, the lookahead push isn't wired.
+          $subsClips = @()
+          $subsNextClips = @()
+          foreach ($layer in $comp.layers) {
+            foreach ($clip in $layer.clips) {
+              $n = $clip.name.value
+              if ($n -match '#sp-subs-next') {
+                $subsNextClips += $clip.video.sourceparams.Text.value
+              } elseif ($n -match '#sp-subs(?!sk)') {
+                $subsClips += $clip.video.sourceparams.Text.value
+              }
+            }
+          }
+          if ($subsNextClips.Count -eq 0) {
+            Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project - skipping lookahead gate"
+          } else {
+            Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips"
+            $identical = $true
+            foreach ($t in $subsNextClips) {
+              if (-not ($subsClips -contains $t)) { $identical = $false; break }
+            }
+            # Identical-only-if BOTH sets match AND the subsClips set has
+            # text to compare against in the first place.
+            if ($subsClips.Count -gt 0 -and $identical) {
+              Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
+              exit 1
+            }
+            Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
+          }
+
       - name: Verify NDI output names configured
         shell: powershell
         run: |
@@ -1192,6 +1267,99 @@ jobs:
             exit 1
           }
           Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"
+
+      - name: Verify AI proxy healthy and not churning
+        shell: powershell
+        run: |
+          # Regression gate for the 2026-04-22 orphan-CLIProxyAPI bug:
+          # after deploy, the old SongPlayer's subprocess stayed on port
+          # 18787 and the new SongPlayer's watchdog spawned dead children
+          # every 30s forever. All previous CI was green and yet the app
+          # was broken. This step fails if the proxy is down, if the
+          # watchdog is churning, or if the proxy owner doesn't respond.
+
+          # 1. SongPlayer's own view of the proxy must report running.
+          $ai = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/ai/status" -TimeoutSec 10
+          Write-Host "ai status: running=$($ai.running) pid=$($ai.pid) authenticated=$($ai.authenticated)"
+          if (-not $ai.running) {
+            Write-Error "FAIL: /api/v1/ai/status reports running=false after deploy"
+            exit 1
+          }
+          if (-not $ai.pid) {
+            Write-Error "FAIL: /api/v1/ai/status reports pid=null (should be the adopted or spawned PID)"
+            exit 1
+          }
+
+          # 2. /v1/models on the proxy port must respond 200.
+          $models = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/models" -UseBasicParsing -TimeoutSec 10
+          if ($models.StatusCode -ne 200) {
+            Write-Error "FAIL: CLIProxyAPI /v1/models returned $($models.StatusCode)"
+            exit 1
+          }
+
+          # 3. Watchdog must not be logging restart-failed in the last
+          # 2 min (indicates an orphan keeping the port while our spawn
+          # immediately dies). Tail the log and count.
+          $log = "C:\ProgramData\SongPlayer\songplayer.log"
+          if (Test-Path $log) {
+            $cutoff = (Get-Date).AddMinutes(-2)
+            $failures = Get-Content $log -Tail 500 | Where-Object {
+              $_ -match 'ai_proxy watchdog: restart failed'
+            } | ForEach-Object {
+              if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
+                try {
+                  $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
+                  if ($ts -gt $cutoff) { $_ }
+                } catch { $_ }
+              }
+            }
+            if ($failures.Count -gt 0) {
+              Write-Host "Recent 'restart failed' entries:"
+              $failures | ForEach-Object { Write-Host "  $_" }
+              Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
+              exit 1
+            }
+          }
+          Write-Host "OK: AI proxy healthy, watchdog quiet, /v1/models responding."
+
+      - name: Verify Presenter reachable
+        shell: powershell
+        run: |
+          # Regression gate for the 2026-04-22 worship-training bundle.
+          # SongPlayer's line-change hook must be able to PUT to the
+          # configured Presenter URL - band singers depend on the stage
+          # display during live worship. This step fails deploy if the
+          # Presenter endpoint is down or returns non-204.
+          $settings = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings" -TimeoutSec 10
+          if ($settings.presenter_enabled -ne "true") {
+            Write-Host "presenter_enabled = '$($settings.presenter_enabled)' - skipping reachability check"
+            exit 0
+          }
+          $url = $settings.presenter_url
+          if ([string]::IsNullOrEmpty($url)) {
+            Write-Error "FAIL: presenter_enabled=true but presenter_url is empty"
+            exit 1
+          }
+          Write-Host "Probing Presenter at $url"
+          try {
+            $probe = @{
+              currentText = "[CI PROBE]"
+              nextText = ""
+              currentSong = ""
+              nextSong = ""
+            } | ConvertTo-Json -Compress
+            $resp = Invoke-WebRequest -Uri $url -Method Put `
+              -ContentType "application/json" `
+              -Body $probe -UseBasicParsing -TimeoutSec 10
+            if ($resp.StatusCode -ne 204) {
+              Write-Error "FAIL: Presenter at $url returned $($resp.StatusCode), expected 204"
+              exit 1
+            }
+            Write-Host "OK: Presenter at $url responded 204 to probe PUT"
+          } catch {
+            Write-Error "FAIL: Presenter unreachable at ${url}: $_"
+            exit 1
+          }
 
       - name: Verify download worker produces a split-file pair
         shell: powershell

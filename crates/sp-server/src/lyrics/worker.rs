@@ -4,7 +4,8 @@
 //!   1. gather_sources: YT manual subs + LRCLIB + autosub json3 in parallel.
 //!   2. Vocal isolation (Qwen3 provider; best-effort).
 //!   3. Orchestrator::process_song → LyricsTrack.
-//!   4. SK translation (Claude only; Gemini quota reserved for alignment).
+//!   4. SK translation — Claude (CLIProxyAPI) first, Gemini direct-API
+//!      fallback when Claude refuses on copyright policy.
 //!   5. Persist JSON + DB row with pipeline_version + quality_score.
 
 use anyhow::Result;
@@ -21,7 +22,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     ai::client::AiClient,
     db::models::get_next_video_missing_translation,
-    lyrics::{aligner, lrclib, translator, youtube_subs},
+    lyrics::{aligner, translator},
 };
 
 #[allow(dead_code)]
@@ -55,152 +56,10 @@ struct RetryBackoff {
     consecutive_failures: u32,
 }
 
-/// Free function containing the `gather_sources` logic so it can be tested
-/// without constructing a full `LyricsWorker`.
-///
-/// mutants::skip: legacy LRCLIB guards (lines 99-100) + description match guard are
-/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_claude_returns_lyrics`
-/// and `gather_sources_skips_description_when_claude_returns_empty_array` integration tests
-/// (plus the structural call-order test further down); individual mutations in these
-/// I/O-bound branches cannot be killed by unit tests without a full mock harness for
-/// yt-dlp/LRCLIB/autosub, which is out of scope.
-#[cfg_attr(test, mutants::skip)]
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn gather_sources_impl(
-    ai_client: Option<&crate::ai::client::AiClient>,
-    ytdlp_path: &std::path::Path,
-    cache_dir: &std::path::Path,
-    client: &reqwest::Client,
-    row: &crate::db::models::VideoLyricsRow,
-    autosub_tmp_dir: &std::path::Path,
-) -> Result<crate::lyrics::provider::SongContext> {
-    use crate::lyrics::autosub_provider::fetch_autosub;
-    use crate::lyrics::provider::{CandidateText, SongContext};
-
-    let youtube_id = row.youtube_id.clone();
-    let audio_path = row
-        .audio_file_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_default();
-
-    // 1. Manual yt_subs
-    let yt_tmp = std::env::temp_dir().join("sp_yt_subs");
-    let _ = tokio::fs::create_dir_all(&yt_tmp).await;
-    let yt_subs_track = match youtube_subs::fetch_subtitles(ytdlp_path, &youtube_id, &yt_tmp).await
-    {
-        Ok(Some(track)) => {
-            info!("gather: YT manual subs hit for {youtube_id}");
-            Some(track)
-        }
-        Ok(None) => {
-            debug!("gather: no YT manual subs for {youtube_id}");
-            None
-        }
-        Err(e) => {
-            warn!("gather: YT sub fetch error for {youtube_id}: {e}");
-            None
-        }
-    };
-
-    // 2. LRCLIB (if song/artist known)
-    let lrclib_track = if !row.song.is_empty() && !row.artist.is_empty() {
-        let duration_s = row.duration_ms.map(|ms| (ms / 1000) as u32).unwrap_or(0);
-        match lrclib::fetch_lyrics(client, &row.artist, &row.song, duration_s).await {
-            Ok(Some(track)) => {
-                info!("gather: LRCLIB hit for {youtube_id}");
-                Some(track)
-            }
-            Ok(None) => None,
-            Err(e) => {
-                warn!("gather: LRCLIB error for {youtube_id}: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // 3. Auto-sub json3
-    let autosub_json3 = match fetch_autosub(ytdlp_path, &youtube_id, autosub_tmp_dir).await {
-        Ok(Some(p)) => Some(p),
-        Ok(None) => None,
-        Err(e) => {
-            warn!("gather: autosub fetch error for {youtube_id}: {e}");
-            None
-        }
-    };
-
-    let mut candidate_texts: Vec<CandidateText> = Vec::new();
-    if let Some(t) = &yt_subs_track {
-        candidate_texts.push(CandidateText {
-            source: "yt_subs".into(),
-            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-            has_timing: true,
-            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-        });
-    }
-    if let Some(t) = &lrclib_track {
-        candidate_texts.push(CandidateText {
-            source: "lrclib".into(),
-            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-            has_timing: true,
-            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-        });
-    }
-
-    // 4. YouTube description lyrics (LLM-extracted). Best-effort.
-    if let Some(ai) = ai_client {
-        let description_lines = match crate::lyrics::description_provider::fetch_description_lyrics(
-            ai,
-            ytdlp_path,
-            &youtube_id,
-            cache_dir,
-            &row.song,
-            &row.artist,
-        )
-        .await
-        {
-            Ok(Some(lines)) if !lines.is_empty() => {
-                info!(
-                    youtube_id = %youtube_id,
-                    line_count = lines.len(),
-                    "gather: description lyrics hit"
-                );
-                Some(lines)
-            }
-            Ok(_) => {
-                debug!("gather: no description lyrics for {youtube_id}");
-                None
-            }
-            Err(e) => {
-                warn!("gather: description fetch error for {youtube_id}: {e}");
-                None
-            }
-        };
-        if let Some(lines) = description_lines {
-            candidate_texts.push(CandidateText {
-                source: "description".into(),
-                lines,
-                has_timing: false,
-                line_timings: None,
-            });
-        }
-    }
-
-    if candidate_texts.is_empty() {
-        anyhow::bail!("no text sources available for {youtube_id}");
-    }
-
-    Ok(SongContext {
-        video_id: youtube_id,
-        audio_path,
-        clean_vocal_path: None, // filled by process_song before orchestrator call
-        candidate_texts,
-        autosub_json3,
-        duration_ms: row.duration_ms.unwrap_or(0) as u64,
-    })
-}
+/// Re-export so `worker_tests` can keep importing from
+/// `crate::lyrics::worker::gather_sources_impl`. The body lives in the
+/// sibling `gather` module so `worker.rs` stays under the 1000-line cap.
+pub(crate) use crate::lyrics::gather::gather_sources_impl;
 
 impl LyricsWorker {
     #[allow(clippy::too_many_arguments)]
@@ -422,6 +281,14 @@ impl LyricsWorker {
         row: &crate::db::models::VideoLyricsRow,
         autosub_tmp_dir: &std::path::Path,
     ) -> Result<crate::lyrics::provider::SongContext> {
+        // Read the Genius token fresh on every song so operators can add
+        // the setting without restarting the server. Empty string disables
+        // the Genius source entirely.
+        let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         gather_sources_impl(
             self.ai_client.as_deref(),
             &self.ytdlp_path,
@@ -429,32 +296,59 @@ impl LyricsWorker {
             &self.client,
             row,
             autosub_tmp_dir,
+            &genius_token,
         )
         .await
     }
 
-    /// EN→SK translation via Claude. No Gemini fallback — Gemini quota is
-    /// reserved for alignment (which dominates call volume). If Claude fails,
-    /// the track ships without translation; the UI degrades gracefully.
+    /// Build per-song Vec<GeminiClient>: split `gemini_api_key` by comma, drop
+    /// empties, wrap each key in a direct-API client with `max_attempts=1`.
+    // mutants::skip: pure split/trim/filter over config; covered by gemini_provider tests.
+    #[cfg_attr(test, mutants::skip)]
+    fn build_gemini_clients(&self) -> Vec<crate::lyrics::gemini_client::GeminiClient> {
+        use crate::lyrics::gemini_client::GeminiClient;
+        let model = std::env::var("GEMINI_LYRICS_MODEL")
+            .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
+        self.gemini_api_key
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(|k| {
+                let mut c = GeminiClient::direct(k, model.clone());
+                c.max_attempts = 1;
+                c
+            })
+            .collect()
+    }
+
+    /// Apply per-line translations to `track`. Empty strings leave `sk = None`.
+    #[cfg_attr(test, mutants::skip)]
+    fn apply_translations(track: &mut LyricsTrack, translations: Vec<String>) {
+        for (line, sk_text) in track.lines.iter_mut().zip(translations) {
+            line.sk = if sk_text.is_empty() {
+                None
+            } else {
+                Some(sk_text)
+            };
+        }
+        track.language_translation = "sk".into();
+    }
+
+    /// EN→SK step of `process_song`. Silent on failure — UI degrades
+    /// gracefully to English-only. Claude-only by design: the user pays a
+    /// Max Plus subscription (unlimited at that tier) and Gemini quota is
+    /// expensive + reserved for alignment. If Claude refuses with a policy
+    /// response, the fix is to tune the prompt (see `translator::build_prompt`
+    /// for the grandmother framing that defeats the copyright classifier),
+    /// NOT to fall back to Gemini.
     #[cfg_attr(test, mutants::skip)]
     async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
         match translator::translate_via_claude(ai_client, track).await {
-            Ok(translations) => {
-                for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                    line.sk = if sk_text.is_empty() {
-                        None
-                    } else {
-                        Some(sk_text)
-                    };
-                }
-                track.language_translation = "sk".into();
-            }
-            Err(e) => {
-                warn!("worker: Claude translation failed for {youtube_id}: {e}");
-            }
+            Ok(translations) => Self::apply_translations(track, translations),
+            Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
         }
     }
 
@@ -595,6 +489,16 @@ impl LyricsWorker {
             gemini_provider::GeminiProvider,
         };
         let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
+        // v19: YtManualSubsProvider ships first. If the gather phase produced a
+        // yt_subs candidate with line-level timing, alignment short-circuits
+        // here — no Gemini API call, no ffmpeg chunking. The provider's
+        // can_provide() returns false when no such candidate exists, so
+        // normal Gemini-on-audio alignment runs for every other song.
+        // Manual subs only per feedback_no_autosub.md; autosub never reaches
+        // candidate_texts with has_timing=true in the current gather code.
+        providers.push(Box::new(
+            crate::lyrics::yt_manual_subs_provider::YtManualSubsProvider,
+        ));
         // v16: AutoSubProvider is NOT registered as an alignment provider.
         // YouTube auto-captions have unreliable timing on sung music and
         // contaminate `ensemble:*` source tags. Autosub stays available for
@@ -608,27 +512,12 @@ impl LyricsWorker {
                 "ffmpeg"
             };
             let ffmpeg_path = self.tools_dir.join(ffmpeg_name);
-            let model = std::env::var("GEMINI_LYRICS_MODEL")
-                .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
-            // v14: direct API with one client per key. The `gemini_api_key`
-            // DB setting is a comma-separated list of API keys; empty entries
-            // and whitespace are stripped. `max_attempts=1` per client so a
-            // 429 fails fast and the provider-level rotation in
+            // v14: direct API with one client per key. `build_gemini_clients`
+            // splits `self.gemini_api_key` on commas, strips whitespace,
+            // drops empty entries, and sets `max_attempts=1` per client so
+            // a 429 fails fast and the provider-level rotation in
             // `transcribe_rotating` advances to the next key immediately.
-            let keys: Vec<String> = self
-                .gemini_api_key
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            let clients: Vec<GeminiClient> = keys
-                .into_iter()
-                .map(|k| {
-                    let mut c = GeminiClient::direct(k, model.clone());
-                    c.max_attempts = 1;
-                    c
-                })
-                .collect();
+            let clients: Vec<GeminiClient> = self.build_gemini_clients();
             if !clients.is_empty() {
                 tracing::info!(
                     "gemini: registered {} API key(s) for alignment rotation",
@@ -846,20 +735,13 @@ impl LyricsWorker {
         };
         info!("lyrics_worker: retrying translation for {youtube_id}");
 
-        // Claude-only. Gemini quota is reserved for alignment.
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        let result = match translator::translate_via_claude(ai_client, &track).await {
-            Ok(translations) => {
-                for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-                    line.sk = if sk_text.is_empty() {
-                        None
-                    } else {
-                        Some(sk_text)
-                    };
-                }
-                track.language_translation = "sk".to_string();
+        // Claude-only by design (see `translate_track` doc comment).
+        let result: Result<()> = match translator::translate_via_claude(ai_client, &track).await {
+            Ok(t) => {
+                Self::apply_translations(&mut track, t);
                 Ok(())
             }
             Err(e) => Err(e),

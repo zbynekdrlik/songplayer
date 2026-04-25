@@ -45,7 +45,9 @@ fn worker_has_no_retired_symbols() {
 /// miss (autosub) last.
 #[test]
 fn gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub() {
-    let src = include_str!("worker.rs");
+    // gather_sources_impl was extracted from worker.rs into the sibling
+    // `gather.rs` module to keep both files under the 1000-line airuleset cap.
+    let src = include_str!("gather.rs");
     let body_start = src
         .find("async fn gather_sources")
         .expect("gather_sources exists");
@@ -112,6 +114,8 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         duration_ms: Some(180_000),
         audio_file_path: None,
         youtube_url: "https://www.youtube.com/watch?v=vidDESC".into(),
+        lyrics_override_text: None,
+        lyrics_time_offset_ms: 0,
     };
 
     let autosub_tmp = tempfile::tempdir().unwrap();
@@ -125,6 +129,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         &reqwest_client,
         &row,
         autosub_tmp.path(),
+        "", // no genius token in tests — skip Genius source
     )
     .await
     .unwrap();
@@ -200,6 +205,8 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         duration_ms: Some(120_000),
         audio_file_path: None,
         youtube_url: "https://www.youtube.com/watch?v=vidEMPTY2".into(),
+        lyrics_override_text: None,
+        lyrics_time_offset_ms: 0,
     };
 
     let autosub_tmp = tempfile::tempdir().unwrap();
@@ -219,6 +226,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         &reqwest_client,
         &row,
         autosub_tmp.path(),
+        "", // no genius token in tests — skip Genius source
     )
     .await;
 

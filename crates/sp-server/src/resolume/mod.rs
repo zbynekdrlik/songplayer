@@ -17,6 +17,12 @@ pub const TITLE_TOKEN: &str = "#sp-title";
 /// Resolume clip tag for English subtitle text delivery.
 pub const SUBS_TOKEN: &str = "#sp-subs";
 
+/// Clip name token for the lookahead "next line" display.
+/// Paired with `SUBS_TOKEN`; receives `line[i+1]` every time `SUBS_TOKEN`
+/// receives `line[i]`. v0.22.0 addition so audience can read the upcoming
+/// line before it's sung.
+pub const SUBS_NEXT_TOKEN: &str = "#sp-subs-next";
+
 /// Resolume clip tag for Slovak subtitle text delivery.
 pub const SUBS_SK_TOKEN: &str = "#sp-subssk";
 
@@ -28,7 +34,16 @@ pub enum ResolumeCommand {
     /// Hide the title (fade out + clear text) on all `#sp-title` clips.
     HideTitle,
     /// Show subtitle text (lyrics) on Resolume subtitle clips.
-    ShowSubtitles { en: String, sk: Option<String> },
+    ShowSubtitles {
+        en: String,
+        next_en: String,
+        sk: Option<String>,
+        next_sk: Option<String>,
+        /// When true, skip the EN pushes (both #sp-subs and #sp-subs-next).
+        /// SK clips still receive their text. Used for songs with baked-in
+        /// English lyrics inside the YouTube video frame.
+        suppress_en: bool,
+    },
     /// Hide subtitles (clear text) on Resolume subtitle clips.
     HideSubtitles,
     /// Force a refresh of the clip mapping cache.
@@ -212,5 +227,10 @@ mod tests {
         }
 
         let _ = shutdown_tx.send(());
+    }
+
+    #[test]
+    fn subs_next_token_matches_agreed_clip_name() {
+        assert_eq!(super::SUBS_NEXT_TOKEN, "#sp-subs-next");
     }
 }

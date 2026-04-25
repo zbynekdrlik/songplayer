@@ -33,6 +33,27 @@ pub fn hide_console_window(cmd: &mut tokio::process::Command) {
 /// Maximum video resolution height for downloads.
 const MAX_RESOLUTION: u32 = 1440;
 
+/// yt-dlp format selector. Uses `/` fallback chain so yt-dlp walks each
+/// option in order and picks the first one YouTube actually serves.
+///
+/// Order:
+/// 1. AV1 MP4 (highest quality per byte, decoded fine by MF's AV1 transform).
+/// 2. H.264 via HLS (`protocol*=m3u8`). Different encoder/muxer path than
+///    DASH. Some H.264 1080p DASH variants (observed on `xrhVLX6vwPk` THE
+///    DEEP on 2026-04-23) generate an SPS that Windows Media Foundation's
+///    hardware transform rejects — every `ReadSample` returns EOS on the
+///    first call, producing `frame_count=0`. The HLS 1080p MP4 for the same
+///    video is a distinct encode that MF decodes cleanly.
+/// 3. Plain `bestvideo` as last-resort.
+fn format_spec() -> String {
+    format!(
+        "bv*[height<={max}][vcodec^=av01]/\
+         bv*[height<={max}][protocol*=m3u8][vcodec^=avc1]/\
+         bv*[height<={max}]",
+        max = MAX_RESOLUTION
+    )
+}
+
 /// Download timeout in seconds.
 const DOWNLOAD_TIMEOUT: u64 = 600;
 
@@ -207,7 +228,7 @@ impl DownloadWorker {
         output: &Path,
     ) -> Result<(), anyhow::Error> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
-        let format_spec = format!("bestvideo[height<={MAX_RESOLUTION}]");
+        let format_spec = format_spec();
         let ffmpeg_dir = self
             .tools
             .ffmpeg
@@ -325,4 +346,43 @@ struct VideoRow {
     id: i64,
     youtube_id: String,
     title: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_spec_orders_av1_then_hls_then_dash() {
+        let spec = format_spec();
+        // AV1 first — highest quality per byte, MF hardware-transform safe.
+        let av1_pos = spec.find("vcodec^=av01").expect("AV1 alternative present");
+        // HLS H.264 second — different encoder path from DASH, MF-compatible
+        // for the THE-DEEP class of broken 1080p DASH encodes.
+        let hls_pos = spec
+            .find("protocol*=m3u8")
+            .expect("HLS alternative present");
+        // Unconstrained `bv*` last — plain bestvideo fallback.
+        let fallback_pos = spec.rfind("bv*").expect("final fallback present");
+        assert!(
+            av1_pos < hls_pos,
+            "AV1 must precede HLS in the fallback chain"
+        );
+        assert!(
+            hls_pos < fallback_pos,
+            "HLS must precede the unconstrained fallback"
+        );
+    }
+
+    #[test]
+    fn format_spec_applies_max_resolution() {
+        let spec = format_spec();
+        let needle = format!("height<={MAX_RESOLUTION}");
+        // Every alternative must cap at MAX_RESOLUTION so we never pull 4K.
+        assert_eq!(
+            spec.matches(&needle).count(),
+            3,
+            "each of the 3 alternatives must carry the height cap; spec: {spec}"
+        );
+    }
 }

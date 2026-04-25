@@ -202,6 +202,20 @@ pub async fn delete_live_item(playlist_id: i64, video_id: i64) -> Result<(), Str
     delete(&format!("/api/v1/playlists/{playlist_id}/items/{video_id}")).await
 }
 
+/// POST one-step reorder of a set-list row. `direction` must be `"up"`
+/// (move earlier) or `"down"` (move later).
+pub async fn post_live_move_item(
+    playlist_id: i64,
+    video_id: i64,
+    direction: &str,
+) -> Result<(), String> {
+    post_json_empty(
+        &format!("/api/v1/playlists/{playlist_id}/items/{video_id}/move"),
+        &serde_json::json!({ "direction": direction }),
+    )
+    .await
+}
+
 /// POST to jump-and-play a specific video on a custom playlist.
 pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(), String> {
     post_json_empty(
@@ -209,4 +223,72 @@ pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(),
         &serde_json::json!({ "video_id": video_id }),
     )
     .await
+}
+
+/// POST seek to a playlist: `POST /api/v1/playlists/{id}/seek {"position_ms":...}`.
+/// Server returns 204 on success. v0.22.0 addition for the /live scrubber +
+/// tap-a-line UI.
+pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), String> {
+    let body = serde_json::json!({ "position_ms": position_ms });
+    post_json_empty(
+        &format!("/api/v1/playlists/{playlist_id}/seek"),
+        &body,
+    )
+    .await
+}
+
+/// GET the lyrics track for a video. Returns the full `LyricsTrack`
+/// JSON — used by the LyricsScroller on /live to render a tappable
+/// line list. 404 signals "no lyrics yet", surfaced as an Err string
+/// so the UI can show an empty state.
+pub async fn get_video_lyrics(video_id: i64) -> Result<sp_core::lyrics::LyricsTrack, String> {
+    get(&format!("/api/v1/videos/{video_id}/lyrics")).await
+}
+
+// ── Import (v0.22.0) ──────────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ImportedVideo {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub title: String,
+}
+
+/// POST a bare YouTube URL to the import endpoint. Returns 201 + the new
+/// video_id on success. yt-dlp does the metadata fetch server-side.
+pub async fn import_video(
+    youtube_url: String,
+    playlist_id: i64,
+) -> Result<ImportedVideo, String> {
+    let body = serde_json::json!({
+        "youtube_url": youtube_url,
+        "playlist_id": playlist_id,
+    });
+    post_json("/api/v1/videos/import", &body).await
+}
+
+/// PATCH `/api/v1/videos/{id}` with the `suppress_resolume_en` flag. Server
+/// replies 204 on success. Used by the /live setlist "EN off" checkbox so
+/// operators can flip the flag for songs that bake English lyrics into the
+/// video (so SongPlayer won't push them again to Resolume's `#sp-subs` /
+/// `#sp-subs-next` clips).
+pub async fn patch_video_suppress_en(video_id: i64, suppress: bool) -> Result<(), String> {
+    let body = serde_json::json!({ "suppress_resolume_en": suppress });
+    patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
+}
+
+/// PATCH JSON to `path` and discard the response body. Mirror of
+/// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
+/// Content`.
+async fn patch_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
+    let resp = Request::patch(path)
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("PATCH {} → {}", path, resp.status()));
+    }
+    Ok(())
 }

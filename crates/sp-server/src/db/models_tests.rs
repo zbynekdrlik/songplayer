@@ -517,3 +517,112 @@ async fn position_for_video_lookup() {
         .unwrap();
     assert_eq!(missing, None);
 }
+
+#[tokio::test]
+async fn video_row_carries_suppress_resolume_en() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, suppress_resolume_en) \
+         VALUES (1, 'yes_abc', 1), (1, 'no_xyz', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let videos = crate::db::models::get_videos_for_playlist(&pool, 1)
+        .await
+        .expect("fetch");
+    let yes = videos
+        .iter()
+        .find(|v| v.youtube_id == "yes_abc")
+        .expect("yes row");
+    assert!(yes.suppress_resolume_en, "yes_abc must have flag=true");
+    let no = videos
+        .iter()
+        .find(|v| v.youtube_id == "no_xyz")
+        .expect("no row");
+    assert!(!no.suppress_resolume_en, "no_xyz must have flag=false");
+}
+
+// Dedicated coverage for `get_video_suppress_resolume_en` — the playback
+// engine's Resolume hot path calls this on every line change and needs
+// both true and false outcomes to be distinguishable. Mutation testing
+// caught that Ok(true) / Ok(false) / != vs == replacements passed through
+// unnoticed because no test pinned the behaviour on a specific video_id.
+#[tokio::test]
+async fn get_video_suppress_resolume_en_returns_true_for_flagged_row() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, suppress_resolume_en) \
+         VALUES (10, 1, 'on_video', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let flag = crate::db::models::get_video_suppress_resolume_en(&pool, 10)
+        .await
+        .expect("lookup ok");
+    assert!(
+        flag,
+        "video with suppress_resolume_en=1 must return true, got {flag}"
+    );
+}
+
+#[tokio::test]
+async fn get_video_suppress_resolume_en_returns_false_for_unflagged_row() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, suppress_resolume_en) \
+         VALUES (11, 1, 'off_video', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let flag = crate::db::models::get_video_suppress_resolume_en(&pool, 11)
+        .await
+        .expect("lookup ok");
+    assert!(
+        !flag,
+        "video with suppress_resolume_en=0 must return false, got {flag}"
+    );
+}
+
+#[tokio::test]
+async fn get_video_suppress_resolume_en_returns_false_for_missing_row() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    let flag = crate::db::models::get_video_suppress_resolume_en(&pool, 9999)
+        .await
+        .expect("lookup must not error on missing id");
+    assert!(
+        !flag,
+        "missing video row must default to false (no suppression), got {flag}"
+    );
+}

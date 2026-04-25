@@ -22,6 +22,15 @@ pub struct AddItemResponse {
     pub position: i64,
 }
 
+/// Request body for `POST /api/v1/playlists/{id}/items/{video_id}/move`.
+/// Moves the item one slot up (`direction = "up"`) or down (`direction =
+/// "down"`). Kept to a one-step swap rather than absolute positions so the
+/// mobile UI only needs ↑/↓ buttons — no numeric picker.
+#[derive(Debug, Deserialize)]
+pub struct MoveItemRequest {
+    pub direction: String,
+}
+
 // HTTP handler: validates playlist kind is 'custom' then appends the video
 // to playlist_items. Returns 409 for youtube playlists and for duplicate
 // video_ids. Covered by api::live::tests_included::post_item_*.
@@ -89,6 +98,44 @@ pub async fn delete_item(
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => {
             warn!(playlist_id, video_id, %e, "remove_playlist_item failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+// HTTP handler: one-step reorder of a set-list row.
+// Body: `{"direction": "up" | "down"}`.
+// mutants::skip: thin HTTP wrapper over move_playlist_item_step; tested in tests_included.
+#[cfg_attr(test, mutants::skip)]
+pub async fn post_move_item(
+    State(state): State<AppState>,
+    Path((playlist_id, video_id)): Path<(i64, i64)>,
+    Json(req): Json<MoveItemRequest>,
+) -> impl IntoResponse {
+    let kind: Option<String> = match sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
+        .bind(playlist_id)
+        .fetch_optional(&state.pool)
+        .await
+    {
+        Ok(k) => k,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    match kind.as_deref() {
+        Some("custom") => {}
+        Some(_) => return (StatusCode::CONFLICT, "playlist is not custom").into_response(),
+        None => return (StatusCode::NOT_FOUND, "playlist not found").into_response(),
+    }
+
+    let direction = match req.direction.as_str() {
+        "up" => -1,
+        "down" => 1,
+        _ => return (StatusCode::BAD_REQUEST, "direction must be 'up' or 'down'").into_response(),
+    };
+
+    match models::move_playlist_item_step(&state.pool, playlist_id, video_id, direction).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => {
+            warn!(playlist_id, video_id, %e, "move_playlist_item_step failed");
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }

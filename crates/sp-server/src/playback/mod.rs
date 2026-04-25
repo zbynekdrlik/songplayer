@@ -4,12 +4,14 @@
 //! transitions through the pure [`PlayState`] state machine.  Title timing
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
+mod lyrics_loader;
 pub mod pipeline;
+mod position_update;
 pub mod state;
 pub mod submitter;
 
 use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -100,6 +102,8 @@ struct PlaylistPipeline {
     cached_song: String,
     cached_artist: String,
     cached_duration_ms: u64,
+    /// v0.22.0: skip EN Resolume when true (baked-in video lyrics).
+    cached_suppress_en: bool,
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
     last_now_playing_broadcast: Option<Instant>,
@@ -110,6 +114,8 @@ struct PlaylistPipeline {
     /// Active lyrics state for karaoke display. Loaded when a video with
     /// lyrics starts; cleared when the video ends.
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
+    /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
+    last_presenter_text: Option<String>,
 }
 
 impl PlaylistPipeline {
@@ -148,6 +154,8 @@ pub struct PlaybackEngine {
     /// WebSocket broadcast — forwards `NowPlaying` and `PlaybackStateChanged`
     /// messages to the dashboard.
     ws_event_tx: broadcast::Sender<ServerMsg>,
+    /// Presenter stage-display client; None = push disabled.
+    presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
 }
 
 impl PlaybackEngine {
@@ -159,6 +167,7 @@ impl PlaybackEngine {
         obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
         ws_event_tx: broadcast::Sender<ServerMsg>,
+        presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -190,6 +199,7 @@ impl PlaybackEngine {
             obs_event_tx,
             resolume_tx,
             ws_event_tx,
+            presenter_client,
         }
     }
 
@@ -217,9 +227,11 @@ impl PlaybackEngine {
                 cached_song: String::new(),
                 cached_artist: String::new(),
                 cached_duration_ms: 0,
+                cached_suppress_en: false,
                 last_now_playing_broadcast: None,
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
+                last_presenter_text: None,
             }
         });
     }
@@ -350,11 +362,20 @@ impl PlaybackEngine {
                     if let Some(video_id) = pp.current_video_id {
                         let cache_dir = self.cache_dir.clone();
                         let pool = self.pool.clone();
-                        match load_lyrics_for_video(&pool, &cache_dir, video_id).await {
-                            Ok(Some(track)) => {
-                                pp.lyrics_state =
-                                    Some(crate::lyrics::renderer::LyricsState::new(track));
-                                debug!(playlist_id, video_id, "lyrics loaded for karaoke");
+                        match lyrics_loader::load_lyrics_for_video(&pool, &cache_dir, video_id)
+                            .await
+                        {
+                            Ok(Some((track, offset_ms))) => {
+                                let lead_ms = lyrics_loader::load_lyrics_lead_ms(&pool).await;
+                                pp.lyrics_state = Some(
+                                    crate::lyrics::renderer::LyricsState::with_lead_and_offset(
+                                        track, lead_ms, offset_ms,
+                                    ),
+                                );
+                                debug!(
+                                    playlist_id,
+                                    video_id, lead_ms, offset_ms, "lyrics loaded for karaoke"
+                                );
                             }
                             Ok(None) => {
                                 pp.lyrics_state = None;
@@ -573,6 +594,17 @@ impl PlaybackEngine {
         }
     }
 
+    /// Seek to `position_ms` within the currently-playing song on the given
+    /// playlist. No-op when no pipeline exists for that playlist or when no
+    /// song is loaded — the pipeline's own Seek handler ignores it.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn seek(&self, playlist_id: i64, position_ms: u64) {
+        if let Some(pp) = self.pipelines.get(&playlist_id) {
+            pp.pipeline
+                .send(crate::playback::pipeline::PipelineCommand::Seek { position_ms });
+        }
+    }
+
     /// Jump to a specific video within a playlist and start playing it.
     ///
     /// For custom playlists this also updates `playlists.current_position` so
@@ -723,11 +755,15 @@ impl PlaybackEngine {
             Ok(Some(pair)) => pair,
             _ => (String::new(), String::new()),
         };
+        let suppress_en = crate::db::models::get_video_suppress_resolume_en(&self.pool, video_id)
+            .await
+            .unwrap_or(false);
 
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.cached_song = song.clone();
             pp.cached_artist = artist.clone();
             pp.cached_duration_ms = duration_ms;
+            pp.cached_suppress_en = suppress_en;
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
@@ -741,10 +777,12 @@ impl PlaybackEngine {
         });
     }
 
-    /// Send empty lyrics to dashboard and Resolume to clear stale display.
-    ///
-    /// Called when switching to a song without subtitles so the previous
-    /// song's lyrics don't linger on screen.
+    /// Send empty lyrics to dashboard, Resolume AND Presenter to clear
+    /// stale display when the previous song ends or the operator switches
+    /// to a song without lyrics. Without the Presenter clear, the stage
+    /// display kept showing the last line of the previous song until the
+    /// next song's first line pushed — cue for singers got stuck on an
+    /// old verse.
     #[cfg_attr(test, mutants::skip)]
     fn clear_lyrics_display(&self, playlist_id: i64) {
         let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
@@ -759,78 +797,21 @@ impl PlaybackEngine {
         let _ = self
             .resolume_tx
             .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
-    }
-
-    /// Throttle and re-broadcast `NowPlaying` with an updated `position_ms`.
-    ///
-    /// Skips the broadcast if less than
-    /// [`POSITION_BROADCAST_INTERVAL_MS`] has elapsed since the last
-    /// broadcast for the same playlist.
-    fn maybe_broadcast_position_update(
-        &mut self,
-        playlist_id: i64,
-        position_ms: u64,
-        duration_ms: u64,
-    ) {
-        let pp = match self.pipelines.get_mut(&playlist_id) {
-            Some(pp) => pp,
-            None => return,
-        };
-
-        let now = Instant::now();
-        let should_send = match pp.last_now_playing_broadcast {
-            Some(t) => should_send_position_update(now.duration_since(t).as_millis() as u64),
-            None => true,
-        };
-        if !should_send {
-            return;
-        }
-        pp.last_now_playing_broadcast = Some(now);
-
-        let video_id = match pp.current_video_id {
-            Some(id) => id,
-            None => return,
-        };
-        let song = pp.cached_song.clone();
-        let artist = pp.cached_artist.clone();
-        let dur = if duration_ms > 0 {
-            duration_ms
-        } else {
-            pp.cached_duration_ms
-        };
-
-        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
-            playlist_id,
-            video_id,
-            song,
-            artist,
-            position_ms,
-            duration_ms: dur,
-        });
-
-        // Emit lyrics update for karaoke display
-        if let Some(ref lyrics) = pp.lyrics_state {
-            let msg = lyrics.update(playlist_id, position_ms);
-            let _ = self.ws_event_tx.send(msg);
-            // Resolume subs gated on scene_active to prevent off-program
-            // playlists clobbering `#sp-subs` (2026-04-19 event).
-            if pp.scene_active.load(Ordering::Acquire) {
-                let (en, sk) = lyrics.resolume_lines(position_ms);
-                match en {
-                    Some(en_text) => {
-                        let _ = self.resolume_tx.try_send(
-                            crate::resolume::ResolumeCommand::ShowSubtitles { en: en_text, sk },
-                        );
-                    }
-                    None => {
-                        let _ = self
-                            .resolume_tx
-                            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
-                    }
+        if let Some(client) = &self.presenter_client {
+            let client = client.clone();
+            tokio::spawn(async move {
+                if let Err(e) = client
+                    .push(crate::presenter::PresenterPayload::empty())
+                    .await
+                {
+                    tracing::warn!(?e, "presenter clear on song-end failed (non-fatal)");
                 }
-            }
+            });
         }
     }
+
+    // `maybe_broadcast_position_update` lives in `position_update.rs`
+    // (extracted to keep this file under the 1000-line cap).
 
     /// Execute a [`PlayAction`] produced by the state machine.
     ///
@@ -955,36 +936,6 @@ impl PlaybackEngine {
     }
 }
 
-/// Load lyrics JSON for a video from the cache directory, if available.
-#[cfg_attr(test, mutants::skip)]
-async fn load_lyrics_for_video(
-    pool: &SqlitePool,
-    cache_dir: &Path,
-    video_id: i64,
-) -> Result<Option<sp_core::lyrics::LyricsTrack>, anyhow::Error> {
-    use sqlx::Row;
-    let row = sqlx::query("SELECT youtube_id, has_lyrics FROM videos WHERE id = ?")
-        .bind(video_id)
-        .fetch_optional(pool)
-        .await?;
-    let row = match row {
-        Some(r) => r,
-        None => return Ok(None),
-    };
-    let has_lyrics: i64 = row.get("has_lyrics");
-    if has_lyrics == 0 {
-        return Ok(None);
-    }
-    let youtube_id: String = row.get("youtube_id");
-    let lyrics_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
-    if !lyrics_path.exists() {
-        return Ok(None);
-    }
-    let content = tokio::fs::read_to_string(&lyrics_path).await?;
-    let track: sp_core::lyrics::LyricsTrack = serde_json::from_str(&content)?;
-    Ok(Some(track))
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -998,3 +949,6 @@ mod tests_play_video;
 #[cfg(test)]
 #[path = "tests_scene_change.rs"]
 mod tests_scene_change;
+#[cfg(test)]
+#[path = "tests_song_end.rs"]
+mod tests_song_end;

@@ -38,6 +38,14 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/playlists/{id}/videos",
             axum::routing::get(routes::list_videos),
         )
+        .route(
+            "/api/v1/videos/{id}",
+            axum::routing::patch(routes::patch_video),
+        )
+        .route(
+            "/api/v1/videos/import",
+            axum::routing::post(routes::import_video),
+        )
         // Playback
         .route(
             "/api/v1/playback/{playlist_id}/play",
@@ -112,6 +120,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/lyrics/clear-manual-queue",
             axum::routing::post(lyrics::post_clear_manual),
         )
+        // Gemini audit log
+        .route(
+            "/api/v1/gemini-audit",
+            axum::routing::get(routes::get_gemini_audit),
+        )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
         // AI proxy
@@ -139,8 +152,16 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::delete(live::delete_item),
         )
         .route(
+            "/api/v1/playlists/{id}/items/{video_id}/move",
+            axum::routing::post(live::post_move_item),
+        )
+        .route(
             "/api/v1/playlists/{id}/play-video",
             axum::routing::post(live::post_play_video),
+        )
+        .route(
+            "/api/v1/playlists/{id}/seek",
+            axum::routing::post(routes::post_seek),
         )
         // Middleware
         .layer(CorsLayer::permissive())

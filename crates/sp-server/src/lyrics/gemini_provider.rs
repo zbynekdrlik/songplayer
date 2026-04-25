@@ -13,7 +13,7 @@
 //! on cold start — acceptable).
 
 use crate::lyrics::gemini_chunks::{merge_overlap, plan_chunks};
-use crate::lyrics::gemini_client::GeminiClient;
+use crate::lyrics::gemini_client::{AuditCtx, GeminiClient};
 use crate::lyrics::gemini_parse::parse_timed_lines;
 use crate::lyrics::gemini_prompt::build_prompt;
 use crate::lyrics::provider::{
@@ -133,6 +133,16 @@ impl AlignmentProvider for GeminiProvider {
             }
             let prompt = build_prompt(&reference, plan.start_ms, plan.end_ms, ctx.duration_ms);
             debug!(chunk = plan.idx, "gemini: calling Gemini for chunk");
+            // Audit context for this chunk — the per-attempt audit entry
+            // written inside `post_with_retries` picks up `video_id` and
+            // `chunk_idx` from here, and `key_idx` from the rotation
+            // position inside `transcribe_rotating`.
+            let audit_base = AuditCtx {
+                cache_dir: Some(self.cache_dir.clone()),
+                video_id: Some(ctx.video_id.clone()),
+                chunk_idx: Some(chunk_idx as u32),
+                key_idx: 0, // overwritten per-attempt by transcribe_rotating
+            };
             // v19: one retry per chunk on failure. A single transient 5-minute
             // timeout (observed on Not Guilty chunk 2) was dropping the whole
             // chunk → 40 s gap in the rendered lyrics. Retrying once usually
@@ -145,6 +155,7 @@ impl AlignmentProvider for GeminiProvider {
                     self.current_key_idx.as_ref(),
                     &prompt,
                     &chunk_wav,
+                    &audit_base,
                 )
                 .await
                 {
@@ -253,11 +264,16 @@ impl AlignmentProvider for GeminiProvider {
 /// immediately — server-side issues won't be fixed by trying another key.
 ///
 /// Returns an error iff every key returned 429 (or the list is empty).
+///
+/// `audit_base` carries `video_id`/`chunk_idx`/`cache_dir` forward to
+/// `post_with_retries`; `key_idx` is overwritten for each rotation step so
+/// each audit entry records the key that actually paid for the roundtrip.
 pub async fn transcribe_rotating(
     clients: &[GeminiClient],
     start_idx: &AtomicUsize,
     prompt: &str,
     audio: &Path,
+    audit_base: &AuditCtx,
 ) -> Result<String> {
     if clients.is_empty() {
         anyhow::bail!("transcribe_rotating: no clients");
@@ -266,8 +282,10 @@ pub async fn transcribe_rotating(
     let mut last_err: Option<anyhow::Error> = None;
     for offset in 0..clients.len() {
         let idx = (start + offset) % clients.len();
-        match clients[idx].transcribe_chunk(prompt, audio).await {
-            Ok(s) => {
+        let mut ctx = audit_base.clone();
+        ctx.key_idx = idx;
+        match clients[idx].transcribe_chunk(prompt, audio, ctx).await {
+            Ok((s, _usage)) => {
                 start_idx.store(idx, Ordering::Relaxed);
                 return Ok(s);
             }
@@ -507,7 +525,8 @@ mod tests {
         let wav = NamedTempFile::new().unwrap();
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
-        let result = transcribe_rotating(&clients, &idx, "hi", wav.path()).await;
+        let audit = AuditCtx::no_audit();
+        let result = transcribe_rotating(&clients, &idx, "hi", wav.path(), &audit).await;
         assert!(result.is_ok(), "rotation must succeed, got {result:?}");
         assert!(result.unwrap().contains("hello"));
         // Sticky index now points to the successful key.
@@ -544,7 +563,8 @@ mod tests {
         let wav = NamedTempFile::new().unwrap();
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
-        let result = transcribe_rotating(&clients, &idx, "hi", wav.path()).await;
+        let audit = AuditCtx::no_audit();
+        let result = transcribe_rotating(&clients, &idx, "hi", wav.path(), &audit).await;
         assert!(result.is_err(), "all-429 must fail");
     }
 
@@ -577,7 +597,8 @@ mod tests {
         let wav = NamedTempFile::new().unwrap();
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
-        let result = transcribe_rotating(&clients, &idx, "hi", wav.path()).await;
+        let audit = AuditCtx::no_audit();
+        let result = transcribe_rotating(&clients, &idx, "hi", wav.path(), &audit).await;
         assert!(result.is_err(), "500 must propagate");
         assert!(
             !is_quota_429(&result.unwrap_err()),
@@ -627,12 +648,13 @@ mod tests {
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
         // First chunk: 0→429 on K1, rotate → K2 → 200. idx sticks to 1.
-        let r1 = transcribe_rotating(&clients, &idx, "c1", wav.path()).await;
+        let audit = AuditCtx::no_audit();
+        let r1 = transcribe_rotating(&clients, &idx, "c1", wav.path(), &audit).await;
         assert!(r1.is_ok());
         assert_eq!(idx.load(Ordering::Relaxed), 1);
 
         // Second chunk: starts at idx=1 → K2 → 200 directly. K1 not retried.
-        let r2 = transcribe_rotating(&clients, &idx, "c2", wav.path()).await;
+        let r2 = transcribe_rotating(&clients, &idx, "c2", wav.path(), &audit).await;
         assert!(r2.is_ok());
         assert_eq!(idx.load(Ordering::Relaxed), 1);
     }
@@ -642,7 +664,8 @@ mod tests {
         use tempfile::NamedTempFile;
         let idx = AtomicUsize::new(0);
         let wav = NamedTempFile::new().unwrap();
-        let result = transcribe_rotating(&[], &idx, "x", wav.path()).await;
+        let audit = AuditCtx::no_audit();
+        let result = transcribe_rotating(&[], &idx, "x", wav.path(), &audit).await;
         assert!(result.is_err());
     }
 }

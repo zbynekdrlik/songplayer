@@ -68,6 +68,10 @@ pub struct Video {
     pub cached: bool,
     pub normalized: bool,
     pub gemini_failed: bool,
+    /// V14: suppress Resolume EN subs for songs with baked-in lyrics in the
+    /// video. SK subs + Presenter current_text remain unaffected. Default 0.
+    #[serde(default)]
+    pub suppress_resolume_en: bool,
 }
 
 /// A record of a video that was played.

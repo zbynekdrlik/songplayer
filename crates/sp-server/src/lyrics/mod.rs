@@ -4,11 +4,14 @@ pub mod autosub_provider;
 pub mod bootstrap;
 pub mod chunking;
 pub mod description_provider;
+pub mod gather;
+pub mod gemini_audit;
 pub mod gemini_chunks;
 pub mod gemini_client;
 pub mod gemini_parse;
 pub mod gemini_prompt;
 pub mod gemini_provider;
+pub mod genius;
 pub mod lrclib;
 pub mod merge;
 pub mod orchestrator;
@@ -21,6 +24,7 @@ pub mod text_merge;
 pub mod translator;
 pub mod worker;
 pub mod youtube_subs;
+pub mod yt_manual_subs_provider;
 pub use worker::LyricsWorker;
 pub use worker::queue_update_loop;
 
@@ -145,7 +149,18 @@ use sp_core::lyrics::LyricsTrack;
 ///   Smart-skip tightened to `version >= 18`; every pre-v18 Gemini
 ///   row is reprocessed so the persisted JSON drops the synthetic
 ///   word arrays.
-pub const LYRICS_PIPELINE_VERSION: u32 = 18;
+/// - v19 (#TBD): YtManualSubsProvider registered as AlignmentProvider
+///   ahead of Gemini. When gather_sources produces a yt_subs candidate
+///   with `has_timing=true`, alignment short-circuits — no Gemini API
+///   call, no ffmpeg chunking — and the track ships as
+///   `source="yt_subs"` directly. Per `feedback_no_autosub.md` this is
+///   MANUAL subs only (autosub never reaches candidate_texts with
+///   has_timing=true). Pipeline-version bump re-queues pre-v19 rows in
+///   the stale bucket so existing Gemini-only songs are re-evaluated
+///   against the new fast path; the smart-skip clause in
+///   `reprocess.rs::fetch_bucket_stale` keeps pure-Gemini v19+ output
+///   protected once generated.
+pub const LYRICS_PIPELINE_VERSION: u32 = 20;
 
 /// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
 /// worker registers `GeminiProvider` in the provider list.
@@ -276,10 +291,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v18() {
+    fn lyrics_pipeline_version_is_v20() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 18,
-            "v18 = drop synthetic per-word timings; ship words=None for wordless providers"
+            LYRICS_PIPELINE_VERSION, 20,
+            "v20 = Genius text source + lyrics_override_text gather paths"
         );
     }
 

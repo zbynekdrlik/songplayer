@@ -82,7 +82,8 @@ pub async fn get_videos_for_playlist(
 ) -> Result<Vec<Video>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, playlist_id, youtube_id, title, song, artist,
-                duration_ms, file_path, normalized, gemini_failed
+                duration_ms, file_path, normalized, gemini_failed,
+                suppress_resolume_en
          FROM videos WHERE playlist_id = ? ORDER BY id",
     )
     .bind(playlist_id)
@@ -105,7 +106,8 @@ pub async fn upsert_video(
          VALUES (?, ?, ?)
          ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title
          RETURNING id, playlist_id, youtube_id, title, song, artist,
-                   duration_ms, file_path, normalized, gemini_failed",
+                   duration_ms, file_path, normalized, gemini_failed,
+                   suppress_resolume_en",
     )
     .bind(playlist_id)
     .bind(youtube_id)
@@ -128,7 +130,22 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         cached: r.get::<Option<String>, _>("file_path").is_some(),
         normalized: r.get::<i32, _>("normalized") != 0,
         gemini_failed: r.get::<i32, _>("gemini_failed") != 0,
+        suppress_resolume_en: r.get::<i32, _>("suppress_resolume_en") != 0,
     }
+}
+
+/// Fast single-column read of `videos.suppress_resolume_en` by id. Used by
+/// the playback engine hot path to decide whether to skip the Resolume EN
+/// push. Returns None when the row doesn't exist.
+pub async fn get_video_suppress_resolume_en(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<bool, sqlx::Error> {
+    let v: Option<i64> = sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(v.map(|n| n != 0).unwrap_or(false))
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +355,16 @@ pub struct VideoLyricsRow {
     pub duration_ms: Option<i64>,
     pub audio_file_path: Option<String>,
     pub youtube_url: String,
+    /// Operator-provided lyrics text (V15 migration). When Some(non-empty),
+    /// `gather_sources` uses it as the top-priority candidate, bypassing
+    /// the yt_subs / description / LRCLIB fetch paths. Populated via
+    /// `PATCH /api/v1/videos/{id}` with `lyrics_override_text`.
+    pub lyrics_override_text: Option<String>,
+    /// Per-song time-axis shift applied at render time; preserves real Gemini
+    /// alignment while letting the operator correct systematic lead/lag.
+    /// Signed: positive = delay display (effectively shorter lead),
+    /// negative = advance display (longer lead). V16 migration.
+    pub lyrics_time_offset_ms: i64,
 }
 
 /// Mark a video's lyrics status, source, AND pipeline version.
@@ -547,6 +574,99 @@ pub async fn remove_playlist_item(
     )
     .bind(playlist_id)
     .bind(playlist_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Move a playlist item one slot up or down. `direction` must be `-1`
+/// (up / earlier) or `+1` (down / later). At the boundary (top-most item
+/// moved up, bottom-most moved down) this is a no-op — we silently return
+/// Ok so the UI doesn't have to pre-check bounds.
+///
+/// Implementation note: SQLite's primary key on `(playlist_id, position)`
+/// means a straight-forward two-UPDATE swap collides mid-transaction. We
+/// stage the moved row at `position = -1` (a sentinel outside the valid
+/// `0..N` range) first, swap the neighbour into the vacated slot, then
+/// move the staged row to its final slot.
+// mutants::skip: direction validation (line 600) and target_pos<0 guard (line 618)
+// are defense-in-depth — the HTTP handler in `api::live::post_move_item` already
+// rejects non "up"/"down" strings (returns 400) and the DB schema clamps positions
+// to u32, so mutants on these branches never observe a test failure via the
+// public API. Behaviour is covered by `api::live::tests_included::move_item_*`.
+#[cfg_attr(test, mutants::skip)]
+pub async fn move_playlist_item_step(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+    direction: i64,
+) -> Result<(), sqlx::Error> {
+    if direction != 1 && direction != -1 {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin().await?;
+
+    let cur_pos: Option<i64> = sqlx::query_scalar(
+        "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(cur_pos) = cur_pos else {
+        return Ok(());
+    };
+    let target_pos = cur_pos + direction;
+    if target_pos < 0 {
+        return Ok(());
+    }
+
+    let neighbor_vid: Option<i64> = sqlx::query_scalar(
+        "SELECT video_id FROM playlist_items WHERE playlist_id = ? AND position = ?",
+    )
+    .bind(playlist_id)
+    .bind(target_pos)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(neighbor_vid) = neighbor_vid else {
+        // Moved item is at the boundary — nothing to swap with.
+        return Ok(());
+    };
+
+    // Stage the moved row at a sentinel position.
+    sqlx::query(
+        "UPDATE playlist_items SET position = -1
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Neighbour slides into the vacated slot.
+    sqlx::query(
+        "UPDATE playlist_items SET position = ?
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(cur_pos)
+    .bind(playlist_id)
+    .bind(neighbor_vid)
+    .execute(&mut *tx)
+    .await?;
+
+    // Moved row lands on its target.
+    sqlx::query(
+        "UPDATE playlist_items SET position = ?
+         WHERE playlist_id = ? AND video_id = ?",
+    )
+    .bind(target_pos)
+    .bind(playlist_id)
+    .bind(video_id)
     .execute(&mut *tx)
     .await?;
 

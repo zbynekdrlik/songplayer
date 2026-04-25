@@ -193,14 +193,53 @@ impl MediaStream for MediaFoundationVideoReader {
         self.duration_ms
     }
 
-    fn seek(&mut self, _position_ms: u64) -> Result<(), DecoderError> {
-        // Seek not yet wired for the video reader — the playback pipeline
-        // does not currently expose scrubbing, so no caller exercises this
-        // path. When dashboard scrubbing is added, this will need a real
-        // MF SetCurrentPosition implementation via PROPVARIANT.
-        Err(DecoderError::Seek(
-            "MediaFoundationVideoReader::seek not yet implemented".into(),
-        ))
+    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
+        // MSDN IMFSourceReader::SetCurrentPosition:
+        //   `guidtimeformat` must point to a GUID that identifies the time
+        //   format. Use a pointer to GUID_NULL for 100-ns units — the call
+        //   dereferences the GUID, so a null pointer causes an access
+        //   violation on release-mode MF.
+        //
+        //   `varPosition` must be a PROPVARIANT of type VT_I8 (or VT_UI8).
+        //
+        // We construct the PROPVARIANT manually as a 24-byte stack buffer
+        // (vt=VT_I8 at offset 0, hVal at offset 8) rather than via
+        // `windows::core::PROPVARIANT::from(i64)`. The wrapper type has a
+        // `Drop` impl that calls `PropVariantClear` from ole32.dll. For
+        // VT_I8 there is nothing to free and avoiding the wrapper keeps
+        // the release-mode LTO path clean (prior retry of this fix left
+        // MF in a state where `ReadSample` returned EOS immediately on
+        // fresh decoders — see the 2026-04-22 worship-training deploy).
+        // u64 → i64 → checked × 10_000. Overflow is theoretical (i64 range is
+        // ~290 years in milliseconds; playback positions are minutes-to-hours)
+        // but the explicit guards surface a clean Seek error rather than silently
+        // wrapping to a negative position that MF would reject mid-decode.
+        let position_signed = i64::try_from(position_ms).map_err(|_| {
+            DecoderError::Seek(format!("position_ms {position_ms} exceeds i64::MAX"))
+        })?;
+        let position_100ns: i64 = position_signed.checked_mul(10_000).ok_or_else(|| {
+            DecoderError::Seek(format!(
+                "position_ms {position_ms} ms × 10_000 overflows i64 (100-ns units)"
+            ))
+        })?;
+        const VT_I8: u16 = 20;
+        let mut raw: [u64; 3] = [0; 3]; // 24 bytes, 8-byte aligned for i64
+        let raw_ptr = raw.as_mut_ptr().cast::<u8>();
+        unsafe {
+            raw_ptr.cast::<u16>().write(VT_I8);
+            raw_ptr.add(8).cast::<i64>().write(position_100ns);
+        }
+        let var_ptr = raw.as_ptr().cast::<windows::core::PROPVARIANT>();
+        // GUID_NULL is the all-zero GUID; stack-allocated so the pointer is
+        // valid for the duration of the call.
+        let guid_null = windows::core::GUID::from_u128(0);
+        unsafe {
+            self.reader
+                .SetCurrentPosition(&guid_null, var_ptr)
+                .map_err(|e| DecoderError::Seek(format!("SetCurrentPosition: {e}")))?;
+        }
+        debug!(position_ms, "mf_reader: seek complete");
+        Ok(())
     }
 }
 

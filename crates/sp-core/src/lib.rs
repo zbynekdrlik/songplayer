@@ -168,6 +168,7 @@ mod tests {
             cached: true,
             normalized: true,
             gemini_failed: false,
+            suppress_resolume_en: false,
         };
         let json = serde_json::to_string(&v).unwrap();
         let back: models::Video = serde_json::from_str(&json).unwrap();

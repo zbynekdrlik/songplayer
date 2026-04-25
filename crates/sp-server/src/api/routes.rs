@@ -1,7 +1,7 @@
 //! HTTP request handlers for the REST API.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
@@ -328,6 +328,158 @@ pub async fn list_videos(State(state): State<AppState>, Path(id): Path<i64>) -> 
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PatchVideoReq {
+    #[serde(default)]
+    pub suppress_resolume_en: Option<bool>,
+    /// Operator-provided lyrics text. When Some(non-empty), the lyrics
+    /// worker uses it as the top-priority reference for Gemini alignment,
+    /// bypassing yt_subs / description / LRCLIB gather paths. Pass
+    /// `Some("")` to clear the override.
+    #[serde(default)]
+    pub lyrics_override_text: Option<String>,
+}
+
+/// Update mutable per-video flags. Currently supports `suppress_resolume_en`
+/// and `lyrics_override_text`. Returns 204 on success, 404 if the video
+/// id doesn't exist, 400 if the request body has no actionable fields.
+pub async fn patch_video(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<PatchVideoReq>,
+) -> impl IntoResponse {
+    // Require at least one field so empty-body PATCHes are a clear error.
+    if req.suppress_resolume_en.is_none() && req.lyrics_override_text.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "request body must include at least one patchable field",
+        )
+            .into_response();
+    }
+
+    // Build a dynamic UPDATE to touch only the columns the caller provided;
+    // avoids clobbering unrelated fields across successive PATCHes.
+    let mut sets: Vec<&'static str> = Vec::new();
+    if req.suppress_resolume_en.is_some() {
+        sets.push("suppress_resolume_en = ?");
+    }
+    if req.lyrics_override_text.is_some() {
+        sets.push("lyrics_override_text = ?");
+    }
+    let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
+
+    let mut q = sqlx::query(&sql);
+    if let Some(flag) = req.suppress_resolume_en {
+        q = q.bind(flag as i32);
+    }
+    if let Some(text) = req.lyrics_override_text.as_ref() {
+        // Store NULL when the caller passes an empty string so a blank
+        // override doesn't silently short-circuit the gather paths.
+        if text.trim().is_empty() {
+            q = q.bind::<Option<String>>(None);
+        } else {
+            q = q.bind::<Option<String>>(Some(text.clone()));
+        }
+    }
+    q = q.bind(video_id);
+
+    match q.execute(&state.pool).await {
+        Ok(res) if res.rows_affected() == 0 => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Video import endpoint
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct ImportVideoReq {
+    pub youtube_url: String,
+    pub playlist_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportVideoResp {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub title: String,
+}
+
+/// Import a YouTube URL into a playlist. Runs `yt-dlp --dump-json` to fetch
+/// title/duration, inserts a `videos` row with `normalized=0` (download
+/// worker picks it up within 5s), and returns the new id.
+pub async fn import_video(
+    State(state): State<AppState>,
+    Json(req): Json<ImportVideoReq>,
+) -> impl IntoResponse {
+    use crate::downloader::tools::{extract_youtube_id, fetch_video_metadata};
+
+    // Fast reject obviously non-YouTube URLs before shelling out.
+    if extract_youtube_id(&req.youtube_url).is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "URL does not look like a YouTube video link",
+        )
+            .into_response();
+    }
+
+    let ytdlp_path = {
+        let guard = state.tool_paths.read().await;
+        match guard.as_ref() {
+            Some(tp) => tp.ytdlp.clone(),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "yt-dlp not ready yet on this server",
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let meta = match fetch_video_metadata(&ytdlp_path, &req.youtube_url).await {
+        Ok(m) => m,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("yt-dlp failed: {e}")).into_response();
+        }
+    };
+
+    let row = sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, title, duration_ms, normalized) \
+         VALUES (?, ?, ?, ?, 0) \
+         ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title \
+         RETURNING id",
+    )
+    .bind(req.playlist_id)
+    .bind(&meta.youtube_id)
+    .bind(&meta.title)
+    .bind(meta.duration_ms.map(|ms| ms as i64))
+    .fetch_one(&state.pool)
+    .await;
+
+    match row {
+        Ok(r) => {
+            let id: i64 = r.get(0);
+            (
+                StatusCode::CREATED,
+                Json(ImportVideoResp {
+                    video_id: id,
+                    youtube_id: meta.youtube_id,
+                    title: meta.title,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Playback endpoints
 // ---------------------------------------------------------------------------
@@ -387,6 +539,32 @@ pub async fn set_mode(
         .send(EngineCommand::SetMode { playlist_id, mode })
         .await;
     StatusCode::NO_CONTENT
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SeekReq {
+    pub position_ms: u64,
+}
+
+/// Jump playback of the given playlist to `position_ms`. Returns 204
+/// No Content on success. Always-ok for valid playlist ids — the pipeline
+/// drops the command when no song is loaded.
+pub async fn post_seek(
+    State(state): State<AppState>,
+    Path(playlist_id): Path<i64>,
+    Json(req): Json<SeekReq>,
+) -> impl IntoResponse {
+    match state
+        .engine_tx
+        .send(EngineCommand::Seek {
+            playlist_id,
+            position_ms: req.position_ms,
+        })
+        .await
+    {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -631,6 +809,56 @@ pub async fn get_lyrics_status(State(state): State<AppState>) -> impl IntoRespon
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Gemini audit endpoint
+// ---------------------------------------------------------------------------
+
+/// Query parameters for GET /api/v1/gemini-audit.
+#[derive(Debug, Deserialize)]
+pub struct GeminiAuditQuery {
+    /// RFC 3339 inclusive lower bound (string compare works because RFC 3339
+    /// timestamps are lexicographically ordered).
+    pub since: Option<String>,
+    /// Exact-match filter on the `video_id` field.
+    pub video_id: Option<String>,
+    /// Row cap after filtering. Defaults to 500, hard max 5000 to keep
+    /// dashboard payloads sane.
+    pub limit: Option<usize>,
+}
+
+const GEMINI_AUDIT_DEFAULT_LIMIT: usize = 500;
+const GEMINI_AUDIT_MAX_LIMIT: usize = 5000;
+
+/// GET /api/v1/gemini-audit
+///
+/// Returns entries from the Gemini audit log, optionally filtered by
+/// `since` (RFC 3339) and/or `video_id`. Results are capped at
+/// `limit` (default 500, max 5000). Missing audit file returns `[]`.
+pub async fn get_gemini_audit(
+    State(state): State<AppState>,
+    Query(q): Query<GeminiAuditQuery>,
+) -> impl IntoResponse {
+    let mut entries = match crate::lyrics::gemini_audit::read_entries(
+        &state.cache_dir,
+        q.since.as_deref(),
+        q.video_id.as_deref(),
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("get_gemini_audit error: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let limit = q
+        .limit
+        .unwrap_or(GEMINI_AUDIT_DEFAULT_LIMIT)
+        .min(GEMINI_AUDIT_MAX_LIMIT);
+    entries.truncate(limit);
+    Json(entries).into_response()
 }
 
 // ---------------------------------------------------------------------------

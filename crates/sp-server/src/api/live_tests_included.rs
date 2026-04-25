@@ -64,6 +64,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
         ai_client: Arc::new(crate::ai::client::AiClient::new(
             crate::ai::AiSettings::default(),
         )),
+        presenter_client: None,
     }
 }
 
@@ -258,6 +259,98 @@ async fn play_video_with_unknown_video_returns_404() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     assert!(engine_rx.try_recv().is_err());
+}
+
+/// Move an item one slot down — it must swap with the next neighbour.
+/// Starting order: [v1, v2]. After POST move v1 down → [v2, v1].
+#[tokio::test]
+async fn move_item_down_swaps_with_next_neighbour() {
+    let (pool, ytlive_id, v1, v2) = setup().await;
+    crate::db::models::append_playlist_item(&pool, ytlive_id, v1)
+        .await
+        .unwrap();
+    crate::db::models::append_playlist_item(&pool, ytlive_id, v2)
+        .await
+        .unwrap();
+
+    let (engine_tx, _) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool.clone(), engine_tx), None);
+
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{ytlive_id}/items/{v1}/move"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"direction":"down"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let items = crate::db::models::list_playlist_items(&pool, ytlive_id)
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        items[0].video_id, v2,
+        "v2 should be first after v1 moves down"
+    );
+    assert_eq!(items[1].video_id, v1, "v1 should be second");
+}
+
+/// Move up at the top is a no-op — must return OK and leave order intact.
+#[tokio::test]
+async fn move_item_up_at_top_is_noop() {
+    let (pool, ytlive_id, v1, v2) = setup().await;
+    crate::db::models::append_playlist_item(&pool, ytlive_id, v1)
+        .await
+        .unwrap();
+    crate::db::models::append_playlist_item(&pool, ytlive_id, v2)
+        .await
+        .unwrap();
+
+    let (engine_tx, _) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool.clone(), engine_tx), None);
+
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{ytlive_id}/items/{v1}/move"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"direction":"up"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let items = crate::db::models::list_playlist_items(&pool, ytlive_id)
+        .await
+        .unwrap();
+    assert_eq!(items[0].video_id, v1);
+    assert_eq!(items[1].video_id, v2);
+}
+
+/// Unknown direction must 400, not silently succeed or 500.
+#[tokio::test]
+async fn move_item_invalid_direction_returns_400() {
+    let (pool, ytlive_id, v1, _) = setup().await;
+    crate::db::models::append_playlist_item(&pool, ytlive_id, v1)
+        .await
+        .unwrap();
+
+    let (engine_tx, _) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{ytlive_id}/items/{v1}/move"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"direction":"sideways"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 /// play-video against a playlist that doesn't exist at all must return 404.

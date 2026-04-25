@@ -453,10 +453,391 @@ body {
     margin-top: 0.75rem;
 }
 
+/* Per-row "EN off" checkbox column. The checkbox flips
+   videos.suppress_resolume_en via PATCH /api/v1/videos/{id}. */
+.live-setlist-suppress-en {
+    text-align: center;
+}
+
 .live-page-error,
 .live-catalog-error,
 .live-setlist-error {
     color: #f66;
     margin: 0.5rem 0;
     min-height: 1.2em;
+}
+
+/* --- v0.22.0 /live mobile styling -------------------------------- */
+
+.import-url-box {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.import-url-input {
+  flex: 1 1 220px;
+  padding: 0.75rem;
+  font-size: 1rem;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #222;
+  color: #fff;
+}
+
+.import-url-btn {
+  min-width: 100px;
+  min-height: 44px;
+  font-size: 1rem;
+  border: 1px solid #7fb;
+  background: #2a4a3a;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.import-url-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.import-url-status {
+  width: 100%;
+  color: #fd7;
+  font-size: 0.85rem;
+}
+
+.now-playing-card {
+  background: #1e1e1e;
+  color: #fff;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.np-song {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.np-artist {
+  font-size: 0.95rem;
+  color: #bbb;
+  margin-bottom: 0.5rem;
+}
+
+.np-time {
+  font-family: monospace;
+  color: #9cf;
+  margin-bottom: 0.25rem;
+}
+
+.np-scrubber {
+  width: 100%;
+  height: 44px;
+  margin: 0.5rem 0;
+}
+
+.np-progress {
+  background: #333;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.np-progress-bar {
+  background: #7fb;
+  height: 100%;
+  transition: width 250ms linear;
+}
+
+.np-controls {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.np-btn {
+  min-width: 48px;
+  min-height: 48px;
+  font-size: 1.6rem;
+  background: #2a2a2a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.np-btn-big {
+  min-width: 64px;
+  min-height: 64px;
+  font-size: 2rem;
+}
+
+.np-btn:active {
+  background: #3a5a4a;
+}
+
+.lyrics-scroller {
+  background: #1a1a1a;
+  color: #eee;
+  padding: 0.75rem;
+  border-radius: 8px;
+  max-height: 55vh;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+
+.lyrics-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.lyr-line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem;
+  min-height: 44px;
+  font-size: 1rem;
+  background: transparent;
+  color: #eee;
+  border: none;
+  border-bottom: 1px solid #2a2a2a;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.lyr-line:active {
+  background: #2a3a4a;
+}
+
+.lyr-current {
+  background: #2a4a3a;
+  color: #fffbcc;
+  font-weight: 600;
+}
+
+.lyr-en {
+  display: block;
+}
+
+.lyr-sk {
+  display: block;
+  color: #9fc;
+  font-size: 0.85rem;
+  margin-top: 0.1rem;
+}
+
+.lyrics-empty,
+.lyrics-error {
+  color: #999;
+  text-align: center;
+  padding: 1rem;
+  font-style: italic;
+}
+
+/* ---- v0.23 /live mobile-first rework ----
+
+   The /live page drives a worship set on a phone in the operator's hand.
+   Everything below is sized for thumb taps, not mouse clicks: 48×48 px
+   minimum targets (Apple HIG recommends 44 pt, we round up for margin),
+   font ≥ 1rem, generous gaps between adjacent buttons so a sloppy tap
+   lands cleanly. Desktop stays usable — these rules only beef up the
+   mobile case, never shrink anything.
+*/
+
+.live-section {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  background: #181818;
+}
+
+.live-section-setlist {
+  /* Primary control surface — prominent border, more breathing room. */
+  border-color: #3a5a4a;
+  padding: 0.75rem;
+}
+
+.live-section-player {
+  background: #1a1a1e;
+}
+
+.live-section-add .live-add-toggle {
+  width: 100%;
+  min-height: 48px;
+  font-size: 1rem;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: #222;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.live-section-add .live-add-body {
+  display: none;
+  margin-top: 0.75rem;
+}
+
+.live-section-add .live-add-body.open {
+  display: block;
+}
+
+/* Per-row action cells. Play sits on the left (.live-setlist-col-play),
+   secondary cluster (reorder + EN toggle + remove) sits on the right
+   (.live-setlist-col-secondary). */
+.live-setlist-col-play {
+  white-space: nowrap;
+  text-align: left;
+  width: 1%;
+}
+
+.live-setlist-secondary {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.live-setlist-secondary > * {
+  vertical-align: middle;
+}
+
+.live-setlist-enoff-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0.4rem;
+  font-size: 0.85rem;
+  color: #bbb;
+  cursor: pointer;
+}
+
+.live-setlist-enoff-inline input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.live-setlist-btn {
+  min-width: 48px;
+  min-height: 48px;
+  margin-left: 0.5rem;
+  font-size: 1.25rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.live-setlist-btn-play {
+  border-color: #4a7a5a;
+  background: #2a4a3a;
+}
+
+.live-setlist-btn-remove {
+  border-color: #7a4a4a;
+  background: #3a2a2a;
+}
+
+.live-setlist-btn:active {
+  transform: scale(0.95);
+}
+
+/* Global controls row (▶ Play / ⏸ / ⏭ / ⏮). */
+.live-setlist-control-btn {
+  min-width: 64px;
+  min-height: 48px;
+  font-size: 1rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* Playback-mode dropdown in the set-list controls row. */
+.live-setlist-mode {
+  min-height: 48px;
+  font-size: 1rem;
+  padding: 0 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.live-setlist-btn-move {
+  border-color: #555;
+  background: #2a2a2a;
+}
+
+/* Setlist rows — taller, easier to read + tap. */
+.live-setlist-table th,
+.live-setlist-table td {
+  padding: 0.6rem 0.5rem;
+}
+
+.live-setlist-suppress-en input[type="checkbox"] {
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .live-page-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem;
+  }
+
+  /* On mobile, give the secondary cell (reorder + EN + ✕) a tight
+     layout so everything stays on one row without pushing the Song
+     column off-screen. Reorder buttons shrink; EN-off label hides
+     its text to save space but keeps the checkbox tappable. */
+  .live-setlist-btn-move {
+    min-width: 36px;
+    padding: 0 0.25rem;
+  }
+  .live-setlist-enoff-inline {
+    margin: 0 0.2rem;
+  }
+  .live-setlist-enoff-inline span,
+  .live-setlist-enoff-inline::after {
+    display: none;
+  }
+  .live-setlist-song {
+    /* Truncate long song titles so the row never forces horizontal scroll. */
+    max-width: 40vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .live-setlist-song {
+    /* Truncate long song titles so the row never forces horizontal scroll. */
+    max-width: 55vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .live-section {
+    padding: 0.5rem;
+  }
+
+  /* Stack global playback controls on mobile so each stays full-tap-width. */
+  .live-setlist-controls {
+    flex-wrap: wrap;
+  }
+
+  .live-setlist-control-btn {
+    flex: 1 1 45%;
+  }
 }

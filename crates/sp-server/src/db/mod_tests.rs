@@ -14,7 +14,7 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 13);
+    assert_eq!(ver, 16);
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 13);
+    assert_eq!(ver, 16);
 }
 
 #[tokio::test]
@@ -745,11 +745,78 @@ async fn migration_v12_adds_pipeline_version_quality_and_priority() {
 }
 
 #[tokio::test]
-async fn schema_version_reaches_12() {
+async fn schema_version_reaches_16() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 13);
+    assert_eq!(ver, 16);
+}
+
+#[tokio::test]
+async fn migration_v16_adds_lyrics_time_offset_column() {
+    let pool = setup().await;
+    let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+    assert!(
+        cols.contains(&"lyrics_time_offset_ms".to_string()),
+        "V16 must add lyrics_time_offset_ms column; got: {cols:?}"
+    );
+    // New rows default to 0 (no time shift).
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (888, 1, 'yt')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let offset: i64 = sqlx::query_scalar("SELECT lyrics_time_offset_ms FROM videos WHERE id = 888")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(offset, 0, "new rows default to 0 offset");
+}
+
+#[tokio::test]
+async fn migration_v15_adds_lyrics_override_text_column() {
+    let pool = setup().await;
+    let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+    assert!(
+        cols.contains(&"lyrics_override_text".to_string()),
+        "V15 must add lyrics_override_text column; got: {cols:?}"
+    );
+    // New rows default to NULL (no override).
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO videos (id, playlist_id, youtube_id) VALUES (999, 1, 'yt')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let override_text: Option<String> =
+        sqlx::query_scalar("SELECT lyrics_override_text FROM videos WHERE id = 999")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(override_text, None, "new rows default to NULL override");
 }
 
 #[tokio::test]
@@ -778,4 +845,53 @@ async fn migration_v13_creates_playlist_items_table() {
             .await
             .unwrap();
     assert!(row.is_some(), "playlist_items table should exist");
+}
+
+#[tokio::test]
+async fn migration_v14_adds_suppress_resolume_en_column() {
+    let pool = create_memory_pool().await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, suppress_resolume_en) \
+         VALUES (1, 'abc', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let flag: i64 =
+        sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE youtube_id = 'abc'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(flag, 1);
+}
+
+#[tokio::test]
+async fn migration_v14_defaults_suppress_resolume_en_to_zero() {
+    let pool = create_memory_pool().await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO videos (playlist_id, youtube_id) VALUES (1, 'xyz')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let flag: i64 =
+        sqlx::query_scalar("SELECT suppress_resolume_en FROM videos WHERE youtube_id = 'xyz'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(flag, 0);
 }

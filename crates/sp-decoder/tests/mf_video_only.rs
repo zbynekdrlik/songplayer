@@ -71,3 +71,61 @@ fn decodes_first_nv12_frame() {
         frame.width
     );
 }
+
+/// Seek-to-zero must not throw, and the reader must still return a frame.
+/// Covers the regression introduced by commit 5977a9d where using
+/// `windows::core::PROPVARIANT::from(i64)` in the seek impl broke later
+/// `ReadSample` calls under release-mode LTO.
+#[test]
+fn seek_zero_then_next_frame_succeeds() {
+    let mut reader = MediaFoundationVideoReader::open(&fixture()).expect("open should succeed");
+    reader
+        .seek(0)
+        .expect("seek(0) must succeed on a seekable file");
+    let frame = reader
+        .next_frame()
+        .expect("next_frame must succeed after seek")
+        .expect("first frame should exist after seek(0)");
+    assert!(!frame.data.is_empty(), "frame must have pixel data");
+}
+
+/// Mid-point seek does not error and still yields a frame.
+/// We do NOT assert on the returned timestamp: MF snaps to the nearest
+/// prior keyframe, and the 3-second `black_3s.mp4` fixture was generated
+/// with only a single keyframe at ts=0 (see `tests/fixtures/regen.sh`).
+/// A production movie has keyframes every 1-2 s so the returned frame
+/// would land near the target, but the test must pass on the fixture.
+#[test]
+fn seek_midpoint_does_not_error_and_returns_frame() {
+    let mut reader = MediaFoundationVideoReader::open(&fixture()).expect("open should succeed");
+    let dur = reader.duration_ms();
+    assert!(dur >= 1_000, "fixture must be long enough to seek");
+    let target_ms = dur / 2;
+    reader.seek(target_ms).expect("seek must succeed");
+    let frame = reader
+        .next_frame()
+        .expect("next_frame after seek must succeed")
+        .expect("a frame must exist after seek");
+    assert!(!frame.data.is_empty(), "frame must have pixel data");
+}
+
+/// Regression gate: after a seek on one reader, an INDEPENDENT new reader
+/// must still decode frames. This was the exact failure mode observed on
+/// 2026-04-22 (commit 5977a9d) — any seek call left MF in a state where
+/// later `MediaFoundationVideoReader::open` succeeded but `next_frame`
+/// returned EOS immediately (frame_count=0 for every new song).
+#[test]
+fn seek_on_one_reader_does_not_break_next_reader() {
+    {
+        let mut r1 = MediaFoundationVideoReader::open(&fixture()).expect("open r1");
+        // Deliberately exercise seek so any global-state corruption triggers.
+        r1.seek(500).expect("seek r1");
+    } // r1 dropped
+
+    let mut r2 = MediaFoundationVideoReader::open(&fixture()).expect("open r2");
+    let frame = r2
+        .next_frame()
+        .expect("next_frame on fresh reader must not error")
+        .expect("fresh reader must yield a frame, not EOS");
+    assert!(!frame.data.is_empty());
+}

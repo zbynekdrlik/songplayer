@@ -59,6 +59,7 @@ async fn handle_play_video_updates_current_position_on_custom_playlist() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
@@ -114,6 +115,7 @@ async fn handle_play_video_with_unknown_video_is_noop() {
         None,
         resolume_tx,
         ws_tx,
+        None,
     );
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
