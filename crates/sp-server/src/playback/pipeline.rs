@@ -689,4 +689,45 @@ mod tests {
 
         let _ = event_rx;
     }
+
+    #[test]
+    fn play_command_clears_paused_state() {
+        // Pin: PipelineCommand::Play must reset paused = false BEFORE
+        // entering decode, so a stale Pause cannot leak across video
+        // changes. This test fails red if anyone ever moves the
+        // `paused = false` assignment out of the Play arm in the loop.
+
+        use crossbeam_channel::unbounded;
+        let (cmd_tx, cmd_rx) = unbounded::<PipelineCommand>();
+
+        // Send Pause then Play; capture via the channel.
+        cmd_tx.send(PipelineCommand::Pause).unwrap();
+        cmd_tx
+            .send(PipelineCommand::Play {
+                video: std::path::PathBuf::from("/tmp/dummy_video.mp4"),
+                audio: std::path::PathBuf::from("/tmp/dummy_audio.flac"),
+            })
+            .unwrap();
+
+        // Drive the command loop synchronously up to (but not including)
+        // decode_and_send by reading the source: the Play arm sets
+        // paused=false at the line marked with `paused = false;` BEFORE
+        // calling decode_and_send. This test asserts that ordering by
+        // matching against the source.
+        //
+        // Static check via include_str! — fails if the line moves.
+        let src = include_str!("pipeline.rs");
+        let play_arm_start = src
+            .find("Ok(PipelineCommand::Play {")
+            .expect("Play arm must exist");
+        let decode_call = src[play_arm_start..]
+            .find("decode_and_send(")
+            .expect("Play arm must call decode_and_send");
+        let play_block = &src[play_arm_start..play_arm_start + decode_call];
+        assert!(
+            play_block.contains("paused = false"),
+            "PipelineCommand::Play must clear paused = false BEFORE decode_and_send. \
+             Current Play arm:\n{play_block}"
+        );
+    }
 }
