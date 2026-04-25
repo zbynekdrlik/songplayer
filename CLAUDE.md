@@ -308,3 +308,46 @@ SongPlayer is the Rust replacement for the legacy Python OBS YouTube Player at `
 | ytfast | PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U | ytfast | SP-fast |
 
 **Coexistence strategy:** Create NEW `sp-*` scenes in OBS with NDI sources from SongPlayer. Do NOT modify existing `yt*` scenes — legacy scripts remain active until SongPlayer is verified working identically.
+
+## CI architecture
+
+The CI pipeline (`.github/workflows/ci.yml`) gates every push to `dev`
+and `main`, plus every PR to `main`. Steady-state runtime on cache hit
+is ~17 minutes for a dev push (after the 2026-04-25 lyrics-quality
+removal).
+
+**Critical path (a dev push):**
+
+```
+parallel ubuntu checks (≤56s)
+  → Build WASM (~1:40)
+    → Build Tauri (~9:50)             ← release compile of sp-server
+      → Gate (2s)
+        → Deploy win-resolume (~2:15)
+          → E2E win-resolume (~3:00)
+TOTAL ≈ 17 min
+```
+
+`Build Tauri` dominates because `src-tauri` is excluded from the
+workspace and uses cargo's default release profile (codegen-units=16,
+no LTO) — already maximally parallel for the Windows runner. Cache
+(`Swatinem/rust-cache@v2`) is in place and hits reliably; the time is
+genuine release optimization of sp-server's dependency graph.
+
+**Hard rules:**
+
+- **No sleep-based CI jobs.** Any job whose runtime is dominated by
+  `sleep` / `Start-Sleep` / `time.sleep` is forbidden. If a soak window
+  is needed for trend analysis, it goes into a scheduled workflow
+  (cron), not the post-deploy critical path. Cron-scheduled jobs do
+  not gate dev pushes.
+
+- **Self-reported metrics are not quality gates.** A pipeline reporting
+  its own `confidence` is not a quality signal. Real quality gates
+  compare against ground truth (hand-verified fixtures, known-correct
+  reference data, or human-perceptible behaviour exercised end-to-end
+  via Playwright on the deployed target).
+
+- **`measure_lyrics_quality.py`** stays installed on win-resolume at
+  `C:\ProgramData\SongPlayer\cache\tools\measure_lyrics_quality.py` as
+  an ad-hoc trend tool. It is no longer wired into CI.
