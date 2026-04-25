@@ -269,6 +269,13 @@ impl Orchestrator {
 /// Keeping the gate this lenient: real alignments on 60+ lines routinely
 /// produce 30+ distinct durations; anything under 9 uniques is a smell
 /// regardless of content.
+///
+/// Known false-positive class: chant-heavy worship songs whose chorus is
+/// genuinely a uniform-cadence repeat (e.g. WOMP WOMP — 142 lines, 15
+/// uniques, real chant is ~50 of those lines at ~1.5 s each). Issue #52
+/// tracks adding `SpotifyLyricsProvider` to short-circuit Gemini for songs
+/// where Spotify already has authoritative LINE_SYNCED timings — that's
+/// the right fix, not loosening this gate.
 fn duration_histogram_ok(lines: &[LineTiming]) -> bool {
     if lines.len() < 20 {
         return true;
