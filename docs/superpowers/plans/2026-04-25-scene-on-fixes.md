@@ -34,63 +34,98 @@
 
 - [ ] **Step 1: Read existing scaffolding**
 
-Read `crates/sp-server/src/playback/tests_scene_change.rs` end-to-end. Note how the existing tests build a `PlaybackEngine` with mock channels and observe the `resolume_rx` for `ResolumeCommand` traffic. Use the same builder pattern.
+Read `crates/sp-server/src/playback/tests_scene_change.rs` end-to-end. The existing two tests use inline `SqlitePool::connect("sqlite::memory:")` setup and skip migrations because they only call `ensure_pipeline` (no DB rows). The new test below needs migrations + a `playlists` parent row + a `videos` row, so it uses the project-standard migration helpers `crate::db::create_memory_pool` + `crate::db::run_migrations`.
 
 - [ ] **Step 2: Write the failing test**
 
 Append to `crates/sp-server/src/playback/tests_scene_change.rs`:
 
 ```rust
+/// #45 — when a scene becomes program for a pipeline that is already in
+/// `Playing` state (off-program), `handle_scene_change` MUST re-push the
+/// title to Resolume so the wall doesn't keep showing the previous song.
+/// The 1.5s post-Started title-show task aborted itself with "title
+/// suppressed — off program"; nothing else re-pushes title without this fix.
 #[tokio::test]
 async fn scene_go_on_refreshes_title_for_already_playing() {
-    use crate::resolume::ResolumeCommand;
+    use std::sync::atomic::Ordering;
 
-    let (engine_setup, mut resolume_rx, _obs_rx) = build_test_engine().await;
-    let (mut engine, playlist_id, video_id) = engine_setup;
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
 
-    // Insert a video row so get_video_title_info can resolve song/artist.
+    // Parent playlist row (FK target for videos.playlist_id).
     sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, position, normalized) \
-         VALUES (?, ?, 'abc123', 'Test Song', 'Test Artist', 0, 1)",
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'test', 'https://example.com/p', 'SP-fast', 1)",
     )
-    .bind(video_id)
-    .bind(playlist_id)
-    .execute(&engine.pool)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Video row that get_video_title_info will resolve.
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
+         VALUES (42, 7, 'abc123', 'Test Song', 'Test Artist', 1)",
+    )
+    .execute(&pool)
     .await
     .unwrap();
 
-    // Force pipeline into Playing state with scene_active=false.
-    if let Some(pp) = engine.pipelines.get_mut(&playlist_id) {
-        pp.state = PlayState::Playing { video_id };
+    let (obs_tx, _obs_rx) = broadcast::channel(16);
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+    );
+
+    engine.ensure_pipeline(7, "SP-fast");
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.state = PlayState::Playing { video_id: 42 };
         pp.scene_active.store(false, Ordering::Release);
     }
 
     // Drain any residual messages from setup.
     while resolume_rx.try_recv().is_ok() {}
 
-    // Trigger scene becoming program.
-    engine.handle_scene_change(playlist_id, true).await;
+    // Scene becomes program.
+    engine.handle_scene_change(7, true).await;
 
-    // Expect a ShowTitle on resolume_rx within a short window.
-    let cmd = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        resolume_rx.recv(),
-    )
-    .await
-    .expect("ShowTitle should arrive within 500ms")
-    .expect("channel should not be closed");
-
-    match cmd {
-        ResolumeCommand::ShowTitle { song, artist } => {
-            assert_eq!(song, "Test Song");
-            assert_eq!(artist, "Test Artist");
+    // Collect every ResolumeCommand emitted during the call (the helper
+    // pushes ShowTitle but earlier scene-state code might also emit other
+    // messages — we look for the ShowTitle specifically).
+    let mut cmds: Vec<crate::resolume::ResolumeCommand> = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(50), resolume_rx.recv()).await
+        {
+            Ok(Some(cmd)) => cmds.push(cmd),
+            Ok(None) => break,
+            Err(_) => {
+                if !cmds.is_empty() {
+                    break;
+                }
+            }
         }
-        other => panic!("expected ShowTitle, got {other:?}"),
     }
+
+    let show_title = cmds.iter().find_map(|c| match c {
+        crate::resolume::ResolumeCommand::ShowTitle { song, artist } => {
+            Some((song.clone(), artist.clone()))
+        }
+        _ => None,
+    });
+    assert_eq!(
+        show_title,
+        Some(("Test Song".into(), "Test Artist".into())),
+        "scene-go-on for an already-Playing pipeline MUST re-push ShowTitle. Got: {cmds:?}"
+    );
 }
 ```
-
-If `build_test_engine` does not exist, refactor an existing helper out of one of the existing tests in the file (lift the inline setup into a helper, then both old and new tests share it). The refactor stays inside `tests_scene_change.rs` — do not touch any other file in this step.
 
 - [ ] **Step 3: Confirm formatting**
 
