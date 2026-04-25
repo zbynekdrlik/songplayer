@@ -210,7 +210,18 @@ impl MediaStream for MediaFoundationVideoReader {
         // the release-mode LTO path clean (prior retry of this fix left
         // MF in a state where `ReadSample` returned EOS immediately on
         // fresh decoders — see the 2026-04-22 worship-training deploy).
-        let position_100ns: i64 = (position_ms as i64).saturating_mul(10_000);
+        // u64 → i64 → checked × 10_000. Overflow is theoretical (i64 range is
+        // ~290 years in milliseconds; playback positions are minutes-to-hours)
+        // but the explicit guards surface a clean Seek error rather than silently
+        // wrapping to a negative position that MF would reject mid-decode.
+        let position_signed = i64::try_from(position_ms).map_err(|_| {
+            DecoderError::Seek(format!("position_ms {position_ms} exceeds i64::MAX"))
+        })?;
+        let position_100ns: i64 = position_signed.checked_mul(10_000).ok_or_else(|| {
+            DecoderError::Seek(format!(
+                "position_ms {position_ms} ms × 10_000 overflows i64 (100-ns units)"
+            ))
+        })?;
         const VT_I8: u16 = 20;
         let mut raw: [u64; 3] = [0; 3]; // 24 bytes, 8-byte aligned for i64
         let raw_ptr = raw.as_mut_ptr().cast::<u8>();
