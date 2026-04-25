@@ -103,3 +103,87 @@ async fn handle_scene_change_off_noop_when_already_off_program() {
          Got: {cmds:?}"
     );
 }
+
+/// #45 — when a scene becomes program for a pipeline that is already in
+/// `Playing` state (off-program), `handle_scene_change` MUST re-push the
+/// title to Resolume so the wall doesn't keep showing the previous song.
+/// The 1.5s post-Started title-show task aborted itself with "title
+/// suppressed — off program"; nothing else re-pushes title without this fix.
+#[tokio::test]
+async fn scene_go_on_refreshes_title_for_already_playing() {
+    use std::sync::atomic::Ordering;
+
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    // Parent playlist row (FK target for videos.playlist_id).
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'test', 'https://example.com/p', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Video row that get_video_title_info will resolve.
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
+         VALUES (42, 7, 'abc123', 'Test Song', 'Test Artist', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _obs_rx) = broadcast::channel(16);
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+    );
+
+    engine.ensure_pipeline(7, "SP-fast");
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.state = PlayState::Playing { video_id: 42 };
+        pp.scene_active.store(false, Ordering::Release);
+    }
+
+    // Drain any residual messages from setup.
+    while resolume_rx.try_recv().is_ok() {}
+
+    // Scene becomes program.
+    engine.handle_scene_change(7, true).await;
+
+    // Collect every ResolumeCommand emitted during the call (the helper
+    // pushes ShowTitle but earlier scene-state code might also emit other
+    // messages — we look for the ShowTitle specifically).
+    let mut cmds: Vec<crate::resolume::ResolumeCommand> = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(50), resolume_rx.recv()).await {
+            Ok(Some(cmd)) => cmds.push(cmd),
+            Ok(None) => break,
+            Err(_) => {
+                if !cmds.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
+    let show_title = cmds.iter().find_map(|c| match c {
+        crate::resolume::ResolumeCommand::ShowTitle { song, artist } => {
+            Some((song.clone(), artist.clone()))
+        }
+        _ => None,
+    });
+    assert_eq!(
+        show_title,
+        Some(("Test Song".into(), "Test Artist".into())),
+        "scene-go-on for an already-Playing pipeline MUST re-push ShowTitle. Got: {cmds:?}"
+    );
+}
