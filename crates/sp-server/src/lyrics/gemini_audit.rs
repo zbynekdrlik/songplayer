@@ -25,9 +25,37 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+
+/// Context carried from the caller through `GeminiClient::post_with_retries`
+/// to this audit logger. `cache_dir = None` disables audit writing entirely —
+/// used by wiremock unit tests that don't want to touch the filesystem, and
+/// as a placeholder for translator calls that haven't been wired up yet.
+#[derive(Debug, Clone)]
+pub struct AuditCtx {
+    pub cache_dir: Option<PathBuf>,
+    pub video_id: Option<String>,
+    pub chunk_idx: Option<u32>,
+    pub key_idx: usize,
+}
+
+impl AuditCtx {
+    /// Sentinel context that disables audit writes (`cache_dir = None`). Used
+    /// by tests + any production path that hasn't yet been wired with audit
+    /// metadata. `Default` was previously derived but a forgotten field
+    /// assignment would silently audit "as key 0" — making the no-audit case
+    /// explicit forces callers to opt in by name.
+    pub fn no_audit() -> Self {
+        Self {
+            cache_dir: None,
+            video_id: None,
+            chunk_idx: None,
+            key_idx: 0,
+        }
+    }
+}
 
 /// One row in the audit log. All `Option` fields cope with missing information
 /// (e.g. `total_tokens = None` when `usageMetadata` was absent from the response,

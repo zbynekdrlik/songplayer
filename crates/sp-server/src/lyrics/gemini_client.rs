@@ -30,7 +30,7 @@ use anyhow::{Context, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_THINKING_BUDGET: i32 = 2048;
@@ -78,33 +78,10 @@ pub struct TokenUsage {
     pub total: u32,
 }
 
-/// Context carried from the caller through `post_with_retries` to the audit
-/// logger. `cache_dir = None` disables audit writing entirely — used by
-/// wiremock unit tests that don't want to touch the filesystem, and as a
-/// placeholder for translator calls that haven't been wired up yet.
-#[derive(Debug, Clone)]
-pub struct AuditCtx {
-    pub cache_dir: Option<PathBuf>,
-    pub video_id: Option<String>,
-    pub chunk_idx: Option<u32>,
-    pub key_idx: usize,
-}
-
-impl AuditCtx {
-    /// Sentinel context that disables audit writes (`cache_dir = None`). Used
-    /// by tests + any production path that hasn't yet been wired with audit
-    /// metadata. `Default` was previously derived but a forgotten field
-    /// assignment would silently audit "as key 0" — making the no-audit case
-    /// explicit forces callers to opt in by name.
-    pub fn no_audit() -> Self {
-        Self {
-            cache_dir: None,
-            video_id: None,
-            chunk_idx: None,
-            key_idx: 0,
-        }
-    }
-}
+// `AuditCtx` lives in `gemini_audit` — re-exported here so existing
+// `use crate::lyrics::gemini_client::AuditCtx;` imports keep compiling.
+// Moved out of this module to keep the file under the 1000-line cap.
+pub use crate::lyrics::gemini_audit::AuditCtx;
 
 impl GeminiClient {
     /// Direct-API client. Calls `https://generativelanguage.googleapis.com` with
