@@ -280,6 +280,13 @@ fn run_loop_windows(
             }
 
             Ok(PipelineCommand::Play { video, audio }) => {
+                info!(
+                    playlist_id,
+                    prev_paused = paused,
+                    ?video,
+                    ?audio,
+                    "pipeline: Play received (paused -> false)"
+                );
                 // Inner loop: decode current song; on NewPlay, restart decode
                 // with the new pair. Breaks out to outer loop on Ended/Stopped/
                 // Error; returns true on Shutdown.
@@ -343,12 +350,20 @@ fn run_loop_windows(
             }
 
             Ok(PipelineCommand::Pause) => {
+                info!(
+                    playlist_id,
+                    prev_paused = paused,
+                    "pipeline: Pause (paused -> true)"
+                );
                 paused = true;
-                debug!(playlist_id, "paused (no active playback)");
             }
             Ok(PipelineCommand::Resume) => {
+                info!(
+                    playlist_id,
+                    prev_paused = paused,
+                    "pipeline: Resume (paused -> false)"
+                );
                 paused = false;
-                debug!(playlist_id, "resumed (no active playback)");
             }
             Ok(PipelineCommand::Seek { position_ms }) => {
                 // Seek is a no-op when no song is loaded. When loaded, forward
