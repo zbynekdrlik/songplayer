@@ -525,7 +525,7 @@ mod tests {
         let wav = NamedTempFile::new().unwrap();
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
-        let audit = AuditCtx::default();
+        let audit = AuditCtx::no_audit();
         let result = transcribe_rotating(&clients, &idx, "hi", wav.path(), &audit).await;
         assert!(result.is_ok(), "rotation must succeed, got {result:?}");
         assert!(result.unwrap().contains("hello"));
@@ -563,7 +563,7 @@ mod tests {
         let wav = NamedTempFile::new().unwrap();
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
-        let audit = AuditCtx::default();
+        let audit = AuditCtx::no_audit();
         let result = transcribe_rotating(&clients, &idx, "hi", wav.path(), &audit).await;
         assert!(result.is_err(), "all-429 must fail");
     }
@@ -597,7 +597,7 @@ mod tests {
         let wav = NamedTempFile::new().unwrap();
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
-        let audit = AuditCtx::default();
+        let audit = AuditCtx::no_audit();
         let result = transcribe_rotating(&clients, &idx, "hi", wav.path(), &audit).await;
         assert!(result.is_err(), "500 must propagate");
         assert!(
@@ -648,7 +648,7 @@ mod tests {
         std::fs::write(wav.path(), b"fake-wav").unwrap();
 
         // First chunk: 0→429 on K1, rotate → K2 → 200. idx sticks to 1.
-        let audit = AuditCtx::default();
+        let audit = AuditCtx::no_audit();
         let r1 = transcribe_rotating(&clients, &idx, "c1", wav.path(), &audit).await;
         assert!(r1.is_ok());
         assert_eq!(idx.load(Ordering::Relaxed), 1);
@@ -664,7 +664,7 @@ mod tests {
         use tempfile::NamedTempFile;
         let idx = AtomicUsize::new(0);
         let wav = NamedTempFile::new().unwrap();
-        let audit = AuditCtx::default();
+        let audit = AuditCtx::no_audit();
         let result = transcribe_rotating(&[], &idx, "x", wav.path(), &audit).await;
         assert!(result.is_err());
     }
