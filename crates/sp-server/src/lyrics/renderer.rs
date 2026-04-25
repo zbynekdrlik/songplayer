@@ -64,19 +64,10 @@ impl LyricsState {
         }
     }
 
-    /// Construct a state with a per-song offset applied to every render
-    /// lookup. See `offset_ms` field docstring. Uses the default lead.
-    pub fn with_offset(track: LyricsTrack, offset_ms: i64) -> Self {
-        Self {
-            track,
-            lead_ms: DEFAULT_LYRICS_LEAD_MS,
-            offset_ms,
-        }
-    }
-
     /// Construct a state with an explicit lead AND per-song offset — used
     /// when the operator has set `lyrics_lead_ms` in DB settings to
-    /// something other than the default 1000 ms.
+    /// something other than the default 1000 ms. For default-lead callers,
+    /// pass `DEFAULT_LYRICS_LEAD_MS` explicitly.
     pub fn with_lead_and_offset(track: LyricsTrack, lead_ms: u64, offset_ms: i64) -> Self {
         Self {
             track,
@@ -470,7 +461,7 @@ mod tests {
                 words: None,
             }],
         };
-        let st = LyricsState::with_offset(track, 500);
+        let st = LyricsState::with_lead_and_offset(track, DEFAULT_LYRICS_LEAD_MS, 500);
         assert!(
             st.presenter_lines(0).is_none(),
             "positive offset must delay — lookup 0+1000-500=500 is before line start 1000"
@@ -501,20 +492,20 @@ mod tests {
         // Without offset: 200 + 1000 = 1200 → before line start 2000 → None.
         // With offset -500: 200 + 1000 - (-500) = 1700 → still before 2000 → None.
         // With offset -1500: 200 + 1000 - (-1500) = 2700 → inside line → Some.
-        let st = LyricsState::with_offset(track, -1_500);
+        let st = LyricsState::with_lead_and_offset(track, DEFAULT_LYRICS_LEAD_MS, -1_500);
         let (cur, _nxt) = st
             .presenter_lines(200)
             .expect("negative offset must advance lookup onto the line");
         assert_eq!(cur, "Advanced line");
     }
 
-    /// With offset 0, `LyricsState::with_offset` must behave identically to
-    /// `LyricsState::new`. Kills any mutant that folds the offset branch
-    /// into a different path when offset == 0.
+    /// With offset 0 + default lead, `LyricsState::with_lead_and_offset`
+    /// must behave identically to `LyricsState::new`. Kills any mutant that
+    /// folds the offset branch into a different path when offset == 0.
     #[test]
     fn offset_zero_behaves_identically_to_no_offset() {
         let st_new = LyricsState::new(test_track());
-        let st_off = LyricsState::with_offset(test_track(), 0);
+        let st_off = LyricsState::with_lead_and_offset(test_track(), DEFAULT_LYRICS_LEAD_MS, 0);
         for pos in [0u64, 500, 1500, 3200, 4500] {
             assert_eq!(
                 st_new.presenter_lines(pos),
