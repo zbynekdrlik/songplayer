@@ -332,7 +332,7 @@ async fn connect_and_run(
                         let req_id = uuid::Uuid::new_v4().to_string();
                         let req = text::set_text_request(&req_id, &source_name, &text);
                         write.send(Message::Text(req.to_string().into())).await?;
-                        debug!(source_name, "sent SetTextSource to OBS");
+                        info!(source_name, "sent SetTextSource to OBS");
                     }
                 }
             }

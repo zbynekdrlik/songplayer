@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::resolume::TITLE_TOKEN;
 use crate::resolume::driver::{ClipInfo, HostDriver};
@@ -86,7 +86,7 @@ pub async fn show_title(
     let driver_ref: &HostDriver = driver;
 
     set_text_all(driver_ref, &clips, &text).await?;
-    debug!(
+    info!(
         token = TITLE_TOKEN,
         count = clips.len(),
         %text,
@@ -101,7 +101,7 @@ pub async fn show_title(
         tokio::time::sleep(step_delay).await;
     }
 
-    debug!(
+    info!(
         token = TITLE_TOKEN,
         count = clips.len(),
         "title fade-in complete"
@@ -132,7 +132,7 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
 
     set_text_all(driver_ref, &clips, "").await?;
 
-    debug!(
+    info!(
         token = TITLE_TOKEN,
         count = clips.len(),
         "title fade-out complete"
