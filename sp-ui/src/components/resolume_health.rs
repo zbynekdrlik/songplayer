@@ -39,7 +39,7 @@ impl HostHealth {
         let missing: Vec<&str> = self
             .clips_by_token
             .iter()
-            .filter(|(_, &n)| n == 0)
+            .filter(|(_, n)| **n == 0)
             .map(|(k, _)| k.as_str())
             .collect();
         if !missing.is_empty() {
