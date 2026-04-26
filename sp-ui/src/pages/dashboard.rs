@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use sp_core::models::Playlist;
 
 use crate::api;
-use crate::components::{download_queue, obs_status, playlist_card, resolume_health};
+use crate::components::{download_queue, ndi_health, obs_status, playlist_card, resolume_health};
 use crate::store::DashboardStore;
 
 #[component]
@@ -26,6 +26,7 @@ pub fn DashboardPage() -> impl IntoView {
                 <h1>"Playlists"</h1>
                 <obs_status::ObsStatus />
                 <resolume_health::ResolumeHealthCard />
+                <ndi_health::NdiHealthCard />
             </div>
 
             <div class="error-banner">
