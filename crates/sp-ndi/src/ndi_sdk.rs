@@ -29,6 +29,7 @@ type FnSendAudioV3 =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *const NDIlib_audio_frame_v3_t);
 type FnSendGetTally =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *mut NDIlib_tally_t, u32) -> bool;
+type FnSendGetNoConnections = unsafe extern "C" fn(*mut NDIlib_send_instance_t, u32) -> i32;
 
 // ---------------------------------------------------------------------------
 // NdiLib — owns the library handle and resolved function pointers
@@ -50,6 +51,7 @@ pub struct NdiLib {
     pub(crate) send_send_video_async_v2: FnSendVideoAsyncV2,
     pub(crate) send_send_audio_v3: FnSendAudioV3,
     pub(crate) send_get_tally: FnSendGetTally,
+    pub(crate) send_get_no_connections: FnSendGetNoConnections,
 }
 
 // SAFETY: The function pointers are loaded from a shared library and are
@@ -88,6 +90,10 @@ impl NdiLib {
                 Self::resolve::<FnSendAudioV3>(&library, b"NDIlib_send_send_audio_v3\0")?;
             let send_get_tally =
                 Self::resolve::<FnSendGetTally>(&library, b"NDIlib_send_get_tally\0")?;
+            let send_get_no_connections = Self::resolve::<FnSendGetNoConnections>(
+                &library,
+                b"NDIlib_send_get_no_connections\0",
+            )?;
 
             // Call NDIlib_initialize — required before any other NDI call.
             info!("Calling NDIlib_initialize()");
@@ -107,6 +113,7 @@ impl NdiLib {
                 send_send_video_async_v2,
                 send_send_audio_v3,
                 send_get_tally,
+                send_get_no_connections,
             })
         }
     }
