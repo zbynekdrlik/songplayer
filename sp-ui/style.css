@@ -841,3 +841,45 @@ body {
     flex: 1 1 45%;
   }
 }
+
+/* ---- Resolume health card ---- */
+
+.resolume-health-card {
+    margin-left: 16px;
+}
+
+.resolume-health-card h3 {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+}
+
+.rh-host {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 2px;
+}
+
+.rh-yellow { background: var(--warning); }
+
+.rh-ts {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+}
+
+.rh-tokens {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.rh-token {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+
+.rh-zero {
+    color: var(--warning);
+}

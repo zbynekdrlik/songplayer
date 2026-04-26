@@ -12,6 +12,7 @@ pub mod now_playing_card;
 pub mod obs_status;
 pub mod playback_controls;
 pub mod playlist_card;
+pub mod resolume_health;
 pub mod resolume_hosts;
 pub mod settings_form;
 pub mod video_list;
