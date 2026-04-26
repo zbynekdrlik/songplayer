@@ -190,3 +190,69 @@ async fn started_event_unconditionally_resets_lyrics_state() {
         "Started with has_lyrics=0 must set lyrics_state=None, not preserve stale state"
     );
 }
+
+/// Regression: Started event with malformed lyrics JSON on disk MUST set
+/// lyrics_state=None and warn — not panic, not preserve stale state.
+/// Covers the Err(e) branch of load_lyrics_for_video.
+#[tokio::test]
+async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // has_lyrics=1 forces the loader to attempt the disk read; the malformed
+    // JSON below makes serde_json::from_str fail → Err branch.
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, has_lyrics, normalized) \
+         VALUES (1, 7, 'malformed_id', 'Song', 'Artist', 1, 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(
+        cache_dir.path().join("malformed_id_lyrics.json"),
+        b"{ this is not valid JSON }",
+    )
+    .await
+    .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        cache_dir.path().to_path_buf(),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+    );
+    engine.ensure_pipeline(7, "SP-fast");
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.current_video_id = Some(1);
+    }
+
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::Started {
+                duration_ms: 60_000,
+            },
+        )
+        .await;
+
+    let pp = engine.pipelines.get(&7).unwrap();
+    assert!(
+        pp.lyrics_state.is_none(),
+        "Started with malformed lyrics JSON must set lyrics_state=None, not panic or preserve stale state"
+    );
+}

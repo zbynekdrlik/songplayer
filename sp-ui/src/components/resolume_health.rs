@@ -20,9 +20,18 @@ pub struct HostHealth {
 pub fn ResolumeHealthCard() -> impl IntoView {
     let snapshot = RwSignal::new(Vec::<HostHealth>::new());
 
+    // Cancellation flag the poll loop checks each iteration. Flipped to
+    // true when the component unmounts so the spawn_local task exits
+    // instead of running for the lifetime of the wasm runtime.
+    let cancelled = RwSignal::new(false);
+    on_cleanup(move || cancelled.set(true));
+
     let _poll = Effect::new(move |_| {
         leptos::task::spawn_local(async move {
             loop {
+                if cancelled.get_untracked() {
+                    break;
+                }
                 if let Ok(data) =
                     crate::api::get::<Vec<HostHealth>>("/api/v1/resolume/health").await
                 {

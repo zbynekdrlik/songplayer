@@ -98,8 +98,10 @@ struct PlaylistPipeline {
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
-    /// Last reported playback position (ms). Updated on every Position event;
-    /// used by handle_resolume_recovery to re-push the current subtitle line.
+    /// Last reported playback position (ms). Updated on every Position event
+    /// (~500 ms throttle); used by handle_resolume_recovery to re-push the
+    /// current subtitle line. The re-push line may be up to one Position
+    /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
 }
 
