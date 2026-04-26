@@ -7,6 +7,7 @@
 mod lyrics_loader;
 pub mod pipeline;
 mod position_update;
+mod recovery;
 pub mod state;
 pub mod submitter;
 mod title;
@@ -97,6 +98,9 @@ struct PlaylistPipeline {
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
+    /// Last reported playback position (ms). Updated on every Position event;
+    /// used by handle_resolume_recovery to re-push the current subtitle line.
+    cached_position_ms: u64,
 }
 
 impl PlaylistPipeline {
@@ -213,6 +217,7 @@ impl PlaybackEngine {
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
                 last_presenter_text: None,
+                cached_position_ms: 0,
             }
         });
     }
@@ -501,6 +506,9 @@ impl PlaybackEngine {
                 // position. Title hide is timer-based (spawned in the
                 // Started handler above) so no position-driven hide work
                 // happens here.
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.cached_position_ms = *position_ms;
+                }
                 self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {
