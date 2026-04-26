@@ -916,3 +916,42 @@ async fn resolume_health_endpoint_returns_array() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(v.is_array(), "response must be a JSON array");
 }
+
+/// Verifies the endpoint returns the registered hosts (not an empty Vec).
+/// Kills the `get_resolume_health -> Json::from(vec![])` mutant.
+#[tokio::test]
+async fn resolume_health_endpoint_returns_registered_hosts() {
+    let mut state = test_state().await;
+    // Replace the empty Arc<ResolumeRegistry> with a populated one.
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+    let mut registry = crate::resolume::ResolumeRegistry::new();
+    registry.add_host(1, "10.0.0.99".to_string(), 8090, shutdown_tx.subscribe());
+    state.resolume_registry = Arc::new(registry);
+
+    let app = app(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/resolume/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = v.as_array().expect("response must be a JSON array");
+    assert_eq!(arr.len(), 1, "response should contain exactly one host");
+    assert_eq!(
+        arr[0]["host"].as_str(),
+        Some("10.0.0.99"),
+        "response must carry the registered host name"
+    );
+
+    let _ = shutdown_tx.send(());
+}

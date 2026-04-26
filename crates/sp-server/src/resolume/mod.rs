@@ -279,6 +279,37 @@ mod tests {
         let _ = shutdown_tx.send(());
     }
 
+    /// Verifies health_snapshots returns ALL registered hosts' snapshots
+    /// (not an empty Vec). Kills the `health_snapshots -> vec![]` mutant.
+    #[tokio::test]
+    async fn health_snapshots_returns_all_registered_hosts() {
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let mut registry = ResolumeRegistry::new();
+
+        let empty = registry.health_snapshots();
+        assert_eq!(empty.len(), 0, "empty registry should yield zero snapshots");
+
+        registry.add_host(1, "10.0.0.1".to_string(), 8080, shutdown_tx.subscribe());
+        let one = registry.health_snapshots();
+        assert_eq!(one.len(), 1, "one host should yield one snapshot");
+        assert_eq!(
+            one[0].host, "10.0.0.1",
+            "snapshot must carry the registered host name"
+        );
+
+        registry.add_host(2, "10.0.0.2".to_string(), 8081, shutdown_tx.subscribe());
+        let two = registry.health_snapshots();
+        let mut hosts: Vec<String> = two.iter().map(|s| s.host.clone()).collect();
+        hosts.sort();
+        assert_eq!(
+            hosts,
+            vec!["10.0.0.1".to_string(), "10.0.0.2".to_string()],
+            "two hosts should yield both names in the snapshot"
+        );
+
+        let _ = shutdown_tx.send(());
+    }
+
     #[test]
     fn subs_next_token_matches_agreed_clip_name() {
         assert_eq!(super::SUBS_NEXT_TOKEN, "#sp-subs-next");

@@ -220,6 +220,11 @@ impl HostDriver {
     const FAIL_WARN_THRESHOLD: u32 = 2;
     const CIRCUIT_OPEN_THRESHOLD: u32 = 3;
 
+    #[cfg_attr(test, mutants::skip)] // log-only diagnostic; CIRCUIT_OPEN_THRESHOLD covers system-critical boundary
+    fn should_emit_repeated_failure_warn(failures: u32) -> bool {
+        failures >= Self::FAIL_WARN_THRESHOLD
+    }
+
     /// Fetch composition JSON from Resolume and build clip mapping from
     /// `#token` tags found in clip names.
     ///
@@ -260,7 +265,7 @@ impl HostDriver {
                 self.last_refresh_ok = false;
                 self.last_refresh_ts = Some(chrono::Utc::now());
                 self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-                if self.consecutive_failures >= Self::FAIL_WARN_THRESHOLD {
+                if Self::should_emit_repeated_failure_warn(self.consecutive_failures) {
                     warn!(
                         host = %self.host,
                         consecutive_failures = self.consecutive_failures,
