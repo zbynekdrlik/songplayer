@@ -842,44 +842,30 @@ body {
   }
 }
 
-/* ---- Resolume health card ---- */
+/* ---- Resolume health alert (only rendered when a host has a problem) ---- */
 
-.resolume-health-card {
+.resolume-health-alert {
     margin-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
-.resolume-health-card h3 {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-}
-
-.rh-host {
+.rh-alert {
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: 0.85rem;
-    margin-bottom: 2px;
-}
-
-.rh-yellow { background: var(--warning); }
-
-.rh-ts {
-    color: var(--text-dim);
-    font-size: 0.75rem;
-}
-
-.rh-tokens {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-
-.rh-token {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-}
-
-.rh-zero {
     color: var(--warning);
+    padding: 4px 8px;
+    border-left: 3px solid var(--warning);
+    background: rgba(255, 170, 0, 0.08);
+}
+
+.rh-alert-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warning);
+    flex-shrink: 0;
 }

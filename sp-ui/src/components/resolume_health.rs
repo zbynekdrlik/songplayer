@@ -1,5 +1,13 @@
-//! Dashboard card showing Resolume push-chain health per host.
-//! Polls /api/v1/resolume/health every 5s.
+//! Dashboard alert for Resolume push-chain health.
+//!
+//! Quiet by default — renders nothing when every host is healthy.
+//! Surfaces a compact alert only when a real problem exists:
+//! - circuit breaker open, OR
+//! - consecutive refresh failures, OR
+//! - any expected SongPlayer token (`#sp-title`, `#sp-subs`,
+//!   `#sp-subs-next`, `#sp-subssk`) has zero clips in the composition.
+//!
+//! Polls /api/v1/resolume/health every 5 s.
 
 use std::collections::BTreeMap;
 
@@ -14,6 +22,31 @@ pub struct HostHealth {
     pub consecutive_failures: u32,
     pub circuit_breaker_open: bool,
     pub clips_by_token: BTreeMap<String, usize>,
+}
+
+impl HostHealth {
+    /// Short human reason this host is unhealthy, or `None` if healthy.
+    fn problem(&self) -> Option<String> {
+        if self.circuit_breaker_open {
+            return Some("circuit open — Resolume unreachable".into());
+        }
+        if self.consecutive_failures > 0 {
+            return Some(format!(
+                "refresh failing ({} consecutive)",
+                self.consecutive_failures
+            ));
+        }
+        let missing: Vec<&str> = self
+            .clips_by_token
+            .iter()
+            .filter(|(_, &n)| n == 0)
+            .map(|(k, _)| k.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Some(format!("missing clips: {}", missing.join(", ")));
+        }
+        None
+    }
 }
 
 #[component]
@@ -43,52 +76,29 @@ pub fn ResolumeHealthCard() -> impl IntoView {
     });
 
     view! {
-        <div class="resolume-health-card">
-            <h3>"Resolume hosts"</h3>
-            <For
-                each=move || snapshot.get()
-                key=|h| h.host.clone()
-                children=move |host| {
-                    let dot_class = if host.circuit_breaker_open {
-                        "status-dot"
-                    } else if host.consecutive_failures > 0
-                        || host.clips_by_token.values().any(|&v| v == 0)
-                    {
-                        "status-dot rh-yellow"
-                    } else {
-                        "status-dot connected"
-                    };
-                    let ts = host
-                        .last_refresh_ts
-                        .clone()
-                        .unwrap_or_else(|| "never".into());
-                    let tokens: Vec<(String, usize)> =
-                        host.clips_by_token.clone().into_iter().collect();
-                    view! {
-                        <div class="rh-host">
-                            <span class=dot_class></span>
-                            <strong>{host.host.clone()}</strong>
-                            <span class="rh-ts">{ts}</span>
-                            <span class="rh-tokens">
-                                <For
-                                    each=move || tokens.clone()
-                                    key=|(k, _)| k.clone()
-                                    children=move |(token, count)| {
-                                        let cls = if count == 0 {
-                                            "rh-token rh-zero"
-                                        } else {
-                                            "rh-token"
-                                        };
-                                        view! {
-                                            <span class=cls>{format!("{token}={count}")}</span>
-                                        }
-                                    }
-                                />
-                            </span>
-                        </div>
+        <Show when=move || snapshot.get().iter().any(|h| h.problem().is_some()) fallback=|| view! {}>
+            <div class="resolume-health-alert">
+                <For
+                    each=move || {
+                        snapshot
+                            .get()
+                            .into_iter()
+                            .filter_map(|h| h.problem().map(|p| (h.host.clone(), p)))
+                            .collect::<Vec<_>>()
                     }
-                }
-            />
-        </div>
+                    key=|(host, _)| host.clone()
+                    children=move |(host, reason)| {
+                        view! {
+                            <div class="rh-alert">
+                                <span class="rh-alert-dot"></span>
+                                <strong>{format!("Resolume {host}")}</strong>
+                                ": "
+                                {reason}
+                            </div>
+                        }
+                    }
+                />
+            </div>
+        </Show>
     }
 }

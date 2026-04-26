@@ -291,11 +291,24 @@ impl HostDriver {
                 last_refresh_ok: self.last_refresh_ok,
                 consecutive_failures: self.consecutive_failures,
                 circuit_breaker_open: self.circuit_breaker_open,
-                clips_by_token: self
-                    .clip_mapping
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.len()))
-                    .collect(),
+                // Only SongPlayer-relevant tokens. The driver scans the
+                // entire composition for `#`-prefixed names, but operators
+                // have many of their own tokens (#bible-*, #timer,
+                // #translate-*-u-re, etc.) that are noise to this dashboard.
+                clips_by_token: [
+                    crate::resolume::TITLE_TOKEN,
+                    crate::resolume::SUBS_TOKEN,
+                    crate::resolume::SUBS_NEXT_TOKEN,
+                    crate::resolume::SUBS_SK_TOKEN,
+                ]
+                .iter()
+                .map(|t| {
+                    (
+                        (*t).to_string(),
+                        self.clip_mapping.get(*t).map(|v| v.len()).unwrap_or(0),
+                    )
+                })
+                .collect(),
             };
             let _ = tx.send(snapshot);
         }
