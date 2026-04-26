@@ -532,6 +532,10 @@ impl PlaybackEngine {
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
+            PipelineEvent::HealthSnapshot { .. } => {
+                // TODO(Task 5): implement `handle_health_snapshot` and update
+                // the NDI health registry. Stub for now.
+            }
         }
     }
 

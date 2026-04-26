@@ -54,6 +54,27 @@ pub enum PipelineEvent {
     Ended,
     /// An error occurred during playback.
     Error(String),
+    /// Per-pipeline NDI health heartbeat. Emitted every ~5 seconds by the
+    /// pipeline thread when running on Windows; consumed by
+    /// `PlaybackEngine::handle_health_snapshot` (impl in
+    /// `playback/ndi_health.rs`). The pipeline reports its locally-inferred
+    /// state (Idle / Playing / Paused); the engine reconciles it against
+    /// canonical `PlayState` before publishing to the dashboard.
+    HealthSnapshot {
+        connections: i32,
+        frames_submitted_total: u64,
+        frames_submitted_last_5s: u32,
+        observed_fps: f32,
+        nominal_fps: f32,
+        /// `Instant` is fine on the wire here because emitter and consumer
+        /// are in the same process. The engine maps it to `DateTime<Utc>`
+        /// using a fixed `Instant`-to-`SystemTime` reference before
+        /// publishing.
+        last_submit_ts: Option<std::time::Instant>,
+        last_heartbeat_ts: std::time::Instant,
+        consecutive_bad_polls: u32,
+        reported_state: crate::playback::ndi_health::PlaybackStateLabel,
+    },
 }
 
 /// Handle to a background decode-to-NDI pipeline thread.
@@ -562,6 +583,8 @@ fn wait_for_shutdown(cmd_rx: &Receiver<PipelineCommand>, playlist_id: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::playback::ndi_health::PlaybackStateLabel;
+    use std::time::Instant;
 
     #[test]
     fn pipeline_spawn_and_shutdown() {
@@ -734,5 +757,36 @@ mod tests {
             "PipelineCommand::Play must clear `paused = false;` (live statement, not \
              a comment) BEFORE decode_and_send. Current Play arm:\n{play_block}"
         );
+    }
+
+    #[test]
+    fn health_snapshot_variant_constructs_and_clones() {
+        let now = Instant::now();
+        let ev = PipelineEvent::HealthSnapshot {
+            connections: 1,
+            frames_submitted_total: 100,
+            frames_submitted_last_5s: 30,
+            observed_fps: 29.97,
+            nominal_fps: 29.97,
+            last_submit_ts: Some(now),
+            last_heartbeat_ts: now,
+            consecutive_bad_polls: 0,
+            reported_state: PlaybackStateLabel::Playing,
+        };
+        let cloned = ev.clone();
+        // Pattern-match to assert the variant exists and the fields round-trip.
+        if let PipelineEvent::HealthSnapshot {
+            connections,
+            frames_submitted_last_5s,
+            reported_state,
+            ..
+        } = cloned
+        {
+            assert_eq!(connections, 1);
+            assert_eq!(frames_submitted_last_5s, 30);
+            assert_eq!(reported_state, PlaybackStateLabel::Playing);
+        } else {
+            panic!("clone produced wrong variant");
+        }
     }
 }
