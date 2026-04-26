@@ -20,8 +20,8 @@
  *     must detect the NDI source in the scene and start the pipeline.
  *     This catches issue #11 (ndi_sources map was empty).
  *
- *  4. Switching back to a non-sp scene must stop playback and return
- *     the card to "Nothing playing".
+ *  4. Switching back to a non-fast baseline scene must stop ytfast
+ *     playback and return the card to "Nothing playing".
  *
  *  5. Zero console errors or warnings throughout the suite. Catches
  *     issue #8/#9 regressions on the UI side plus anything else that
@@ -38,6 +38,34 @@ const OBS_WS_URL = process.env.OBS_WS_URL || "ws://localhost:4455";
 // `ndi_output_name=SP-fast` and a corresponding OBS scene `sp-fast`.
 const FAST_PLAYLIST_NAME = "ytfast";
 const FAST_SCENE_NAME = "sp-fast";
+
+// Picking the off-program baseline scene was historically `find((s) =>
+// !s.startsWith("sp-"))`, which on win-resolume resolved to a sound-sync
+// QR-code "test" scene that disrupts the wall + LED audience whenever
+// E2E runs against a live machine. Pick another sp-* scene instead —
+// any one that isn't sp-fast (under test) and isn't sp-warmup (also
+// disturbing per operator). Falls back to a non-sp scene only if no
+// alternative sp-* exists. The assertion-of-interest in every test is
+// "ytfast NOT in active_playlist_ids", which holds for any non-sp-fast
+// program scene regardless of whether another sp-* is active.
+const DISALLOWED_BASELINE_SCENES = new Set(["sp-fast", "sp-warmup"]);
+
+function pickBaselineScene(scenes: string[]): string {
+  // Prefer sp-slow specifically — it's a quiet music scene operators
+  // routinely use as a "background" state.
+  if (scenes.includes("sp-slow")) return "sp-slow";
+  // Fall back to any other sp-* that isn't disallowed.
+  const otherSp = scenes.find(
+    (s) => s.startsWith("sp-") && !DISALLOWED_BASELINE_SCENES.has(s),
+  );
+  if (otherSp) return otherSp;
+  // Last resort — non-sp scene. This may be the disruptive QR-code
+  // test scene, but it's better than running a test where the baseline
+  // and the sp-fast probe scene collide.
+  const nonSp = scenes.find((s) => !s.startsWith("sp-"));
+  if (nonSp) return nonSp;
+  return scenes[0];
+}
 
 async function findPlaylistId(request: import("@playwright/test").APIRequestContext, name: string): Promise<number> {
   const resp = await request.get("/api/v1/playlists");
@@ -61,20 +89,33 @@ async function findPlaylistWithVideos(
 
 test.describe("SongPlayer post-deploy feature verification", () => {
   let obs: ObsDriver | null = null;
+  // Captured at suite start, restored at suite end so the wall returns
+  // to whatever the operator was on before CI hijacked OBS.
+  let initialScene: string | null = null;
 
   test.beforeAll(async () => {
     obs = await ObsDriver.connect(OBS_WS_URL);
+    try {
+      initialScene = await obs.currentProgramScene();
+    } catch {
+      initialScene = null;
+    }
   });
 
   test.afterAll(async () => {
     if (obs) {
-      // Put OBS back to a known non-sp scene so subsequent runs start clean.
+      // Restore whatever scene was on program when the suite started.
+      // Avoids leaving the wall on whatever the last test happened to
+      // switch to (especially the QR-code/sync-tone test scene).
       try {
-        const scenes = await obs.listScenes();
-        const fallback = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
-        if (fallback) await obs.switchScene(fallback);
+        if (initialScene) {
+          await obs.switchScene(initialScene);
+        } else {
+          const scenes = await obs.listScenes();
+          await obs.switchScene(pickBaselineScene(scenes));
+        }
       } catch {
-        // ignore
+        // ignore — best-effort restoration
       }
       await obs.disconnect();
     }
@@ -90,12 +131,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   test("clicking the Play button dispatches a 2xx backend request", async ({ page, request }) => {
     const pl = await findPlaylistWithVideos(request);
 
-    // Move OBS off any sp-* scene so scene-driven playback doesn't
-    // also kick in and muddy the assertions.
+    // Park on a baseline scene (sp-slow / another non-fast sp-* if
+    // available) so this test isn't muddied by ytfast already running.
     if (obs) {
       const scenes = await obs.listScenes();
-      const nonSp = scenes.find((s) => !s.startsWith("sp-"));
-      if (nonSp) await obs.switchScene(nonSp);
+      await obs.switchScene(pickBaselineScene(scenes));
     }
 
     await page.goto("/");
@@ -133,8 +173,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
     if (obs) {
       const scenes = await obs.listScenes();
-      const nonSp = scenes.find((s) => !s.startsWith("sp-"));
-      if (nonSp) await obs.switchScene(nonSp);
+      await obs.switchScene(pickBaselineScene(scenes));
     }
 
     // Trigger playback via REST (bypasses the button so this test is
@@ -197,19 +236,19 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `deployed OBS must have an "${FAST_SCENE_NAME}" scene with an NDI source subscribed to "SP-fast"`,
     ).toBe(true);
 
-    // Reset to a non-sp scene first so we observe the transition to
-    // sp-fast, not a no-op.
-    const nonSp = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
-    await obs!.switchScene(nonSp);
+    // Reset to a non-fast baseline scene first so we observe the
+    // transition to sp-fast, not a no-op.
+    const baselineScene = pickBaselineScene(scenes);
+    await obs!.switchScene(baselineScene);
     await new Promise((r) => setTimeout(r, 500));
 
     // Verify baseline: ytfast should NOT be in active_playlist_ids
-    // while the non-sp scene is on program. This kills any "always
-    // returns sp-fast" mutation in the status handler.
+    // while the non-fast baseline scene is on program. This kills any
+    // "always returns sp-fast" mutation in the status handler.
     const baseline = await (await request.get("/api/v1/status")).json();
     expect(
       (baseline.active_playlist_ids as number[]).includes(fastId),
-      `ytfast (id=${fastId}) must NOT be in active_playlist_ids while the non-sp scene "${nonSp}" is on program; got ${JSON.stringify(baseline.active_playlist_ids)}`,
+      `ytfast (id=${fastId}) must NOT be in active_playlist_ids while baseline scene "${baselineScene}" is on program; got ${JSON.stringify(baseline.active_playlist_ids)}`,
     ).toBe(false);
 
     // Switch to sp-fast.
@@ -239,8 +278,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `within 5s of switching OBS to "${FAST_SCENE_NAME}", /api/v1/status must report active_scene="${FAST_SCENE_NAME}" AND active_playlist_ids containing ${fastId}; last status: ${JSON.stringify(lastStatus)}`,
     ).toBe(true);
 
-    // Cleanup: switch away.
-    await obs!.switchScene(nonSp);
+    // Cleanup: switch back to the baseline scene.
+    await obs!.switchScene(baselineScene);
   });
 
   /**
@@ -274,10 +313,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
     ).toBe(true);
 
-    // Baseline: park on a non-sp scene and pause ytfast so the card
+    // Baseline: park on a non-fast scene and pause ytfast so the card
     // starts from the "Nothing playing" state.
-    const nonSp = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
-    await obs!.switchScene(nonSp);
+    const baselineScene = pickBaselineScene(scenes);
+    await obs!.switchScene(baselineScene);
     await request.post(`/api/v1/playback/${fastId}/pause`);
     await new Promise((r) => setTimeout(r, 500));
 
@@ -305,8 +344,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       timeout: 15_000,
     });
 
-    // Cleanup: switch back to the non-sp scene.
-    await obs!.switchScene(nonSp);
+    // Cleanup: switch back to the baseline scene.
+    await obs!.switchScene(baselineScene);
     await request.post(`/api/v1/playback/${fastId}/pause`);
   });
 
@@ -338,10 +377,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
     ).toBe(true);
 
-    // Start from a clean non-sp baseline so the scene switch is a
+    // Start from a clean non-fast baseline so the scene switch is a
     // real transition, not a no-op.
-    const nonSp = scenes.find((s) => !s.startsWith("sp-")) || scenes[0];
-    await obs!.switchScene(nonSp);
+    const baselineScene = pickBaselineScene(scenes);
+    await obs!.switchScene(baselineScene);
     await new Promise((r) => setTimeout(r, 500));
 
     // Switch to sp-fast and let the engine detect it.
@@ -385,8 +424,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         `A flat counter means the pipeline is frozen.`,
     ).toBeGreaterThan(first);
 
-    // Cleanup: switch back to non-sp scene.
-    await obs!.switchScene(nonSp);
+    // Cleanup: switch back to baseline scene.
+    await obs!.switchScene(baselineScene);
   });
 
   /**

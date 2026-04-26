@@ -351,3 +351,13 @@ genuine release optimization of sp-server's dependency graph.
 - **`measure_lyrics_quality.py`** stays installed on win-resolume at
   `C:\ProgramData\SongPlayer\cache\tools\measure_lyrics_quality.py` as
   an ad-hoc trend tool. It is no longer wired into CI.
+
+- **E2E must not switch to disruptive OBS scenes.** The post-deploy
+  Playwright suite shares win-resolume's OBS with the LED wall and live
+  audio. The "off-program baseline" picker (`pickBaselineScene` in
+  `e2e/post-deploy.spec.ts`) prefers `sp-slow` and falls back to any
+  sp-* scene that isn't `sp-fast` (under test) or `sp-warmup` (sync
+  tone). Non-sp scenes (such as a QR-code/sync-tone test scene) are a
+  last resort only. The suite captures the program scene at start
+  (`beforeAll`) and restores it at end (`afterAll`); never leave the
+  wall on whatever scene the last test happened to switch to.
