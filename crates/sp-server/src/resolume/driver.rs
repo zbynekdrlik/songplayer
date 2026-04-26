@@ -92,6 +92,7 @@ pub struct HostDriver {
     /// Whether the circuit breaker has tripped (≥30s of failures).
     pub(crate) circuit_breaker_open: bool,
     pub(crate) recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
+    pub(crate) health_tx: Option<tokio::sync::watch::Sender<crate::resolume::HostHealthSnapshot>>,
 }
 
 impl HostDriver {
@@ -110,7 +111,16 @@ impl HostDriver {
             consecutive_failures: 0,
             circuit_breaker_open: false,
             recovery_tx: None,
+            health_tx: None,
         }
+    }
+
+    pub fn with_health_channel(
+        mut self,
+        tx: tokio::sync::watch::Sender<crate::resolume::HostHealthSnapshot>,
+    ) -> Self {
+        self.health_tx = Some(tx);
+        self
     }
 
     pub fn with_recovery_channel(
@@ -216,7 +226,7 @@ impl HostDriver {
     /// `GET /api/v1/composition`
     pub(crate) async fn refresh_mapping(&mut self) -> Result<(), anyhow::Error> {
         let result = self.fetch_mapping_inner().await;
-        match result {
+        let outcome = match result {
             Ok(new_mapping) => {
                 self.last_refresh_ok = true;
                 self.last_refresh_ts = Some(chrono::Utc::now());
@@ -266,7 +276,23 @@ impl HostDriver {
                 }
                 Err(e)
             }
+        };
+        if let Some(tx) = &self.health_tx {
+            let snapshot = crate::resolume::HostHealthSnapshot {
+                host: self.host.clone(),
+                last_refresh_ts: self.last_refresh_ts,
+                last_refresh_ok: self.last_refresh_ok,
+                consecutive_failures: self.consecutive_failures,
+                circuit_breaker_open: self.circuit_breaker_open,
+                clips_by_token: self
+                    .clip_mapping
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.len()))
+                    .collect(),
+            };
+            let _ = tx.send(snapshot);
         }
+        outcome
     }
 
     async fn fetch_mapping_inner(

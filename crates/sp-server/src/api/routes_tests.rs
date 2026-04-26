@@ -46,6 +46,7 @@ async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
             crate::ai::AiSettings::default(),
         )),
         presenter_client: None,
+        resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
     }
 }
 
@@ -366,6 +367,7 @@ async fn post_seek_returns_204_and_forwards_to_engine() {
             crate::ai::AiSettings::default(),
         )),
         presenter_client: None,
+        resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
     };
 
     let body = serde_json::json!({"position_ms": 45000});
@@ -890,4 +892,27 @@ async fn gemini_audit_endpoint_applies_limit() {
     // The truncate keeps the first N after filter — oldest first by file order.
     assert_eq!(entries[0]["video_id"], "v0");
     assert_eq!(entries[2]["video_id"], "v2");
+}
+
+#[tokio::test]
+async fn resolume_health_endpoint_returns_array() {
+    let state = test_state().await;
+    let app = app(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/resolume/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v.is_array(), "response must be a JSON array");
 }

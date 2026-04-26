@@ -5,7 +5,7 @@ pub mod handlers;
 
 use std::collections::HashMap;
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
@@ -60,10 +60,23 @@ pub enum ResolumeCommand {
     Shutdown,
 }
 
+/// Per-host snapshot published by [`HostDriver`] after every refresh attempt.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HostHealthSnapshot {
+    pub host: String,
+    pub last_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_refresh_ok: bool,
+    pub consecutive_failures: u32,
+    pub circuit_breaker_open: bool,
+    /// Number of clips mapped per token (e.g. `"#sp-title"` → 2).
+    pub clips_by_token: std::collections::BTreeMap<String, usize>,
+}
+
 /// Registry managing per-host Resolume workers.
 pub struct ResolumeRegistry {
     hosts: HashMap<i64, mpsc::Sender<ResolumeCommand>>,
     recovery_tx: broadcast::Sender<RecoveryEvent>,
+    health_rxs: HashMap<String, watch::Receiver<HostHealthSnapshot>>,
 }
 
 impl ResolumeRegistry {
@@ -72,7 +85,16 @@ impl ResolumeRegistry {
         Self {
             hosts: HashMap::new(),
             recovery_tx,
+            health_rxs: HashMap::new(),
         }
+    }
+
+    /// Return a per-host health snapshot from each watch receiver. Lock-free.
+    pub fn health_snapshots(&self) -> Vec<HostHealthSnapshot> {
+        self.health_rxs
+            .values()
+            .map(|rx| rx.borrow().clone())
+            .collect()
     }
 
     /// Subscribe to recovery events fired when a host recovers after failures.
@@ -90,8 +112,18 @@ impl ResolumeRegistry {
         shutdown: broadcast::Receiver<()>,
     ) {
         let (tx, rx) = mpsc::channel::<ResolumeCommand>(64);
-        let driver =
-            HostDriver::new(host.clone(), port).with_recovery_channel(self.recovery_tx.clone());
+        let initial = HostHealthSnapshot {
+            host: host.clone(),
+            last_refresh_ts: None,
+            last_refresh_ok: false,
+            consecutive_failures: 0,
+            circuit_breaker_open: false,
+            clips_by_token: std::collections::BTreeMap::new(),
+        };
+        let (health_tx, health_rx) = watch::channel(initial);
+        let driver = HostDriver::new(host.clone(), port)
+            .with_recovery_channel(self.recovery_tx.clone())
+            .with_health_channel(health_tx);
 
         tokio::spawn(async move {
             driver.run(rx, shutdown).await;
@@ -99,6 +131,7 @@ impl ResolumeRegistry {
 
         info!(host_id, %host, port, "added Resolume host worker");
         self.hosts.insert(host_id, tx);
+        self.health_rxs.insert(host, health_rx);
     }
 
     /// Remove a host worker. Sends a shutdown command before dropping the

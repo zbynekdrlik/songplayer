@@ -704,6 +704,15 @@ pub async fn add_resolume_host(
     }
 }
 
+/// GET /api/v1/resolume/health
+///
+/// Returns a per-host snapshot of the Resolume push chain health.
+pub async fn get_resolume_health(
+    State(state): State<AppState>,
+) -> Json<Vec<crate::resolume::HostHealthSnapshot>> {
+    Json(state.resolume_registry.health_snapshots())
+}
+
 pub async fn delete_resolume_host(
     State(state): State<AppState>,
     Path(id): Path<i64>,
