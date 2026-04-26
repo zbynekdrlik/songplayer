@@ -708,8 +708,8 @@ mod tests {
     /// Pin: `PipelineCommand::Play` must reset `paused = false` BEFORE
     /// entering `decode_and_send`, so a stale `Pause` cannot leak across
     /// video changes. Static check via `include_str!` — fires red if the
-    /// `paused = false` line is moved out of the Play arm or after the
-    /// decode call.
+    /// `paused = false` statement is moved out of the Play arm, deleted,
+    /// or commented out.
     #[test]
     fn play_command_clears_paused_state() {
         let src = include_str!("pipeline.rs");
@@ -720,10 +720,19 @@ mod tests {
             .find("decode_and_send(")
             .expect("Play arm must call decode_and_send");
         let play_block = &src[play_arm_start..play_arm_start + decode_call];
+
+        // Strict match: an actual statement (semicolon-terminated), not a
+        // commented-out line or a docstring mention. Strip any line whose
+        // first non-whitespace chars are `//` before checking.
+        let live_lines: String = play_block
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            play_block.contains("paused = false"),
-            "PipelineCommand::Play must clear paused = false BEFORE decode_and_send. \
-             Current Play arm:\n{play_block}"
+            live_lines.contains("paused = false;"),
+            "PipelineCommand::Play must clear `paused = false;` (live statement, not \
+             a comment) BEFORE decode_and_send. Current Play arm:\n{play_block}"
         );
     }
 }
