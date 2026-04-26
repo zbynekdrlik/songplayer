@@ -380,18 +380,32 @@ impl PlaybackEngine {
                         {
                             Ok(Some((track, offset_ms))) => {
                                 let lead_ms = lyrics_loader::load_lyrics_lead_ms(&pool).await;
+                                let line_count = track.lines.len();
+                                let source = track.source.clone();
+                                let pipeline_version = track.version;
                                 pp.lyrics_state = Some(
                                     crate::lyrics::renderer::LyricsState::with_lead_and_offset(
                                         track, lead_ms, offset_ms,
                                     ),
                                 );
-                                debug!(
+                                info!(
                                     playlist_id,
-                                    video_id, lead_ms, offset_ms, "lyrics loaded for karaoke"
+                                    video_id,
+                                    lines = line_count,
+                                    source = %source,
+                                    pipeline_version,
+                                    lead_ms,
+                                    offset_ms,
+                                    "lyrics: loaded"
                                 );
                             }
                             Ok(None) => {
                                 pp.lyrics_state = None;
+                                info!(
+                                    playlist_id,
+                                    video_id,
+                                    "lyrics: no track available — wall will show no subtitles"
+                                );
                                 self.clear_lyrics_display(playlist_id);
                             }
                             Err(e) => {
