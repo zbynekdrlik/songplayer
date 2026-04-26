@@ -670,7 +670,11 @@ fn classify_bad_poll(
 // Windows heartbeat helpers
 // ---------------------------------------------------------------------------
 
+// mutants::skip — Windows-only plumbing for emit_heartbeat (which is also
+// skipped); no Linux test path. State assignment from `paused` flag is a
+// trivial branch with no cross-platform observable behaviour.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 fn run_heartbeat_outer(
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
@@ -694,7 +698,10 @@ fn run_heartbeat_outer(
     );
 }
 
+// mutants::skip — Windows-only plumbing for emit_heartbeat (which is also
+// skipped); no Linux test path. Always emits with state=Playing.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 fn run_heartbeat_inner(
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
@@ -975,6 +982,23 @@ mod tests {
         } else {
             panic!("clone produced wrong variant");
         }
+    }
+
+    #[test]
+    fn spawn_stores_ndi_name_for_accessor() {
+        // Construct a real PlaybackPipeline. On non-Windows the run_loop
+        // stub just waits for commands and exits on Shutdown — no MF/NDI
+        // required. This test kills all three mutants on spawn/ndi_name:
+        // - Default::default() substitution → compile error or "" ndi_name
+        // - "" substitution on ndi_name() → assertion fails
+        // - "xyzzy" substitution on ndi_name() → assertion fails
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel::<(i64, PipelineEvent)>();
+        let pp = PlaybackPipeline::spawn("SP-fixture-name".to_string(), None, event_tx, 42);
+        assert_eq!(
+            pp.ndi_name(),
+            "SP-fixture-name",
+            "spawn must store the ndi_name argument so ndi_health can label snapshots"
+        );
     }
 }
 
