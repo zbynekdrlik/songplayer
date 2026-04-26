@@ -47,6 +47,7 @@ async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
         )),
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
+        ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     }
 }
 
@@ -368,6 +369,7 @@ async fn post_seek_returns_204_and_forwards_to_engine() {
         )),
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
+        ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     };
 
     let body = serde_json::json!({"position_ms": 45000});

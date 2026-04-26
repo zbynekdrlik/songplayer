@@ -60,6 +60,8 @@ pub struct AppState {
     pub presenter_client: Option<Arc<presenter::PresenterClient>>,
     /// Resolume registry exposing per-host health snapshots.
     pub resolume_registry: Arc<resolume::ResolumeRegistry>,
+    /// NDI health registry exposing per-pipeline health snapshots.
+    pub ndi_health_registry: Arc<playback::ndi_health::NdiHealthRegistry>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -213,7 +215,11 @@ pub async fn start(
     let ai_client = Arc::new(ai::client::AiClient::new(ai_settings));
     let presenter_client = presenter::build_from_settings(&pool).await?;
 
-    // 3b. Resolume registry — must be created before AppState so the Arc can
+    // 3b. NDI health registry — constructed before AppState so both the engine
+    // (writer) and the AppState (reader) can hold an Arc to the same instance.
+    let ndi_health_registry = Arc::new(playback::ndi_health::NdiHealthRegistry::new());
+
+    // 3c. Resolume registry — must be created before AppState so the Arc can
     // be stored in state and shared with the health endpoint.
     let resolume_rows =
         sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
@@ -246,6 +252,7 @@ pub async fn start(
         ai_client: ai_client.clone(),
         presenter_client: presenter_client.clone(),
         resolume_registry: resolume_registry.clone(),
+        ndi_health_registry: ndi_health_registry.clone(),
     };
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
@@ -520,6 +527,7 @@ pub async fn start(
         resolume_cmd_tx,
         event_tx.clone(),
         presenter_client,
+        ndi_health_registry,
     );
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.

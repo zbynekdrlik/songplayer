@@ -81,6 +81,7 @@ pub enum PipelineEvent {
 pub struct PlaybackPipeline {
     cmd_tx: Sender<PipelineCommand>,
     handle: Option<thread::JoinHandle<()>>,
+    ndi_name: String,
 }
 
 /// Shared NDI backend handle (Windows only). Wraps the loaded NDI SDK so
@@ -105,6 +106,7 @@ impl PlaybackPipeline {
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
+        let ndi_name_for_self = ndi_name.clone();
         let handle = thread::Builder::new()
             .name(format!("pipeline-{playlist_id}"))
             .spawn(move || {
@@ -115,6 +117,7 @@ impl PlaybackPipeline {
         Self {
             cmd_tx,
             handle: Some(handle),
+            ndi_name: ndi_name_for_self,
         }
     }
 
@@ -128,6 +131,7 @@ impl PlaybackPipeline {
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
+        let ndi_name_for_self = ndi_name.clone();
         let handle = thread::Builder::new()
             .name(format!("pipeline-{playlist_id}"))
             .spawn(move || {
@@ -138,6 +142,7 @@ impl PlaybackPipeline {
         Self {
             cmd_tx,
             handle: Some(handle),
+            ndi_name: ndi_name_for_self,
         }
     }
 
@@ -152,6 +157,12 @@ impl PlaybackPipeline {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+
+    /// Borrow the NDI source name this pipeline was spawned with. Used by
+    /// `playback::ndi_health` to populate health snapshot labels.
+    pub fn ndi_name(&self) -> &str {
+        &self.ndi_name
     }
 }
 

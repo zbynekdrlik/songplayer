@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+use chrono::Utc;
 use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
 use sp_core::ws::ServerMsg;
 use sqlx::SqlitePool;
@@ -144,6 +145,14 @@ pub struct PlaybackEngine {
     ws_event_tx: broadcast::Sender<ServerMsg>,
     /// Presenter stage-display client; None = push disabled.
     presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
+    /// Reference for mapping `Instant` (pipeline-thread heartbeat) →
+    /// `DateTime<Utc>` (dashboard timestamps). Captured at engine
+    /// construction.
+    instant_origin: (std::time::Instant, chrono::DateTime<chrono::Utc>),
+    /// Shared registry holding the latest NDI health snapshot per pipeline.
+    /// Cloned into `AppState` so the API layer reads without going through
+    /// the engine. Mirrors the `Arc<ResolumeRegistry>` pattern from PR #54.
+    ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
 }
 
 impl PlaybackEngine {
@@ -156,6 +165,7 @@ impl PlaybackEngine {
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
         ws_event_tx: broadcast::Sender<ServerMsg>,
         presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
+        ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -175,6 +185,8 @@ impl PlaybackEngine {
             }
         };
 
+        let instant_origin = (std::time::Instant::now(), Utc::now());
+
         Self {
             pool,
             cache_dir,
@@ -188,6 +200,8 @@ impl PlaybackEngine {
             resolume_tx,
             ws_event_tx,
             presenter_client,
+            instant_origin,
+            ndi_health_registry,
         }
     }
 
@@ -223,6 +237,16 @@ impl PlaybackEngine {
                 cached_position_ms: 0,
             }
         });
+    }
+
+    /// Test-only: force a pipeline's canonical engine state. Lets the
+    /// ndi_health unit tests drive the WaitingForScene override path
+    /// without spinning up an OBS event stream.
+    #[cfg(test)]
+    pub(crate) fn set_state_for_test(&mut self, playlist_id: i64, state: PlayState) {
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.state = state;
+        }
     }
 
     /// Receive the next pipeline event (for use in external select! loops).
@@ -532,9 +556,8 @@ impl PlaybackEngine {
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
-            PipelineEvent::HealthSnapshot { .. } => {
-                // TODO(Task 5): implement `handle_health_snapshot` and update
-                // the NDI health registry. Stub for now.
+            ev @ PipelineEvent::HealthSnapshot { .. } => {
+                self.handle_health_snapshot(playlist_id, ev);
             }
         }
     }
