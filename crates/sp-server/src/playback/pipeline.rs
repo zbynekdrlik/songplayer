@@ -280,6 +280,13 @@ fn run_loop_windows(
             }
 
             Ok(PipelineCommand::Play { video, audio }) => {
+                info!(
+                    playlist_id,
+                    prev_paused = paused,
+                    ?video,
+                    ?audio,
+                    "pipeline: Play received (paused -> false)"
+                );
                 // Inner loop: decode current song; on NewPlay, restart decode
                 // with the new pair. Breaks out to outer loop on Ended/Stopped/
                 // Error; returns true on Shutdown.
@@ -343,12 +350,20 @@ fn run_loop_windows(
             }
 
             Ok(PipelineCommand::Pause) => {
+                info!(
+                    playlist_id,
+                    prev_paused = paused,
+                    "pipeline: Pause (paused -> true)"
+                );
                 paused = true;
-                debug!(playlist_id, "paused (no active playback)");
             }
             Ok(PipelineCommand::Resume) => {
+                info!(
+                    playlist_id,
+                    prev_paused = paused,
+                    "pipeline: Resume (paused -> false)"
+                );
                 paused = false;
-                debug!(playlist_id, "resumed (no active playback)");
             }
             Ok(PipelineCommand::Seek { position_ms }) => {
                 // Seek is a no-op when no song is loaded. When loaded, forward
@@ -688,5 +703,36 @@ mod tests {
         }
 
         let _ = event_rx;
+    }
+
+    /// Pin: `PipelineCommand::Play` must reset `paused = false` BEFORE
+    /// entering `decode_and_send`, so a stale `Pause` cannot leak across
+    /// video changes. Static check via `include_str!` — fires red if the
+    /// `paused = false` statement is moved out of the Play arm, deleted,
+    /// or commented out.
+    #[test]
+    fn play_command_clears_paused_state() {
+        let src = include_str!("pipeline.rs");
+        let play_arm_start = src
+            .find("Ok(PipelineCommand::Play {")
+            .expect("Play arm must exist");
+        let decode_call = src[play_arm_start..]
+            .find("decode_and_send(")
+            .expect("Play arm must call decode_and_send");
+        let play_block = &src[play_arm_start..play_arm_start + decode_call];
+
+        // Strict match: an actual statement (semicolon-terminated), not a
+        // commented-out line or a docstring mention. Strip any line whose
+        // first non-whitespace chars are `//` before checking.
+        let live_lines: String = play_block
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            live_lines.contains("paused = false;"),
+            "PipelineCommand::Play must clear `paused = false;` (live statement, not \
+             a comment) BEFORE decode_and_send. Current Play arm:\n{play_block}"
+        );
     }
 }
