@@ -557,7 +557,7 @@ impl PlaybackEngine {
                     .await;
             }
             ev @ PipelineEvent::HealthSnapshot { .. } => {
-                self.handle_health_snapshot(playlist_id, ev);
+                self.handle_health_snapshot(playlist_id, ev.clone());
             }
         }
     }

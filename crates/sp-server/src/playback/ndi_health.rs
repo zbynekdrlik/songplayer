@@ -204,14 +204,16 @@ impl crate::playback::PlaybackEngine {
         };
 
         // Transition logging: connection-count change, degradation, recovery.
-        if prev_connections != Some(connections) {
-            info!(
-                playlist_id,
-                ndi_name = %ndi_name,
-                prev = ?prev_connections,
-                now = connections,
-                "ndi: connections changed"
-            );
+        if let Some(prev) = prev_connections {
+            if prev != connections {
+                info!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    prev = prev,
+                    now = connections,
+                    "ndi: connections changed"
+                );
+            }
         }
         if degraded_reason.is_some() && prev_degraded.is_none() {
             warn!(
