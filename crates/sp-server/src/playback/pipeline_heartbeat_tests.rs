@@ -33,6 +33,21 @@ fn classify_bad_poll_connections_zero_while_playing() {
 }
 
 #[test]
+fn classify_bad_poll_paused_is_never_bad() {
+    // Even with connections=0, fps=0, and no recent submit, the Paused
+    // state must not bump consecutive_bad_polls. Same non-Playing guard
+    // as Idle / WaitingForScene.
+    assert!(!classify_bad_poll(
+        &PlaybackStateLabel::Paused,
+        0,
+        0.0,
+        30.0,
+        None,
+        Instant::now(),
+    ));
+}
+
+#[test]
 fn classify_bad_poll_idle_is_never_bad() {
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Idle,

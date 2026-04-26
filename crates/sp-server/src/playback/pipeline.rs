@@ -362,12 +362,14 @@ fn run_loop_windows(
                         &mut consecutive_bad_polls,
                     ) {
                         DecodeResult::Ended => {
+                            paused = false;
                             info!(playlist_id, "video ended naturally");
                             submitter.send_black_bgra(1920, 1080);
                             let _ = event_tx.send((playlist_id, PipelineEvent::Ended));
                             break false;
                         }
                         DecodeResult::Stopped => {
+                            paused = false;
                             info!(playlist_id, "playback stopped");
                             submitter.send_black_bgra(1920, 1080);
                             break false;
@@ -387,6 +389,7 @@ fn run_loop_windows(
                             continue;
                         }
                         DecodeResult::Error(msg) => {
+                            paused = false;
                             error!(playlist_id, %msg, "decode error");
                             submitter.send_black_bgra(1920, 1080);
                             let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));
@@ -624,20 +627,15 @@ fn wait_for_shutdown(cmd_rx: &Receiver<PipelineCommand>, playlist_id: i64) {
 
 /// Pure predicate: should the pipeline thread run a heartbeat now?
 /// Extracted so the timing rule is unit-testable without a live decode loop.
-///
-/// Mutation testing: the `>=` boundary is exhaustively covered by
-/// `heartbeat_decision_tests::should_run_heartbeat_*`.
-#[cfg_attr(test, mutants::skip)]
 fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
     elapsed >= std::time::Duration::from_secs(5)
 }
 
 /// Pure predicate: is the just-completed poll a "bad poll" per the spec?
 /// Used by the pipeline thread to bump or reset `consecutive_bad_polls`.
-///
-/// Mutation testing: each branch (state, connections, fps, staleness) is
-/// covered by `heartbeat_decision_tests::classify_bad_poll_*`.
-#[cfg_attr(test, mutants::skip)]
+/// Branches (state guard, connections, fps, staleness) are individually
+/// covered by `heartbeat_decision_tests::classify_bad_poll_*` so the
+/// mutation runner can validate every boundary.
 fn classify_bad_poll(
     state: &crate::playback::ndi_health::PlaybackStateLabel,
     connections: i32,
