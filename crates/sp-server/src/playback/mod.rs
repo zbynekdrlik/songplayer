@@ -9,6 +9,7 @@ pub mod pipeline;
 mod position_update;
 pub mod state;
 pub mod submitter;
+mod title;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -28,9 +29,7 @@ use crate::playlist::selector::VideoSelector;
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
 
-/// OBS text source name used for the fallback title display (in the
-/// CG OVERLAY scene). Must match the source name in OBS exactly.
-const OBS_TITLE_SOURCE: &str = "#sp-title";
+use title::OBS_TITLE_SOURCE;
 
 /// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
@@ -62,24 +61,6 @@ fn play_state_to_ws(state: &PlayState) -> WsPlaybackState {
         PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
         PlayState::Playing { .. } => WsPlaybackState::Playing,
     }
-}
-
-/// Helper: fetch song, artist for a video.
-async fn get_video_title_info(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> Result<Option<(String, String)>, sqlx::Error> {
-    let row = sqlx::query("SELECT song, artist FROM videos WHERE id = ?")
-        .bind(video_id)
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(row.map(|r| {
-        use sqlx::Row;
-        let song: String = r.get::<Option<String>, _>("song").unwrap_or_default();
-        let artist: String = r.get::<Option<String>, _>("artist").unwrap_or_default();
-        (song, artist)
-    }))
 }
 
 /// Per-playlist pipeline state tracked by the engine.
@@ -246,29 +227,16 @@ impl PlaybackEngine {
     /// off-program — the 1.5 s title-show task aborted with "title suppressed —
     /// off program", so without this the wall shows a stale title. Idempotent.
     async fn push_title_for_playing(&self, playlist_id: i64, video_id: i64) {
-        let Ok(Some((song, artist))) = get_video_title_info(&self.pool, video_id).await else {
-            return;
-        };
-        let text = if artist.is_empty() {
-            song.clone()
-        } else if song.is_empty() {
-            artist.clone()
-        } else {
-            format!("{song} - {artist}")
-        };
-        if let Some(cmd_tx) = &self.obs_cmd_tx {
-            let _ = cmd_tx
-                .send(crate::obs::ObsCommand::SetTextSource {
-                    source_name: OBS_TITLE_SOURCE.to_string(),
-                    text,
-                })
-                .await;
+        if title::push_title(
+            &self.pool,
+            self.obs_cmd_tx.as_ref(),
+            &self.resolume_tx,
+            video_id,
+        )
+        .await
+        {
+            info!(playlist_id, video_id, "title re-pushed on scene-go-on");
         }
-        let _ = self
-            .resolume_tx
-            .send(crate::resolume::ResolumeCommand::ShowTitle { song, artist })
-            .await;
-        info!(playlist_id, video_id, "title re-pushed on scene-go-on");
     }
 
     /// Handle a scene change from the OBS module. On program, fires
@@ -469,33 +437,8 @@ impl PlaybackEngine {
                             debug!(playlist_id = pl_id, "title suppressed — off program");
                             return;
                         }
-                        if let Ok(Some((song, artist))) =
-                            get_video_title_info(&pool, video_id).await
+                        if title::push_title(&pool, obs_cmd.as_ref(), &resolume_tx, video_id).await
                         {
-                            // Format the displayed text once for OBS.
-                            let text = if artist.is_empty() {
-                                song.clone()
-                            } else if song.is_empty() {
-                                artist.clone()
-                            } else {
-                                format!("{song} - {artist}")
-                            };
-
-                            // OBS fallback (single hardcoded source name).
-                            if let Some(cmd_tx) = obs_cmd {
-                                let _ = cmd_tx
-                                    .send(crate::obs::ObsCommand::SetTextSource {
-                                        source_name: OBS_TITLE_SOURCE.to_string(),
-                                        text,
-                                    })
-                                    .await;
-                            }
-
-                            // Resolume — registry broadcasts to all hosts; driver targets all #sp-title clips.
-                            let _ = resolume_tx
-                                .send(crate::resolume::ResolumeCommand::ShowTitle { song, artist })
-                                .await;
-
                             info!(playlist_id = pl_id, video_id, "title shown");
                         }
                     });
@@ -796,7 +739,7 @@ impl PlaybackEngine {
             None => return,
         };
 
-        let (song, artist) = match get_video_title_info(&self.pool, video_id).await {
+        let (song, artist) = match title::get_video_title_info(&self.pool, video_id).await {
             Ok(Some(pair)) => pair,
             _ => (String::new(), String::new()),
         };

@@ -3,6 +3,7 @@
 
 #![allow(unused_imports)]
 
+use super::title;
 use super::*;
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc};
@@ -168,7 +169,7 @@ async fn get_video_title_info_returns_song_and_artist() {
         .await
         .unwrap();
 
-    let result = get_video_title_info(&pool, 42).await.unwrap();
+    let result = title::get_video_title_info(&pool, 42).await.unwrap();
     assert_eq!(
         result,
         Some(("My Song".to_string(), "Artist Name".to_string()))
@@ -179,7 +180,7 @@ async fn get_video_title_info_returns_song_and_artist() {
 async fn get_video_title_info_returns_none_for_missing_video() {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    let result = get_video_title_info(&pool, 999).await.unwrap();
+    let result = title::get_video_title_info(&pool, 999).await.unwrap();
     assert_eq!(result, None);
 }
 
@@ -195,7 +196,7 @@ async fn get_video_title_info_handles_null_song_and_artist() {
         .execute(&pool)
         .await
         .unwrap();
-    let result = get_video_title_info(&pool, 42).await.unwrap();
+    let result = title::get_video_title_info(&pool, 42).await.unwrap();
     assert_eq!(result, Some((String::new(), String::new())));
 }
 
