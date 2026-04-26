@@ -91,6 +91,7 @@ pub struct HostDriver {
     pub(crate) consecutive_failures: u32,
     /// Whether the circuit breaker has tripped (≥30s of failures).
     pub(crate) circuit_breaker_open: bool,
+    pub(crate) recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
 }
 
 impl HostDriver {
@@ -108,7 +109,16 @@ impl HostDriver {
             last_refresh_ts: None,
             consecutive_failures: 0,
             circuit_breaker_open: false,
+            recovery_tx: None,
         }
+    }
+
+    pub fn with_recovery_channel(
+        mut self,
+        tx: tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>,
+    ) -> Self {
+        self.recovery_tx = Some(tx);
+        self
     }
 
     /// Main run loop: processes commands, periodically refreshes clip mapping,
@@ -216,7 +226,14 @@ impl HostDriver {
                     self.circuit_breaker_open = false;
                     info!(host = %self.host, "circuit breaker closed — Resolume recovered");
                 }
-                let _ = was_failing;
+                if was_failing {
+                    if let Some(tx) = &self.recovery_tx {
+                        let _ = tx.send(crate::resolume::RecoveryEvent {
+                            host: self.host.clone(),
+                        });
+                    }
+                    info!(host = %self.host, "Resolume recovery — RecoveryEvent fired");
+                }
                 if new_mapping != self.clip_mapping {
                     let total: usize = new_mapping.values().map(|v| v.len()).sum();
                     info!(
@@ -853,6 +870,60 @@ mod tests {
         // Same resolved_at means we got the cached value, not a fresh resolve.
         assert_eq!(ep1.resolved_at, ep2.resolved_at);
         assert_eq!(ep1.base_url, ep2.base_url);
+    }
+
+    #[tokio::test]
+    async fn recovery_event_fires_on_success_after_failure() {
+        let server = wiremock::MockServer::start().await;
+        // First request fails, subsequent succeed
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"layers": []})),
+            )
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+
+        let (tx, mut rx) = tokio::sync::broadcast::channel(8);
+        let mut driver = HostDriver::new("127.0.0.1".into(), port).with_recovery_channel(tx);
+
+        let _ = driver.refresh_mapping().await; // fails
+        let _ = driver.refresh_mapping().await; // succeeds → RecoveryEvent
+
+        let event = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv())
+            .await
+            .expect("RecoveryEvent should arrive")
+            .expect("channel open");
+        assert_eq!(event.host, "127.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn no_recovery_event_on_clean_first_success() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"layers": []})),
+            )
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(8);
+        let mut driver = HostDriver::new("127.0.0.1".into(), port).with_recovery_channel(tx);
+
+        let _ = driver.refresh_mapping().await;
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "no event should fire on clean first success"
+        );
     }
 
     #[tokio::test]

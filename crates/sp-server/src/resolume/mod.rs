@@ -10,6 +10,14 @@ use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
 
+/// Fired by [`HostDriver`] when a refresh succeeds after at least one
+/// prior consecutive failure. Subscribers (e.g. the playback engine)
+/// react by re-emitting their current state to the recovered host.
+#[derive(Debug, Clone)]
+pub struct RecoveryEvent {
+    pub host: String,
+}
+
 /// The single Resolume clip tag used for title delivery.
 /// Any Resolume clip whose name contains this tag becomes a title target.
 pub const TITLE_TOKEN: &str = "#sp-title";
@@ -55,13 +63,21 @@ pub enum ResolumeCommand {
 /// Registry managing per-host Resolume workers.
 pub struct ResolumeRegistry {
     hosts: HashMap<i64, mpsc::Sender<ResolumeCommand>>,
+    recovery_tx: broadcast::Sender<RecoveryEvent>,
 }
 
 impl ResolumeRegistry {
     pub fn new() -> Self {
+        let (recovery_tx, _) = broadcast::channel::<RecoveryEvent>(16);
         Self {
             hosts: HashMap::new(),
+            recovery_tx,
         }
+    }
+
+    /// Subscribe to recovery events fired when a host recovers after failures.
+    pub fn subscribe_recovery(&self) -> broadcast::Receiver<RecoveryEvent> {
+        self.recovery_tx.subscribe()
     }
 
     /// Start a worker for a host. Spawns a background task and stores the
@@ -74,7 +90,8 @@ impl ResolumeRegistry {
         shutdown: broadcast::Receiver<()>,
     ) {
         let (tx, rx) = mpsc::channel::<ResolumeCommand>(64);
-        let driver = HostDriver::new(host.clone(), port);
+        let driver =
+            HostDriver::new(host.clone(), port).with_recovery_channel(self.recovery_tx.clone());
 
         tokio::spawn(async move {
             driver.run(rx, shutdown).await;
