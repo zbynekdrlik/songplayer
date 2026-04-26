@@ -157,6 +157,7 @@ pub struct PlaybackEngine {
 
 impl PlaybackEngine {
     /// Create a new playback engine. Loads the NDI SDK once on Windows.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: SqlitePool,
         cache_dir: PathBuf,

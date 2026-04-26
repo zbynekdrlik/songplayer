@@ -627,6 +627,7 @@ fn wait_for_shutdown(cmd_rx: &Receiver<PipelineCommand>, playlist_id: i64) {
 
 /// Pure predicate: should the pipeline thread run a heartbeat now?
 /// Extracted so the timing rule is unit-testable without a live decode loop.
+#[cfg(any(windows, test))]
 fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
     elapsed >= std::time::Duration::from_secs(5)
 }
@@ -636,6 +637,7 @@ fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
 /// Branches (state guard, connections, fps, staleness) are individually
 /// covered by `heartbeat_decision_tests::classify_bad_poll_*` so the
 /// mutation runner can validate every boundary.
+#[cfg(any(windows, test))]
 fn classify_bad_poll(
     state: &crate::playback::ndi_health::PlaybackStateLabel,
     connections: i32,

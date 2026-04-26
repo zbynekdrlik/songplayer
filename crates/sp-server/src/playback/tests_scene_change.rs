@@ -28,6 +28,7 @@ async fn handle_scene_change_off_sends_hide_title_and_subs() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
 
     engine.ensure_pipeline(7, "SP-fast");
@@ -79,6 +80,7 @@ async fn handle_scene_change_off_noop_when_already_off_program() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
 
     engine.ensure_pipeline(7, "SP-fast");
@@ -144,6 +146,7 @@ async fn scene_go_on_refreshes_title_for_already_playing() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
 
     engine.ensure_pipeline(7, "SP-fast");
@@ -222,6 +225,7 @@ async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {
