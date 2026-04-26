@@ -69,9 +69,7 @@ async fn status_returns_200() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::OK);
-
     let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
         .unwrap();
@@ -105,9 +103,7 @@ async fn create_and_list_playlists() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::CREATED);
-
     // List
     let resp = app
         .oneshot(
@@ -118,7 +114,6 @@ async fn create_and_list_playlists() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
@@ -132,7 +127,6 @@ async fn create_and_list_playlists() {
 async fn get_playlist_not_found() {
     let state = test_state().await;
     let app = app(state);
-
     let resp = app
         .oneshot(
             Request::builder()
@@ -142,16 +136,13 @@ async fn get_playlist_not_found() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn delete_playlist_not_found() {
     let state = test_state().await;
-    let app = app(state);
-
-    let resp = app
+    let resp = app(state)
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -161,16 +152,13 @@ async fn delete_playlist_not_found() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn settings_get_empty() {
     let state = test_state().await;
-    let app = app(state);
-
-    let resp = app
+    let resp = app(state)
         .oneshot(
             Request::builder()
                 .uri("/api/v1/settings")
@@ -179,7 +167,6 @@ async fn settings_get_empty() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
@@ -192,7 +179,6 @@ async fn settings_get_empty() {
 async fn settings_patch_and_get() {
     let state = test_state().await;
     let app = app(state);
-
     // Patch
     let resp = app
         .clone()
@@ -212,9 +198,7 @@ async fn settings_patch_and_get() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
     // Get
     let resp = app
         .oneshot(
@@ -225,7 +209,6 @@ async fn settings_patch_and_get() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
@@ -239,7 +222,6 @@ async fn settings_patch_and_get() {
 async fn resolume_hosts_crud() {
     let state = test_state().await;
     let app = app(state);
-
     // Add host
     let resp = app
         .clone()
@@ -260,14 +242,12 @@ async fn resolume_hosts_crud() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::CREATED);
     let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
         .unwrap();
     let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let host_id = created["id"].as_i64().unwrap();
-
     // List hosts
     let resp = app
         .clone()
@@ -279,14 +259,12 @@ async fn resolume_hosts_crud() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
         .unwrap();
     let hosts: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
     assert_eq!(hosts.len(), 1);
-
     // Delete host
     let resp = app
         .oneshot(
@@ -298,7 +276,6 @@ async fn resolume_hosts_crud() {
         )
         .await
         .unwrap();
-
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 }
 
@@ -956,4 +933,65 @@ async fn resolume_health_endpoint_returns_registered_hosts() {
     );
 
     let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
+async fn ndi_health_endpoint_returns_array() {
+    let state = test_state().await;
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/ndi/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v.is_array(), "response must be a JSON array");
+}
+
+/// Kills the `get_ndi_health -> Json::from(vec![])` mutant.
+/// Mirrors `resolume_health_endpoint_returns_registered_hosts` from PR #54.
+#[tokio::test]
+async fn ndi_health_endpoint_returns_seeded_pipeline() {
+    use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
+    let state = test_state().await;
+    state.ndi_health_registry.update(PipelineHealthSnapshot {
+        playlist_id: 11,
+        ndi_name: "SP-test".to_string(),
+        state: PlaybackStateLabel::Playing,
+        connections: 1,
+        frames_submitted_total: 100,
+        frames_submitted_last_5s: 30,
+        observed_fps: 29.97,
+        nominal_fps: 29.97,
+        last_submit_ts: None,
+        last_heartbeat_ts: None,
+        consecutive_bad_polls: 0,
+        degraded_reason: None,
+    });
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/ndi/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = v.as_array().expect("response must be a JSON array");
+    assert_eq!(arr.len(), 1, "response should contain exactly one pipeline");
+    assert_eq!(arr[0]["playlist_id"].as_i64(), Some(11));
+    assert_eq!(arr[0]["ndi_name"].as_str(), Some("SP-test"));
+    assert_eq!(arr[0]["state"], serde_json::json!("Playing"));
 }
