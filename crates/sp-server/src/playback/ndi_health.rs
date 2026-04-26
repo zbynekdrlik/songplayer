@@ -9,8 +9,9 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use std::time::Instant;
+use tracing::warn;
 
 /// Per-pipeline NDI health. Serialized to the dashboard via
 /// `GET /api/v1/ndi/health`. Built by the engine from
@@ -68,17 +69,28 @@ pub struct NdiHealthRegistry {
 }
 
 impl NdiHealthRegistry {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+    /// Construct an empty registry. Callers wrap in `Arc::new(...)` when
+    /// sharing across the playback engine and `AppState` — matches the
+    /// `ResolumeRegistry` precedent in `crate::resolume::mod`.
+    pub fn new() -> Self {
+        Self {
             snapshots: RwLock::new(HashMap::new()),
-        })
+        }
     }
 
     /// Replace (or insert) the snapshot for `playlist_id`.
     /// Called from the playback-engine HealthSnapshot handler.
     pub fn update(&self, snapshot: PipelineHealthSnapshot) {
-        if let Ok(mut map) = self.snapshots.write() {
-            map.insert(snapshot.playlist_id, snapshot);
+        match self.snapshots.write() {
+            Ok(mut map) => {
+                map.insert(snapshot.playlist_id, snapshot);
+            }
+            Err(_) => {
+                warn!(
+                    playlist_id = snapshot.playlist_id,
+                    "NdiHealthRegistry: RwLock poisoned on write — snapshot dropped"
+                );
+            }
         }
     }
 
@@ -88,15 +100,16 @@ impl NdiHealthRegistry {
     pub fn snapshots(&self) -> Vec<PipelineHealthSnapshot> {
         match self.snapshots.read() {
             Ok(map) => map.values().cloned().collect(),
-            Err(_) => Vec::new(),
+            Err(_) => {
+                warn!("NdiHealthRegistry: RwLock poisoned on read — returning empty list");
+                Vec::new()
+            }
         }
     }
 }
 
 impl Default for NdiHealthRegistry {
     fn default() -> Self {
-        Self {
-            snapshots: RwLock::new(HashMap::new()),
-        }
+        Self::new()
     }
 }
