@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use futures::stream::{FuturesUnordered, StreamExt};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::resolume::TITLE_TOKEN;
 use crate::resolume::driver::{ClipInfo, HostDriver};
@@ -183,12 +183,12 @@ pub async fn set_subtitles(
         .cloned();
 
     if subs_clips.is_none() && subs_next_clips.is_none() && subs_sk_clips.is_none() {
-        debug!(
+        warn!(
             subs_token = super::SUBS_TOKEN,
             subs_next_token = super::SUBS_NEXT_TOKEN,
             subs_sk_token = super::SUBS_SK_TOKEN,
             suppress_en,
-            "no Resolume subtitle clips found, skipping set_subtitles"
+            "no Resolume subtitle clips found — wall is dark for subtitles, skipping push"
         );
         return Ok(());
     }
@@ -226,10 +226,10 @@ pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Erro
         .cloned();
 
     if subs_clips.is_none() && subs_sk_clips.is_none() {
-        debug!(
+        warn!(
             subs_token = super::SUBS_TOKEN,
             subs_sk_token = super::SUBS_SK_TOKEN,
-            "no Resolume subtitle clips found, skipping clear_subtitles"
+            "no Resolume subtitle clips found — wall is dark for subtitles, skipping push"
         );
         return Ok(());
     }
