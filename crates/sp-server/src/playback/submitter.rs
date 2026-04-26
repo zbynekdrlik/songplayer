@@ -190,6 +190,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     pub fn last_submit_ts(&self) -> Option<std::time::Instant> {
         self.last_submit_ts
     }
+
+    /// Current nominal frame rate as fps. Used by the heartbeat to compute
+    /// the underrun threshold (observed_fps < nominal_fps / 2).
+    pub fn nominal_fps(&self) -> f32 {
+        if self.frame_rate_d == 0 {
+            return 0.0;
+        }
+        self.frame_rate_n as f32 / self.frame_rate_d as f32
+    }
 }
 
 #[cfg(test)]
@@ -431,6 +440,15 @@ mod tests {
         let stats3 = sub.drain_window();
         assert_eq!(stats3.frames_in_window, 1);
         assert_eq!(sub.frames_submitted_total(), 3);
+    }
+
+    #[test]
+    fn nominal_fps_computes_from_rate_pair() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "F1", true, false).unwrap();
+        let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30000, 1001);
+        let v = sub.nominal_fps();
+        assert!((v - 29.97).abs() < 0.01, "expected ~29.97 got {v}");
     }
 
     #[test]

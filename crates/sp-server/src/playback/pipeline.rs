@@ -301,11 +301,28 @@ fn run_loop_windows(
     submitter.send_black_bgra(1920, 1080);
 
     let mut paused = false;
+    let mut last_heartbeat = std::time::Instant::now();
+    let mut consecutive_bad_polls: u32 = 0;
 
     loop {
-        // Wait for a command (blocking).
-        match cmd_rx.recv() {
-            Ok(PipelineCommand::Shutdown) | Err(_) => {
+        match cmd_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                run_heartbeat_outer(
+                    &mut submitter,
+                    &event_tx,
+                    playlist_id,
+                    paused,
+                    &mut last_heartbeat,
+                    &mut consecutive_bad_polls,
+                );
+                continue;
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                info!(playlist_id, "pipeline thread shutting down (cmd_rx closed)");
+                submitter.flush();
+                break;
+            }
+            Ok(PipelineCommand::Shutdown) => {
                 info!(playlist_id, "pipeline thread shutting down");
                 submitter.flush();
                 break;
@@ -341,6 +358,8 @@ fn run_loop_windows(
                         &event_tx,
                         playlist_id,
                         &mut paused,
+                        &mut last_heartbeat,
+                        &mut consecutive_bad_polls,
                     ) {
                         DecodeResult::Ended => {
                             info!(playlist_id, "video ended naturally");
@@ -439,6 +458,8 @@ fn decode_and_send(
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
     paused: &mut bool,
+    last_heartbeat: &mut std::time::Instant,
+    consecutive_bad_polls: &mut u32,
 ) -> DecodeResult {
     use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder, SymphoniaAudioReader};
 
@@ -545,6 +566,16 @@ fn decode_and_send(
                     &ndi_audio,
                 );
 
+                if should_run_heartbeat(last_heartbeat.elapsed()) {
+                    run_heartbeat_inner(
+                        submitter,
+                        event_tx,
+                        playlist_id,
+                        last_heartbeat,
+                        consecutive_bad_polls,
+                    );
+                }
+
                 frame_count += 1;
 
                 if last_position_report.elapsed() >= std::time::Duration::from_millis(500) {
@@ -585,6 +616,151 @@ fn wait_for_shutdown(cmd_rx: &Receiver<PipelineCommand>, playlist_id: i64) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers (Linux-testable, no cfg-gate)
+// ---------------------------------------------------------------------------
+
+/// Pure predicate: should the pipeline thread run a heartbeat now?
+/// Extracted so the timing rule is unit-testable without a live decode loop.
+///
+/// Mutation testing: the `>=` boundary is exhaustively covered by
+/// `heartbeat_decision_tests::should_run_heartbeat_*`.
+#[cfg_attr(test, mutants::skip)]
+fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
+    elapsed >= std::time::Duration::from_secs(5)
+}
+
+/// Pure predicate: is the just-completed poll a "bad poll" per the spec?
+/// Used by the pipeline thread to bump or reset `consecutive_bad_polls`.
+///
+/// Mutation testing: each branch (state, connections, fps, staleness) is
+/// covered by `heartbeat_decision_tests::classify_bad_poll_*`.
+#[cfg_attr(test, mutants::skip)]
+fn classify_bad_poll(
+    state: &crate::playback::ndi_health::PlaybackStateLabel,
+    connections: i32,
+    observed_fps: f32,
+    nominal_fps: f32,
+    last_submit_ts: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    if !matches!(
+        state,
+        crate::playback::ndi_health::PlaybackStateLabel::Playing
+    ) {
+        return false;
+    }
+    if connections == 0 {
+        return true;
+    }
+    if nominal_fps > 0.0 && observed_fps < nominal_fps / 2.0 {
+        return true;
+    }
+    if let Some(ts) = last_submit_ts {
+        if now.duration_since(ts) > std::time::Duration::from_secs(10) {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Windows heartbeat helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(windows)]
+fn run_heartbeat_outer(
+    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    playlist_id: i64,
+    paused: bool,
+    last_heartbeat: &mut std::time::Instant,
+    consecutive_bad_polls: &mut u32,
+) {
+    let state = if paused {
+        crate::playback::ndi_health::PlaybackStateLabel::Paused
+    } else {
+        crate::playback::ndi_health::PlaybackStateLabel::Idle
+    };
+    emit_heartbeat(
+        submitter,
+        event_tx,
+        playlist_id,
+        state,
+        last_heartbeat,
+        consecutive_bad_polls,
+    );
+}
+
+#[cfg(windows)]
+fn run_heartbeat_inner(
+    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    playlist_id: i64,
+    last_heartbeat: &mut std::time::Instant,
+    consecutive_bad_polls: &mut u32,
+) {
+    emit_heartbeat(
+        submitter,
+        event_tx,
+        playlist_id,
+        crate::playback::ndi_health::PlaybackStateLabel::Playing,
+        last_heartbeat,
+        consecutive_bad_polls,
+    );
+}
+
+// mutants::skip — drives the live MF + NDI SDK heartbeat path; cross-platform
+// behaviour is verified by the pure helpers should_run_heartbeat /
+// classify_bad_poll plus the engine-side ndi_health tests using synthetic
+// HealthSnapshot events. Same status as run_loop_windows.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn emit_heartbeat(
+    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    playlist_id: i64,
+    state: crate::playback::ndi_health::PlaybackStateLabel,
+    last_heartbeat: &mut std::time::Instant,
+    consecutive_bad_polls: &mut u32,
+) {
+    let connections = submitter.sender().get_no_connections(0);
+    let stats = submitter.drain_window();
+    let observed_fps = stats.frames_in_window as f32 / stats.window_secs.max(0.001);
+    let nominal_fps = submitter.nominal_fps();
+
+    let now = std::time::Instant::now();
+    let bad = classify_bad_poll(
+        &state,
+        connections,
+        observed_fps,
+        nominal_fps,
+        submitter.last_submit_ts(),
+        now,
+    );
+    if bad {
+        *consecutive_bad_polls = consecutive_bad_polls.saturating_add(1);
+    } else {
+        *consecutive_bad_polls = 0;
+    }
+
+    let _ = event_tx.send((
+        playlist_id,
+        PipelineEvent::HealthSnapshot {
+            connections,
+            frames_submitted_total: submitter.frames_submitted_total(),
+            frames_submitted_last_5s: stats.frames_in_window,
+            observed_fps,
+            nominal_fps,
+            last_submit_ts: submitter.last_submit_ts(),
+            last_heartbeat_ts: now,
+            consecutive_bad_polls: *consecutive_bad_polls,
+            reported_state: state,
+        },
+    ));
+    *last_heartbeat = now;
 }
 
 // ---------------------------------------------------------------------------
@@ -801,3 +977,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pipeline_heartbeat_tests.rs"]
+mod heartbeat_decision_tests;
