@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 mod lyrics_loader;
+pub mod ndi_health;
 pub mod pipeline;
 mod position_update;
 mod recovery;
