@@ -69,6 +69,7 @@ mod tests {
             )),
             ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
             presenter_client: None,
+            resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
         };
 
         // Verify the router can be built.
@@ -346,6 +347,7 @@ mod tests {
             )),
             ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
             presenter_client: None,
+            resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
         };
 
         // Verify clone works.

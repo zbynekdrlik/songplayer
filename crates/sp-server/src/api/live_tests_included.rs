@@ -65,6 +65,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
             crate::ai::AiSettings::default(),
         )),
         presenter_client: None,
+        resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
     }
 }
 
