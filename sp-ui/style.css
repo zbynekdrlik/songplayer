@@ -841,3 +841,31 @@ body {
     flex: 1 1 45%;
   }
 }
+
+/* ---- Resolume health alert (only rendered when a host has a problem) ---- */
+
+.resolume-health-alert {
+    margin-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rh-alert {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--warning);
+    padding: 4px 8px;
+    border-left: 3px solid var(--warning);
+    background: rgba(255, 170, 0, 0.08);
+}
+
+.rh-alert-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warning);
+    flex-shrink: 0;
+}

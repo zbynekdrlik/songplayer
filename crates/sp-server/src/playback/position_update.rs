@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use sp_core::ws::ServerMsg;
+use tracing::info;
 
 use super::should_send_position_update;
 
@@ -61,6 +62,12 @@ impl super::PlaybackEngine {
             if pp.scene_active.load(Ordering::Acquire) {
                 match lyrics.resolume_lines_with_next(position_ms) {
                     Some((en, next_en, sk, next_sk)) => {
+                        info!(
+                            playlist_id,
+                            video_id,
+                            text = %en.lines().next().unwrap_or("").chars().take(60).collect::<String>(),
+                            "ShowSubtitles dispatched"
+                        );
                         let _ = self.resolume_tx.try_send(
                             crate::resolume::ResolumeCommand::ShowSubtitles {
                                 en,

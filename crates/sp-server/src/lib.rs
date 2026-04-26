@@ -58,6 +58,8 @@ pub struct AppState {
     pub ai_client: Arc<ai::client::AiClient>,
     /// Presenter HTTP client; None = push disabled. See `presenter` module.
     pub presenter_client: Option<Arc<presenter::PresenterClient>>,
+    /// Resolume registry exposing per-host health snapshots.
+    pub resolume_registry: Arc<resolume::ResolumeRegistry>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -101,6 +103,10 @@ pub enum EngineCommand {
     Seek {
         playlist_id: i64,
         position_ms: u64,
+    },
+    /// Re-emit current title + subtitle state after a Resolume host recovered.
+    ResolumeRecovered {
+        host: String,
     },
 }
 
@@ -206,6 +212,22 @@ pub async fn start(
     };
     let ai_client = Arc::new(ai::client::AiClient::new(ai_settings));
     let presenter_client = presenter::build_from_settings(&pool).await?;
+
+    // 3b. Resolume registry — must be created before AppState so the Arc can
+    // be stored in state and shared with the health endpoint.
+    let resolume_rows =
+        sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
+            .fetch_all(&pool)
+            .await?;
+    let mut resolume_registry_mut = resolume::ResolumeRegistry::new();
+    for row in &resolume_rows {
+        let host_id: i64 = row.get("id");
+        let host: String = row.get("host");
+        let port: i32 = row.get("port");
+        resolume_registry_mut.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
+    }
+    let resolume_registry = Arc::new(resolume_registry_mut);
+
     let state = AppState {
         pool: pool.clone(),
         event_tx: event_tx.clone(),
@@ -223,6 +245,7 @@ pub async fn start(
         )),
         ai_client: ai_client.clone(),
         presenter_client: presenter_client.clone(),
+        resolume_registry: resolume_registry.clone(),
     };
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
@@ -473,18 +496,7 @@ pub async fn start(
     );
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
-    // 9. Resolume workers (load enabled hosts from DB)
-    let resolume_rows =
-        sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
-            .fetch_all(&pool)
-            .await?;
-    let mut resolume_registry = resolume::ResolumeRegistry::new();
-    for row in resolume_rows {
-        let host_id: i64 = row.get("id");
-        let host: String = row.get("host");
-        let port: i32 = row.get("port");
-        resolume_registry.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
-    }
+    // 9. Resolume command forwarding (registry was built before AppState above).
     // Forward commands from the shared channel to all host workers.
     // Uses try_send to avoid blocking the broadcast loop on a slow Resolume host;
     // dropped messages are logged at debug level for observability.
@@ -523,6 +535,23 @@ pub async fn start(
         count = active_playlists.len(),
         "playback pipelines created for active playlists"
     );
+
+    // Subscribe to RecoveryEvent from the Resolume registry and forward to the
+    // engine via EngineCommand::ResolumeRecovered so the engine can re-emit
+    // ShowTitle + ShowSubtitles after a host comes back online.
+    let mut recovery_rx = resolume_registry.subscribe_recovery();
+    let recovery_engine_tx = engine_tx.clone();
+    let mut recovery_shutdown = shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                Ok(event) = recovery_rx.recv() => {
+                    let _ = recovery_engine_tx.send(EngineCommand::ResolumeRecovered { host: event.host }).await;
+                }
+                _ = recovery_shutdown.recv() => break,
+            }
+        }
+    });
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in
@@ -574,6 +603,9 @@ pub async fn start(
                         }
                         EngineCommand::Seek { playlist_id, position_ms } => {
                             engine.seek(playlist_id, position_ms);
+                        }
+                        EngineCommand::ResolumeRecovered { host } => {
+                            engine.handle_resolume_recovery(&host).await;
                         }
                     }
                 }

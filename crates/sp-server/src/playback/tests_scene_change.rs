@@ -187,3 +187,71 @@ async fn scene_go_on_refreshes_title_for_already_playing() {
         "scene-go-on for an already-Playing pipeline MUST re-push ShowTitle. Got: {cmds:?}"
     );
 }
+
+/// On RecoveryEvent, handle_resolume_recovery MUST re-emit ShowTitle for every
+/// active pipeline in Playing state with scene_active=true.
+#[tokio::test]
+async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
+    use std::sync::atomic::Ordering;
+
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
+         VALUES (42, 7, 'abc', 'Song', 'Artist', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _obs_rx) = broadcast::channel(16);
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+    );
+    engine.ensure_pipeline(7, "SP-fast");
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.state = PlayState::Playing { video_id: 42 };
+        pp.scene_active.store(true, Ordering::Release);
+    }
+    while resolume_rx.try_recv().is_ok() {}
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut got_title = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(20), resolume_rx.recv()).await {
+            Ok(Some(cmd)) => {
+                if matches!(cmd, crate::resolume::ResolumeCommand::ShowTitle { .. }) {
+                    got_title = true;
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                if got_title {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        got_title,
+        "ShowTitle must be re-emitted on Resolume recovery"
+    );
+}

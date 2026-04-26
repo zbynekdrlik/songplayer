@@ -7,6 +7,7 @@
 mod lyrics_loader;
 pub mod pipeline;
 mod position_update;
+mod recovery;
 pub mod state;
 pub mod submitter;
 mod title;
@@ -97,6 +98,11 @@ struct PlaylistPipeline {
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
+    /// Last reported playback position (ms). Updated on every Position event
+    /// (~500 ms throttle); used by handle_resolume_recovery to re-push the
+    /// current subtitle line. The re-push line may be up to one Position
+    /// tick (~500 ms) behind the audio's actual playhead.
+    cached_position_ms: u64,
 }
 
 impl PlaylistPipeline {
@@ -213,6 +219,7 @@ impl PlaybackEngine {
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
                 last_presenter_text: None,
+                cached_position_ms: 0,
             }
         });
     }
@@ -380,18 +387,32 @@ impl PlaybackEngine {
                         {
                             Ok(Some((track, offset_ms))) => {
                                 let lead_ms = lyrics_loader::load_lyrics_lead_ms(&pool).await;
+                                let line_count = track.lines.len();
+                                let source = track.source.clone();
+                                let pipeline_version = track.version;
                                 pp.lyrics_state = Some(
                                     crate::lyrics::renderer::LyricsState::with_lead_and_offset(
                                         track, lead_ms, offset_ms,
                                     ),
                                 );
-                                debug!(
+                                info!(
                                     playlist_id,
-                                    video_id, lead_ms, offset_ms, "lyrics loaded for karaoke"
+                                    video_id,
+                                    lines = line_count,
+                                    source = %source,
+                                    pipeline_version,
+                                    lead_ms,
+                                    offset_ms,
+                                    "lyrics: loaded"
                                 );
                             }
                             Ok(None) => {
                                 pp.lyrics_state = None;
+                                info!(
+                                    playlist_id,
+                                    video_id,
+                                    "lyrics: no track available — wall will show no subtitles"
+                                );
                                 self.clear_lyrics_display(playlist_id);
                             }
                             Err(e) => {
@@ -487,6 +508,9 @@ impl PlaybackEngine {
                 // position. Title hide is timer-based (spawned in the
                 // Started handler above) so no position-driven hide work
                 // happens here.
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.cached_position_ms = *position_ms;
+                }
                 self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {

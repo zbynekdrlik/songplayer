@@ -5,10 +5,18 @@ pub mod handlers;
 
 use std::collections::HashMap;
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
+
+/// Fired by [`HostDriver`] when a refresh succeeds after at least one
+/// prior consecutive failure. Subscribers (e.g. the playback engine)
+/// react by re-emitting their current state to the recovered host.
+#[derive(Debug, Clone)]
+pub struct RecoveryEvent {
+    pub host: String,
+}
 
 /// The single Resolume clip tag used for title delivery.
 /// Any Resolume clip whose name contains this tag becomes a title target.
@@ -52,16 +60,46 @@ pub enum ResolumeCommand {
     Shutdown,
 }
 
+/// Per-host snapshot published by [`HostDriver`] after every refresh attempt.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HostHealthSnapshot {
+    pub host: String,
+    pub last_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_refresh_ok: bool,
+    pub consecutive_failures: u32,
+    pub circuit_breaker_open: bool,
+    /// Number of clips mapped per token (e.g. `"#sp-title"` → 2).
+    pub clips_by_token: std::collections::BTreeMap<String, usize>,
+}
+
 /// Registry managing per-host Resolume workers.
 pub struct ResolumeRegistry {
     hosts: HashMap<i64, mpsc::Sender<ResolumeCommand>>,
+    recovery_tx: broadcast::Sender<RecoveryEvent>,
+    health_rxs: HashMap<String, watch::Receiver<HostHealthSnapshot>>,
 }
 
 impl ResolumeRegistry {
     pub fn new() -> Self {
+        let (recovery_tx, _) = broadcast::channel::<RecoveryEvent>(16);
         Self {
             hosts: HashMap::new(),
+            recovery_tx,
+            health_rxs: HashMap::new(),
         }
+    }
+
+    /// Return a per-host health snapshot from each watch receiver. Lock-free.
+    pub fn health_snapshots(&self) -> Vec<HostHealthSnapshot> {
+        self.health_rxs
+            .values()
+            .map(|rx| rx.borrow().clone())
+            .collect()
+    }
+
+    /// Subscribe to recovery events fired when a host recovers after failures.
+    pub fn subscribe_recovery(&self) -> broadcast::Receiver<RecoveryEvent> {
+        self.recovery_tx.subscribe()
     }
 
     /// Start a worker for a host. Spawns a background task and stores the
@@ -74,7 +112,18 @@ impl ResolumeRegistry {
         shutdown: broadcast::Receiver<()>,
     ) {
         let (tx, rx) = mpsc::channel::<ResolumeCommand>(64);
-        let driver = HostDriver::new(host.clone(), port);
+        let initial = HostHealthSnapshot {
+            host: host.clone(),
+            last_refresh_ts: None,
+            last_refresh_ok: false,
+            consecutive_failures: 0,
+            circuit_breaker_open: false,
+            clips_by_token: std::collections::BTreeMap::new(),
+        };
+        let (health_tx, health_rx) = watch::channel(initial);
+        let driver = HostDriver::new(host.clone(), port)
+            .with_recovery_channel(self.recovery_tx.clone())
+            .with_health_channel(health_tx);
 
         tokio::spawn(async move {
             driver.run(rx, shutdown).await;
@@ -82,6 +131,7 @@ impl ResolumeRegistry {
 
         info!(host_id, %host, port, "added Resolume host worker");
         self.hosts.insert(host_id, tx);
+        self.health_rxs.insert(host, health_rx);
     }
 
     /// Remove a host worker. Sends a shutdown command before dropping the
@@ -225,6 +275,37 @@ mod tests {
         for tx in &three {
             assert!(tx.try_send(ResolumeCommand::RefreshMapping).is_ok());
         }
+
+        let _ = shutdown_tx.send(());
+    }
+
+    /// Verifies health_snapshots returns ALL registered hosts' snapshots
+    /// (not an empty Vec). Kills the `health_snapshots -> vec![]` mutant.
+    #[tokio::test]
+    async fn health_snapshots_returns_all_registered_hosts() {
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let mut registry = ResolumeRegistry::new();
+
+        let empty = registry.health_snapshots();
+        assert_eq!(empty.len(), 0, "empty registry should yield zero snapshots");
+
+        registry.add_host(1, "10.0.0.1".to_string(), 8080, shutdown_tx.subscribe());
+        let one = registry.health_snapshots();
+        assert_eq!(one.len(), 1, "one host should yield one snapshot");
+        assert_eq!(
+            one[0].host, "10.0.0.1",
+            "snapshot must carry the registered host name"
+        );
+
+        registry.add_host(2, "10.0.0.2".to_string(), 8081, shutdown_tx.subscribe());
+        let two = registry.health_snapshots();
+        let mut hosts: Vec<String> = two.iter().map(|s| s.host.clone()).collect();
+        hosts.sort();
+        assert_eq!(
+            hosts,
+            vec!["10.0.0.1".to_string(), "10.0.0.2".to_string()],
+            "two hosts should yield both names in the snapshot"
+        );
 
         let _ = shutdown_tx.send(());
     }

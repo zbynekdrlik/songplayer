@@ -82,6 +82,19 @@ pub struct HostDriver {
     pub(crate) clip_mapping: HashMap<String, Vec<ClipInfo>>,
     /// Cached DNS resolution for hostname-based hosts.
     endpoint_cache: Option<ResolvedEndpoint>,
+    /// Set true after a successful refresh, false after a failure.
+    last_refresh_ok: bool,
+    /// Wall-clock timestamp of the last completed refresh attempt
+    /// (success or failure). `None` until first attempt.
+    last_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
+    /// Number of consecutive refresh failures. Reset to 0 on success.
+    consecutive_failures: u32,
+    /// Whether the circuit breaker has tripped (≥30s of failures).
+    circuit_breaker_open: bool,
+    /// Set via `with_recovery_channel` builder; never accessed directly.
+    recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
+    /// Set via `with_health_channel` builder; never accessed directly.
+    health_tx: Option<tokio::sync::watch::Sender<crate::resolume::HostHealthSnapshot>>,
 }
 
 impl HostDriver {
@@ -95,7 +108,29 @@ impl HostDriver {
                 .expect("failed to build reqwest client"),
             clip_mapping: HashMap::new(),
             endpoint_cache: None,
+            last_refresh_ok: false,
+            last_refresh_ts: None,
+            consecutive_failures: 0,
+            circuit_breaker_open: false,
+            recovery_tx: None,
+            health_tx: None,
         }
+    }
+
+    pub fn with_health_channel(
+        mut self,
+        tx: tokio::sync::watch::Sender<crate::resolume::HostHealthSnapshot>,
+    ) -> Self {
+        self.health_tx = Some(tx);
+        self
+    }
+
+    pub fn with_recovery_channel(
+        mut self,
+        tx: tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>,
+    ) -> Self {
+        self.recovery_tx = Some(tx);
+        self
     }
 
     /// Main run loop: processes commands, periodically refreshes clip mapping,
@@ -184,30 +219,111 @@ impl HostDriver {
         }
     }
 
+    const FAIL_WARN_THRESHOLD: u32 = 2;
+    const CIRCUIT_OPEN_THRESHOLD: u32 = 3;
+
+    #[cfg_attr(test, mutants::skip)] // log-only diagnostic; CIRCUIT_OPEN_THRESHOLD covers system-critical boundary
+    fn should_emit_repeated_failure_warn(failures: u32) -> bool {
+        failures >= Self::FAIL_WARN_THRESHOLD
+    }
+
     /// Fetch composition JSON from Resolume and build clip mapping from
     /// `#token` tags found in clip names.
     ///
     /// `GET /api/v1/composition`
     pub(crate) async fn refresh_mapping(&mut self) -> Result<(), anyhow::Error> {
+        let result = self.fetch_mapping_inner().await;
+        let outcome = match result {
+            Ok(new_mapping) => {
+                self.last_refresh_ok = true;
+                self.last_refresh_ts = Some(chrono::Utc::now());
+                let was_failing = self.consecutive_failures > 0;
+                self.consecutive_failures = 0;
+                if self.circuit_breaker_open {
+                    self.circuit_breaker_open = false;
+                    info!(host = %self.host, "circuit breaker closed — Resolume recovered");
+                }
+                if was_failing {
+                    if let Some(tx) = &self.recovery_tx {
+                        let _ = tx.send(crate::resolume::RecoveryEvent {
+                            host: self.host.clone(),
+                        });
+                    }
+                    info!(host = %self.host, "Resolume recovery — RecoveryEvent fired");
+                }
+                if new_mapping != self.clip_mapping {
+                    let total: usize = new_mapping.values().map(|v| v.len()).sum();
+                    info!(
+                        host = %self.host,
+                        tokens = new_mapping.len(),
+                        clips = total,
+                        "updated Resolume clip mapping"
+                    );
+                    self.clip_mapping = new_mapping;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.last_refresh_ok = false;
+                self.last_refresh_ts = Some(chrono::Utc::now());
+                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+                if Self::should_emit_repeated_failure_warn(self.consecutive_failures) {
+                    warn!(
+                        host = %self.host,
+                        consecutive_failures = self.consecutive_failures,
+                        "Resolume refresh failing repeatedly"
+                    );
+                }
+                if self.consecutive_failures >= Self::CIRCUIT_OPEN_THRESHOLD
+                    && !self.circuit_breaker_open
+                {
+                    self.circuit_breaker_open = true;
+                    self.clip_mapping = HashMap::new();
+                    warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
+                }
+                Err(e)
+            }
+        };
+        if let Some(tx) = &self.health_tx {
+            let snapshot = crate::resolume::HostHealthSnapshot {
+                host: self.host.clone(),
+                last_refresh_ts: self.last_refresh_ts,
+                last_refresh_ok: self.last_refresh_ok,
+                consecutive_failures: self.consecutive_failures,
+                circuit_breaker_open: self.circuit_breaker_open,
+                // Only SongPlayer-relevant tokens. The driver scans the
+                // entire composition for `#`-prefixed names, but operators
+                // have many of their own tokens (#bible-*, #timer,
+                // #translate-*-u-re, etc.) that are noise to this dashboard.
+                clips_by_token: [
+                    crate::resolume::TITLE_TOKEN,
+                    crate::resolume::SUBS_TOKEN,
+                    crate::resolume::SUBS_NEXT_TOKEN,
+                    crate::resolume::SUBS_SK_TOKEN,
+                ]
+                .iter()
+                .map(|t| {
+                    (
+                        (*t).to_string(),
+                        self.clip_mapping.get(*t).map(|v| v.len()).unwrap_or(0),
+                    )
+                })
+                .collect(),
+            };
+            let _ = tx.send(snapshot);
+        }
+        outcome
+    }
+
+    async fn fetch_mapping_inner(
+        &mut self,
+    ) -> Result<HashMap<String, Vec<ClipInfo>>, anyhow::Error> {
         let ep = self.endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
         let resp = Self::apply_host_header(req, &ep).send().await?;
         let body: serde_json::Value = resp.json().await?;
-
-        let new_mapping = parse_composition(&body);
-        if new_mapping != self.clip_mapping {
-            let total: usize = new_mapping.values().map(|v| v.len()).sum();
-            info!(
-                host = %self.host,
-                tokens = new_mapping.len(),
-                clips = total,
-                "updated Resolume clip mapping"
-            );
-            self.clip_mapping = new_mapping;
-        }
-
-        Ok(())
+        Ok(parse_composition(&body))
     }
 
     /// Ensure the endpoint cache is populated. Call before parallel operations
@@ -405,400 +521,5 @@ impl PartialEq for ClipInfo {
 impl Eq for ClipInfo {}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_composition() -> serde_json::Value {
-        serde_json::json!({
-            "layers": [
-                {
-                    "clips": [
-                        {
-                            "id": 100,
-                            "name": { "value": "Title #song-name-a" },
-                            "video": {
-                                "sourceparams": {
-                                    "Text": { "id": 200, "valuetype": "ParamText" }
-                                }
-                            }
-                        },
-                        {
-                            "id": 101,
-                            "name": { "value": "Title #song-name-b" },
-                            "video": {
-                                "sourceparams": {
-                                    "Text": { "id": 201, "valuetype": "ParamText" }
-                                }
-                            }
-                        },
-                        {
-                            "id": 102,
-                            "name": { "value": "Artist #artist-name-a" },
-                            "video": {
-                                "sourceparams": {
-                                    "Text": { "id": 202, "valuetype": "ParamText" }
-                                }
-                            }
-                        },
-                        {
-                            "id": 103,
-                            "name": { "value": "Artist #artist-name-b" },
-                            "video": {
-                                "sourceparams": {
-                                    "Text": { "id": 203, "valuetype": "ParamText" }
-                                }
-                            }
-                        },
-                        {
-                            "id": 104,
-                            "name": { "value": "Clear #song-clear" },
-                            "video": {
-                                "sourceparams": {
-                                    "Text": { "id": 204, "valuetype": "ParamText" }
-                                }
-                            }
-                        }
-                    ]
-                }
-            ]
-        })
-    }
-
-    #[test]
-    fn clip_discovery_parses_tokens() {
-        let comp = sample_composition();
-        let mapping = parse_composition(&comp);
-
-        assert_eq!(mapping.len(), 5);
-
-        let song_a = &mapping["#song-name-a"];
-        assert_eq!(song_a.len(), 1);
-        assert_eq!(song_a[0].clip_id, 100);
-        assert_eq!(song_a[0].text_param_id, 200);
-
-        let song_b = &mapping["#song-name-b"];
-        assert_eq!(song_b.len(), 1);
-        assert_eq!(song_b[0].clip_id, 101);
-        assert_eq!(song_b[0].text_param_id, 201);
-
-        let artist_a = &mapping["#artist-name-a"];
-        assert_eq!(artist_a.len(), 1);
-        assert_eq!(artist_a[0].clip_id, 102);
-        assert_eq!(artist_a[0].text_param_id, 202);
-
-        let artist_b = &mapping["#artist-name-b"];
-        assert_eq!(artist_b.len(), 1);
-        assert_eq!(artist_b[0].clip_id, 103);
-        assert_eq!(artist_b[0].text_param_id, 203);
-
-        let clear = &mapping["#song-clear"];
-        assert_eq!(clear.len(), 1);
-        assert_eq!(clear[0].clip_id, 104);
-        assert_eq!(clear[0].text_param_id, 204);
-    }
-
-    #[test]
-    fn clip_discovery_ignores_clips_without_tokens() {
-        let comp = serde_json::json!({
-            "layers": [{
-                "clips": [{
-                    "id": 1,
-                    "name": { "value": "No tokens here" },
-                    "video": {
-                        "sourceparams": {
-                            "Text": { "id": 10, "valuetype": "ParamText" }
-                        }
-                    }
-                }]
-            }]
-        });
-
-        let mapping = parse_composition(&comp);
-        assert!(mapping.is_empty());
-    }
-
-    #[test]
-    fn clip_discovery_ignores_clips_without_text_param() {
-        let comp = serde_json::json!({
-            "layers": [{
-                "clips": [{
-                    "id": 1,
-                    "name": { "value": "Has #token" },
-                    "video": {
-                        "sourceparams": {}
-                    }
-                }]
-            }]
-        });
-
-        let mapping = parse_composition(&comp);
-        assert!(mapping.is_empty());
-    }
-
-    #[test]
-    fn clip_discovery_handles_multiple_tokens_per_clip() {
-        let comp = serde_json::json!({
-            "layers": [{
-                "clips": [{
-                    "id": 50,
-                    "name": { "value": "Multi #tag-one #tag-two" },
-                    "video": {
-                        "sourceparams": {
-                            "Text": { "id": 500, "valuetype": "ParamText" }
-                        }
-                    }
-                }]
-            }]
-        });
-
-        let mapping = parse_composition(&comp);
-        assert_eq!(mapping.len(), 2);
-        assert_eq!(mapping["#tag-one"][0].clip_id, 50);
-        assert_eq!(mapping["#tag-two"][0].clip_id, 50);
-    }
-
-    #[test]
-    fn clip_discovery_empty_composition() {
-        let comp = serde_json::json!({});
-        let mapping = parse_composition(&comp);
-        assert!(mapping.is_empty());
-
-        let comp2 = serde_json::json!({ "layers": [] });
-        let mapping2 = parse_composition(&comp2);
-        assert!(mapping2.is_empty());
-    }
-
-    #[test]
-    fn parse_composition_collects_multiple_clips_per_token() {
-        let comp = serde_json::json!({
-            "layers": [
-                {
-                    "clips": [
-                        {
-                            "id": 100,
-                            "name": { "value": "Title A #sp-title" },
-                            "video": { "sourceparams": { "Text": { "id": 200, "valuetype": "ParamText" } } }
-                        },
-                        {
-                            "id": 101,
-                            "name": { "value": "Title B #sp-title" },
-                            "video": { "sourceparams": { "Text": { "id": 201, "valuetype": "ParamText" } } }
-                        }
-                    ]
-                },
-                {
-                    "clips": [
-                        {
-                            "id": 102,
-                            "name": { "value": "Other Layer #sp-title" },
-                            "video": { "sourceparams": { "Text": { "id": 202, "valuetype": "ParamText" } } }
-                        }
-                    ]
-                }
-            ]
-        });
-
-        let mapping = parse_composition(&comp);
-        let clips = mapping.get("#sp-title").expect("must have #sp-title entry");
-        assert_eq!(clips.len(), 3, "expected 3 clips, got: {clips:?}");
-
-        let ids: Vec<i64> = clips.iter().map(|c| c.clip_id).collect();
-        assert!(ids.contains(&100));
-        assert!(ids.contains(&101));
-        assert!(ids.contains(&102));
-    }
-
-    #[test]
-    fn clip_discovery_uses_param_text_valuetype() {
-        let comp = serde_json::json!({
-            "layers": [{
-                "clips": [{
-                    "id": 1683810383769_i64,
-                    "name": { "value": "#sp-title" },
-                    "video": {
-                        "sourceparams": {
-                            "Text": {
-                                "id": 1775761488634_i64,
-                                "valuetype": "ParamText",
-                                "value": "Hello"
-                            }
-                        }
-                    }
-                }]
-            }]
-        });
-        let mapping = parse_composition(&comp);
-        assert_eq!(mapping.len(), 1);
-        let clips = &mapping["#sp-title"];
-        assert_eq!(clips.len(), 1);
-        assert_eq!(clips[0].clip_id, 1683810383769);
-        assert_eq!(clips[0].text_param_id, 1775761488634);
-    }
-
-    #[test]
-    fn host_driver_new() {
-        let driver = HostDriver::new("192.168.1.10".to_string(), 8080);
-        assert!(driver.clip_mapping.is_empty());
-        assert!(driver.endpoint_cache.is_none());
-    }
-
-    #[test]
-    fn is_ip_literal_detects_ipv4() {
-        assert!(is_ip_literal("192.168.1.10"));
-        assert!(is_ip_literal("127.0.0.1"));
-        assert!(is_ip_literal("10.77.9.201"));
-        assert!(!is_ip_literal("resolume.lan"));
-        assert!(!is_ip_literal("my-host.local"));
-    }
-
-    #[test]
-    fn resolved_endpoint_ip_literal_no_host_header() {
-        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
-        assert_eq!(ep.base_url, "http://192.168.1.10:8090");
-        assert!(ep.host_header.is_none());
-    }
-
-    #[test]
-    fn resolved_endpoint_hostname_has_host_header() {
-        let ep = ResolvedEndpoint::from_resolved("10.77.9.201", "resolume.lan", 8090);
-        assert_eq!(ep.base_url, "http://10.77.9.201:8090");
-        assert_eq!(ep.host_header.as_deref(), Some("resolume.lan:8090"));
-    }
-
-    #[test]
-    fn resolved_endpoint_expiry() {
-        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
-        // Freshly created endpoint should not be expired.
-        assert!(!ep.is_expired());
-    }
-
-    /// Verify TTL expiry using a synthetic future `now`. This avoids the
-    /// Windows `Instant::now() - Duration` underflow problem by going
-    /// forward in time rather than backward.
-    #[test]
-    fn resolved_endpoint_expires_after_ttl() {
-        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
-        let future = ep.resolved_at + Duration::from_secs(301);
-        assert!(
-            ep.is_expired_at(future),
-            "endpoint aged 301s should be expired (TTL=300s)"
-        );
-    }
-
-    /// Boundary test: just under TTL is NOT expired.
-    #[test]
-    fn resolved_endpoint_just_under_ttl_is_not_expired() {
-        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
-        let future = ep.resolved_at + (RESOLUTION_TTL - Duration::from_millis(1));
-        assert!(
-            !ep.is_expired_at(future),
-            "endpoint just under TTL should not be expired"
-        );
-    }
-
-    /// Boundary test: exactly at TTL is NOT expired (strict-greater semantics).
-    /// This is the only test that distinguishes `>` from `>=` in is_expired_at —
-    /// the `is_expired_at(now)` refactor lets us construct the boundary exactly,
-    /// which `Instant::now()`-based tests could not.
-    #[test]
-    fn resolved_endpoint_at_exactly_ttl_is_not_expired() {
-        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
-        let exact_ttl = ep.resolved_at + RESOLUTION_TTL;
-        assert!(
-            !ep.is_expired_at(exact_ttl),
-            "endpoint at exactly TTL boundary must NOT be expired (>, not >=)"
-        );
-    }
-
-    /// Boundary test: just over TTL IS expired.
-    #[test]
-    fn resolved_endpoint_just_over_ttl_is_expired() {
-        let ep = ResolvedEndpoint::from_ip("192.168.1.10", 8090);
-        let future = ep.resolved_at + (RESOLUTION_TTL + Duration::from_millis(1));
-        assert!(
-            ep.is_expired_at(future),
-            "endpoint just over TTL should be expired"
-        );
-    }
-
-    #[tokio::test]
-    async fn cached_endpoint_returns_none_until_ensure_endpoint_called() {
-        let driver = HostDriver::new("127.0.0.1".to_string(), 1);
-        assert!(
-            driver.cached_endpoint().is_none(),
-            "no endpoint cached before ensure_endpoint"
-        );
-    }
-
-    #[tokio::test]
-    async fn ensure_endpoint_populates_cache_for_ip_literal() {
-        let mut driver = HostDriver::new("127.0.0.1".to_string(), 8090);
-        driver.ensure_endpoint().await.unwrap();
-        let cached = driver.cached_endpoint().expect("endpoint should be cached");
-        assert_eq!(cached.base_url, "http://127.0.0.1:8090");
-        assert!(
-            cached.host_header.is_none(),
-            "IP literal should not need a Host header override"
-        );
-    }
-
-    /// Wiremock test that exercises `refresh_mapping` against a real HTTP
-    /// server returning a composition. Kills the `Ok(())` mutant by asserting
-    /// that the mapping was actually populated from the response.
-    #[tokio::test]
-    async fn refresh_mapping_populates_clip_mapping_from_composition() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let server = MockServer::start().await;
-        let composition = serde_json::json!({
-            "layers": [{
-                "clips": [{
-                    "id": 555,
-                    "name": { "value": "#sp-title" },
-                    "video": {
-                        "sourceparams": {
-                            "Text": { "id": 999, "valuetype": "ParamText" }
-                        }
-                    }
-                }]
-            }]
-        });
-        Mock::given(method("GET"))
-            .and(path("/api/v1/composition"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(composition))
-            .mount(&server)
-            .await;
-
-        let url = server.uri();
-        let stripped = url.trim_start_matches("http://");
-        let parts: Vec<&str> = stripped.split(':').collect();
-        let host = parts[0].to_string();
-        let port: u16 = parts[1].parse().unwrap();
-
-        let mut driver = HostDriver::new(host, port);
-        assert!(driver.clip_mapping.is_empty());
-
-        driver.refresh_mapping().await.unwrap();
-
-        let clips = driver
-            .clip_mapping
-            .get("#sp-title")
-            .expect("#sp-title should be populated");
-        assert_eq!(clips.len(), 1);
-        assert_eq!(clips[0].clip_id, 555);
-        assert_eq!(clips[0].text_param_id, 999);
-    }
-
-    /// Verify the cache is reused when not expired (kills the `delete !` mutant
-    /// at the `if !cached.is_expired()` check).
-    #[tokio::test]
-    async fn endpoint_returns_cached_value_on_subsequent_calls() {
-        let mut driver = HostDriver::new("127.0.0.1".to_string(), 8090);
-        let ep1 = driver.endpoint().await.unwrap();
-        let ep2 = driver.endpoint().await.unwrap();
-        // Same resolved_at means we got the cached value, not a fresh resolve.
-        assert_eq!(ep1.resolved_at, ep2.resolved_at);
-        assert_eq!(ep1.base_url, ep2.base_url);
-    }
-}
+#[path = "driver_tests.rs"]
+mod tests;
