@@ -37,6 +37,18 @@ pub struct FrameSubmitter<B: NdiBackend> {
     prev_frame: Option<Vec<u8>>,
     frame_rate_n: i32,
     frame_rate_d: i32,
+    /// Monotonic count of `submit_nv12` calls. `send_black_bgra` does not
+    /// bump this — black-frame standby is not "playback" for visibility
+    /// purposes.
+    frames_submitted_total: u64,
+    /// Frames since the most recent `drain_window` call. Reset on drain.
+    frames_in_window: u32,
+    /// Wall-clock instant the current window started (last drain or
+    /// FrameSubmitter construction).
+    window_start: std::time::Instant,
+    /// Wall-clock instant of the last `submit_nv12` call. `None` means no
+    /// real frame has been submitted (standby black frames are excluded).
+    last_submit_ts: Option<std::time::Instant>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -47,6 +59,10 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             prev_frame: None,
             frame_rate_n,
             frame_rate_d,
+            frames_submitted_total: 0,
+            frames_in_window: 0,
+            window_start: std::time::Instant::now(),
+            last_submit_ts: None,
         }
     }
 
@@ -82,6 +98,12 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         video_data: Vec<u8>,
         audio: &[AudioFrame],
     ) {
+        // Counters first — these must run on every successful submit, even
+        // if the SDK call below blocks on clock_video pacing.
+        self.frames_submitted_total += 1;
+        self.frames_in_window += 1;
+        self.last_submit_ts = Some(std::time::Instant::now());
+
         // 1. Audio first — fast, non-blocking, goes straight into NDI's queue.
         for af in audio {
             self.sender.send_audio(af);
@@ -138,6 +160,35 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// Borrow the underlying sender (mainly for tests).
     pub fn sender(&self) -> &NdiSender<B> {
         &self.sender
+    }
+
+    /// Snapshot the rolling window counter and reset it. Returns the number
+    /// of frames submitted since the last drain plus the wall-clock seconds
+    /// over which they accumulated.
+    ///
+    /// The heartbeat caller divides `frames_in_window / window_secs` to get
+    /// observed fps. `window_secs` is clamped at the call site to avoid
+    /// divide-by-zero on freshly-spawned pipelines (the heartbeat does
+    /// `window_secs.max(0.001)`).
+    pub fn drain_window(&mut self) -> crate::playback::ndi_health::WindowStats {
+        let now = std::time::Instant::now();
+        let window_secs = now.duration_since(self.window_start).as_secs_f32();
+        let frames = self.frames_in_window;
+        self.frames_in_window = 0;
+        self.window_start = now;
+        crate::playback::ndi_health::WindowStats {
+            frames_in_window: frames,
+            window_secs,
+            drained_at: now,
+        }
+    }
+
+    pub fn frames_submitted_total(&self) -> u64 {
+        self.frames_submitted_total
+    }
+
+    pub fn last_submit_ts(&self) -> Option<std::time::Instant> {
+        self.last_submit_ts
     }
 }
 
@@ -341,5 +392,67 @@ mod tests {
         assert!(sub.prev_frame.is_some());
         sub.flush();
         assert!(sub.prev_frame.is_none());
+    }
+
+    #[test]
+    fn submitter_counts_frames_submitted_total() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Cnt", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+        assert_eq!(sub.frames_submitted_total(), 0);
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        assert_eq!(sub.frames_submitted_total(), 1);
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        assert_eq!(sub.frames_submitted_total(), 3);
+    }
+
+    #[test]
+    fn drain_window_resets_window_counter_but_not_total() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "DW", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        let stats1 = sub.drain_window();
+        assert_eq!(stats1.frames_in_window, 2);
+        assert!(stats1.window_secs >= 0.0);
+        // Total preserved across drain.
+        assert_eq!(sub.frames_submitted_total(), 2);
+
+        // Next drain (no submits in between) returns 0 frames.
+        let stats2 = sub.drain_window();
+        assert_eq!(stats2.frames_in_window, 0);
+        assert_eq!(sub.frames_submitted_total(), 2);
+
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        let stats3 = sub.drain_window();
+        assert_eq!(stats3.frames_in_window, 1);
+        assert_eq!(sub.frames_submitted_total(), 3);
+    }
+
+    #[test]
+    fn send_black_bgra_does_not_count_as_a_frame_submission() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "Bk", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+        sub.send_black_bgra(1920, 1080);
+        assert_eq!(
+            sub.frames_submitted_total(),
+            0,
+            "black-frame standby must NOT count as playback"
+        );
+        assert!(
+            sub.last_submit_ts().is_none(),
+            "black-frame standby must not advance last_submit_ts"
+        );
+
+        // Confirm a real submit DOES count.
+        sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+        assert_eq!(sub.frames_submitted_total(), 1);
+        assert!(sub.last_submit_ts().is_some());
     }
 }
