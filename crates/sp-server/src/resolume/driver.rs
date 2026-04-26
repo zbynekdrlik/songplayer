@@ -82,6 +82,15 @@ pub struct HostDriver {
     pub(crate) clip_mapping: HashMap<String, Vec<ClipInfo>>,
     /// Cached DNS resolution for hostname-based hosts.
     endpoint_cache: Option<ResolvedEndpoint>,
+    /// Set true after a successful refresh, false after a failure.
+    pub(crate) last_refresh_ok: bool,
+    /// Wall-clock timestamp of the last completed refresh attempt
+    /// (success or failure). `None` until first attempt.
+    pub(crate) last_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
+    /// Number of consecutive refresh failures. Reset to 0 on success.
+    pub(crate) consecutive_failures: u32,
+    /// Whether the circuit breaker has tripped (≥30s of failures).
+    pub(crate) circuit_breaker_open: bool,
 }
 
 impl HostDriver {
@@ -95,6 +104,10 @@ impl HostDriver {
                 .expect("failed to build reqwest client"),
             clip_mapping: HashMap::new(),
             endpoint_cache: None,
+            last_refresh_ok: false,
+            last_refresh_ts: None,
+            consecutive_failures: 0,
+            circuit_breaker_open: false,
         }
     }
 
@@ -184,30 +197,70 @@ impl HostDriver {
         }
     }
 
+    const FAIL_WARN_THRESHOLD: u32 = 2;
+    const CIRCUIT_OPEN_THRESHOLD: u32 = 3;
+
     /// Fetch composition JSON from Resolume and build clip mapping from
     /// `#token` tags found in clip names.
     ///
     /// `GET /api/v1/composition`
     pub(crate) async fn refresh_mapping(&mut self) -> Result<(), anyhow::Error> {
+        let result = self.fetch_mapping_inner().await;
+        match result {
+            Ok(new_mapping) => {
+                self.last_refresh_ok = true;
+                self.last_refresh_ts = Some(chrono::Utc::now());
+                let was_failing = self.consecutive_failures > 0;
+                self.consecutive_failures = 0;
+                if self.circuit_breaker_open {
+                    self.circuit_breaker_open = false;
+                    info!(host = %self.host, "circuit breaker closed — Resolume recovered");
+                }
+                let _ = was_failing;
+                if new_mapping != self.clip_mapping {
+                    let total: usize = new_mapping.values().map(|v| v.len()).sum();
+                    info!(
+                        host = %self.host,
+                        tokens = new_mapping.len(),
+                        clips = total,
+                        "updated Resolume clip mapping"
+                    );
+                    self.clip_mapping = new_mapping;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.last_refresh_ok = false;
+                self.last_refresh_ts = Some(chrono::Utc::now());
+                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+                if self.consecutive_failures >= Self::FAIL_WARN_THRESHOLD {
+                    warn!(
+                        host = %self.host,
+                        consecutive_failures = self.consecutive_failures,
+                        "Resolume refresh failing repeatedly"
+                    );
+                }
+                if self.consecutive_failures >= Self::CIRCUIT_OPEN_THRESHOLD
+                    && !self.circuit_breaker_open
+                {
+                    self.circuit_breaker_open = true;
+                    self.clip_mapping = HashMap::new();
+                    warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    async fn fetch_mapping_inner(
+        &mut self,
+    ) -> Result<HashMap<String, Vec<ClipInfo>>, anyhow::Error> {
         let ep = self.endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
         let resp = Self::apply_host_header(req, &ep).send().await?;
         let body: serde_json::Value = resp.json().await?;
-
-        let new_mapping = parse_composition(&body);
-        if new_mapping != self.clip_mapping {
-            let total: usize = new_mapping.values().map(|v| v.len()).sum();
-            info!(
-                host = %self.host,
-                tokens = new_mapping.len(),
-                clips = total,
-                "updated Resolume clip mapping"
-            );
-            self.clip_mapping = new_mapping;
-        }
-
-        Ok(())
+        Ok(parse_composition(&body))
     }
 
     /// Ensure the endpoint cache is populated. Call before parallel operations
@@ -800,5 +853,45 @@ mod tests {
         // Same resolved_at means we got the cached value, not a fresh resolve.
         assert_eq!(ep1.resolved_at, ep2.resolved_at);
         assert_eq!(ep1.base_url, ep2.base_url);
+    }
+
+    #[tokio::test]
+    async fn circuit_breaker_evicts_clip_map_after_threshold_failures() {
+        // wiremock server that returns 503 every time
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let mut driver = HostDriver::new("127.0.0.1".into(), port);
+        // Pretend the cache has clips from a prior successful refresh
+        driver.clip_mapping.insert("#sp-title".into(), vec![]);
+
+        // Three consecutive failures should trip the breaker and evict
+        for _ in 0..3 {
+            let _ = driver.refresh_mapping().await;
+        }
+
+        assert!(driver.circuit_breaker_open, "circuit should be open");
+        assert!(driver.clip_mapping.is_empty(), "cache should be evicted");
+    }
+
+    #[tokio::test]
+    async fn single_failure_does_not_trip_circuit() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        // Subsequent requests should 404 by default; we only test the first failure
+        let port = server.address().port();
+        let mut driver = HostDriver::new("127.0.0.1".into(), port);
+
+        let _ = driver.refresh_mapping().await;
+
+        assert_eq!(driver.consecutive_failures, 1);
+        assert!(!driver.circuit_breaker_open);
     }
 }
