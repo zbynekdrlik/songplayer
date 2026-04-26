@@ -142,6 +142,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // Wait for the WASM bundle to mount and the card to appear.
     await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
 
+    // NDI Tier-1 visibility — alert must be absent on a healthy wall.
+    // The component renders zero pixels when every pipeline is healthy
+    // (no .ndi-health-alert element exists in the DOM at all).
+    await expect(page.locator(".ndi-health-alert")).toHaveCount(0);
+
     const card = page.locator(".playlist-card", { hasText: pl.name });
     await expect(card).toBeVisible();
 
