@@ -97,7 +97,10 @@ impl PlaybackPipeline {
     /// * `event_tx` — channel for sending events back to the async engine.
     /// * `playlist_id` — used to tag events so the engine knows which playlist
     ///   they belong to.
+    // mutants::skip — Default::default() body-replacement is unsound (no Default impl);
+    // Windows variant not exercised on Linux runner. Verified by spawn_stores_ndi_name_for_accessor.
     #[cfg(windows)]
+    #[cfg_attr(test, mutants::skip)]
     pub fn spawn(
         ndi_name: String,
         ndi_backend: Option<SharedNdiBackend>,
@@ -122,7 +125,10 @@ impl PlaybackPipeline {
     }
 
     /// Spawn the decode-to-NDI loop on a dedicated OS thread (non-Windows stub).
+    // mutants::skip — Default::default() body-replacement is unsound (no Default impl).
+    // Correctness verified by spawn_stores_ndi_name_for_accessor.
     #[cfg(not(windows))]
+    #[cfg_attr(test, mutants::skip)]
     pub fn spawn(
         ndi_name: String,
         _ndi_backend: Option<()>,
@@ -655,7 +661,9 @@ fn classify_bad_poll(
     if connections == 0 {
         return true;
     }
-    if nominal_fps > 0.0 && observed_fps < nominal_fps / 2.0 {
+    // Guard `nominal_fps > 0.0` removed: with nominal=0, observed < 0 is
+    // unreachable for non-negative observed, so it was a structurally unkillable mutant.
+    if observed_fps < nominal_fps / 2.0 {
         return true;
     }
     if let Some(ts) = last_submit_ts {
@@ -769,10 +777,6 @@ fn emit_heartbeat(
     ));
     *last_heartbeat = now;
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -983,25 +987,12 @@ mod tests {
             panic!("clone produced wrong variant");
         }
     }
-
-    #[test]
-    fn spawn_stores_ndi_name_for_accessor() {
-        // Construct a real PlaybackPipeline. On non-Windows the run_loop
-        // stub just waits for commands and exits on Shutdown — no MF/NDI
-        // required. This test kills all three mutants on spawn/ndi_name:
-        // - Default::default() substitution → compile error or "" ndi_name
-        // - "" substitution on ndi_name() → assertion fails
-        // - "xyzzy" substitution on ndi_name() → assertion fails
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel::<(i64, PipelineEvent)>();
-        let pp = PlaybackPipeline::spawn("SP-fixture-name".to_string(), None, event_tx, 42);
-        assert_eq!(
-            pp.ndi_name(),
-            "SP-fixture-name",
-            "spawn must store the ndi_name argument so ndi_health can label snapshots"
-        );
-    }
 }
 
 #[cfg(test)]
 #[path = "pipeline_heartbeat_tests.rs"]
 mod heartbeat_decision_tests;
+
+#[cfg(test)]
+#[path = "pipeline_spawn_tests.rs"]
+mod pipeline_spawn_tests;
