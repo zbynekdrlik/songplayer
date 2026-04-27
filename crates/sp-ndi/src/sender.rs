@@ -801,6 +801,42 @@ mod tests {
     }
 
     #[test]
+    fn replacing_submitter_calls_destroy_before_new_create() {
+        // Mirrors the run_loop_windows RecreateSender path: drop the
+        // existing submitter (which calls send_video_flush + send_destroy
+        // via NdiSender::Drop), then construct a new submitter sharing
+        // the same backend. The MockNdiBackend records the call ordering
+        // so we can prove old-destroy precedes new-create.
+        let backend = std::sync::Arc::new(MockNdiBackend::new());
+        {
+            let s = NdiSender::new_with_clocking(backend.clone(), "RX", true, false).unwrap();
+            // Drop happens at end of scope.
+            drop(s);
+        }
+        // Second sender with the same name — what RecreateSender does.
+        let _s2 = NdiSender::new_with_clocking(backend.clone(), "RX", true, false).unwrap();
+
+        let calls = backend.calls();
+        let first_create = calls
+            .iter()
+            .position(|c| c.starts_with("send_create_with_clocking"))
+            .expect("first sender must call send_create");
+        let destroy = calls
+            .iter()
+            .position(|c| c.starts_with("send_destroy"))
+            .expect("dropping the first sender must call send_destroy");
+        let second_create = calls
+            .iter()
+            .rposition(|c| c.starts_with("send_create_with_clocking"))
+            .expect("second sender must call send_create");
+
+        assert!(
+            first_create < destroy && destroy < second_create,
+            "expected create -> destroy -> create ordering, got {calls:#?}"
+        );
+    }
+
+    #[test]
     fn sender_drop_flushes_then_destroys() {
         let backend = Arc::new(MockNdiBackend::new());
         {

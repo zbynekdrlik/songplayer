@@ -974,6 +974,8 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,
         degraded_reason: None,
+        recreate_attempts: 0,
+        last_recreate_at_polls: None,
     });
     let resp = app(state)
         .oneshot(
