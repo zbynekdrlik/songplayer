@@ -347,32 +347,34 @@ fn compute_degraded_reason(
 }
 
 /// Pure predicate: should the engine fire a `RecreateSender` for a
-/// pipeline that's currently degraded? Implements the exponential
-/// backoff schedule (30s, 60s, 120s, 240s, then every 5min) by
-/// examining the current `consecutive_bad_polls`, the count of
-/// previous attempts, and the polls value at which the most recent
-/// recreate fired.
+/// pipeline that's currently degraded?
 ///
-/// Pure / deterministic so the backoff schedule is unit-testable.
+/// **Disabled in v0.26.0 — always returns `false`.** The 2026-04-27
+/// production failure showed Tier-2 RecreateSender cannot fix the
+/// actual root cause of `connections=0`: the NDI runtime occasionally
+/// binds its mDNS announcement socket to a stale APIPA / link-local
+/// address (e.g. `169.254.x.y`) that no longer exists on any current
+/// network adapter. Per-sender recreate within the same process keeps
+/// the same global mDNS binding, so the new sender is also dark; meanwhile
+/// `send_create` with the same name fails on the same-name conflict and
+/// the loop spams the log every 30 s while the wall stays dark.
+///
+/// Recovery from that state requires either a process restart (the
+/// new process picks up the current adapter) or a full NDI runtime
+/// re-init (`NDIlib_destroy()` + `NDIlib_initialize()` and recreate
+/// every sender). Both are coordinated, multi-pipeline operations
+/// that don't fit in a single-pipeline recreate command.
+///
+/// The predicate is kept (rather than ripped out) so the wiring in
+/// `handle_health_snapshot` remains structurally intact while the
+/// proper re-init recovery is designed.
+#[allow(unused_variables)]
 pub(crate) fn should_fire_recreate(
     consecutive_bad_polls: u32,
     prev_attempts: u32,
     prev_last_polls: Option<u32>,
 ) -> bool {
-    if consecutive_bad_polls == 0 {
-        return false;
-    }
-    let next_threshold: u32 = match prev_attempts {
-        0 => 6,
-        1 => 12,
-        2 => 24,
-        3 => 48,
-        _ => match prev_last_polls {
-            Some(last) => last.saturating_add(60),
-            None => 60, // shouldn't happen but be safe
-        },
-    };
-    consecutive_bad_polls >= next_threshold
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -575,44 +577,81 @@ mod tests {
         assert_eq!(r.as_deref(), Some("no frames in 10s"));
     }
 
+    /// Tier-2 RecreateSender is disabled in v0.26.0+: per-sender recreate
+    /// cannot fix NDI runtime-level mDNS adapter binding (production failure
+    /// 2026-04-27 — APIPA `169.254.144.214` binding survived the Tier-1
+    /// "all senders dark" detection but per-sender recreate could never
+    /// rebind the global mDNS socket). Predicate must therefore return
+    /// `false` for every input — no exponential-backoff schedule, no
+    /// "5th attempt at 5min", nothing.
     #[test]
-    fn should_fire_recreate_first_attempt_at_30s() {
+    fn should_fire_recreate_returns_false_for_every_input() {
+        // Was-true cases under the old backoff schedule (30s/60s/2min/4min/5min):
+        assert!(!should_fire_recreate(6, 0, None));
+        assert!(!should_fire_recreate(12, 1, Some(6)));
+        assert!(!should_fire_recreate(24, 2, Some(12)));
+        assert!(!should_fire_recreate(48, 3, Some(24)));
+        assert!(!should_fire_recreate(108, 4, Some(48)));
+        assert!(!should_fire_recreate(168, 5, Some(108)));
+        // Pathological: huge consecutive_bad_polls past every threshold.
+        assert!(!should_fire_recreate(u32::MAX, 100, Some(1000)));
+        // Was-false cases — still false, function is total.
+        assert!(!should_fire_recreate(0, 0, None));
         assert!(!should_fire_recreate(5, 0, None));
-        assert!(should_fire_recreate(6, 0, None));
-        assert!(should_fire_recreate(7, 0, None));
-    }
-
-    #[test]
-    fn should_fire_recreate_second_attempt_at_60s() {
-        assert!(!should_fire_recreate(11, 1, Some(6)));
-        assert!(should_fire_recreate(12, 1, Some(6)));
-    }
-
-    #[test]
-    fn should_fire_recreate_third_attempt_at_2min() {
-        assert!(!should_fire_recreate(23, 2, Some(12)));
-        assert!(should_fire_recreate(24, 2, Some(12)));
-    }
-
-    #[test]
-    fn should_fire_recreate_fourth_attempt_at_4min() {
-        assert!(!should_fire_recreate(47, 3, Some(24)));
-        assert!(should_fire_recreate(48, 3, Some(24)));
-    }
-
-    #[test]
-    fn should_fire_recreate_fifth_and_beyond_every_5min() {
-        // 5th attempt: previous fired at poll 48; next at 48 + 60 = 108
-        assert!(!should_fire_recreate(107, 4, Some(48)));
-        assert!(should_fire_recreate(108, 4, Some(48)));
-        // 6th attempt: previous fired at 108; next at 168
-        assert!(!should_fire_recreate(167, 5, Some(108)));
-        assert!(should_fire_recreate(168, 5, Some(108)));
-    }
-
-    #[test]
-    fn should_fire_recreate_returns_false_on_clean_poll() {
         assert!(!should_fire_recreate(0, 5, Some(108)));
+    }
+
+    /// Regression test for the 2026-04-27 production failure:
+    ///
+    /// SongPlayer was deployed in v0.25.0; NDI runtime bound its mDNS
+    /// socket to a stale 169.254 APIPA address; OBS distroAV could not
+    /// receive frames; `send_get_no_connections` returned 0 every poll;
+    /// the engine fired RecreateSender every 30s; each recreate failed
+    /// with `send_create returned null` (same-name conflict) and the
+    /// loop never recovered until process restart.
+    ///
+    /// After the v0.26.0 fix (`should_fire_recreate` returns false),
+    /// `recreate_attempts` must remain 0 even at extreme `consecutive_bad_polls`.
+    /// Failing this test means the broken Tier-2 trigger has been
+    /// re-enabled without a proper NDI runtime re-init replacement.
+    #[tokio::test]
+    async fn handle_health_snapshot_does_not_fire_recreate_on_apipa_binding_failure() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(7, "SP-fast");
+        engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(7, true);
+
+        let now = Instant::now();
+        // Simulate 100 consecutive bad polls (8+ minutes of dark wall) —
+        // past every threshold the old PR #58 schedule would have fired at.
+        engine.handle_health_snapshot(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 12_000,
+                frames_submitted_last_5s: 120,
+                observed_fps: 24.0,
+                nominal_fps: 24.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 100,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+
+        let snap = &registry.snapshots()[0];
+        assert_eq!(
+            snap.recreate_attempts, 0,
+            "Tier-2 RecreateSender must not fire — per-sender recreate cannot \
+             fix NDI runtime-level mDNS adapter binding (see should_fire_recreate doc)"
+        );
+        assert_eq!(snap.last_recreate_at_polls, None);
+        // Tier-1 visibility still works: degraded_reason is filled in for the
+        // dashboard/log to render, even though no auto-recovery fires.
+        assert_eq!(
+            snap.degraded_reason.as_deref(),
+            Some("no NDI receiver — wall is dark"),
+        );
     }
 
     #[tokio::test]
