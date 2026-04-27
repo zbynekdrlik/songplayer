@@ -177,7 +177,7 @@ mod tests {
             let appender = build_file_appender(dir).expect("build session 1");
             let mut w = appender;
             w.write_all(b"session-1-line\n").expect("write session 1");
-            w.flush().ok();
+            w.flush().expect("flush appender");
         }
 
         // Session 2 — same directory, same prefix.
@@ -185,7 +185,7 @@ mod tests {
             let appender = build_file_appender(dir).expect("build session 2");
             let mut w = appender;
             w.write_all(b"session-2-line\n").expect("write session 2");
-            w.flush().ok();
+            w.flush().expect("flush appender");
         }
 
         // Daily rotation means both writes go into the same dated file.
