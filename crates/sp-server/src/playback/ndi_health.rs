@@ -33,15 +33,13 @@ pub struct PipelineHealthSnapshot {
     pub consecutive_bad_polls: u32,
     /// Populated server-side when `consecutive_bad_polls >= 2`. The dashboard
     /// renders this verbatim; it does NOT compute its own staleness.
+    ///
+    /// Visibility-only: SongPlayer does not auto-recover from this state in
+    /// v0.26.0+. The 2026-04-27 production failure showed per-sender recreate
+    /// cannot fix the actual root cause (NDI runtime mDNS bound to a stale
+    /// network adapter); recovery requires a process restart or full NDI
+    /// runtime re-init (tracked in #60).
     pub degraded_reason: Option<String>,
-    /// Number of RecreateSender commands sent so far for this pipeline
-    /// (resets to 0 when a clean poll arrives, i.e. when recovery
-    /// succeeds and consecutive_bad_polls drops back to 0).
-    pub recreate_attempts: u32,
-    /// `consecutive_bad_polls` value when the most recent
-    /// RecreateSender was sent. Combined with the backoff schedule,
-    /// determines when the next recreate fires.
-    pub last_recreate_at_polls: Option<u32>,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from
@@ -222,28 +220,6 @@ impl crate::playback::PlaybackEngine {
         let prev_connections = prev.as_ref().map(|s| s.connections);
         let prev_degraded = prev.as_ref().and_then(|s| s.degraded_reason.clone());
 
-        // Tier-2 auto-recovery with exponential backoff. Fire at
-        // 30s, 60s, 120s, 240s, then every 5min for as long as the
-        // failure persists. Tracks per-pipeline state across
-        // heartbeats via the registry's previous snapshot.
-        let prev_attempts = prev.as_ref().map(|s| s.recreate_attempts).unwrap_or(0);
-        let prev_last_polls = prev.as_ref().and_then(|s| s.last_recreate_at_polls);
-
-        // Decide whether to fire on this tick.
-        let should_recreate = degraded_reason.is_some()
-            && should_fire_recreate(consecutive_bad_polls, prev_attempts, prev_last_polls);
-
-        // The snapshot we publish reflects the post-decision state:
-        // if we're firing, attempts increments and last_polls updates.
-        let (new_attempts, new_last_polls) = if should_recreate {
-            (prev_attempts + 1, Some(consecutive_bad_polls))
-        } else if degraded_reason.is_none() {
-            // Clean poll → reset for the next degradation cycle.
-            (0, None)
-        } else {
-            (prev_attempts, prev_last_polls)
-        };
-
         let snapshot = PipelineHealthSnapshot {
             playlist_id,
             ndi_name: ndi_name.clone(),
@@ -257,8 +233,6 @@ impl crate::playback::PlaybackEngine {
             last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
             consecutive_bad_polls,
             degraded_reason: degraded_reason.clone(),
-            recreate_attempts: new_attempts,
-            last_recreate_at_polls: new_last_polls,
         };
 
         // Transition logging: connection-count change, degradation, recovery.
@@ -284,27 +258,8 @@ impl crate::playback::PlaybackEngine {
             info!(
                 playlist_id,
                 ndi_name = %ndi_name,
-                recreate_attempts = prev_attempts,
                 "ndi: pipeline recovered"
             );
-        }
-
-        if should_recreate {
-            tracing::warn!(
-                playlist_id,
-                ndi_name = %ndi_name,
-                consecutive_bad_polls,
-                attempt = new_attempts,
-                "ndi: triggering Tier-2 auto-recovery (RecreateSender)"
-            );
-            if let Some(pp) = self.pipelines.get(&playlist_id) {
-                if let Err(e) = pp
-                    .pipeline
-                    .send_command(crate::playback::pipeline::PipelineCommand::RecreateSender)
-                {
-                    tracing::warn!(playlist_id, %e, "failed to send RecreateSender to pipeline thread");
-                }
-            }
         }
 
         self.ndi_health_registry.update(snapshot);
@@ -344,35 +299,6 @@ fn compute_degraded_reason(
         ));
     }
     Some("no frames in 10s".to_string())
-}
-
-/// Pure predicate: should the engine fire a `RecreateSender` for a
-/// pipeline that's currently degraded? Implements the exponential
-/// backoff schedule (30s, 60s, 120s, 240s, then every 5min) by
-/// examining the current `consecutive_bad_polls`, the count of
-/// previous attempts, and the polls value at which the most recent
-/// recreate fired.
-///
-/// Pure / deterministic so the backoff schedule is unit-testable.
-pub(crate) fn should_fire_recreate(
-    consecutive_bad_polls: u32,
-    prev_attempts: u32,
-    prev_last_polls: Option<u32>,
-) -> bool {
-    if consecutive_bad_polls == 0 {
-        return false;
-    }
-    let next_threshold: u32 = match prev_attempts {
-        0 => 6,
-        1 => 12,
-        2 => 24,
-        3 => 48,
-        _ => match prev_last_polls {
-            Some(last) => last.saturating_add(60),
-            None => 60, // shouldn't happen but be safe
-        },
-    };
-    consecutive_bad_polls >= next_threshold
 }
 
 // ---------------------------------------------------------------------------
@@ -575,44 +501,113 @@ mod tests {
         assert_eq!(r.as_deref(), Some("no frames in 10s"));
     }
 
-    #[test]
-    fn should_fire_recreate_first_attempt_at_30s() {
-        assert!(!should_fire_recreate(5, 0, None));
-        assert!(should_fire_recreate(6, 0, None));
-        assert!(should_fire_recreate(7, 0, None));
+    /// Regression test for the 2026-04-27 production failure.
+    ///
+    /// v0.25.0 deployed PR #58's Tier-2 RecreateSender as the auto-recovery
+    /// for prolonged `connections=0`. In production NDI's mDNS socket bound
+    /// to a stale APIPA address (`169.254.144.214`); per-sender recreate
+    /// could not fix that runtime-level binding, and `send_create` with the
+    /// existing name failed on the same-name conflict. The wall stayed dark
+    /// while the log spammed `RecreateSender mid-decode: failed; keeping existing`
+    /// every 30 s for ~50 minutes until the process was restarted.
+    ///
+    /// v0.26.0 ripped the entire trigger out (no `RecreateSender` variant,
+    /// no `should_fire_recreate` predicate, no `recreate_attempts` snapshot
+    /// field) and reverted to Tier-1 visibility only. This test asserts the
+    /// remaining behaviour: prolonged `connections=0` while Playing fills
+    /// `degraded_reason` for the dashboard/log without any other side effects.
+    /// Re-introducing per-sender recreate machinery would have to redefine
+    /// the snapshot shape and is structurally caught by `cargo check` — but
+    /// this test is the documented contract.
+    #[tokio::test]
+    async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(7, "SP-fast");
+        engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(7, true);
+
+        let now = Instant::now();
+        // Simulate 100 consecutive bad polls (8+ minutes of dark wall) —
+        // past every threshold the v0.25.0 PR #58 schedule fired at.
+        engine.handle_health_snapshot(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 12_000,
+                frames_submitted_last_5s: 120,
+                observed_fps: 24.0,
+                nominal_fps: 24.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 100,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+
+        let snap = &registry.snapshots()[0];
+        assert_eq!(snap.consecutive_bad_polls, 100);
+        assert_eq!(snap.connections, 0);
+        // Tier-1 visibility fires.
+        assert_eq!(
+            snap.degraded_reason.as_deref(),
+            Some("no NDI receiver — wall is dark"),
+        );
     }
 
-    #[test]
-    fn should_fire_recreate_second_attempt_at_60s() {
-        assert!(!should_fire_recreate(11, 1, Some(6)));
-        assert!(should_fire_recreate(12, 1, Some(6)));
-    }
+    /// Tier-1 visibility must clear when the wall recovers (e.g. operator
+    /// restarts SongPlayer after NDI APIPA binding made connections=0). A
+    /// clean poll after a degraded run drops `degraded_reason` back to None
+    /// so the dashboard / log "ndi: pipeline recovered" path fires.
+    #[tokio::test]
+    async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(7, "SP-fast");
+        engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(7, true);
 
-    #[test]
-    fn should_fire_recreate_third_attempt_at_2min() {
-        assert!(!should_fire_recreate(23, 2, Some(12)));
-        assert!(should_fire_recreate(24, 2, Some(12)));
-    }
+        let now = Instant::now();
+        // First: degraded.
+        engine.handle_health_snapshot(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 240,
+                frames_submitted_last_5s: 120,
+                observed_fps: 24.0,
+                nominal_fps: 24.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 5,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+        assert_eq!(
+            registry.snapshots()[0].degraded_reason.as_deref(),
+            Some("no NDI receiver — wall is dark")
+        );
 
-    #[test]
-    fn should_fire_recreate_fourth_attempt_at_4min() {
-        assert!(!should_fire_recreate(47, 3, Some(24)));
-        assert!(should_fire_recreate(48, 3, Some(24)));
-    }
-
-    #[test]
-    fn should_fire_recreate_fifth_and_beyond_every_5min() {
-        // 5th attempt: previous fired at poll 48; next at 48 + 60 = 108
-        assert!(!should_fire_recreate(107, 4, Some(48)));
-        assert!(should_fire_recreate(108, 4, Some(48)));
-        // 6th attempt: previous fired at 108; next at 168
-        assert!(!should_fire_recreate(167, 5, Some(108)));
-        assert!(should_fire_recreate(168, 5, Some(108)));
-    }
-
-    #[test]
-    fn should_fire_recreate_returns_false_on_clean_poll() {
-        assert!(!should_fire_recreate(0, 5, Some(108)));
+        // Then: clean poll. Connections returned, no consecutive_bad_polls.
+        engine.handle_health_snapshot(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 2,
+                frames_submitted_total: 480,
+                frames_submitted_last_5s: 120,
+                observed_fps: 24.0,
+                nominal_fps: 24.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 0,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+        let snap = &registry.snapshots()[0];
+        assert_eq!(snap.connections, 2);
+        assert_eq!(snap.consecutive_bad_polls, 0);
+        assert!(
+            snap.degraded_reason.is_none(),
+            "clean poll must clear degraded_reason so 'ndi: pipeline recovered' log fires",
+        );
     }
 
     #[tokio::test]

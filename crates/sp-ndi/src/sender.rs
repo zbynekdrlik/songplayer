@@ -801,19 +801,26 @@ mod tests {
     }
 
     #[test]
-    fn replacing_submitter_calls_destroy_before_new_create() {
-        // Mirrors the run_loop_windows RecreateSender path: drop the
-        // existing submitter (which calls send_video_flush + send_destroy
-        // via NdiSender::Drop), then construct a new submitter sharing
-        // the same backend. The MockNdiBackend records the call ordering
-        // so we can prove old-destroy precedes new-create.
+    fn dropping_sender_calls_destroy_before_subsequent_create() {
+        // Drop semantics check: dropping an `NdiSender` calls
+        // `send_video_flush + send_destroy` on the underlying backend before
+        // anything else can run. Useful baseline for any future redesign
+        // that wants to recreate a sender (#60 NDI runtime re-init).
+        //
+        // Note: real NDI runtime rejects two senders with the same name
+        // in one process; `MockNdiBackend` does not enforce that. The
+        // 2026-04-27 production failure (PR #58 RecreateSender loop) was
+        // caused exactly by code that called `send_create` for the new
+        // sender BEFORE the old sender's `send_destroy` ran — `MockNdiBackend`
+        // happily accepted both creates while the real SDK returned null.
+        // Real-NDI integration testing is the only way to catch that;
+        // this test only verifies the drop ordering inside our wrapper.
         let backend = std::sync::Arc::new(MockNdiBackend::new());
         {
             let s = NdiSender::new_with_clocking(backend.clone(), "RX", true, false).unwrap();
             // Drop happens at end of scope.
             drop(s);
         }
-        // Second sender with the same name — what RecreateSender does.
         let _s2 = NdiSender::new_with_clocking(backend.clone(), "RX", true, false).unwrap();
 
         let calls = backend.calls();

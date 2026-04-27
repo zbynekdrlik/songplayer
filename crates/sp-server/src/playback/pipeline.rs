@@ -41,10 +41,6 @@ pub enum PipelineCommand {
     Stop,
     /// Shut down the thread.
     Shutdown,
-    /// Force-recreate the NDI sender (destroy + create with the same name).
-    /// Used by the auto-recovery path when delivery has been failing for
-    /// >= 30 s — drops the existing handle so OBS receivers must re-handshake.
-    RecreateSender,
 }
 
 /// Events emitted by the pipeline thread back to the async engine.
@@ -161,22 +157,6 @@ impl PlaybackPipeline {
         let _ = self.cmd_tx.send(cmd);
     }
 
-    /// Send a command to the pipeline thread. Returns Err if the channel
-    /// is closed (thread already exited). Used by the auto-recovery path
-    /// in `playback::ndi_health`.
-    ///
-    /// mutants::skip — thin pass-through to crossbeam_channel::Sender::send;
-    /// the Ok(())-substitution mutant is observable only by capturing the
-    /// thread's reaction to a sent command, which would require spinning up
-    /// the full pipeline thread machinery for a one-line wrapper.
-    #[cfg_attr(test, mutants::skip)]
-    pub fn send_command(
-        &self,
-        cmd: PipelineCommand,
-    ) -> Result<(), crossbeam_channel::SendError<PipelineCommand>> {
-        self.cmd_tx.send(cmd)
-    }
-
     /// Gracefully shut down the pipeline, blocking until the thread exits.
     pub fn shutdown(mut self) {
         let _ = self.cmd_tx.send(PipelineCommand::Shutdown);
@@ -268,9 +248,6 @@ fn run_loop_stub(
             Ok(PipelineCommand::Stop) => {
                 info!(playlist_id, "pipeline: stopped (stub)");
             }
-            Ok(PipelineCommand::RecreateSender) => {
-                tracing::info!(playlist_id, "RecreateSender ignored (non-Windows stub)");
-            }
         }
     }
 }
@@ -308,8 +285,7 @@ fn run_loop_windows(
     // clock_video = true lets NDI pace `send_video_async` on its internal
     // high-resolution clock. clock_audio stays false because we submit both
     // streams from a single thread; clocking both would deadlock on startup.
-    let sender = match sp_ndi::NdiSender::new_with_clocking(backend.clone(), ndi_name, true, false)
-    {
+    let sender = match sp_ndi::NdiSender::new_with_clocking(backend, ndi_name, true, false) {
         Ok(s) => s,
         Err(e) => {
             error!(%e, "failed to create NDI sender");
@@ -383,8 +359,6 @@ fn run_loop_windows(
                     match decode_and_send(
                         &cmd_rx,
                         &mut submitter,
-                        backend.clone(),
-                        ndi_name,
                         &current_video,
                         &current_audio,
                         &event_tx,
@@ -461,25 +435,6 @@ fn run_loop_windows(
                 submitter.send_black_bgra(1920, 1080);
                 debug!(playlist_id, "stopped (no active playback)");
             }
-            Ok(PipelineCommand::RecreateSender) => {
-                let prev_rate_n = submitter.frame_rate_n();
-                let prev_rate_d = submitter.frame_rate_d();
-                match sp_ndi::NdiSender::new_with_clocking(backend.clone(), ndi_name, true, false) {
-                    Ok(new_sender) => {
-                        // Replace submitter; old one's Drop calls
-                        // send_video_flush + send_destroy on the old sender.
-                        submitter = FrameSubmitter::new(new_sender, prev_rate_n, prev_rate_d);
-                        submitter.send_black_bgra(1920, 1080);
-                        info!(
-                            playlist_id,
-                            ndi_name, "NDI sender recreated (Tier-2 auto-recovery)"
-                        );
-                    }
-                    Err(e) => {
-                        error!(%e, ndi_name, "RecreateSender: failed to create new sender; keeping existing");
-                    }
-                }
-            }
         }
     }
 }
@@ -507,8 +462,6 @@ enum DecodeResult {
 fn decode_and_send(
     cmd_rx: &Receiver<PipelineCommand>,
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
-    backend: SharedNdiBackend,
-    ndi_name: &str,
     video_path: &std::path::Path,
     audio_path: &std::path::Path,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
@@ -588,25 +541,6 @@ fn decode_and_send(
                 if let Err(e) = decoder.seek(position_ms) {
                     tracing::warn!(?e, position_ms, "pipeline: seek failed");
                 }
-            }
-            Ok(PipelineCommand::RecreateSender) => {
-                // Force-recreate during active decode. Same flow as outer.
-                let prev_rate_n = submitter.frame_rate_n();
-                let prev_rate_d = submitter.frame_rate_d();
-                match sp_ndi::NdiSender::new_with_clocking(backend.clone(), ndi_name, true, false) {
-                    Ok(new_sender) => {
-                        *submitter = FrameSubmitter::new(new_sender, prev_rate_n, prev_rate_d);
-                        submitter.send_black_bgra(1920, 1080);
-                        info!(
-                            playlist_id,
-                            ndi_name, "NDI sender recreated mid-decode (Tier-2 auto-recovery)"
-                        );
-                    }
-                    Err(e) => {
-                        error!(%e, ndi_name, "RecreateSender mid-decode: failed; keeping existing");
-                    }
-                }
-                // Continue the decode loop — don't break.
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {

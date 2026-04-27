@@ -278,6 +278,23 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   one key does not kill translation for the song. Wired into both
   `translate_track` and `retry_missing_translations`.
 
+## Disabled subsystems (do not re-enable without redesign)
+
+### NDI auto-recovery (per-sender RecreateSender) — disabled v0.26.0
+
+PR #58 shipped a Tier-2 auto-recovery that, on prolonged `connections=0`, sent a `PipelineCommand::RecreateSender` to the affected pipeline thread, which destroyed the old NDI sender and created a new one with the same name. **It cannot work and was ripped out in v0.26.0.** Two structural reasons:
+
+1. **NDI runtime mDNS binding is process-global.** The 2026-04-27 production failure cause was the NDI SDK binding its mDNS announce socket to a stale APIPA address (`169.254.144.214` — no longer present on any current adapter). Per-sender create/destroy keeps the same global socket; the new sender is also dark.
+2. **Real NDI rejects two senders with the same name in one process.** Our recreate created the new sender BEFORE the old one's destroy ran (Drop is deferred to end of arm), so `send_create` returned null on the same-name conflict and the loop spammed `RecreateSender mid-decode: failed; keeping existing` every 30 s. `MockNdiBackend` did not enforce same-name uniqueness so unit tests never caught it.
+
+Recovery from that state requires either:
+- Process restart (works today; operator-only — there is no in-app /api/v1/admin/restart endpoint)
+- Full NDI runtime re-init: `NDIlib_destroy()` + `NDIlib_initialize()` + recreate every sender + reconnect every receiver subscription. Coordinated, multi-pipeline, and risky enough that it needs its own design and integration test against a real Windows NDI runtime — tracked in #60.
+
+If you find yourself adding `PipelineCommand::RecreateSender` back: stop. Check #60 first. Any per-sender recreate is structurally unable to fix the root cause.
+
+The `degraded_reason` field on `PipelineHealthSnapshot` is preserved as Tier-1 visibility: when `connections=0` for ≥2 consecutive 5-second polls while Playing, the dashboard / log gets `"no NDI receiver — wall is dark"`. That's the entire current response.
+
 ## Legacy OBS YouTube Player (obsytplayer)
 
 SongPlayer is the Rust replacement for the legacy Python OBS YouTube Player at `/home/newlevel/devel/obsytplayer/`. **Always reference the legacy code when implementing features** — it contains battle-tested logic for:
