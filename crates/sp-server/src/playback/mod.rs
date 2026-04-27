@@ -5,11 +5,13 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 mod lyrics_loader;
+pub mod ndi_health;
 pub mod pipeline;
 mod position_update;
 mod recovery;
 pub mod state;
 pub mod submitter;
+mod test_helpers;
 mod title;
 
 use std::collections::{HashMap, VecDeque};
@@ -18,6 +20,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+use chrono::Utc;
 use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
 use sp_core::ws::ServerMsg;
 use sqlx::SqlitePool;
@@ -143,10 +146,19 @@ pub struct PlaybackEngine {
     ws_event_tx: broadcast::Sender<ServerMsg>,
     /// Presenter stage-display client; None = push disabled.
     presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
+    /// Reference for mapping `Instant` (pipeline-thread heartbeat) →
+    /// `DateTime<Utc>` (dashboard timestamps). Captured at engine
+    /// construction.
+    instant_origin: (std::time::Instant, chrono::DateTime<chrono::Utc>),
+    /// Shared registry holding the latest NDI health snapshot per pipeline.
+    /// Cloned into `AppState` so the API layer reads without going through
+    /// the engine. Mirrors the `Arc<ResolumeRegistry>` pattern from PR #54.
+    ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
 }
 
 impl PlaybackEngine {
     /// Create a new playback engine. Loads the NDI SDK once on Windows.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: SqlitePool,
         cache_dir: PathBuf,
@@ -155,6 +167,7 @@ impl PlaybackEngine {
         resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
         ws_event_tx: broadcast::Sender<ServerMsg>,
         presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
+        ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
     ) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
@@ -174,6 +187,8 @@ impl PlaybackEngine {
             }
         };
 
+        let instant_origin = (std::time::Instant::now(), Utc::now());
+
         Self {
             pool,
             cache_dir,
@@ -187,6 +202,8 @@ impl PlaybackEngine {
             resolume_tx,
             ws_event_tx,
             presenter_client,
+            instant_origin,
+            ndi_health_registry,
         }
     }
 
@@ -530,6 +547,9 @@ impl PlaybackEngine {
                 self.clear_lyrics_display(playlist_id);
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
+            }
+            ev @ PipelineEvent::HealthSnapshot { .. } => {
+                self.handle_health_snapshot(playlist_id, ev.clone());
             }
         }
     }

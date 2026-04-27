@@ -142,6 +142,15 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // Wait for the WASM bundle to mount and the card to appear.
     await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
 
+    // NDI Tier-1 visibility — the endpoint is the public surface; the
+    // dashboard card was removed in favour of structured logs +
+    // auto-recovery (no operator-facing alert needed when the system
+    // self-heals).
+    const ndiHealthResp = await request.get("/api/v1/ndi/health");
+    expect(ndiHealthResp.status()).toBe(200);
+    const ndiHealth = await ndiHealthResp.json();
+    expect(Array.isArray(ndiHealth)).toBe(true);
+
     const card = page.locator(".playlist-card", { hasText: pl.name });
     await expect(card).toBeVisible();
 

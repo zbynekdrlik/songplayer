@@ -713,6 +713,14 @@ pub async fn get_resolume_health(
     Json(state.resolume_registry.health_snapshots())
 }
 
+/// GET /api/v1/ndi/health — return per-pipeline NDI delivery health.
+/// Empty `[]` if no pipelines have reported a heartbeat yet.
+pub async fn get_ndi_health(
+    State(state): State<AppState>,
+) -> Json<Vec<crate::playback::ndi_health::PipelineHealthSnapshot>> {
+    Json(state.ndi_health_registry.snapshots())
+}
+
 pub async fn delete_resolume_host(
     State(state): State<AppState>,
     Path(id): Path<i64>,

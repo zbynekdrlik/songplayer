@@ -60,6 +60,7 @@ async fn handle_play_video_updates_current_position_on_custom_playlist() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
@@ -116,6 +117,7 @@ async fn handle_play_video_with_unknown_video_is_noop() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
@@ -169,6 +171,7 @@ async fn started_event_unconditionally_resets_lyrics_state() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {
@@ -235,6 +238,7 @@ async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
         resolume_tx,
         ws_tx,
         None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {

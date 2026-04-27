@@ -87,6 +87,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/resolume/health",
             axum::routing::get(routes::get_resolume_health),
         )
+        .route(
+            "/api/v1/ndi/health",
+            axum::routing::get(routes::get_ndi_health),
+        )
         // Lyrics
         .route(
             "/api/v1/videos/{id}/lyrics",

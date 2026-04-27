@@ -55,6 +55,7 @@ async fn presenter_empty_payload_on_song_end() {
         resolume_tx,
         ws_tx,
         Some(presenter_client),
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
     );
     engine.ensure_pipeline(77, "SP-test");
 

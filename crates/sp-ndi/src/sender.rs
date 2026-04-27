@@ -130,6 +130,16 @@ pub trait NdiBackend: Send + Sync {
 
     /// Query tally state. Returns `None` if the timeout expired with no change.
     fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)>;
+
+    /// Return the current number of NDI receivers connected to this sender.
+    /// Returns `>= 0` when the SDK reports a count; the caller must treat any
+    /// negative value as "unknown" and not as a failure (the NDI SDK may
+    /// occasionally use negatives to mean "never been polled").
+    ///
+    /// `timeout_ms = 0` is the recommended value: the SDK returns the cached
+    /// count immediately. With `> 0` the call blocks until the count changes
+    /// or the timeout expires.
+    fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +375,17 @@ impl NdiBackend for RealNdiBackend {
             None
         }
     }
+
+    // mutants::skip — dereferences NDI SDK function pointer; only exercised on
+    // real Windows runtime. Behaviour is verified through MockNdiBackend.
+    #[cfg_attr(test, mutants::skip)]
+    fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32 {
+        let handles = self.handles.lock().unwrap();
+        let Some(state) = handles.get(&handle) else {
+            return -1;
+        };
+        unsafe { (self.lib.send_get_no_connections)(state.ptr, timeout_ms) }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +498,13 @@ impl<B: NdiBackend> NdiSender<B> {
             })
     }
 
+    /// Return the current count of NDI receivers connected to this sender.
+    /// `timeout_ms = 0` returns immediately with the SDK's cached count.
+    pub fn get_no_connections(&self, timeout_ms: u32) -> i32 {
+        self.backend
+            .send_get_no_connections(self.handle, timeout_ms)
+    }
+
     /// Return the internal handle ID (useful for tests).
     pub fn handle(&self) -> usize {
         self.handle
@@ -500,6 +528,7 @@ impl<B: NdiBackend> Drop for NdiSender<B> {
 pub mod test_util {
     use super::*;
     use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicI32, Ordering};
 
     /// A mock backend that records every call for assertion.
     #[derive(Default)]
@@ -507,6 +536,7 @@ pub mod test_util {
         calls: StdMutex<Vec<String>>,
         tally_response: StdMutex<Option<(bool, bool)>>,
         last_audio_planar: StdMutex<Vec<f32>>,
+        connection_count: AtomicI32,
     }
 
     impl MockNdiBackend {
@@ -524,6 +554,13 @@ pub mod test_util {
 
         pub fn set_tally(&self, on_program: bool, on_preview: bool) {
             *self.tally_response.lock().unwrap() = Some((on_program, on_preview));
+        }
+
+        /// Drive the value `MockNdiBackend::send_get_no_connections` returns.
+        /// Lets unit tests exercise every NDI-health alert branch without a
+        /// real NDI runtime.
+        pub fn set_connection_count(&self, n: i32) {
+            self.connection_count.store(n, Ordering::SeqCst);
         }
     }
 
@@ -609,6 +646,14 @@ pub mod test_util {
                 .unwrap()
                 .push(format!("send_get_tally({handle},{timeout_ms})"));
             *self.tally_response.lock().unwrap()
+        }
+
+        fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32 {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("send_get_no_connections({handle},{timeout_ms})"));
+            self.connection_count.load(Ordering::SeqCst)
         }
     }
 }
@@ -756,6 +801,42 @@ mod tests {
     }
 
     #[test]
+    fn replacing_submitter_calls_destroy_before_new_create() {
+        // Mirrors the run_loop_windows RecreateSender path: drop the
+        // existing submitter (which calls send_video_flush + send_destroy
+        // via NdiSender::Drop), then construct a new submitter sharing
+        // the same backend. The MockNdiBackend records the call ordering
+        // so we can prove old-destroy precedes new-create.
+        let backend = std::sync::Arc::new(MockNdiBackend::new());
+        {
+            let s = NdiSender::new_with_clocking(backend.clone(), "RX", true, false).unwrap();
+            // Drop happens at end of scope.
+            drop(s);
+        }
+        // Second sender with the same name — what RecreateSender does.
+        let _s2 = NdiSender::new_with_clocking(backend.clone(), "RX", true, false).unwrap();
+
+        let calls = backend.calls();
+        let first_create = calls
+            .iter()
+            .position(|c| c.starts_with("send_create_with_clocking"))
+            .expect("first sender must call send_create");
+        let destroy = calls
+            .iter()
+            .position(|c| c.starts_with("send_destroy"))
+            .expect("dropping the first sender must call send_destroy");
+        let second_create = calls
+            .iter()
+            .rposition(|c| c.starts_with("send_create_with_clocking"))
+            .expect("second sender must call send_create");
+
+        assert!(
+            first_create < destroy && destroy < second_create,
+            "expected create -> destroy -> create ordering, got {calls:#?}"
+        );
+    }
+
+    #[test]
     fn sender_drop_flushes_then_destroys() {
         let backend = Arc::new(MockNdiBackend::new());
         {
@@ -799,5 +880,42 @@ mod tests {
         let backend = Arc::new(MockNdiBackend::new());
         let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
         assert!(sender.get_tally(0).is_none());
+    }
+
+    #[test]
+    fn mock_get_no_connections_returns_set_count() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "C", true, false).unwrap();
+        // Default before any setter: 0 (no receivers).
+        assert_eq!(sender.get_no_connections(0), 0);
+        backend.set_connection_count(3);
+        assert_eq!(sender.get_no_connections(0), 3);
+        backend.set_connection_count(0);
+        assert_eq!(sender.get_no_connections(0), 0);
+    }
+
+    #[test]
+    fn mock_get_no_connections_records_call() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "C2", true, false).unwrap();
+        let _ = sender.get_no_connections(50);
+        let calls = backend.calls();
+        assert!(
+            calls.iter().any(|c| c == "send_get_no_connections(42,50)"),
+            "expected send_get_no_connections(handle=42, timeout=50) recorded: {calls:#?}"
+        );
+    }
+
+    #[test]
+    fn mock_set_connection_count_is_thread_safe_via_atomic() {
+        // Driven from another thread to confirm visibility — same pattern the
+        // pipeline thread will use (heartbeat polls from one thread, the test
+        // helper sets from another).
+        let backend = Arc::new(MockNdiBackend::new());
+        let backend2 = backend.clone();
+        let h = std::thread::spawn(move || backend2.set_connection_count(7));
+        h.join().unwrap();
+        let sender = NdiSender::new_with_clocking(backend, "C3", true, false).unwrap();
+        assert_eq!(sender.get_no_connections(0), 7);
     }
 }

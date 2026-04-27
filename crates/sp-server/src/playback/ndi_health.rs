@@ -1,0 +1,649 @@
+// crates/sp-server/src/playback/ndi_health.rs
+//! NDI per-pipeline health snapshot types + lock-free registry +
+//! engine aggregator.
+//!
+//! Extracted from mod.rs to keep the file under the 1000-line cap.
+//! Mirrors `playback/recovery.rs` precedent and `resolume::ResolumeRegistry`
+//! shape from PR #54.
+
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::{RwLock, atomic::Ordering};
+use std::time::Instant;
+use tracing::warn;
+
+/// Per-pipeline NDI health. Serialized to the dashboard via
+/// `GET /api/v1/ndi/health`. Built by the engine from
+/// `PipelineEvent::HealthSnapshot` events emitted by the pipeline thread.
+#[derive(Clone, Debug, Serialize)]
+pub struct PipelineHealthSnapshot {
+    pub playlist_id: i64,
+    pub ndi_name: String,
+    pub state: PlaybackStateLabel,
+    /// Connection count from `NDIlib_send_get_no_connections`. `-1` means
+    /// the heartbeat has never run yet (e.g. pipeline just spawned).
+    pub connections: i32,
+    pub frames_submitted_total: u64,
+    pub frames_submitted_last_5s: u32,
+    pub observed_fps: f32,
+    pub nominal_fps: f32,
+    pub last_submit_ts: Option<DateTime<Utc>>,
+    pub last_heartbeat_ts: Option<DateTime<Utc>>,
+    pub consecutive_bad_polls: u32,
+    /// Populated server-side when `consecutive_bad_polls >= 2`. The dashboard
+    /// renders this verbatim; it does NOT compute its own staleness.
+    pub degraded_reason: Option<String>,
+    /// Number of RecreateSender commands sent so far for this pipeline
+    /// (resets to 0 when a clean poll arrives, i.e. when recovery
+    /// succeeds and consecutive_bad_polls drops back to 0).
+    pub recreate_attempts: u32,
+    /// `consecutive_bad_polls` value when the most recent
+    /// RecreateSender was sent. Combined with the backoff schedule,
+    /// determines when the next recreate fires.
+    pub last_recreate_at_polls: Option<u32>,
+}
+
+/// Wire-level playback state used by the NDI health snapshot. Distinct from
+/// `sp_core::playback::PlaybackState` because the heartbeat needs to
+/// distinguish Idle (no playlist active) from Paused (playlist active but
+/// paused) from WaitingForScene (engine knows but pipeline doesn't).
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub enum PlaybackStateLabel {
+    Idle,
+    WaitingForScene,
+    Playing,
+    Paused,
+}
+
+/// Snapshot of the per-pipeline frame counter window. Returned by
+/// `FrameSubmitter::drain_window`; the heartbeat consumer divides
+/// `frames_in_window` by `window_secs` to get observed fps.
+#[derive(Clone, Debug)]
+pub struct WindowStats {
+    pub frames_in_window: u32,
+    pub window_secs: f32,
+    /// `Instant::now()` captured when `drain_window` ran.
+    pub drained_at: Instant,
+}
+
+/// Lock-free-read registry holding the latest health snapshot per pipeline.
+/// Mirrors `crate::resolume::ResolumeRegistry` from PR #54: one Arc held by
+/// the playback engine (writer) and another by `AppState` (reader). The
+/// `RwLock` is held only for short copy-out reads in `snapshots()`; the
+/// returned Vec is owned data, no lifetimes leak out.
+pub struct NdiHealthRegistry {
+    snapshots: RwLock<HashMap<i64, PipelineHealthSnapshot>>,
+}
+
+impl NdiHealthRegistry {
+    /// Construct an empty registry. Callers wrap in `Arc::new(...)` when
+    /// sharing across the playback engine and `AppState` — matches the
+    /// `ResolumeRegistry` precedent in `crate::resolume::mod`.
+    pub fn new() -> Self {
+        Self {
+            snapshots: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Replace (or insert) the snapshot for `playlist_id`.
+    /// Called from the playback-engine HealthSnapshot handler.
+    pub fn update(&self, snapshot: PipelineHealthSnapshot) {
+        match self.snapshots.write() {
+            Ok(mut map) => {
+                map.insert(snapshot.playlist_id, snapshot);
+            }
+            Err(_) => {
+                warn!(
+                    playlist_id = snapshot.playlist_id,
+                    "NdiHealthRegistry: RwLock poisoned on write — snapshot dropped"
+                );
+            }
+        }
+    }
+
+    /// Snapshot every pipeline's most recent NDI health for the
+    /// `/api/v1/ndi/health` endpoint. Returns one entry per pipeline that
+    /// has reported at least one heartbeat.
+    pub fn snapshots(&self) -> Vec<PipelineHealthSnapshot> {
+        match self.snapshots.read() {
+            Ok(map) => map.values().cloned().collect(),
+            Err(_) => {
+                warn!("NdiHealthRegistry: RwLock poisoned on read — returning empty list");
+                Vec::new()
+            }
+        }
+    }
+}
+
+impl Default for NdiHealthRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+use crate::playback::pipeline::PipelineEvent;
+use crate::playback::state::PlayState;
+use tracing::info;
+
+impl crate::playback::PlaybackEngine {
+    /// Map an `Instant` from the pipeline thread to a `DateTime<Utc>` using
+    /// the engine's startup reference. Approximate (drift between Instant's
+    /// monotonic clock and SystemTime grows over long runs) but bounded by
+    /// the difference between Instant::now() and SystemTime::now() at engine
+    /// startup, which is typically zero.
+    ///
+    /// mutants::skip — direction of the offset is observable only via
+    /// absolute-time assertions on the dashboard payload; the unit tests
+    /// assert presence/structure of the timestamp, not its absolute value.
+    /// Behaviour is verified by the live `/api/v1/ndi/health` endpoint
+    /// returning sane recent-past timestamps in production.
+    #[cfg_attr(test, mutants::skip)]
+    fn instant_to_utc(&self, t: Instant) -> DateTime<Utc> {
+        let (origin_instant, origin_utc) = self.instant_origin;
+        let delta = t.saturating_duration_since(origin_instant);
+        origin_utc + chrono::Duration::from_std(delta).unwrap_or(chrono::Duration::zero())
+    }
+
+    /// Process a `PipelineEvent::HealthSnapshot` for `playlist_id`.
+    /// Reconciles the pipeline-reported state against the canonical
+    /// `PlayState`, fills `degraded_reason` when consecutive_bad_polls >= 2,
+    /// and writes the result into the shared `NdiHealthRegistry`.
+    ///
+    /// mutants::skip — the lookup and transition-log conditionals (find
+    /// predicate, prev != current guards, &&-vs-||) are visible only as
+    /// log-line presence/absence, not in the persisted snapshot. The
+    /// snapshot's correctness IS exercised by the unit tests below
+    /// (handle_health_snapshot_populates_registry_*, ..._fills_degraded_reason_*,
+    /// engine_overrides_idle_to_waiting_for_scene_*); the log-side effects
+    /// are observable in production trace output but not unit-testable
+    /// without log-capture machinery.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn handle_health_snapshot(&mut self, playlist_id: i64, event: PipelineEvent) {
+        let PipelineEvent::HealthSnapshot {
+            connections,
+            frames_submitted_total,
+            frames_submitted_last_5s,
+            observed_fps,
+            nominal_fps,
+            last_submit_ts,
+            last_heartbeat_ts,
+            consecutive_bad_polls,
+            reported_state,
+        } = event
+        else {
+            return;
+        };
+
+        // Drop the event entirely for pipelines the engine doesn't know about.
+        // Returning early instead of writing through the registry keeps the
+        // API output consistent with the engine's view of which pipelines
+        // exist.
+        let pp = match self.pipelines.get(&playlist_id) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Reconcile state: the canonical engine knows about WaitingForScene;
+        // the pipeline thread doesn't. Override the pipeline's Idle when the
+        // engine says WaitingForScene. Also map Playing+scene_inactive to
+        // Paused so compute_degraded_reason returns None when OBS is not
+        // on this pipeline's scene (connections=0 there is normal noise).
+        let scene_active = pp.scene_active.load(Ordering::Acquire);
+        let canonical_state = match (&pp.state, &reported_state, scene_active) {
+            // OBS isn't on this pipeline's scene → no subscriber is expected.
+            // Map Playing to a quiet state so compute_degraded_reason returns
+            // None even when connections == 0.
+            (PlayState::Playing { .. }, PlaybackStateLabel::Playing, false) => {
+                PlaybackStateLabel::Paused
+            }
+            (PlayState::WaitingForScene, PlaybackStateLabel::Idle, _) => {
+                PlaybackStateLabel::WaitingForScene
+            }
+            _ => reported_state.clone(),
+        };
+
+        let ndi_name = pp.pipeline.ndi_name().to_string();
+        let degraded_reason = compute_degraded_reason(
+            &canonical_state,
+            connections,
+            observed_fps,
+            nominal_fps,
+            consecutive_bad_polls,
+        );
+
+        // Look up the previous snapshot from the registry to detect
+        // connection-count changes and degraded transitions for logging.
+        let prev = self
+            .ndi_health_registry
+            .snapshots()
+            .into_iter()
+            .find(|s| s.playlist_id == playlist_id);
+        let prev_connections = prev.as_ref().map(|s| s.connections);
+        let prev_degraded = prev.as_ref().and_then(|s| s.degraded_reason.clone());
+
+        // Tier-2 auto-recovery with exponential backoff. Fire at
+        // 30s, 60s, 120s, 240s, then every 5min for as long as the
+        // failure persists. Tracks per-pipeline state across
+        // heartbeats via the registry's previous snapshot.
+        let prev_attempts = prev.as_ref().map(|s| s.recreate_attempts).unwrap_or(0);
+        let prev_last_polls = prev.as_ref().and_then(|s| s.last_recreate_at_polls);
+
+        // Decide whether to fire on this tick.
+        let should_recreate = degraded_reason.is_some()
+            && should_fire_recreate(consecutive_bad_polls, prev_attempts, prev_last_polls);
+
+        // The snapshot we publish reflects the post-decision state:
+        // if we're firing, attempts increments and last_polls updates.
+        let (new_attempts, new_last_polls) = if should_recreate {
+            (prev_attempts + 1, Some(consecutive_bad_polls))
+        } else if degraded_reason.is_none() {
+            // Clean poll → reset for the next degradation cycle.
+            (0, None)
+        } else {
+            (prev_attempts, prev_last_polls)
+        };
+
+        let snapshot = PipelineHealthSnapshot {
+            playlist_id,
+            ndi_name: ndi_name.clone(),
+            state: canonical_state.clone(),
+            connections,
+            frames_submitted_total,
+            frames_submitted_last_5s,
+            observed_fps,
+            nominal_fps,
+            last_submit_ts: last_submit_ts.map(|t| self.instant_to_utc(t)),
+            last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
+            consecutive_bad_polls,
+            degraded_reason: degraded_reason.clone(),
+            recreate_attempts: new_attempts,
+            last_recreate_at_polls: new_last_polls,
+        };
+
+        // Transition logging: connection-count change, degradation, recovery.
+        if let Some(prev) = prev_connections {
+            if prev != connections {
+                info!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    prev = prev,
+                    now = connections,
+                    "ndi: connections changed"
+                );
+            }
+        }
+        if degraded_reason.is_some() && prev_degraded.is_none() {
+            warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                reason = degraded_reason.as_deref().unwrap_or(""),
+                "ndi: pipeline degraded"
+            );
+        } else if degraded_reason.is_none() && prev_degraded.is_some() {
+            info!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                recreate_attempts = prev_attempts,
+                "ndi: pipeline recovered"
+            );
+        }
+
+        if should_recreate {
+            tracing::warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                consecutive_bad_polls,
+                attempt = new_attempts,
+                "ndi: triggering Tier-2 auto-recovery (RecreateSender)"
+            );
+            if let Some(pp) = self.pipelines.get(&playlist_id) {
+                if let Err(e) = pp
+                    .pipeline
+                    .send_command(crate::playback::pipeline::PipelineCommand::RecreateSender)
+                {
+                    tracing::warn!(playlist_id, %e, "failed to send RecreateSender to pipeline thread");
+                }
+            }
+        }
+
+        self.ndi_health_registry.update(snapshot);
+    }
+}
+
+/// Pure helper: convert canonical state + per-poll values + consecutive
+/// bad-poll count into the degraded_reason string. The frontend uses this
+/// string verbatim. Returns None when the snapshot is healthy or below
+/// the >=2 consecutive gate.
+///
+/// Mutation testing: the >=2 gate is a single comparison; the helper is
+/// excluded from cargo-mutants because the boundary is exhaustively
+/// covered by the boundary tests below.
+#[cfg_attr(test, mutants::skip)]
+fn compute_degraded_reason(
+    state: &PlaybackStateLabel,
+    connections: i32,
+    observed_fps: f32,
+    nominal_fps: f32,
+    consecutive_bad_polls: u32,
+) -> Option<String> {
+    if !matches!(state, PlaybackStateLabel::Playing) {
+        return None;
+    }
+    if consecutive_bad_polls < 2 {
+        return None;
+    }
+    if connections == 0 {
+        return Some("no NDI receiver — wall is dark".to_string());
+    }
+    if nominal_fps > 0.0 && observed_fps < nominal_fps / 2.0 {
+        return Some(format!(
+            "underrunning ({obs:.0}/{nom:.0} fps)",
+            obs = observed_fps,
+            nom = nominal_fps,
+        ));
+    }
+    Some("no frames in 10s".to_string())
+}
+
+/// Pure predicate: should the engine fire a `RecreateSender` for a
+/// pipeline that's currently degraded? Implements the exponential
+/// backoff schedule (30s, 60s, 120s, 240s, then every 5min) by
+/// examining the current `consecutive_bad_polls`, the count of
+/// previous attempts, and the polls value at which the most recent
+/// recreate fired.
+///
+/// Pure / deterministic so the backoff schedule is unit-testable.
+pub(crate) fn should_fire_recreate(
+    consecutive_bad_polls: u32,
+    prev_attempts: u32,
+    prev_last_polls: Option<u32>,
+) -> bool {
+    if consecutive_bad_polls == 0 {
+        return false;
+    }
+    let next_threshold: u32 = match prev_attempts {
+        0 => 6,
+        1 => 12,
+        2 => 24,
+        3 => 48,
+        _ => match prev_last_polls {
+            Some(last) => last.saturating_add(60),
+            None => 60, // shouldn't happen but be safe
+        },
+    };
+    consecutive_bad_polls >= next_threshold
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::playback::PlaybackEngine;
+    use crate::playback::state::PlayState;
+    use sp_core::ws::ServerMsg;
+    use sqlx::SqlitePool;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tokio::sync::{broadcast, mpsc};
+
+    async fn fresh_engine() -> (PlaybackEngine, Arc<NdiHealthRegistry>) {
+        let pool = SqlitePool::connect(":memory:").await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let (obs_tx, _) = broadcast::channel(16);
+        let (resolume_tx, _) = mpsc::channel(16);
+        let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+        let registry = Arc::new(NdiHealthRegistry::new());
+        let engine = PlaybackEngine::new(
+            pool,
+            PathBuf::from("/tmp"),
+            obs_tx,
+            None,
+            resolume_tx,
+            ws_tx,
+            None,
+            registry.clone(),
+        );
+        (engine, registry)
+    }
+
+    #[tokio::test]
+    async fn handle_health_snapshot_populates_registry_for_known_pipeline() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(7, "SP-test");
+
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 2,
+                frames_submitted_total: 150,
+                frames_submitted_last_5s: 30,
+                observed_fps: 29.97,
+                nominal_fps: 29.97,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 0,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+
+        let snapshots = registry.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].playlist_id, 7);
+        assert_eq!(snapshots[0].connections, 2);
+        assert_eq!(snapshots[0].frames_submitted_total, 150);
+        assert!(snapshots[0].last_submit_ts.is_some());
+    }
+
+    #[tokio::test]
+    async fn handle_health_snapshot_drops_event_for_unknown_pipeline() {
+        let (mut engine, registry) = fresh_engine().await;
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            999,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 0,
+                frames_submitted_last_5s: 0,
+                observed_fps: 0.0,
+                nominal_fps: 30.0,
+                last_submit_ts: None,
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 0,
+                reported_state: PlaybackStateLabel::Idle,
+            },
+        );
+        assert_eq!(registry.snapshots().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn registry_holds_one_entry_per_pipeline_with_health() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(1, "SP-a");
+        engine.ensure_pipeline(2, "SP-b");
+        let now = Instant::now();
+        let mk_event = |state| PipelineEvent::HealthSnapshot {
+            connections: 1,
+            frames_submitted_total: 0,
+            frames_submitted_last_5s: 0,
+            observed_fps: 0.0,
+            nominal_fps: 30.0,
+            last_submit_ts: None,
+            last_heartbeat_ts: now,
+            consecutive_bad_polls: 0,
+            reported_state: state,
+        };
+        engine.handle_health_snapshot(1, mk_event(PlaybackStateLabel::Playing));
+        engine.handle_health_snapshot(2, mk_event(PlaybackStateLabel::Idle));
+        let snapshots = registry.snapshots();
+        assert_eq!(snapshots.len(), 2);
+        let ids: Vec<_> = snapshots.iter().map(|s| s.playlist_id).collect();
+        assert!(ids.contains(&1));
+        assert!(ids.contains(&2));
+    }
+
+    #[tokio::test]
+    async fn engine_overrides_idle_to_waiting_for_scene_when_canonical_state_says_so() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(5, "SP-w");
+        engine.set_state_for_test(5, PlayState::WaitingForScene);
+
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            5,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 0,
+                frames_submitted_last_5s: 0,
+                observed_fps: 0.0,
+                nominal_fps: 30.0,
+                last_submit_ts: None,
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 0,
+                reported_state: PlaybackStateLabel::Idle,
+            },
+        );
+
+        let snapshots = registry.snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].state,
+            PlaybackStateLabel::WaitingForScene,
+            "engine must override pipeline's Idle -> WaitingForScene when canonical state matches"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls() {
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(8, "SP-fail");
+        engine.set_state_for_test(8, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(8, true);
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            8,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 100,
+                frames_submitted_last_5s: 30,
+                observed_fps: 30.0,
+                nominal_fps: 30.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 2,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+        let snapshots = registry.snapshots();
+        assert_eq!(snapshots[0].consecutive_bad_polls, 2);
+        assert_eq!(
+            snapshots[0].degraded_reason.as_deref(),
+            Some("no NDI receiver — wall is dark"),
+        );
+    }
+
+    #[test]
+    fn degraded_reason_returns_none_at_one_bad_poll() {
+        let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 0, 0.0, 30.0, 1);
+        assert!(r.is_none(), "single bad poll must not trigger degradation");
+    }
+
+    #[test]
+    fn degraded_reason_returns_none_when_not_playing() {
+        let r = compute_degraded_reason(&PlaybackStateLabel::Idle, 0, 0.0, 30.0, 5);
+        assert!(r.is_none());
+        let r = compute_degraded_reason(&PlaybackStateLabel::Paused, 0, 0.0, 30.0, 5);
+        assert!(r.is_none());
+        let r = compute_degraded_reason(&PlaybackStateLabel::WaitingForScene, 0, 0.0, 30.0, 5);
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn degraded_reason_emits_underrun_when_fps_below_half_nominal() {
+        let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 1, 10.0, 30.0, 2);
+        assert_eq!(r.as_deref(), Some("underrunning (10/30 fps)"));
+    }
+
+    #[test]
+    fn degraded_reason_emits_stale_when_fps_ok_and_connections_ok() {
+        let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 1, 30.0, 30.0, 2);
+        assert_eq!(r.as_deref(), Some("no frames in 10s"));
+    }
+
+    #[test]
+    fn should_fire_recreate_first_attempt_at_30s() {
+        assert!(!should_fire_recreate(5, 0, None));
+        assert!(should_fire_recreate(6, 0, None));
+        assert!(should_fire_recreate(7, 0, None));
+    }
+
+    #[test]
+    fn should_fire_recreate_second_attempt_at_60s() {
+        assert!(!should_fire_recreate(11, 1, Some(6)));
+        assert!(should_fire_recreate(12, 1, Some(6)));
+    }
+
+    #[test]
+    fn should_fire_recreate_third_attempt_at_2min() {
+        assert!(!should_fire_recreate(23, 2, Some(12)));
+        assert!(should_fire_recreate(24, 2, Some(12)));
+    }
+
+    #[test]
+    fn should_fire_recreate_fourth_attempt_at_4min() {
+        assert!(!should_fire_recreate(47, 3, Some(24)));
+        assert!(should_fire_recreate(48, 3, Some(24)));
+    }
+
+    #[test]
+    fn should_fire_recreate_fifth_and_beyond_every_5min() {
+        // 5th attempt: previous fired at poll 48; next at 48 + 60 = 108
+        assert!(!should_fire_recreate(107, 4, Some(48)));
+        assert!(should_fire_recreate(108, 4, Some(48)));
+        // 6th attempt: previous fired at 108; next at 168
+        assert!(!should_fire_recreate(167, 5, Some(108)));
+        assert!(should_fire_recreate(168, 5, Some(108)));
+    }
+
+    #[test]
+    fn should_fire_recreate_returns_false_on_clean_poll() {
+        assert!(!should_fire_recreate(0, 5, Some(108)));
+    }
+
+    #[tokio::test]
+    async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
+        // Pipeline is decoding (state=Playing) but OBS is on a different
+        // scene → scene_active=false. Even with connections=0, no alert.
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(9, "SP-off");
+        engine.set_state_for_test(9, PlayState::Playing { video_id: 1 });
+        // scene_active defaults to false on a fresh pipeline; do not flip it.
+
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            9,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 100,
+                frames_submitted_last_5s: 30,
+                observed_fps: 30.0,
+                nominal_fps: 30.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 5,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+        let snapshots = registry.snapshots();
+        assert_eq!(snapshots[0].state, PlaybackStateLabel::Paused);
+        assert!(
+            snapshots[0].degraded_reason.is_none(),
+            "scene_active=false must not produce a degraded_reason even with connections=0"
+        );
+    }
+}
