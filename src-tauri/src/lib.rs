@@ -3,16 +3,19 @@
 //! Embeds `sp-server` and runs it in the background while providing
 //! a system-tray icon and a WebView window pointing at the dashboard.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::Manager;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 mod tray;
 mod tray_icons;
 
 /// Run the Tauri application.
 pub fn run() {
-    setup_logging();
+    // Hold the worker guard for the process lifetime so the background log
+    // writer thread keeps draining buffered messages until shutdown.
+    let _log_guard = setup_logging();
 
     tracing::info!("SongPlayer v{} starting", env!("BUILD_VERSION"));
 
@@ -103,7 +106,24 @@ fn data_directory() -> PathBuf {
     }
 }
 
-fn setup_logging() {
+/// Build the rolling file appender used for `songplayer.log.<DATE>` files.
+///
+/// Daily rotation, retains the last 14 files. Always opens in append mode —
+/// previous-session logs are NEVER truncated. This is critical for diagnosing
+/// failures where the operator restarts the app before logs can be collected
+/// (e.g. the 2026-04-27 dark-wall incident, where the morning's failure log
+/// was destroyed when the process restarted).
+fn build_file_appender(log_dir: &Path) -> std::io::Result<RollingFileAppender> {
+    RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("songplayer")
+        .filename_suffix("log")
+        .max_log_files(14)
+        .build(log_dir)
+        .map_err(|e| std::io::Error::other(e.to_string()))
+}
+
+fn setup_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::{EnvFilter, fmt};
@@ -111,15 +131,20 @@ fn setup_logging() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,sp_server=debug"));
 
-    // Log to file so we can diagnose issues on win-resolume.
+    // Log to file so we can diagnose issues on win-resolume across restarts.
     let log_dir = data_directory();
     let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join("songplayer.log");
 
-    let file_layer = if let Ok(file) = std::fs::File::create(&log_path) {
-        Some(fmt::layer().with_target(true).with_writer(std::sync::Mutex::new(file)))
-    } else {
-        None
+    let (file_layer, guard) = match build_file_appender(&log_dir) {
+        Ok(appender) => {
+            let (non_blocking, guard) = tracing_appender::non_blocking(appender);
+            let layer = fmt::layer()
+                .with_target(true)
+                .with_ansi(false)
+                .with_writer(non_blocking);
+            (Some(layer), Some(guard))
+        }
+        Err(_) => (None, None),
     };
 
     tracing_subscriber::registry()
@@ -127,4 +152,62 @@ fn setup_logging() {
         .with(fmt::layer().with_target(true))
         .with(file_layer)
         .init();
+
+    guard
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for the 2026-04-27 dark-wall log-loss incident.
+    ///
+    /// Two consecutive sessions in the same log directory must both end up in
+    /// the on-disk log file. The previous implementation used `File::create`
+    /// which truncates, destroying the prior session's evidence.
+    #[test]
+    fn rolling_appender_preserves_previous_session_content() {
+        use std::io::Write;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+
+        // Session 1
+        {
+            let appender = build_file_appender(dir).expect("build session 1");
+            let mut w = appender;
+            w.write_all(b"session-1-line\n").expect("write session 1");
+            w.flush().expect("flush appender");
+        }
+
+        // Session 2 — same directory, same prefix.
+        {
+            let appender = build_file_appender(dir).expect("build session 2");
+            let mut w = appender;
+            w.write_all(b"session-2-line\n").expect("write session 2");
+            w.flush().expect("flush appender");
+        }
+
+        // Daily rotation means both writes go into the same dated file.
+        let entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("read_dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("songplayer"))
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "expected exactly one rolled file under daily rotation, got {}",
+            entries.len()
+        );
+        let content = std::fs::read_to_string(entries[0].path()).expect("read log");
+        assert!(
+            content.contains("session-1-line"),
+            "session 1 content was truncated: {content:?}"
+        );
+        assert!(
+            content.contains("session-2-line"),
+            "session 2 content missing: {content:?}"
+        );
+    }
 }
