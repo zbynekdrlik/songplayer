@@ -302,7 +302,8 @@ fn run_loop_windows(
     // clock_video = true lets NDI pace `send_video_async` on its internal
     // high-resolution clock. clock_audio stays false because we submit both
     // streams from a single thread; clocking both would deadlock on startup.
-    let sender = match sp_ndi::NdiSender::new_with_clocking(backend, ndi_name, true, false) {
+    let sender = match sp_ndi::NdiSender::new_with_clocking(backend.clone(), ndi_name, true, false)
+    {
         Ok(s) => s,
         Err(e) => {
             error!(%e, "failed to create NDI sender");

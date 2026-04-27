@@ -250,6 +250,17 @@ impl PlaybackEngine {
         }
     }
 
+    /// Test-only: force a pipeline's `scene_active` flag. Lets the
+    /// ndi_health unit tests drive both branches of the new
+    /// "Playing+scene_active=false" gate.
+    #[cfg(test)]
+    pub(crate) fn set_scene_active_for_test(&mut self, playlist_id: i64, active: bool) {
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.scene_active
+                .store(active, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     /// Receive the next pipeline event (for use in external select! loops).
     pub async fn recv_pipeline_event(&mut self) -> Option<(i64, PipelineEvent)> {
         self.event_rx.recv().await

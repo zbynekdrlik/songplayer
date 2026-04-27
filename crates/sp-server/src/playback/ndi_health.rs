@@ -466,6 +466,7 @@ mod tests {
         let (mut engine, registry) = fresh_engine().await;
         engine.ensure_pipeline(8, "SP-fail");
         engine.set_state_for_test(8, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(8, true);
         let now = Instant::now();
         engine.handle_health_snapshot(
             8,
