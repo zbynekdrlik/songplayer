@@ -85,9 +85,8 @@ fn seek_does_not_collide_with_other_variants() {
         PipelineCommand::Seek { position_ms: 0 },
         PipelineCommand::Stop,
         PipelineCommand::Shutdown,
-        PipelineCommand::RecreateSender,
     ];
-    assert_eq!(variants.len(), 7);
+    assert_eq!(variants.len(), 6);
 }
 
 #[test]
