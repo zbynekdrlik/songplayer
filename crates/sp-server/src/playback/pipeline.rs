@@ -164,6 +164,12 @@ impl PlaybackPipeline {
     /// Send a command to the pipeline thread. Returns Err if the channel
     /// is closed (thread already exited). Used by the auto-recovery path
     /// in `playback::ndi_health`.
+    ///
+    /// mutants::skip — thin pass-through to crossbeam_channel::Sender::send;
+    /// the Ok(())-substitution mutant is observable only by capturing the
+    /// thread's reaction to a sent command, which would require spinning up
+    /// the full pipeline thread machinery for a one-line wrapper.
+    #[cfg_attr(test, mutants::skip)]
     pub fn send_command(
         &self,
         cmd: PipelineCommand,

@@ -11,6 +11,7 @@ mod position_update;
 mod recovery;
 pub mod state;
 pub mod submitter;
+mod test_helpers;
 mod title;
 
 use std::collections::{HashMap, VecDeque};
@@ -238,27 +239,6 @@ impl PlaybackEngine {
                 cached_position_ms: 0,
             }
         });
-    }
-
-    /// Test-only: force a pipeline's canonical engine state. Lets the
-    /// ndi_health unit tests drive the WaitingForScene override path
-    /// without spinning up an OBS event stream.
-    #[cfg(test)]
-    pub(crate) fn set_state_for_test(&mut self, playlist_id: i64, state: PlayState) {
-        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            pp.state = state;
-        }
-    }
-
-    /// Test-only: force a pipeline's `scene_active` flag. Lets the
-    /// ndi_health unit tests drive both branches of the new
-    /// "Playing+scene_active=false" gate.
-    #[cfg(test)]
-    pub(crate) fn set_scene_active_for_test(&mut self, playlist_id: i64, active: bool) {
-        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            pp.scene_active
-                .store(active, std::sync::atomic::Ordering::Release);
-        }
     }
 
     /// Receive the next pipeline event (for use in external select! loops).

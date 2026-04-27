@@ -481,4 +481,20 @@ mod tests {
         assert_eq!(sub.frames_submitted_total(), 1);
         assert!(sub.last_submit_ts().is_some());
     }
+
+    #[test]
+    fn frame_rate_n_returns_construction_value() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "Rn", true, false).unwrap();
+        let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30000, 1001);
+        assert_eq!(sub.frame_rate_n(), 30000);
+    }
+
+    #[test]
+    fn frame_rate_d_returns_construction_value() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "Rd", true, false).unwrap();
+        let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30000, 1001);
+        assert_eq!(sub.frame_rate_d(), 1001);
+    }
 }
