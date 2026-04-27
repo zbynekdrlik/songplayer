@@ -191,6 +191,14 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.last_submit_ts
     }
 
+    pub fn frame_rate_n(&self) -> i32 {
+        self.frame_rate_n
+    }
+
+    pub fn frame_rate_d(&self) -> i32 {
+        self.frame_rate_d
+    }
+
     /// Current nominal frame rate as fps. Used by the heartbeat to compute
     /// the underrun threshold (observed_fps < nominal_fps / 2).
     pub fn nominal_fps(&self) -> f32 {

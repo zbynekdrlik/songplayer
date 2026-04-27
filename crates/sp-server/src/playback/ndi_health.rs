@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{RwLock, atomic::Ordering};
 use std::time::Instant;
 use tracing::warn;
 
@@ -178,9 +178,18 @@ impl crate::playback::PlaybackEngine {
 
         // Reconcile state: the canonical engine knows about WaitingForScene;
         // the pipeline thread doesn't. Override the pipeline's Idle when the
-        // engine says WaitingForScene.
-        let canonical_state = match (&pp.state, &reported_state) {
-            (PlayState::WaitingForScene, PlaybackStateLabel::Idle) => {
+        // engine says WaitingForScene. Also map Playing+scene_inactive to
+        // Paused so compute_degraded_reason returns None when OBS is not
+        // on this pipeline's scene (connections=0 there is normal noise).
+        let scene_active = pp.scene_active.load(Ordering::Acquire);
+        let canonical_state = match (&pp.state, &reported_state, scene_active) {
+            // OBS isn't on this pipeline's scene → no subscriber is expected.
+            // Map Playing to a quiet state so compute_degraded_reason returns
+            // None even when connections == 0.
+            (PlayState::Playing { .. }, PlaybackStateLabel::Playing, false) => {
+                PlaybackStateLabel::Paused
+            }
+            (PlayState::WaitingForScene, PlaybackStateLabel::Idle, _) => {
                 PlaybackStateLabel::WaitingForScene
             }
             _ => reported_state.clone(),
@@ -248,6 +257,29 @@ impl crate::playback::PlaybackEngine {
         }
 
         self.ndi_health_registry.update(snapshot);
+
+        // Tier-2 auto-recovery: every ~30s of sustained degradation, force
+        // the pipeline thread to destroy + recreate the NDI sender so OBS
+        // receivers re-handshake. consecutive_bad_polls is bumped every 5s,
+        // so 6 bad polls = 30s. Recreate every 6 polls (30s, 60s, ...) to
+        // avoid thrashing.
+        if degraded_reason.is_some() && consecutive_bad_polls > 0 && consecutive_bad_polls % 6 == 0
+        {
+            tracing::warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                consecutive_bad_polls,
+                "ndi: triggering Tier-2 auto-recovery (RecreateSender)"
+            );
+            if let Some(pp) = self.pipelines.get(&playlist_id) {
+                if let Err(e) = pp
+                    .pipeline
+                    .send_command(crate::playback::pipeline::PipelineCommand::RecreateSender)
+                {
+                    tracing::warn!(playlist_id, %e, "failed to send RecreateSender to pipeline thread");
+                }
+            }
+        }
     }
 }
 
@@ -483,5 +515,37 @@ mod tests {
     fn degraded_reason_emits_stale_when_fps_ok_and_connections_ok() {
         let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 1, 30.0, 30.0, 2);
         assert_eq!(r.as_deref(), Some("no frames in 10s"));
+    }
+
+    #[tokio::test]
+    async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
+        // Pipeline is decoding (state=Playing) but OBS is on a different
+        // scene → scene_active=false. Even with connections=0, no alert.
+        let (mut engine, registry) = fresh_engine().await;
+        engine.ensure_pipeline(9, "SP-off");
+        engine.set_state_for_test(9, PlayState::Playing { video_id: 1 });
+        // scene_active defaults to false on a fresh pipeline; do not flip it.
+
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            9,
+            PipelineEvent::HealthSnapshot {
+                connections: 0,
+                frames_submitted_total: 100,
+                frames_submitted_last_5s: 30,
+                observed_fps: 30.0,
+                nominal_fps: 30.0,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 5,
+                reported_state: PlaybackStateLabel::Playing,
+            },
+        );
+        let snapshots = registry.snapshots();
+        assert_eq!(snapshots[0].state, PlaybackStateLabel::Paused);
+        assert!(
+            snapshots[0].degraded_reason.is_none(),
+            "scene_active=false must not produce a degraded_reason even with connections=0"
+        );
     }
 }

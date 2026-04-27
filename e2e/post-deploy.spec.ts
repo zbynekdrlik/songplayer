@@ -142,33 +142,14 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // Wait for the WASM bundle to mount and the card to appear.
     await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
 
-    // NDI Tier-1 visibility — verify the dashboard component renders
-    // correctly. The card is alert-only: it renders nothing when all
-    // pipelines are healthy, and a `.nh-alert` row per degraded
-    // pipeline otherwise. We intentionally do NOT assert toHaveCount(0)
-    // here because the deployed system can have legitimate degraded
-    // pipelines (e.g. a Playing pipeline whose OBS scene is off-program
-    // — see #57). Instead, validate that IF the alert renders, it
-    // shows a real reason from the server's degraded_reason field, and
-    // the rendered text matches the live API.
-    const ndiHealth = await request
-      .get("/api/v1/ndi/health")
-      .then((r) => r.json() as Promise<Array<{
-        ndi_name: string;
-        state: string;
-        consecutive_bad_polls: number;
-        degraded_reason: string | null;
-      }>>);
-    const expectedAlerts = ndiHealth.filter(
-      (h) => h.state === "Playing" && h.consecutive_bad_polls >= 2 && h.degraded_reason,
-    );
-    const alertRows = page.locator(".nh-alert");
-    await expect(alertRows).toHaveCount(expectedAlerts.length);
-    for (const alert of expectedAlerts) {
-      const row = alertRows.filter({ hasText: `NDI ${alert.ndi_name}` });
-      await expect(row).toBeVisible();
-      await expect(row).toContainText(alert.degraded_reason!);
-    }
+    // NDI Tier-1 visibility — the endpoint is the public surface; the
+    // dashboard card was removed in favour of structured logs +
+    // auto-recovery (no operator-facing alert needed when the system
+    // self-heals).
+    const ndiHealthResp = await request.get("/api/v1/ndi/health");
+    expect(ndiHealthResp.status()).toBe(200);
+    const ndiHealth = await ndiHealthResp.json();
+    expect(Array.isArray(ndiHealth)).toBe(true);
 
     const card = page.locator(".playlist-card", { hasText: pl.name });
     await expect(card).toBeVisible();

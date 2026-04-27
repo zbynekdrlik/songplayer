@@ -869,31 +869,3 @@ body {
     background: var(--warning);
     flex-shrink: 0;
 }
-
-/* ---- NDI health alert (only rendered when a pipeline has a problem) ---- */
-
-.ndi-health-alert {
-    margin-left: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.nh-alert {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
-    color: var(--warning);
-    padding: 4px 8px;
-    border-left: 3px solid var(--warning);
-    background: rgba(255, 170, 0, 0.08);
-}
-
-.nh-alert-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--warning);
-    flex-shrink: 0;
-}
