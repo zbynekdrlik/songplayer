@@ -1,6 +1,7 @@
 pub mod aligner;
 pub mod assembly;
 pub mod autosub_provider;
+pub mod backend;
 pub mod bootstrap;
 pub mod chunking;
 pub mod description_provider;
