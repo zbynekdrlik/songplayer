@@ -12,7 +12,7 @@
 //! within the same song. Restart starts from key 0 again (one extra 429 burst
 //! on cold start — acceptable).
 
-use crate::lyrics::gemini_chunks::{merge_overlap, plan_chunks};
+use crate::lyrics::audio_chunking::{merge_overlap, plan_chunks};
 use crate::lyrics::gemini_client::{AuditCtx, GeminiClient};
 use crate::lyrics::gemini_parse::parse_timed_lines;
 use crate::lyrics::gemini_prompt::build_prompt;
@@ -402,7 +402,7 @@ async fn write_raw_cache(cache_dir: &Path, video_id: &str, chunks: &[RawChunk]) 
 async fn load_cached_chunks(
     cache_dir: &Path,
     video_id: &str,
-    plans: &[crate::lyrics::gemini_chunks::ChunkPlan],
+    plans: &[crate::lyrics::audio_chunking::ChunkPlan],
 ) -> Vec<Option<String>> {
     let path = cache_dir.join(format!("{video_id}_gemini_chunks.json"));
     let Ok(bytes) = tokio::fs::read(&path).await else {

@@ -1,6 +1,8 @@
-//! Chunk planning (how to slice the song into 60s/10s-overlap chunks) and
-//! overlap-merge logic for stitching per-chunk timed-line outputs into a
-//! single global timeline.
+//! Audio time-window chunking — 60s windows with 10s overlap.
+//!
+//! Originally introduced for Gemini chunked transcription. Reused by
+//! WhisperXReplicateBackend's optional chunking trigger (see Task A.5)
+//! when WhisperX's native long-form handling collapses on a song.
 
 use crate::lyrics::gemini_parse::ParsedLine;
 

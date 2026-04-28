@@ -1,5 +1,6 @@
 pub mod aligner;
 pub mod assembly;
+pub mod audio_chunking;
 pub mod autosub_provider;
 pub mod backend;
 pub mod bootstrap;
@@ -7,7 +8,6 @@ pub mod chunking;
 pub mod description_provider;
 pub mod gather;
 pub mod gemini_audit;
-pub mod gemini_chunks;
 pub mod gemini_client;
 pub mod gemini_parse;
 pub mod gemini_prompt;
