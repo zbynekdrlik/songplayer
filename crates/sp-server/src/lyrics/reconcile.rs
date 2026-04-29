@@ -43,7 +43,7 @@ pub fn reconcile(asr: &AlignedTrack, authoritative: &[CandidateText]) -> Aligned
     }
     let auth_words: Vec<String> = auth_text
         .iter()
-        .flat_map(|line| line.split_whitespace().map(|w| norm(w)))
+        .flat_map(|line| line.split_whitespace().map(norm))
         .collect();
     if auth_words.is_empty() {
         return asr.clone();

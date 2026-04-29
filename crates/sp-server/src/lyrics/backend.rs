@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlignedWord {
     pub text: String,
     pub start_ms: u32,
@@ -18,7 +18,7 @@ pub struct AlignedWord {
     pub confidence: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlignedLine {
     pub text: String,
     pub start_ms: u32,
@@ -29,7 +29,7 @@ pub struct AlignedLine {
     pub words: Option<Vec<AlignedWord>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlignedTrack {
     pub lines: Vec<AlignedLine>,
     /// e.g. "whisperx-large-v3@rev1"
