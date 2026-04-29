@@ -110,7 +110,8 @@ fn split_line(line: &AlignedLine, cfg: SplitConfig) -> Vec<AlignedLine> {
 /// Find the byte-index for the split. Priority order:
 /// 1. Sentence-end punctuation rightmost ≤ max_chars
 /// 2. Comma rightmost ≤ max_chars
-/// 3. Word-boundary nearest to center (max_chars / 2)
+/// 3. Word-boundary nearest the center, constrained to be at or before the
+///    max_chars limit (not a global nearest-center search)
 /// 4. Rightmost word-boundary ≤ max_chars
 fn find_split_index(text: &str, max_chars: usize) -> Option<usize> {
     if text.chars().count() <= max_chars {
@@ -120,8 +121,10 @@ fn find_split_index(text: &str, max_chars: usize) -> Option<usize> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let limit_idx = chars.get(max_chars).map(|(i, _)| *i).unwrap_or(text.len());
 
+    // Early return guarantees chars.len() > max_chars, so [..max_chars] is in bounds.
+
     // 1. Sentence-end (.!?…) rightmost ≤ limit
-    for &(i, c) in chars[..max_chars.min(chars.len())].iter().rev() {
+    for &(i, c) in chars[..max_chars].iter().rev() {
         if matches!(c, '.' | '!' | '?' | '…') {
             // Prefer split AFTER the punctuation
             let next = i + c.len_utf8();
@@ -132,7 +135,7 @@ fn find_split_index(text: &str, max_chars: usize) -> Option<usize> {
     }
 
     // 2. Comma / pause rightmost ≤ limit
-    for &(i, c) in chars[..max_chars.min(chars.len())].iter().rev() {
+    for &(i, c) in chars[..max_chars].iter().rev() {
         if matches!(c, ',' | ';' | ':' | '，' | '、') {
             let next = i + c.len_utf8();
             if next < text.len() {
@@ -174,8 +177,13 @@ fn split_words_by_index(
     }
 
     // Approximate — words.len() may not equal text.split_whitespace().count() if
-    // words came from ASR with different tokenization. Char-proportional gives a
-    // reasonable boundary even on mismatched arrays.
+    // words came from ASR with different tokenization. Byte-proportional gives a
+    // reasonable boundary even on mismatched arrays. `line.text.len()` is the byte
+    // length and `byte_idx` is a byte offset, so this is byte-proportional, not
+    // char-proportional. For ASCII/Latin text (English/Spanish/Portuguese — mostly
+    // 1-2 byte chars) the difference is negligible; it skews toward multibyte
+    // regions on CJK text, which is an acceptable approximation for the karaoke
+    // use case.
     let split_word = (words.len() * byte_idx / line.text.len().max(1)).min(words.len());
     let (left, right) = words.split_at(split_word);
     (
@@ -269,6 +277,13 @@ mod tests {
 
     #[test]
     fn timing_proportionally_distributed() {
+        // "Praise the Lord. Tell the world." splits at the '.' after "Lord."
+        // Left:  "Praise the Lord." — non-WS chars: P,r,a,i,s,e,t,h,e,L,o,r,d,. = 14
+        // Right: "Tell the world."  — non-WS chars: T,e,l,l,t,h,e,w,o,r,l,d,.   = 13
+        // Total non-WS = 27
+        // Expected mid = 0 + (4000 * 14 / 27) = 56000 / 27 = 2074 (integer division)
+        // A buggy uniform-split implementation (mid = (0+4000)/2 = 2000) would fail
+        // the ±10ms tolerance check below.
         let l = line("Praise the Lord. Tell the world.", 0, 4000);
         let track = AlignedTrack {
             lines: vec![l],
@@ -276,14 +291,68 @@ mod tests {
             raw_confidence: 1.0,
         };
         let split = split_track(&track, SplitConfig::default());
-        // First line ends roughly halfway
-        assert!(split.lines[0].end_ms > 1000);
-        assert!(split.lines[0].end_ms < 3000);
+        assert_eq!(split.lines.len(), 2);
+        let expected_mid: u32 = 2074;
+        let actual_mid = split.lines[0].end_ms;
+        assert!(
+            actual_mid.abs_diff(expected_mid) <= 10,
+            "expected mid ≈ {expected_mid}ms (char-weighted), got {actual_mid}ms"
+        );
         // Continuity: line 1 end == line 2 start
         assert_eq!(split.lines[0].end_ms, split.lines[1].start_ms);
         // Outer bounds preserved
         assert_eq!(split.lines[0].start_ms, 0);
         assert_eq!(split.lines[1].end_ms, 4000);
+    }
+
+    #[test]
+    fn timing_proportional_diverges_from_uniform() {
+        // Unbalanced split: "Hi." is tiny vs the long tail.
+        // Sentence-end priority finds '.' after "Hi" at char 3 (within max_chars=32).
+        // Left:  "Hi." — non-WS chars: H,i,. = 3
+        // Right: "Then a much longer phrase that runs on for a while."
+        //        non-WS: T,h,e,n=4 + a=1 + m,u,c,h=4 + l,o,n,g,e,r=6 + p,h,r,a,s,e=6
+        //               + t,h,a,t=4 + r,u,n,s=4 + o,n=2 + f,o,r=3 + a=1 + w,h,i,l,e,.=6 = 41
+        // Total non-WS = 3 + 41 = 44
+        // Expected mid = 0 + (4000 * 3 / 44) = 12000 / 44 = 272ms
+        // Uniform would place mid at (0 + 4000) / 2 = 2000ms — VERY different.
+        let l = line(
+            "Hi. Then a much longer phrase that runs on for a while.",
+            0,
+            4000,
+        );
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, SplitConfig::default());
+        assert!(split.lines.len() >= 2, "expected a split");
+        // Proportional mid is ≈272ms — far below the uniform 2000ms midpoint.
+        // A uniform-split implementation would fail this assertion.
+        assert!(
+            split.lines[0].end_ms < 600,
+            "expected proportional mid < 600ms for tiny left half, got {}ms (uniform would be 2000ms)",
+            split.lines[0].end_ms
+        );
+    }
+
+    #[test]
+    fn zero_duration_line_does_not_panic() {
+        // Edge case: start_ms == end_ms (zero-duration). The clamp + saturating_sub
+        // must produce a finite result without underflow or div-by-zero.
+        let l = line("Praise the Lord. Tell the world.", 5000, 5000);
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, SplitConfig::default());
+        assert!(!split.lines.is_empty());
+        for sl in &split.lines {
+            assert_eq!(sl.start_ms, 5000);
+            assert_eq!(sl.end_ms, 5000);
+        }
     }
 
     #[test]
