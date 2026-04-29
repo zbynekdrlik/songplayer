@@ -13,6 +13,7 @@ pub mod gemini_parse;
 pub mod gemini_prompt;
 pub mod gemini_provider;
 pub mod genius;
+pub(crate) mod lcs;
 pub mod lrclib;
 pub mod merge;
 pub mod orchestrator;
