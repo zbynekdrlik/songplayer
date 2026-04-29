@@ -29,8 +29,7 @@ pub struct CandidateText {
     pub has_timing: bool,
 }
 
-// Temporary bridge until B.4 retargets fetchers to use tier1 directly.
-// Will become a no-op after B.4 since the shapes are identical.
+// Temporary bridge — Phase G deletes provider.rs and this impl with it.
 impl From<crate::lyrics::provider::CandidateText> for CandidateText {
     fn from(c: crate::lyrics::provider::CandidateText) -> Self {
         Self {
@@ -135,16 +134,16 @@ pub async fn collect(fetchers: Vec<FetchFn>) -> Tier1Result {
 /// `line_timings: None` and `has_timing: false`.
 pub fn lyrics_track_to_candidate(track: sp_core::lyrics::LyricsTrack) -> CandidateText {
     let any_timing = track.lines.iter().any(|l| l.start_ms != 0 || l.end_ms != 0);
-    let lines: Vec<String> = track.lines.iter().map(|l| l.en.clone()).collect();
-    let line_timings = if any_timing {
-        Some(track.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect())
-    } else {
-        None
-    };
+    let mut lines: Vec<String> = Vec::with_capacity(track.lines.len());
+    let mut timings: Vec<(u64, u64)> = Vec::with_capacity(track.lines.len());
+    for l in track.lines {
+        timings.push((l.start_ms, l.end_ms));
+        lines.push(l.en);
+    }
     CandidateText {
         source: track.source,
         lines,
-        line_timings,
+        line_timings: if any_timing { Some(timings) } else { None },
         has_timing: any_timing,
     }
 }
@@ -152,6 +151,7 @@ pub fn lyrics_track_to_candidate(track: sp_core::lyrics::LyricsTrack) -> Candida
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sp_core::lyrics::{LyricsLine, LyricsTrack};
 
     fn cand(
         source: &str,
@@ -291,8 +291,6 @@ mod tests {
         let r = collect(vec![none_fetcher, good_fetcher]).await;
         assert!(matches!(r, Tier1Result::TextOnly(v) if v.len() == 1));
     }
-
-    use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
 
     fn lt_line(en: &str, start: u64, end: u64) -> LyricsLine {
         LyricsLine {
