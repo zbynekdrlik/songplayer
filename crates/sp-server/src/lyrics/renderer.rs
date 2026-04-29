@@ -5,7 +5,7 @@ use sp_core::ws::ServerMsg;
 /// per-installation via `PATCH /api/v1/settings {"lyrics_lead_ms": "500"}`
 /// if stage-display / LED-wall sync needs adjustment. When absent or
 /// unparseable, defaults to 0 (no lead — line timing is real, per WhisperX
-/// alignment accuracy). The 1-second band-aid is removed as of v0.27.0.
+/// alignment accuracy).
 pub const LYRICS_LEAD_SETTING_KEY: &str = "lyrics_lead_ms";
 
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
@@ -128,9 +128,7 @@ impl LyricsState {
     /// the last line of the track. `next_sk` is `None` when the current line
     /// is last or when the next line has no SK translation.
     ///
-    /// The lookup is shifted forward by `self.lead_ms` (read from `lyrics_lead_ms`
-    /// DB setting, default 0). If the operator needs stage-display sync adjustment,
-    /// they can set a lead via API.
+    /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     pub fn resolume_lines_with_next(
         &self,
         position_ms: u64,
@@ -148,8 +146,7 @@ impl LyricsState {
     /// the current line is the last line of the track. Returns `None`
     /// between lines so the caller can hold off pushing a duplicate.
     ///
-    /// The lookup is shifted forward by `self.lead_ms` (read from `lyrics_lead_ms`
-    /// DB setting, default 0). Timings are real and accurate per WhisperX alignment.
+    /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
