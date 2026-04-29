@@ -105,7 +105,17 @@ fn parse_proxy_lines(parsed: ProxyResponse) -> Option<CandidateText> {
         if words.is_empty() || words == "♪" {
             continue;
         }
-        let start: u64 = line.start_time_ms.parse().unwrap_or(0);
+        let start: u64 = match line.start_time_ms.parse() {
+            Ok(n) => n,
+            Err(_) => {
+                tracing::warn!(
+                    track_line = %words,
+                    raw_start = %line.start_time_ms,
+                    "spotify_proxy: skipping line with malformed startTimeMs"
+                );
+                continue;
+            }
+        };
         let end: u64 = if i + 1 < n {
             raw_lines[i + 1]
                 .start_time_ms
@@ -240,5 +250,23 @@ mod tests {
     fn fetcher_constructs() {
         let _f = SpotifyLyricsFetcher::new();
         let _g = SpotifyLyricsFetcher::default();
+    }
+
+    #[test]
+    fn skips_lines_with_malformed_start_time_ms() {
+        let body = r#"{
+            "error": false,
+            "syncType": "LINE_SYNCED",
+            "lines": [
+                {"startTimeMs": "100", "words": "first"},
+                {"startTimeMs": "not-a-number", "words": "BAD"},
+                {"startTimeMs": "5000", "words": "second"}
+            ]
+        }"#;
+        let c = parse(body).unwrap();
+        // BAD line skipped; only first and second remain
+        assert_eq!(c.lines.len(), 2);
+        assert_eq!(c.lines[0], "first");
+        assert_eq!(c.lines[1], "second");
     }
 }

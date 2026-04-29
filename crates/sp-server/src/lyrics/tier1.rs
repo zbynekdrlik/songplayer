@@ -6,7 +6,11 @@
 //! Task B.2 only seeds the CandidateText type. Task B.3 adds the
 //! Tier1Collector with the parallel-fetch + short-circuit logic.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
+
+use crate::lyrics::backend::AlignedLine;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CandidateText {
@@ -16,4 +20,242 @@ pub struct CandidateText {
     /// `Some` when the fetcher has line-level timing. `start_ms`, `end_ms` per line.
     pub line_timings: Option<Vec<(u64, u64)>>,
     pub has_timing: bool,
+}
+
+// Temporary bridge until B.4 retargets fetchers to use tier1 directly.
+// Will become a no-op after B.4 since the shapes are identical.
+impl From<crate::lyrics::provider::CandidateText> for CandidateText {
+    fn from(c: crate::lyrics::provider::CandidateText) -> Self {
+        Self {
+            source: c.source,
+            lines: c.lines,
+            line_timings: c.line_timings,
+            has_timing: c.has_timing,
+        }
+    }
+}
+
+/// Threshold for Tier-1 short-circuit: only ship directly if the source
+/// has timing AND at least this many lines. Below this, treat as
+/// suspiciously short (intro snippet, partial fetch, etc.) and fall
+/// through to Tier-2 + reconciliation.
+pub const TIER1_MIN_LINES: usize = 10;
+
+#[derive(Debug, Clone)]
+pub enum Tier1Result {
+    /// One source has line-synced authoritative output. Ship directly.
+    LineSynced(AlignedLines),
+    /// Only text-only candidates (no timing). Pass to Tier-2 + reconcile.
+    TextOnly(Vec<CandidateText>),
+    /// No fetchers returned anything usable.
+    None,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlignedLines {
+    pub lines: Vec<AlignedLine>,
+    pub provenance: String,
+}
+
+/// Per-fetcher async closure shape so the collector doesn't depend on
+/// concrete fetcher types — keeps Phase G's deletion of provider.rs clean.
+pub type FetchFn =
+    Arc<dyn Fn() -> futures::future::BoxFuture<'static, Option<CandidateText>> + Send + Sync>;
+
+/// Pure logic that picks the best Tier-1 candidate from a vec.
+/// Broken out for unit testability — wire-up tests don't need real HTTP.
+///
+/// Rule: first candidate (in input order) with `has_timing == true` AND
+/// `lines.len() >= TIER1_MIN_LINES` AND `line_timings.is_some()` →
+/// `LineSynced`. Else if any non-empty candidates exist → `TextOnly`.
+/// Else `None`.
+pub fn pick_best(candidates: Vec<CandidateText>) -> Tier1Result {
+    for c in &candidates {
+        if c.has_timing && c.lines.len() >= TIER1_MIN_LINES {
+            if let Some(timings) = &c.line_timings {
+                if timings.len() == c.lines.len() {
+                    let aligned: Vec<AlignedLine> = c
+                        .lines
+                        .iter()
+                        .zip(timings.iter())
+                        .map(|(text, (start, end))| AlignedLine {
+                            text: text.clone(),
+                            start_ms: *start as u32,
+                            end_ms: *end as u32,
+                            // Per feedback_line_timing_only.md: never synthesize
+                            // word timings. Tier-1 line-synced ships words: None;
+                            // renderer falls back to line-level highlighting.
+                            words: None,
+                        })
+                        .collect();
+                    return Tier1Result::LineSynced(AlignedLines {
+                        lines: aligned,
+                        provenance: c.source.clone(),
+                    });
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        Tier1Result::None
+    } else {
+        Tier1Result::TextOnly(candidates)
+    }
+}
+
+/// Collect from all configured fetchers in parallel, then pick the best.
+///
+/// `fetchers` is a list of FetchFn closures; the caller (orchestrator)
+/// constructs each closure with its captured fetcher + per-song args
+/// (artist, track, duration, spotify_track_id, vtt_path). Failed fetchers
+/// (None) are silently dropped — the rest of the chain proceeds.
+pub async fn collect(fetchers: Vec<FetchFn>) -> Tier1Result {
+    let futures: Vec<_> = fetchers.iter().map(|f| f()).collect();
+    let results: Vec<_> = futures::future::join_all(futures).await;
+    let candidates: Vec<CandidateText> = results.into_iter().flatten().collect();
+    pick_best(candidates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cand(
+        source: &str,
+        lines_count: usize,
+        has_timing: bool,
+        with_timings: bool,
+    ) -> CandidateText {
+        let lines: Vec<String> = (0..lines_count).map(|i| format!("line {i}")).collect();
+        let timings: Option<Vec<(u64, u64)>> = if with_timings {
+            Some(
+                (0..lines_count)
+                    .map(|i| (i as u64 * 1000, i as u64 * 1000 + 1000))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        CandidateText {
+            source: source.into(),
+            lines,
+            line_timings: timings,
+            has_timing,
+        }
+    }
+
+    #[test]
+    fn tier1_min_lines_is_ten() {
+        assert_eq!(TIER1_MIN_LINES, 10);
+    }
+
+    #[test]
+    fn line_synced_above_threshold_ships_directly() {
+        let r = pick_best(vec![cand("tier1:spotify", 12, true, true)]);
+        match r {
+            Tier1Result::LineSynced(a) => {
+                assert_eq!(a.lines.len(), 12);
+                assert_eq!(a.provenance, "tier1:spotify");
+                // feedback_line_timing_only.md: ship words: None
+                for l in &a.lines {
+                    assert!(l.words.is_none(), "Tier-1 ships words: None");
+                }
+            }
+            _ => panic!("expected LineSynced"),
+        }
+    }
+
+    #[test]
+    fn line_synced_below_threshold_falls_through_to_text_only() {
+        let r = pick_best(vec![cand("tier1:spotify", 5, true, true)]);
+        match r {
+            Tier1Result::TextOnly(v) => assert_eq!(v.len(), 1),
+            _ => panic!("expected TextOnly fallthrough"),
+        }
+    }
+
+    #[test]
+    fn line_synced_with_mismatched_timing_count_falls_through() {
+        // 12 lines but only 5 timings — invariant violation, fall through
+        let mut c = cand("tier1:spotify", 12, true, true);
+        c.line_timings = Some(vec![(0, 1000); 5]);
+        let r = pick_best(vec![c]);
+        assert!(matches!(r, Tier1Result::TextOnly(_)));
+    }
+
+    #[test]
+    fn text_only_candidate_returns_text_only_variant() {
+        let r = pick_best(vec![cand("genius", 30, false, false)]);
+        assert!(matches!(r, Tier1Result::TextOnly(_)));
+    }
+
+    #[test]
+    fn empty_candidates_returns_none() {
+        let r = pick_best(vec![]);
+        assert!(matches!(r, Tier1Result::None));
+    }
+
+    #[test]
+    fn first_line_synced_wins_over_later_text_only() {
+        let r = pick_best(vec![
+            cand("tier1:spotify", 12, true, true),
+            cand("genius", 30, false, false),
+        ]);
+        match r {
+            Tier1Result::LineSynced(a) => assert_eq!(a.provenance, "tier1:spotify"),
+            _ => panic!("first line-synced should win"),
+        }
+    }
+
+    #[test]
+    fn text_only_first_then_line_synced_still_picks_line_synced() {
+        // Order doesn't matter for line-synced detection — the loop scans all.
+        let r = pick_best(vec![
+            cand("genius", 30, false, false),
+            cand("tier1:spotify", 12, true, true),
+        ]);
+        match r {
+            Tier1Result::LineSynced(a) => assert_eq!(a.provenance, "tier1:spotify"),
+            _ => panic!("any line-synced should win"),
+        }
+    }
+
+    #[tokio::test]
+    async fn collect_with_zero_fetchers_returns_none() {
+        let r = collect(vec![]).await;
+        assert!(matches!(r, Tier1Result::None));
+    }
+
+    #[tokio::test]
+    async fn collect_with_one_async_fetcher_returns_text_only() {
+        let f: FetchFn = Arc::new(|| {
+            Box::pin(async {
+                Some(CandidateText {
+                    source: "test".into(),
+                    lines: vec!["a".into(), "b".into()],
+                    line_timings: None,
+                    has_timing: false,
+                })
+            })
+        });
+        let r = collect(vec![f]).await;
+        assert!(matches!(r, Tier1Result::TextOnly(_)));
+    }
+
+    #[tokio::test]
+    async fn collect_with_failing_fetcher_drops_silently() {
+        let none_fetcher: FetchFn = Arc::new(|| Box::pin(async { None }));
+        let good_fetcher: FetchFn = Arc::new(|| {
+            Box::pin(async {
+                Some(CandidateText {
+                    source: "test".into(),
+                    lines: vec!["a".into()],
+                    line_timings: None,
+                    has_timing: false,
+                })
+            })
+        });
+        let r = collect(vec![none_fetcher, good_fetcher]).await;
+        assert!(matches!(r, Tier1Result::TextOnly(v) if v.len() == 1));
+    }
 }
