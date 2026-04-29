@@ -276,8 +276,14 @@ LINE-LENGTH RULES:
 
 CHRONOLOGICAL ORDER: output lines must be sorted by start_ms ascending.
 
-OUTPUT (strict JSON, no markdown, no prose):
-{"lines": [{"start_ms": int, "end_ms": int, "text": string}, ...]}
+OUTPUT FORMAT — STRICT, READ CAREFULLY:
+- Output ONLY a single JSON object with key "lines".
+- DO NOT wrap your answer in Python, JavaScript, or any other code.
+- DO NOT print code that "would produce" the answer — produce the answer DIRECTLY.
+- DO NOT include any prose explanation before or after.
+- DO NOT include markdown fences (no ```json, no ```python, no ```).
+- The very first character of your response must be `{` and the very last character must be `}`.
+- Schema: {"lines": [{"start_ms": int, "end_ms": int, "text": string}, ...]}
 
 WHISPERX_PHRASES_JSON:
 ___WHISPERX___
@@ -299,24 +305,22 @@ ___REFERENCE___"#;
 ///
 /// Returns `MergeError::ParseFailed` on failure.
 fn parse_claude_response(raw: &str) -> Result<Vec<MergedLine>, MergeError> {
-    // Fast path: find the first `{"lines":` substring and attempt parsing.
-    if let Some(pos) = find_lines_object(raw) {
-        let candidate = &raw[pos..];
-        if let Ok(resp) = try_parse_balanced(candidate) {
-            return Ok(resp.lines);
-        }
+    // Try every position of `{"lines":` in the raw response — Claude sometimes
+    // wraps the answer in Python/JS code where the first match is inside an
+    // assignment like `result = {"lines": ...}; print(...)` and balanced-parse
+    // from there fails because the code continues past the closing `}`.
+    if let Ok(lines) = try_all_lines_positions(raw) {
+        return Ok(lines);
     }
 
-    // Slow path: strip markdown fences and retry.
+    // Strip markdown fences and retry — handles the simple ```json ... ``` case
+    // when there's no surrounding code.
     let stripped = crate::ai::client::strip_markdown_fences(raw);
-    if let Some(pos) = find_lines_object(&stripped) {
-        let candidate = &stripped[pos..];
-        if let Ok(resp) = try_parse_balanced(candidate) {
-            return Ok(resp.lines);
-        }
+    if let Ok(lines) = try_all_lines_positions(&stripped) {
+        return Ok(lines);
     }
 
-    // Last resort: try parsing the entire stripped string.
+    // Last resort: try parsing the entire stripped string as one object.
     match serde_json::from_str::<ClaudeResponse>(&stripped) {
         Ok(resp) => Ok(resp.lines),
         Err(e) => Err(MergeError::ParseFailed(format!(
@@ -326,7 +330,32 @@ fn parse_claude_response(raw: &str) -> Result<Vec<MergedLine>, MergeError> {
     }
 }
 
+/// Try parsing the response starting at every occurrence of `{"lines":` until
+/// one succeeds AND yields a non-empty `lines` array. Robust against Claude
+/// wrapping the JSON in surrounding code (Python / JS) where the first match
+/// is at e.g. `result = {"lines": ...}; print(json.dumps(result))`.
+fn try_all_lines_positions(s: &str) -> Result<Vec<MergedLine>, ()> {
+    let needles = ["{\"lines\":", "{ \"lines\":"];
+    let mut last_err = None;
+    for needle in &needles {
+        let mut search_from = 0usize;
+        while let Some(rel) = s[search_from..].find(needle) {
+            let pos = search_from + rel;
+            let candidate = &s[pos..];
+            match try_parse_balanced(candidate) {
+                Ok(resp) if !resp.lines.is_empty() => return Ok(resp.lines),
+                Ok(_) => {}
+                Err(e) => last_err = Some(e),
+            }
+            search_from = pos + needle.len();
+        }
+    }
+    let _ = last_err; // we only signal failure; caller decides next step
+    Err(())
+}
+
 /// Find the byte offset of the first `{"lines":` pattern in `s`.
+#[allow(dead_code)]
 fn find_lines_object(s: &str) -> Option<usize> {
     // Accept both `{"lines":` and `{ "lines":` (with optional spaces).
     for prefix in &["{\"lines\":", "{ \"lines\":"] {
