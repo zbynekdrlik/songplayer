@@ -10,10 +10,12 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::lyrics::audio_chunking::{merge_overlap, plan_chunks};
 use crate::lyrics::backend::{
     AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
     BackendError,
 };
+use crate::lyrics::gemini_parse::ParsedLine;
 use crate::lyrics::replicate_client::{ReplicateClient, ReplicateError};
 
 /// Pinned version hash discovered at plan-write time (April 2026).
@@ -66,22 +68,18 @@ pub fn parse_output(output: &Value) -> Result<Vec<AlignedLine>, BackendError> {
         if text.is_empty() {
             continue;
         }
-        let words = if s.words.is_empty() {
-            None
-        } else {
-            Some(
-                s.words
-                    .iter()
-                    .filter(|w| w.start.is_some() && w.end.is_some())
-                    .map(|w| AlignedWord {
-                        text: w.word.trim().to_string(),
-                        start_ms: (w.start.unwrap_or(0.0) * 1000.0) as u32,
-                        end_ms: (w.end.unwrap_or(0.0) * 1000.0) as u32,
-                        confidence: w.score.unwrap_or(0.9) as f32,
-                    })
-                    .collect(),
-            )
-        };
+        let words: Vec<AlignedWord> = s
+            .words
+            .iter()
+            .filter(|w| w.start.is_some() && w.end.is_some())
+            .map(|w| AlignedWord {
+                text: w.word.trim().to_string(),
+                start_ms: (w.start.unwrap_or(0.0) * 1000.0) as u32,
+                end_ms: (w.end.unwrap_or(0.0) * 1000.0) as u32,
+                confidence: w.score.unwrap_or(0.9) as f32,
+            })
+            .collect();
+        let words = if words.is_empty() { None } else { Some(words) };
         lines.push(AlignedLine {
             text,
             start_ms: (s.start * 1000.0) as u32,
@@ -117,14 +115,133 @@ impl AlignmentBackend for WhisperXReplicateBackend {
         vocal_wav_path: &Path,
         _reference_text: Option<&str>,
         language: &str,
-        _opts: &AlignOpts,
+        opts: &AlignOpts,
     ) -> Result<AlignedTrack, BackendError> {
-        let url = self
+        let duration_ms = probe_duration_ms(vocal_wav_path)?;
+        let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
+
+        let lines = if duration_ms / 1000 > trigger as u64 {
+            align_chunked(self, vocal_wav_path, language, duration_ms).await?
+        } else {
+            let url = self
+                .client
+                .upload_file(vocal_wav_path)
+                .await
+                .map_err(replicate_to_backend_err)?;
+            let input = serde_json::json!({
+                "audio_file": url,
+                "language": language,
+                "align_output": true,
+                "diarization": false,
+                "batch_size": 32,
+            });
+            let pred = self
+                .client
+                .predict(WHISPERX_VERSION, input)
+                .await
+                .map_err(replicate_to_backend_err)?;
+            let output = pred
+                .output
+                .ok_or_else(|| BackendError::Malformed("succeeded but no output".into()))?;
+            parse_output(&output)?
+        };
+
+        Ok(AlignedTrack {
+            lines,
+            provenance: format!("{}@rev{}", self.id(), self.revision()),
+            raw_confidence: 0.9,
+        })
+    }
+}
+
+/// Determine audio duration via `ffprobe`. Returns milliseconds.
+fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
+    use std::process::Command;
+    let out = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            path.to_str()
+                .ok_or_else(|| BackendError::Malformed("non-utf8 path".into()))?,
+        ])
+        .output()
+        .map_err(BackendError::Io)?;
+    if !out.status.success() {
+        return Err(BackendError::Rejected("ffprobe failed".into()));
+    }
+    let s = String::from_utf8(out.stdout)
+        .map_err(|e| BackendError::Malformed(format!("ffprobe utf8: {e}")))?;
+    let secs: f64 = s
+        .trim()
+        .parse()
+        .map_err(|e| BackendError::Malformed(format!("ffprobe parse: {e}")))?;
+    Ok((secs * 1000.0) as u64)
+}
+
+/// Chunked transcription path: slice the vocal WAV into 60s/10s-overlap
+/// chunks via ffmpeg, transcribe each independently via WhisperX, then merge
+/// using the same overlap-dedup logic as the Gemini path.
+///
+/// Triggered only when `AlignOpts::chunk_trigger_seconds` is set and the
+/// audio duration exceeds the threshold. Default behavior (None or
+/// Some(u32::MAX)) is to never chunk — WhisperX handles long-form natively
+/// via faster-whisper VAD.
+async fn align_chunked(
+    backend: &WhisperXReplicateBackend,
+    vocal_wav_path: &Path,
+    language: &str,
+    duration_ms: u64,
+) -> Result<Vec<AlignedLine>, BackendError> {
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    let plans = plan_chunks(duration_ms);
+    let tmp = TempDir::new().map_err(BackendError::Io)?;
+    let mut all: Vec<Vec<ParsedLine>> = Vec::with_capacity(plans.len());
+
+    for plan in &plans {
+        let chunk_path = tmp.path().join(format!("chunk_{}.wav", plan.idx));
+        let wav_str = vocal_wav_path
+            .to_str()
+            .ok_or_else(|| BackendError::Malformed("non-utf8 wav path".into()))?;
+        let chunk_str = chunk_path.to_str().unwrap();
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-ss",
+                &format!("{}", plan.start_ms as f64 / 1000.0),
+                "-i",
+                wav_str,
+                "-t",
+                &format!("{}", (plan.end_ms - plan.start_ms) as f64 / 1000.0),
+                "-c:a",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                chunk_str,
+            ])
+            .status()
+            .map_err(BackendError::Io)?;
+        if !status.success() {
+            return Err(BackendError::Rejected(format!(
+                "ffmpeg failed for chunk {}",
+                plan.idx
+            )));
+        }
+
+        let url = backend
             .client
-            .upload_file(vocal_wav_path)
+            .upload_file(&chunk_path)
             .await
             .map_err(replicate_to_backend_err)?;
-
         let input = serde_json::json!({
             "audio_file": url,
             "language": language,
@@ -132,24 +249,41 @@ impl AlignmentBackend for WhisperXReplicateBackend {
             "diarization": false,
             "batch_size": 32,
         });
-
-        let pred = self
+        let pred = backend
             .client
             .predict(WHISPERX_VERSION, input)
             .await
             .map_err(replicate_to_backend_err)?;
-
         let output = pred
             .output
-            .ok_or_else(|| BackendError::Malformed("succeeded but no output".into()))?;
+            .ok_or_else(|| BackendError::Malformed("chunk: no output".into()))?;
+        let chunk_lines = parse_output(&output)?;
 
-        let lines = parse_output(&output)?;
-        Ok(AlignedTrack {
-            lines,
-            provenance: format!("{}@rev{}", self.id(), self.revision()),
-            raw_confidence: 0.9,
-        })
+        // Convert AlignedLine → ParsedLine (gemini_parse::ParsedLine) for merge_overlap.
+        // The merge operates on local (chunk-relative) timings; merge_overlap adds
+        // plan.start_ms internally.
+        let parsed: Vec<ParsedLine> = chunk_lines
+            .into_iter()
+            .map(|l| ParsedLine {
+                text: l.text,
+                start_ms: l.start_ms as u64,
+                end_ms: l.end_ms as u64,
+            })
+            .collect();
+        all.push(parsed);
     }
+
+    let merged = merge_overlap(&plans, &all);
+    Ok(merged
+        .into_iter()
+        .map(|g| AlignedLine {
+            text: g.text,
+            start_ms: g.start_ms as u32,
+            end_ms: g.end_ms as u32,
+            // Chunked path is line-only; word-merge across chunk boundaries is out of scope.
+            words: None,
+        })
+        .collect())
 }
 
 fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
@@ -160,7 +294,7 @@ fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
         ApiError { status, body } => BackendError::Rejected(format!("HTTP {status}: {body}")),
         RateLimited(n) => BackendError::RateLimit(format!("after {n} attempts")),
         PredictionFailed(s) => BackendError::Rejected(s),
-        Timeout => BackendError::Timeout(std::time::Duration::from_secs(1800)),
+        Timeout => BackendError::Timeout(crate::lyrics::replicate_client::PREDICTION_TIMEOUT),
         Malformed(s) => BackendError::Malformed(s),
     }
 }
@@ -262,5 +396,40 @@ mod tests {
         assert!(cap.languages.contains(&"en"));
         assert!(cap.languages.contains(&"es"));
         assert!(cap.languages.contains(&"pt"));
+    }
+
+    #[test]
+    fn all_untimestamped_words_yields_none() {
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 0.0, "end": 2.0, "text": "untimed words only",
+                "words": [
+                    {"word": "untimed", "start": null, "end": null},
+                    {"word": "words", "start": null, "end": null},
+                ]
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].words.is_none(),
+            "all-untimestamped → None, not Some(vec![])"
+        );
+    }
+
+    #[test]
+    fn default_align_opts_never_triggers_chunking() {
+        let opts = AlignOpts::default();
+        let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
+        assert_eq!(trigger, u32::MAX);
+    }
+
+    #[test]
+    fn chunk_trigger_some_zero_means_always_chunk() {
+        let opts = AlignOpts {
+            chunk_trigger_seconds: Some(0),
+        };
+        let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
+        assert_eq!(trigger, 0);
     }
 }

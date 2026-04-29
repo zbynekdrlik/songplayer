@@ -23,7 +23,7 @@ const RETRY_BASE: Duration = Duration::from_secs(10);
 const RETRY_CAP: Duration = Duration::from_secs(60);
 const RETRY_MAX_ATTEMPTS: u32 = 4;
 const POLL_INTERVAL: Duration = Duration::from_secs(8);
-const PREDICTION_TIMEOUT: Duration = Duration::from_secs(1800);
+pub const PREDICTION_TIMEOUT: Duration = Duration::from_secs(1800);
 const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Error)]
