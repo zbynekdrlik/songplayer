@@ -1,10 +1,17 @@
 //! Tier-1 — free text + line-timing fetchers.
 //!
-//! Fetchers run in parallel; if any returns has_timing=true with a plausible
-//! line count, the orchestrator ships directly without calling Tier-2 (WhisperX).
+//! `pick_best` is pure logic: short-circuits when any candidate has
+//! `has_timing=true` AND at least `TIER1_MIN_LINES` lines. Else returns
+//! `TextOnly` for downstream Tier-2 (WhisperX) + reconciliation. Else
+//! `None` if no fetcher returned anything usable.
 //!
-//! Task B.2 only seeds the CandidateText type. Task B.3 adds the
-//! Tier1Collector with the parallel-fetch + short-circuit logic.
+//! `collect` is the async wrapper that runs all configured fetchers in
+//! parallel via `futures::future::join_all` and feeds successful (`Some`)
+//! results into `pick_best`.
+//!
+//! Per `feedback_line_timing_only.md`: Tier-1 line-synced output ships
+//! `words: None` on every `AlignedLine` — the renderer falls back to
+//! line-level highlighting. Word timings are NEVER synthesized.
 
 use std::sync::Arc;
 
@@ -114,6 +121,32 @@ pub async fn collect(fetchers: Vec<FetchFn>) -> Tier1Result {
     let results: Vec<_> = futures::future::join_all(futures).await;
     let candidates: Vec<CandidateText> = results.into_iter().flatten().collect();
     pick_best(candidates)
+}
+
+/// Convert an sp-core `LyricsTrack` into a `tier1::CandidateText`.
+///
+/// Used by Phase F orchestrator wiring: when wrapping `lrclib`, `genius`,
+/// `youtube_subs` (and any future Tier-1 fetcher that emits `LyricsTrack`)
+/// into a `FetchFn` closure, the closure body invokes the fetcher and then
+/// passes the `LyricsTrack` through this adapter.
+///
+/// `has_timing` is `true` iff at least one line has a non-zero timestamp.
+/// All-zero-timing tracks (e.g., plain Genius text) return
+/// `line_timings: None` and `has_timing: false`.
+pub fn lyrics_track_to_candidate(track: sp_core::lyrics::LyricsTrack) -> CandidateText {
+    let any_timing = track.lines.iter().any(|l| l.start_ms != 0 || l.end_ms != 0);
+    let lines: Vec<String> = track.lines.iter().map(|l| l.en.clone()).collect();
+    let line_timings = if any_timing {
+        Some(track.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect())
+    } else {
+        None
+    };
+    CandidateText {
+        source: track.source,
+        lines,
+        line_timings,
+        has_timing: any_timing,
+    }
 }
 
 #[cfg(test)]
@@ -257,5 +290,85 @@ mod tests {
         });
         let r = collect(vec![none_fetcher, good_fetcher]).await;
         assert!(matches!(r, Tier1Result::TextOnly(v) if v.len() == 1));
+    }
+
+    use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
+
+    fn lt_line(en: &str, start: u64, end: u64) -> LyricsLine {
+        LyricsLine {
+            start_ms: start,
+            end_ms: end,
+            en: en.into(),
+            sk: None,
+            words: None,
+        }
+    }
+
+    fn lt(source: &str, lines: Vec<LyricsLine>) -> LyricsTrack {
+        LyricsTrack {
+            version: 1,
+            source: source.into(),
+            language_source: "en".into(),
+            language_translation: String::new(),
+            lines,
+        }
+    }
+
+    #[test]
+    fn lyrics_track_with_timings_yields_has_timing_true() {
+        let track = lt(
+            "lrclib",
+            vec![lt_line("hello", 0, 1000), lt_line("world", 1000, 2000)],
+        );
+        let c = lyrics_track_to_candidate(track);
+        assert_eq!(c.source, "lrclib");
+        assert_eq!(c.lines, vec!["hello", "world"]);
+        assert!(c.has_timing);
+        assert_eq!(
+            c.line_timings.as_ref().unwrap(),
+            &vec![(0, 1000), (1000, 2000)]
+        );
+    }
+
+    #[test]
+    fn lyrics_track_with_all_zero_timings_yields_has_timing_false() {
+        // Plain Genius text — no timings on any line
+        let track = lt(
+            "genius",
+            vec![lt_line("hello", 0, 0), lt_line("world", 0, 0)],
+        );
+        let c = lyrics_track_to_candidate(track);
+        assert_eq!(c.source, "genius");
+        assert_eq!(c.lines, vec!["hello", "world"]);
+        assert!(!c.has_timing);
+        assert!(c.line_timings.is_none());
+    }
+
+    #[test]
+    fn lyrics_track_with_at_least_one_nonzero_timing_yields_has_timing_true() {
+        // Mixed: first line zero, second line has timing → still treated as
+        // "has timing" since SOME line is timed. Caller (pick_best) further
+        // checks line_timings.len() == lines.len().
+        let track = lt(
+            "yt_subs",
+            vec![lt_line("hello", 0, 0), lt_line("world", 1000, 2000)],
+        );
+        let c = lyrics_track_to_candidate(track);
+        assert!(c.has_timing);
+        // Both timings emitted (first one is (0, 0) but the count matches lines)
+        let timings = c.line_timings.as_ref().unwrap();
+        assert_eq!(timings.len(), 2);
+        assert_eq!(timings[0], (0, 0));
+        assert_eq!(timings[1], (1000, 2000));
+    }
+
+    #[test]
+    fn lyrics_track_empty_lines_yields_empty_candidate() {
+        let track = lt("lrclib", vec![]);
+        let c = lyrics_track_to_candidate(track);
+        assert_eq!(c.source, "lrclib");
+        assert!(c.lines.is_empty());
+        assert!(!c.has_timing);
+        assert!(c.line_timings.is_none());
     }
 }
