@@ -53,10 +53,13 @@ pub struct OrchestratorInput<'a> {
     pub fetchers: Vec<FetchFn>,
     /// BCP-47 language code for the ASR backend (e.g. "en").
     pub language: &'a str,
-    /// Path to the Mel-Roformer + anvuew dereverb vocal stem. MUST be
-    /// supplied by the worker from `preprocess_vocals`; the backend
-    /// aligns against this stem, not the raw mix.
-    pub vocal_wav: &'a Path,
+    /// Path to the Mel-Roformer + anvuew dereverb vocal stem.
+    /// `None` when `preprocess_vocals` failed or tooling is unavailable.
+    /// If `None` and Tier-1 returns `TextOnly` or `None` (requiring backend
+    /// alignment), `process` returns `OrchestratorError::NoAlignment`.
+    /// Tier-1 `LineSynced` short-circuits before the backend is reached and
+    /// therefore succeeds even when this is `None`.
+    pub vocal_wav: Option<&'a Path>,
 }
 
 impl Orchestrator {
@@ -95,9 +98,16 @@ impl Orchestrator {
             Tier1Result::TextOnly(text_candidates) => {
                 // Text-only: run WhisperX for timing, then reconcile against
                 // the authoritative text to correct mishearings.
+                let wav = input.vocal_wav.ok_or_else(|| {
+                    OrchestratorError::NoAlignment(
+                        "Tier-1 TextOnly path requires a vocal WAV but none was available \
+                         (preprocess_vocals failed or tooling is absent)"
+                            .into(),
+                    )
+                })?;
                 let asr = self
                     .backend
-                    .align(input.vocal_wav, None, input.language, &AlignOpts::default())
+                    .align(wav, None, input.language, &AlignOpts::default())
                     .await?;
                 info!(
                     provenance = %asr.provenance,
@@ -110,9 +120,16 @@ impl Orchestrator {
             Tier1Result::None => {
                 // No text candidates at all — run WhisperX and ship its output
                 // verbatim (no reconciliation possible without reference text).
+                let wav = input.vocal_wav.ok_or_else(|| {
+                    OrchestratorError::NoAlignment(
+                        "Tier-1 None path requires a vocal WAV but none was available \
+                         (preprocess_vocals failed or tooling is absent)"
+                            .into(),
+                    )
+                })?;
                 let asr = self
                     .backend
-                    .align(input.vocal_wav, None, input.language, &AlignOpts::default())
+                    .align(wav, None, input.language, &AlignOpts::default())
                     .await?;
                 info!(
                     provenance = %asr.provenance,
@@ -256,7 +273,7 @@ mod tests {
             .process(OrchestratorInput {
                 fetchers: vec![fixed_fetcher(candidate)],
                 language: "en",
-                vocal_wav: &PathBuf::from("/tmp/test.wav"),
+                vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
             })
             .await
             .expect("process should succeed");
@@ -310,7 +327,7 @@ mod tests {
             .process(OrchestratorInput {
                 fetchers: vec![fixed_fetcher(candidate)],
                 language: "en",
-                vocal_wav: &PathBuf::from("/tmp/test.wav"),
+                vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
             })
             .await
             .expect("process should succeed");
@@ -347,7 +364,7 @@ mod tests {
             .process(OrchestratorInput {
                 fetchers: vec![empty_fetcher(), empty_fetcher()],
                 language: "en",
-                vocal_wav: &PathBuf::from("/tmp/test.wav"),
+                vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
             })
             .await
             .expect("process should succeed");
@@ -387,7 +404,7 @@ mod tests {
             .process(OrchestratorInput {
                 fetchers: vec![],
                 language: "en",
-                vocal_wav: &PathBuf::from("/tmp/test.wav"),
+                vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
             })
             .await
             .expect("process should succeed");
