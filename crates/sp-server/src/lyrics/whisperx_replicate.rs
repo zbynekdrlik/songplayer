@@ -116,8 +116,17 @@ impl AlignmentBackend for WhisperXReplicateBackend {
         language: &str,
         opts: &AlignOpts,
     ) -> Result<AlignedTrack, BackendError> {
-        let duration_ms = probe_duration_ms(vocal_wav_path)?;
+        // Probe duration ONLY when chunking might fire — `probe_duration_ms`
+        // shells out to `ffprobe`, which is not bundled (the tools manager
+        // installs ffmpeg.exe only). With default `AlignOpts.chunk_trigger_seconds = None`
+        // we skip probing entirely; WhisperX's faster-whisper backend
+        // handles long-form audio natively via VAD, so chunking is opt-in.
         let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
+        let duration_ms = if opts.chunk_trigger_seconds.is_some() {
+            probe_duration_ms(vocal_wav_path)?
+        } else {
+            0 // unused — chunking branch below is unreachable when trigger == u32::MAX
+        };
 
         let lines = if duration_ms / 1000 > trigger as u64 {
             align_chunked(self, vocal_wav_path, language, duration_ms).await?
