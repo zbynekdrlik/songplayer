@@ -201,7 +201,7 @@ fn source_priority(source: &str) -> u32 {
         4
     } else if source.starts_with("tier1:lrclib") {
         3
-    } else if source == "genius" {
+    } else if source == "genius" || source == "tier1:genius" {
         2
     } else if source.starts_with("tier1:yt_subs") {
         1
