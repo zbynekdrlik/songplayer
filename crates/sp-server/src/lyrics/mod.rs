@@ -20,6 +20,7 @@ pub mod orchestrator;
 pub mod provider;
 pub mod quality;
 pub mod qwen3_provider;
+pub mod reconcile;
 pub mod renderer;
 pub mod replicate_client;
 pub mod reprocess;
