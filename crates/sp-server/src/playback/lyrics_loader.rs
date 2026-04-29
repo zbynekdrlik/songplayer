@@ -12,23 +12,23 @@ use std::path::Path;
 use tracing::warn;
 
 /// Read the global `lyrics_lead_ms` setting from the DB, falling back to
-/// [`crate::lyrics::renderer::DEFAULT_LYRICS_LEAD_MS`] when absent or
-/// unparseable. An unparseable value warns but does not fail — lead time
-/// is cosmetic, not correctness-critical.
+/// 0 when absent or unparseable. An unparseable value warns but does not
+/// fail — lead time is cosmetic, not correctness-critical. Timings are
+/// real per WhisperX alignment; lead is optional operator override.
 #[cfg_attr(test, mutants::skip)] // I/O wrapper; the renderer's
 // `lead_ms_is_applied_from_state` unit test exercises the constructor
 // this wrapper feeds, which is the observable behavior.
 pub(super) async fn load_lyrics_lead_ms(pool: &SqlitePool) -> u64 {
-    use crate::lyrics::renderer::{DEFAULT_LYRICS_LEAD_MS, LYRICS_LEAD_SETTING_KEY};
+    use crate::lyrics::renderer::LYRICS_LEAD_SETTING_KEY;
     let val = match crate::db::models::get_setting(pool, LYRICS_LEAD_SETTING_KEY).await {
         Ok(v) => v,
         Err(e) => {
             warn!(%e, "lyrics_lead_ms: DB read failed, using default");
-            return DEFAULT_LYRICS_LEAD_MS;
+            return 0;
         }
     };
     let Some(raw) = val else {
-        return DEFAULT_LYRICS_LEAD_MS;
+        return 0;
     };
     match raw.trim().parse::<u64>() {
         Ok(n) => n,
@@ -38,7 +38,7 @@ pub(super) async fn load_lyrics_lead_ms(pool: &SqlitePool) -> u64 {
                 %e,
                 "lyrics_lead_ms: unparseable, using default"
             );
-            DEFAULT_LYRICS_LEAD_MS
+            0
         }
     }
 }
