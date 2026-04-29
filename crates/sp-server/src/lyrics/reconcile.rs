@@ -57,6 +57,16 @@ pub fn reconcile(asr: &AlignedTrack, authoritative: &[CandidateText]) -> Aligned
         }
     }
 
+    // Precompute prefix-sum: first_word_offset_per_line[i] = index of first
+    // auth word belonging to auth_text[i] in the flat auth_words array.
+    // O(L) once instead of O(N*L*words) per anchor pair.
+    let mut first_word_offset_per_line: Vec<usize> = Vec::with_capacity(auth_text.len());
+    let mut running = 0usize;
+    for line in &auth_text {
+        first_word_offset_per_line.push(running);
+        running += line.split_whitespace().count();
+    }
+
     // 2. Flatten ASR words across all lines for LCS.
     // At this point every line is guaranteed to have Some(words) from the
     // early-exit check above, so the None branch is unreachable.
@@ -103,30 +113,41 @@ pub fn reconcile(asr: &AlignedTrack, authoritative: &[CandidateText]) -> Aligned
             asr_word_idx,
         );
 
-        let local_idx = auth_idx - first_word_offset(&auth_text, auth_line_idx);
+        // Use precomputed prefix-sum — O(1) lookup, invariant: always in-bounds.
+        let local_idx = auth_idx - first_word_offset_per_line[auth_line_idx];
+        // Safety: local_idx is derived from auth_word_to_line which was built
+        // by iterating split_whitespace(), so the nth() is always in-bounds.
         let auth_word = auth_text[auth_line_idx]
             .split_whitespace()
             .nth(local_idx)
-            .unwrap_or("")
+            .expect("auth_word_to_line invariant: auth_idx always in-bounds")
             .to_string();
 
         if Some(auth_line_idx) != current_auth_line {
             // Flush previous line
             if let Some(prev_li) = current_auth_line {
+                let line_text = auth_text[prev_li].clone();
+                let token_count = line_text.split_whitespace().count();
+                // Per feedback_line_timing_only.md: emit words: None when the
+                // collected word array doesn't cover every token in the auth
+                // line text. Partial coverage misleads the karaoke renderer
+                // (line has 4 tokens but words array has 3 anchored entries).
+                // The renderer falls back to line-level highlighting.
+                let words_out = if !current_words.is_empty() && current_words.len() == token_count {
+                    Some(std::mem::take(&mut current_words))
+                } else {
+                    current_words.clear();
+                    None
+                };
                 new_lines.push(AlignedLine {
-                    text: auth_text[prev_li].clone(),
+                    text: line_text,
                     start_ms: current_start_ms,
                     end_ms: current_end_ms,
-                    words: if current_words.is_empty() {
-                        None
-                    } else {
-                        Some(std::mem::take(&mut current_words))
-                    },
+                    words: words_out,
                 });
             }
             current_auth_line = Some(auth_line_idx);
             current_start_ms = start_ms;
-            current_words.clear();
         }
         current_end_ms = end_ms;
         current_words.push(AlignedWord {
@@ -139,15 +160,18 @@ pub fn reconcile(asr: &AlignedTrack, authoritative: &[CandidateText]) -> Aligned
 
     // Flush final line
     if let Some(li) = current_auth_line {
+        let line_text = auth_text[li].clone();
+        let token_count = line_text.split_whitespace().count();
+        let words_out = if !current_words.is_empty() && current_words.len() == token_count {
+            Some(current_words)
+        } else {
+            None
+        };
         new_lines.push(AlignedLine {
-            text: auth_text[li].clone(),
+            text: line_text,
             start_ms: current_start_ms,
             end_ms: current_end_ms,
-            words: if current_words.is_empty() {
-                None
-            } else {
-                Some(current_words)
-            },
+            words: words_out,
         });
     }
 
@@ -162,28 +186,36 @@ pub fn reconcile(asr: &AlignedTrack, authoritative: &[CandidateText]) -> Aligned
 /// Takes the words slice directly (caller ensures it is non-empty and
 /// that `word_idx` is in-bounds for all anchors produced by `lcs_pairs`).
 fn anchor_timing(words: &[AlignedWord], word_idx: usize) -> (u32, u32, f32) {
-    if let Some(w) = words.get(word_idx) {
-        return (w.start_ms, w.end_ms, w.confidence);
+    // word_idx is derived from asr_word_origin which was built by iterating
+    // the same words slice — so indexing is always in-bounds.
+    let w = words
+        .get(word_idx)
+        .expect("asr_word_origin invariant: word_idx always in-bounds");
+    (w.start_ms, w.end_ms, w.confidence)
+}
+
+/// Stable source-preference for tie-breaking in `best_authoritative`.
+/// Higher score = more reliable timing / text quality.
+fn source_priority(source: &str) -> u32 {
+    if source.starts_with("tier1:spotify") {
+        4
+    } else if source.starts_with("tier1:lrclib") {
+        3
+    } else if source == "genius" {
+        2
+    } else if source.starts_with("tier1:yt_subs") {
+        1
+    } else {
+        0
     }
-    // word_idx out-of-bounds — should not happen given the LCS build above,
-    // but return a zeroed sentinel rather than panicking.
-    (0, 0, 0.0)
 }
 
-/// Return the flat word offset of the first word in `auth_text[line_idx]`.
-fn first_word_offset(auth_text: &[String], line_idx: usize) -> usize {
-    auth_text
-        .iter()
-        .take(line_idx)
-        .map(|l| l.split_whitespace().count())
-        .sum()
-}
-
-/// Pick the strongest authoritative source: prefer one with most lines.
+/// Pick the strongest authoritative source: most lines wins; ties broken by
+/// `source_priority` (spotify > lrclib > genius > yt_subs > other).
 fn best_authoritative(candidates: &[CandidateText]) -> Vec<String> {
     candidates
         .iter()
-        .max_by_key(|c| c.lines.len())
+        .max_by_key(|c| (c.lines.len(), source_priority(&c.source)))
         .map(|c| c.lines.clone())
         .unwrap_or_default()
 }
@@ -221,6 +253,10 @@ mod tests {
     #[test]
     fn reconciler_replaces_misheard_word_keeps_timing() {
         // ASR mishears "I've" as "I"; "got", "a", "God" are anchor matches.
+        // "I've" is NOT in the words array (only 3 anchored entries for a
+        // 4-token auth line) → per F2 / feedback_line_timing_only.md the
+        // reconciler must emit words: None so the renderer falls back to
+        // line-level highlighting rather than showing misleading partial data.
         let asr = make_asr(&[(
             "I got a God",
             1000,
@@ -243,6 +279,12 @@ mod tests {
         assert_eq!(reconciled.lines[0].text, "I've got a God"); // authoritative text
         assert_eq!(reconciled.lines[0].start_ms, 1200); // timing from "got" anchor
         assert!(reconciled.provenance.ends_with("+reconciled"));
+        // "I've" was not anchored → words array covers only 3 of 4 tokens →
+        // incomplete coverage must produce words: None (not partial highlights).
+        assert!(
+            reconciled.lines[0].words.is_none(),
+            "incomplete word coverage → line-level fallback per feedback_line_timing_only.md"
+        );
     }
 
     #[test]
@@ -329,5 +371,86 @@ mod tests {
         // Must return unchanged — no synthesized timings allowed
         assert_eq!(r.lines, asr.lines);
         assert_eq!(r.provenance, "test@rev1");
+    }
+
+    #[test]
+    fn reconciler_handles_multi_line_authoritative() {
+        // Two ASR lines + two auth lines. Exercises:
+        //  - line-transition flush logic (the if-Some(prev_li) branch fires once)
+        //  - first_word_offset_per_line for auth line_idx > 0 (second auth line
+        //    starts at flat offset 3, not 0 — the old O(N*L) helper had to
+        //    correctly sum across prior lines; the precomputed prefix-sum must
+        //    produce the same result)
+        //  - auth_idx - offset arithmetic: for auth_idx=3 (first word of line 2)
+        //    local_idx must be 0, not 3.
+        //  - Both lines flush separately with correct start_ms windows.
+        //
+        // Auth line 0: "amazing grace" (2 tokens, both anchored → words: Some)
+        // Auth line 1: "how sweet the sound" (4 tokens, all anchored → words: Some)
+        //
+        // ASR line 0: "amazing grace" — matches exactly
+        // ASR line 1: "how sweet the sound" — matches exactly
+        let asr = make_asr(&[
+            (
+                "amazing grace",
+                0,
+                2000,
+                &[("amazing", 0, 1000), ("grace", 1000, 2000)],
+            ),
+            (
+                "how sweet the sound",
+                2000,
+                6000,
+                &[
+                    ("how", 2000, 3000),
+                    ("sweet", 3000, 4000),
+                    ("the", 4000, 5000),
+                    ("sound", 5000, 6000),
+                ],
+            ),
+        ]);
+        let auth = vec![CandidateText {
+            source: "tier1:lrclib".into(),
+            lines: vec!["amazing grace".into(), "how sweet the sound".into()],
+            line_timings: None,
+            has_timing: false,
+        }];
+        let reconciled = reconcile(&asr, &auth);
+
+        // Both auth lines must be present
+        assert_eq!(reconciled.lines.len(), 2, "expected 2 reconciled lines");
+
+        // Line 0: "amazing grace" — all 2 tokens anchored → words: Some
+        assert_eq!(reconciled.lines[0].text, "amazing grace");
+        assert_eq!(reconciled.lines[0].start_ms, 0);
+        assert_eq!(reconciled.lines[0].end_ms, 2000);
+        assert!(
+            reconciled.lines[0].words.is_some(),
+            "line 0: full token coverage → words should be Some"
+        );
+        let w0 = reconciled.lines[0].words.as_ref().unwrap();
+        assert_eq!(w0.len(), 2);
+        assert_eq!(w0[0].text, "amazing");
+        assert_eq!(w0[1].text, "grace");
+
+        // Line 1: "how sweet the sound" — auth flat offset starts at 2
+        // (first_word_offset_per_line[1] = 2), so local_idx for auth_idx=2
+        // must be 0 ("how"), not 2. All 4 tokens anchored → words: Some.
+        assert_eq!(reconciled.lines[1].text, "how sweet the sound");
+        assert_eq!(
+            reconciled.lines[1].start_ms, 2000,
+            "line 1 must start at 'how' anchor timing"
+        );
+        assert_eq!(reconciled.lines[1].end_ms, 6000);
+        assert!(
+            reconciled.lines[1].words.is_some(),
+            "line 1: full token coverage → words should be Some"
+        );
+        let w1 = reconciled.lines[1].words.as_ref().unwrap();
+        assert_eq!(w1.len(), 4);
+        assert_eq!(w1[0].text, "how");
+        assert_eq!(w1[3].text, "sound");
+
+        assert!(reconciled.provenance.ends_with("+reconciled"));
     }
 }
