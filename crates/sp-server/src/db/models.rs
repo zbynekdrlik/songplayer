@@ -95,6 +95,11 @@ pub async fn get_videos_for_playlist(
 
 /// Insert or update a video keyed on (playlist_id, youtube_id).
 /// On conflict the title is updated. Returns the resulting row.
+///
+// V17 NOTE: `spotify_track_id` is in RETURNING but intentionally NOT in
+// `ON CONFLICT … DO UPDATE SET` — manual track-ID assignments must survive
+// playlist re-syncs. Do not extend `DO UPDATE SET` without revisiting this
+// design (and adding multi-playlist test coverage if you do).
 pub async fn upsert_video(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -149,30 +154,34 @@ pub async fn get_video_suppress_resolume_en(
     Ok(v.map(|n| n != 0).unwrap_or(false))
 }
 
-/// Set the Spotify track ID for a video. Used by the dashboard to assign
-/// a manual track ID for SpotifyLyricsFetcher (Tier-1 source).
+/// Set the Spotify track ID for a video by its row id. Used by the
+/// dashboard to assign a manual track ID for SpotifyLyricsFetcher
+/// (Tier-1 source). Per V14 precedent, the column is keyed on the
+/// numeric primary key — youtube_id is non-unique across playlists.
+///
+/// Returns the number of rows affected (0 = no row with that id).
 pub async fn set_video_spotify_track_id(
     pool: &SqlitePool,
-    youtube_id: &str,
+    video_id: i64,
     spotify_track_id: Option<&str>,
-) -> sqlx::Result<()> {
-    sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE youtube_id = ?2")
+) -> sqlx::Result<u64> {
+    let res = sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE id = ?2")
         .bind(spotify_track_id)
-        .bind(youtube_id)
+        .bind(video_id)
         .execute(pool)
-        .await
-        .map(|_| ())
+        .await?;
+    Ok(res.rows_affected())
 }
 
-/// Read the Spotify track ID for a video by youtube_id. Returns None when
-/// the column is NULL or the row doesn't exist.
+/// Read the Spotify track ID for a video by its row id. Returns None
+/// when the column is NULL or the row doesn't exist.
 pub async fn get_video_spotify_track_id(
     pool: &SqlitePool,
-    youtube_id: &str,
+    video_id: i64,
 ) -> sqlx::Result<Option<String>> {
     let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT spotify_track_id FROM videos WHERE youtube_id = ?1")
-            .bind(youtube_id)
+        sqlx::query_as("SELECT spotify_track_id FROM videos WHERE id = ?1")
+            .bind(video_id)
             .fetch_optional(pool)
             .await?;
     Ok(row.and_then(|(s,)| s))

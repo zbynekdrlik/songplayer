@@ -914,31 +914,72 @@ async fn migration_v17_adds_spotify_track_id_column() {
         "V17 must add spotify_track_id column; got: {cols:?}"
     );
 
-    // Insert a playlist + video, then set + read spotify_track_id
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) VALUES (1, 'p', 'u', 'n', 1)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title) VALUES (1, 'abc', 't')")
-        .execute(&pool)
-        .await
-        .unwrap();
+    // Two playlists with the SAME youtube_id — exercises the per-row keying
+    // (v17 helpers must key on numeric `id`, not non-unique `youtube_id`).
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p1', 'u1', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (2, 'p2', 'u2', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let id1: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title) VALUES (1, 'abc', 't') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let id2: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title) VALUES (2, 'abc', 't') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
 
-    super::models::set_video_spotify_track_id(&pool, "abc", Some("401mrYPv21Zs2USsU6bauy"))
+    // Each row's spotify_track_id is independent
+    let n1 = super::models::set_video_spotify_track_id(&pool, id1, Some("401mrYPv21Zs2USsU6bauy"))
         .await
         .unwrap();
-    let id = super::models::get_video_spotify_track_id(&pool, "abc")
-        .await
-        .unwrap();
-    assert_eq!(id.as_deref(), Some("401mrYPv21Zs2USsU6bauy"));
+    let n2 =
+        super::models::set_video_spotify_track_id(&pool, id2, Some("DIFFERENT_TRACK_ID_22B62"))
+            .await
+            .unwrap();
+    assert_eq!(n1, 1, "set_*: exactly one row updated");
+    assert_eq!(n2, 1, "set_*: exactly one row updated");
 
-    // Verify NULL is returned when unset
-    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title) VALUES (1, 'def', 't2')")
-        .execute(&pool)
+    let g1 = super::models::get_video_spotify_track_id(&pool, id1)
         .await
         .unwrap();
-    let id_unset = super::models::get_video_spotify_track_id(&pool, "def")
+    let g2 = super::models::get_video_spotify_track_id(&pool, id2)
         .await
         .unwrap();
-    assert_eq!(id_unset, None);
+    assert_eq!(g1.as_deref(), Some("401mrYPv21Zs2USsU6bauy"));
+    assert_eq!(g2.as_deref(), Some("DIFFERENT_TRACK_ID_22B62"));
+
+    // Unset row stays NULL
+    let id3: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title) VALUES (1, 'def', 't2') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let g3 = super::models::get_video_spotify_track_id(&pool, id3)
+        .await
+        .unwrap();
+    assert_eq!(g3, None);
+
+    // Non-existent row: set_* returns 0 rows affected, get_* returns None
+    let n_missing = super::models::set_video_spotify_track_id(&pool, 99999, Some("X"))
+        .await
+        .unwrap();
+    assert_eq!(n_missing, 0, "set_* on missing row: 0 rows affected");
+    let g_missing = super::models::get_video_spotify_track_id(&pool, 99999)
+        .await
+        .unwrap();
+    assert_eq!(g_missing, None);
 }

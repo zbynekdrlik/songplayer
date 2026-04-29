@@ -169,6 +169,7 @@ mod tests {
             normalized: true,
             gemini_failed: false,
             suppress_resolume_en: false,
+            spotify_track_id: None,
         };
         let json = serde_json::to_string(&v).unwrap();
         let back: models::Video = serde_json::from_str(&json).unwrap();
