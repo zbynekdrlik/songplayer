@@ -16,7 +16,6 @@ pub mod genius;
 pub(crate) mod lcs;
 pub mod line_splitter;
 pub mod lrclib;
-pub mod merge;
 pub mod orchestrator;
 pub mod provider;
 pub mod quality;
