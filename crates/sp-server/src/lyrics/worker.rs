@@ -458,8 +458,25 @@ impl LyricsWorker {
         let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> =
             Arc::new(WhisperXReplicateBackend::new(replicate_token));
 
+        // Require an AI client for orchestrator construction — claude-merge needs it.
+        // If None at runtime, log warning and bail processing for this song.
+        let ai_client = match &self.ai_client {
+            Some(c) => c.clone(),
+            None => {
+                warn!(
+                    "worker: ai_client is None — CLIProxyAPI not configured; \
+                     cannot run claude-merge for {youtube_id}"
+                );
+                self.clear_processing().await;
+                return Err(anyhow::anyhow!(
+                    "ai_client required for orchestrator (claude-merge) but is None"
+                ));
+            }
+        };
+
         let orch = Orchestrator::new(
             backend,
+            ai_client,
             crate::lyrics::line_splitter::SplitConfig::default(),
         );
         let aligned = match orch

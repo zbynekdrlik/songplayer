@@ -1,7 +1,7 @@
 //! Orchestrator — drives the tier chain for a single song.
 //!
 //! Flow: Tier-1 collect → branch on LineSynced/TextOnly/None →
-//! WhisperX backend (Tier-2) when needed → reconcile against text →
+//! WhisperX backend (Tier-2) when needed → claude-merge (TextOnly path) →
 //! SubtitleEdit-port line split. Returns `AlignedTrack`; the caller
 //! (worker) converts to `LyricsTrack` and translates separately.
 //!
@@ -22,9 +22,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
 
+use crate::ai::client::AiClient;
 use crate::lyrics::backend::{AlignOpts, AlignedTrack, AlignmentBackend, BackendError};
+use crate::lyrics::claude_merge;
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
-use crate::lyrics::reconcile::reconcile;
 use crate::lyrics::tier1::{FetchFn, Tier1Result, collect};
 
 #[derive(Debug, Error)]
@@ -37,6 +38,7 @@ pub enum OrchestratorError {
 
 pub struct Orchestrator {
     pub backend: Arc<dyn AlignmentBackend>,
+    pub ai_client: Arc<AiClient>,
     pub split_cfg: SplitConfig,
 }
 
@@ -63,8 +65,16 @@ pub struct OrchestratorInput<'a> {
 }
 
 impl Orchestrator {
-    pub fn new(backend: Arc<dyn AlignmentBackend>, split_cfg: SplitConfig) -> Self {
-        Self { backend, split_cfg }
+    pub fn new(
+        backend: Arc<dyn AlignmentBackend>,
+        ai_client: Arc<AiClient>,
+        split_cfg: SplitConfig,
+    ) -> Self {
+        Self {
+            backend,
+            ai_client,
+            split_cfg,
+        }
     }
 
     /// Run the full tier chain for one song and return an `AlignedTrack`.
@@ -81,23 +91,28 @@ impl Orchestrator {
         let tier1_result = collect(input.fetchers).await;
 
         // Step 2: Branch on Tier-1 outcome.
-        let aligned = match tier1_result {
+        match tier1_result {
             Tier1Result::LineSynced(aligned_lines) => {
                 // Authoritative line-synced timing — ship directly, no ASR call.
+                // Apply split_track to enforce the 32-char cap on long yt_subs lines.
                 info!(
                     provenance = %aligned_lines.provenance,
                     lines = aligned_lines.lines.len(),
                     "orchestrator: Tier-1 short-circuit (line-synced), skipping backend"
                 );
-                AlignedTrack {
+                let pre_split = AlignedTrack {
                     lines: aligned_lines.lines,
                     provenance: aligned_lines.provenance,
                     raw_confidence: 1.0,
-                }
+                };
+                Ok(split_track(&pre_split, self.split_cfg))
             }
             Tier1Result::TextOnly(text_candidates) => {
-                // Text-only: run WhisperX for timing, then reconcile against
-                // the authoritative text to correct mishearings.
+                // Text-only: run WhisperX for timing, then use Claude to semantically
+                // merge authoritative text with WhisperX phrases to correct mishearings.
+                // Claude's prompt enforces the 32-char cap internally — do NOT run
+                // split_track on the claude-merge output (double-splitting corrupts timings).
+                // If claude-merge fails, fall back to split_track on raw WhisperX.
                 let wav = input.vocal_wav.ok_or_else(|| {
                     OrchestratorError::NoAlignment(
                         "Tier-1 TextOnly path requires a vocal WAV but none was available \
@@ -113,13 +128,23 @@ impl Orchestrator {
                     provenance = %asr.provenance,
                     asr_lines = asr.lines.len(),
                     text_candidates = text_candidates.len(),
-                    "orchestrator: Tier-1 TextOnly — backend called, reconciling"
+                    "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
                 );
-                reconcile(&asr, &text_candidates)
+                match claude_merge::merge(&self.ai_client, &asr, &text_candidates).await {
+                    Ok(merged) => Ok(merged),
+                    Err(e) => {
+                        tracing::warn!(
+                            provenance = %asr.provenance,
+                            error = %e,
+                            "orchestrator: claude-merge failed — falling back to raw WhisperX with line split"
+                        );
+                        Ok(split_track(&asr, self.split_cfg))
+                    }
+                }
             }
             Tier1Result::None => {
                 // No text candidates at all — run WhisperX and ship its output
-                // verbatim (no reconciliation possible without reference text).
+                // with the line splitter (no reconciliation possible without reference text).
                 let wav = input.vocal_wav.ok_or_else(|| {
                     OrchestratorError::NoAlignment(
                         "Tier-1 None path requires a vocal WAV but none was available \
@@ -136,20 +161,16 @@ impl Orchestrator {
                     asr_lines = asr.lines.len(),
                     "orchestrator: Tier-1 None — backend called, no reconciliation"
                 );
-                asr
+                Ok(split_track(&asr, self.split_cfg))
             }
-        };
-
-        // Step 3: Apply the SubtitleEdit-port line splitter (32-char default).
-        let split = split_track(&aligned, self.split_cfg);
-
-        Ok(split)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::{AiSettings, client::AiClient};
     use crate::lyrics::backend::{
         AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
         BackendError,
@@ -247,6 +268,16 @@ mod tests {
         Arc::new(|| Box::pin(async { None }))
     }
 
+    /// Build an AiClient pointed at a wiremock server URL.
+    fn mock_ai_client(api_url: &str) -> Arc<AiClient> {
+        Arc::new(AiClient::new(AiSettings {
+            api_url: format!("{api_url}/v1"),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        }))
+    }
+
     // -----------------------------------------------------------------------
     // Test 1: Tier-1 short-circuit (LineSynced) — backend must NOT be called
     // -----------------------------------------------------------------------
@@ -256,6 +287,18 @@ mod tests {
     /// Per `feedback_line_timing_only.md` every line must carry `words: None`.
     #[tokio::test]
     async fn tier1_short_circuit_skips_backend() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // AI server should never be called on the LineSynced path.
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+
         // Build a 12-line timed fetcher — above TIER1_MIN_LINES threshold.
         let lines: Vec<String> = (0..12).map(|i| format!("line {i}")).collect();
         let timings: Vec<(u64, u64)> = (0..12).map(|i| (i * 1000, i * 1000 + 900)).collect();
@@ -267,7 +310,11 @@ mod tests {
         };
 
         let (mock, call_count) = MockBackend::new(asr_track("mock@rev1"));
-        let orch = Orchestrator::new(Arc::new(mock), SplitConfig::default());
+        let orch = Orchestrator::new(
+            Arc::new(mock),
+            mock_ai_client(&server.uri()),
+            SplitConfig::default(),
+        );
 
         let result = orch
             .process(OrchestratorInput {
@@ -304,15 +351,28 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 2: Tier-1 TextOnly — backend AND reconciler must be called
+    // Test 2: Tier-1 TextOnly — backend called, then claude-merge attempted.
+    //         Success path: Claude returns valid JSON → provenance ends with +claude-merge.
     // -----------------------------------------------------------------------
 
-    /// When Tier-1 returns `TextOnly`, the orchestrator calls the backend
-    /// for timing, then passes through the reconciler. The output provenance
-    /// must contain `+reconciled`.
+    /// When Tier-1 returns `TextOnly`, the orchestrator calls the backend for
+    /// timing and then attempts claude-merge. When Claude succeeds, provenance
+    /// must contain `+claude-merge`.
     #[tokio::test]
-    async fn tier1_text_only_runs_backend_then_reconciler() {
-        // Text-only candidate (no timing) — 2 lines, no line_timings.
+    async fn tier1_text_only_runs_backend_then_claude_merge() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // Mock Claude returning 1 merged line.
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"lines\": [{\"start_ms\": 0, \"end_ms\": 2000, \"text\": \"amazing grace\"}]}"}}]
+            })))
+            .mount(&server)
+            .await;
+
         let candidate = CandidateText {
             source: "genius".into(),
             lines: vec!["amazing grace".into(), "how sweet the sound".into()],
@@ -321,7 +381,11 @@ mod tests {
         };
 
         let (mock, call_count) = MockBackend::new(asr_track("mock@rev1"));
-        let orch = Orchestrator::new(Arc::new(mock), SplitConfig::default());
+        let orch = Orchestrator::new(
+            Arc::new(mock),
+            mock_ai_client(&server.uri()),
+            SplitConfig::default(),
+        );
 
         let result = orch
             .process(OrchestratorInput {
@@ -339,26 +403,90 @@ mod tests {
             "backend.align must be called exactly once on TextOnly path"
         );
 
-        // Provenance must contain "+reconciled" (added by reconcile()).
+        // Provenance must contain "+claude-merge".
         assert!(
-            result.provenance.contains("+reconciled"),
-            "TextOnly path must run the reconciler; got provenance: {}",
+            result.provenance.contains("+claude-merge"),
+            "TextOnly path must run claude-merge; got provenance: {}",
+            result.provenance
+        );
+
+        // Per feedback_line_timing_only.md: words must be None on merged output.
+        for line in &result.lines {
+            assert!(line.words.is_none(), "merged output must have words: None");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 3: Tier-1 TextOnly fallback — Claude fails → split_track on raw ASR
+    // -----------------------------------------------------------------------
+
+    /// When claude-merge fails (e.g., AI server unreachable), the orchestrator
+    /// falls back to split_track on the raw WhisperX output. Provenance must
+    /// NOT contain `+claude-merge`.
+    #[tokio::test]
+    async fn tier1_text_only_fallback_when_claude_fails() {
+        // Point at a port nothing is listening on — connection refused = fallback.
+        let dead_ai_client = Arc::new(AiClient::new(AiSettings {
+            api_url: "http://127.0.0.1:19999/v1".into(),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        }));
+
+        let candidate = CandidateText {
+            source: "genius".into(),
+            lines: vec!["amazing grace".into()],
+            line_timings: None,
+            has_timing: false,
+        };
+
+        let (mock, call_count) = MockBackend::new(asr_track("mock@rev1"));
+        let orch = Orchestrator::new(Arc::new(mock), dead_ai_client, SplitConfig::default());
+
+        let result = orch
+            .process(OrchestratorInput {
+                fetchers: vec![fixed_fetcher(candidate)],
+                language: "en",
+                vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+            })
+            .await
+            .expect("fallback must succeed even when Claude is unreachable");
+
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        assert!(
+            !result.provenance.contains("+claude-merge"),
+            "fallback path must not set +claude-merge; got: {}",
             result.provenance
         );
     }
 
     // -----------------------------------------------------------------------
-    // Test 3: Tier-1 None — backend called, no reconciliation
+    // Test 4: Tier-1 None — backend called, no reconciliation
     // -----------------------------------------------------------------------
 
     /// When Tier-1 returns `None` (no fetchers returned anything usable),
-    /// the orchestrator calls the backend but does NOT run the reconciler.
-    /// The output provenance must NOT contain `+reconciled`.
+    /// the orchestrator calls the backend but does NOT run claude-merge.
+    /// The output provenance must NOT contain `+claude-merge`.
     #[tokio::test]
     async fn tier1_none_runs_backend_only() {
-        // All fetchers return None — simulates a song with no text sources.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // AI server should never be called on the None path.
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+
         let (mock, call_count) = MockBackend::new(asr_track("whisperx-large-v3@rev1"));
-        let orch = Orchestrator::new(Arc::new(mock), SplitConfig::default());
+        let orch = Orchestrator::new(
+            Arc::new(mock),
+            mock_ai_client(&server.uri()),
+            SplitConfig::default(),
+        );
 
         let result = orch
             .process(OrchestratorInput {
@@ -376,10 +504,10 @@ mod tests {
             "backend.align must be called exactly once on None path"
         );
 
-        // Provenance must NOT contain "+reconciled".
+        // Provenance must NOT contain "+claude-merge".
         assert!(
-            !result.provenance.contains("+reconciled"),
-            "None path must skip the reconciler; got provenance: {}",
+            !result.provenance.contains("+claude-merge"),
+            "None path must skip claude-merge; got provenance: {}",
             result.provenance
         );
 
@@ -392,13 +520,28 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 4: Zero fetchers → same as Tier1::None
+    // Test 5: Zero fetchers → same as Tier1::None
     // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn zero_fetchers_falls_back_to_backend_only() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+
         let (mock, call_count) = MockBackend::new(asr_track("whisperx-large-v3@rev1"));
-        let orch = Orchestrator::new(Arc::new(mock), SplitConfig::default());
+        let orch = Orchestrator::new(
+            Arc::new(mock),
+            mock_ai_client(&server.uri()),
+            SplitConfig::default(),
+        );
 
         let result = orch
             .process(OrchestratorInput {
@@ -410,6 +553,6 @@ mod tests {
             .expect("process should succeed");
 
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
-        assert!(!result.provenance.contains("+reconciled"));
+        assert!(!result.provenance.contains("+claude-merge"));
     }
 }

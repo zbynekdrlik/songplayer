@@ -173,7 +173,8 @@ fn new_provenance_source_literals_are_recognizable() {
     // non-empty string comparisons to make the test read as a spec.
     let tier1_sources = ["tier1:spotify", "tier1:lrclib", "tier1:yt_subs", "genius"];
     let backend_source = "whisperx-large-v3@rev1";
-    let reconciled_suffix = "+reconciled";
+    // TextOnly path: claude-merge appends "+claude-merge" to the ASR provenance.
+    let claude_merge_suffix = "+claude-merge";
 
     for s in &tier1_sources {
         assert!(
@@ -185,9 +186,9 @@ fn new_provenance_source_literals_are_recognizable() {
         backend_source.contains("whisperx"),
         "backend source must mention whisperx"
     );
-    // Reconciled provenance is backend provenance + "+reconciled"
-    let reconciled = format!("{backend_source}{reconciled_suffix}");
-    assert!(reconciled.ends_with("+reconciled"));
+    // Claude-merged provenance is backend provenance + "+claude-merge"
+    let merged = format!("{backend_source}{claude_merge_suffix}");
+    assert!(merged.ends_with("+claude-merge"));
 }
 
 /// Description provider is wired as the 4th candidate source.
