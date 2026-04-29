@@ -151,7 +151,7 @@ fn find_split_index(text: &str, max_chars: usize) -> Option<usize> {
     for (idx, c) in text.char_indices() {
         if c == ' ' && idx <= limit_idx {
             let dist = (idx as i64 - center_byte as i64).abs();
-            if best.map_or(true, |(_, d)| dist < d) {
+            if best.is_none_or(|(_, d)| dist < d) {
                 best = Some((idx + 1, dist));
             }
         }
