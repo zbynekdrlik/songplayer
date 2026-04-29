@@ -233,7 +233,9 @@ mod tests {
 
     #[test]
     fn long_line_splits_at_sentence_end() {
-        let l = line("Praise the Lord. Tell the world.", 0, 4000);
+        // 47 chars total — exceeds the 32-char default. '.' at byte 23 is inside
+        // the first 32 chars, so priority-1 (sentence-end) wins; split at byte 24.
+        let l = line("Praise our God and King. Tell the whole world.", 0, 4000);
         let track = AlignedTrack {
             lines: vec![l],
             provenance: "t".into(),
@@ -241,13 +243,15 @@ mod tests {
         };
         let split = split_track(&track, SplitConfig::default());
         assert_eq!(split.lines.len(), 2);
-        assert_eq!(split.lines[0].text, "Praise the Lord.");
-        assert_eq!(split.lines[1].text, "Tell the world.");
+        assert_eq!(split.lines[0].text, "Praise our God and King.");
+        assert_eq!(split.lines[1].text, "Tell the whole world.");
     }
 
     #[test]
     fn long_line_splits_at_comma_when_no_sentence_end() {
-        let l = line("Praise the Lord, tell the world", 0, 4000);
+        // 45 chars total — exceeds 32. No '.!?…' in the first 32 chars, so
+        // priority-2 (comma) wins; split at byte 24 after the ','.
+        let l = line("Praise our God and King, tell the whole world", 0, 4000);
         let track = AlignedTrack {
             lines: vec![l],
             provenance: "t".into(),
@@ -277,14 +281,14 @@ mod tests {
 
     #[test]
     fn timing_proportionally_distributed() {
-        // "Praise the Lord. Tell the world." splits at the '.' after "Lord."
-        // Left:  "Praise the Lord." — non-WS chars: P,r,a,i,s,e,t,h,e,L,o,r,d,. = 14
-        // Right: "Tell the world."  — non-WS chars: T,e,l,l,t,h,e,w,o,r,l,d,.   = 13
-        // Total non-WS = 27
-        // Expected mid = 0 + (4000 * 14 / 27) = 56000 / 27 = 2074 (integer division)
+        // "Praise our God and King. Tell the whole world." splits at '.' after "King."
+        // Left:  "Praise our God and King." — non-WS chars: P,r,a,i,s,e,o,u,r,G,o,d,a,n,d,K,i,n,g,. = 20
+        // Right: "Tell the whole world."   — non-WS chars: T,e,l,l,t,h,e,w,h,o,l,e,w,o,r,l,d,.    = 18
+        // Total non-WS = 38
+        // Expected mid = 0 + (4000 * 20 / 38) = 80000 / 38 = 2105 (integer division)
         // A buggy uniform-split implementation (mid = (0+4000)/2 = 2000) would fail
         // the ±10ms tolerance check below.
-        let l = line("Praise the Lord. Tell the world.", 0, 4000);
+        let l = line("Praise our God and King. Tell the whole world.", 0, 4000);
         let track = AlignedTrack {
             lines: vec![l],
             provenance: "t".into(),
@@ -292,7 +296,7 @@ mod tests {
         };
         let split = split_track(&track, SplitConfig::default());
         assert_eq!(split.lines.len(), 2);
-        let expected_mid: u32 = 2074;
+        let expected_mid: u32 = 2105;
         let actual_mid = split.lines[0].end_ms;
         assert!(
             actual_mid.abs_diff(expected_mid) <= 10,
