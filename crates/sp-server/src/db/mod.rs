@@ -25,6 +25,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (14, MIGRATION_V14),
     (15, MIGRATION_V15),
     (16, MIGRATION_V16),
+    (17, MIGRATION_V17),
 ];
 
 const MIGRATION_V1: &str = "
@@ -232,6 +233,13 @@ ALTER TABLE videos ADD COLUMN lyrics_override_text TEXT;
 // Defaults to 0 for existing rows so untouched songs behave identically.
 const MIGRATION_V16: &str = "
 ALTER TABLE videos ADD COLUMN lyrics_time_offset_ms INTEGER NOT NULL DEFAULT 0;
+";
+
+// V17 — Spotify track ID for Tier-1 SpotifyLyricsFetcher. Manually
+// assigned per video for line-synced lyrics via public proxy. NULL when
+// not set; fetcher silently skips when None. Idempotent ADD COLUMN.
+const MIGRATION_V17: &str = "
+ALTER TABLE videos ADD COLUMN spotify_track_id TEXT;
 ";
 
 /// Create a connection pool backed by a file.

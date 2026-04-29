@@ -14,7 +14,7 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 16);
+    assert_eq!(ver, 17);
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 16);
+    assert_eq!(ver, 17);
 }
 
 #[tokio::test]
@@ -745,11 +745,11 @@ async fn migration_v12_adds_pipeline_version_quality_and_priority() {
 }
 
 #[tokio::test]
-async fn schema_version_reaches_16() {
+async fn schema_version_reaches_17() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 16);
+    assert_eq!(ver, 17);
 }
 
 #[tokio::test]
@@ -894,4 +894,51 @@ async fn migration_v14_defaults_suppress_resolume_en_to_zero() {
             .await
             .unwrap();
     assert_eq!(flag, 0);
+}
+
+#[tokio::test]
+async fn migration_v17_adds_spotify_track_id_column() {
+    let pool = create_memory_pool().await.unwrap();
+    run_migrations(&pool).await.unwrap();
+
+    // Verify the column exists
+    let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+    assert!(
+        cols.contains(&"spotify_track_id".to_string()),
+        "V17 must add spotify_track_id column; got: {cols:?}"
+    );
+
+    // Insert a playlist + video, then set + read spotify_track_id
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) VALUES (1, 'p', 'u', 'n', 1)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title) VALUES (1, 'abc', 't')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    super::models::set_video_spotify_track_id(&pool, "abc", Some("401mrYPv21Zs2USsU6bauy"))
+        .await
+        .unwrap();
+    let id = super::models::get_video_spotify_track_id(&pool, "abc")
+        .await
+        .unwrap();
+    assert_eq!(id.as_deref(), Some("401mrYPv21Zs2USsU6bauy"));
+
+    // Verify NULL is returned when unset
+    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title) VALUES (1, 'def', 't2')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let id_unset = super::models::get_video_spotify_track_id(&pool, "def")
+        .await
+        .unwrap();
+    assert_eq!(id_unset, None);
 }
