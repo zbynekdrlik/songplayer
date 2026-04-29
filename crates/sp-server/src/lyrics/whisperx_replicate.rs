@@ -10,12 +10,11 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::lyrics::audio_chunking::{merge_overlap, plan_chunks};
+use crate::lyrics::audio_chunking::{ParsedLine, merge_overlap, plan_chunks};
 use crate::lyrics::backend::{
     AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
     BackendError,
 };
-use crate::lyrics::gemini_parse::ParsedLine;
 use crate::lyrics::replicate_client::{ReplicateClient, ReplicateError};
 
 /// Pinned version hash discovered at plan-write time (April 2026).
@@ -259,7 +258,7 @@ async fn align_chunked(
             .ok_or_else(|| BackendError::Malformed("chunk: no output".into()))?;
         let chunk_lines = parse_output(&output)?;
 
-        // Convert AlignedLine → ParsedLine (gemini_parse::ParsedLine) for merge_overlap.
+        // Convert AlignedLine → ParsedLine (audio_chunking::ParsedLine) for merge_overlap.
         // The merge operates on local (chunk-relative) timings; merge_overlap adds
         // plan.start_ms internally.
         let parsed: Vec<ParsedLine> = chunk_lines
