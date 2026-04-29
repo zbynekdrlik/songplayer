@@ -14,7 +14,12 @@ pub const LYRICS_LEAD_SETTING_KEY: &str = "lyrics_lead_ms";
 /// it visually clutters projected lyrics. Inner punctuation (mid-line
 /// commas etc.) stays untouched. Whitespace is also trimmed at the end.
 fn strip_display_punctuation(s: &str) -> String {
-    s.trim_end_matches(|c: char| matches!(c, ',' | ';' | ':' | '.' | '!' | '?' | '…'))
+    // Trim trailing whitespace first so that lines like "Note: " (space after
+    // colon) don't sneak the colon past the punctuation strip. Then strip
+    // the punctuation, then trim once more in case there was whitespace
+    // between the punctuation and a still-stripping run.
+    s.trim_end()
+        .trim_end_matches([',', ';', ':', '.', '!', '?', '…'])
         .trim_end()
         .to_string()
 }
