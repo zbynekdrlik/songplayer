@@ -20,7 +20,8 @@ use crate::lyrics::replicate_client::{ReplicateClient, ReplicateError};
 /// Pinned version hash discovered at plan-write time (April 2026).
 /// Update when Replicate publishes a new wrapper version that we choose
 /// to upgrade to. Bumped together with `revision()` below.
-pub const WHISPERX_VERSION: &str = "84d2ad2d61945af5e7517a9efaee9c12d3a9d9a3";
+pub const WHISPERX_VERSION: &str =
+    "84d2ad2d6194fe98a17d2b60bef1c7f910c46b2f6fd38996ca457afd9c8abfcb";
 
 pub struct WhisperXReplicateBackend {
     client: ReplicateClient,
