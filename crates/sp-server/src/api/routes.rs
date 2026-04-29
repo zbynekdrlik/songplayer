@@ -829,56 +829,6 @@ pub async fn get_lyrics_status(State(state): State<AppState>) -> impl IntoRespon
 }
 
 // ---------------------------------------------------------------------------
-// Gemini audit endpoint
-// ---------------------------------------------------------------------------
-
-/// Query parameters for GET /api/v1/gemini-audit.
-#[derive(Debug, Deserialize)]
-pub struct GeminiAuditQuery {
-    /// RFC 3339 inclusive lower bound (string compare works because RFC 3339
-    /// timestamps are lexicographically ordered).
-    pub since: Option<String>,
-    /// Exact-match filter on the `video_id` field.
-    pub video_id: Option<String>,
-    /// Row cap after filtering. Defaults to 500, hard max 5000 to keep
-    /// dashboard payloads sane.
-    pub limit: Option<usize>,
-}
-
-const GEMINI_AUDIT_DEFAULT_LIMIT: usize = 500;
-const GEMINI_AUDIT_MAX_LIMIT: usize = 5000;
-
-/// GET /api/v1/gemini-audit
-///
-/// Returns entries from the Gemini audit log, optionally filtered by
-/// `since` (RFC 3339) and/or `video_id`. Results are capped at
-/// `limit` (default 500, max 5000). Missing audit file returns `[]`.
-pub async fn get_gemini_audit(
-    State(state): State<AppState>,
-    Query(q): Query<GeminiAuditQuery>,
-) -> impl IntoResponse {
-    let mut entries = match crate::lyrics::gemini_audit::read_entries(
-        &state.cache_dir,
-        q.since.as_deref(),
-        q.video_id.as_deref(),
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("get_gemini_audit error: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let limit = q
-        .limit
-        .unwrap_or(GEMINI_AUDIT_DEFAULT_LIMIT)
-        .min(GEMINI_AUDIT_MAX_LIMIT);
-    entries.truncate(limit);
-    Json(entries).into_response()
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
