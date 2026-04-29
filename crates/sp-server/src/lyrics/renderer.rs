@@ -8,6 +8,17 @@ use sp_core::ws::ServerMsg;
 /// alignment accuracy).
 pub const LYRICS_LEAD_SETTING_KEY: &str = "lyrics_lead_ms";
 
+/// Strip trailing punctuation (`,;:.!?…`) from a single display line. Stage
+/// displays (Resolume, ProPresenter) by convention do not show end-of-line
+/// punctuation — it doesn't add meaning when each line is one phrase, and
+/// it visually clutters projected lyrics. Inner punctuation (mid-line
+/// commas etc.) stays untouched. Whitespace is also trimmed at the end.
+fn strip_display_punctuation(s: &str) -> String {
+    s.trim_end_matches(|c: char| matches!(c, ',' | ';' | ':' | '.' | '!' | '?' | '…'))
+        .trim_end()
+        .to_string()
+}
+
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
@@ -136,9 +147,15 @@ impl LyricsState {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next_line = self.track.lines.get(idx + 1);
-        let next_en = next_line.map(|l| l.en.clone()).unwrap_or_default();
-        let next_sk = next_line.and_then(|l| l.sk.clone());
-        Some((line.en.clone(), next_en, line.sk.clone(), next_sk))
+        let cur_en = strip_display_punctuation(&line.en);
+        let next_en = next_line
+            .map(|l| strip_display_punctuation(&l.en))
+            .unwrap_or_default();
+        let cur_sk = line.sk.as_deref().map(strip_display_punctuation);
+        let next_sk = next_line
+            .and_then(|l| l.sk.as_deref())
+            .map(strip_display_punctuation);
+        Some((cur_en, next_en, cur_sk, next_sk))
     }
 
     /// Returns `Some((current_en, next_en))` for the Presenter push when
@@ -150,13 +167,14 @@ impl LyricsState {
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
+        let cur = strip_display_punctuation(&line.en);
         let next = self
             .track
             .lines
             .get(idx + 1)
-            .map(|l| l.en.clone())
+            .map(|l| strip_display_punctuation(&l.en))
             .unwrap_or_default();
-        Some((line.en.clone(), next))
+        Some((cur, next))
     }
 
     /// Read-only accessor for the underlying [`LyricsTrack`]. Used in tests
@@ -170,6 +188,45 @@ impl LyricsState {
 mod tests {
     use super::*;
     use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
+
+    #[test]
+    fn strip_display_punctuation_removes_trailing_marks() {
+        assert_eq!(strip_display_punctuation("Hello world,"), "Hello world");
+        assert_eq!(strip_display_punctuation("Hello world."), "Hello world");
+        assert_eq!(
+            strip_display_punctuation("Praise the Lord!"),
+            "Praise the Lord"
+        );
+        assert_eq!(strip_display_punctuation("Are you ready?"), "Are you ready");
+        assert_eq!(strip_display_punctuation("Listen…"), "Listen");
+        assert_eq!(strip_display_punctuation("End: line"), "End: line"); // colon mid-line stays
+    }
+
+    #[test]
+    fn strip_display_punctuation_keeps_inner_punctuation() {
+        // Mid-line commas / apostrophes must stay.
+        assert_eq!(
+            strip_display_punctuation("Won't you stay,"),
+            "Won't you stay"
+        );
+        assert_eq!(
+            strip_display_punctuation("Through every season, in spite of."),
+            "Through every season, in spite of"
+        );
+    }
+
+    #[test]
+    fn strip_display_punctuation_handles_multiple_trailing() {
+        assert_eq!(strip_display_punctuation("Wow!?"), "Wow");
+        assert_eq!(strip_display_punctuation("End...."), "End");
+        assert_eq!(strip_display_punctuation("Note: "), "Note");
+    }
+
+    #[test]
+    fn strip_display_punctuation_preserves_text_without_punct() {
+        assert_eq!(strip_display_punctuation("clean line"), "clean line");
+        assert_eq!(strip_display_punctuation(""), "");
+    }
 
     fn test_track() -> LyricsTrack {
         LyricsTrack {
