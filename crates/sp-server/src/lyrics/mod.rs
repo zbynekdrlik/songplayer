@@ -24,6 +24,7 @@ pub mod replicate_client;
 pub mod reprocess;
 pub mod text_merge;
 pub mod translator;
+pub mod whisperx_replicate;
 pub mod worker;
 pub mod youtube_subs;
 pub mod yt_manual_subs_provider;
