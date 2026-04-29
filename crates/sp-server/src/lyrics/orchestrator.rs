@@ -110,9 +110,14 @@ impl Orchestrator {
             Tier1Result::TextOnly(text_candidates) => {
                 // Text-only: run WhisperX for timing, then use Claude to semantically
                 // merge authoritative text with WhisperX phrases to correct mishearings.
-                // Claude's prompt enforces the 32-char cap internally — do NOT run
-                // split_track on the claude-merge output (double-splitting corrupts timings).
-                // If claude-merge fails, fall back to split_track on raw WhisperX.
+                // Claude's prompt asks for the 32-char cap, but Claude is unreliable
+                // on this rule (issue #64 — production observed 9 lines >32ch on
+                // video 86, and 3 unsplit 59-char lines on video 17 like "the rock of
+                // ages, holding to the hope that's never failing."). We apply
+                // split_track AFTER claude_merge as a mechanical safety net. The
+                // splitter only acts on lines OVER max_chars; shorter Claude output
+                // passes through unchanged, so we never double-split.
+                // If claude-merge fails entirely, fall back to split_track on raw WhisperX.
                 let wav = input.vocal_wav.ok_or_else(|| {
                     OrchestratorError::NoAlignment(
                         "Tier-1 TextOnly path requires a vocal WAV but none was available \
@@ -131,7 +136,7 @@ impl Orchestrator {
                     "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
                 );
                 match claude_merge::merge(&self.ai_client, &asr, &text_candidates).await {
-                    Ok(merged) => Ok(merged),
+                    Ok(merged) => Ok(split_track(&merged, self.split_cfg)),
                     Err(e) => {
                         tracing::warn!(
                             provenance = %asr.provenance,
