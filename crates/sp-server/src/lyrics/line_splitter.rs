@@ -568,6 +568,200 @@ mod tests {
     //
     // We test that the function correctly distributes words proportionally.
 
+    // ── split_line: trailing-spaces right half → `||` guard (line 60 mutant) ─
+    //
+    // Mutant: `||` → `&&` — only bails when BOTH halves are empty.
+    // Input: "hello      " — spaces fill the right half after the nearest-center
+    // split at byte 6.  right_text = "     ".trim_start() = "" (empty), while
+    // left_text = "hello" (non-empty).  Original `||` bails (returns original
+    // line); mutant `&&` does not bail and produces two lines, the second being
+    // an empty string.
+    #[test]
+    fn split_line_passthrough_when_right_half_is_all_spaces() {
+        // "hello      " = 5 non-space + 6 spaces = 11 chars, max_chars=8.
+        // find_split_index: center=4, space at byte 5 (dist=1) → split at 6.
+        // right = "     " → trim_start = "" → right_text empty → || guard fires.
+        let l = line("hello      ", 0, 1000);
+        let cfg = SplitConfig { max_chars: 8 };
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, cfg);
+        assert_eq!(
+            split.lines.len(),
+            1,
+            "all-space right half must trigger passthrough"
+        );
+        assert_eq!(split.lines[0].text, "hello      ");
+    }
+
+    // ── split_line: deep recursion needed (lines 102 `> → ==,<` mutants) ──────
+    //
+    // Mutant `> → ==`: right is recursed only when it is EXACTLY max_chars.
+    // Mutant `> → <`:  right is recursed only when it is LESS than max_chars.
+    // Both cause a right half that is strictly greater than max_chars to be
+    // pushed without further splitting, producing only 2 lines instead of ≥3.
+    #[test]
+    fn split_line_recurses_right_half_until_within_max_chars() {
+        // "aaa bbb ccc ddd eee fff" (23 chars), max_chars=8.
+        // First split: center=4, center_byte=4.  Spaces: byte 3 (dist=1) and
+        // byte 7 (dist=3).  Nearest = byte 3 → split at 4.
+        // left="aaa" (3 chars, ≤8 — no recursion).
+        // right="bbb ccc ddd eee fff" (19 chars, >8) → must recurse.
+        // Recursion produces multiple sub-lines.  Total output ≥ 3.
+        // Under `> → ==`: 19 == 8 is false → right pushed as-is → only 2 lines.
+        // Under `> → <`: 19 < 8 is false → right pushed as-is → only 2 lines.
+        let l = line("aaa bbb ccc ddd eee fff", 0, 5000);
+        let cfg = SplitConfig { max_chars: 8 };
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, cfg);
+        assert!(
+            split.lines.len() >= 3,
+            "right half >8 chars must recurse; expected ≥3 lines, got {}",
+            split.lines.len()
+        );
+        for sl in &split.lines {
+            assert!(
+                sl.text.chars().count() <= 8,
+                "each output line must be ≤max_chars, got {:?}",
+                sl.text
+            );
+        }
+    }
+
+    // ── find_split_index: center-division correctness (line 148 mutants) ──────
+    //
+    // center = max_chars / 2 (integer division).
+    // Mutant `/→%`: center = max_chars % 2 — for even max_chars this is 0,
+    //   so center_byte=0 and the leftmost space within limit always wins.
+    // Mutant `/→*`: center = max_chars * 2 — out of range for most inputs,
+    //   center_byte falls back to text.len(), so the RIGHTMOST space within
+    //   limit wins instead of the nearest-to-center one.
+    //
+    // Two separate inputs are required:
+    //   (A) An input where the LEFTMOST space is NOT the nearest-to-center one
+    //       (distinguishes `/→%` from original).
+    //   (B) An input where the RIGHTMOST space within limit is NOT the
+    //       nearest-to-center one (distinguishes `/→*` from original).
+
+    #[test]
+    fn find_split_index_center_division_not_modulo() {
+        // "a bbbbb ccccc" — 13 chars, max_chars=10.
+        // chars: a(0), ' '(1), b(2-6), ' '(7), c(8-12).
+        // center=5, center_byte=5 (char[5]='b' at byte 5).
+        // Spaces within limit(10): byte 1 (dist=4), byte 7 (dist=2).
+        // Nearest = byte 7 → split at 8 → Some(8).
+        //
+        // Under `/→%`: center=0, center_byte=0.
+        //   dist(1)=1, dist(7)=7 → nearest = byte 1 → Some(2). Different.
+        let result = find_split_index("a bbbbb ccccc", 10);
+        assert_eq!(
+            result,
+            Some(8),
+            "nearest-center split must use division, not modulo"
+        );
+    }
+
+    #[test]
+    fn find_split_index_center_division_not_multiplication() {
+        // "aaaa bb ccc dddd" — 16 chars, max_chars=8.
+        // chars: a(0-3), ' '(4), b(5-6), ' '(7), c(8-10), ' '(11), d(12-15).
+        // center=4, center_byte=4 (char[4]=' ' at byte 4).
+        // limit_idx=byte 8 (char[8]='c').
+        // Spaces within limit: byte 4 (dist=0), byte 7 (dist=3).
+        // Nearest = byte 4 → split at 5 → Some(5).
+        //
+        // Under `/→*`: center=16, center_byte=text.len()=16.
+        //   dist(4)=12, dist(7)=9 → nearest-to-end = byte 7 → Some(8). Different.
+        let result = find_split_index("aaaa bb ccc dddd", 8);
+        assert_eq!(
+            result,
+            Some(5),
+            "nearest-center split must use division, not multiplication"
+        );
+    }
+
+    // ── find_split_index: distance subtraction (line 153 mutants) ────────────
+    //
+    // dist = (idx as i64 - center_byte as i64).abs()
+    // Mutant `-→+`: dist = idx + center_byte — always large, picks leftmost space.
+    // Mutant `-→/`: dist = idx / center_byte (integer) — maps distances to small
+    //   integers, effectively picking the leftmost low-ratio space.
+    //
+    // Input with three spaces where the correct nearest-to-center is NOT the
+    // leftmost one.  Both mutations pick the leftmost space instead.
+
+    #[test]
+    fn find_split_index_nearest_center_uses_subtraction_for_distance() {
+        // "aa bb ccccc ddd" — 15 chars, max_chars=12.
+        // chars: a(0-1), ' '(2), b(3-4), ' '(5), c(6-10), ' '(11), d(12-14).
+        // center=6, center_byte=6 (char[6]='c' at byte 6).
+        // limit_idx=byte 12.
+        // Spaces within limit: byte 2 (dist=4), byte 5 (dist=1), byte 11 (dist=5).
+        // Nearest = byte 5 → split at 6 → Some(6).
+        //
+        // Under `-→+`: dist(2)=8, dist(5)=11, dist(11)=17 → leftmost (byte 2) → Some(3).
+        // Under `-→/`: dist(2)=0, dist(5)=0 (int), dist(11)=1 → tie(2,5) → byte 2 → Some(3).
+        let result = find_split_index("aa bb ccccc ddd", 12);
+        assert_eq!(
+            result,
+            Some(6),
+            "distance must be computed via subtraction, not addition or division"
+        );
+    }
+
+    // ── find_split_index: strict-less-than best update (line 154 mutants) ────
+    //
+    // if best.is_none_or(|(_, d)| dist < d) { best = Some((idx + 1, dist)); }
+    //
+    // Mutant `< → ==`: updates on equal distance → last tie wins (not first).
+    // Mutant `< → <=`: also updates on equal → last tie wins.
+    // Mutant `< → >`:  updates on LARGER distance → picks the farthest space.
+    //
+    // Two test inputs are required:
+    //   (A) Two equidistant spaces → first one must win (kills == and <=).
+    //   (B) Two unequal-distance spaces → nearer one must win (kills >).
+
+    #[test]
+    fn find_split_index_equal_distance_picks_first_space() {
+        // "aa bbbbb ccc ddd" — 16 chars, max_chars=10.
+        // chars: a(0-1), ' '(2), b(3-7), ' '(8), c(9-11), ' '(12), d(13-15).
+        // center=5, center_byte=5 ('b' at byte 5).
+        // limit_idx=byte 10. Spaces within limit: byte 2 (dist=3), byte 8 (dist=3).
+        // Equal distance — forward iteration picks byte 2 first → split at 3 → Some(3).
+        //
+        // Under `< → ==` or `< → <=`: byte 8 (dist=3) also updates → Some(9). Different.
+        let result = find_split_index("aa bbbbb ccc ddd", 10);
+        assert_eq!(
+            result,
+            Some(3),
+            "equal-distance spaces: first (leftmost) must be chosen, not last"
+        );
+    }
+
+    #[test]
+    fn find_split_index_nearer_center_wins_over_farther() {
+        // "a bbbbbb cccc" — 13 chars, max_chars=10.
+        // chars: a(0), ' '(1), b(2-7), ' '(8), c(9-12).
+        // center=5, center_byte=5 ('b' at byte 5).
+        // limit_idx=byte 10. Spaces within limit: byte 1 (dist=4), byte 8 (dist=3).
+        // Nearer = byte 8 → split at 9 → Some(9).
+        //
+        // Under `< → >`: picks farthest → byte 1 (dist=4 > dist=3) → Some(2). Different.
+        let result = find_split_index("a bbbbbb cccc", 10);
+        assert_eq!(
+            result,
+            Some(9),
+            "nearer-to-center space must win over farther space"
+        );
+    }
+
     #[test]
     fn split_words_by_index_none_when_words_is_none() {
         let l = AlignedLine {
