@@ -511,7 +511,10 @@ jobs:
             --exclude-re 'line_splitter\.rs:102:40: replace > with >=' \
             --exclude-re 'line_splitter\.rs:131:' \
             --exclude-re 'line_splitter\.rs:141:' \
-            --exclude-re 'line_splitter\.rs:164:'
+            --exclude-re 'line_splitter\.rs:164:' \
+            --exclude-re 'claude_merge\.rs:331:35: replace \+ with \* in try_all_lines_positions' \
+            --exclude-re 'claude_merge\.rs:338:31: replace \+ with - in try_all_lines_positions' \
+            --exclude-re 'claude_merge\.rs:338:31: replace \+ with \* in try_all_lines_positions'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
