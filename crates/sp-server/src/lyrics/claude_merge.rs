@@ -73,22 +73,10 @@ pub async fn merge(
     let merged_lines = match parse_claude_response(&raw) {
         Ok(lines) => lines,
         Err(e) => {
-            // Dump the raw response to a tmp file so operators can inspect what
-            // Claude actually returned. Helps debug parser mismatches against
-            // the live model output without re-running a paid prediction.
-            let dump_path = std::env::temp_dir().join(format!(
-                "claude_merge_raw_{}.txt",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0)
-            ));
-            let _ = std::fs::write(&dump_path, &raw);
             tracing::warn!(
-                dump = %dump_path.display(),
                 raw_len = raw.len(),
                 first_200 = %raw.chars().take(200).collect::<String>(),
-                "claude_merge: parse failed — raw response dumped"
+                "claude_merge: parse failed"
             );
             return Err(e);
         }
@@ -352,18 +340,6 @@ fn try_all_lines_positions(s: &str) -> Result<Vec<MergedLine>, ()> {
     }
     let _ = last_err; // we only signal failure; caller decides next step
     Err(())
-}
-
-/// Find the byte offset of the first `{"lines":` pattern in `s`.
-#[allow(dead_code)]
-fn find_lines_object(s: &str) -> Option<usize> {
-    // Accept both `{"lines":` and `{ "lines":` (with optional spaces).
-    for prefix in &["{\"lines\":", "{ \"lines\":"] {
-        if let Some(pos) = s.find(prefix) {
-            return Some(pos);
-        }
-    }
-    None
 }
 
 /// Try to parse a `ClaudeResponse` from the start of `s` by walking to a
