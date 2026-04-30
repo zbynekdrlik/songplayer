@@ -689,4 +689,255 @@ mod tests {
         assert_eq!(track.lines[0].start_ms, 1000);
         assert_eq!(track.lines[1].text, "How sweet the sound");
     }
+
+    // ── build_phrases: empty-words-list guard (line 166 mutant) ─────────────
+    //
+    // Mutant: replace `!w.is_empty()` with `true` — would include lines with
+    // an empty Vec, causing an out-of-bounds panic at `words[0]` below.
+    // This test asserts that a `Some(vec![])` line produces NO phrases.
+
+    #[test]
+    fn build_phrases_skips_lines_with_empty_words_vec() {
+        let asr = AlignedTrack {
+            lines: vec![
+                AlignedLine {
+                    text: "empty words".into(),
+                    start_ms: 0,
+                    end_ms: 1000,
+                    words: Some(vec![]), // Some but empty — must be skipped
+                },
+                AlignedLine {
+                    text: "has words".into(),
+                    start_ms: 2000,
+                    end_ms: 3000,
+                    words: Some(vec![
+                        make_word("has", 2000, 2400),
+                        make_word("words", 2400, 3000),
+                    ]),
+                },
+            ],
+            provenance: "test".into(),
+            raw_confidence: 0.9,
+        };
+        let phrases = build_phrases(&asr);
+        // Only the non-empty line contributes; the Some(vec![]) line is skipped.
+        assert_eq!(phrases.len(), 1, "Some(vec![]) must be skipped");
+        assert_eq!(phrases[0].text, "has words");
+    }
+
+    // ── drop_hallucinated_lead_in: exact boundary tests (line 230 mutants) ──
+    //
+    // Mutant A: `duration > 1500` → `duration >= 1500` would drop a word with
+    // duration == 1500ms, but the correct code keeps it.
+    // Mutant B: `gap > 2000` → `gap >= 2000` would drop a word with gap == 2000ms.
+
+    #[test]
+    fn drop_lead_in_keeps_word_at_exactly_1500ms_duration() {
+        // duration == 1500 (NOT > 1500 → should NOT drop)
+        let words = vec![
+            make_word("hmm", 0, 1500), // duration = 1500 exactly — boundary, must keep
+            make_word("alleluia", 4000, 5000), // gap = 2500 (> 2000)
+        ];
+        let result = drop_hallucinated_lead_in(words);
+        assert_eq!(
+            result.len(),
+            2,
+            "duration == 1500 must NOT be dropped (threshold is > 1500)"
+        );
+        assert_eq!(result[0].text, "hmm");
+    }
+
+    #[test]
+    fn drop_lead_in_keeps_word_at_exactly_2000ms_gap() {
+        // gap == 2000 (NOT > 2000 → should NOT drop)
+        let words = vec![
+            make_word("ohhh", 0, 2000),        // duration = 2000 > 1500 ✓
+            make_word("alleluia", 4000, 5000), // gap = 4000 - 2000 = 2000 exactly — boundary, must keep
+        ];
+        let result = drop_hallucinated_lead_in(words);
+        assert_eq!(
+            result.len(),
+            2,
+            "gap == 2000 must NOT be dropped (threshold is > 2000)"
+        );
+        assert_eq!(result[0].text, "ohhh");
+    }
+
+    // ── build_prompt: template content (line 241 mutants) ───────────────────
+    //
+    // Mutant A: replace `build_prompt -> String` with `String::new()` — empty.
+    // Mutant B: replace with `"xyzzy".into()` — garbage.
+    // Both mutations produce strings that lack the template's key markers.
+
+    #[test]
+    fn build_prompt_contains_required_template_markers() {
+        let prompt = build_prompt(r#"[{"start_ms":0}]"#, r#"["line1"]"#);
+        // The template must contain these literal strings to correctly instruct Claude.
+        assert!(
+            prompt.contains("WHISPERX_PHRASES_JSON"),
+            "prompt must contain WHISPERX_PHRASES_JSON marker"
+        );
+        assert!(
+            prompt.contains("REFERENCE_LYRICS_JSON"),
+            "prompt must contain REFERENCE_LYRICS_JSON marker"
+        );
+        assert!(
+            prompt.contains("LED-wall"),
+            "prompt must contain LED-wall context"
+        );
+        assert!(
+            prompt.contains("32 characters"),
+            "prompt must contain line-length rule"
+        );
+        assert!(
+            prompt.contains(r#"[{"start_ms":0}]"#),
+            "whisperx JSON must be substituted into prompt"
+        );
+        assert!(
+            prompt.contains(r#"["line1"]"#),
+            "reference JSON must be substituted into prompt"
+        );
+    }
+
+    #[test]
+    fn build_prompt_substitutes_both_placeholders() {
+        let whisperx = r#"[{"start_ms":100,"end_ms":2000,"text":"hello"}]"#;
+        let reference = r#"["Hello world"]"#;
+        let prompt = build_prompt(whisperx, reference);
+        // Neither placeholder token should remain verbatim in the final string.
+        assert!(
+            !prompt.contains("___WHISPERX___"),
+            "___WHISPERX___ placeholder must be replaced"
+        );
+        assert!(
+            !prompt.contains("___REFERENCE___"),
+            "___REFERENCE___ placeholder must be replaced"
+        );
+        // The actual values must appear.
+        assert!(prompt.contains(whisperx));
+        assert!(prompt.contains(reference));
+    }
+
+    // ── try_all_lines_positions: empty-lines guard (line 334 mutants) ────────
+    //
+    // Mutant A: replace guard `!resp.lines.is_empty()` with `true` — would
+    // accept and return the first `{"lines":[]}` match instead of falling
+    // through to a valid match with actual lines.
+    // Mutant B: replace with `false` — would never return Ok(lines) from the
+    // non-empty arm; tests that return OK on non-empty break.
+    // Mutant C: delete `!` — same as replacing guard with `resp.lines.is_empty()`.
+
+    #[test]
+    fn try_all_lines_positions_skips_empty_lines_and_returns_real_match() {
+        // Response contains two occurrences of {"lines": ...}: first one is empty,
+        // second has real data. The function must skip the empty one and return
+        // the second.
+        let s = r#"result = {"lines": []}; actual = {"lines": [{"start_ms": 500, "end_ms": 1500, "text": "Grace"}]}"#;
+        let result = try_all_lines_positions(s);
+        assert!(result.is_ok(), "must find the non-empty lines object");
+        let lines = result.unwrap();
+        assert_eq!(
+            lines.len(),
+            1,
+            "must return the non-empty lines, not the empty one"
+        );
+        assert_eq!(lines[0].text, "Grace");
+    }
+
+    #[test]
+    fn try_all_lines_positions_returns_error_when_all_lines_empty() {
+        // Only empty lines arrays — must return Err(()) since no non-empty result found.
+        let s = r#"{"lines": []}"#;
+        let result = try_all_lines_positions(s);
+        assert!(
+            result.is_err(),
+            "all-empty lines arrays must return Err, not Ok([])"
+        );
+    }
+
+    // ── try_parse_balanced: JSON string tracking (lines 362-368 mutants) ─────
+    //
+    // These mutants target the brace-depth + string-escape tracking inside the
+    // balanced-parse loop:
+    //   - `b'"'` arm deletion: would leave in_string=false, braces inside strings
+    //     would be miscounted
+    //   - `in_string` guard inversions: would count braces while inside a string
+    //   - `depth += 1` / `depth -= 1` / `depth == 0` / `i + 1` arithmetic changes
+
+    #[test]
+    fn try_parse_balanced_handles_braces_inside_string_values() {
+        // The "text" value contains literal `{` and `}` characters. Without proper
+        // string tracking the depth counter goes wrong and serde_json either sees
+        // a truncated or over-extended slice.
+        let s = r#"{"lines": [{"start_ms": 0, "end_ms": 1000, "text": "a {bracketed} value"}]} trailing garbage here"#;
+        let result = try_parse_balanced(s);
+        assert!(
+            result.is_ok(),
+            "braces inside string must not confuse depth tracking"
+        );
+        let resp = result.unwrap();
+        assert_eq!(resp.lines.len(), 1);
+        assert_eq!(resp.lines[0].text, "a {bracketed} value");
+    }
+
+    #[test]
+    fn try_parse_balanced_handles_escaped_quotes_inside_strings() {
+        // The "text" value contains an escaped quote `\"`. Without the escape
+        // tracking (`b'\\'` arm), the parser would treat the `"` after `\` as
+        // a string-end token, misidentifying the next `{` as an object start.
+        let s = r#"{"lines": [{"start_ms": 0, "end_ms": 1000, "text": "He\"s holy"}]}"#;
+        let result = try_parse_balanced(s);
+        assert!(
+            result.is_ok(),
+            "escaped quote must not toggle in_string incorrectly"
+        );
+        let resp = result.unwrap();
+        assert_eq!(resp.lines.len(), 1);
+        // serde decodes the escape: \" → "
+        assert!(resp.lines[0].text.contains('\'') || resp.lines[0].text.contains('"'));
+    }
+
+    #[test]
+    fn try_parse_balanced_counts_depth_correctly_for_nested_objects() {
+        // The inner word objects have their own braces. depth must reach 0 only
+        // at the outermost closing `}`.
+        // depth trace: { → 1, { → 2, } → 1 (inner closes), } → 0 (outer closes)
+        // Without correct depth +=/−= the serde slice is wrong.
+        let s = r#"{"lines": [{"start_ms": 100, "end_ms": 500, "text": "nested"}]} extra"#;
+        let result = try_parse_balanced(s);
+        assert!(result.is_ok());
+        let resp = result.unwrap();
+        assert_eq!(resp.lines.len(), 1);
+        assert_eq!(resp.lines[0].start_ms, 100);
+        assert_eq!(resp.lines[0].end_ms, 500);
+    }
+
+    #[test]
+    fn try_parse_balanced_end_idx_includes_closing_brace() {
+        // If `end_idx = i + 1` is mutated to `i` the slice won't include the
+        // closing `}` and serde_json will fail to parse.
+        let s = r#"{"lines": [{"start_ms": 0, "end_ms": 1, "text": "x"}]}"#;
+        let result = try_parse_balanced(s);
+        assert!(
+            result.is_ok(),
+            "closing brace must be included in slice (end_idx = i+1)"
+        );
+    }
+
+    #[test]
+    fn try_parse_balanced_multiple_lines_with_curly_braces_in_text() {
+        // Multiple lines where text fields contain `{` / `}` to thoroughly
+        // exercise the in_string guard across many iterations.
+        let s = r#"{"lines": [
+            {"start_ms": 1000, "end_ms": 2000, "text": "{intro}"},
+            {"start_ms": 2000, "end_ms": 3000, "text": "normal line"},
+            {"start_ms": 3000, "end_ms": 4000, "text": "end {outro}"}
+        ]}"#;
+        let result = try_parse_balanced(s);
+        assert!(result.is_ok());
+        let resp = result.unwrap();
+        assert_eq!(resp.lines.len(), 3);
+        assert_eq!(resp.lines[0].text, "{intro}");
+        assert_eq!(resp.lines[2].text, "end {outro}");
+    }
 }
