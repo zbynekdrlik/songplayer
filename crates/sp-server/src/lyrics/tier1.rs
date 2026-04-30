@@ -369,4 +369,46 @@ mod tests {
         assert!(!c.has_timing);
         assert!(c.line_timings.is_none());
     }
+
+    // ── lyrics_track_to_candidate: || vs && in any_timing (line 136 mutant) ──
+    //
+    // Mutant: `||` → `&&` — under `&&`, a line with `start_ms != 0` but
+    // `end_ms == 0` would NOT count as having timing (1000 != 0 && 0 != 0 = false).
+    // Correct code uses `||`: either nonzero field is enough to flag timing.
+    //
+    // Test: a line with start_ms=1000 and end_ms=0 MUST produce has_timing=true.
+
+    #[test]
+    fn any_timing_detected_when_only_start_ms_nonzero() {
+        // start_ms=1000, end_ms=0 — only start is nonzero.
+        // With `||`: 1000!=0 || 0!=0 = true → has_timing=true.
+        // With `&&` mutant: 1000!=0 && 0!=0 = false → has_timing=false (WRONG).
+        let track = lt("tier1:lrclib", vec![lt_line("Amazing grace", 1000, 0)]);
+        let c = lyrics_track_to_candidate(track);
+        assert!(
+            c.has_timing,
+            "start_ms=1000 alone must set has_timing=true (|| not &&)"
+        );
+        assert!(
+            c.line_timings.is_some(),
+            "line_timings must be Some when has_timing is true"
+        );
+    }
+
+    #[test]
+    fn any_timing_detected_when_only_end_ms_nonzero() {
+        // start_ms=0, end_ms=2000 — only end is nonzero.
+        // With `||`: 0!=0 || 2000!=0 = true → has_timing=true.
+        // With `&&` mutant: 0!=0 && 2000!=0 = false → has_timing=false (WRONG).
+        let track = lt(
+            "tier1:spotify",
+            vec![lt_line("How sweet the sound", 0, 2000)],
+        );
+        let c = lyrics_track_to_candidate(track);
+        assert!(
+            c.has_timing,
+            "end_ms=2000 alone must set has_timing=true (|| not &&)"
+        );
+        assert!(c.line_timings.is_some());
+    }
 }
