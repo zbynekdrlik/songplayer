@@ -82,6 +82,12 @@ pub async fn merge(
         }
     };
 
+    if merged_lines.is_empty() {
+        return Err(anyhow::anyhow!(
+            "claude_merge: zero lines (refusal or empty); fall back to raw WhisperX"
+        ));
+    }
+
     // Step 6: convert to AlignedTrack with words: None.
     let aligned_lines: Vec<AlignedLine> = merged_lines
         .into_iter()
@@ -126,16 +132,17 @@ struct ClaudeResponse {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Stable source-preference for tie-breaking in `best_authoritative`.
-/// Higher score = more reliable text quality.
+/// Tie-break order for `best_authoritative` (production labels match gather.rs).
 fn source_priority(source: &str) -> u32 {
-    if source.starts_with("tier1:spotify") {
+    if source == "override" {
+        5
+    } else if source.starts_with("tier1:spotify") {
         4
-    } else if source.starts_with("tier1:lrclib") {
+    } else if source == "lrclib" || source.starts_with("tier1:lrclib") {
         3
-    } else if source == "genius" || source == "tier1:genius" {
+    } else if source == "genius" || source.starts_with("tier1:genius") {
         2
-    } else if source.starts_with("tier1:yt_subs") {
+    } else if source == "yt_subs" || source.starts_with("tier1:yt_subs") {
         1
     } else {
         0
@@ -574,8 +581,9 @@ mod tests {
 
     #[test]
     fn parse_claude_response_empty_lines_array() {
-        let raw = r#"{"lines": []}"#;
-        let lines = parse_claude_response(raw).expect("empty lines array is valid");
+        // Parser allows empty lines array; merge() above rejects it as a
+        // refusal so orchestrator falls back to raw WhisperX.
+        let lines = parse_claude_response(r#"{"lines": []}"#).expect("valid JSON");
         assert_eq!(lines.len(), 0);
     }
 
@@ -583,55 +591,64 @@ mod tests {
 
     #[test]
     fn source_priority_values() {
-        assert_eq!(source_priority("tier1:spotify"), 4);
-        assert_eq!(source_priority("tier1:lrclib"), 3);
-        assert_eq!(source_priority("genius"), 2);
-        assert_eq!(source_priority("tier1:genius"), 2);
-        assert_eq!(source_priority("tier1:yt_subs"), 1);
-        assert_eq!(source_priority("unknown"), 0);
-        assert_eq!(source_priority(""), 0);
+        // Production labels (gather_sources_impl) and tier1: aliases.
+        let cases = [
+            ("override", 5),
+            ("tier1:spotify", 4),
+            ("lrclib", 3),
+            ("tier1:lrclib", 3),
+            ("genius", 2),
+            ("tier1:genius", 2),
+            ("yt_subs", 1),
+            ("tier1:yt_subs", 1),
+            ("description", 0),
+            ("unknown", 0),
+            ("", 0),
+        ];
+        for (s, p) in cases {
+            assert_eq!(source_priority(s), p, "{s}");
+        }
+        // Strict order: override > spotify > lrclib > genius > yt_subs > description.
+        let order = [
+            "override",
+            "tier1:spotify",
+            "lrclib",
+            "genius",
+            "yt_subs",
+            "description",
+        ];
+        for w in order.windows(2) {
+            assert!(source_priority(w[0]) > source_priority(w[1]), "{w:?}");
+        }
     }
 
     // ── best_authoritative tests ──────────────────────────────────────────────
 
+    fn cand(source: &str, lines: &[&str]) -> CandidateText {
+        CandidateText {
+            source: source.into(),
+            lines: lines.iter().map(|s| (*s).into()).collect(),
+            line_timings: None,
+            has_timing: false,
+        }
+    }
+
     #[test]
     fn best_authoritative_picks_most_lines() {
-        let candidates = vec![
-            CandidateText {
-                source: "tier1:spotify".into(),
-                lines: vec!["a".into(), "b".into()],
-                line_timings: None,
-                has_timing: false,
-            },
-            CandidateText {
-                source: "genius".into(),
-                lines: vec!["a".into(), "b".into(), "c".into(), "d".into()],
-                line_timings: None,
-                has_timing: false,
-            },
-        ];
-        let result = best_authoritative(&candidates);
+        let result = best_authoritative(&[
+            cand("tier1:spotify", &["a", "b"]),
+            cand("genius", &["a", "b", "c", "d"]),
+        ]);
         assert_eq!(result.len(), 4, "should pick the candidate with more lines");
     }
 
     #[test]
     fn best_authoritative_uses_priority_for_tie() {
-        let candidates = vec![
-            CandidateText {
-                source: "genius".into(),
-                lines: vec!["x".into(), "y".into()],
-                line_timings: None,
-                has_timing: false,
-            },
-            CandidateText {
-                source: "tier1:spotify".into(),
-                lines: vec!["a".into(), "b".into()],
-                line_timings: None,
-                has_timing: false,
-            },
-        ];
         // Both have 2 lines; spotify wins on priority.
-        let result = best_authoritative(&candidates);
+        let result = best_authoritative(&[
+            cand("genius", &["x", "y"]),
+            cand("tier1:spotify", &["a", "b"]),
+        ]);
         assert_eq!(result[0], "a");
     }
 
@@ -643,13 +660,9 @@ mod tests {
 
     // ── merge output structure test (mock) ────────────────────────────────────
 
-    /// Verify that `merge` produces an AlignedTrack with the expected shape
-    /// when Claude returns a known JSON response. We can't call a live Claude
-    /// in unit tests, but we can verify the conversion logic by calling the
-    /// internal helpers directly and constructing the expected output.
-    ///
-    /// This test exercises the full path EXCEPT the actual HTTP call by
-    /// testing each stage independently and asserting the composited result.
+    /// Verify `merge` produces an AlignedTrack with `words: None` and the
+    /// expected provenance suffix. Composes the same stages `merge()` runs
+    /// without making the HTTP call.
     #[test]
     fn merge_output_structure_words_none_and_provenance() {
         // Simulate Claude returning 2 lines.

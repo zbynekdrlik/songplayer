@@ -319,6 +319,9 @@ async fn align_chunked(
 fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
     use ReplicateError::*;
     match e {
+        Http(err) if err.is_timeout() => {
+            BackendError::Timeout(crate::lyrics::replicate_client::PER_REQUEST_TIMEOUT)
+        }
         Http(err) => BackendError::Transport(err.to_string()),
         Io(err) => BackendError::Io(err),
         ApiError { status, body } => BackendError::Rejected(format!("HTTP {status}: {body}")),

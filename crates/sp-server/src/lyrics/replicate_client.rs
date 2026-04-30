@@ -24,7 +24,7 @@ const RETRY_CAP: Duration = Duration::from_secs(60);
 const RETRY_MAX_ATTEMPTS: u32 = 4;
 const POLL_INTERVAL: Duration = Duration::from_secs(8);
 pub const PREDICTION_TIMEOUT: Duration = Duration::from_secs(1800);
-const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+pub const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Error)]
 pub enum ReplicateError {
@@ -163,7 +163,8 @@ impl ReplicateClient {
             break p;
         };
 
-        // 3. Poll until terminal
+        // 3. Poll until terminal. Transient 429/5xx + reqwest errors retry up to
+        // RETRY_MAX_ATTEMPTS with the same exponential backoff used at creation.
         let started = std::time::Instant::now();
         let mut current = pred;
         loop {
@@ -175,22 +176,45 @@ impl ReplicateClient {
             }
             sleep(POLL_INTERVAL).await;
 
-            let resp = self
-                .http
-                .get(format!("{REPLICATE_BASE}/predictions/{}", current.id))
-                .bearer_auth(&self.api_token)
-                .send()
-                .await?;
-            let status = resp.status();
-            let body = resp.text().await?;
-            if !status.is_success() {
-                return Err(ReplicateError::ApiError {
-                    status: status.as_u16(),
-                    body,
-                });
-            }
-            current = serde_json::from_str(&body)
-                .map_err(|e| ReplicateError::Malformed(format!("poll response: {e}")))?;
+            let mut poll_attempt = 0u32;
+            current = loop {
+                poll_attempt += 1;
+                let resp_result = self
+                    .http
+                    .get(format!("{REPLICATE_BASE}/predictions/{}", current.id))
+                    .bearer_auth(&self.api_token)
+                    .send()
+                    .await;
+
+                match resp_result {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        if (status.as_u16() == 429 || status.is_server_error())
+                            && poll_attempt < RETRY_MAX_ATTEMPTS
+                        {
+                            let backoff = (RETRY_BASE * 2_u32.pow(poll_attempt - 1)).min(RETRY_CAP);
+                            sleep(backoff).await;
+                            continue;
+                        }
+                        let body = resp.text().await?;
+                        if !status.is_success() {
+                            return Err(ReplicateError::ApiError {
+                                status: status.as_u16(),
+                                body,
+                            });
+                        }
+                        break serde_json::from_str(&body).map_err(|e| {
+                            ReplicateError::Malformed(format!("poll response: {e}"))
+                        })?;
+                    }
+                    Err(e) if poll_attempt < RETRY_MAX_ATTEMPTS => {
+                        let backoff = (RETRY_BASE * 2_u32.pow(poll_attempt - 1)).min(RETRY_CAP);
+                        tracing::warn!(attempt = poll_attempt, error = %e, "replicate poll retry");
+                        sleep(backoff).await;
+                    }
+                    Err(e) => return Err(ReplicateError::Http(e)),
+                }
+            };
         }
 
         if current.status != "succeeded" {
