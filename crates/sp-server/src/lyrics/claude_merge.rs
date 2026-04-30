@@ -83,8 +83,8 @@ pub async fn merge(
     };
 
     if merged_lines.is_empty() {
-        return Err(anyhow::anyhow!(
-            "claude_merge: zero lines (refusal or empty); fall back to raw WhisperX"
+        return Err(MergeError::ParseFailed(
+            "zero lines (refusal or empty); fall back to raw WhisperX".into(),
         ));
     }
 
