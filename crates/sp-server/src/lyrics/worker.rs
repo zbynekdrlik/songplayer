@@ -436,6 +436,15 @@ impl LyricsWorker {
             .ok()
             .flatten()
             .unwrap_or_default();
+        if replicate_token.trim().is_empty() {
+            warn!(
+                youtube_id = %youtube_id,
+                "worker: replicate_api_token not set — skipping song; \
+                 configure via PATCH /api/v1/settings"
+            );
+            self.clear_processing().await;
+            return Err(anyhow::anyhow!("replicate_api_token not configured"));
+        }
         let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> =
             Arc::new(WhisperXReplicateBackend::new(replicate_token));
 

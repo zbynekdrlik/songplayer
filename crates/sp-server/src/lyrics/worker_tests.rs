@@ -363,3 +363,25 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         "expected 'no text sources available' error, got: {err_msg}"
     );
 }
+
+/// Verify the replicate_api_token early-exit guard is present in process_song.
+///
+/// The guard prevents the worker from feeding an empty string to
+/// WhisperXReplicateBackend (which would then fail with HTTP 401 after the
+/// 12-second rate-limit pre-sleep, chewing through every queued song before
+/// anyone notices). A structural check catches if the guard is accidentally
+/// removed during future edits.
+#[test]
+fn process_song_has_replicate_token_early_exit() {
+    let src = include_str!("worker.rs");
+    // The guard must check trim().is_empty() on the token ...
+    assert!(
+        src.contains("replicate_token.trim().is_empty()"),
+        "process_song must have a replicate_token early-exit guard"
+    );
+    // ... and produce the expected error message.
+    assert!(
+        src.contains("replicate_api_token not configured"),
+        "early-exit error message must mention replicate_api_token not configured"
+    );
+}
