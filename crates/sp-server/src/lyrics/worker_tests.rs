@@ -57,11 +57,10 @@ fn worker_has_no_retired_symbols() {
     );
 }
 
-/// Gather phase must try sources in order: YouTube manual subs → LRCLIB → autosub.
-/// This preserves the legacy yt_subs-before-lrclib precedence and puts the cheapest
-/// miss (autosub) last.
+/// Gather phase must try sources in order: YouTube manual subs → LRCLIB.
+/// This preserves the yt_subs-before-lrclib precedence.
 #[test]
-fn gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub() {
+fn gather_sources_call_order_preserves_yt_subs_then_lrclib() {
     // gather_sources_impl was extracted from worker.rs into the sibling
     // `gather.rs` module to keep both files under the 1000-line airuleset cap.
     let src = include_str!("gather.rs");
@@ -73,9 +72,7 @@ fn gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub() {
         .find("youtube_subs::fetch_subtitles")
         .expect("yt_subs call");
     let lr = body.find("lrclib::fetch_lyrics").expect("lrclib call");
-    let au = body.find("fetch_autosub(").expect("autosub call");
     assert!(yt < lr, "yt_subs must be before lrclib");
-    assert!(lr < au, "lrclib must be before autosub");
 }
 
 /// `align_track_to_lyrics_track` correctly maps AlignedTrack fields to
@@ -248,7 +245,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         lyrics_time_offset_ms: 0,
     };
 
-    let autosub_tmp = tempfile::tempdir().unwrap();
     let reqwest_client = reqwest::Client::new();
     let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
 
@@ -258,7 +254,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         cache_dir.path(),
         &reqwest_client,
         &row,
-        autosub_tmp.path(),
         "", // no genius token in tests — skip Genius source
     )
     .await
@@ -339,14 +334,12 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         lyrics_time_offset_ms: 0,
     };
 
-    let autosub_tmp = tempfile::tempdir().unwrap();
     let reqwest_client = reqwest::Client::new();
     let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
 
     // gather_sources_impl should bail with "no text sources available" because:
     // - yt_subs: yt-dlp path bogus, returns None
     // - lrclib: artist empty, skipped
-    // - autosub: bogus path, returns None
     // - description: Claude returns empty array, match guard skips push
     // So candidate_texts is empty and the function bails.
     let result = gather_sources_impl(
@@ -355,7 +348,6 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         cache_dir.path(),
         &reqwest_client,
         &row,
-        autosub_tmp.path(),
         "", // no genius token in tests — skip Genius source
     )
     .await;

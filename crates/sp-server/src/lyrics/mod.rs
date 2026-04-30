@@ -1,7 +1,6 @@
 pub mod aligner;
 pub mod assembly;
 pub mod audio_chunking;
-pub mod autosub_provider;
 pub mod backend;
 pub mod bootstrap;
 pub mod chunking;

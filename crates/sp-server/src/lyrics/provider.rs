@@ -44,7 +44,6 @@ pub struct SongContext {
     pub audio_path: PathBuf,
     pub clean_vocal_path: Option<PathBuf>,
     pub candidate_texts: Vec<CandidateText>,
-    pub autosub_json3: Option<PathBuf>,
     pub duration_ms: u64,
 }
 

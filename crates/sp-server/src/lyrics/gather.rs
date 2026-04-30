@@ -20,19 +20,16 @@ use crate::lyrics::{genius, lrclib, youtube_subs};
 /// and `gather_sources_skips_description_when_claude_returns_empty_array` integration tests
 /// (plus the structural call-order test further down); individual mutations in these
 /// I/O-bound branches cannot be killed by unit tests without a full mock harness for
-/// yt-dlp/LRCLIB/autosub, which is out of scope.
+/// yt-dlp/LRCLIB, which is out of scope.
 #[cfg_attr(test, mutants::skip)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn gather_sources_impl(
     ai_client: Option<&crate::ai::client::AiClient>,
     ytdlp_path: &std::path::Path,
     cache_dir: &std::path::Path,
     client: &reqwest::Client,
     row: &crate::db::models::VideoLyricsRow,
-    autosub_tmp_dir: &std::path::Path,
     genius_access_token: &str,
 ) -> Result<crate::lyrics::provider::SongContext> {
-    use crate::lyrics::autosub_provider::fetch_autosub;
     use crate::lyrics::provider::{CandidateText, SongContext};
 
     let youtube_id = row.youtube_id.clone();
@@ -94,16 +91,6 @@ pub(crate) async fn gather_sources_impl(
         }
     } else {
         None
-    };
-
-    // 3. Auto-sub json3
-    let autosub_json3 = match fetch_autosub(ytdlp_path, &youtube_id, autosub_tmp_dir).await {
-        Ok(Some(p)) => Some(p),
-        Ok(None) => None,
-        Err(e) => {
-            warn!("gather: autosub fetch error for {youtube_id}: {e}");
-            None
-        }
     };
 
     let mut candidate_texts: Vec<CandidateText> = Vec::new();
@@ -205,7 +192,6 @@ pub(crate) async fn gather_sources_impl(
         audio_path,
         clean_vocal_path: None, // filled by process_song before orchestrator call
         candidate_texts,
-        autosub_json3,
         duration_ms: row.duration_ms.unwrap_or(0) as u64,
     })
 }

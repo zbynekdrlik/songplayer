@@ -279,11 +279,10 @@ impl LyricsWorker {
     /// Returns a `SongContext` ready for orchestrator. Never bails on a single
     /// source failure — collects what it can and returns; if zero text candidates
     /// were gathered, bails.
-    #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub`
+    #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib`
     async fn gather_sources(
         &self,
         row: &crate::db::models::VideoLyricsRow,
-        autosub_tmp_dir: &std::path::Path,
     ) -> Result<crate::lyrics::provider::SongContext> {
         // Read the Genius token fresh on every song so operators can add
         // the setting without restarting the server. Empty string disables
@@ -299,7 +298,6 @@ impl LyricsWorker {
             &self.cache_dir,
             &self.client,
             row,
-            autosub_tmp_dir,
             &genius_token,
         )
         .await
@@ -353,10 +351,6 @@ impl LyricsWorker {
         let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
         let start_instant = std::time::Instant::now();
 
-        // Dedicated per-song tmp dir for autosub json3 — cleaned on exit.
-        let autosub_tmp = std::env::temp_dir().join(format!("sp_autosub_{youtube_id}"));
-        let _ = tokio::fs::create_dir_all(&autosub_tmp).await;
-
         self.broadcast_stage(
             video_id,
             &youtube_id,
@@ -368,10 +362,9 @@ impl LyricsWorker {
         )
         .await;
 
-        let ctx = match self.gather_sources(&row, &autosub_tmp).await {
+        let ctx = match self.gather_sources(&row).await {
             Ok(c) => c,
             Err(e) => {
-                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
                 self.clear_processing().await;
                 return Err(e);
             }
@@ -490,7 +483,6 @@ impl LyricsWorker {
             Ok(t) => t,
             Err(e) => {
                 warn!("worker: orchestrator failed for {youtube_id}: {e}");
-                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
                 let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
                 let _ = tokio::fs::remove_file(&wav_path).await;
                 self.clear_processing().await;
@@ -502,7 +494,6 @@ impl LyricsWorker {
         let mut track = align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION);
 
         // Cleanup scratch files.
-        let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
         let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
         let _ = tokio::fs::remove_file(&wav_path).await;
 
