@@ -200,6 +200,10 @@ fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
 /// audio duration exceeds the threshold. Default behavior (None or
 /// Some(u32::MAX)) is to never chunk — WhisperX handles long-form natively
 /// via faster-whisper VAD.
+///
+/// TODO(test): align_chunked has no unit coverage — mock-injection requires
+/// either extracting ReplicateClient behind a trait or making the function
+/// accept a generic backend. Tracked in GitHub issue #65.
 async fn align_chunked(
     backend: &WhisperXReplicateBackend,
     vocal_wav_path: &Path,
