@@ -102,9 +102,10 @@ impl AlignmentBackend for WhisperXReplicateBackend {
         AlignmentCapability {
             word_level: true,
             segment_level: true,
-            // WhisperX handles long-form natively via faster-whisper VAD chunking.
-            // Songs > this duration would need chunking trigger (Task A.5).
-            max_audio_seconds: 3_600,
+            // Ceiling matches PREDICTION_TIMEOUT (1800 s = 30 min) in
+            // replicate_client.rs. Advertising more would be dishonest:
+            // a song longer than 1800 s would time out during polling.
+            max_audio_seconds: 1_800,
             languages: &["en", "es", "pt", "fr", "de", "it", "nl", "pl", "ru", "uk"],
             takes_reference_text: false,
         }
@@ -405,6 +406,21 @@ mod tests {
         assert!(cap.languages.contains(&"en"));
         assert!(cap.languages.contains(&"es"));
         assert!(cap.languages.contains(&"pt"));
+    }
+
+    #[test]
+    fn capability_max_audio_seconds_matches_prediction_timeout() {
+        use crate::lyrics::replicate_client::PREDICTION_TIMEOUT;
+        let b = WhisperXReplicateBackend::new("test-token");
+        let cap = b.capability();
+        // max_audio_seconds must not exceed PREDICTION_TIMEOUT's seconds so
+        // we never advertise handling durations we'd actually time out on.
+        assert_eq!(
+            cap.max_audio_seconds as u64,
+            PREDICTION_TIMEOUT.as_secs(),
+            "max_audio_seconds must equal PREDICTION_TIMEOUT seconds ({} s)",
+            PREDICTION_TIMEOUT.as_secs()
+        );
     }
 
     #[test]
