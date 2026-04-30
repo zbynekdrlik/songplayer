@@ -25,7 +25,6 @@ use crate::{
     lyrics::{aligner, translator},
 };
 
-#[allow(dead_code)]
 pub struct LyricsWorker {
     pool: SqlitePool,
     client: Client,
@@ -35,12 +34,6 @@ pub struct LyricsWorker {
     tools_dir: PathBuf,
     script_path: PathBuf,
     models_dir: PathBuf,
-    /// Legacy Gemini key — kept for lib.rs call-site compatibility during
-    /// Phase G cleanup. Not used by the new tier-chain pipeline.
-    gemini_api_key: String,
-    /// Legacy Gemini model — kept for lib.rs call-site compatibility.
-    /// Not used by the new tier-chain pipeline.
-    gemini_model: String,
     /// Claude AI client for EN→SK translation (CLIProxyAPI).
     /// None if CLIProxyAPI is not configured.
     ai_client: Option<Arc<AiClient>>,
@@ -66,15 +59,12 @@ struct RetryBackoff {
 pub(crate) use crate::lyrics::gather::gather_sources_impl;
 
 impl LyricsWorker {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: SqlitePool,
         cache_dir: PathBuf,
         ytdlp_path: PathBuf,
         python_path: Option<PathBuf>,
         tools_dir: PathBuf,
-        gemini_api_key: String,
-        gemini_model: String,
         ai_client: Option<Arc<AiClient>>,
         events_tx: broadcast::Sender<ServerMsg>,
     ) -> Self {
@@ -89,8 +79,6 @@ impl LyricsWorker {
             tools_dir,
             script_path,
             models_dir,
-            gemini_api_key,
-            gemini_model,
             ai_client,
             venv_python: tokio::sync::RwLock::new(None),
             retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
