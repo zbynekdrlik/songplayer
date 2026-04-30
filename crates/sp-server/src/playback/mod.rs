@@ -698,6 +698,25 @@ impl PlaybackEngine {
                 video_id, %video_path, %audio_path,
                 "PlayVideo → jumping to clicked song"
             );
+            // Clear Resolume `#sp-subs` clips immediately so the previous song's
+            // last line doesn't linger on the wall during the new song's intro.
+            // Same idea for the Presenter stage push — start blank, the first
+            // matching lyric line will populate via position_update.
+            let _ = self
+                .resolume_tx
+                .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+            pp.last_presenter_text = None;
+            if let Some(client) = &self.presenter_client {
+                let client = client.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client
+                        .push(crate::presenter::PresenterPayload::empty())
+                        .await
+                    {
+                        tracing::warn!(?e, "presenter clear on PlayVideo failed (non-fatal)");
+                    }
+                });
+            }
             pp.pipeline.send(PipelineCommand::Play {
                 video: video_path.into(),
                 audio: audio_path.into(),
