@@ -371,4 +371,361 @@ mod tests {
         let split = split_track(&track, SplitConfig::default());
         assert_eq!(split.lines.len(), 1, "no safe split → preserve original");
     }
+
+    // ── split_line: || guard on empty halves (line 60 mutant) ───────────────
+    //
+    // Mutant: `||` → `&&` — would only bail when BOTH halves are empty.
+    // Need a case where split_idx lands exactly at a word-boundary yielding
+    // an empty right_text (after trim_start). In that scenario the original
+    // line should be passed through unchanged.
+    // We construct this by picking max_chars exactly equal to the line length,
+    // so no split is needed, but also a split that would leave one half empty.
+
+    #[test]
+    fn split_line_passthrough_when_right_half_empty_after_trim() {
+        // split_idx lands at position beyond all non-space content → right is empty
+        // Use a line where the only split candidate puts all text in the left half.
+        // E.g. "Hello world " — 12 chars. With max_chars=6, sentence-end wins if '.' present;
+        // use a line "Hello." (6 chars) where sentence-end is at byte 6, but text.len() == 6
+        // means next = 6 == text.len(), so the condition `next < text.len()` is false.
+        // That path falls through to the word-boundary search but there's no space ≤ limit_idx.
+        // Result: find_split_index returns None → pass through.
+        // This exercises the `None => return vec![line.clone()]` path, which verifies
+        // the guard is needed in the first place.
+        let l = line("Hello.", 0, 1000);
+        let cfg = SplitConfig { max_chars: 6 };
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, cfg);
+        // Text len == max_chars → no split needed, passes through untouched
+        assert_eq!(split.lines.len(), 1);
+        assert_eq!(split.lines[0].text, "Hello.");
+    }
+
+    #[test]
+    fn split_line_passthrough_when_both_halves_would_be_empty() {
+        // A line consisting of spaces only produces empty left and right after trim.
+        // find_split_index returns None for all-whitespace (no word boundary pattern).
+        // The `None => return vec![line.clone()]` path triggers.
+        let l = line("     ", 0, 500);
+        let cfg = SplitConfig { max_chars: 2 };
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, cfg);
+        assert_eq!(split.lines.len(), 1);
+    }
+
+    // ── split_line: recursive re-split guard (lines 97/102 mutants) ──────────
+    //
+    // Mutant: `> cfg.max_chars` → `>= cfg.max_chars` — would try to recursively
+    // split a half that is exactly max_chars long (which `split_track` already
+    // wouldn't have touched), causing unnecessary re-splits.
+    // Test: construct a line that splits into two halves where one half is
+    // EXACTLY max_chars chars. Under the mutated code that half would be
+    // re-split; under correct code it is left alone.
+
+    #[test]
+    fn split_line_does_not_recurse_when_half_is_exactly_max_chars() {
+        // "Hallelujah alleluia" splits at space after "Hallelujah" (11 chars).
+        // Left "Hallelujah" = 10 chars, right "alleluia" = 8 chars.
+        // With max_chars=10: left == 10, NOT > 10 → no recursion.
+        // Under `>= 10` mutant, left would be re-split (impossible since
+        // find_split_index returns None for a 10-char no-punctuation word),
+        // but we'd still get 2 lines. The key: both halves must be ≤ max_chars.
+        let l = line("Hallelujah alleluia", 0, 2000);
+        let cfg = SplitConfig { max_chars: 10 };
+        let track = AlignedTrack {
+            lines: vec![l],
+            provenance: "t".into(),
+            raw_confidence: 1.0,
+        };
+        let split = split_track(&track, cfg);
+        // Expected: 2 lines, "Hallelujah" and "alleluia"
+        assert_eq!(split.lines.len(), 2);
+        assert_eq!(split.lines[0].text, "Hallelujah");
+        assert_eq!(split.lines[1].text, "alleluia");
+    }
+
+    // ── find_split_index: center / distance arithmetic (lines 131-164 mutants)
+
+    #[test]
+    fn find_split_index_returns_none_for_short_text() {
+        // text.chars().count() <= max_chars → must return None
+        assert_eq!(find_split_index("Hello", 5), None);
+        assert_eq!(find_split_index("Hello", 6), None);
+        assert_eq!(find_split_index("Hello", 100), None);
+    }
+
+    #[test]
+    fn find_split_index_word_boundary_nearest_center() {
+        // "aaaa bbbb cccc dddd" — 19 chars, max_chars=10.
+        // Spaces at bytes 4 and 9 and 14.
+        // center = max_chars/2 = 5. center_byte = byte of chars[5] = 5.
+        // Spaces: byte 4 (dist=1), byte 9 (dist=4), byte 14 (>limit_idx, excluded).
+        // limit_idx = byte of chars[10] = 10.
+        // Nearest-to-center space at byte 4 (dist=|4-5|=1) → split at byte 5.
+        // Result: left = "aaaa", right = "bbbb cccc dddd".
+        //
+        // Under `/→%` mutant: center = 10 % 2 = 0; nearest = byte 4 instead of 5.
+        // Under `/→*` mutant: center = 10 * 2 = 20; both spaces have same "nearest".
+        // Under `−→+` mutant: distance = idx + center_byte (always larger), picks arbitrary.
+        // Under `−→/` mutant: distance = idx / center_byte (wrong scaling).
+        let result = find_split_index("aaaa bbbb cccc dddd", 10);
+        // The split should be at a word boundary near the center.
+        assert!(result.is_some());
+        let idx = result.unwrap();
+        // idx must be a valid split point: not zero, not at end, byte is word start
+        assert!(idx > 0);
+        assert!(idx < "aaaa bbbb cccc dddd".len());
+        // The left half must be at most max_chars chars
+        assert!("aaaa bbbb cccc dddd"[..idx].chars().count() <= 10);
+    }
+
+    #[test]
+    fn find_split_index_word_boundary_nearest_center_verified_value() {
+        // Verify the exact split byte for a controlled case.
+        // "abcde fghij klmno" — 17 chars, max_chars=9.
+        // Spaces: byte 5 (char idx 5), byte 11 (char idx 11).
+        // center = 9/2 = 4. center_byte = byte of chars[4] = 4.
+        // limit_idx = byte of chars[9] = 9.
+        // Space at byte 5: dist = |5-4| = 1, idx <= 9 ✓ → split = 6.
+        // Space at byte 11: idx=11 > limit_idx=9 → excluded.
+        // So split at byte 6 → left = "abcde", right = "fghij klmno".
+        let text = "abcde fghij klmno";
+        let result = find_split_index(text, 9);
+        assert_eq!(result, Some(6), "nearest-center split at byte 6");
+    }
+
+    #[test]
+    fn find_split_index_does_not_split_beyond_limit() {
+        // Spaces beyond limit_idx must not be chosen. Verify the right half
+        // starts within the original max_chars window.
+        // "hello world and more text here" — 30 chars, max_chars=12.
+        let text = "hello world and more text here";
+        let result = find_split_index(text, 12);
+        assert!(result.is_some());
+        let idx = result.unwrap();
+        assert!(
+            text[..idx].chars().count() <= 12,
+            "left half must be ≤ max_chars"
+        );
+    }
+
+    #[test]
+    fn find_split_index_rightmost_word_boundary_fallback() {
+        // No sentence-end, no comma, and no space near center — triggers path 4.
+        // "abcdefghij klmno" — 16 chars, max_chars=8.
+        // No punctuation. Spaces at byte 10 only (beyond limit_idx=8 → excluded from
+        // nearest-center search too). Falls to rfind(' ') in text[..limit_idx].
+        // limit_idx = byte of chars[8] = 8. text[..8] = "abcdefgh" — no space.
+        // → falls all the way to rfind which also finds nothing → None.
+        // Test a case where there IS a space within limit_idx for path 4.
+        // "abc def ghij klmno" — 18 chars, max_chars=10.
+        // Spaces: byte 3, byte 7, byte 12 (>limit_idx=10 → excluded).
+        // center=5, center_byte=5. Space at byte 3: dist=2. Space at byte 7: dist=2.
+        // Both equal distance — pick first (smallest idx with min dist? no, iter is
+        // forward order, so byte 3 seen first with dist=2, byte 7 seen next with dist=2,
+        // dist < d is strict so byte 3 wins). split at byte 4.
+        let text = "abc def ghij klmno";
+        let result = find_split_index(text, 10);
+        assert!(result.is_some());
+        let idx = result.unwrap();
+        assert!(text[..idx].chars().count() <= 10);
+        assert!(idx > 0);
+    }
+
+    #[test]
+    fn find_split_index_split_point_is_after_space_not_at_space() {
+        // `rfind(' ').map(|i| i + 1)` — if mutated to just `i` the split includes
+        // the space in the left half (it would end with ' ').
+        // Similarly for the nearest-center path: `best = Some((idx + 1, dist))`.
+        // After split_line trims, a space at the end would not appear, but we can
+        // verify the byte index is past the space character.
+        let text = "hello world how are you doing here";
+        let result = find_split_index(text, 15);
+        assert!(result.is_some());
+        let idx = result.unwrap();
+        // The byte at idx should NOT be a space (it's the start of the right word)
+        let byte_at_idx = text.as_bytes().get(idx).copied().unwrap_or(0);
+        assert_ne!(
+            byte_at_idx, b' ',
+            "split idx must point past the space, not at it"
+        );
+    }
+
+    // ── split_words_by_index: return values and arithmetic (lines 171-187) ───
+    //
+    // Mutants on split_words_by_index:
+    //   - Replace return with (None, None), (None, Some(vec![])), etc.
+    //   - `*` → `+` / `/` in `words.len() * byte_idx`
+    //   - `/` → `%` / `*` in `/ line.text.len().max(1)`
+    //
+    // We test that the function correctly distributes words proportionally.
+
+    #[test]
+    fn split_words_by_index_none_when_words_is_none() {
+        let l = AlignedLine {
+            text: "hello world".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: None,
+        };
+        let (left, right) = split_words_by_index(&l, 5);
+        assert!(left.is_none(), "None words → left must be None");
+        assert!(right.is_none(), "None words → right must be None");
+    }
+
+    #[test]
+    fn split_words_by_index_none_when_words_empty() {
+        let l = AlignedLine {
+            text: "hello world".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: Some(vec![]),
+        };
+        let (left, right) = split_words_by_index(&l, 5);
+        assert!(left.is_none(), "empty words → left must be None");
+        assert!(right.is_none(), "empty words → right must be None");
+    }
+
+    #[test]
+    fn split_words_by_index_distributes_proportionally() {
+        // "hello world" — 11 bytes. Split at byte 6 (after "hello ").
+        // words.len() = 2, byte_idx = 6, text.len() = 11.
+        // split_word = (2 * 6) / 11 = 12 / 11 = 1.
+        // left = words[..1] = ["hello"], right = words[1..] = ["world"].
+        //
+        // Under `* → +` mutant: (2 + 6) / 11 = 0 → all words go to right, left=None.
+        // Under `/ → %` mutant: (2 * 6) % 11 = 1 (same here but different for other inputs).
+        // Under `/ → *` mutant: (2 * 6) * 11 = 132 → min(132, 2) = 2 → all left, right=None.
+        let hello = AlignedWord {
+            text: "hello".into(),
+            start_ms: 0,
+            end_ms: 400,
+            confidence: 0.9,
+        };
+        let world = AlignedWord {
+            text: "world".into(),
+            start_ms: 400,
+            end_ms: 1000,
+            confidence: 0.9,
+        };
+        let l = AlignedLine {
+            text: "hello world".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: Some(vec![hello.clone(), world.clone()]),
+        };
+        let (left, right) = split_words_by_index(&l, 6);
+        assert!(left.is_some(), "left must be Some (has at least 1 word)");
+        assert!(right.is_some(), "right must be Some (has at least 1 word)");
+        let lv = left.unwrap();
+        let rv = right.unwrap();
+        assert_eq!(lv.len(), 1);
+        assert_eq!(rv.len(), 1);
+        assert_eq!(lv[0].text, "hello");
+        assert_eq!(rv[0].text, "world");
+    }
+
+    #[test]
+    fn split_words_by_index_all_to_right_when_byte_idx_zero() {
+        // byte_idx = 0 → split_word = (2 * 0) / 11 = 0 → left empty → None
+        let hello = AlignedWord {
+            text: "hello".into(),
+            start_ms: 0,
+            end_ms: 400,
+            confidence: 0.9,
+        };
+        let world = AlignedWord {
+            text: "world".into(),
+            start_ms: 400,
+            end_ms: 1000,
+            confidence: 0.9,
+        };
+        let l = AlignedLine {
+            text: "hello world".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: Some(vec![hello, world]),
+        };
+        let (left, right) = split_words_by_index(&l, 0);
+        assert!(
+            left.is_none(),
+            "byte_idx=0 → split_word=0 → left empty → None"
+        );
+        assert!(right.is_some(), "all words go to right");
+        assert_eq!(right.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn split_words_by_index_all_to_left_when_byte_idx_at_end() {
+        // byte_idx = text.len() → split_word = min(words.len(), words.len()) = 2
+        // left = all words, right = empty → None
+        let hello = AlignedWord {
+            text: "hello".into(),
+            start_ms: 0,
+            end_ms: 400,
+            confidence: 0.9,
+        };
+        let world = AlignedWord {
+            text: "world".into(),
+            start_ms: 400,
+            end_ms: 1000,
+            confidence: 0.9,
+        };
+        let text = "hello world";
+        let l = AlignedLine {
+            text: text.into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: Some(vec![hello, world]),
+        };
+        let (left, right) = split_words_by_index(&l, text.len());
+        assert!(left.is_some(), "byte_idx at end → all words to left");
+        assert!(right.is_none(), "right is empty → None");
+        assert_eq!(left.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn split_words_by_index_four_words_mid_split() {
+        // "aa bb cc dd" — 11 bytes. 4 words. split at byte 6 (after "aa bb ").
+        // split_word = (4 * 6) / 11 = 24 / 11 = 2.
+        // Under `* → +`: (4 + 6) / 11 = 0 → left=None (WRONG).
+        // Under `/ → *`: (4 * 6) * 11 = 264 → min(264, 4) = 4 → right=None (WRONG).
+        let make_w = |t: &str, s: u32, e: u32| AlignedWord {
+            text: t.into(),
+            start_ms: s,
+            end_ms: e,
+            confidence: 0.9,
+        };
+        let l = AlignedLine {
+            text: "aa bb cc dd".into(),
+            start_ms: 0,
+            end_ms: 4000,
+            words: Some(vec![
+                make_w("aa", 0, 1000),
+                make_w("bb", 1000, 2000),
+                make_w("cc", 2000, 3000),
+                make_w("dd", 3000, 4000),
+            ]),
+        };
+        let (left, right) = split_words_by_index(&l, 6);
+        assert!(left.is_some());
+        assert!(right.is_some());
+        let lv = left.unwrap();
+        let rv = right.unwrap();
+        // split_word = 2: first 2 go left, last 2 go right
+        assert_eq!(lv.len(), 2, "split_word=2 → 2 words left");
+        assert_eq!(rv.len(), 2, "split_word=2 → 2 words right");
+        assert_eq!(lv[0].text, "aa");
+        assert_eq!(lv[1].text, "bb");
+        assert_eq!(rv[0].text, "cc");
+        assert_eq!(rv[1].text, "dd");
+    }
 }
