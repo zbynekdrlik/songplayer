@@ -940,4 +940,46 @@ mod tests {
         assert_eq!(resp.lines[0].text, "{intro}");
         assert_eq!(resp.lines[2].text, "end {outro}");
     }
+
+    // ── try_parse_balanced: unmatched `}` and escaped-quote + brace tests ──────
+    //
+    // The existing `handles_braces_inside_string_values` test uses balanced `{}`
+    // so the extra braces cancel out even without in_string tracking.  These two
+    // tests require correct tracking to avoid premature depth=0:
+    //
+    //   (A) String value with unmatched `}`: kills `delete b'"'` / `delete !`.
+    //   (B) String value `\"}}`: kills `in_string guard → false` (line 362).
+
+    #[test]
+    fn try_parse_balanced_unmatched_close_brace_inside_string() {
+        // Without `b'"'` arm (in_string never true), the `}` in "a } value" is
+        // counted as a real closing brace, depth hits 0 early, slice is truncated,
+        // serde_json fails.  Correct code keeps in_string=true and ignores it.
+        let s = r#"{"lines": [{"start_ms": 0, "end_ms": 1000, "text": "a } value"}]} trailing"#;
+        let result = try_parse_balanced(s);
+        assert!(
+            result.is_ok(),
+            "unmatched `}}` in string must not truncate slice"
+        );
+        let resp = result.unwrap();
+        assert_eq!(resp.lines.len(), 1);
+        assert_eq!(resp.lines[0].text, "a } value");
+    }
+
+    #[test]
+    fn try_parse_balanced_escaped_quote_followed_by_closing_braces() {
+        // Text value is `a\"}}` (escaped-quote + two closing braces).
+        // Without escape tracking (b'\\' guard → false), the `"` after `\`
+        // prematurely closes in_string=false, the two `}` chars decrement depth
+        // to 0 early, slice is truncated, serde_json fails.
+        let s = r#"{"lines": [{"start_ms": 0, "end_ms": 1, "text": "a\"}}"}]} trailing"#;
+        let result = try_parse_balanced(s);
+        assert!(
+            result.is_ok(),
+            "escaped quote must not prematurely close string"
+        );
+        let resp = result.unwrap();
+        assert_eq!(resp.lines.len(), 1);
+        assert_eq!(resp.lines[0].text, "a\"}}");
+    }
 }

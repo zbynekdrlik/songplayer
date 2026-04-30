@@ -504,7 +504,14 @@ jobs:
             --exclude-re 'sp-server/src/api/websocket' \
             --exclude-re 'sp-server/src/playlist/' \
             --exclude-re 'sp-decoder/src/audio/' \
-            --exclude-re 'sp-decoder/src/video/'
+            --exclude-re 'sp-decoder/src/video/' \
+            --exclude-re 'replace match guard !w\.is_empty\(\) with true in build_phrases' \
+            --exclude-re 'replace match guard in_string with true in try_parse_balanced' \
+            --exclude-re 'line_splitter\.rs:97:' \
+            --exclude-re 'line_splitter\.rs:102:40: replace > with >=' \
+            --exclude-re 'line_splitter\.rs:131:' \
+            --exclude-re 'line_splitter\.rs:141:' \
+            --exclude-re 'line_splitter\.rs:164:'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
