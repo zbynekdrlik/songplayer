@@ -237,7 +237,9 @@ ALTER TABLE videos ADD COLUMN lyrics_time_offset_ms INTEGER NOT NULL DEFAULT 0;
 
 // V17 — Spotify track ID for Tier-1 SpotifyLyricsFetcher. Manually
 // assigned per video for line-synced lyrics via public proxy. NULL when
-// not set; fetcher silently skips when None. Idempotent ADD COLUMN.
+// not set; fetcher silently skips when None.
+// Note: migration runner enforces idempotency via schema_version;
+// this raw ALTER would error if applied twice manually.
 const MIGRATION_V17: &str = "
 ALTER TABLE videos ADD COLUMN spotify_track_id TEXT;
 ";
