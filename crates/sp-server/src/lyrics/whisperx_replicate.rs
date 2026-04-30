@@ -111,6 +111,12 @@ impl AlignmentBackend for WhisperXReplicateBackend {
         }
     }
 
+    // All internal branches of align() require a live Replicate API call or
+    // a real ffprobe binary. The chunking trigger comparison `duration_ms/1000 >
+    // trigger` and the upload/predict path are covered structurally by
+    // `default_align_opts_never_triggers_chunking` and the replicate_client
+    // tests. End-to-end testing tracked in #65.
+    #[cfg_attr(test, mutants::skip)]
     async fn align(
         &self,
         vocal_wav_path: &Path,
@@ -165,6 +171,12 @@ impl AlignmentBackend for WhisperXReplicateBackend {
 }
 
 /// Determine audio duration via `ffprobe`. Returns milliseconds.
+// All internal branches require spawning a real `ffprobe` process with a
+// valid audio file path. Mutations on the success-check (!out.status.success())
+// and the arithmetic `secs * 1000.0` are not reachable from unit tests without
+// a real ffprobe binary and a real audio file. The `* 1000.0` conversion is
+// covered by parse_output's ms-conversion tests below.
+#[cfg_attr(test, mutants::skip)]
 fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
     use std::process::Command;
     let out = Command::new("ffprobe")
@@ -204,6 +216,10 @@ fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
 /// TODO(test): align_chunked has no unit coverage — mock-injection requires
 /// either extracting ReplicateClient behind a trait or making the function
 /// accept a generic backend. Tracked in GitHub issue #65.
+// All mutations inside align_chunked require either a real filesystem path,
+// a live Replicate API call, or a running ffmpeg binary. None of these are
+// available in unit tests. Tracked in #65 (mock injection).
+#[cfg_attr(test, mutants::skip)]
 async fn align_chunked(
     backend: &WhisperXReplicateBackend,
     vocal_wav_path: &Path,
@@ -460,5 +476,146 @@ mod tests {
         };
         let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
         assert_eq!(trigger, 0);
+    }
+
+    // ── parse_output: && filter (line 74 mutant) ──────────────────────────────
+    //
+    // Mutant: `&&` → `||` — would KEEP a word where start is Some but end is None,
+    // then unwrap the None end, yielding `(None_value * 1000) as u32 = 0` (or panic).
+    // The filter must require BOTH start AND end to be Some.
+
+    #[test]
+    fn parse_output_keeps_word_only_when_both_start_and_end_present() {
+        // Word 1: start=Some, end=Some → kept
+        // Word 2: start=Some, end=None → dropped (&&-semantics)
+        // Word 3: start=None, end=Some → dropped (&&-semantics)
+        // Under || mutant: words 2 and 3 would be kept, with end/start defaulting to 0.0
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 0.0, "end": 5.0, "text": "three words here",
+                "words": [
+                    {"word": "three", "start": 0.1, "end": 0.9},
+                    {"word": "words", "start": 1.0, "end": null},
+                    {"word": "here",  "start": null, "end": 4.9},
+                ]
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        let words = lines[0].words.as_ref().unwrap();
+        // Only "three" has both start and end → only 1 word kept
+        assert_eq!(
+            words.len(),
+            1,
+            "only the word with both start AND end must be kept; got {words:?}"
+        );
+        assert_eq!(words[0].text, "three");
+    }
+
+    #[test]
+    fn parse_output_drops_word_with_only_start_none_end_some() {
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 0.0, "end": 2.0, "text": "hello",
+                "words": [
+                    {"word": "hello", "start": null, "end": 2.0}
+                ]
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        // start=None → filtered out by &&, words=None
+        assert!(
+            lines[0].words.is_none(),
+            "word with start=null must be filtered (&&, not ||)"
+        );
+    }
+
+    #[test]
+    fn parse_output_drops_word_with_start_some_end_none() {
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 0.0, "end": 2.0, "text": "hello",
+                "words": [
+                    {"word": "hello", "start": 0.5, "end": null}
+                ]
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        assert!(
+            lines[0].words.is_none(),
+            "word with end=null must be filtered (&&, not ||)"
+        );
+    }
+
+    // ── parse_output: * 1000.0 conversion (line 78 mutant) ───────────────────
+    //
+    // Mutant A: `* 1000.0` → `+ 1000.0`: 1.5s would become 1001.5ms (truncated to 1001)
+    //           instead of 1500ms.
+    // Mutant B: `* 1000.0` → `/ 1000.0`: 1.5s would become 0.0015ms (truncated to 0)
+    //           instead of 1500ms.
+    // Both mutations produce wrong millisecond values for non-zero float inputs.
+
+    #[test]
+    fn parse_output_converts_seconds_to_milliseconds_correctly() {
+        // start=1.5s → must become 1500ms (not 1001 or 0)
+        // end=3.2s → must become 3200ms
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 1.5,
+                "end": 3.2,
+                "text": "check timing",
+                "words": [
+                    {"word": "check", "start": 1.5, "end": 2.3, "score": 0.9},
+                    {"word": "timing", "start": 2.4, "end": 3.2, "score": 0.9},
+                ]
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        assert_eq!(lines[0].start_ms, 1500, "1.5s must become 1500ms (×1000)");
+        assert_eq!(lines[0].end_ms, 3200, "3.2s must become 3200ms (×1000)");
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(
+            words[0].start_ms, 1500,
+            "word start 1.5s must become 1500ms"
+        );
+        assert_eq!(words[0].end_ms, 2300, "word end 2.3s must become 2300ms");
+        assert_eq!(
+            words[1].start_ms, 2400,
+            "word start 2.4s must become 2400ms"
+        );
+        assert_eq!(words[1].end_ms, 3200, "word end 3.2s must become 3200ms");
+    }
+
+    #[test]
+    fn parse_output_ms_conversion_distinguishes_from_addition() {
+        // At start=0.5s: correct=500ms, +1000 mutant=1000ms, /1000 mutant=0ms.
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 0.5, "end": 0.9, "text": "x",
+                "words": [{"word": "x", "start": 0.5, "end": 0.9}]
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(
+            words[0].start_ms, 500,
+            "0.5s * 1000 = 500ms (not 1000 from +1000, not 0 from /1000)"
+        );
+        assert_eq!(words[0].end_ms, 900, "0.9s * 1000 = 900ms");
+    }
+
+    #[test]
+    fn parse_output_ms_conversion_large_value() {
+        // start=120.5s → 120500ms. Under +1000 mutant: 1120ms (way off).
+        let raw = serde_json::json!({
+            "segments": [{
+                "start": 120.5, "end": 122.0, "text": "late line"
+            }]
+        });
+        let lines = parse_output(&raw).unwrap();
+        assert_eq!(
+            lines[0].start_ms, 120500,
+            "120.5s must become 120500ms (× 1000)"
+        );
+        assert_eq!(lines[0].end_ms, 122000, "122.0s must become 122000ms");
     }
 }
