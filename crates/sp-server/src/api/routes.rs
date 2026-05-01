@@ -829,8 +829,115 @@ pub async fn get_lyrics_status(State(state): State<AppState>) -> impl IntoRespon
 }
 
 // ---------------------------------------------------------------------------
+// Spotify integration
+// ---------------------------------------------------------------------------
+
+/// Extract a Spotify track ID from any of:
+/// - canonical URL: `https://open.spotify.com/track/<id>` (with or without `?si=...`, with or without trailing `/`)
+/// - localized URL: `https://open.spotify.com/intl-cz/track/<id>?si=...`
+/// - bare 22-char alphanumeric ID
+///
+/// Returns `Err` for empty input, missing `/track/` segment, or IDs that
+/// don't match Spotify's 22-char base62 shape.
+pub(crate) fn parse_spotify_track_id(input: &str) -> Result<String, &'static str> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("spotify_url is empty");
+    }
+    let candidate = if let Some(idx) = trimmed.find("/track/") {
+        let after = &trimmed[idx + "/track/".len()..];
+        let cut = after
+            .find(|c: char| c == '?' || c == '/')
+            .unwrap_or(after.len());
+        &after[..cut]
+    } else {
+        trimmed
+    };
+    if candidate.len() == 22 && candidate.chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(candidate.to_string())
+    } else {
+        Err("not a valid Spotify track ID (must be 22 alphanumeric chars)")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod parse_spotify_tests {
+    use super::parse_spotify_track_id;
+
+    #[test]
+    fn extracts_id_from_canonical_url() {
+        let id = parse_spotify_track_id("https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp")
+            .unwrap();
+        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
+    }
+
+    #[test]
+    fn extracts_id_from_url_with_si_query() {
+        let id =
+            parse_spotify_track_id("https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp?si=abcd")
+                .unwrap();
+        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
+    }
+
+    #[test]
+    fn extracts_id_from_url_with_trailing_slash() {
+        let id = parse_spotify_track_id("https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp/")
+            .unwrap();
+        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
+    }
+
+    #[test]
+    fn extracts_id_from_intl_url() {
+        let id = parse_spotify_track_id(
+            "https://open.spotify.com/intl-cz/track/3n3Ppam7vgaVa1iaRUc9Lp?si=xyz",
+        )
+        .unwrap();
+        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
+    }
+
+    #[test]
+    fn accepts_bare_track_id() {
+        let id = parse_spotify_track_id("3n3Ppam7vgaVa1iaRUc9Lp").unwrap();
+        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
+    }
+
+    #[test]
+    fn rejects_empty_string() {
+        assert!(parse_spotify_track_id("").is_err());
+    }
+
+    #[test]
+    fn rejects_whitespace_only() {
+        assert!(parse_spotify_track_id("   ").is_err());
+    }
+
+    #[test]
+    fn rejects_url_without_track_path() {
+        assert!(
+            parse_spotify_track_id("https://open.spotify.com/album/3n3Ppam7vgaVa1iaRUc9Lp")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_id_too_short() {
+        assert!(parse_spotify_track_id("3n3Ppam7vga").is_err());
+    }
+
+    #[test]
+    fn rejects_id_too_long() {
+        assert!(parse_spotify_track_id("3n3Ppam7vgaVa1iaRUc9LpXXX").is_err());
+    }
+
+    #[test]
+    fn rejects_id_with_invalid_chars() {
+        assert!(parse_spotify_track_id("3n3Ppam7vga!a1iaRUc9Lp").is_err());
+    }
+}
 
 #[cfg(test)]
 #[path = "routes_tests.rs"]
