@@ -56,21 +56,22 @@ fn app(state: AppState) -> axum::Router {
 }
 
 async fn insert_test_video(state: &AppState) -> i64 {
-    sqlx::query(
+    let (playlist_id,): (i64,) = sqlx::query_as(
         "INSERT INTO playlists (name, youtube_url, ndi_output_name, is_active) \
-         VALUES ('p', 'https://youtube.com/playlist?list=PLtest', 'n', 1)",
-    )
-    .execute(&state.pool)
-    .await
-    .unwrap();
-    let row: (i64,) = sqlx::query_as(
-        "INSERT INTO videos (playlist_id, youtube_id, title) \
-         VALUES (1, 'aaaaaaaaaaa', 't') RETURNING id",
+         VALUES ('p', 'https://youtube.com/playlist?list=PLtest', 'n', 1) RETURNING id",
     )
     .fetch_one(&state.pool)
     .await
     .unwrap();
-    row.0
+    let (video_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO videos (playlist_id, youtube_id, title) \
+         VALUES (?1, 'aaaaaaaaaaa', 't') RETURNING id",
+    )
+    .bind(playlist_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    video_id
 }
 
 #[tokio::test]
@@ -158,6 +159,12 @@ async fn patch_video_malformed_spotify_url_returns_400() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let body_str = std::str::from_utf8(&body).unwrap();
+    assert!(
+        body_str.contains("spotify_url"),
+        "400 body must name the offending field, got: {body_str}"
+    );
 }
 
 #[tokio::test]
