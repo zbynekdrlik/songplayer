@@ -30,6 +30,7 @@ pub struct CandidateText {
 }
 
 // Temporary bridge — Phase G deletes provider.rs and this impl with it.
+// Reverse direction lives in `provider.rs` next to its struct.
 impl From<crate::lyrics::provider::CandidateText> for CandidateText {
     fn from(c: crate::lyrics::provider::CandidateText) -> Self {
         Self {
