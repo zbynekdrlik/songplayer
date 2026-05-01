@@ -973,3 +973,7 @@ mod parse_spotify_tests {
 #[cfg(test)]
 #[path = "routes_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "routes_tests_spotify.rs"]
+mod tests_spotify;
