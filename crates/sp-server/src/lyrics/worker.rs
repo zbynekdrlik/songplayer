@@ -1,16 +1,16 @@
-//! Lyrics worker orchestrator — unified ensemble pipeline.
+//! Lyrics worker — tier-chain pipeline.
 //!
-//! Every song goes through the same path:
-//!   1. gather_sources: YT manual subs + LRCLIB + autosub json3 in parallel.
-//!   2. Vocal isolation (Qwen3 provider; best-effort).
-//!   3. Orchestrator::process_song → LyricsTrack.
-//!   4. SK translation — Claude (CLIProxyAPI) first, Gemini direct-API
-//!      fallback when Claude refuses on copyright policy.
-//!   5. Persist JSON + DB row with pipeline_version + quality_score.
+//! Every song goes through:
+//!   1. gather_sources: YT manual subs + LRCLIB + Genius + description in parallel.
+//!   2. Vocal isolation (Mel-Roformer + anvuew; best-effort via `preprocess_vocals`).
+//!   3. Build tier1 fetchers from candidate_texts → Orchestrator::process → AlignedTrack.
+//!   4. Convert AlignedTrack → LyricsTrack via `align_track_to_lyrics_track`.
+//!   5. SK translation — Claude (CLIProxyAPI) only per `feedback_claude_only_translation.md`.
+//!   6. Persist JSON + DB row with pipeline_version.
 
 use anyhow::Result;
 use reqwest::Client;
-use sp_core::lyrics::LyricsTrack;
+use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
 use sp_core::ws::{LyricsProcessingState, ServerMsg};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
@@ -25,7 +25,6 @@ use crate::{
     lyrics::{aligner, translator},
 };
 
-#[allow(dead_code)]
 pub struct LyricsWorker {
     pool: SqlitePool,
     client: Client,
@@ -35,9 +34,7 @@ pub struct LyricsWorker {
     tools_dir: PathBuf,
     script_path: PathBuf,
     models_dir: PathBuf,
-    gemini_api_key: String,
-    gemini_model: String,
-    /// Claude Opus AI client for translation + ensemble merge.
+    /// Claude AI client for EN→SK translation (CLIProxyAPI).
     /// None if CLIProxyAPI is not configured.
     ai_client: Option<Arc<AiClient>>,
     venv_python: tokio::sync::RwLock<Option<PathBuf>>,
@@ -62,15 +59,12 @@ struct RetryBackoff {
 pub(crate) use crate::lyrics::gather::gather_sources_impl;
 
 impl LyricsWorker {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: SqlitePool,
         cache_dir: PathBuf,
         ytdlp_path: PathBuf,
         python_path: Option<PathBuf>,
         tools_dir: PathBuf,
-        gemini_api_key: String,
-        gemini_model: String,
         ai_client: Option<Arc<AiClient>>,
         events_tx: broadcast::Sender<ServerMsg>,
     ) -> Self {
@@ -85,8 +79,6 @@ impl LyricsWorker {
             tools_dir,
             script_path,
             models_dir,
-            gemini_api_key,
-            gemini_model,
             ai_client,
             venv_python: tokio::sync::RwLock::new(None),
             retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
@@ -275,11 +267,10 @@ impl LyricsWorker {
     /// Returns a `SongContext` ready for orchestrator. Never bails on a single
     /// source failure — collects what it can and returns; if zero text candidates
     /// were gathered, bails.
-    #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub`
+    #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib`
     async fn gather_sources(
         &self,
         row: &crate::db::models::VideoLyricsRow,
-        autosub_tmp_dir: &std::path::Path,
     ) -> Result<crate::lyrics::provider::SongContext> {
         // Read the Genius token fresh on every song so operators can add
         // the setting without restarting the server. Empty string disables
@@ -295,30 +286,9 @@ impl LyricsWorker {
             &self.cache_dir,
             &self.client,
             row,
-            autosub_tmp_dir,
             &genius_token,
         )
         .await
-    }
-
-    /// Build per-song Vec<GeminiClient>: split `gemini_api_key` by comma, drop
-    /// empties, wrap each key in a direct-API client with `max_attempts=1`.
-    // mutants::skip: pure split/trim/filter over config; covered by gemini_provider tests.
-    #[cfg_attr(test, mutants::skip)]
-    fn build_gemini_clients(&self) -> Vec<crate::lyrics::gemini_client::GeminiClient> {
-        use crate::lyrics::gemini_client::GeminiClient;
-        let model = std::env::var("GEMINI_LYRICS_MODEL")
-            .unwrap_or_else(|_| "gemini-3.1-pro-preview".to_string());
-        self.gemini_api_key
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .map(|k| {
-                let mut c = GeminiClient::direct(k, model.clone());
-                c.max_attempts = 1;
-                c
-            })
-            .collect()
     }
 
     /// Apply per-line translations to `track`. Empty strings leave `sk = None`.
@@ -352,48 +322,13 @@ impl LyricsWorker {
         }
     }
 
-    /// Read quality score from the audit log written by the orchestrator.
-    // Reads a JSON audit log file; graceful fallback to None on any error. Path/shape covered by orchestrator tests.
-    #[cfg_attr(test, mutants::skip)]
-    async fn read_quality_from_audit(&self, youtube_id: &str) -> Option<f32> {
-        use crate::lyrics::reprocess::compute_quality_score;
-        let audit_path = self
-            .cache_dir
-            .join(format!("{youtube_id}_alignment_audit.json"));
-        let raw = tokio::fs::read_to_string(&audit_path).await.ok()?;
-        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-        let qm = parsed.get("quality_metrics")?;
-        let avg = qm.get("avg_confidence")?.as_f64()? as f32;
-        let dup = qm.get("duplicate_start_pct")?.as_f64()? as f32;
-        Some(compute_quality_score(avg, dup))
-    }
-
-    /// Read `reference_text_source` from the per-song alignment audit
-    /// log. Surfaces the text-merge layer's decision (`description`,
-    /// `lrclib`, `yt_subs`, `merged:<a>+<b>`) so operators can see it
-    /// in the `worker: persisted` log line without having to open the
-    /// audit JSON. Returns `None` when the audit log is missing or
-    /// malformed.
-    // Thin I/O wrapper around tokio::fs::read_to_string + serde_json;
-    // mutation-testing can't meaningfully pin the error paths without a
-    // real audit file fixture — behaviour covered by production logs.
-    #[cfg_attr(test, mutants::skip)]
-    async fn read_ref_source_from_audit(&self, youtube_id: &str) -> Option<String> {
-        let audit_path = self
-            .cache_dir
-            .join(format!("{youtube_id}_alignment_audit.json"));
-        let raw = tokio::fs::read_to_string(&audit_path).await.ok()?;
-        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-        parsed
-            .get("reference_text_source")?
-            .as_str()
-            .map(String::from)
-    }
-
     #[cfg_attr(test, mutants::skip)]
     async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
         use crate::lyrics::{
-            LYRICS_PIPELINE_VERSION, orchestrator::Orchestrator, qwen3_provider::Qwen3Provider,
+            LYRICS_PIPELINE_VERSION,
+            orchestrator::{Orchestrator, OrchestratorInput},
+            tier1::FetchFn,
+            whisperx_replicate::WhisperXReplicateBackend,
         };
 
         let video_id = row.id;
@@ -403,14 +338,6 @@ impl LyricsWorker {
 
         let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
         let start_instant = std::time::Instant::now();
-
-        let ai_client = self.ai_client.clone().ok_or_else(|| {
-            anyhow::anyhow!("ai_client not configured; ensemble pipeline requires Claude")
-        })?;
-
-        // Dedicated per-song tmp dir for autosub json3 — cleaned on success.
-        let autosub_tmp = std::env::temp_dir().join(format!("sp_autosub_{youtube_id}"));
-        let _ = tokio::fs::create_dir_all(&autosub_tmp).await;
 
         self.broadcast_stage(
             video_id,
@@ -423,10 +350,9 @@ impl LyricsWorker {
         )
         .await;
 
-        let mut ctx = match self.gather_sources(&row, &autosub_tmp).await {
+        let ctx = match self.gather_sources(&row).await {
             Ok(c) => c,
             Err(e) => {
-                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
                 self.clear_processing().await;
                 return Err(e);
             }
@@ -437,21 +363,23 @@ impl LyricsWorker {
             &youtube_id,
             &song,
             &artist,
-            "text_merge",
+            "preprocessing",
             None,
             started_at_unix_ms,
         )
         .await;
 
-        // Preprocess vocals for Qwen3 provider (best-effort; Qwen3 is skipped if this fails).
+        // Preprocess vocals — UNCHANGED path (Mel-Roformer + anvuew dereverb).
+        // Per feedback_winresolume_is_shared_event_machine.md this uses
+        // BELOW_NORMAL priority subprocesses; not modified here.
         let venv_python = self.venv_python.read().await.clone();
-        let (python_for_qwen3, clean_vocal) = if let (Some(python), Some(audio_path)) = (
+        let clean_vocal: Option<PathBuf> = if let (Some(python), Some(audio_path)) = (
             venv_python.as_ref(),
             row.audio_file_path.as_ref().map(PathBuf::from),
         ) {
             if audio_path.exists() {
                 let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-                let clean_vocal = match aligner::preprocess_vocals(
+                match aligner::preprocess_vocals(
                     python,
                     &self.script_path,
                     &self.models_dir,
@@ -465,86 +393,13 @@ impl LyricsWorker {
                         warn!("worker: vocal isolation failed for {youtube_id}: {e}");
                         None
                     }
-                };
-                (Some(python.clone()), clean_vocal)
+                }
             } else {
-                (None, None)
+                None
             }
         } else {
-            (None, None)
+            None
         };
-        ctx.clean_vocal_path = clean_vocal;
-
-        // Build provider list.
-        // - GeminiProvider: registered when LYRICS_GEMINI_ENABLED AND at least one
-        //   direct-API key is configured in `gemini_api_key` (comma-separated list).
-        //   v14 transcribe_rotating cycles keys on HTTP 429.
-        // - Qwen3Provider: registered only when LYRICS_QWEN3_ENABLED AND Python venv +
-        //   clean vocal are available. Parked off; revived when word-level work resumes.
-        // - AutoSubProvider: NOT registered as an alignment source (v16). Autosub's
-        //   timing on sung music is unreliable and contaminated ensemble outputs
-        //   in v11-v15; per user direction it is banned from alignment.
-        use crate::lyrics::{
-            LYRICS_GEMINI_ENABLED, LYRICS_QWEN3_ENABLED, gemini_client::GeminiClient,
-            gemini_provider::GeminiProvider,
-        };
-        let mut providers: Vec<Box<dyn crate::lyrics::provider::AlignmentProvider>> = Vec::new();
-        // v19: YtManualSubsProvider ships first. If the gather phase produced a
-        // yt_subs candidate with line-level timing, alignment short-circuits
-        // here — no Gemini API call, no ffmpeg chunking. The provider's
-        // can_provide() returns false when no such candidate exists, so
-        // normal Gemini-on-audio alignment runs for every other song.
-        // Manual subs only per feedback_no_autosub.md; autosub never reaches
-        // candidate_texts with has_timing=true in the current gather code.
-        providers.push(Box::new(
-            crate::lyrics::yt_manual_subs_provider::YtManualSubsProvider,
-        ));
-        // v16: AutoSubProvider is NOT registered as an alignment provider.
-        // YouTube auto-captions have unreliable timing on sung music and
-        // contaminate `ensemble:*` source tags. Autosub stays available for
-        // text-candidate gathering in `gather_sources` (where it feeds the
-        // description/text pool), but NEVER as an alignment source. See the
-        // `feedback_no_autosub` memory for the user's explicit direction.
-        if LYRICS_GEMINI_ENABLED {
-            let ffmpeg_name = if cfg!(windows) {
-                "ffmpeg.exe"
-            } else {
-                "ffmpeg"
-            };
-            let ffmpeg_path = self.tools_dir.join(ffmpeg_name);
-            // v14: direct API with one client per key. `build_gemini_clients`
-            // splits `self.gemini_api_key` on commas, strips whitespace,
-            // drops empty entries, and sets `max_attempts=1` per client so
-            // a 429 fails fast and the provider-level rotation in
-            // `transcribe_rotating` advances to the next key immediately.
-            let clients: Vec<GeminiClient> = self.build_gemini_clients();
-            if !clients.is_empty() {
-                tracing::info!(
-                    "gemini: registered {} API key(s) for alignment rotation",
-                    clients.len()
-                );
-                providers.push(Box::new(GeminiProvider {
-                    clients,
-                    current_key_idx: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                    ffmpeg_path,
-                    cache_dir: self.cache_dir.clone(),
-                }));
-            } else {
-                tracing::warn!(
-                    "gemini: LYRICS_GEMINI_ENABLED is true but gemini_api_key setting is empty \
-                     — Gemini provider not registered"
-                );
-            }
-        }
-        if LYRICS_QWEN3_ENABLED {
-            if let Some(python) = python_for_qwen3 {
-                providers.push(Box::new(Qwen3Provider {
-                    python_path: python,
-                    script_path: self.script_path.clone(),
-                    models_dir: self.models_dir.clone(),
-                }));
-            }
-        }
 
         self.broadcast_stage(
             video_id,
@@ -557,52 +412,85 @@ impl LyricsWorker {
         )
         .await;
 
-        let orch = Orchestrator::new(providers, ai_client.clone(), self.cache_dir.clone());
-        let mut track = match orch.process_song(&ctx).await {
-            Ok(t) => t,
-            Err(e) => {
-                warn!("worker: ensemble failed for {youtube_id}: {e}");
-                let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
+        // Build Tier-1 fetchers from candidate_texts gathered above.
+        // Each provider::CandidateText becomes a FetchFn closure that immediately
+        // returns the pre-fetched candidate without any additional I/O.
+        let fetchers: Vec<FetchFn> = ctx
+            .candidate_texts
+            .into_iter()
+            .map(|c| {
+                let t1c = crate::lyrics::tier1::CandidateText::from(c);
+                let boxed = Arc::new(t1c);
+                let f: FetchFn = Arc::new(move || {
+                    let candidate = (*boxed).clone();
+                    Box::pin(async move { Some(candidate) })
+                });
+                f
+            })
+            .collect();
 
-                // Zero-provider fallback: emit a line-level track from the first
-                // candidate with line timings. Preserves legacy LRCLIB-line-level behavior.
-                let fallback = ctx
-                    .candidate_texts
-                    .iter()
-                    .find(|c| c.has_timing && c.line_timings.is_some());
-                let Some(c) = fallback else {
-                    self.clear_processing().await;
-                    return Err(e);
-                };
-                info!(
-                    "worker: zero-provider fallback for {youtube_id} using source={}",
-                    c.source
+        // Build the WhisperX backend using the Replicate API token from settings.
+        // Read per-song so operators can add the token without restarting.
+        let replicate_token = crate::db::models::get_setting(&self.pool, "replicate_api_token")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        if replicate_token.trim().is_empty() {
+            warn!(
+                youtube_id = %youtube_id,
+                "worker: replicate_api_token not set — skipping song; \
+                 configure via PATCH /api/v1/settings"
+            );
+            self.clear_processing().await;
+            return Err(anyhow::anyhow!("replicate_api_token not configured"));
+        }
+        let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> =
+            Arc::new(WhisperXReplicateBackend::new(replicate_token));
+
+        // Require an AI client for orchestrator construction — claude-merge needs it.
+        // If None at runtime, log warning and bail processing for this song.
+        let ai_client = match &self.ai_client {
+            Some(c) => c.clone(),
+            None => {
+                warn!(
+                    "worker: ai_client is None — CLIProxyAPI not configured; \
+                     cannot run claude-merge for {youtube_id}"
                 );
-                let timings = c.line_timings.as_ref().unwrap();
-                let lines: Vec<sp_core::lyrics::LyricsLine> = c
-                    .lines
-                    .iter()
-                    .zip(timings.iter())
-                    .map(|(text, (start, end))| sp_core::lyrics::LyricsLine {
-                        start_ms: *start,
-                        end_ms: *end,
-                        en: text.clone(),
-                        sk: None,
-                        words: None,
-                    })
-                    .collect();
-                sp_core::lyrics::LyricsTrack {
-                    version: 2,
-                    source: c.source.clone(),
-                    language_source: "en".into(),
-                    language_translation: String::new(),
-                    lines,
-                }
+                self.clear_processing().await;
+                return Err(anyhow::anyhow!(
+                    "ai_client required for orchestrator (claude-merge) but is None"
+                ));
             }
         };
 
+        let orch = Orchestrator::new(
+            backend,
+            ai_client,
+            crate::lyrics::line_splitter::SplitConfig::default(),
+        );
+        let aligned = match orch
+            .process(OrchestratorInput {
+                fetchers,
+                language: "en",
+                vocal_wav: clean_vocal.as_deref(),
+            })
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("worker: orchestrator failed for {youtube_id}: {e}");
+                let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
+                let _ = tokio::fs::remove_file(&wav_path).await;
+                self.clear_processing().await;
+                return Err(anyhow::anyhow!("orchestrator: {e}"));
+            }
+        };
+
+        // Convert AlignedTrack → LyricsTrack at the worker boundary.
+        let mut track = align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION);
+
         // Cleanup scratch files.
-        let _ = tokio::fs::remove_dir_all(&autosub_tmp).await;
         let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
         let _ = tokio::fs::remove_file(&wav_path).await;
 
@@ -617,7 +505,7 @@ impl LyricsWorker {
         )
         .await;
 
-        // SK translation (Claude → Gemini fallback) — unchanged logic, just extracted.
+        // EN→SK translation — Claude-only (per feedback_claude_only_translation.md).
         self.translate_track(&mut track, &youtube_id).await;
 
         self.broadcast_stage(
@@ -631,68 +519,38 @@ impl LyricsWorker {
         )
         .await;
 
-        // Persist JSON + DB row with pipeline_version + quality_score.
+        // Persist JSON + DB row with pipeline_version.
+        // quality_score is None (no audit log in the new pipeline).
+        // Passing None writes SQL NULL — avoids poisoning ORDER BY
+        // lyrics_quality_score ASC NULLS FIRST in the queue selector.
         let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let json_bytes = serde_json::to_vec(&track)?;
         tokio::fs::write(&json_path, &json_bytes).await?;
-
-        // Recover quality from the audit log the orchestrator wrote.
-        // None is returned when the audit log is absent (e.g. ensemble timeout fallback).
-        // Passing None to mark_video_lyrics_complete writes SQL NULL instead of 0.0,
-        // which avoids poisoning the ORDER BY lyrics_quality_score ASC NULLS FIRST selector.
-        let quality_score: Option<f32> = self.read_quality_from_audit(&youtube_id).await;
-        // Surface the reference-text source (description / lrclib / yt_subs /
-        // merged:*) in the persist log so operators can see the text-merge
-        // decision without opening the per-song audit JSON. `track.source`
-        // only names the ALIGNMENT provider (qwen3 / ensemble:*), which hides
-        // the text candidate that fed the aligner.
-        let ref_source: String = self
-            .read_ref_source_from_audit(&youtube_id)
-            .await
-            .unwrap_or_else(|| "unknown".into());
 
         crate::db::models::mark_video_lyrics_complete(
             &self.pool,
             video_id,
             &track.source,
             LYRICS_PIPELINE_VERSION,
-            quality_score,
+            None,
         )
         .await?;
 
         tracing::info!(
-            "worker: persisted {} (source={}, ref_source={}, quality={}, version={})",
+            "worker: persisted {} (source={}, version={})",
             youtube_id,
             track.source,
-            ref_source,
-            quality_score
-                .map(|q| format!("{q:.2}"))
-                .unwrap_or_else(|| "null".into()),
             LYRICS_PIPELINE_VERSION
         );
 
         // Broadcast completion and clear processing state.
-        let provider_count = tokio::fs::read_to_string(
-            &self
-                .cache_dir
-                .join(format!("{youtube_id}_alignment_audit.json")),
-        )
-        .await
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("providers_run")
-                .and_then(|p| p.as_array())
-                .map(|a| a.len())
-        })
-        .unwrap_or(0) as u8;
         let duration_ms = start_instant.elapsed().as_millis() as u64;
         let _ = self.events_tx.send(ServerMsg::LyricsCompleted {
             video_id,
             youtube_id: youtube_id.clone(),
             source: track.source.clone(),
-            quality_score: quality_score.unwrap_or(0.0),
-            provider_count,
+            quality_score: 0.0,
+            provider_count: 1,
             duration_ms,
         });
         self.clear_processing().await;
@@ -769,6 +627,54 @@ impl LyricsWorker {
                 );
             }
         }
+    }
+}
+
+/// Convert the orchestrator's internal `AlignedTrack` to the persisted
+/// `sp_core::lyrics::LyricsTrack` shape at the worker boundary.
+///
+/// Mapping:
+/// - `AlignedLine.text`     → `LyricsLine.en`
+/// - `AlignedLine.start_ms` (u32) → `LyricsLine.start_ms` (u64) via widening
+/// - `AlignedLine.end_ms`   (u32) → `LyricsLine.end_ms`   (u64) via widening
+/// - `AlignedLine.words`    → `LyricsLine.words` — each `AlignedWord` maps to
+///   `LyricsWord { text, start_ms: w.start_ms as u64, end_ms: w.end_ms as u64 }`.
+///   Per `feedback_line_timing_only.md` the orchestrator ships `words: None` for
+///   Tier-1 line-synced output; this function preserves whatever the orchestrator
+///   produced (no word synthesis).
+/// - `AlignedTrack.provenance` → `LyricsTrack.source`
+/// - `version` is the caller-supplied LYRICS_PIPELINE_VERSION (not bumped here).
+/// - `sk` and `language_translation` left empty — the worker fills them via
+///   `translate_track` immediately after this call.
+pub fn align_track_to_lyrics_track(
+    aligned: crate::lyrics::backend::AlignedTrack,
+    version: u32,
+) -> LyricsTrack {
+    let lines: Vec<LyricsLine> = aligned
+        .lines
+        .into_iter()
+        .map(|l| LyricsLine {
+            start_ms: l.start_ms as u64,
+            end_ms: l.end_ms as u64,
+            en: l.text,
+            sk: None,
+            words: l.words.map(|ws| {
+                ws.into_iter()
+                    .map(|w| LyricsWord {
+                        text: w.text,
+                        start_ms: w.start_ms as u64,
+                        end_ms: w.end_ms as u64,
+                    })
+                    .collect()
+            }),
+        })
+        .collect();
+    LyricsTrack {
+        version,
+        source: aligned.provenance,
+        language_source: "en".into(),
+        language_translation: String::new(),
+        lines,
     }
 }
 

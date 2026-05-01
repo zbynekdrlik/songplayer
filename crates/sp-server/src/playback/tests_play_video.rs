@@ -80,16 +80,27 @@ async fn handle_play_video_updates_current_position_on_custom_playlist() {
     assert_eq!(pp.current_video_id, Some(200));
     assert_eq!(pp.state, PlayState::Playing { video_id: 200 });
 
-    // WS broadcast.
-    match ws_rx.try_recv() {
-        Ok(ServerMsg::PlaybackStateChanged {
+    // WS broadcast. PlayVideo first dispatches `clear_lyrics_display` to
+    // avoid the previous song's last line lingering on the wall during the
+    // new song's intro — that emits a LyricsUpdate-with-all-None ahead of
+    // the PlaybackStateChanged. Drain LyricsUpdate(s) and assert the
+    // PlaybackStateChanged eventually arrives.
+    let mut found_play = false;
+    while let Ok(msg) = ws_rx.try_recv() {
+        if let ServerMsg::PlaybackStateChanged {
             playlist_id, state, ..
-        }) => {
+        } = msg
+        {
             assert_eq!(playlist_id, ytlive_id);
             assert_eq!(state, WsPlaybackState::Playing);
+            found_play = true;
+            break;
         }
-        other => panic!("expected PlaybackStateChanged(Playing), got {other:?}"),
     }
+    assert!(
+        found_play,
+        "expected PlaybackStateChanged(Playing) in WS stream"
+    );
 }
 
 /// handle_play_video with an unknown video_id is a no-op: no DB change, no

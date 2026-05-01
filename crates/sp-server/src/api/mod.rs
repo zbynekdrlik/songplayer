@@ -128,11 +128,6 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/lyrics/clear-manual-queue",
             axum::routing::post(lyrics::post_clear_manual),
         )
-        // Gemini audit log
-        .route(
-            "/api/v1/gemini-audit",
-            axum::routing::get(routes::get_gemini_audit),
-        )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
         // AI proxy

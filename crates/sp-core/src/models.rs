@@ -72,6 +72,11 @@ pub struct Video {
     /// video. SK subs + Presenter current_text remain unaffected. Default 0.
     #[serde(default)]
     pub suppress_resolume_en: bool,
+    /// V17: Spotify track ID (e.g., "401mrYPv21Zs2USsU6bauy") — manually
+    /// assigned per video for SpotifyLyricsFetcher (Tier-1 source). NULL
+    /// when not set; fetcher silently skips when None.
+    #[serde(default)]
+    pub spotify_track_id: Option<String>,
 }
 
 /// A record of a video that was played.

@@ -262,7 +262,50 @@ impl crate::playback::PlaybackEngine {
             );
         }
 
+        // Periodic heartbeat log: once per UTC-minute bucket per pipeline.
+        // Guarantees a baseline state record in the log within 60s of any
+        // moment, so a "wall is dark" report can be diagnosed against the
+        // pipeline state SongPlayer believed it had at that minute. Without
+        // this, transition-only logging leaves multi-hour silent windows
+        // (observed: 2026-04-28 sp-fast playing all night with no log
+        // line for ~9h, while OBS distroAV silently received zero frames).
+        let prev_heartbeat_ts = prev.as_ref().and_then(|s| s.last_heartbeat_ts);
+        let cur_heartbeat_ts = snapshot.last_heartbeat_ts;
+        if let Some(cur) = cur_heartbeat_ts {
+            if should_log_periodic_heartbeat(prev_heartbeat_ts, cur) {
+                info!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    state = ?canonical_state,
+                    connections,
+                    frames_total = frames_submitted_total,
+                    frames_5s = frames_submitted_last_5s,
+                    observed_fps = format!("{:.1}", observed_fps),
+                    nominal_fps = format!("{:.1}", nominal_fps),
+                    scene_active,
+                    "ndi: heartbeat"
+                );
+            }
+        }
+
         self.ndi_health_registry.update(snapshot);
+    }
+}
+
+/// Pure helper: should the engine emit a periodic INFO heartbeat log for
+/// this `last_heartbeat_ts`? Returns `true` on the first heartbeat for a
+/// pipeline (`prev` is `None`) and once per UTC-minute wall-clock bucket
+/// thereafter.
+///
+/// The 60-second bucket is computed via `timestamp() / 60`, so consecutive
+/// 5-second heartbeats inside the same UTC minute log at most once. This
+/// bounds output to ~1 line/min/pipeline (~8640/day for 6 pipelines) while
+/// guaranteeing a recent baseline ground-truth entry exists for every
+/// minute the engine is alive.
+fn should_log_periodic_heartbeat(prev: Option<DateTime<Utc>>, cur: DateTime<Utc>) -> bool {
+    match prev {
+        None => true,
+        Some(p) => p.timestamp() / 60 != cur.timestamp() / 60,
     }
 }
 
@@ -607,6 +650,35 @@ mod tests {
         assert!(
             snap.degraded_reason.is_none(),
             "clean poll must clear degraded_reason so 'ndi: pipeline recovered' log fires",
+        );
+    }
+
+    #[test]
+    fn should_log_periodic_heartbeat_on_first_heartbeat() {
+        let cur: DateTime<Utc> = "2026-04-28T05:21:00Z".parse().unwrap();
+        assert!(
+            should_log_periodic_heartbeat(None, cur),
+            "first heartbeat for a pipeline must always log"
+        );
+    }
+
+    #[test]
+    fn should_log_periodic_heartbeat_on_new_minute_bucket() {
+        let prev: DateTime<Utc> = "2026-04-28T05:21:55Z".parse().unwrap();
+        let cur: DateTime<Utc> = "2026-04-28T05:22:00Z".parse().unwrap();
+        assert!(
+            should_log_periodic_heartbeat(Some(prev), cur),
+            "crossing into a new UTC-minute bucket must log"
+        );
+    }
+
+    #[test]
+    fn should_log_periodic_heartbeat_suppresses_within_same_minute() {
+        let prev: DateTime<Utc> = "2026-04-28T05:21:00Z".parse().unwrap();
+        let cur: DateTime<Utc> = "2026-04-28T05:21:55Z".parse().unwrap();
+        assert!(
+            !should_log_periodic_heartbeat(Some(prev), cur),
+            "heartbeats inside the same UTC minute must NOT spam the log"
         );
     }
 

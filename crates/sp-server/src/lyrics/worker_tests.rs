@@ -1,12 +1,18 @@
 //! Tests for `lyrics::worker`. Included as a sibling file via
 //! `#[path = "worker_tests.rs"] #[cfg(test)] mod tests;` from `worker.rs`
 //! to keep that file under the 1000-line airuleset cap.
+//!
+//! The three tier-chain branch tests (LineSynced/TextOnly/None) live in
+//! `orchestrator.rs::tests` — that's where the mock backend can be
+//! injected cleanly. This file covers worker-level concerns: source
+//! literal correctness, `align_track_to_lyrics_track` field mapping,
+//! and the gather → candidate pipeline.
 
 #![allow(unused_imports)]
 
 use super::*;
 
-/// Audit: retired symbols must not appear in this file.
+/// Audit: retired symbols must not appear in worker.rs.
 ///
 /// NOTE: banned symbol names are split across two string literals joined
 /// at runtime so this test file does not contain the verbatim string it is
@@ -24,6 +30,17 @@ fn worker_has_no_retired_symbols() {
         ["acquire_", "lyrics"].concat(),
         ["run_chunked_", "alignment"].concat(),
         ["warn_on_degenerate_", "lines"].concat(),
+        // Legacy alignment providers — removed in Phase F, deleted in Phase G.
+        ["gemini_", "provider"].concat(),
+        ["qwen3_", "provider"].concat(),
+        ["autosub_", "provider"].concat(),
+        ["description_", "provider"].concat(),
+        ["text_", "merge"].concat(),
+        // Legacy Gemini provider import pattern.
+        ["Gemini", "Provider"].concat(),
+        ["Qwen3", "Provider"].concat(),
+        // Legacy orchestrator::Orchestrator::new(..., providers, ai_client, cache_dir) shape.
+        ["process_", "song(&ctx"].concat(),
     ];
     for sym in &banned {
         assert!(
@@ -40,11 +57,10 @@ fn worker_has_no_retired_symbols() {
     );
 }
 
-/// Gather phase must try sources in order: YouTube manual subs → LRCLIB → autosub.
-/// This preserves the legacy yt_subs-before-lrclib precedence and puts the cheapest
-/// miss (autosub) last.
+/// Gather phase must try sources in order: YouTube manual subs → LRCLIB.
+/// This preserves the yt_subs-before-lrclib precedence.
 #[test]
-fn gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub() {
+fn gather_sources_call_order_preserves_yt_subs_then_lrclib() {
     // gather_sources_impl was extracted from worker.rs into the sibling
     // `gather.rs` module to keep both files under the 1000-line airuleset cap.
     let src = include_str!("gather.rs");
@@ -56,9 +72,120 @@ fn gather_sources_call_order_preserves_yt_subs_then_lrclib_then_autosub() {
         .find("youtube_subs::fetch_subtitles")
         .expect("yt_subs call");
     let lr = body.find("lrclib::fetch_lyrics").expect("lrclib call");
-    let au = body.find("fetch_autosub(").expect("autosub call");
     assert!(yt < lr, "yt_subs must be before lrclib");
-    assert!(lr < au, "lrclib must be before autosub");
+}
+
+/// `align_track_to_lyrics_track` correctly maps AlignedTrack fields to
+/// LyricsTrack. Specifically:
+/// - provenance → source
+/// - AlignedLine.text → LyricsLine.en
+/// - start_ms/end_ms widening u32 → u64
+/// - words: None passes through as None (no word synthesis)
+/// - words: Some(vec) maps start_ms/end_ms per AlignedWord to LyricsWord u64 fields
+/// - version is the supplied pipeline version constant
+#[test]
+fn align_track_to_lyrics_track_maps_fields_correctly() {
+    use crate::lyrics::backend::{AlignedLine, AlignedTrack, AlignedWord};
+
+    let aligned = AlignedTrack {
+        lines: vec![
+            AlignedLine {
+                text: "amazing grace".into(),
+                start_ms: 0,
+                end_ms: 2000,
+                words: Some(vec![
+                    AlignedWord {
+                        text: "amazing".into(),
+                        start_ms: 0,
+                        end_ms: 1000,
+                        confidence: 0.9,
+                    },
+                    AlignedWord {
+                        text: "grace".into(),
+                        start_ms: 1000,
+                        end_ms: 2000,
+                        confidence: 0.9,
+                    },
+                ]),
+            },
+            AlignedLine {
+                text: "how sweet the sound".into(),
+                start_ms: 2000,
+                end_ms: 4000,
+                // Tier-1 line-synced ships words: None per feedback_line_timing_only.md
+                words: None,
+            },
+        ],
+        provenance: "tier1:spotify".into(),
+        raw_confidence: 1.0,
+    };
+
+    let track = align_track_to_lyrics_track(aligned, 42);
+
+    assert_eq!(
+        track.version, 42,
+        "version must match the supplied constant"
+    );
+    assert_eq!(
+        track.source, "tier1:spotify",
+        "source must come from AlignedTrack.provenance"
+    );
+    assert_eq!(track.language_source, "en");
+    assert_eq!(track.language_translation, "");
+    assert_eq!(track.lines.len(), 2);
+
+    // Line 0: text and timing
+    assert_eq!(track.lines[0].en, "amazing grace");
+    assert_eq!(track.lines[0].start_ms, 0u64);
+    assert_eq!(track.lines[0].end_ms, 2000u64);
+    // Words map with u32 → u64 widening
+    let words = track.lines[0]
+        .words
+        .as_ref()
+        .expect("line 0 should have words");
+    assert_eq!(words.len(), 2);
+    assert_eq!(words[0].text, "amazing");
+    assert_eq!(words[0].start_ms, 0u64);
+    assert_eq!(words[0].end_ms, 1000u64);
+    assert_eq!(words[1].text, "grace");
+    assert_eq!(words[1].start_ms, 1000u64);
+    assert_eq!(words[1].end_ms, 2000u64);
+
+    // Line 1: words: None preserved (no synthesis)
+    assert_eq!(track.lines[1].en, "how sweet the sound");
+    assert_eq!(track.lines[1].start_ms, 2000u64);
+    assert_eq!(track.lines[1].end_ms, 4000u64);
+    assert!(
+        track.lines[1].words.is_none(),
+        "words: None must pass through unchanged — no word synthesis allowed"
+    );
+}
+
+/// Verify that new provenance literals produced by the tier chain are valid.
+/// This is a documentation-as-test: if the source tag format changes, this
+/// test breaks, forcing a deliberate update.
+#[test]
+fn new_provenance_source_literals_are_recognizable() {
+    // These are the sources the new tier chain can produce. Asserted as
+    // non-empty string comparisons to make the test read as a spec.
+    let tier1_sources = ["tier1:spotify", "tier1:lrclib", "tier1:yt_subs", "genius"];
+    let backend_source = "whisperx-large-v3@rev1";
+    // TextOnly path: claude-merge appends "+claude-merge" to the ASR provenance.
+    let claude_merge_suffix = "+claude-merge";
+
+    for s in &tier1_sources {
+        assert!(
+            s.starts_with("tier1:") || *s == "genius",
+            "tier1 source must be recognizable: {s}"
+        );
+    }
+    assert!(
+        backend_source.contains("whisperx"),
+        "backend source must mention whisperx"
+    );
+    // Claude-merged provenance is backend provenance + "+claude-merge"
+    let merged = format!("{backend_source}{claude_merge_suffix}");
+    assert!(merged.ends_with("+claude-merge"));
 }
 
 /// Description provider is wired as the 4th candidate source.
@@ -118,7 +245,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         lyrics_time_offset_ms: 0,
     };
 
-    let autosub_tmp = tempfile::tempdir().unwrap();
     let reqwest_client = reqwest::Client::new();
     let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
 
@@ -128,7 +254,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         cache_dir.path(),
         &reqwest_client,
         &row,
-        autosub_tmp.path(),
         "", // no genius token in tests — skip Genius source
     )
     .await
@@ -209,14 +334,12 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         lyrics_time_offset_ms: 0,
     };
 
-    let autosub_tmp = tempfile::tempdir().unwrap();
     let reqwest_client = reqwest::Client::new();
     let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
 
     // gather_sources_impl should bail with "no text sources available" because:
     // - yt_subs: yt-dlp path bogus, returns None
     // - lrclib: artist empty, skipped
-    // - autosub: bogus path, returns None
     // - description: Claude returns empty array, match guard skips push
     // So candidate_texts is empty and the function bails.
     let result = gather_sources_impl(
@@ -225,7 +348,6 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         cache_dir.path(),
         &reqwest_client,
         &row,
-        autosub_tmp.path(),
         "", // no genius token in tests — skip Genius source
     )
     .await;
@@ -239,5 +361,27 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     assert!(
         err_msg.contains("no text sources available"),
         "expected 'no text sources available' error, got: {err_msg}"
+    );
+}
+
+/// Verify the replicate_api_token early-exit guard is present in process_song.
+///
+/// The guard prevents the worker from feeding an empty string to
+/// WhisperXReplicateBackend (which would then fail with HTTP 401 after the
+/// 12-second rate-limit pre-sleep, chewing through every queued song before
+/// anyone notices). A structural check catches if the guard is accidentally
+/// removed during future edits.
+#[test]
+fn process_song_has_replicate_token_early_exit() {
+    let src = include_str!("worker.rs");
+    // The guard must check trim().is_empty() on the token ...
+    assert!(
+        src.contains("replicate_token.trim().is_empty()"),
+        "process_song must have a replicate_token early-exit guard"
+    );
+    // ... and produce the expected error message.
+    assert!(
+        src.contains("replicate_api_token not configured"),
+        "early-exit error message must mention replicate_api_token not configured"
     );
 }

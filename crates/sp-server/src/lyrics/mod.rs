@@ -1,30 +1,26 @@
 pub mod aligner;
 pub mod assembly;
-pub mod autosub_provider;
+pub mod audio_chunking;
+pub mod backend;
 pub mod bootstrap;
 pub mod chunking;
+pub mod claude_merge;
 pub mod description_provider;
 pub mod gather;
-pub mod gemini_audit;
-pub mod gemini_chunks;
-pub mod gemini_client;
-pub mod gemini_parse;
-pub mod gemini_prompt;
-pub mod gemini_provider;
 pub mod genius;
+pub mod line_splitter;
 pub mod lrclib;
-pub mod merge;
 pub mod orchestrator;
 pub mod provider;
-pub mod quality;
-pub mod qwen3_provider;
 pub mod renderer;
+pub mod replicate_client;
 pub mod reprocess;
-pub mod text_merge;
+pub mod spotify_proxy;
+pub mod tier1;
 pub mod translator;
+pub mod whisperx_replicate;
 pub mod worker;
 pub mod youtube_subs;
-pub mod yt_manual_subs_provider;
 pub use worker::LyricsWorker;
 pub use worker::queue_update_loop;
 
@@ -162,16 +158,6 @@ use sp_core::lyrics::LyricsTrack;
 ///   protected once generated.
 pub const LYRICS_PIPELINE_VERSION: u32 = 20;
 
-/// Feature flag: enable the Gemini-based AlignmentProvider. When true, the
-/// worker registers `GeminiProvider` in the provider list.
-pub const LYRICS_GEMINI_ENABLED: bool = true;
-
-/// Feature flag: enable the Qwen3 forced-alignment provider. When false, the
-/// worker skips registering it even if Python venv is available. Kept as a
-/// flag (not a code removal) so word-level work can revive qwen3 without a
-/// history rewrite.
-pub const LYRICS_QWEN3_ENABLED: bool = false;
-
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
 /// - Strips inline bracketed noise like `[music]`, `[applause]`, `[laughter]`
@@ -296,11 +282,5 @@ mod tests {
             LYRICS_PIPELINE_VERSION, 20,
             "v20 = Genius text source + lyrics_override_text gather paths"
         );
-    }
-
-    #[test]
-    fn gemini_enabled_and_qwen3_disabled_by_default() {
-        assert!(super::LYRICS_GEMINI_ENABLED);
-        assert!(!super::LYRICS_QWEN3_ENABLED);
     }
 }

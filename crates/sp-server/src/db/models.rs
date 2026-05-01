@@ -83,7 +83,7 @@ pub async fn get_videos_for_playlist(
     let rows = sqlx::query(
         "SELECT id, playlist_id, youtube_id, title, song, artist,
                 duration_ms, file_path, normalized, gemini_failed,
-                suppress_resolume_en
+                suppress_resolume_en, spotify_track_id
          FROM videos WHERE playlist_id = ? ORDER BY id",
     )
     .bind(playlist_id)
@@ -95,6 +95,11 @@ pub async fn get_videos_for_playlist(
 
 /// Insert or update a video keyed on (playlist_id, youtube_id).
 /// On conflict the title is updated. Returns the resulting row.
+///
+// V17 NOTE: `spotify_track_id` is in RETURNING but intentionally NOT in
+// `ON CONFLICT … DO UPDATE SET` — manual track-ID assignments must survive
+// playlist re-syncs. Do not extend `DO UPDATE SET` without revisiting this
+// design (and adding multi-playlist test coverage if you do).
 pub async fn upsert_video(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -107,7 +112,7 @@ pub async fn upsert_video(
          ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title
          RETURNING id, playlist_id, youtube_id, title, song, artist,
                    duration_ms, file_path, normalized, gemini_failed,
-                   suppress_resolume_en",
+                   suppress_resolume_en, spotify_track_id",
     )
     .bind(playlist_id)
     .bind(youtube_id)
@@ -131,6 +136,7 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         normalized: r.get::<i32, _>("normalized") != 0,
         gemini_failed: r.get::<i32, _>("gemini_failed") != 0,
         suppress_resolume_en: r.get::<i32, _>("suppress_resolume_en") != 0,
+        spotify_track_id: r.get("spotify_track_id"),
     }
 }
 
@@ -146,6 +152,39 @@ pub async fn get_video_suppress_resolume_en(
         .fetch_optional(pool)
         .await?;
     Ok(v.map(|n| n != 0).unwrap_or(false))
+}
+
+/// Set the Spotify track ID for a video by its row id. Used by the
+/// dashboard to assign a manual track ID for SpotifyLyricsFetcher
+/// (Tier-1 source). Per V14 precedent, the column is keyed on the
+/// numeric primary key — youtube_id is non-unique across playlists.
+///
+/// Returns the number of rows affected (0 = no row with that id).
+pub async fn set_video_spotify_track_id(
+    pool: &SqlitePool,
+    video_id: i64,
+    spotify_track_id: Option<&str>,
+) -> sqlx::Result<u64> {
+    let res = sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE id = ?2")
+        .bind(spotify_track_id)
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}
+
+/// Read the Spotify track ID for a video by its row id. Returns None
+/// when the column is NULL or the row doesn't exist.
+pub async fn get_video_spotify_track_id(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> sqlx::Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT spotify_track_id FROM videos WHERE id = ?1")
+            .bind(video_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|(s,)| s))
 }
 
 // ---------------------------------------------------------------------------

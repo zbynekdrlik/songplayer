@@ -316,8 +316,6 @@ pub async fn start(
     let startup_sync_tx = sync_tx.clone();
     let lyrics_pool = pool.clone();
     let lyrics_cache_dir = config.cache_dir.clone();
-    let lyrics_gemini_key = gemini_key.clone();
-    let lyrics_gemini_model = gemini_model.clone();
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
     let ai_client_for_dl = ai_client.clone();
@@ -378,8 +376,6 @@ pub async fn start(
                     lyrics_ytdlp,
                     lyrics_python,
                     lyrics_tools_dir,
-                    lyrics_gemini_key,
-                    lyrics_gemini_model,
                     Some(ai_client_for_dl),
                     tools_event_tx.clone(),
                 );
