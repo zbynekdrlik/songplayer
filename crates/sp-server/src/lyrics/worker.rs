@@ -480,8 +480,10 @@ impl LyricsWorker {
             Ok(t) => t,
             Err(e) => {
                 warn!("worker: orchestrator failed for {youtube_id}: {e}");
-                let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-                let _ = tokio::fs::remove_file(&wav_path).await;
+                // Vocals WAV intentionally preserved on disk — aligner's
+                // cache-hit path (aligner.rs:87-96) reuses it on next run,
+                // saving Demucs minutes per song. Self-heal removes orphans
+                // when the parent video is removed (cache.rs).
                 self.clear_processing().await;
                 return Err(anyhow::anyhow!("orchestrator: {e}"));
             }
@@ -490,9 +492,10 @@ impl LyricsWorker {
         // Convert AlignedTrack → LyricsTrack at the worker boundary.
         let mut track = align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION);
 
-        // Cleanup scratch files.
-        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-        let _ = tokio::fs::remove_file(&wav_path).await;
+        // Vocals WAV intentionally preserved on disk — aligner's cache-hit
+        // path (aligner.rs:87-96) reuses it on next run, saving Demucs
+        // minutes per song. Self-heal removes orphans (cache.rs) when the
+        // parent video is removed.
 
         self.broadcast_stage(
             video_id,
