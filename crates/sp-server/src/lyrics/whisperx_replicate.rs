@@ -621,4 +621,46 @@ mod tests {
         );
         assert_eq!(lines[0].end_ms, 122000, "122.0s must become 122000ms");
     }
+
+    #[tokio::test]
+    async fn replicate_to_backend_err_maps_reqwest_timeout_to_timeout() {
+        use std::time::Duration;
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(200).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap();
+        let err = client
+            .get(server.uri())
+            .send()
+            .await
+            .expect_err("expected timeout");
+        assert!(err.is_timeout(), "precondition: reqwest reports timeout");
+        let mapped = replicate_to_backend_err(ReplicateError::Http(err));
+        assert!(
+            matches!(mapped, BackendError::Timeout(_)),
+            "is_timeout() must map to Timeout, got: {mapped:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn replicate_to_backend_err_maps_non_timeout_reqwest_to_transport() {
+        // DNS failure on .invalid (RFC 6761 reserved TLD) — not a timeout.
+        let client = reqwest::Client::builder().build().unwrap();
+        let err = client
+            .get("http://nonexistent.invalid/")
+            .send()
+            .await
+            .expect_err("expected DNS error");
+        assert!(!err.is_timeout(), "precondition: DNS error is not timeout");
+        let mapped = replicate_to_backend_err(ReplicateError::Http(err));
+        assert!(
+            matches!(mapped, BackendError::Transport(_)),
+            "non-timeout must map to Transport, got: {mapped:?}"
+        );
+    }
 }

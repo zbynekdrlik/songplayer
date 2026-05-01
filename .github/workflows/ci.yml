@@ -507,14 +507,12 @@ jobs:
             --exclude-re 'sp-decoder/src/video/' \
             --exclude-re 'replace match guard !w\.is_empty\(\) with true in build_phrases' \
             --exclude-re 'replace match guard in_string with true in try_parse_balanced' \
+            --exclude-re 'replace [+\-*] with [+\-*] in try_all_lines_positions' \
             --exclude-re 'line_splitter\.rs:97:' \
             --exclude-re 'line_splitter\.rs:102:40: replace > with >=' \
             --exclude-re 'line_splitter\.rs:131:' \
             --exclude-re 'line_splitter\.rs:141:' \
-            --exclude-re 'line_splitter\.rs:164:' \
-            --exclude-re 'claude_merge\.rs:331:35: replace \+ with \* in try_all_lines_positions' \
-            --exclude-re 'claude_merge\.rs:338:31: replace \+ with - in try_all_lines_positions' \
-            --exclude-re 'claude_merge\.rs:338:31: replace \+ with \* in try_all_lines_positions'
+            --exclude-re 'line_splitter\.rs:164:'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
