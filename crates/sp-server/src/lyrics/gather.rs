@@ -108,6 +108,13 @@ pub(crate) async fn gather_sources_impl(
                 debug!("gather: no Spotify synced lyrics for {youtube_id}");
                 None
             }
+            Err(crate::lyrics::spotify_proxy::SpotifyError::NotFound) => {
+                // 404 from the proxy is common (deleted track / stale ID); not a
+                // production warning. Demote to debug so the log stays quiet on
+                // catalogs with many old Spotify URLs.
+                debug!("gather: Spotify track id not found for {youtube_id}");
+                None
+            }
             Err(e) => {
                 warn!("gather: Spotify error for {youtube_id}: {e}");
                 None
@@ -144,7 +151,7 @@ pub(crate) async fn gather_sources_impl(
         }
     }
     // Spotify priority sits between override and other Tier-1 sources;
-    // claude_merge::source_priority maps "tier1:spotify" to 4.
+    // see `claude_merge::source_priority` for the exact ordering.
     if let Some(t) = spotify_track {
         candidate_texts.push(t.into());
     }

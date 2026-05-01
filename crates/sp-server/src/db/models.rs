@@ -404,6 +404,11 @@ pub struct VideoLyricsRow {
     /// Signed: positive = delay display (effectively shorter lead),
     /// negative = advance display (longer lead). V16 migration.
     pub lyrics_time_offset_ms: i64,
+    /// Operator-pasted Spotify track ID (V17 migration). When Some, the
+    /// gather pass calls SpotifyLyricsFetcher to pull LINE_SYNCED lyrics
+    /// from the public proxy. Set via PATCH /api/v1/videos/{id} with
+    /// `spotify_url`.
+    pub spotify_track_id: Option<String>,
 }
 
 /// Mark a video's lyrics status, source, AND pipeline version.
