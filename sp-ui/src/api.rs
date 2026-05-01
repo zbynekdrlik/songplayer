@@ -277,6 +277,17 @@ pub async fn patch_video_suppress_en(video_id: i64, suppress: bool) -> Result<()
     patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
 }
 
+/// PATCH `/api/v1/videos/{id}` with the operator-pasted `spotify_url`.
+/// Server extracts the track ID via `parse_spotify_track_id` (canonical /
+/// `intl-*` / bare 22-char ID all accepted), persists it to
+/// `videos.spotify_track_id`. An empty/whitespace `spotify_url` clears the
+/// column to NULL. A malformed URL returns HTTP 400 with a
+/// `spotify_url: <reason>` message that this helper surfaces as `Err(...)`.
+pub async fn patch_video_spotify_url(video_id: i64, spotify_url: &str) -> Result<(), String> {
+    let body = serde_json::json!({ "spotify_url": spotify_url });
+    patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
+}
+
 /// PATCH JSON to `path` and discard the response body. Mirror of
 /// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
 /// Content`.
