@@ -57,8 +57,8 @@ fn app(state: AppState) -> axum::Router {
 
 async fn insert_test_video(state: &AppState) -> i64 {
     sqlx::query(
-        "INSERT INTO playlists (name, youtube_url, ndi_output_name, scene_name, is_active) \
-         VALUES ('p', 'https://youtube.com/playlist?list=PLtest', 'n', 's', 1)",
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name, is_active) \
+         VALUES ('p', 'https://youtube.com/playlist?list=PLtest', 'n', 1)",
     )
     .execute(&state.pool)
     .await
