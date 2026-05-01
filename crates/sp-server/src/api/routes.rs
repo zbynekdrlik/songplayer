@@ -877,9 +877,7 @@ pub(crate) fn parse_spotify_track_id(input: &str) -> Result<String, &'static str
     }
     let candidate = if let Some(idx) = trimmed.find("/track/") {
         let after = &trimmed[idx + "/track/".len()..];
-        let cut = after
-            .find(|c: char| c == '?' || c == '/')
-            .unwrap_or(after.len());
+        let cut = after.find(['?', '/']).unwrap_or(after.len());
         &after[..cut]
     } else {
         trimmed
