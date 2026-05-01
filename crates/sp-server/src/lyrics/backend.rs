@@ -61,6 +61,8 @@ pub enum BackendError {
     Transport(String),
     #[error("backend rejected request: {0}")]
     Rejected(String),
+    /// Backend gave up waiting. The Duration is the configured timeout that
+    /// fired, NOT actual elapsed wall time (which the caller did not measure).
     #[error("backend timeout after {0:?}")]
     Timeout(std::time::Duration),
     #[error("backend output malformed: {0}")]

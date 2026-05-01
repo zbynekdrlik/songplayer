@@ -189,9 +189,18 @@ impl ReplicateClient {
                 match resp_result {
                     Ok(resp) => {
                         let status = resp.status();
-                        if (status.as_u16() == 429 || status.is_server_error())
-                            && poll_attempt < RETRY_MAX_ATTEMPTS
-                        {
+                        if status.as_u16() == 429 || status.is_server_error() {
+                            if poll_attempt >= RETRY_MAX_ATTEMPTS {
+                                // Mirror predict-create loop: surface 429 exhaustion
+                                // as RateLimited rather than a raw ApiError.
+                                if status.as_u16() == 429 {
+                                    return Err(ReplicateError::RateLimited(poll_attempt));
+                                }
+                                return Err(ReplicateError::ApiError {
+                                    status: status.as_u16(),
+                                    body: resp.text().await?,
+                                });
+                            }
                             let backoff = (RETRY_BASE * 2_u32.pow(poll_attempt - 1)).min(RETRY_CAP);
                             sleep(backoff).await;
                             continue;
@@ -211,6 +220,7 @@ impl ReplicateClient {
                         let backoff = (RETRY_BASE * 2_u32.pow(poll_attempt - 1)).min(RETRY_CAP);
                         tracing::warn!(attempt = poll_attempt, error = %e, "replicate poll retry");
                         sleep(backoff).await;
+                        continue;
                     }
                     Err(e) => return Err(ReplicateError::Http(e)),
                 }
