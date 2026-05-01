@@ -10,7 +10,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-use crate::lyrics::{genius, lrclib, youtube_subs};
+use crate::lyrics::{genius, lrclib, spotify_proxy::SpotifyLyricsFetcher, youtube_subs};
 
 /// Free function containing the `gather_sources` logic so it can be tested
 /// without constructing a full `LyricsWorker`.
@@ -93,6 +93,30 @@ pub(crate) async fn gather_sources_impl(
         None
     };
 
+    // 3. Spotify (operator pasted track URL via dashboard). Authoritative
+    //    LINE_SYNCED lyrics for songs the other Tier-1 sources miss
+    //    (chant, dense vocal, niche worship). Best-effort; transport /
+    //    proxy errors log and skip.
+    let spotify_track = if let Some(track_id) = row.spotify_track_id.as_deref() {
+        let fetcher = SpotifyLyricsFetcher::new();
+        match fetcher.fetch(track_id).await {
+            Ok(Some(t)) => {
+                info!(%youtube_id, line_count = t.lines.len(), "gather: Spotify hit");
+                Some(t)
+            }
+            Ok(None) => {
+                debug!("gather: no Spotify synced lyrics for {youtube_id}");
+                None
+            }
+            Err(e) => {
+                warn!("gather: Spotify error for {youtube_id}: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut candidate_texts: Vec<CandidateText> = Vec::new();
 
     // 0. Operator-provided override (V15). Highest priority — when an
@@ -118,6 +142,11 @@ pub(crate) async fn gather_sources_impl(
                 line_timings: None,
             });
         }
+    }
+    // Spotify priority sits between override and other Tier-1 sources;
+    // claude_merge::source_priority maps "tier1:spotify" to 4.
+    if let Some(t) = spotify_track {
+        candidate_texts.push(t.into());
     }
     if let Some(t) = &yt_subs_track {
         candidate_texts.push(CandidateText {
