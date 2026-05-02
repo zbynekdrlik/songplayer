@@ -173,6 +173,26 @@ pub async fn set_video_spotify_track_id(
     Ok(res.rows_affected())
 }
 
+/// Atomically record the outcome of a Spotify resolution attempt. Sets both
+/// `spotify_track_id` and `spotify_resolved_at = datetime('now')` in one
+/// statement. Pass `None` for the track ID to record a no-match attempt.
+///
+/// Returns the number of rows affected (0 = no row with that id).
+pub async fn set_video_spotify_resolution(
+    pool: &SqlitePool,
+    video_id: i64,
+    spotify_track_id: Option<&str>,
+) -> sqlx::Result<u64> {
+    let res = sqlx::query(
+        "UPDATE videos SET spotify_track_id = ?1, spotify_resolved_at = datetime('now') WHERE id = ?2",
+    )
+    .bind(spotify_track_id)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 /// Read the Spotify track ID for a video by its row id. Returns None
 /// when the column is NULL or the row doesn't exist.
 pub async fn get_video_spotify_track_id(
