@@ -229,3 +229,218 @@ mod tests {
         assert_eq!(MIN_VERIFIED_LINES, crate::lyrics::tier1::TIER1_MIN_LINES);
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::ai::AiSettings;
+
+    fn ai_client_pointed_at(uri: &str) -> AiClient {
+        AiClient::new(AiSettings {
+            api_url: format!("{uri}/v1"),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        })
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn resolves_when_claude_returns_id_and_proxy_verifies() {
+        let claude_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "3n3Ppam7vgaVa1iaRUc9Lp"
+                        }
+                    }]
+                })),
+            )
+            .mount(&claude_mock)
+            .await;
+
+        let proxy_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/"))
+            .and(wiremock::matchers::query_param(
+                "trackid",
+                "3n3Ppam7vgaVa1iaRUc9Lp",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "error": false,
+                    "syncType": "LINE_SYNCED",
+                    "lines": (0..12).map(|i| serde_json::json!({
+                        "startTimeMs": format!("{}", i * 1000),
+                        "words": format!("line {i}"),
+                    })).collect::<Vec<_>>()
+                })),
+            )
+            .mount(&proxy_mock)
+            .await;
+        // SAFETY: marked serial above; no other test races on this env var while
+        // this test runs.
+        unsafe {
+            std::env::set_var("SPOTIFY_LYRICS_PROXY_BASE", proxy_mock.uri());
+        }
+
+        let resolver = SpotifyResolver::new();
+        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let outcome = resolver
+            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .await;
+
+        match outcome {
+            ResolveOutcome::Resolved(id) => assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp"),
+            other => panic!("expected Resolved, got {other:?}"),
+        }
+
+        unsafe {
+            std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn no_match_when_claude_returns_none() {
+        let claude_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": { "role": "assistant", "content": "NONE" }
+                    }]
+                })),
+            )
+            .mount(&claude_mock)
+            .await;
+
+        let resolver = SpotifyResolver::new();
+        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let outcome = resolver
+            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .await;
+
+        assert!(
+            matches!(outcome, ResolveOutcome::NoMatch),
+            "expected NoMatch on Claude NONE, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn no_match_when_proxy_returns_404() {
+        let claude_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": { "role": "assistant", "content": "3n3Ppam7vgaVa1iaRUc9Lp" }
+                    }]
+                })),
+            )
+            .mount(&claude_mock)
+            .await;
+
+        let proxy_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(404))
+            .mount(&proxy_mock)
+            .await;
+        unsafe {
+            std::env::set_var("SPOTIFY_LYRICS_PROXY_BASE", proxy_mock.uri());
+        }
+
+        let resolver = SpotifyResolver::new();
+        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let outcome = resolver
+            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .await;
+
+        assert!(
+            matches!(outcome, ResolveOutcome::NoMatch),
+            "expected NoMatch on proxy 404, got {outcome:?}"
+        );
+        unsafe {
+            std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn no_match_when_proxy_returns_too_few_lines() {
+        let claude_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": { "role": "assistant", "content": "3n3Ppam7vgaVa1iaRUc9Lp" }
+                    }]
+                })),
+            )
+            .mount(&claude_mock)
+            .await;
+
+        let proxy_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "error": false,
+                    "syncType": "LINE_SYNCED",
+                    "lines": [
+                        {"startTimeMs": "0",    "words": "only"},
+                        {"startTimeMs": "1000", "words": "three"},
+                        {"startTimeMs": "2000", "words": "lines"}
+                    ]
+                })),
+            )
+            .mount(&proxy_mock)
+            .await;
+        unsafe {
+            std::env::set_var("SPOTIFY_LYRICS_PROXY_BASE", proxy_mock.uri());
+        }
+
+        let resolver = SpotifyResolver::new();
+        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let outcome = resolver
+            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .await;
+
+        assert!(
+            matches!(outcome, ResolveOutcome::NoMatch),
+            "expected NoMatch on <10 lines, got {outcome:?}"
+        );
+        unsafe {
+            std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn error_when_claude_transport_fails() {
+        let claude_mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&claude_mock)
+            .await;
+
+        let resolver = SpotifyResolver::new();
+        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let outcome = resolver
+            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .await;
+
+        assert!(
+            matches!(outcome, ResolveOutcome::Error(_)),
+            "expected Error on Claude HTTP 500, got {outcome:?}"
+        );
+    }
+}
