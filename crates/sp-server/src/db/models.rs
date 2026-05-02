@@ -391,10 +391,13 @@ pub struct VideoLyricsRow {
     /// Signed: positive = delay display (effectively shorter lead),
     /// negative = advance display (longer lead). V16 migration.
     pub lyrics_time_offset_ms: i64,
-    /// Operator-pasted Spotify track ID (V17 migration). When Some, the
-    /// gather pass calls SpotifyLyricsFetcher to pull LINE_SYNCED lyrics
-    /// from the public proxy. Set via PATCH /api/v1/videos/{id} with
-    /// `spotify_url`.
+    /// Spotify track ID for line-synced lyrics fetch (V17 column).
+    /// Auto-populated by the lyrics worker via `SpotifyResolver` (Claude
+    /// canonical-ID lookup, gated by `spotify_resolved_at IS NULL`). When
+    /// non-NULL, `gather_sources_impl` calls `SpotifyLyricsFetcher` to pull
+    /// LINE_SYNCED lyrics from the public proxy. V18 backfilled this for
+    /// any rows that already had a value from PR #70's now-removed manual
+    /// UI.
     pub spotify_track_id: Option<String>,
     /// V18 column. Set to `datetime('now')` whenever the Spotify resolver runs
     /// on this song (success OR no-match). NULL means "never attempted." Worker
