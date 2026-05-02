@@ -14,7 +14,7 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 17);
+    assert_eq!(ver, 18);
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 17);
+    assert_eq!(ver, 18);
 }
 
 #[tokio::test]
@@ -745,11 +745,11 @@ async fn migration_v12_adds_pipeline_version_quality_and_priority() {
 }
 
 #[tokio::test]
-async fn schema_version_reaches_17() {
+async fn schema_version_reaches_18() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 17);
+    assert_eq!(ver, 18);
 }
 
 #[tokio::test]

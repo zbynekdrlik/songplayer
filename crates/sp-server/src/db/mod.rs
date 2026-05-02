@@ -246,7 +246,7 @@ ALTER TABLE videos ADD COLUMN spotify_track_id TEXT;
 ";
 
 const MIGRATION_V18: &str = "
-ALTER TABLE videos ADD COLUMN spotify_resolved_at TIMESTAMP;
+ALTER TABLE videos ADD COLUMN spotify_resolved_at TEXT;
 UPDATE videos SET spotify_resolved_at = datetime('now') WHERE spotify_track_id IS NOT NULL;
 ";
 
