@@ -46,7 +46,7 @@ test.describe('/live Spotify URL input (#67)', () => {
 
   test('paste Spotify URL via prompt → PATCH issued with spotify_url field', async ({ page }) => {
     // Mock the live items endpoint so one row renders.
-    await page.route('**/api/v1/playlists/184/items', async (route) => {
+    await page.route('**/api/v1/playlists/*/items', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -105,7 +105,7 @@ test.describe('/live Spotify URL input (#67)', () => {
   });
 
   test('cancel prompt → no PATCH issued', async ({ page }) => {
-    await page.route('**/api/v1/playlists/184/items', async (route) => {
+    await page.route('**/api/v1/playlists/*/items', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -148,5 +148,42 @@ test.describe('/live Spotify URL input (#67)', () => {
     // Allow a moment to ensure no PATCH fires after dismiss.
     await page.waitForTimeout(500);
     expect(patchBodies).toHaveLength(0);
+  });
+
+  test('saved track ID renders .has-spotify class and pre-fills the prompt', async ({ page }) => {
+    const SAVED_ID = '3n3Ppam7vgaVa1iaRUc9Lp';
+    await page.route('**/api/v1/playlists/*/items', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([MOCK_LIVE_ITEM]),
+      });
+    });
+    await page.route('**/api/v1/lyrics/songs**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ ...MOCK_LYRICS_SONG, spotify_track_id: SAVED_ID }]),
+      });
+    });
+
+    let promptDefault: string | null = null;
+    page.once('dialog', async (dialog) => {
+      expect(dialog.type()).toBe('prompt');
+      promptDefault = dialog.defaultValue();
+      await dialog.dismiss();
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Live', exact: true }).click();
+    await expect(page.getByText('Test Song').first()).toBeVisible({ timeout: 30_000 });
+
+    // The 🎵 button must carry the .has-spotify class when a track ID is saved.
+    const spotifyBtn = page.locator('button.live-setlist-btn-spotify').first();
+    await expect(spotifyBtn).toHaveClass(/has-spotify/);
+
+    // Click triggers the prompt with the saved ID pre-filled.
+    await spotifyBtn.click();
+    await expect.poll(() => promptDefault, { timeout: 2_000 }).toBe(SAVED_ID);
   });
 });
