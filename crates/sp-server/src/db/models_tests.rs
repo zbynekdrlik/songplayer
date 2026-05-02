@@ -626,3 +626,73 @@ async fn get_video_suppress_resolume_en_returns_false_for_missing_row() {
         "missing video row must default to false (no suppression), got {flag}"
     );
 }
+
+// ── set_video_spotify_resolution: rows_affected return value ──────────────
+//
+// Mutation testing on PR #74 surfaced two surviving mutants on this helper:
+// `replace ... -> sqlx::Result<u64> with Ok(0)` and `with Ok(1)`. Both
+// constants pass any test that doesn't assert on the return value. The
+// tests below pin both ends: a successful UPDATE returns 1 (kills Ok(0))
+// and an UPDATE with a non-existent video_id returns 0 (kills Ok(1)).
+
+#[tokio::test]
+async fn set_video_spotify_resolution_returns_one_on_successful_update() {
+    let (pool, id) = setup_with_video().await;
+
+    let n = set_video_spotify_resolution(&pool, id, Some("3n3Ppam7vgaVa1iaRUc9Lp"))
+        .await
+        .expect("update must not error");
+    assert_eq!(n, 1, "UPDATE matching exactly one row must return 1");
+
+    // Round-trip: the helper must actually have written both columns.
+    let row = sqlx::query("SELECT spotify_track_id, spotify_resolved_at FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let stored: Option<String> = row.get("spotify_track_id");
+    let resolved_at: Option<String> = row.get("spotify_resolved_at");
+    assert_eq!(stored.as_deref(), Some("3n3Ppam7vgaVa1iaRUc9Lp"));
+    assert!(
+        resolved_at.is_some(),
+        "spotify_resolved_at must be set to datetime('now')"
+    );
+}
+
+#[tokio::test]
+async fn set_video_spotify_resolution_returns_zero_when_id_missing() {
+    let (pool, _id) = setup_with_video().await;
+
+    let n = set_video_spotify_resolution(&pool, 9999, Some("3n3Ppam7vgaVa1iaRUc9Lp"))
+        .await
+        .expect("update of missing id must not error");
+    assert_eq!(n, 0, "UPDATE matching zero rows must return 0");
+}
+
+#[tokio::test]
+async fn set_video_spotify_resolution_persists_null_for_no_match_outcome() {
+    let (pool, id) = setup_with_video().await;
+
+    // Pre-set a value so we can verify the None call clears it.
+    set_video_spotify_resolution(&pool, id, Some("3n3Ppam7vgaVa1iaRUc9Lp"))
+        .await
+        .unwrap();
+
+    let n = set_video_spotify_resolution(&pool, id, None)
+        .await
+        .expect("update with None must not error");
+    assert_eq!(n, 1, "UPDATE matching exactly one row must return 1");
+
+    let row = sqlx::query("SELECT spotify_track_id, spotify_resolved_at FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let stored: Option<String> = row.get("spotify_track_id");
+    let resolved_at: Option<String> = row.get("spotify_resolved_at");
+    assert!(stored.is_none(), "None outcome must clear spotify_track_id");
+    assert!(
+        resolved_at.is_some(),
+        "spotify_resolved_at must STILL be set on no-match (gates further re-resolution)"
+    );
+}
