@@ -26,6 +26,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (15, MIGRATION_V15),
     (16, MIGRATION_V16),
     (17, MIGRATION_V17),
+    (18, MIGRATION_V18),
 ];
 
 const MIGRATION_V1: &str = "
@@ -242,6 +243,11 @@ ALTER TABLE videos ADD COLUMN lyrics_time_offset_ms INTEGER NOT NULL DEFAULT 0;
 // this raw ALTER would error if applied twice manually.
 const MIGRATION_V17: &str = "
 ALTER TABLE videos ADD COLUMN spotify_track_id TEXT;
+";
+
+const MIGRATION_V18: &str = "
+ALTER TABLE videos ADD COLUMN spotify_resolved_at TIMESTAMP;
+UPDATE videos SET spotify_resolved_at = datetime('now') WHERE spotify_track_id IS NOT NULL;
 ";
 
 /// Create a connection pool backed by a file.

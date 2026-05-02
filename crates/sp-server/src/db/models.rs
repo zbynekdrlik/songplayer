@@ -409,6 +409,11 @@ pub struct VideoLyricsRow {
     /// from the public proxy. Set via PATCH /api/v1/videos/{id} with
     /// `spotify_url`.
     pub spotify_track_id: Option<String>,
+    /// V18 column. Set to `datetime('now')` whenever the Spotify resolver runs
+    /// on this song (success OR no-match). NULL means "never attempted." Worker
+    /// gate uses (spotify_track_id IS NULL AND spotify_resolved_at IS NULL) to
+    /// decide whether to ask Claude.
+    pub spotify_resolved_at: Option<String>,
 }
 
 /// Mark a video's lyrics status, source, AND pipeline version.

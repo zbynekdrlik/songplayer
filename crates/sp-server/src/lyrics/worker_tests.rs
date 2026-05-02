@@ -244,6 +244,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         lyrics_override_text: None,
         lyrics_time_offset_ms: 0,
         spotify_track_id: None,
+        spotify_resolved_at: None,
     };
 
     let reqwest_client = reqwest::Client::new();
@@ -334,6 +335,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         lyrics_override_text: None,
         lyrics_time_offset_ms: 0,
         spotify_track_id: None,
+        spotify_resolved_at: None,
     };
 
     let reqwest_client = reqwest::Client::new();
@@ -439,6 +441,7 @@ async fn gather_emits_tier1_spotify_candidate_when_track_id_set() {
         lyrics_override_text: None,
         lyrics_time_offset_ms: 0,
         spotify_track_id: Some("3n3Ppam7vgaVa1iaRUc9Lp".into()),
+        spotify_resolved_at: None,
     };
 
     let ctx = gather_sources_impl(
@@ -488,6 +491,7 @@ async fn gather_omits_spotify_when_track_id_is_null() {
         lyrics_override_text: Some("operator line".into()),
         lyrics_time_offset_ms: 0,
         spotify_track_id: None,
+        spotify_resolved_at: None,
     };
 
     let ctx = gather_sources_impl(
@@ -536,6 +540,7 @@ async fn gather_skips_spotify_on_404() {
         lyrics_override_text: Some("operator line".into()),
         lyrics_time_offset_ms: 0,
         spotify_track_id: Some("3n3Ppam7vgaVa1iaRUc9Lp".into()),
+        spotify_resolved_at: None,
     };
 
     let ctx = gather_sources_impl(
@@ -593,6 +598,7 @@ async fn gather_skips_spotify_on_proxy_error_field() {
         lyrics_override_text: Some("operator line".into()),
         lyrics_time_offset_ms: 0,
         spotify_track_id: Some("3n3Ppam7vgaVa1iaRUc9Lp".into()),
+        spotify_resolved_at: None,
     };
 
     let ctx = gather_sources_impl(
