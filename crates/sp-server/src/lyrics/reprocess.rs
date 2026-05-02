@@ -41,7 +41,7 @@ async fn fetch_bucket_manual(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
-                v.spotify_track_id \
+                v.spotify_track_id, v.spotify_resolved_at \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.lyrics_manual_priority = 1 \
                AND (v.lyrics_source IS NULL \
@@ -87,7 +87,7 @@ async fn fetch_bucket_null(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
-                v.spotify_track_id \
+                v.spotify_track_id, v.spotify_resolved_at \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
                AND (v.lyrics_source IS NULL \
@@ -127,7 +127,7 @@ async fn fetch_bucket_stale(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
-                v.spotify_track_id \
+                v.spotify_track_id, v.spotify_resolved_at \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \

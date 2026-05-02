@@ -14,7 +14,7 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 17);
+    assert_eq!(ver, 18);
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 17);
+    assert_eq!(ver, 18);
 }
 
 #[tokio::test]
@@ -745,11 +745,11 @@ async fn migration_v12_adds_pipeline_version_quality_and_priority() {
 }
 
 #[tokio::test]
-async fn schema_version_reaches_17() {
+async fn schema_version_reaches_18() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 17);
+    assert_eq!(ver, 18);
 }
 
 #[tokio::test]
@@ -941,21 +941,29 @@ async fn migration_v17_adds_spotify_track_id_column() {
     .await
     .unwrap();
 
-    // Each row's spotify_track_id is independent
-    let n1 = super::models::set_video_spotify_track_id(&pool, id1, Some("401mrYPv21Zs2USsU6bauy"))
+    // Each row's spotify_track_id is independent — verified via raw SQL since
+    // the manual UI helpers (set_video_spotify_track_id / get_video_spotify_track_id)
+    // were removed in PR #74 along with the rest of PR #70's manual surface.
+    sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE id = ?2")
+        .bind("401mrYPv21Zs2USsU6bauy")
+        .bind(id1)
+        .execute(&pool)
         .await
         .unwrap();
-    let n2 =
-        super::models::set_video_spotify_track_id(&pool, id2, Some("DIFFERENT_TRACK_ID_22B62"))
-            .await
-            .unwrap();
-    assert_eq!(n1, 1, "set_*: exactly one row updated");
-    assert_eq!(n2, 1, "set_*: exactly one row updated");
-
-    let g1 = super::models::get_video_spotify_track_id(&pool, id1)
+    sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE id = ?2")
+        .bind("DIFFERENT_TRACK_ID_22B62")
+        .bind(id2)
+        .execute(&pool)
         .await
         .unwrap();
-    let g2 = super::models::get_video_spotify_track_id(&pool, id2)
+    let g1: Option<String> = sqlx::query_scalar("SELECT spotify_track_id FROM videos WHERE id = ?")
+        .bind(id1)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let g2: Option<String> = sqlx::query_scalar("SELECT spotify_track_id FROM videos WHERE id = ?")
+        .bind(id2)
+        .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(g1.as_deref(), Some("401mrYPv21Zs2USsU6bauy"));
@@ -968,18 +976,10 @@ async fn migration_v17_adds_spotify_track_id_column() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    let g3 = super::models::get_video_spotify_track_id(&pool, id3)
+    let g3: Option<String> = sqlx::query_scalar("SELECT spotify_track_id FROM videos WHERE id = ?")
+        .bind(id3)
+        .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(g3, None);
-
-    // Non-existent row: set_* returns 0 rows affected, get_* returns None
-    let n_missing = super::models::set_video_spotify_track_id(&pool, 99999, Some("X"))
-        .await
-        .unwrap();
-    assert_eq!(n_missing, 0, "set_* on missing row: 0 rows affected");
-    let g_missing = super::models::get_video_spotify_track_id(&pool, 99999)
-        .await
-        .unwrap();
-    assert_eq!(g_missing, None);
 }

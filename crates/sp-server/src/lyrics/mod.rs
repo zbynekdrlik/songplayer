@@ -16,6 +16,7 @@ pub mod renderer;
 pub mod replicate_client;
 pub mod reprocess;
 pub mod spotify_proxy;
+pub mod spotify_resolver;
 pub mod tier1;
 pub mod translator;
 pub mod whisperx_replicate;

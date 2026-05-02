@@ -26,6 +26,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (15, MIGRATION_V15),
     (16, MIGRATION_V16),
     (17, MIGRATION_V17),
+    (18, MIGRATION_V18),
 ];
 
 const MIGRATION_V1: &str = "
@@ -244,6 +245,11 @@ const MIGRATION_V17: &str = "
 ALTER TABLE videos ADD COLUMN spotify_track_id TEXT;
 ";
 
+const MIGRATION_V18: &str = "
+ALTER TABLE videos ADD COLUMN spotify_resolved_at TEXT;
+UPDATE videos SET spotify_resolved_at = datetime('now') WHERE spotify_track_id IS NOT NULL;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -316,3 +322,7 @@ pub async fn current_schema_version(pool: &SqlitePool) -> Result<i32, sqlx::Erro
 #[path = "mod_tests.rs"]
 #[cfg(test)]
 mod tests;
+
+#[path = "mod_tests_v18.rs"]
+#[cfg(test)]
+mod tests_v18;

@@ -154,37 +154,24 @@ pub async fn get_video_suppress_resolume_en(
     Ok(v.map(|n| n != 0).unwrap_or(false))
 }
 
-/// Set the Spotify track ID for a video by its row id. Used by the
-/// dashboard to assign a manual track ID for SpotifyLyricsFetcher
-/// (Tier-1 source). Per V14 precedent, the column is keyed on the
-/// numeric primary key — youtube_id is non-unique across playlists.
+/// Atomically record the outcome of a Spotify resolution attempt. Sets both
+/// `spotify_track_id` and `spotify_resolved_at = datetime('now')` in one
+/// statement. Pass `None` for the track ID to record a no-match attempt.
 ///
 /// Returns the number of rows affected (0 = no row with that id).
-pub async fn set_video_spotify_track_id(
+pub async fn set_video_spotify_resolution(
     pool: &SqlitePool,
     video_id: i64,
     spotify_track_id: Option<&str>,
 ) -> sqlx::Result<u64> {
-    let res = sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE id = ?2")
-        .bind(spotify_track_id)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    let res = sqlx::query(
+        "UPDATE videos SET spotify_track_id = ?1, spotify_resolved_at = datetime('now') WHERE id = ?2",
+    )
+    .bind(spotify_track_id)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(res.rows_affected())
-}
-
-/// Read the Spotify track ID for a video by its row id. Returns None
-/// when the column is NULL or the row doesn't exist.
-pub async fn get_video_spotify_track_id(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> sqlx::Result<Option<String>> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT spotify_track_id FROM videos WHERE id = ?1")
-            .bind(video_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.and_then(|(s,)| s))
 }
 
 // ---------------------------------------------------------------------------
@@ -404,11 +391,19 @@ pub struct VideoLyricsRow {
     /// Signed: positive = delay display (effectively shorter lead),
     /// negative = advance display (longer lead). V16 migration.
     pub lyrics_time_offset_ms: i64,
-    /// Operator-pasted Spotify track ID (V17 migration). When Some, the
-    /// gather pass calls SpotifyLyricsFetcher to pull LINE_SYNCED lyrics
-    /// from the public proxy. Set via PATCH /api/v1/videos/{id} with
-    /// `spotify_url`.
+    /// Spotify track ID for line-synced lyrics fetch (V17 column).
+    /// Auto-populated by the lyrics worker via `SpotifyResolver` (Claude
+    /// canonical-ID lookup, gated by `spotify_resolved_at IS NULL`). When
+    /// non-NULL, `gather_sources_impl` calls `SpotifyLyricsFetcher` to pull
+    /// LINE_SYNCED lyrics from the public proxy. V18 backfilled this for
+    /// any rows that already had a value from PR #70's now-removed manual
+    /// UI.
     pub spotify_track_id: Option<String>,
+    /// V18 column. Set to `datetime('now')` whenever the Spotify resolver runs
+    /// on this song (success OR no-match). NULL means "never attempted." Worker
+    /// gate uses (spotify_track_id IS NULL AND spotify_resolved_at IS NULL) to
+    /// decide whether to ask Claude.
+    pub spotify_resolved_at: Option<String>,
 }
 
 /// Mark a video's lyrics status, source, AND pipeline version.

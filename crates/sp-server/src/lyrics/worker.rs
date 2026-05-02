@@ -42,6 +42,10 @@ pub struct LyricsWorker {
     /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
     /// event channel so messages reach all dashboard WS subscribers.
     events_tx: broadcast::Sender<ServerMsg>,
+    /// Spotify track ID auto-resolver. Constructed once at worker startup.
+    /// Per-song, the worker checks the gate (spotify_track_id IS NULL AND
+    /// spotify_resolved_at IS NULL) before invoking it.
+    spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver,
     /// Shared state read by `queue_update_loop` so the broadcast `processing`
     /// field reflects the current song being aligned.
     current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
@@ -83,6 +87,7 @@ impl LyricsWorker {
             venv_python: tokio::sync::RwLock::new(None),
             retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
             events_tx,
+            spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver::new(),
             current_processing: Arc::new(RwLock::new(None)),
         }
     }
@@ -323,7 +328,7 @@ impl LyricsWorker {
     }
 
     #[cfg_attr(test, mutants::skip)]
-    async fn process_song(&self, row: crate::db::models::VideoLyricsRow) -> Result<()> {
+    async fn process_song(&self, mut row: crate::db::models::VideoLyricsRow) -> Result<()> {
         use crate::lyrics::{
             LYRICS_PIPELINE_VERSION,
             orchestrator::{Orchestrator, OrchestratorInput},
@@ -349,6 +354,70 @@ impl LyricsWorker {
             started_at_unix_ms,
         )
         .await;
+
+        // Spotify auto-resolution gate (#73). Run Claude once per song lifetime
+        // when `spotify_track_id` is NULL and we've never recorded an attempt.
+        // The result (success OR no-match) is persisted with a timestamp so the
+        // gate short-circuits on subsequent reprocesses.
+        if row.spotify_track_id.is_none() && row.spotify_resolved_at.is_none() {
+            if let Some(ai_client) = self.ai_client.as_deref() {
+                if !row.song.is_empty() && !row.artist.is_empty() {
+                    use crate::lyrics::spotify_resolver::ResolveOutcome;
+                    let outcome = self
+                        .spotify_resolver
+                        .resolve(ai_client, &row.song, &row.artist, &row.youtube_id)
+                        .await;
+                    match outcome {
+                        ResolveOutcome::Resolved(id) => {
+                            if let Err(e) = crate::db::models::set_video_spotify_resolution(
+                                &self.pool,
+                                row.id,
+                                Some(&id),
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "worker: failed to persist resolved spotify_track_id for {}: {e}",
+                                    row.youtube_id
+                                );
+                            } else {
+                                info!(
+                                    youtube_id = %row.youtube_id,
+                                    track_id = %id,
+                                    "spotify_resolver: resolved + verified"
+                                );
+                                row.spotify_track_id = Some(id);
+                            }
+                        }
+                        ResolveOutcome::NoMatch => {
+                            if let Err(e) = crate::db::models::set_video_spotify_resolution(
+                                &self.pool, row.id, None,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "worker: failed to persist no-match for {}: {e}",
+                                    row.youtube_id
+                                );
+                            } else {
+                                debug!(
+                                    youtube_id = %row.youtube_id,
+                                    "spotify_resolver: no canonical match"
+                                );
+                            }
+                        }
+                        ResolveOutcome::Error(e) => {
+                            warn!(
+                                "worker: spotify resolution transport error for {}: {e}",
+                                row.youtube_id
+                            );
+                            // Intentionally do NOT persist resolved_at — leaves
+                            // the row eligible for retry on the next worker pass.
+                        }
+                    }
+                }
+            }
+        }
 
         let ctx = match self.gather_sources(&row).await {
             Ok(c) => c,
