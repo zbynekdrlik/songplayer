@@ -5,6 +5,12 @@
 
 use super::*;
 
+async fn setup() -> SqlitePool {
+    let pool = create_memory_pool().await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    pool
+}
+
 #[tokio::test]
 async fn migration_v18_adds_spotify_resolved_at_column() {
     let pool = setup().await;
