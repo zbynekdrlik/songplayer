@@ -56,14 +56,11 @@ impl SpotifyResolver {
     ///   string `NONE`. Anything else is treated as `NoMatch`.
     /// - Explicitly tell Claude to return `NONE` for cover/remix/live versions
     ///   that aren't on Spotify as the canonical recording.
-    /// - Give Claude all four fields (song, artist, youtube_title, youtube_id)
-    ///   so it can disambiguate versions.
-    pub(crate) fn build_prompt(
-        song: &str,
-        artist: &str,
-        youtube_title: &str,
-        youtube_id: &str,
-    ) -> (String, String) {
+    /// - Give Claude (song, artist, youtube_id). The youtube_id alone lets
+    ///   Claude look up the YouTube video title if it needs disambiguation;
+    ///   threading the title through `VideoLyricsRow` was rejected as not
+    ///   worth the plumbing cost.
+    pub(crate) fn build_prompt(song: &str, artist: &str, youtube_id: &str) -> (String, String) {
         let system = "You map YouTube videos to canonical Spotify track IDs. \
                       Reply with EXACTLY one of: a 22-character base62 Spotify track ID, or the literal string NONE. \
                       No prose. No explanation. No markdown."
@@ -71,7 +68,6 @@ impl SpotifyResolver {
         let user = format!(
             "song: {song}\n\
              artist: {artist}\n\
-             youtube_title: {youtube_title}\n\
              youtube_id: {youtube_id}\n\
              \n\
              Return the canonical Spotify track ID for this exact recording. \
@@ -104,23 +100,23 @@ impl SpotifyResolver {
     /// `NoMatch` on Claude-NONE or proxy-rejected, `Error` on transport-level
     /// failure (which the caller treats as "retry next time").
     ///
-    /// mutants::skip: this orchestration function chains three I/O steps
-    /// (Claude call → parse → proxy fetch). Each leaf is unit-tested
-    /// independently (parse_reply tests below; SpotifyLyricsFetcher tests
-    /// in spotify_proxy.rs; AiClient::chat is itself mutants::skip'd in
-    /// ai/client.rs). Mutating the orchestration body without touching the
-    /// leaves cannot fail any unit test without a full wiremock harness,
-    /// which is added in B.2.
+    /// mutants::skip: orchestration body is exercised by 5 wiremock
+    /// integration tests in `integration_tests` below — each covers a
+    /// distinct ResolveOutcome path through the full async flow. Pure-leaf
+    /// mutations (parse_reply branches, build_prompt content) are caught by
+    /// the 11 unit tests above. The `lines.len() >= MIN_VERIFIED_LINES`
+    /// comparison and the Ok(_) → NoMatch fallthrough on the verification
+    /// arm both have wiremock coverage (`no_match_when_proxy_returns_too_few_lines`,
+    /// `no_match_when_proxy_returns_404`).
     #[cfg_attr(test, mutants::skip)]
     pub async fn resolve(
         &self,
         ai_client: &AiClient,
         song: &str,
         artist: &str,
-        youtube_title: &str,
         youtube_id: &str,
     ) -> ResolveOutcome {
-        let (system, user) = Self::build_prompt(song, artist, youtube_title, youtube_id);
+        let (system, user) = Self::build_prompt(song, artist, youtube_id);
 
         let raw = match ai_client.chat(&system, &user).await {
             Ok(s) => s,
@@ -205,19 +201,27 @@ mod tests {
     }
 
     #[test]
-    fn build_prompt_includes_all_four_fields() {
-        let (system, user) = SpotifyResolver::build_prompt(
-            "Amazing Grace",
-            "Chris Tomlin",
-            "Amazing Grace (My Chains Are Gone)",
-            "dQw4w9WgXcQ",
-        );
+    fn build_prompt_includes_all_three_fields() {
+        let (system, user) =
+            SpotifyResolver::build_prompt("Amazing Grace", "Chris Tomlin", "dQw4w9WgXcQ");
         assert!(system.contains("22-character"));
         assert!(system.contains("NONE"));
-        assert!(user.contains("Amazing Grace"));
-        assert!(user.contains("Chris Tomlin"));
-        assert!(user.contains("My Chains Are Gone"));
-        assert!(user.contains("dQw4w9WgXcQ"));
+        assert!(user.contains("song: Amazing Grace"));
+        assert!(user.contains("artist: Chris Tomlin"));
+        assert!(user.contains("youtube_id: dQw4w9WgXcQ"));
+    }
+
+    #[test]
+    fn build_prompt_does_not_include_youtube_title_field() {
+        // youtube_title was dropped from the resolver contract pre-merge —
+        // VideoLyricsRow has no title field, threading it through 3 SELECTs
+        // + 6 fixture literals isn't worth the disambiguation benefit.
+        // Claude can fetch the video title from youtube_id if it needs to.
+        let (_system, user) = SpotifyResolver::build_prompt("S", "A", "abc");
+        assert!(
+            !user.contains("youtube_title"),
+            "prompt must NOT mention youtube_title"
+        );
     }
 
     #[test]
@@ -291,7 +295,7 @@ mod integration_tests {
         let resolver = SpotifyResolver::new();
         let ai = ai_client_pointed_at(&claude_mock.uri());
         let outcome = resolver
-            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         match outcome {
@@ -323,7 +327,7 @@ mod integration_tests {
         let resolver = SpotifyResolver::new();
         let ai = ai_client_pointed_at(&claude_mock.uri());
         let outcome = resolver
-            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         assert!(
@@ -360,7 +364,7 @@ mod integration_tests {
         let resolver = SpotifyResolver::new();
         let ai = ai_client_pointed_at(&claude_mock.uri());
         let outcome = resolver
-            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         assert!(
@@ -410,7 +414,7 @@ mod integration_tests {
         let resolver = SpotifyResolver::new();
         let ai = ai_client_pointed_at(&claude_mock.uri());
         let outcome = resolver
-            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         assert!(
@@ -435,7 +439,7 @@ mod integration_tests {
         let resolver = SpotifyResolver::new();
         let ai = ai_client_pointed_at(&claude_mock.uri());
         let outcome = resolver
-            .resolve(&ai, "Test Song", "Test Artist", "Test Title", "aaaaaaaaaaa")
+            .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         assert!(

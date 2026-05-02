@@ -365,7 +365,7 @@ impl LyricsWorker {
                     use crate::lyrics::spotify_resolver::ResolveOutcome;
                     let outcome = self
                         .spotify_resolver
-                        .resolve(ai_client, &row.song, &row.artist, "", &row.youtube_id)
+                        .resolve(ai_client, &row.song, &row.artist, &row.youtube_id)
                         .await;
                     match outcome {
                         ResolveOutcome::Resolved(id) => {

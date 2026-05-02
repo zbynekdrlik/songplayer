@@ -154,25 +154,6 @@ pub async fn get_video_suppress_resolume_en(
     Ok(v.map(|n| n != 0).unwrap_or(false))
 }
 
-/// Set the Spotify track ID for a video by its row id. Used by the
-/// dashboard to assign a manual track ID for SpotifyLyricsFetcher
-/// (Tier-1 source). Per V14 precedent, the column is keyed on the
-/// numeric primary key — youtube_id is non-unique across playlists.
-///
-/// Returns the number of rows affected (0 = no row with that id).
-pub async fn set_video_spotify_track_id(
-    pool: &SqlitePool,
-    video_id: i64,
-    spotify_track_id: Option<&str>,
-) -> sqlx::Result<u64> {
-    let res = sqlx::query("UPDATE videos SET spotify_track_id = ?1 WHERE id = ?2")
-        .bind(spotify_track_id)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
-    Ok(res.rows_affected())
-}
-
 /// Atomically record the outcome of a Spotify resolution attempt. Sets both
 /// `spotify_track_id` and `spotify_resolved_at = datetime('now')` in one
 /// statement. Pass `None` for the track ID to record a no-match attempt.
@@ -191,20 +172,6 @@ pub async fn set_video_spotify_resolution(
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
-}
-
-/// Read the Spotify track ID for a video by its row id. Returns None
-/// when the column is NULL or the row doesn't exist.
-pub async fn get_video_spotify_track_id(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> sqlx::Result<Option<String>> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT spotify_track_id FROM videos WHERE id = ?1")
-            .bind(video_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.and_then(|(s,)| s))
 }
 
 // ---------------------------------------------------------------------------

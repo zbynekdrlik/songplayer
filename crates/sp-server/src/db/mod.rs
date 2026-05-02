@@ -322,3 +322,7 @@ pub async fn current_schema_version(pool: &SqlitePool) -> Result<i32, sqlx::Erro
 #[path = "mod_tests.rs"]
 #[cfg(test)]
 mod tests;
+
+#[path = "mod_tests_v18.rs"]
+#[cfg(test)]
+mod tests_v18;
