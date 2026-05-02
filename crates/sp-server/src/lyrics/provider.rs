@@ -38,6 +38,19 @@ pub struct CandidateText {
     pub line_timings: Option<Vec<(u64, u64)>>,
 }
 
+// Temporary bridge — Phase G deletes provider.rs and this impl with it.
+// Mirrors the forward impl in `tier1.rs::33`.
+impl From<crate::lyrics::tier1::CandidateText> for CandidateText {
+    fn from(c: crate::lyrics::tier1::CandidateText) -> Self {
+        Self {
+            source: c.source,
+            lines: c.lines,
+            has_timing: c.has_timing,
+            line_timings: c.line_timings,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SongContext {
     pub video_id: String,
@@ -185,5 +198,40 @@ mod tests {
         assert_eq!(decoded.providers_skipped[0].1, "no vocal path");
         assert_eq!(decoded.per_word_details[0].merged_start_ms, 505);
         assert_eq!(decoded.quality_metrics.gap_stddev_ms, 42.5);
+    }
+}
+
+#[cfg(test)]
+mod from_tier1_tests {
+    use super::CandidateText as ProviderCandidate;
+    use crate::lyrics::tier1::CandidateText as Tier1Candidate;
+
+    #[test]
+    fn round_trips_all_fields() {
+        let src = Tier1Candidate {
+            source: "tier1:spotify".into(),
+            lines: vec!["one".into(), "two".into()],
+            line_timings: Some(vec![(0, 1000), (1000, 2000)]),
+            has_timing: true,
+        };
+        let p: ProviderCandidate = src.clone().into();
+        assert_eq!(p.source, "tier1:spotify");
+        assert_eq!(p.lines, vec!["one", "two"]);
+        assert_eq!(p.line_timings, Some(vec![(0, 1000), (1000, 2000)]));
+        assert!(p.has_timing);
+    }
+
+    #[test]
+    fn preserves_no_timing_state() {
+        let src = Tier1Candidate {
+            source: "genius".into(),
+            lines: vec!["only text".into()],
+            line_timings: None,
+            has_timing: false,
+        };
+        let p: ProviderCandidate = src.into();
+        assert_eq!(p.source, "genius");
+        assert!(p.line_timings.is_none());
+        assert!(!p.has_timing);
     }
 }

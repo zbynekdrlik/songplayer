@@ -243,6 +243,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         youtube_url: "https://www.youtube.com/watch?v=vidDESC".into(),
         lyrics_override_text: None,
         lyrics_time_offset_ms: 0,
+        spotify_track_id: None,
     };
 
     let reqwest_client = reqwest::Client::new();
@@ -332,6 +333,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         youtube_url: "https://www.youtube.com/watch?v=vidEMPTY2".into(),
         lyrics_override_text: None,
         lyrics_time_offset_ms: 0,
+        spotify_track_id: None,
     };
 
     let reqwest_client = reqwest::Client::new();
@@ -384,4 +386,234 @@ fn process_song_has_replicate_token_early_exit() {
         src.contains("replicate_api_token not configured"),
         "early-exit error message must mention replicate_api_token not configured"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Spotify branch (#67)
+// ---------------------------------------------------------------------------
+//
+// `SPOTIFY_LYRICS_PROXY_BASE` is a process-wide env var. The four tests below
+// are marked `#[serial_test::serial]` so they don't race when cargo runs them
+// in parallel.
+
+#[tokio::test]
+#[serial_test::serial]
+async fn gather_emits_tier1_spotify_candidate_when_track_id_set() {
+    use crate::db::models::VideoLyricsRow;
+    use crate::lyrics::worker::gather_sources_impl;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let mock = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/"))
+        .and(wiremock::matchers::query_param(
+            "trackid",
+            "3n3Ppam7vgaVa1iaRUc9Lp",
+        ))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "error": false,
+                "syncType": "LINE_SYNCED",
+                "lines": [
+                    {"startTimeMs": "1000", "words": "Amazing grace"},
+                    {"startTimeMs": "3000", "words": "How sweet the sound"}
+                ]
+            })),
+        )
+        .mount(&mock)
+        .await;
+    // SAFETY: marked serial above; no other test races on this env var while
+    // this test runs.
+    unsafe {
+        std::env::set_var("SPOTIFY_LYRICS_PROXY_BASE", mock.uri());
+    }
+
+    let row = VideoLyricsRow {
+        id: 1,
+        youtube_id: "spotifyOK1".into(),
+        song: "".into(), // empty → LRCLIB+Genius branches skipped
+        artist: "".into(),
+        duration_ms: Some(180_000),
+        audio_file_path: None,
+        youtube_url: "https://www.youtube.com/watch?v=spotifyOK1".into(),
+        lyrics_override_text: None,
+        lyrics_time_offset_ms: 0,
+        spotify_track_id: Some("3n3Ppam7vgaVa1iaRUc9Lp".into()),
+    };
+
+    let ctx = gather_sources_impl(
+        None,
+        std::path::Path::new("/definitely/does/not/exist/ytdlp"),
+        cache_dir.path(),
+        &reqwest::Client::new(),
+        &row,
+        "",
+    )
+    .await
+    .expect("gather succeeds with Spotify candidate");
+
+    let spotify = ctx
+        .candidate_texts
+        .iter()
+        .find(|c| c.source == "tier1:spotify")
+        .expect("Spotify candidate present");
+    assert!(spotify.has_timing);
+    assert_eq!(spotify.lines.len(), 2);
+    assert_eq!(spotify.lines[0], "Amazing grace");
+    assert_eq!(spotify.lines[1], "How sweet the sound");
+    assert!(spotify.line_timings.is_some());
+
+    unsafe {
+        std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn gather_omits_spotify_when_track_id_is_null() {
+    use crate::db::models::VideoLyricsRow;
+    use crate::lyrics::worker::gather_sources_impl;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+
+    // No spotify_track_id; gather has only the override candidate.
+    let row = VideoLyricsRow {
+        id: 2,
+        youtube_id: "noSpotifyId".into(),
+        song: "".into(),
+        artist: "".into(),
+        duration_ms: Some(180_000),
+        audio_file_path: None,
+        youtube_url: "https://www.youtube.com/watch?v=noSpotifyId".into(),
+        lyrics_override_text: Some("operator line".into()),
+        lyrics_time_offset_ms: 0,
+        spotify_track_id: None,
+    };
+
+    let ctx = gather_sources_impl(
+        None,
+        std::path::Path::new("/definitely/does/not/exist/ytdlp"),
+        cache_dir.path(),
+        &reqwest::Client::new(),
+        &row,
+        "",
+    )
+    .await
+    .expect("gather succeeds via override candidate");
+
+    assert!(
+        ctx.candidate_texts
+            .iter()
+            .all(|c| c.source != "tier1:spotify"),
+        "no Spotify candidate must be emitted when spotify_track_id is None"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn gather_skips_spotify_on_404() {
+    use crate::db::models::VideoLyricsRow;
+    use crate::lyrics::worker::gather_sources_impl;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let mock = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(404))
+        .mount(&mock)
+        .await;
+    unsafe {
+        std::env::set_var("SPOTIFY_LYRICS_PROXY_BASE", mock.uri());
+    }
+
+    let row = VideoLyricsRow {
+        id: 3,
+        youtube_id: "spotify404".into(),
+        song: "".into(),
+        artist: "".into(),
+        duration_ms: Some(180_000),
+        audio_file_path: None,
+        youtube_url: "https://www.youtube.com/watch?v=spotify404".into(),
+        lyrics_override_text: Some("operator line".into()),
+        lyrics_time_offset_ms: 0,
+        spotify_track_id: Some("3n3Ppam7vgaVa1iaRUc9Lp".into()),
+    };
+
+    let ctx = gather_sources_impl(
+        None,
+        std::path::Path::new("/definitely/does/not/exist/ytdlp"),
+        cache_dir.path(),
+        &reqwest::Client::new(),
+        &row,
+        "",
+    )
+    .await
+    .expect("gather succeeds when Spotify returns 404");
+
+    assert!(
+        ctx.candidate_texts
+            .iter()
+            .all(|c| c.source != "tier1:spotify"),
+        "no Spotify candidate must be emitted when proxy returns 404"
+    );
+
+    unsafe {
+        std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn gather_skips_spotify_on_proxy_error_field() {
+    use crate::db::models::VideoLyricsRow;
+    use crate::lyrics::worker::gather_sources_impl;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let mock = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "error": true,
+                "message": "track not found"
+            })),
+        )
+        .mount(&mock)
+        .await;
+    unsafe {
+        std::env::set_var("SPOTIFY_LYRICS_PROXY_BASE", mock.uri());
+    }
+
+    let row = VideoLyricsRow {
+        id: 4,
+        youtube_id: "spotifyERR".into(),
+        song: "".into(),
+        artist: "".into(),
+        duration_ms: Some(180_000),
+        audio_file_path: None,
+        youtube_url: "https://www.youtube.com/watch?v=spotifyERR".into(),
+        lyrics_override_text: Some("operator line".into()),
+        lyrics_time_offset_ms: 0,
+        spotify_track_id: Some("3n3Ppam7vgaVa1iaRUc9Lp".into()),
+    };
+
+    let ctx = gather_sources_impl(
+        None,
+        std::path::Path::new("/definitely/does/not/exist/ytdlp"),
+        cache_dir.path(),
+        &reqwest::Client::new(),
+        &row,
+        "",
+    )
+    .await
+    .expect("gather succeeds when proxy returns error:true");
+
+    assert!(
+        ctx.candidate_texts
+            .iter()
+            .all(|c| c.source != "tier1:spotify"),
+        "no Spotify candidate must be emitted when proxy reports error:true"
+    );
+
+    unsafe {
+        std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
+    }
 }

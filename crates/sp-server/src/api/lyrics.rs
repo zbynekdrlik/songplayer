@@ -88,6 +88,11 @@ pub struct SongListItem {
     /// pushing the English lyric line to Resolume's `#sp-subs` / `#sp-subs-next`
     /// clips. The /live setlist UI renders a checkbox bound to this field.
     pub suppress_resolume_en: bool,
+    /// `videos.spotify_track_id` — operator-pasted Spotify track ID (V17),
+    /// consumed by `gather.rs` to fetch LINE_SYNCED lyrics. The /live setlist
+    /// UI uses this to show a `.has-spotify` visual state on the 🎵 button
+    /// and to pre-fill the edit prompt with the saved value.
+    pub spotify_track_id: Option<String>,
 }
 
 // HTTP handler: behavior covered by integration tests in Task 14 Playwright + is_stale/manual_priority cast logic verified via API shape tests.
@@ -100,7 +105,7 @@ pub async fn list_songs(
     let mut sql = String::from(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
          lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en \
+         suppress_resolume_en, spotify_track_id \
          FROM videos WHERE normalized = 1",
     );
     if q.playlist_id.is_some() {
@@ -139,6 +144,7 @@ pub async fn list_songs(
                 is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
                 manual_priority: mp == 1,
                 suppress_resolume_en: sre != 0,
+                spotify_track_id: r.try_get("spotify_track_id").ok(),
             }
         })
         .collect();
@@ -162,7 +168,7 @@ pub async fn get_song_detail(
     let row = match sqlx::query(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
          lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en \
+         suppress_resolume_en, spotify_track_id \
          FROM videos WHERE id = ? AND normalized = 1",
     )
     .bind(video_id)
@@ -194,6 +200,7 @@ pub async fn get_song_detail(
         is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
         manual_priority: mp == 1,
         suppress_resolume_en: sre != 0,
+        spotify_track_id: row.try_get("spotify_track_id").ok(),
     };
     let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let audit_path = state

@@ -106,6 +106,10 @@ pub fn LiveSetList(
                             let suppress_initial = meta["suppress_resolume_en"]
                                 .as_bool()
                                 .unwrap_or(false);
+                            let spotify_track_id_initial = meta["spotify_track_id"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
                             view! {
                                 <tr>
                                     <td>{position + 1}</td>
@@ -180,6 +184,50 @@ pub fn LiveSetList(
                                             />
                                             "EN"
                                         </label>
+                                        <button
+                                            class={
+                                                let extra = if spotify_track_id_initial.is_empty() {
+                                                    ""
+                                                } else {
+                                                    " has-spotify"
+                                                };
+                                                format!("live-setlist-btn live-setlist-btn-spotify{extra}")
+                                            }
+                                            title=if spotify_track_id_initial.is_empty() {
+                                                "Paste Spotify track URL"
+                                            } else {
+                                                "Edit Spotify track URL"
+                                            }
+                                            on:click={
+                                                let initial = spotify_track_id_initial.clone();
+                                                move |_| {
+                                                    let prompt_text = if initial.is_empty() {
+                                                        String::new()
+                                                    } else {
+                                                        // Show the bare track ID (URL would not round-trip through
+                                                        // server's parser if the operator doesn't edit it).
+                                                        initial.clone()
+                                                    };
+                                                    let result = web_sys::window()
+                                                        .and_then(|w| {
+                                                            w.prompt_with_message_and_default(
+                                                                "Paste Spotify track URL (or empty to clear)",
+                                                                &prompt_text,
+                                                            )
+                                                            .ok()
+                                                        })
+                                                        .flatten();
+                                                    if let Some(input) = result {
+                                                        leptos::task::spawn_local(async move {
+                                                            match api::patch_video_spotify_url(video_id, &input).await {
+                                                                Ok(()) => on_changed.run(()),
+                                                                Err(e) => error_msg.set(e),
+                                                            }
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        >"🎵"</button>
                                         <button
                                             class="live-setlist-btn live-setlist-btn-remove"
                                             title="Remove from set list"

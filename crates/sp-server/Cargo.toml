@@ -43,6 +43,7 @@ tempfile = "3.27.0"
 [dev-dependencies]
 tower = "0.5"
 wiremock = "0.6"
+serial_test = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.

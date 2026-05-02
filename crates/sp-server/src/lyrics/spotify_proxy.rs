@@ -11,7 +11,13 @@ use serde::Deserialize;
 
 use crate::lyrics::tier1::CandidateText;
 
-const PROXY_BASE: &str = "https://spotify-lyrics-api-khaki.vercel.app";
+/// Spotify lyrics proxy base URL. Overridable via env var
+/// `SPOTIFY_LYRICS_PROXY_BASE` for tests (wiremock + integration). Defaults
+/// to the public proxy.
+fn proxy_base() -> String {
+    std::env::var("SPOTIFY_LYRICS_PROXY_BASE")
+        .unwrap_or_else(|_| "https://spotify-lyrics-api-khaki.vercel.app".to_string())
+}
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, thiserror::Error)]
@@ -73,7 +79,7 @@ impl SpotifyLyricsFetcher {
     /// The async HTTP path itself requires a live network; tracked in #65.
     #[cfg_attr(test, mutants::skip)]
     pub async fn fetch(&self, track_id: &str) -> Result<Option<CandidateText>, SpotifyError> {
-        let url = format!("{PROXY_BASE}/?trackid={track_id}");
+        let url = format!("{}/?trackid={}", proxy_base(), track_id);
         let resp = self.http.get(&url).send().await?;
         let status = resp.status();
         if status == reqwest::StatusCode::NOT_FOUND {

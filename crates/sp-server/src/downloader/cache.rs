@@ -55,6 +55,10 @@ pub struct ScanResult {
     pub orphans: Vec<Orphan>,
     /// Lyrics sidecar files: `(youtube_id, path)`.
     pub lyrics_files: Vec<(String, PathBuf)>,
+    /// `(youtube_id, path)` for every preprocess-vocals output found in
+    /// the cache directory. Persisted across alignment runs (see #41) so
+    /// reprocess reuses Demucs output via aligner.rs cache-hit logic.
+    pub vocals_files: Vec<(String, PathBuf)>,
 }
 
 static VIDEO_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]{11}$").unwrap());
@@ -69,6 +73,9 @@ static LEGACY_RE: LazyLock<Regex> =
 
 static LYRICS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-zA-Z0-9_-]{11})_lyrics\.json$").unwrap());
+
+static VOCALS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([a-zA-Z0-9_-]{11})_vocals16k\.wav$").unwrap());
 
 /// Build the output filename for the video sidecar.
 pub fn video_filename(song: &str, artist: &str, video_id: &str, gemini_failed: bool) -> String {
@@ -101,6 +108,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
     let mut audio_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
     let mut legacy: Vec<LegacyFile> = Vec::new();
     let mut lyrics_files: Vec<(String, PathBuf)> = Vec::new();
+    let mut vocals_files: Vec<(String, PathBuf)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -139,6 +147,11 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
             lyrics_files.push((caps[1].to_string(), path));
             continue;
         }
+
+        if let Some(caps) = VOCALS_RE.captures(filename) {
+            vocals_files.push((caps[1].to_string(), path));
+            continue;
+        }
     }
 
     // Pair video + audio halves by video_id.
@@ -173,6 +186,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         legacy,
         orphans,
         lyrics_files,
+        vocals_files,
     }
 }
 
@@ -207,6 +221,26 @@ pub fn cleanup_removed(cache_dir: &Path, active_ids: &HashSet<String>, playing_i
         );
         if let Err(e) = std::fs::remove_file(&orphan.path) {
             tracing::warn!("failed to remove orphan {}: {e}", orphan.path.display());
+        }
+    }
+
+    // Delete vocals for video_ids no longer in active_ids (and not currently
+    // playing). Preserves the cache-hit path on next reprocess for active
+    // songs while preventing orphan accumulation per #41.
+    for (vid, path) in result.vocals_files {
+        if active_ids.contains(&vid) {
+            continue;
+        }
+        if playing_id == Some(vid.as_str()) {
+            continue;
+        }
+        tracing::info!(
+            "removing orphan vocals for removed video {}: {}",
+            vid,
+            path.display()
+        );
+        if let Err(e) = std::fs::remove_file(&path) {
+            tracing::warn!("failed to remove vocals {}: {e}", path.display());
         }
     }
 }
@@ -472,5 +506,68 @@ mod tests {
 
         let result = scan_cache(dir.path());
         assert!(result.lyrics_files.is_empty());
+    }
+
+    #[test]
+    fn scan_cache_picks_up_vocals_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("dQw4w9WgXcQ_vocals16k.wav"), "fake vocals").unwrap();
+        fs::write(dir.path().join("aBcDeFgHiJk_vocals16k.wav"), "fake").unwrap();
+        let result = scan_cache(dir.path());
+        assert_eq!(result.vocals_files.len(), 2);
+        let ids: HashSet<&str> = result
+            .vocals_files
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert!(ids.contains("dQw4w9WgXcQ"));
+        assert!(ids.contains("aBcDeFgHiJk"));
+    }
+
+    #[test]
+    fn cleanup_removed_deletes_vocals_for_inactive_videos() {
+        let dir = tempfile::tempdir().unwrap();
+        // active song
+        fs::write(
+            dir.path()
+                .join("Song_Artist_aaaaaaaaaaa_normalized_video.mp4"),
+            "v",
+        )
+        .unwrap();
+        fs::write(
+            dir.path()
+                .join("Song_Artist_aaaaaaaaaaa_normalized_audio.flac"),
+            "a",
+        )
+        .unwrap();
+        fs::write(dir.path().join("aaaaaaaaaaa_vocals16k.wav"), "active").unwrap();
+        // removed song's vocals
+        fs::write(dir.path().join("xxxxxxxxxxx_vocals16k.wav"), "stale").unwrap();
+
+        let mut active: HashSet<String> = HashSet::new();
+        active.insert("aaaaaaaaaaa".into());
+        cleanup_removed(dir.path(), &active, None);
+
+        assert!(
+            dir.path().join("aaaaaaaaaaa_vocals16k.wav").exists(),
+            "active vocals must be kept"
+        );
+        assert!(
+            !dir.path().join("xxxxxxxxxxx_vocals16k.wav").exists(),
+            "stale vocals must be deleted"
+        );
+    }
+
+    #[test]
+    fn cleanup_removed_preserves_vocals_for_currently_playing() {
+        let dir = tempfile::tempdir().unwrap();
+        // Vocals for a song that is NOT in active_ids but IS playing.
+        fs::write(dir.path().join("playingidxxx_vocals16k.wav"), "playing").unwrap();
+        let active: HashSet<String> = HashSet::new();
+        cleanup_removed(dir.path(), &active, Some("playingidxxx"));
+        assert!(
+            dir.path().join("playingidxxx_vocals16k.wav").exists(),
+            "currently-playing vocals must not be deleted"
+        );
     }
 }
