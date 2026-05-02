@@ -149,12 +149,13 @@ fn source_priority(source: &str) -> u32 {
     }
 }
 
-/// Pick the strongest authoritative source: most lines wins; ties broken by
-/// `source_priority` (spotify > lrclib > genius > yt_subs > other).
+/// Pick the strongest authoritative source: source priority wins; ties broken by
+/// line count (longest wins). Per #72: high-priority short candidates beat
+/// longer noisy low-priority ones.
 fn best_authoritative(candidates: &[CandidateText]) -> Vec<String> {
     candidates
         .iter()
-        .max_by_key(|c| (c.lines.len(), source_priority(&c.source)))
+        .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
         .map(|c| c.lines.clone())
         .unwrap_or_default()
 }
@@ -635,9 +636,11 @@ mod tests {
 
     #[test]
     fn best_authoritative_picks_most_lines() {
+        // When sources have equal priority, longest wins (tie-break on lines).
+        // Both are tier1:genius (same priority) — the one with more lines should win.
         let result = best_authoritative(&[
-            cand("tier1:spotify", &["a", "b"]),
-            cand("genius", &["a", "b", "c", "d"]),
+            cand("tier1:genius", &["a", "b"]),
+            cand("tier1:genius", &["a", "b", "c", "d"]),
         ]);
         assert_eq!(result.len(), 4, "should pick the candidate with more lines");
     }
@@ -650,6 +653,150 @@ mod tests {
             cand("tier1:spotify", &["a", "b"]),
         ]);
         assert_eq!(result[0], "a");
+    }
+
+    #[test]
+    fn best_authoritative_priority_beats_longer_lower_priority_candidate() {
+        // The whole point of source_priority: a high-priority short candidate
+        // (e.g. tier1:spotify with 12 lines) MUST win over a longer noisy
+        // low-priority candidate (e.g. yt_subs with 50 lines). Pre-fix
+        // ranking was (lines.len(), priority) which got this backwards.
+        let result = best_authoritative(&[
+            cand(
+                "yt_subs",
+                &[
+                    "yt line 0",
+                    "yt line 1",
+                    "yt line 2",
+                    "yt line 3",
+                    "yt line 4",
+                    "yt line 5",
+                    "yt line 6",
+                    "yt line 7",
+                    "yt line 8",
+                    "yt line 9",
+                    "yt line 10",
+                    "yt line 11",
+                    "yt line 12",
+                    "yt line 13",
+                    "yt line 14",
+                    "yt line 15",
+                    "yt line 16",
+                    "yt line 17",
+                    "yt line 18",
+                    "yt line 19",
+                    "yt line 20",
+                    "yt line 21",
+                    "yt line 22",
+                    "yt line 23",
+                    "yt line 24",
+                    "yt line 25",
+                    "yt line 26",
+                    "yt line 27",
+                    "yt line 28",
+                    "yt line 29",
+                    "yt line 30",
+                    "yt line 31",
+                    "yt line 32",
+                    "yt line 33",
+                    "yt line 34",
+                    "yt line 35",
+                    "yt line 36",
+                    "yt line 37",
+                    "yt line 38",
+                    "yt line 39",
+                    "yt line 40",
+                    "yt line 41",
+                    "yt line 42",
+                    "yt line 43",
+                    "yt line 44",
+                    "yt line 45",
+                    "yt line 46",
+                    "yt line 47",
+                    "yt line 48",
+                    "yt line 49",
+                ],
+            ),
+            cand(
+                "tier1:spotify",
+                &[
+                    "spotify line 0",
+                    "spotify line 1",
+                    "spotify line 2",
+                    "spotify line 3",
+                    "spotify line 4",
+                    "spotify line 5",
+                    "spotify line 6",
+                    "spotify line 7",
+                    "spotify line 8",
+                    "spotify line 9",
+                    "spotify line 10",
+                    "spotify line 11",
+                ],
+            ),
+        ]);
+        assert_eq!(
+            result.len(),
+            12,
+            "should pick spotify with 12 lines, not yt_subs with 50"
+        );
+        assert!(
+            result[0].starts_with("spotify"),
+            "first line should be from spotify, not yt_subs"
+        );
+    }
+
+    #[test]
+    fn best_authoritative_override_beats_spotify() {
+        // Override (priority 5) is the absolute top — even short overrides
+        // beat longer Spotify candidates.
+        let result = best_authoritative(&[
+            cand(
+                "tier1:spotify",
+                &[
+                    "spotify line 0",
+                    "spotify line 1",
+                    "spotify line 2",
+                    "spotify line 3",
+                    "spotify line 4",
+                    "spotify line 5",
+                    "spotify line 6",
+                    "spotify line 7",
+                    "spotify line 8",
+                    "spotify line 9",
+                    "spotify line 10",
+                    "spotify line 11",
+                    "spotify line 12",
+                    "spotify line 13",
+                    "spotify line 14",
+                    "spotify line 15",
+                    "spotify line 16",
+                    "spotify line 17",
+                    "spotify line 18",
+                    "spotify line 19",
+                    "spotify line 20",
+                    "spotify line 21",
+                    "spotify line 22",
+                    "spotify line 23",
+                    "spotify line 24",
+                    "spotify line 25",
+                    "spotify line 26",
+                    "spotify line 27",
+                    "spotify line 28",
+                    "spotify line 29",
+                ],
+            ),
+            cand("override", &["op line 1", "op line 2"]),
+        ]);
+        assert_eq!(
+            result.len(),
+            2,
+            "should pick override with 2 lines, not spotify with 30"
+        );
+        assert!(
+            result[0].starts_with("op"),
+            "first line should be from override, not spotify"
+        );
     }
 
     #[test]
