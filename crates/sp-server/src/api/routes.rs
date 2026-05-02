@@ -338,12 +338,6 @@ pub struct PatchVideoReq {
     /// `Some("")` to clear the override.
     #[serde(default)]
     pub lyrics_override_text: Option<String>,
-    /// Spotify track URL or bare 22-char ID. The handler extracts the
-    /// track ID via `parse_spotify_track_id`. Pass `Some("")` to clear.
-    /// Source for `videos.spotify_track_id` (V17 column), consumed by
-    /// `gather.rs` to fetch line-synced lyrics from the proxy.
-    #[serde(default)]
-    pub spotify_url: Option<String>,
 }
 
 /// Update mutable per-video flags. Currently supports `suppress_resolume_en`
@@ -355,32 +349,13 @@ pub async fn patch_video(
     Json(req): Json<PatchVideoReq>,
 ) -> impl IntoResponse {
     // Require at least one field so empty-body PATCHes are a clear error.
-    if req.suppress_resolume_en.is_none()
-        && req.lyrics_override_text.is_none()
-        && req.spotify_url.is_none()
-    {
+    if req.suppress_resolume_en.is_none() && req.lyrics_override_text.is_none() {
         return (
             StatusCode::BAD_REQUEST,
             "request body must include at least one patchable field",
         )
             .into_response();
     }
-
-    // Resolve spotify_url into a track ID up-front so a malformed URL is a
-    // 400 before we touch the DB. Distinguish:
-    //   - None              → field absent (don't UPDATE this column)
-    //   - Some(empty/ws)    → clear column to NULL
-    //   - Some(valid url)   → extract 22-char track ID and persist it
-    let resolved_spotify_track_id: Option<Option<String>> = match req.spotify_url.as_deref() {
-        None => None,
-        Some(s) if s.trim().is_empty() => Some(None),
-        Some(s) => match parse_spotify_track_id(s) {
-            Ok(id) => Some(Some(id)),
-            Err(msg) => {
-                return (StatusCode::BAD_REQUEST, format!("spotify_url: {msg}")).into_response();
-            }
-        },
-    };
 
     // Build a dynamic UPDATE to touch only the columns the caller provided;
     // avoids clobbering unrelated fields across successive PATCHes.
@@ -390,9 +365,6 @@ pub async fn patch_video(
     }
     if req.lyrics_override_text.is_some() {
         sets.push("lyrics_override_text = ?");
-    }
-    if resolved_spotify_track_id.is_some() {
-        sets.push("spotify_track_id = ?");
     }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
 
@@ -408,9 +380,6 @@ pub async fn patch_video(
         } else {
             q = q.bind::<Option<String>>(Some(text.clone()));
         }
-    }
-    if let Some(opt_id) = resolved_spotify_track_id.as_ref() {
-        q = q.bind::<Option<String>>(opt_id.clone());
     }
     q = q.bind(video_id);
 
@@ -860,118 +829,9 @@ pub async fn get_lyrics_status(State(state): State<AppState>) -> impl IntoRespon
 }
 
 // ---------------------------------------------------------------------------
-// Spotify integration
-// ---------------------------------------------------------------------------
-
-/// Extract a Spotify track ID from any of:
-/// - canonical URL: `https://open.spotify.com/track/<id>` (with or without `?si=...`, with or without trailing `/`)
-/// - localized URL: `https://open.spotify.com/intl-cz/track/<id>?si=...`
-/// - bare 22-char alphanumeric ID
-///
-/// Returns `Err` for empty input, missing `/track/` segment, or IDs that
-/// don't match Spotify's 22-char base62 shape.
-pub(crate) fn parse_spotify_track_id(input: &str) -> Result<String, &'static str> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err("spotify_url is empty");
-    }
-    let candidate = if let Some(idx) = trimmed.find("/track/") {
-        let after = &trimmed[idx + "/track/".len()..];
-        let cut = after.find(['?', '/']).unwrap_or(after.len());
-        &after[..cut]
-    } else {
-        trimmed
-    };
-    if candidate.len() == 22 && candidate.chars().all(|c| c.is_ascii_alphanumeric()) {
-        Ok(candidate.to_string())
-    } else {
-        Err("not a valid Spotify track ID (must be 22 alphanumeric chars)")
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod parse_spotify_tests {
-    use super::parse_spotify_track_id;
-
-    #[test]
-    fn extracts_id_from_canonical_url() {
-        let id = parse_spotify_track_id("https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp")
-            .unwrap();
-        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
-    }
-
-    #[test]
-    fn extracts_id_from_url_with_si_query() {
-        let id =
-            parse_spotify_track_id("https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp?si=abcd")
-                .unwrap();
-        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
-    }
-
-    #[test]
-    fn extracts_id_from_url_with_trailing_slash() {
-        let id = parse_spotify_track_id("https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp/")
-            .unwrap();
-        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
-    }
-
-    #[test]
-    fn extracts_id_from_intl_url() {
-        let id = parse_spotify_track_id(
-            "https://open.spotify.com/intl-cz/track/3n3Ppam7vgaVa1iaRUc9Lp?si=xyz",
-        )
-        .unwrap();
-        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
-    }
-
-    #[test]
-    fn accepts_bare_track_id() {
-        let id = parse_spotify_track_id("3n3Ppam7vgaVa1iaRUc9Lp").unwrap();
-        assert_eq!(id, "3n3Ppam7vgaVa1iaRUc9Lp");
-    }
-
-    #[test]
-    fn rejects_empty_string() {
-        assert!(parse_spotify_track_id("").is_err());
-    }
-
-    #[test]
-    fn rejects_whitespace_only() {
-        assert!(parse_spotify_track_id("   ").is_err());
-    }
-
-    #[test]
-    fn rejects_url_without_track_path() {
-        assert!(
-            parse_spotify_track_id("https://open.spotify.com/album/3n3Ppam7vgaVa1iaRUc9Lp")
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn rejects_id_too_short() {
-        assert!(parse_spotify_track_id("3n3Ppam7vga").is_err());
-    }
-
-    #[test]
-    fn rejects_id_too_long() {
-        assert!(parse_spotify_track_id("3n3Ppam7vgaVa1iaRUc9LpXXX").is_err());
-    }
-
-    #[test]
-    fn rejects_id_with_invalid_chars() {
-        assert!(parse_spotify_track_id("3n3Ppam7vga!a1iaRUc9Lp").is_err());
-    }
-}
-
-#[cfg(test)]
 #[path = "routes_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "routes_tests_spotify.rs"]
-mod tests_spotify;
