@@ -203,36 +203,105 @@ fn flatten_asr(asr: &AlignedTrack) -> Vec<AsrWord> {
     out
 }
 
+/// Match reference lines to ASR audio words via SEQUENTIAL PER-LINE WINDOW
+/// alignment (replaces the previous global LCS).
+///
+/// Why: global LCS over the whole song produced sparse matches for repetitive
+/// worship lyrics. A 6-word ref like "To the King of Kings, Holy" might align
+/// to just 2 of its words scattered across 0.8 s of audio, while the actual
+/// sung phrase covers 3+ s. The wall flashed the line briefly at the wrong
+/// moment. Sequential per-line scanning enforces (1) chronological order
+/// across ref lines and (2) contiguity within each ref line's matched audio
+/// window — symptomatically eliminating sub-second emits and timing drift.
+///
+/// Algorithm:
+/// - Maintain an `audio_cursor` (start of unsearched audio).
+/// - For each ref line in order: scan windows starting in `[cursor, cursor +
+///   lookahead]` with lengths in `[ref_count .. ref_count * 3]`. Each window
+///   gets a sub-LCS against the ref's normalized words; the score is
+///   `matched / ref_count` weighted by window-shortness (preferring tighter
+///   matches over loose ones). Best window's matched indices become the ref
+///   line's emit; the cursor advances past the window's last matched index.
+/// - Ref lines with no qualifying window (score < 0.3) emit empty indices —
+///   floor-clamped in Phase 5.
 fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit> {
-    let mut ref_pairs: Vec<(String, usize)> = Vec::new();
-    for (idx, line) in ref_lines.iter().enumerate() {
-        for w in line.split_whitespace() {
-            let n = normalize_word(w);
-            if !n.is_empty() {
-                ref_pairs.push((n, idx));
+    let total_audio = asr_words.len();
+    let mut emits: Vec<LineEmit> = Vec::with_capacity(ref_lines.len());
+    let mut audio_cursor = 0usize;
+
+    for line in ref_lines.iter() {
+        let ref_norms: Vec<String> = line
+            .split_whitespace()
+            .map(normalize_word)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if ref_norms.is_empty() || audio_cursor >= total_audio {
+            emits.push(LineEmit {
+                text: line.clone(),
+                asr_word_indices: Vec::new(),
+            });
+            continue;
+        }
+        let ref_count = ref_norms.len();
+        let ref_strs: Vec<&str> = ref_norms.iter().map(|s| s.as_str()).collect();
+
+        // Search bounds. Lookahead capped so consecutive ref lines stay in
+        // order; window length capped at 3× ref count so we don't sweep
+        // through an entire chorus block looking for the line.
+        let lookahead_end = (audio_cursor + ref_count.saturating_mul(8) + 32).min(total_audio);
+        let max_window_len = ref_count.saturating_mul(3).max(ref_count + 4);
+
+        let mut best: Option<(usize, usize, f32, Vec<usize>)> = None;
+        for start in audio_cursor..lookahead_end {
+            let max_len = max_window_len.min(total_audio - start);
+            // Window length floor = ref_count (so a too-short window cannot
+            // match all ref words by accident).
+            for length in ref_count..=max_len {
+                let window_norms: Vec<&str> = asr_words[start..start + length]
+                    .iter()
+                    .map(|w| w.norm.as_str())
+                    .collect();
+                let alignment = lcs_align(&ref_strs, &window_norms);
+                let matched_count = alignment.iter().filter(|a| a.is_some()).count();
+                let coverage = matched_count as f32 / ref_count as f32;
+                if coverage < 0.3 {
+                    continue;
+                }
+                // Prefer tighter windows (closer to ref length) for the same
+                // coverage. Score = coverage / (length / ref_count). Higher
+                // is better.
+                let length_ratio = length as f32 / ref_count as f32;
+                let score = coverage / length_ratio.max(1.0);
+                let matched: Vec<usize> = alignment
+                    .iter()
+                    .filter_map(|a| a.map(|j| start + j))
+                    .collect();
+
+                if best.as_ref().is_none_or(|(_, _, s, _)| score > *s) {
+                    best = Some((start, length, score, matched));
+                }
+            }
+        }
+
+        match best {
+            Some((_start, _length, _score, matched)) => {
+                let advance_to = matched.iter().max().copied().unwrap_or(audio_cursor);
+                audio_cursor = advance_to + 1;
+                emits.push(LineEmit {
+                    text: line.clone(),
+                    asr_word_indices: matched,
+                });
+            }
+            None => {
+                emits.push(LineEmit {
+                    text: line.clone(),
+                    asr_word_indices: Vec::new(),
+                });
             }
         }
     }
 
-    let ref_only: Vec<&str> = ref_pairs.iter().map(|(w, _)| w.as_str()).collect();
-    let asr_only: Vec<&str> = asr_words.iter().map(|w| w.norm.as_str()).collect();
-    let alignment = lcs_align(&ref_only, &asr_only);
-
-    let mut indices_per_line: Vec<Vec<usize>> = vec![Vec::new(); ref_lines.len()];
-    for (ref_idx, (_w, line_idx)) in ref_pairs.iter().enumerate() {
-        if let Some(asr_idx) = alignment[ref_idx] {
-            indices_per_line[*line_idx].push(asr_idx);
-        }
-    }
-
-    ref_lines
-        .iter()
-        .zip(indices_per_line)
-        .map(|(text, indices)| LineEmit {
-            text: text.clone(),
-            asr_word_indices: indices,
-        })
-        .collect()
+    emits
 }
 
 // ── Phase 2: chorus repeat detection ──────────────────────────────────────────
