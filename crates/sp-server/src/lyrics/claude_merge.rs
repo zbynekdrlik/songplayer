@@ -33,22 +33,47 @@ pub enum MergeError {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-/// Merge WhisperX timing with authoritative reference text via Claude.
+/// Merge WhisperX timing with authoritative reference text.
 ///
 /// Returns an `AlignedTrack` with line-level timing only (`words: None` on
 /// every line — per `feedback_line_timing_only.md`).
 ///
-/// Provenance format: `"{asr.provenance}+claude-merge"`.
+/// Two paths based on the best authoritative candidate's source label:
+///
+/// 1. `description` / `override` — clean text from a trusted human / extractor
+///    source. Goes through the deterministic mapper which preserves the
+///    reference's exact line count by construction (no Claude call, no
+///    re-segmentation by audio phrasing). Provenance: `"{source}+{asr.provenance}"`.
+///    Fixes issue #78 where description's natural 25-line output was being
+///    re-segmented into 95 audio-phrase fragments unusable on the LED wall.
+///
+/// 2. `genius` / other text-only — Claude semantic merge corrects WhisperX
+///    mishearings against the reference. Provenance: `"{asr.provenance}+claude-merge"`.
 pub async fn merge(
     ai_client: &AiClient,
     asr: &AlignedTrack,
     text_candidates: &[CandidateText],
 ) -> Result<AlignedTrack, MergeError> {
-    // Step 1: pick authoritative reference text.
-    let reference_lines = best_authoritative(text_candidates);
-    if reference_lines.is_empty() {
-        return Err(MergeError::NoReference);
+    // Step 1: pick authoritative reference candidate (whole CandidateText, not
+    // just its lines — we need the source label to choose the merge path).
+    let best = match text_candidates
+        .iter()
+        .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
+    {
+        Some(b) if !b.lines.is_empty() => b,
+        _ => return Err(MergeError::NoReference),
+    };
+
+    // Step 1a: description / override sources go through the deterministic
+    // mapper. No Claude round-trip. Output line count == reference line count
+    // by construction. Per `feedback_no_even_distribution.md`, timing comes
+    // from word-level LCS alignment between reference text and ASR words —
+    // never uniform/even-distribution.
+    if best.source == "description" || best.source == "override" {
+        return Ok(merge_deterministic(asr, &best.lines, &best.source));
     }
+
+    let reference_lines = best.lines.clone();
 
     // Step 2: build phrase-level chunks from WhisperX word timings.
     let phrases = build_phrases(asr);
@@ -384,6 +409,171 @@ fn try_parse_balanced(s: &str) -> Result<ClaudeResponse, serde_json::Error> {
 
     let slice = if found { &s[..end_idx] } else { s };
     serde_json::from_str(slice)
+}
+
+// ── Deterministic mapper for description / override sources ───────────────────
+//
+// Why this exists: when the authoritative reference text comes from a clean,
+// segmented source (YouTube-description extraction or operator override),
+// the reference's line breaks are themselves the contract we must ship. The
+// pre-fix Claude merge path iterated WhisperX *audio phrases* (split on
+// >500ms gaps) and emitted one output line per phrase, so a 6-min worship
+// song with 60 phrases produced 60+ output lines — destroying the
+// reference's 25-line natural segmentation. Issue #78.
+//
+// The mapper aligns reference words to ASR words via LCS, then for each
+// reference line collects the matched ASR words' min/max timing. Output line
+// count == reference line count by construction. No LLM round-trip.
+
+/// Normalize a word for cross-source matching: lowercase, alphanumeric only.
+/// Strips punctuation so "He's" and "hes" match; "praise," and "praise" match.
+fn normalize_word_for_match(w: &str) -> String {
+    w.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// LCS-based word alignment. Returns `alignment[i] = Some(j)` if
+/// `ref_words[i]` is matched to `asr_words[j]`, else `None`.
+///
+/// Standard dynamic-programming LCS over the two normalized word sequences.
+/// Tolerates ASR mishearings (unmatched ASR words skipped) and reference
+/// ad-libs absent from audio (unmatched reference words flagged None).
+fn lcs_align(ref_words: &[String], asr_words: &[String]) -> Vec<Option<usize>> {
+    let n = ref_words.len();
+    let m = asr_words.len();
+    if n == 0 || m == 0 {
+        return vec![None; n];
+    }
+
+    // dp[i][j] = LCS length of ref_words[..i] and asr_words[..j].
+    let mut dp = vec![vec![0u32; m + 1]; n + 1];
+    for i in 0..n {
+        for j in 0..m {
+            dp[i + 1][j + 1] = if ref_words[i] == asr_words[j] {
+                dp[i][j] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+
+    // Backtrack to recover the alignment. Walk from (n,m) back; whenever
+    // ref_words[i-1] == asr_words[j-1] we record a match.
+    let mut alignment = vec![None; n];
+    let mut i = n;
+    let mut j = m;
+    while i > 0 && j > 0 {
+        if ref_words[i - 1] == asr_words[j - 1] {
+            alignment[i - 1] = Some(j - 1);
+            i -= 1;
+            j -= 1;
+        } else if dp[i - 1][j] >= dp[i][j - 1] {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    alignment
+}
+
+/// Map clean reference lines onto ASR word timings deterministically.
+///
+/// Output: an `AlignedTrack` with exactly `reference_lines.len()` lines, each
+/// carrying the reference line's text verbatim and a `[start_ms, end_ms]`
+/// window derived from the LCS-matched ASR words. Strictly chronological
+/// (`line[i].end_ms <= line[i+1].start_ms`) by floor-clamping.
+///
+/// `best_source` is the authoritative source label (`"description"` or
+/// `"override"` in production). Provenance is `"{best_source}+{asr.provenance}"`.
+pub(super) fn merge_deterministic(
+    asr: &AlignedTrack,
+    reference_lines: &[String],
+    best_source: &str,
+) -> AlignedTrack {
+    // Tokenize the reference into (normalized_word, ref_line_idx) pairs.
+    let mut ref_pairs: Vec<(String, usize)> = Vec::new();
+    for (idx, line) in reference_lines.iter().enumerate() {
+        for w in line.split_whitespace() {
+            let n = normalize_word_for_match(w);
+            if !n.is_empty() {
+                ref_pairs.push((n, idx));
+            }
+        }
+    }
+
+    // Flatten ASR per-word timings (drop hallucinated lead-ins consistent with
+    // the Claude path so both branches see the same audio cleaning).
+    let mut asr_words: Vec<(String, u32, u32)> = Vec::new();
+    for line in &asr.lines {
+        let words = match &line.words {
+            Some(w) if !w.is_empty() => w.clone(),
+            _ => continue,
+        };
+        let words = drop_hallucinated_lead_in(words);
+        for w in &words {
+            let n = normalize_word_for_match(&w.text);
+            if !n.is_empty() {
+                asr_words.push((n, w.start_ms, w.end_ms));
+            }
+        }
+    }
+
+    // LCS alignment of normalized reference words to normalized ASR words.
+    let ref_only: Vec<String> = ref_pairs.iter().map(|(w, _)| w.clone()).collect();
+    let asr_only: Vec<String> = asr_words.iter().map(|(w, _, _)| w.clone()).collect();
+    let alignment = lcs_align(&ref_only, &asr_only);
+
+    // For each reference line, gather its matched ASR word indices.
+    let n_lines = reference_lines.len();
+    let mut line_asr_indices: Vec<Vec<usize>> = vec![Vec::new(); n_lines];
+    for (ref_idx, (_w, line_idx)) in ref_pairs.iter().enumerate() {
+        if let Some(asr_idx) = alignment[ref_idx] {
+            line_asr_indices[*line_idx].push(asr_idx);
+        }
+    }
+
+    // Compute per-line timing from matched indices (min start, max end).
+    // Unmatched lines get None and are filled in a second pass.
+    let mut starts: Vec<Option<u32>> = vec![None; n_lines];
+    let mut ends: Vec<Option<u32>> = vec![None; n_lines];
+    for (line_idx, indices) in line_asr_indices.iter().enumerate() {
+        if let Some(&min_i) = indices.iter().min() {
+            starts[line_idx] = Some(asr_words[min_i].1);
+        }
+        if let Some(&max_i) = indices.iter().max() {
+            ends[line_idx] = Some(asr_words[max_i].2);
+        }
+    }
+
+    // Second pass: emit AlignedLine per reference line with strictly
+    // increasing timings. For unmatched lines we use a small placeholder
+    // (200ms) starting at the previous line's end — this is NOT a uniform
+    // distribution (per `feedback_no_even_distribution.md`); it's a minimal
+    // window for a line the audio doesn't sing, so the wall briefly displays
+    // the reference text without breaking timeline monotonicity.
+    let mut output_lines: Vec<AlignedLine> = Vec::with_capacity(n_lines);
+    let mut floor: u32 = 0;
+    for (idx, text) in reference_lines.iter().enumerate() {
+        let raw_start = starts[idx].unwrap_or(floor);
+        let raw_end = ends[idx].unwrap_or(raw_start.saturating_add(200));
+        let s = raw_start.max(floor);
+        let e = raw_end.max(s.saturating_add(1));
+        output_lines.push(AlignedLine {
+            text: text.clone(),
+            start_ms: s,
+            end_ms: e,
+            words: None,
+        });
+        floor = e;
+    }
+
+    AlignedTrack {
+        lines: output_lines,
+        provenance: format!("{}+{}", best_source, asr.provenance),
+        raw_confidence: asr.raw_confidence,
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

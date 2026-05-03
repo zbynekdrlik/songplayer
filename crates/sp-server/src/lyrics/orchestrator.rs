@@ -136,7 +136,24 @@ impl Orchestrator {
                     "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
                 );
                 match claude_merge::merge(&self.ai_client, &asr, &text_candidates).await {
-                    Ok(merged) => Ok(split_track(&merged, self.split_cfg)),
+                    Ok(merged) => {
+                        // Description / override sources go through the
+                        // deterministic mapper (issue #78) which preserves
+                        // the reference's natural line breaks. Splitting
+                        // those at 32 chars would re-fragment exactly the
+                        // segmentation we just protected — skip split_track
+                        // for that provenance prefix. Claude-merge output
+                        // for genius/other sources still gets split as a
+                        // safety net (issue #64).
+                        let provenance = merged.provenance.as_str();
+                        if provenance.starts_with("description+")
+                            || provenance.starts_with("override+")
+                        {
+                            Ok(merged)
+                        } else {
+                            Ok(split_track(&merged, self.split_cfg))
+                        }
+                    }
                     Err(e) => {
                         tracing::warn!(
                             provenance = %asr.provenance,
