@@ -866,30 +866,41 @@ fn emit_with_subs(
 
 // ── Phase 5: cap + monotonic ──────────────────────────────────────────────────
 
-fn apply_cap_and_monotonic(lines: &mut [AlignedLine]) {
+fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
     // Sort by start_ms ascending; ties broken by original order (stable sort).
     lines.sort_by_key(|l| l.start_ms);
 
+    // Drop micro-windows whose original duration is below MIN_LINE_DURATION_MS.
+    // The previous policy inflated them up to MIN_LINE_DURATION_MS, but a
+    // 500 ms emit reads as a flash on the wall (operator wall-verify on
+    // id=132 2026-05-04). Better to leave the wall blank than flash a
+    // sub-readable line. Affects Phase 2 chorus repeats with tiny matched
+    // spans and Phase 4 sub-line splits where the second LCS finds
+    // near-zero overlap.
+    let mut output = Vec::with_capacity(lines.len());
     let mut floor: u32 = 0;
-    for l in lines.iter_mut() {
-        // Cap duration on the upper end.
+    for mut l in std::mem::take(lines) {
+        // Pre-clamp duration check.
         let dur = l.end_ms.saturating_sub(l.start_ms);
+        if dur < MIN_LINE_DURATION_MS {
+            continue;
+        }
+        // Upper cap.
         if dur > LONG_LINE_CAP_MS {
             l.end_ms = l.start_ms.saturating_add(LONG_LINE_CAP_MS);
         }
-        // Floor-clamp to enforce monotonic non-overlap.
+        // Floor-clamp start_ms forward to enforce monotonic non-overlap.
         if l.start_ms < floor {
             l.start_ms = floor;
         }
-        // Enforce minimum display duration so collapsed-window emits don't
-        // flash invisibly on the wall. Recomputed AFTER floor-clamp so the
-        // line gets at least MIN_LINE_DURATION_MS regardless of overlap.
-        let dur_after_clamp = l.end_ms.saturating_sub(l.start_ms);
-        if dur_after_clamp < MIN_LINE_DURATION_MS {
-            l.end_ms = l.start_ms.saturating_add(MIN_LINE_DURATION_MS);
+        // Drop if floor-clamp collapsed the window below threshold.
+        if l.end_ms.saturating_sub(l.start_ms) < MIN_LINE_DURATION_MS {
+            continue;
         }
         floor = l.end_ms;
+        output.push(l);
     }
+    *lines = output;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

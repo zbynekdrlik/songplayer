@@ -162,12 +162,16 @@ fn apply_cap_and_monotonic_caps_long_line_to_8s() {
         words: None,
     }];
     apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].start_ms, 1000);
     assert_eq!(lines[0].end_ms, 1000 + LONG_LINE_CAP_MS);
 }
 
 #[test]
 fn apply_cap_and_monotonic_floor_clamps_overlap() {
+    // Both lines have original dur 1000ms (>= MIN). After floor-clamp the
+    // second's start_ms is pushed to 1000 (the first's end_ms), leaving its
+    // dur at 500ms — equal to MIN_LINE_DURATION_MS so it's kept.
     let mut lines = vec![
         AlignedLine {
             text: "a".into(),
@@ -183,8 +187,61 @@ fn apply_cap_and_monotonic_floor_clamps_overlap() {
         },
     ];
     apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 2);
     assert!(lines[1].start_ms >= lines[0].end_ms);
     assert!(lines[1].end_ms > lines[1].start_ms);
+}
+
+#[test]
+fn apply_cap_and_monotonic_drops_pre_clamp_micro_window() {
+    // Original duration 200ms < 500ms threshold — dropped, no flash.
+    let mut lines = vec![
+        AlignedLine {
+            text: "real".into(),
+            start_ms: 0,
+            end_ms: 1500,
+            words: None,
+        },
+        AlignedLine {
+            text: "flash".into(),
+            start_ms: 2000,
+            end_ms: 2200, // 200ms — micro-window
+            words: None,
+        },
+        AlignedLine {
+            text: "more".into(),
+            start_ms: 3000,
+            end_ms: 5000,
+            words: None,
+        },
+    ];
+    apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].text, "real");
+    assert_eq!(lines[1].text, "more");
+}
+
+#[test]
+fn apply_cap_and_monotonic_drops_post_clamp_collapse() {
+    // Both lines start near 1000ms, both 600ms duration. After floor-clamp
+    // the second's window collapses to <500ms — drop it.
+    let mut lines = vec![
+        AlignedLine {
+            text: "a".into(),
+            start_ms: 0,
+            end_ms: 1100,
+            words: None,
+        },
+        AlignedLine {
+            text: "collapses".into(),
+            start_ms: 700,
+            end_ms: 1300, // post-clamp would be 1100..1300 = 200ms
+            words: None,
+        },
+    ];
+    apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "a");
 }
 
 // ── deterministic_split_one ───────────────────────────────────────────────────
