@@ -581,3 +581,7 @@ pub(super) fn merge_deterministic(
 #[cfg(test)]
 #[path = "claude_merge_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "claude_merge_deterministic_tests.rs"]
+mod deterministic_tests;
