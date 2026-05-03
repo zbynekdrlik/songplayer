@@ -16,9 +16,16 @@
 //! caller falls back to the deterministic NW DP. Claude is best-effort
 //! intelligence on top of a guaranteed-correct floor.
 //!
-//! Output schema: `{"l": [<int|null>, ...]}` — array length must equal the
-//! ASR word count. Validated for monotonic non-decreasing line indices and
-//! in-range values before use.
+//! Output schema: sparse pairs — `{"assignments": [{"a": <asr_idx>, "l":
+//! <ref_idx>}, ...]}`. Claude lists only words it wants to map; ASR words not
+//! in the list default to "skip". The first iteration used a dense
+//! `[<int|null>, ...]` array of length == asr_count, but Claude reliably
+//! miscounts arrays of 250+ elements (off by 5-15 entries on the id=132 test
+//! song). The sparse format sidesteps the counting problem entirely.
+//!
+//! Validation rules: assignments' `a` strictly increasing, `l` monotonic
+//! non-decreasing, both within their respective bounds. Output rejected (and
+//! NW DP fallback runs) if any rule violated.
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -29,7 +36,15 @@ use super::{AsrWord, LineEmit};
 
 #[derive(Debug, Deserialize)]
 struct ClaudeMappingResponse {
-    l: Vec<Option<usize>>,
+    assignments: Vec<Assignment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Assignment {
+    /// ASR word index — into the flattened ASR word stream.
+    a: usize,
+    /// Reference line index — into the description's line list.
+    l: usize,
 }
 
 pub(super) async fn claude_map_words_to_lines(
@@ -43,8 +58,7 @@ pub(super) async fn claude_map_words_to_lines(
     let prompt = build_mapping_prompt(ref_lines, asr_words);
     let raw = ai_client.chat("", &prompt).await?;
     let parsed: ClaudeMappingResponse = parse_first_json_object(&raw)?;
-    validate_mapping(&parsed.l, ref_lines.len(), asr_words.len())?;
-    Ok(parsed.l)
+    sparse_to_dense(&parsed.assignments, ref_lines.len(), asr_words.len())
 }
 
 fn build_mapping_prompt(ref_lines: &[String], asr_words: &[AsrWord]) -> String {
@@ -60,19 +74,24 @@ fn build_mapping_prompt(ref_lines: &[String], asr_words: &[AsrWord]) -> String {
         .map(|(i, w)| format!("{i}: {} ({}-{}ms)", w.norm, w.start_ms, w.end_ms))
         .collect::<Vec<_>>()
         .join("\n");
-    let n = asr_words.len();
+    let n_ref = ref_lines.len();
+    let n_asr = asr_words.len();
     format!(
         r#"You receive a worship-song reference text (clean lines from a YouTube description) and a WhisperX audio transcription word stream (with mishearings and possible filler).
 
-TASK: assign each ASR word to a reference line index, or null = skip.
+TASK: list which ASR words map to which reference lines. Skip words you don't want to assign — just don't include them in the output.
 
-CONSTRAINTS:
-- Line indices MUST be monotonic non-decreasing across the ASR stream — once you advance past line K, no later ASR word maps to a line < K.
-- Skip filler / mishearings / instrumental noise / silence with null.
-- Words that don't fit any reference line (ad-libs, "yeah", "oh") → null.
-- For chorus REPEATS in audio, assign repeated words to the FIRST occurrence in the reference and emit null for the rest. A separate pass handles repeats.
+OUTPUT SCHEMA: {{"assignments": [{{"a": <asr_word_idx>, "l": <ref_line_idx>}}, ...]}}
+
+Each assignment says "ASR word `a` belongs to reference line `l`". Words you omit default to skip (filler, mishearings, instrumental, ad-libs, chorus-repeat words for a separate pass).
+
+VALIDATION RULES (your output is rejected if any rule is broken):
+- `a` values STRICTLY INCREASING — each entry's `a` is greater than the previous entry's `a`. No duplicates.
+- `l` values MONOTONIC NON-DECREASING — each entry's `l` is >= the previous entry's `l`. Once you advance past line K, no later assignment maps to a line < K.
+- `a` in [0, {n_asr}). `l` in [0, {n_ref}).
+- A reference line MAY receive zero assignments (singer dropped it) — that's fine.
+- For chorus REPEATS in audio: assign words to the FIRST occurrence in the reference and OMIT later repeats. A separate pass handles repeats.
 - Use ASR start_ms timing to pick natural phrase boundaries when ambiguous.
-- A reference line MAY legitimately receive ZERO ASR words (singer dropped it) — that's fine.
 
 REFERENCE LINES (numbered):
 {ref_repr}
@@ -80,42 +99,65 @@ REFERENCE LINES (numbered):
 ASR WORD STREAM (numbered, with timing):
 {asr_repr}
 
-OUTPUT: ONLY a JSON object. Schema: {{"l": [<int|null>, ...]}}
-
-The array length MUST equal {n} (the ASR word count). Each element is the reference line index for that ASR word, or null to skip.
-
 First char of response = `{{`. No prose, no fences, no markdown."#
     )
 }
 
-pub(super) fn validate_mapping(
-    map: &[Option<usize>],
+/// Convert sparse Claude assignments to a dense `Vec<Option<usize>>` of length
+/// `n_asr`. Validates strict-increasing `a`, monotonic `l`, and range bounds in
+/// the same pass. ASR word indices not listed in `assignments` default to None
+/// (skip). This shape is robust to Claude failing to count to `n_asr` exactly:
+/// the model just lists what it wants to map and we fill in the rest.
+fn sparse_to_dense(
+    assignments: &[Assignment],
     n_ref: usize,
     n_asr: usize,
-) -> Result<(), anyhow::Error> {
-    if map.len() != n_asr {
-        anyhow::bail!("claude mapping length {} != asr count {}", map.len(), n_asr);
-    }
-    let mut last: Option<usize> = None;
-    for (i, m) in map.iter().enumerate() {
-        if let Some(idx) = m {
-            if *idx >= n_ref {
-                anyhow::bail!("line idx {} out of range [0..{})", idx, n_ref);
-            }
-            if let Some(prev) = last {
-                if *idx < prev {
-                    anyhow::bail!(
-                        "non-monotonic at asr[{}]: line {} after line {}",
-                        i,
-                        idx,
-                        prev
-                    );
-                }
-            }
-            last = Some(*idx);
+) -> Result<Vec<Option<usize>>, anyhow::Error> {
+    let mut dense = vec![None; n_asr];
+    let mut last_a: Option<usize> = None;
+    let mut last_l: Option<usize> = None;
+    for (i, a) in assignments.iter().enumerate() {
+        if a.a >= n_asr {
+            anyhow::bail!(
+                "assignment[{}] asr idx {} out of range [0..{})",
+                i,
+                a.a,
+                n_asr
+            );
         }
+        if a.l >= n_ref {
+            anyhow::bail!(
+                "assignment[{}] line idx {} out of range [0..{})",
+                i,
+                a.l,
+                n_ref
+            );
+        }
+        if let Some(prev) = last_a {
+            if a.a <= prev {
+                anyhow::bail!(
+                    "assignment[{}] asr idx not strictly increasing: {} after {}",
+                    i,
+                    a.a,
+                    prev
+                );
+            }
+        }
+        if let Some(prev) = last_l {
+            if a.l < prev {
+                anyhow::bail!(
+                    "assignment[{}] line idx not monotonic: {} after {}",
+                    i,
+                    a.l,
+                    prev
+                );
+            }
+        }
+        dense[a.a] = Some(a.l);
+        last_a = Some(a.a);
+        last_l = Some(a.l);
     }
-    Ok(())
+    Ok(dense)
 }
 
 pub(super) fn emits_from_mapping(map: &[Option<usize>], ref_lines: &[String]) -> Vec<LineEmit> {
@@ -186,47 +228,77 @@ pub(super) fn parse_first_json_object<T: DeserializeOwned>(raw: &str) -> Result<
 mod tests {
     use super::*;
 
-    #[test]
-    fn validate_mapping_accepts_valid() {
-        let m = vec![Some(0), None, Some(0), Some(1), None, Some(1)];
-        validate_mapping(&m, 2, 6).unwrap();
+    fn assn(a: usize, l: usize) -> Assignment {
+        Assignment { a, l }
     }
 
     #[test]
-    fn validate_mapping_accepts_all_null() {
-        let m = vec![None, None, None];
-        validate_mapping(&m, 3, 3).unwrap();
+    fn sparse_to_dense_fills_skips_with_none() {
+        // 6 ASR words; assignments only cover 0,1,3,5. Words 2,4 default skip.
+        let asgs = vec![assn(0, 0), assn(1, 0), assn(3, 1), assn(5, 1)];
+        let dense = sparse_to_dense(&asgs, 2, 6).unwrap();
+        assert_eq!(dense, vec![Some(0), Some(0), None, Some(1), None, Some(1)]);
     }
 
     #[test]
-    fn validate_mapping_rejects_wrong_length() {
-        let m = vec![Some(0), None];
-        let err = validate_mapping(&m, 1, 5).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("length 2"), "{}", msg);
+    fn sparse_to_dense_empty_assignments_yields_all_none() {
+        let dense = sparse_to_dense(&[], 3, 4).unwrap();
+        assert_eq!(dense, vec![None, None, None, None]);
     }
 
     #[test]
-    fn validate_mapping_rejects_out_of_range() {
-        let m = vec![Some(0), Some(2)];
-        let err = validate_mapping(&m, 1, 2).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("out of range"), "{}", msg);
+    fn sparse_to_dense_robust_to_short_list() {
+        // Claude returned only 2 entries for a 100-ASR-word stream — common
+        // length-counting failure mode that the old dense-array schema
+        // tripped on. Now: just fill the rest with None.
+        let asgs = vec![assn(0, 0), assn(1, 0)];
+        let dense = sparse_to_dense(&asgs, 2, 100).unwrap();
+        assert_eq!(dense.len(), 100);
+        assert_eq!(dense[0], Some(0));
+        assert_eq!(dense[1], Some(0));
+        assert!(dense[2..].iter().all(|x| x.is_none()));
     }
 
     #[test]
-    fn validate_mapping_rejects_non_monotonic() {
-        let m = vec![Some(1), Some(0)];
-        let err = validate_mapping(&m, 2, 2).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("non-monotonic"), "{}", msg);
+    fn sparse_to_dense_rejects_asr_idx_out_of_range() {
+        let asgs = vec![assn(0, 0), assn(99, 1)];
+        let err = sparse_to_dense(&asgs, 2, 5).unwrap_err();
+        assert!(format!("{err}").contains("out of range"));
     }
 
     #[test]
-    fn validate_mapping_allows_equal_consecutive() {
-        // Multiple ASR words mapping to the same line — the common case.
-        let m = vec![Some(0), Some(0), Some(0), Some(1), Some(1)];
-        validate_mapping(&m, 2, 5).unwrap();
+    fn sparse_to_dense_rejects_line_idx_out_of_range() {
+        let asgs = vec![assn(0, 0), assn(1, 9)];
+        let err = sparse_to_dense(&asgs, 2, 5).unwrap_err();
+        assert!(format!("{err}").contains("out of range"));
+    }
+
+    #[test]
+    fn sparse_to_dense_rejects_non_strict_increasing_a() {
+        let asgs = vec![assn(0, 0), assn(0, 1)]; // duplicate a
+        let err = sparse_to_dense(&asgs, 2, 5).unwrap_err();
+        assert!(format!("{err}").contains("strictly increasing"));
+    }
+
+    #[test]
+    fn sparse_to_dense_rejects_decreasing_a() {
+        let asgs = vec![assn(2, 0), assn(1, 1)];
+        let err = sparse_to_dense(&asgs, 2, 5).unwrap_err();
+        assert!(format!("{err}").contains("strictly increasing"));
+    }
+
+    #[test]
+    fn sparse_to_dense_rejects_non_monotonic_l() {
+        let asgs = vec![assn(0, 1), assn(1, 0)];
+        let err = sparse_to_dense(&asgs, 2, 5).unwrap_err();
+        assert!(format!("{err}").contains("monotonic"));
+    }
+
+    #[test]
+    fn sparse_to_dense_allows_equal_consecutive_l() {
+        // Common case: multiple ASR words map to same ref line.
+        let asgs = vec![assn(0, 0), assn(1, 0), assn(2, 0)];
+        sparse_to_dense(&asgs, 1, 3).unwrap();
     }
 
     #[test]
@@ -262,44 +334,41 @@ mod tests {
         assert_eq!(emits[0].asr_word_indices, vec![0]);
     }
 
-    #[derive(Deserialize)]
-    struct TestWrap {
-        l: Vec<Option<usize>>,
-    }
-
     #[test]
-    fn parse_first_json_object_clean() {
-        let raw = r#"{"l":[0,null,1]}"#;
-        let p: TestWrap = parse_first_json_object(raw).unwrap();
-        assert_eq!(p.l, vec![Some(0), None, Some(1)]);
+    fn parse_first_json_object_assignments_clean() {
+        let raw = r#"{"assignments":[{"a":0,"l":0},{"a":1,"l":0},{"a":3,"l":1}]}"#;
+        let p: ClaudeMappingResponse = parse_first_json_object(raw).unwrap();
+        assert_eq!(p.assignments.len(), 3);
+        assert_eq!((p.assignments[0].a, p.assignments[0].l), (0, 0));
+        assert_eq!((p.assignments[2].a, p.assignments[2].l), (3, 1));
     }
 
     #[test]
     fn parse_first_json_object_strips_prose() {
-        let raw = "Sure! Here:\n```json\n{\"l\":[1,2]}\n```";
-        let p: TestWrap = parse_first_json_object(raw).unwrap();
-        assert_eq!(p.l, vec![Some(1), Some(2)]);
+        let raw = "Sure! Here:\n```json\n{\"assignments\":[{\"a\":0,\"l\":1}]}\n```";
+        let p: ClaudeMappingResponse = parse_first_json_object(raw).unwrap();
+        assert_eq!(p.assignments.len(), 1);
+        assert_eq!((p.assignments[0].a, p.assignments[0].l), (0, 1));
     }
 
     #[test]
     fn parse_first_json_object_handles_nested_braces() {
-        let raw = r#"{"l":[0,1],"meta":{"nested":true}}"#;
-        let p: TestWrap = parse_first_json_object(raw).unwrap();
-        assert_eq!(p.l, vec![Some(0), Some(1)]);
+        let raw = r#"{"assignments":[{"a":0,"l":0}],"meta":{"nested":true}}"#;
+        let p: ClaudeMappingResponse = parse_first_json_object(raw).unwrap();
+        assert_eq!(p.assignments.len(), 1);
     }
 
     #[test]
     fn parse_first_json_object_handles_braces_in_strings() {
-        // Brace inside a string literal must NOT confuse depth tracking.
-        let raw = r#"{"note":"has } brace","l":[0]}"#;
-        let p: TestWrap = parse_first_json_object(raw).unwrap();
-        assert_eq!(p.l, vec![Some(0)]);
+        let raw = r#"{"note":"has } brace","assignments":[{"a":0,"l":0}]}"#;
+        let p: ClaudeMappingResponse = parse_first_json_object(raw).unwrap();
+        assert_eq!(p.assignments.len(), 1);
     }
 
     #[test]
     fn parse_first_json_object_malformed_returns_err() {
         let raw = "no json here";
-        let r: Result<TestWrap, _> = parse_first_json_object(raw);
+        let r: Result<ClaudeMappingResponse, _> = parse_first_json_object(raw);
         assert!(r.is_err());
     }
 }
