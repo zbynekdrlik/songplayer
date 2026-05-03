@@ -512,7 +512,7 @@ fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
     for i in 1..cap {
         if chars[i] == ' ' {
             let d = mid.abs_diff(i);
-            if best_dist.map_or(true, |bd| d < bd) {
+            if best_dist.is_none_or(|bd| d < bd) {
                 best_dist = Some(d);
                 best = Some(i);
             }
