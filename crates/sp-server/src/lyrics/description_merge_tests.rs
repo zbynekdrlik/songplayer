@@ -59,17 +59,19 @@ fn match_ref_to_asr_assigns_words_to_matching_lines() {
 
 #[test]
 fn detect_chorus_repeats_emits_for_long_unmatched_gap() {
-    // 1 ref line "holy holy holy". ASR sings it twice with a > 4s gap between
-    // (the chorus repeat).
+    // 1 ref line "holy holy holy". ASR sings it twice. First three words
+    // (0..1700) get LCS-consumed by the ref line. The remaining three words
+    // span 5500ms (6000..11500), exceeding CHORUS_REPEAT_GAP_MS (4000),
+    // so the chorus-repeat detector re-emits the ref line for that window.
     let ref_lines = vec!["holy holy holy".to_string()];
     let asr_track = asr(vec![
         make_word("holy", 0, 500),
         make_word("holy", 600, 1100),
         make_word("holy", 1200, 1700),
-        // long instrumental pause modelled by gap in indexing
+        // long instrumental pause; second-pass chorus repeats:
         make_word("holy", 6000, 6500),
-        make_word("holy", 6600, 7100),
-        make_word("holy", 7200, 7700),
+        make_word("holy", 8500, 9000),
+        make_word("holy", 11000, 11500),
     ]);
     let asr_words = flatten_asr(&asr_track);
     let emits = match_ref_to_asr(&ref_lines, &asr_words);

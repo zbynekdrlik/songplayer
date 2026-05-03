@@ -36,6 +36,11 @@
 //! `+claude-merge` suffix on the description path because the Claude call here
 //! is only for line-splitting, not semantic merging.
 
+// Algorithm uses several index-based scans (LCS DP, gap detection, char-index
+// split-point search) where the iter-chain rewrite obscures intent or pulls
+// awkward zip(enumerate(...)) patterns. Allow indexed loops for this module.
+#![allow(clippy::needless_range_loop)]
+
 use std::collections::HashMap;
 
 use serde::Deserialize;
@@ -212,7 +217,7 @@ fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit
 
     ref_lines
         .iter()
-        .zip(indices_per_line.into_iter())
+        .zip(indices_per_line)
         .map(|(text, indices)| LineEmit {
             text: text.clone(),
             asr_word_indices: indices,
@@ -283,7 +288,7 @@ fn detect_chorus_repeats(
                 .collect();
             let score = matched.len() as f32 / ref_norms.len() as f32;
             if score >= CHORUS_REPEAT_MIN_MATCH_RATIO
-                && best.as_ref().map(|(_, s, _)| score > *s).unwrap_or(true)
+                && best.as_ref().is_none_or(|(_, s, _)| score > *s)
             {
                 best = Some((li, score, matched));
             }
@@ -338,7 +343,7 @@ async fn claude_split_lines(
 
     let mut map: HashMap<usize, Vec<String>> = HashMap::new();
     for entry in parsed.splits {
-        let subs: Vec<String> = entry.subs.into_iter().map(|s| s.en).collect();
+        let subs: Vec<String> = entry.subs.iter().map(|s| s.en.clone()).collect();
         let all_fit = subs.iter().all(|s| s.chars().count() <= SUBLINE_MAX_CHARS);
         if !all_fit {
             // Claude violated the hard cap on at least one sub. Fall back to
@@ -525,12 +530,7 @@ fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
 }
 
 fn rfind_in(chars: &[char], targets: &[char]) -> Option<usize> {
-    for i in (0..chars.len()).rev() {
-        if targets.contains(&chars[i]) {
-            return Some(i);
-        }
-    }
-    None
+    chars.iter().rposition(|c| targets.contains(c))
 }
 
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
@@ -658,7 +658,7 @@ fn emit_with_subs(
 
 // ── Phase 5: cap + monotonic ──────────────────────────────────────────────────
 
-fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
+fn apply_cap_and_monotonic(lines: &mut [AlignedLine]) {
     // Sort by start_ms ascending; ties broken by original order (stable sort).
     lines.sort_by_key(|l| l.start_ms);
 
