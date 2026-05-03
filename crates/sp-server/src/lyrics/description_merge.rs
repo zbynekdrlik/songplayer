@@ -262,50 +262,82 @@ fn detect_chorus_repeats(
         })
         .collect();
 
-    let mut extras = Vec::new();
-    for (gap_s, gap_e) in long_gaps {
-        // Pull the gap's audio words.
-        let gap_norms: Vec<&str> = (gap_s..=gap_e)
-            .map(|i| asr_words[i].norm.as_str())
-            .collect();
-
-        // For each ref line, score how well its words appear in the gap.
-        let mut best: Option<(usize, f32, Vec<usize>)> = None;
-        for (li, ref_line) in ref_lines.iter().enumerate() {
-            let ref_norms: Vec<String> = ref_line
-                .split_whitespace()
+    // Pre-tokenize each ref line once. Empty ref lines (rare; defensive)
+    // contribute zero words so they're skipped in the per-gap loop.
+    let ref_norms_per_line: Vec<Vec<String>> = ref_lines
+        .iter()
+        .map(|line| {
+            line.split_whitespace()
                 .map(normalize_word)
                 .filter(|s| !s.is_empty())
-                .collect();
-            if ref_norms.is_empty() {
-                continue;
-            }
-            let ref_strs: Vec<&str> = ref_norms.iter().map(|s| s.as_str()).collect();
-            let alignment = lcs_align(&ref_strs, &gap_norms);
-            let matched: Vec<usize> = alignment
-                .iter()
-                .filter_map(|a| a.map(|j| gap_s + j))
-                .collect();
-            let score = matched.len() as f32 / ref_norms.len() as f32;
-            if score >= CHORUS_REPEAT_MIN_MATCH_RATIO
-                && best.as_ref().is_none_or(|(_, s, _)| score > *s)
-            {
-                best = Some((li, score, matched));
-            }
-        }
+                .collect()
+        })
+        .collect();
 
-        if let Some((li, score, matched)) = best {
-            debug!(
-                ref_idx = li,
-                score,
-                gap_start_ms = asr_words[gap_s].start_ms,
-                gap_end_ms = asr_words[gap_e].end_ms,
-                "description_merge: re-emit chorus repeat"
-            );
-            extras.push(LineEmit {
-                text: ref_lines[li].clone(),
-                asr_word_indices: matched,
-            });
+    let mut extras = Vec::new();
+    for (gap_s, gap_e) in long_gaps {
+        // Worship songs typically repeat the chorus 3-4 times in a row during
+        // bridges / vamps. A gap can therefore correspond to MULTIPLE chorus
+        // re-emissions, not just one. We loop the matcher: each iteration
+        // picks the best-scoring ref line in the gap's currently-unconsumed
+        // audio words; if its score >= threshold, we emit and remove its
+        // matched indices from the unconsumed set, then re-scan. Stop when no
+        // ref line qualifies, or unconsumed becomes too short to score.
+        //
+        // Without this loop a 90-second instrumental that sings the chorus 3×
+        // would only get 1 re-emit (one chorus printed; the wall blank for
+        // the other 60+ seconds). The 2026-05-03 wall verification on
+        // id=132 (Holy Forever) surfaced the gap.
+        let mut unconsumed: std::collections::BTreeSet<usize> = (gap_s..=gap_e).collect();
+
+        loop {
+            if unconsumed.is_empty() {
+                break;
+            }
+            let gap_indices: Vec<usize> = unconsumed.iter().copied().collect();
+            let gap_norms: Vec<&str> = gap_indices
+                .iter()
+                .map(|&i| asr_words[i].norm.as_str())
+                .collect();
+
+            let mut best: Option<(usize, f32, Vec<usize>)> = None;
+            for (li, ref_norms) in ref_norms_per_line.iter().enumerate() {
+                if ref_norms.is_empty() {
+                    continue;
+                }
+                let ref_strs: Vec<&str> = ref_norms.iter().map(|s| s.as_str()).collect();
+                let alignment = lcs_align(&ref_strs, &gap_norms);
+                let matched: Vec<usize> = alignment
+                    .iter()
+                    .filter_map(|a| a.map(|j| gap_indices[j]))
+                    .collect();
+                let score = matched.len() as f32 / ref_norms.len() as f32;
+                if score >= CHORUS_REPEAT_MIN_MATCH_RATIO
+                    && best.as_ref().is_none_or(|(_, s, _)| score > *s)
+                {
+                    best = Some((li, score, matched));
+                }
+            }
+
+            match best {
+                Some((li, score, matched)) => {
+                    debug!(
+                        ref_idx = li,
+                        score,
+                        gap_start_ms = asr_words[*matched.iter().min().unwrap_or(&gap_s)].start_ms,
+                        gap_end_ms = asr_words[*matched.iter().max().unwrap_or(&gap_e)].end_ms,
+                        "description_merge: re-emit chorus repeat"
+                    );
+                    for &idx in &matched {
+                        unconsumed.remove(&idx);
+                    }
+                    extras.push(LineEmit {
+                        text: ref_lines[li].clone(),
+                        asr_word_indices: matched,
+                    });
+                }
+                None => break,
+            }
         }
     }
 
