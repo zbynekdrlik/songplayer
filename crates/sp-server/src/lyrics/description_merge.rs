@@ -51,6 +51,9 @@ use crate::lyrics::backend::{AlignedLine, AlignedTrack};
 use crate::lyrics::claude_merge::{MergeError, drop_hallucinated_lead_in};
 use crate::lyrics::tier1::CandidateText;
 
+#[path = "description_merge_mapping.rs"]
+mod mapping;
+
 /// Hard upper bound for sub-line EN length. The LED wall renders only this
 /// many characters per row; longer lines visually overflow into adjacent UI
 /// panels and are unacceptable.
@@ -120,8 +123,29 @@ pub async fn process(
         return Err(MergeError::NoReference);
     }
 
-    // Phase 1: initial LCS match.
-    let mut emits = match_ref_to_asr(ref_lines, &asr_words);
+    // Phase 1: Claude line-mapping (primary) with NW DP fallback. Claude
+    // reads phrasing semantically; the deterministic DP is a guaranteed-correct
+    // floor on parse / network / refusal failure. See description_merge_mapping.
+    let mut emits = match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await
+    {
+        Ok(map) => {
+            info!(
+                ref_lines = ref_lines.len(),
+                asr_words = asr_words.len(),
+                "description_merge: claude line-mapping succeeded"
+            );
+            mapping::emits_from_mapping(&map, ref_lines)
+        }
+        Err(e) => {
+            warn!(
+                %e,
+                ref_lines = ref_lines.len(),
+                asr_words = asr_words.len(),
+                "description_merge: claude line-mapping failed; falling back to NW DP"
+            );
+            match_ref_to_asr(ref_lines, &asr_words)
+        }
+    };
 
     // Phase 2: chorus repeat re-emit for long unmatched gaps.
     let extras = detect_chorus_repeats(ref_lines, &asr_words, &emits);
