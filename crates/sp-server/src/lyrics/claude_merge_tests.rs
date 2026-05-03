@@ -238,7 +238,7 @@ fn source_priority_values() {
     }
 }
 
-// ── best_authoritative tests ──────────────────────────────────────────────
+// ── best_authoritative_candidate tests ────────────────────────────────────
 
 fn cand(source: &str, lines: &[&str]) -> CandidateText {
     CandidateText {
@@ -249,11 +249,19 @@ fn cand(source: &str, lines: &[&str]) -> CandidateText {
     }
 }
 
+/// Helper: compatibility shim that returns just the lines vec, matching the
+/// shape of the original `best_authoritative` for ergonomic test assertions.
+fn best_lines(candidates: &[CandidateText]) -> Vec<String> {
+    best_authoritative_candidate(candidates)
+        .map(|c| c.lines.clone())
+        .unwrap_or_default()
+}
+
 #[test]
 fn best_authoritative_picks_most_lines() {
     // When sources have equal priority, longest wins (tie-break on lines).
     // Both are tier1:genius (same priority) — the one with more lines should win.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand("tier1:genius", &["a", "b"]),
         cand("tier1:genius", &["a", "b", "c", "d"]),
     ]);
@@ -263,7 +271,7 @@ fn best_authoritative_picks_most_lines() {
 #[test]
 fn best_authoritative_uses_priority_for_tie() {
     // Both have 2 lines; spotify wins on priority.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand("genius", &["x", "y"]),
         cand("tier1:spotify", &["a", "b"]),
     ]);
@@ -276,7 +284,7 @@ fn best_authoritative_priority_beats_longer_lower_priority_candidate() {
     // (e.g. tier1:spotify with 12 lines) MUST win over a longer noisy
     // low-priority candidate (e.g. yt_subs with 50 lines). Pre-fix
     // ranking was (lines.len(), priority) which got this backwards.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand(
             "yt_subs",
             &[
@@ -365,7 +373,7 @@ fn best_authoritative_priority_beats_longer_lower_priority_candidate() {
 fn best_authoritative_override_beats_spotify() {
     // Override (priority 5) is the absolute top — even short overrides
     // beat longer Spotify candidates.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand(
             "tier1:spotify",
             &[
@@ -416,8 +424,9 @@ fn best_authoritative_override_beats_spotify() {
 
 #[test]
 fn best_authoritative_empty_returns_empty() {
-    let result = best_authoritative(&[]);
+    let result = best_lines(&[]);
     assert!(result.is_empty());
+    assert!(best_authoritative_candidate(&[]).is_none());
 }
 
 // ── merge output structure test (mock) ────────────────────────────────────

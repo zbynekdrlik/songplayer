@@ -56,10 +56,7 @@ pub async fn merge(
 ) -> Result<AlignedTrack, MergeError> {
     // Step 1: pick authoritative reference candidate (whole CandidateText, not
     // just its lines — we need the source label to choose the merge path).
-    let best = match text_candidates
-        .iter()
-        .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
-    {
+    let best = match best_authoritative_candidate(text_candidates) {
         Some(b) if !b.lines.is_empty() => b,
         _ => return Err(MergeError::NoReference),
     };
@@ -174,15 +171,18 @@ fn source_priority(source: &str) -> u32 {
     }
 }
 
-/// Pick the strongest authoritative source: source priority wins; ties broken by
-/// line count (longest wins). Per #72: high-priority short candidates beat
-/// longer noisy low-priority ones.
-fn best_authoritative(candidates: &[CandidateText]) -> Vec<String> {
+/// Pick the strongest authoritative candidate: source priority wins; ties
+/// broken by line count (longest wins). Per #72: high-priority short
+/// candidates beat longer noisy low-priority ones.
+///
+/// Returns a reference to the chosen `CandidateText` so callers can read
+/// both `lines` (for merging) and `source` (for choosing the merge path —
+/// description / override go through `merge_deterministic`, others go
+/// through Claude). Returns `None` for empty input.
+fn best_authoritative_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
     candidates
         .iter()
         .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
-        .map(|c| c.lines.clone())
-        .unwrap_or_default()
 }
 
 /// Build phrase-level chunks from all word-timed lines in `asr`.
