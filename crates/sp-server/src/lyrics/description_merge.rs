@@ -70,7 +70,17 @@ const CHORUS_REPEAT_GAP_MS: u32 = 4000;
 
 /// Minimum word-level match score for a chorus repeat to be emitted (matched
 /// ASR words / ref words ratio). Below threshold the gap stays blank.
-const CHORUS_REPEAT_MIN_MATCH_RATIO: f32 = 0.5;
+const CHORUS_REPEAT_MIN_MATCH_RATIO: f32 = 0.6;
+
+/// Minimum number of ASR words a chorus repeat must match. Without this floor
+/// a 2-word ref like "Holy forever" with ratio 0.5 would emit on a single
+/// "holy" audio word, producing a near-zero-duration display flash.
+const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
+
+/// Minimum display duration for ANY emitted line. Short matches (single
+/// audio word, fragments) collapse to ~0 ms display windows that flash by
+/// invisibly on the wall. We drop emits below this floor in Phase 5.
+const MIN_LINE_DURATION_MS: u32 = 500;
 
 /// One ref-line emission with its matched ASR word-stream indices. May be
 /// either an original-pass match (Phase 1) or a chorus-repeat re-emission
@@ -312,6 +322,22 @@ fn detect_chorus_repeats(
                     .filter_map(|a| a.map(|j| gap_indices[j]))
                     .collect();
                 let score = matched.len() as f32 / ref_norms.len() as f32;
+                if matched.len() < CHORUS_REPEAT_MIN_MATCHED_WORDS {
+                    continue;
+                }
+                // Reject re-emits whose matched audio span is too short to
+                // display (single-word matches, near-instant collapse). The
+                // floor-clamp in Phase 5 would still produce a 1-ms window
+                // that flashes invisibly on the wall.
+                let span_ms = match (matched.iter().min(), matched.iter().max()) {
+                    (Some(&imin), Some(&imax)) => asr_words[imax]
+                        .end_ms
+                        .saturating_sub(asr_words[imin].start_ms),
+                    _ => 0,
+                };
+                if span_ms < MIN_LINE_DURATION_MS {
+                    continue;
+                }
                 if score >= CHORUS_REPEAT_MIN_MATCH_RATIO
                     && best.as_ref().is_none_or(|(_, s, _)| score > *s)
                 {
@@ -696,7 +722,7 @@ fn apply_cap_and_monotonic(lines: &mut [AlignedLine]) {
 
     let mut floor: u32 = 0;
     for l in lines.iter_mut() {
-        // Cap duration.
+        // Cap duration on the upper end.
         let dur = l.end_ms.saturating_sub(l.start_ms);
         if dur > LONG_LINE_CAP_MS {
             l.end_ms = l.start_ms.saturating_add(LONG_LINE_CAP_MS);
@@ -705,8 +731,12 @@ fn apply_cap_and_monotonic(lines: &mut [AlignedLine]) {
         if l.start_ms < floor {
             l.start_ms = floor;
         }
-        if l.end_ms <= l.start_ms {
-            l.end_ms = l.start_ms.saturating_add(1);
+        // Enforce minimum display duration so collapsed-window emits don't
+        // flash invisibly on the wall. Recomputed AFTER floor-clamp so the
+        // line gets at least MIN_LINE_DURATION_MS regardless of overlap.
+        let dur_after_clamp = l.end_ms.saturating_sub(l.start_ms);
+        if dur_after_clamp < MIN_LINE_DURATION_MS {
+            l.end_ms = l.start_ms.saturating_add(MIN_LINE_DURATION_MS);
         }
         floor = l.end_ms;
     }
