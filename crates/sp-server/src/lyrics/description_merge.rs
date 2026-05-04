@@ -1,22 +1,11 @@
-//! Description / override merge pipeline (issue #78 full fix).
-//!
-//! Phases:
-//! - Phase 1: Claude line-mapping (primary) or NW DP (fallback) assigns each
-//!   asr_word to one ref line, monotonic line order.
-//! - Phase 2: chorus repeat re-emit for long unmatched audio gaps (worship
-//!   songs repeat chorus 3-4× but description lists each unique line once).
-//! - Phase 2.5: trim trailing-outlier matched indices so derived span ≤ 8 s.
-//! - Phase 3: Claude-driven natural-phrase splits for >32-char lines.
-//! - Phase 4: emit AlignedLine list with sub-line word-level timing (second
-//!   LCS within parent's matched word range).
-//! - Phase 5: 8 s display cap, monotonic floor-clamp, drop micro-windows.
-//!
-//! Per `feedback_line_timing_only.md` every emitted `AlignedLine` ships
-//! `words: None`. Per `feedback_no_even_distribution.md` no uniform-spacing
-//! ever; all timings derive from real ASR word-timestamps.
-//!
-//! Provenance: `"{candidate.source}+{asr.provenance}"`. No `+claude-merge`
-//! suffix; Claude only splits long lines, no semantic merging.
+//! Description / override merge pipeline (issue #78). Phases: 1 Claude
+//! line-mapping (NW DP fallback), 2 chorus repeat via sliding-window LCS,
+//! 2.5 trim outlier indices, 2.7 absorb sustained-note tokens at line
+//! boundaries, 3 Claude split for >32c, 4 emit AlignedLine with sub-line
+//! word timing, 5 cap + monotonic + extend end_ms to next.start_ms (no gap).
+//! Per `feedback_line_timing_only.md` `words: None`; per
+//! `feedback_no_even_distribution.md` no uniform spacing.
+//! Provenance: `"{source}+{asr.provenance}"`, no `+claude-merge` suffix.
 
 // Algorithm uses several index-based scans (LCS DP, gap detection, char-index
 // split-point search) where the iter-chain rewrite obscures intent or pulls
@@ -159,6 +148,10 @@ pub async fn process(
     for e in emits.iter_mut() {
         trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
     }
+
+    // Phase 2.7: absorb sustained-note same-word tokens at line boundaries
+    // into prev line so wall stays on prev until distinct word starts.
+    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
 
     audit_state.record_phase2(&emits, &asr_words);
 
@@ -878,6 +871,37 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const SUSTAINED_NOTE_MAX_GAP_MS: u32 = 2000;
+
+fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
+    for i in 1..emits.len() {
+        let (prev_part, next_part) = emits.split_at_mut(i);
+        let prev = prev_part.last_mut().expect("split_at >0");
+        let next = &mut next_part[0];
+        loop {
+            if next.asr_word_indices.len() <= 1 {
+                break;
+            }
+            let prev_last = match prev.asr_word_indices.last() {
+                Some(&i) => i,
+                None => break,
+            };
+            let next_first = next.asr_word_indices[0];
+            if asr_words[prev_last].norm != asr_words[next_first].norm {
+                break;
+            }
+            let gap = asr_words[next_first]
+                .start_ms
+                .saturating_sub(asr_words[prev_last].end_ms);
+            if gap > SUSTAINED_NOTE_MAX_GAP_MS {
+                break;
+            }
+            prev.asr_word_indices.push(next_first);
+            next.asr_word_indices.remove(0);
+        }
+    }
+}
 
 /// Trim trailing-outlier indices so derived span ≤ `LONG_LINE_CAP_MS`.
 /// LCS can pick far-apart words straddling multi-chorus audio: id=132

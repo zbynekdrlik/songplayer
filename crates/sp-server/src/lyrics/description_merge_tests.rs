@@ -103,6 +103,104 @@ fn detect_chorus_repeats_emits_for_long_unmatched_gap() {
     );
 }
 
+// ── Phase 2.7: absorb_sustained_boundary_tokens ───────────────────────────────
+
+#[test]
+fn absorb_sustained_boundary_transfers_same_word_token() {
+    // Sustained "Holy" as 2 tokens at 100-200 + 250-400. Next line starts
+    // with "Holy forever" → first "holy" token belongs to prev line; only
+    // "forever" belongs to next.
+    let asr_track = asr(vec![
+        make_word("you", 0, 80),
+        make_word("be", 90, 99),
+        make_word("holy", 100, 200),    // prev's last
+        make_word("holy", 250, 400),    // sustained — should transfer to prev
+        make_word("forever", 500, 800), // next's real first
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "You will always be, Holy".into(),
+            asr_word_indices: vec![0, 1, 2],
+        },
+        LineEmit {
+            text: "Holy forever".into(),
+            asr_word_indices: vec![3, 4],
+        },
+    ];
+    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2, 3]);
+    assert_eq!(emits[1].asr_word_indices, vec![4]);
+}
+
+#[test]
+fn absorb_sustained_boundary_no_op_when_words_differ() {
+    let asr_track = asr(vec![
+        make_word("holy", 0, 100),
+        make_word("forever", 200, 400),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Line A".into(),
+            asr_word_indices: vec![0],
+        },
+        LineEmit {
+            text: "Line B".into(),
+            asr_word_indices: vec![1],
+        },
+    ];
+    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0]);
+    assert_eq!(emits[1].asr_word_indices, vec![1]);
+}
+
+#[test]
+fn absorb_sustained_boundary_preserves_non_empty_next() {
+    // Next has only one token that matches prev — DON'T transfer (would
+    // leave next empty). The token stays as next's only word.
+    let asr_track = asr(vec![make_word("holy", 0, 100), make_word("holy", 200, 300)]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Line A".into(),
+            asr_word_indices: vec![0],
+        },
+        LineEmit {
+            text: "Holy".into(),
+            asr_word_indices: vec![1],
+        },
+    ];
+    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0]);
+    assert_eq!(emits[1].asr_word_indices, vec![1]);
+}
+
+#[test]
+fn absorb_sustained_boundary_skips_long_gap() {
+    // Same word but gap > SUSTAINED_NOTE_MAX_GAP_MS=2000 → not a sustained
+    // note, treat as separate occurrences.
+    let asr_track = asr(vec![
+        make_word("holy", 0, 100),
+        make_word("holy", 5000, 5100), // 4.9s gap > 2s
+        make_word("forever", 5500, 5800),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Line A".into(),
+            asr_word_indices: vec![0],
+        },
+        LineEmit {
+            text: "Holy forever".into(),
+            asr_word_indices: vec![1, 2],
+        },
+    ];
+    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0]);
+    assert_eq!(emits[1].asr_word_indices, vec![1, 2]);
+}
+
 // ── Phase 2.5: trim_outlier_indices ───────────────────────────────────────────
 
 #[test]
