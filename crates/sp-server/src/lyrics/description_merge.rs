@@ -859,6 +859,24 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         floor = l.end_ms;
         output.push(l);
     }
+
+    // Extend each line's end_ms to the next line's start_ms (capped at
+    // `start_ms + LONG_LINE_CAP_MS`) so the wall doesn't go blank during
+    // short silences between adjacent sung phrases. Operator wall-verify
+    // on id=132 2026-05-04: at 2:55 "You will always be, Holy" ended at
+    // 172349 ms but the next line "Holy forever" started at 173570 ms,
+    // leaving a 1.2 s blank-wall flicker. With this pass the line stays
+    // visible until the next line's first sung word begins.
+    let n = output.len();
+    for i in 0..n.saturating_sub(1) {
+        let next_start = output[i + 1].start_ms;
+        let max_end = output[i].start_ms.saturating_add(LONG_LINE_CAP_MS);
+        let new_end = next_start.min(max_end);
+        if new_end > output[i].end_ms {
+            output[i].end_ms = new_end;
+        }
+    }
+
     *lines = output;
 }
 

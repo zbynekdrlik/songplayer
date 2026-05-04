@@ -300,6 +300,72 @@ fn apply_cap_and_monotonic_drops_pre_clamp_micro_window() {
 }
 
 #[test]
+fn apply_cap_and_monotonic_extends_end_to_next_start() {
+    // Two lines with a short silence between them. Line A originally ends
+    // at 2000ms; Line B starts at 3500ms. Wall would flicker blank for
+    // 1500ms without this pass. Extension pulls A.end forward to B.start.
+    let mut lines = vec![
+        AlignedLine {
+            text: "A".into(),
+            start_ms: 0,
+            end_ms: 2000,
+            words: None,
+        },
+        AlignedLine {
+            text: "B".into(),
+            start_ms: 3500,
+            end_ms: 5000,
+            words: None,
+        },
+    ];
+    apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].end_ms, 3500, "A should extend to B.start");
+    assert_eq!(lines[1].start_ms, 3500);
+}
+
+#[test]
+fn apply_cap_and_monotonic_extension_capped_at_long_line_cap() {
+    // Line A starts at 0, originally ends at 1000. Line B starts at
+    // 30_000 (29s gap). Extension can't run for 29s — cap at A.start +
+    // LONG_LINE_CAP_MS = 8s. Wall blank from 8s to 30s.
+    let mut lines = vec![
+        AlignedLine {
+            text: "A".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: None,
+        },
+        AlignedLine {
+            text: "B".into(),
+            start_ms: 30_000,
+            end_ms: 32_000,
+            words: None,
+        },
+    ];
+    apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+        lines[0].end_ms, LONG_LINE_CAP_MS,
+        "A.end_ms should cap at start + LONG_LINE_CAP_MS"
+    );
+    assert_eq!(lines[1].start_ms, 30_000);
+}
+
+#[test]
+fn apply_cap_and_monotonic_last_line_no_extension() {
+    let mut lines = vec![AlignedLine {
+        text: "only".into(),
+        start_ms: 0,
+        end_ms: 1500,
+        words: None,
+    }];
+    apply_cap_and_monotonic(&mut lines);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].end_ms, 1500, "last line keeps original end_ms");
+}
+
+#[test]
 fn apply_cap_and_monotonic_drops_post_clamp_collapse() {
     // Both lines start near 1000ms, both 600ms duration. After floor-clamp
     // the second's window collapses to <500ms — drop it.
