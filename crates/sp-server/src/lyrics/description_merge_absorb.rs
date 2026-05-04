@@ -82,6 +82,21 @@ pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words
         let (prev_part, next_part) = emits.split_at_mut(i);
         let prev = prev_part.last_mut().expect("split_at >0");
         let next = &mut next_part[0];
+
+        // If next emit's ref text starts with the same word as the token
+        // being absorbed, that token rightfully belongs to next's first
+        // ref word — DON'T absorb. id=132 1:33: "Holy forever" line had
+        // matched [80, 81] (holy + forever); Phase 2.7 was incorrectly
+        // transferring 80 to prev "You are lifted high, Holy" because
+        // both ended/started with "holy", leaving "Holy forever" to
+        // display only at "forever" timestamp instead of "Holy".
+        let next_first_ref_word = next
+            .text
+            .split_whitespace()
+            .next()
+            .map(normalize_word)
+            .filter(|s| !s.is_empty());
+
         loop {
             if next.asr_word_indices.len() <= 1 {
                 break;
@@ -91,7 +106,12 @@ pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words
                 None => break,
             };
             let next_first = next.asr_word_indices[0];
-            if asr_words[prev_last].norm != asr_words[next_first].norm {
+            let token_norm = &asr_words[next_first].norm;
+            if asr_words[prev_last].norm != *token_norm {
+                break;
+            }
+            // Skip when this token IS next emit's first ref word.
+            if next_first_ref_word.as_deref() == Some(token_norm.as_str()) {
                 break;
             }
             let gap = asr_words[next_first]

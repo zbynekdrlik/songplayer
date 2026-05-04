@@ -186,16 +186,17 @@ fn absorb_prefix_matches_skips_single_word_refs() {
 // ── Phase 2.7: absorb_sustained_boundary_tokens ───────────────────────────────
 
 #[test]
-fn absorb_sustained_boundary_transfers_same_word_token() {
-    // Sustained "Holy" as 2 tokens at 100-200 + 250-400. Next line starts
-    // with "Holy forever" → first "holy" token belongs to prev line; only
-    // "forever" belongs to next.
+fn absorb_sustained_boundary_skips_when_next_ref_starts_same() {
+    // Next line "Holy forever" starts with "holy" — its first ref word
+    // matches the token. The token rightfully belongs to next's "Holy",
+    // don't absorb it into prev. id=132 1:33 case: "Holy forever" was
+    // losing its first sung holy.
     let asr_track = asr(vec![
         make_word("you", 0, 80),
         make_word("be", 90, 99),
-        make_word("holy", 100, 200),    // prev's last
-        make_word("holy", 250, 400),    // sustained — should transfer to prev
-        make_word("forever", 500, 800), // next's real first
+        make_word("holy", 100, 200),
+        make_word("holy", 250, 400), // would absorb under old rule
+        make_word("forever", 500, 800),
     ]);
     let asr_words = flatten_asr(&asr_track);
     let mut emits = vec![
@@ -209,8 +210,37 @@ fn absorb_sustained_boundary_transfers_same_word_token() {
         },
     ];
     absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
-    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2, 3]);
-    assert_eq!(emits[1].asr_word_indices, vec![4]);
+    // Phase 1's distribution preserved; the second "holy" stays with
+    // next so "Holy forever" displays starting at its first sung "holy".
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2]);
+    assert_eq!(emits[1].asr_word_indices, vec![3, 4]);
+}
+
+#[test]
+fn absorb_sustained_boundary_transfers_when_next_ref_differs() {
+    // Next line starts with a different word ("praise"). The trailing
+    // "holy" token at boundary is genuine sustained-note residue from
+    // prev — absorb it.
+    let asr_track = asr(vec![
+        make_word("be", 0, 80),
+        make_word("holy", 100, 200),
+        make_word("holy", 250, 400), // sustained, should absorb
+        make_word("praise", 500, 800),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Be Holy".into(),
+            asr_word_indices: vec![0, 1],
+        },
+        LineEmit {
+            text: "Praise the Lord".into(),
+            asr_word_indices: vec![2, 3],
+        },
+    ];
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2]);
+    assert_eq!(emits[1].asr_word_indices, vec![3]);
 }
 
 #[test]
