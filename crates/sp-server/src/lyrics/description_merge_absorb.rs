@@ -21,6 +21,15 @@ use super::{AsrWord, LineEmit, normalize_word};
 /// note (singer holding a vowel). Above this, treat as two separate words.
 pub(super) const SUSTAINED_NOTE_MAX_GAP_MS: u32 = 2000;
 
+/// A whisperx token shorter than this is a candidate "artifact" — likely
+/// a false split / breath / mistokenization rather than a real sung note.
+const ARTIFACT_TOKEN_DUR_MS: u32 = 200;
+
+/// Duration ratio threshold for confirming an artifact: if the next token
+/// is at least N× longer than the suspected artifact, treat the short
+/// token as noise and let the long token represent the real sung note.
+const ARTIFACT_DUR_RATIO: u32 = 5;
+
 pub(super) fn absorb_prefix_matches(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
     let mut consumed: std::collections::HashSet<usize> = emits
         .iter()
@@ -83,13 +92,6 @@ pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words
         let prev = prev_part.last_mut().expect("split_at >0");
         let next = &mut next_part[0];
 
-        // If next emit's ref text starts with the same word as the token
-        // being absorbed, that token rightfully belongs to next's first
-        // ref word — DON'T absorb. id=132 1:33: "Holy forever" line had
-        // matched [80, 81] (holy + forever); Phase 2.7 was incorrectly
-        // transferring 80 to prev "You are lifted high, Holy" because
-        // both ended/started with "holy", leaving "Holy forever" to
-        // display only at "forever" timestamp instead of "Holy".
         let next_first_ref_word = next
             .text
             .split_whitespace()
@@ -110,16 +112,40 @@ pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words
             if asr_words[prev_last].norm != *token_norm {
                 break;
             }
-            // Skip when this token IS next emit's first ref word.
-            if next_first_ref_word.as_deref() == Some(token_norm.as_str()) {
-                break;
-            }
             let gap = asr_words[next_first]
                 .start_ms
                 .saturating_sub(asr_words[prev_last].end_ms);
             if gap > SUSTAINED_NOTE_MAX_GAP_MS {
                 break;
             }
+
+            // ARTIFACT-REPLACEMENT detection: prev's last token is suspiciously
+            // short AND next's first token is much longer. Whisperx tokenized
+            // a single sustained note as two — the short one is noise, the
+            // long one is the real sung note. Absorb so prev gets the real
+            // long note and the line displays through the full sustain.
+            // id=132 2:53: prev_last=152 (80 ms) + next_first=153 (2141 ms,
+            // 26× longer) — short 152 is artifact, 153 is the real "Holy".
+            let prev_dur = asr_words[prev_last]
+                .end_ms
+                .saturating_sub(asr_words[prev_last].start_ms);
+            let next_dur = asr_words[next_first]
+                .end_ms
+                .saturating_sub(asr_words[next_first].start_ms);
+            let is_artifact_replacement = prev_dur < ARTIFACT_TOKEN_DUR_MS
+                && next_dur >= prev_dur.saturating_mul(ARTIFACT_DUR_RATIO);
+
+            // When NOT an artifact-replacement: skip absorption if next's
+            // first ref word matches the token (it rightfully belongs to
+            // next's first sung word). id=132 1:33: 79+80 both 2 s holies —
+            // each emit gets its own "Holy" so wall switches at the second
+            // holy's start.
+            if !is_artifact_replacement
+                && next_first_ref_word.as_deref() == Some(token_norm.as_str())
+            {
+                break;
+            }
+
             prev.asr_word_indices.push(next_first);
             next.asr_word_indices.remove(0);
         }

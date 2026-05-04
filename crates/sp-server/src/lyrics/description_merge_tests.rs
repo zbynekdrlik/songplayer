@@ -186,6 +186,37 @@ fn absorb_prefix_matches_skips_single_word_refs() {
 // ── Phase 2.7: absorb_sustained_boundary_tokens ───────────────────────────────
 
 #[test]
+fn absorb_sustained_boundary_artifact_replacement_kicks_in() {
+    // id=132 2:53: prev_last "holy" 80ms (artifact), next_first "holy"
+    // 2141ms (real sustained note). Artifact-replacement absorbs the
+    // long real holy into prev so prev's line displays through the
+    // full sustained note. Line 2 keeps just "forever".
+    let asr_track = asr(vec![
+        make_word("be", 0, 80),
+        make_word("holy", 100, 180),   // 80ms — artifact
+        make_word("holy", 1500, 3641), // 2141ms — real sustained
+        make_word("forever", 3700, 4000),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Be Holy".into(),
+            asr_word_indices: vec![0, 1],
+        },
+        LineEmit {
+            text: "Holy forever".into(),
+            asr_word_indices: vec![2, 3],
+        },
+    ];
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    // Long "holy" (idx 2) absorbed into prev despite next ref starting
+    // with "holy" — because next ref's same-text rule is overridden by
+    // artifact detection.
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2]);
+    assert_eq!(emits[1].asr_word_indices, vec![3]);
+}
+
+#[test]
 fn absorb_sustained_boundary_skips_when_next_ref_starts_same() {
     // Next line "Holy forever" starts with "holy" — its first ref word
     // matches the token. The token rightfully belongs to next's "Holy",
