@@ -65,12 +65,11 @@ const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
 /// invisibly on the wall. We drop emits below this floor in Phase 5.
 const MIN_LINE_DURATION_MS: u32 = 500;
 
-/// Phase 5 extends each line's end_ms toward the next line's start_ms to
-/// avoid wall-flicker between adjacent sung phrases — but capped at
-/// `last_matched_word.end_ms + EXTENSION_TOLERANCE_MS` so a line never
-/// lingers through a long instrumental. 1.5 s breath-pause buffer past
-/// the last sung word; after that, wall blank until next line.
+/// Phase 5 extension policy. Gap ≤ REASONABLE_GAP_MS → fill to next.start
+/// (whisperx often undertimes last word). Gap > REASONABLE_GAP_MS → cap
+/// at natural_end + EXTENSION_TOLERANCE_MS (real instrumental silence).
 const EXTENSION_TOLERANCE_MS: u32 = 1500;
+const REASONABLE_GAP_MS: u32 = 4000;
 
 /// One ref-line emission with its matched ASR word-stream indices. May be
 /// either an original-pass match (Phase 1) or a chorus-repeat re-emission
@@ -853,15 +852,18 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         floor = l.end_ms;
     }
 
-    // Extend each line's end_ms toward the next line's start_ms but
-    // cap at natural_end + EXTENSION_TOLERANCE_MS. Brief breath-pause
-    // buffer past the last sung word; never lingers through a long
-    // instrumental.
+    // Two-tier extension: see EXTENSION_TOLERANCE_MS / REASONABLE_GAP_MS.
     let n = lines.len();
     for i in 0..n.saturating_sub(1) {
         let next_start = lines[i + 1].start_ms;
-        let max_end = natural_ends[i].saturating_add(EXTENSION_TOLERANCE_MS);
-        let new_end = next_start.min(max_end);
+        let natural_gap = next_start.saturating_sub(natural_ends[i]);
+        let new_end = if natural_gap <= REASONABLE_GAP_MS {
+            next_start
+        } else {
+            natural_ends[i]
+                .saturating_add(EXTENSION_TOLERANCE_MS)
+                .min(next_start)
+        };
         if new_end > lines[i].end_ms {
             lines[i].end_ms = new_end;
         }

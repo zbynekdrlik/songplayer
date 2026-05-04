@@ -545,8 +545,8 @@ fn apply_cap_and_monotonic_extends_micro_window_within_tolerance() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_extends_end_within_tolerance() {
-    // 1500 ms gap < EXTENSION_TOLERANCE_MS — extension reaches B.start.
+fn apply_cap_and_monotonic_fills_reasonable_gap_to_next_start() {
+    // Gap 1500 ms ≤ REASONABLE_GAP_MS — extension reaches B.start fully.
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -563,13 +563,13 @@ fn apply_cap_and_monotonic_extends_end_within_tolerance() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].end_ms, 3500, "1.5 s gap fully bridged");
+    assert_eq!(lines[0].end_ms, 3500, "reasonable gap fully bridged");
     assert_eq!(lines[1].start_ms, 3500);
 }
 
 #[test]
-fn apply_cap_and_monotonic_extension_capped_at_tolerance() {
-    // 29 s instrumental gap — extension capped at natural_end +
+fn apply_cap_and_monotonic_caps_long_gap_at_tolerance() {
+    // Gap 29 s > REASONABLE_GAP_MS — extension capped at natural_end +
     // EXTENSION_TOLERANCE_MS=1500. Wall blank from 2500 to 30_000.
     let mut lines = vec![
         AlignedLine {
@@ -590,7 +590,7 @@ fn apply_cap_and_monotonic_extension_capped_at_tolerance() {
     assert_eq!(
         lines[0].end_ms,
         1000 + EXTENSION_TOLERANCE_MS,
-        "A extends only by tolerance past natural_end"
+        "long gap → tolerance-capped extension"
     );
     assert_eq!(lines[1].start_ms, 30_000);
 }
