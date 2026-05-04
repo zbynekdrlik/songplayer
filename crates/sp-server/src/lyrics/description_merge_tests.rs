@@ -103,6 +103,86 @@ fn detect_chorus_repeats_emits_for_long_unmatched_gap() {
     );
 }
 
+// ── Phase 2.6: absorb_prefix_matches ──────────────────────────────────────────
+
+#[test]
+fn absorb_prefix_matches_attaches_unconsumed_ref_prefix() {
+    // Phase 2 sliding-window window cap caused [is, the, highest] match
+    // for "Your name is the highest" while [your, name] sat unconsumed
+    // before. Prefix-absorption walks back, finds them, attaches.
+    let asr_track = asr(vec![
+        make_word("your", 0, 100),   // 0 — prefix word 1
+        make_word("name", 200, 400), // 1 — prefix word 2
+        // 8s instrumental gap
+        make_word("is", 8500, 8700),      // 2 — current emit start
+        make_word("the", 8800, 9000),     // 3
+        make_word("highest", 9100, 9500), // 4
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![LineEmit {
+        text: "Your name is the highest".into(),
+        asr_word_indices: vec![2, 3, 4],
+    }];
+    absorb::absorb_prefix_matches(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn absorb_prefix_matches_stops_at_consumed_word() {
+    // Idx 1 is consumed (assigned to a different emit). Walking back from
+    // emit's first matched, we hit consumed and stop — don't claim
+    // someone else's word.
+    let asr_track = asr(vec![
+        make_word("your", 0, 100),        // 0 — would match prefix
+        make_word("foreign", 200, 400),   // 1 — consumed by another emit
+        make_word("name", 500, 700),      // 2 — would match prefix
+        make_word("is", 8500, 8700),      // 3 — current emit start
+        make_word("the", 8800, 9000),     // 4
+        make_word("highest", 9100, 9500), // 5
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Foreign claim".into(),
+            asr_word_indices: vec![1],
+        },
+        LineEmit {
+            text: "Your name is the highest".into(),
+            asr_word_indices: vec![3, 4, 5],
+        },
+    ];
+    absorb::absorb_prefix_matches(&mut emits, &asr_words);
+    // Walks back from idx 3: idx 2 ("name") matches ref[1] → add. cursor=2.
+    // Walks back from cursor 2: idx 1 ("foreign") consumed → stop.
+    // Result: prefix only includes idx 2; idx 0 ("your") not attached.
+    assert_eq!(emits[1].asr_word_indices, vec![2, 3, 4, 5]);
+}
+
+#[test]
+fn absorb_prefix_matches_no_op_when_emit_already_starts_at_ref_zero() {
+    let asr_track = asr(vec![make_word("your", 0, 100), make_word("name", 200, 400)]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![LineEmit {
+        text: "Your name".into(),
+        asr_word_indices: vec![0, 1],
+    }];
+    absorb::absorb_prefix_matches(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1]);
+}
+
+#[test]
+fn absorb_prefix_matches_skips_single_word_refs() {
+    // 1-word ref line — no prefix to absorb.
+    let asr_track = asr(vec![make_word("holy", 0, 100), make_word("holy", 200, 400)]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![LineEmit {
+        text: "Holy".into(),
+        asr_word_indices: vec![1],
+    }];
+    absorb::absorb_prefix_matches(&mut emits, &asr_words);
+    assert_eq!(emits[0].asr_word_indices, vec![1]);
+}
+
 // ── Phase 2.7: absorb_sustained_boundary_tokens ───────────────────────────────
 
 #[test]
@@ -128,7 +208,7 @@ fn absorb_sustained_boundary_transfers_same_word_token() {
             asr_word_indices: vec![3, 4],
         },
     ];
-    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
     assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2, 3]);
     assert_eq!(emits[1].asr_word_indices, vec![4]);
 }
@@ -150,7 +230,7 @@ fn absorb_sustained_boundary_no_op_when_words_differ() {
             asr_word_indices: vec![1],
         },
     ];
-    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
     assert_eq!(emits[0].asr_word_indices, vec![0]);
     assert_eq!(emits[1].asr_word_indices, vec![1]);
 }
@@ -171,7 +251,7 @@ fn absorb_sustained_boundary_preserves_non_empty_next() {
             asr_word_indices: vec![1],
         },
     ];
-    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
     assert_eq!(emits[0].asr_word_indices, vec![0]);
     assert_eq!(emits[1].asr_word_indices, vec![1]);
 }
@@ -196,7 +276,7 @@ fn absorb_sustained_boundary_skips_long_gap() {
             asr_word_indices: vec![1, 2],
         },
     ];
-    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
     assert_eq!(emits[0].asr_word_indices, vec![0]);
     assert_eq!(emits[1].asr_word_indices, vec![1, 2]);
 }
@@ -330,17 +410,20 @@ fn aligned_lines_for_emit_with_subs_assigns_per_sub_word_timing() {
 // ── Phase 5: cap + monotonic ──────────────────────────────────────────────────
 
 #[test]
-fn apply_cap_and_monotonic_caps_long_line_to_8s() {
+fn apply_cap_and_monotonic_preserves_long_natural_span() {
+    // 30 s line — Phase 5 no longer caps display duration. The matcher
+    // (sliding-window + trim) is responsible for keeping natural spans
+    // reasonable; Phase 5 just enforces monotonic + bounded extension.
     let mut lines = vec![AlignedLine {
         text: "long".into(),
         start_ms: 1000,
-        end_ms: 60000, // 59 s — way over 8 s cap
+        end_ms: 30000,
         words: None,
     }];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].start_ms, 1000);
-    assert_eq!(lines[0].end_ms, 1000 + LONG_LINE_CAP_MS);
+    assert_eq!(lines[0].end_ms, 30000);
 }
 
 #[test]
@@ -369,11 +452,11 @@ fn apply_cap_and_monotonic_floor_clamps_overlap() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_extends_micro_window_through_next_gap() {
-    // 200ms middle line followed by 800ms gap — extension saves it: the
-    // line displays from 2000ms (its real start) through 3000ms (next's
-    // start), total 1000ms ≥ MIN_LINE_DURATION_MS. Wall stays on it
-    // through the silence. This is operator directive: NO gap, ever.
+fn apply_cap_and_monotonic_extends_micro_window_within_tolerance() {
+    // 200 ms middle line followed by 800 ms gap. Extension caps at
+    // natural_end + tolerance: 2200 + 1500 = 3700, then min with
+    // next.start = 3000 → end_ms = 3000. Final dur = 1000 ms,
+    // ≥ MIN_LINE_DURATION_MS. Kept.
     let mut lines = vec![
         AlignedLine {
             text: "real".into(),
@@ -396,17 +479,13 @@ fn apply_cap_and_monotonic_extends_micro_window_through_next_gap() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 3);
-    assert_eq!(lines[0].end_ms, 2000, "real extends to short.start");
-    assert_eq!(lines[1].text, "short");
     assert_eq!(lines[1].start_ms, 2000);
-    assert_eq!(lines[1].end_ms, 3000, "short extends to more.start");
+    assert_eq!(lines[1].end_ms, 3000);
 }
 
 #[test]
-fn apply_cap_and_monotonic_extends_end_to_next_start() {
-    // Two lines with a short silence between them. Line A originally ends
-    // at 2000ms; Line B starts at 3500ms. Wall would flicker blank for
-    // 1500ms without this pass. Extension pulls A.end forward to B.start.
+fn apply_cap_and_monotonic_extends_end_within_tolerance() {
+    // 1500 ms gap < EXTENSION_TOLERANCE_MS — extension reaches B.start.
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -423,15 +502,14 @@ fn apply_cap_and_monotonic_extends_end_to_next_start() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].end_ms, 3500, "A should extend to B.start");
+    assert_eq!(lines[0].end_ms, 3500, "1.5 s gap fully bridged");
     assert_eq!(lines[1].start_ms, 3500);
 }
 
 #[test]
-fn apply_cap_and_monotonic_extension_uncapped_no_gap() {
-    // No gap, EVER. Operator directive 2026-05-04. Even a 29 s instrumental
-    // gap between sung phrases: the line stays visible across the whole
-    // silence until the next phrase's first sung word begins.
+fn apply_cap_and_monotonic_extension_capped_at_tolerance() {
+    // 29 s instrumental gap — extension capped at natural_end +
+    // EXTENSION_TOLERANCE_MS=1500. Wall blank from 2500 to 30_000.
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -448,7 +526,11 @@ fn apply_cap_and_monotonic_extension_uncapped_no_gap() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].end_ms, 30_000, "A extends to B.start, no cap");
+    assert_eq!(
+        lines[0].end_ms,
+        1000 + EXTENSION_TOLERANCE_MS,
+        "A extends only by tolerance past natural_end"
+    );
     assert_eq!(lines[1].start_ms, 30_000);
 }
 

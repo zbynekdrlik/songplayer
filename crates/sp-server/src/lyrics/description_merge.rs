@@ -31,6 +31,9 @@ mod audit;
 #[path = "description_merge_window.rs"]
 mod window;
 
+#[path = "description_merge_absorb.rs"]
+mod absorb;
+
 /// Hard upper bound for sub-line EN length. The LED wall renders only this
 /// many characters per row; longer lines visually overflow into adjacent UI
 /// panels and are unacceptable.
@@ -61,6 +64,13 @@ const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
 /// audio word, fragments) collapse to ~0 ms display windows that flash by
 /// invisibly on the wall. We drop emits below this floor in Phase 5.
 const MIN_LINE_DURATION_MS: u32 = 500;
+
+/// Phase 5 extends each line's end_ms toward the next line's start_ms to
+/// avoid wall-flicker between adjacent sung phrases — but capped at
+/// `last_matched_word.end_ms + EXTENSION_TOLERANCE_MS` so a line never
+/// lingers through a long instrumental. 1.5 s breath-pause buffer past
+/// the last sung word; after that, wall blank until next line.
+const EXTENSION_TOLERANCE_MS: u32 = 1500;
 
 /// One ref-line emission with its matched ASR word-stream indices. May be
 /// either an original-pass match (Phase 1) or a chorus-repeat re-emission
@@ -149,9 +159,13 @@ pub async fn process(
         trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
     }
 
-    // Phase 2.7: absorb sustained-note same-word tokens at line boundaries
-    // into prev line so wall stays on prev until distinct word starts.
-    absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    // Phase 2.6: prefix-absorption — attach unconsumed prefix words that
+    // Phase 2's window cap missed (id=132 3:07).
+    absorb::absorb_prefix_matches(&mut emits, &asr_words);
+
+    // Phase 2.7: sustained-note absorption — same-text boundary tokens
+    // stay with prev line so wall doesn't switch mid-sustained-note.
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
 
     audit_state.record_phase2(&emits, &asr_words);
 
@@ -822,16 +836,13 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
     // Sort by start_ms ascending; ties broken by original order (stable sort).
     lines.sort_by_key(|l| l.start_ms);
 
-    // Cap original audio span at LONG_LINE_CAP_MS (defensive — Phase 2.5
-    // trim_outlier_indices already enforces this in the matched-index
-    // domain, but a tight cap here protects against any pre-Phase-5 path
-    // that bypasses trim).
-    for l in lines.iter_mut() {
-        let dur = l.end_ms.saturating_sub(l.start_ms);
-        if dur > LONG_LINE_CAP_MS {
-            l.end_ms = l.start_ms.saturating_add(LONG_LINE_CAP_MS);
-        }
-    }
+    // Snapshot the natural end_ms (last sung word's end) per line BEFORE
+    // any Phase 5 modifications. Used as the upper bound for the
+    // extension pass — a line never displays more than
+    // EXTENSION_TOLERANCE_MS past its last sung word, so wall doesn't
+    // linger through long instrumentals (id=132 wall-verify 2026-05-04:
+    // 49 of 49 misalignments came from unbounded extension).
+    let natural_ends: Vec<u32> = lines.iter().map(|l| l.end_ms).collect();
 
     // Floor-clamp start_ms forward to enforce monotonic non-overlap.
     let mut floor: u32 = 0;
@@ -842,56 +853,26 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         floor = l.end_ms;
     }
 
-    // Extend each line's end_ms to the next line's start_ms (operator
-    // directive: NO gap on the wall, EVER). Last line keeps natural end.
+    // Extend each line's end_ms toward the next line's start_ms but
+    // cap at natural_end + EXTENSION_TOLERANCE_MS. Brief breath-pause
+    // buffer past the last sung word; never lingers through a long
+    // instrumental.
     let n = lines.len();
     for i in 0..n.saturating_sub(1) {
         let next_start = lines[i + 1].start_ms;
-        if next_start > lines[i].end_ms {
-            lines[i].end_ms = next_start;
+        let max_end = natural_ends[i].saturating_add(EXTENSION_TOLERANCE_MS);
+        let new_end = next_start.min(max_end);
+        if new_end > lines[i].end_ms {
+            lines[i].end_ms = new_end;
         }
     }
 
-    // Drop micro-windows whose POST-EXTENSION duration is still below
-    // MIN_LINE_DURATION_MS — a sub-readable line reads as a flash on the
-    // wall regardless of its source. Extension saves short emits that
-    // are followed by a gap (sustained-note absorption may leave a 1-word
-    // emit which the next-line gap then extends to a readable window).
+    // Drop micro-windows whose post-extension duration is still below
+    // MIN_LINE_DURATION_MS (sub-readable flashes).
     lines.retain(|l| l.end_ms.saturating_sub(l.start_ms) >= MIN_LINE_DURATION_MS);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const SUSTAINED_NOTE_MAX_GAP_MS: u32 = 2000;
-
-fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
-    for i in 1..emits.len() {
-        let (prev_part, next_part) = emits.split_at_mut(i);
-        let prev = prev_part.last_mut().expect("split_at >0");
-        let next = &mut next_part[0];
-        loop {
-            if next.asr_word_indices.len() <= 1 {
-                break;
-            }
-            let prev_last = match prev.asr_word_indices.last() {
-                Some(&i) => i,
-                None => break,
-            };
-            let next_first = next.asr_word_indices[0];
-            if asr_words[prev_last].norm != asr_words[next_first].norm {
-                break;
-            }
-            let gap = asr_words[next_first]
-                .start_ms
-                .saturating_sub(asr_words[prev_last].end_ms);
-            if gap > SUSTAINED_NOTE_MAX_GAP_MS {
-                break;
-            }
-            prev.asr_word_indices.push(next_first);
-            next.asr_word_indices.remove(0);
-        }
-    }
-}
 
 /// Trim trailing-outlier indices so derived span ≤ `LONG_LINE_CAP_MS`.
 /// LCS can pick far-apart words straddling multi-chorus audio: id=132
