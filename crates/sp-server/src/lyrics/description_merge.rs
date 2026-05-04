@@ -909,18 +909,18 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Trim trailing-outlier indices so derived span ≤ `LONG_LINE_CAP_MS`.
-/// LCS matchers can pick a far-later word that fits the ref-line pattern
-/// but lies past the real sung instance — id=132 2026-05-04: 5 contiguous
-/// words + 6th from a different chorus, spanning 11.8 s. Trim keeps tail
-/// off until span fits cap; never drops below 2 (CHORUS_REPEAT_MIN floor).
+/// LCS can pick far-apart words straddling multi-chorus audio: id=132
+/// saw both [210..214, 221] (11.8 s) and [129, 136] (10.4 s "Holy forever").
+/// Pop trailing until span fits cap; can drop to 1 entry — Phase 5's
+/// MIN_LINE_DURATION_MS drop then rejects single-word residuals.
 fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWord]) {
-    if indices.len() <= 2 {
+    if indices.len() <= 1 {
         return;
     }
     indices.sort_unstable();
-    while indices.len() > 2 {
+    while indices.len() > 1 {
         let first = indices[0];
-        let last = *indices.last().expect("len > 2");
+        let last = *indices.last().expect("len > 1");
         let span = asr_words[last]
             .end_ms
             .saturating_sub(asr_words[first].start_ms);

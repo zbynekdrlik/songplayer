@@ -139,8 +139,12 @@ fn trim_outlier_indices_drops_trailing_outlier_past_cap() {
 }
 
 #[test]
-fn trim_outlier_indices_preserves_min_two_entries() {
-    // Even if span exceeds cap, never trim below 2 entries.
+fn trim_outlier_indices_drops_to_single_when_two_entry_span_exceeds_cap() {
+    // 2-entry emit with span > cap — trim drops the trailing outlier so
+    // only [0] remains. Phase 5 will then reject the single-word residual
+    // via its MIN_LINE_DURATION_MS micro-window drop. Reproduces id=132
+    // 2026-05-04 case where Phase 2 LCS for "Holy forever" picked the
+    // first "holy" + a far-later "forever" across multiple sung phrases.
     let asr_track = asr(vec![
         make_word("a", 0, 100),
         make_word("b", 50000, 50100), // 50s gap — exceeds cap
@@ -148,7 +152,17 @@ fn trim_outlier_indices_preserves_min_two_entries() {
     let asr_words = flatten_asr(&asr_track);
     let mut indices = vec![0, 1];
     trim_outlier_indices(&mut indices, &asr_words);
-    assert_eq!(indices, vec![0, 1]);
+    assert_eq!(indices, vec![0]);
+}
+
+#[test]
+fn trim_outlier_indices_keeps_single_entry_intact() {
+    // Single-entry input is untouched (no second word to compare span).
+    let asr_track = asr(vec![make_word("a", 1000, 1500)]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = vec![0];
+    trim_outlier_indices(&mut indices, &asr_words);
+    assert_eq!(indices, vec![0]);
 }
 
 #[test]
