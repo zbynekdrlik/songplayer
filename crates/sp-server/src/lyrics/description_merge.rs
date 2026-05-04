@@ -39,6 +39,9 @@ mod mapping;
 #[path = "description_merge_audit.rs"]
 mod audit;
 
+#[path = "description_merge_window.rs"]
+mod window;
+
 /// Hard upper bound for sub-line EN length. The LED wall renders only this
 /// many characters per row; longer lines visually overflow into adjacent UI
 /// panels and are unacceptable.
@@ -439,77 +442,30 @@ fn detect_chorus_repeats(
 
     let mut extras = Vec::new();
     for (gap_s, gap_e) in long_gaps {
-        // Worship songs typically repeat the chorus 3-4 times in a row during
-        // bridges / vamps. A gap can therefore correspond to MULTIPLE chorus
-        // re-emissions, not just one. We loop the matcher: each iteration
-        // picks the best-scoring ref line in the gap's currently-unconsumed
-        // audio words; if its score >= threshold, we emit and remove its
-        // matched indices from the unconsumed set, then re-scan. Stop when no
-        // ref line qualifies, or unconsumed becomes too short to score.
-        //
-        // Without this loop a 90-second instrumental that sings the chorus 3×
-        // would only get 1 re-emit (one chorus printed; the wall blank for
-        // the other 60+ seconds). The 2026-05-03 wall verification on
-        // id=132 (Holy Forever) surfaced the gap.
-        let mut unconsumed: std::collections::BTreeSet<usize> = (gap_s..=gap_e).collect();
+        // Sliding-window matcher: per (ref_line, candidate_start), LCS within
+        // an 8 s window only. Match span-bounded by construction so a Phase
+        // 2 emit can never exceed LONG_LINE_CAP_MS pre-Phase-5. See
+        // best_window_match.
+        let mut unconsumed: Vec<usize> = (gap_s..=gap_e).collect();
 
         loop {
             if unconsumed.is_empty() {
                 break;
             }
-            let gap_indices: Vec<usize> = unconsumed.iter().copied().collect();
-            let gap_norms: Vec<&str> = gap_indices
-                .iter()
-                .map(|&i| asr_words[i].norm.as_str())
-                .collect();
-
-            let mut best: Option<(usize, f32, Vec<usize>)> = None;
-            for (li, ref_norms) in ref_norms_per_line.iter().enumerate() {
-                if ref_norms.is_empty() {
-                    continue;
-                }
-                let ref_strs: Vec<&str> = ref_norms.iter().map(|s| s.as_str()).collect();
-                let alignment = lcs_align(&ref_strs, &gap_norms);
-                let matched: Vec<usize> = alignment
-                    .iter()
-                    .filter_map(|a| a.map(|j| gap_indices[j]))
-                    .collect();
-                let score = matched.len() as f32 / ref_norms.len() as f32;
-                if matched.len() < CHORUS_REPEAT_MIN_MATCHED_WORDS {
-                    continue;
-                }
-                // Reject re-emits whose matched audio span is too short to
-                // display (single-word matches, near-instant collapse). The
-                // floor-clamp in Phase 5 would still produce a 1-ms window
-                // that flashes invisibly on the wall.
-                let span_ms = match (matched.iter().min(), matched.iter().max()) {
-                    (Some(&imin), Some(&imax)) => asr_words[imax]
-                        .end_ms
-                        .saturating_sub(asr_words[imin].start_ms),
-                    _ => 0,
-                };
-                if span_ms < MIN_LINE_DURATION_MS {
-                    continue;
-                }
-                if score >= CHORUS_REPEAT_MIN_MATCH_RATIO
-                    && best.as_ref().is_none_or(|(_, s, _)| score > *s)
-                {
-                    best = Some((li, score, matched));
-                }
-            }
-
+            let best =
+                window::best_window_match(&ref_norms_per_line, &unconsumed, asr_words, &lcs_align);
             match best {
                 Some((li, score, matched)) => {
                     debug!(
                         ref_idx = li,
                         score,
-                        gap_start_ms = asr_words[*matched.iter().min().unwrap_or(&gap_s)].start_ms,
-                        gap_end_ms = asr_words[*matched.iter().max().unwrap_or(&gap_e)].end_ms,
-                        "description_merge: re-emit chorus repeat"
+                        win_start_ms = asr_words[*matched.first().expect("non-empty")].start_ms,
+                        win_end_ms = asr_words[*matched.last().expect("non-empty")].end_ms,
+                        "description_merge: re-emit chorus repeat (window-bounded)"
                     );
-                    for &idx in &matched {
-                        unconsumed.remove(&idx);
-                    }
+                    let consumed: std::collections::HashSet<usize> =
+                        matched.iter().copied().collect();
+                    unconsumed.retain(|i| !consumed.contains(i));
                     extras.push(LineEmit {
                         text: ref_lines[li].clone(),
                         asr_word_indices: matched,
