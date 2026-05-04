@@ -117,28 +117,25 @@ mod tests {
 
     #[test]
     fn best_window_match_picks_dense_close_window() {
-        // Audio: "holy" at 0s, "you are lifted high" 1-2s, "holy" at 5s,
-        // "holy" at 12s, "forever" at 20s. Old whole-gap LCS for "Holy
-        // forever" picked [0, 20s] (12 s span > 8 s cap). Sliding window
-        // must instead pick a window containing both "holy" + "forever"
-        // within 8 s — only window starting at 12 s qualifies (12-20 s).
-        // Returns indices [11, 12] (dummy positions), span 8 s exactly.
+        // Audio sequence with two viable "holy" + "forever" pairs and an
+        // unrelated "holy" + "holy" stretch in between. Whole-gap LCS would
+        // have matched the FIRST "holy" with the LAST "forever" (span > 8s);
+        // sliding window restricts to windows ≤ LONG_LINE_CAP_MS so it
+        // matches a dense close pair only.
         let asr_words = vec![
-            w("holy", 0, 100),          // 0
-            w("you", 1000, 1100),       // 1
-            w("are", 1200, 1300),       // 2
-            w("lifted", 1400, 1500),    // 3
-            w("high", 1600, 1700),      // 4
-            w("holy", 5000, 5100),      // 5
-            w("holy", 12000, 12100),    // 6 — first start of viable window
-            w("forever", 20000, 20100), // 7 — within 12000+8000=20000
+            w("holy", 0, 100),         // 0 — earliest "holy"
+            w("you", 1000, 1100),      // 1
+            w("holy", 5000, 5100),     // 2 — viable window start
+            w("forever", 12000, 12500), // 3 — end_ms within 5000+8000
+            w("holy", 20000, 20100),   // 4
+            w("forever", 30000, 30500), // 5
         ];
         let ref_norms: Vec<Vec<String>> = vec![vec!["holy".into(), "forever".into()]];
         let unconsumed: Vec<usize> = (0..asr_words.len()).collect();
         let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
         let (line_idx, _score, matched) = result.expect("should match");
         assert_eq!(line_idx, 0);
-        // Span must be ≤ LONG_LINE_CAP_MS=8000.
+        // Span ≤ LONG_LINE_CAP_MS by construction.
         let span = asr_words[*matched.last().unwrap()].end_ms
             - asr_words[*matched.first().unwrap()].start_ms;
         assert!(span <= LONG_LINE_CAP_MS, "span {} exceeds cap", span);
