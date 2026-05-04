@@ -1,15 +1,15 @@
 //! Description / override merge pipeline (issue #78 full fix).
 //!
 //! Phases:
-//! 1. Claude line-mapping (primary) or NW DP (fallback) — assign each
-//!    asr_word to one ref line, monotonic line order.
-//! 2. Chorus repeat re-emit for long unmatched audio gaps (worship songs
-//!    repeat chorus 3-4× but description lists each unique line once).
-//! 2.5. Trim trailing-outlier matched indices so derived span ≤ 8 s.
-//! 3. Claude-driven natural-phrase splits for >32-char lines (LED wall cap).
-//! 4. Emit AlignedLine list with sub-line word-level timing (second LCS
-//!    within parent's matched word range).
-//! 5. 8 s display cap, monotonic floor-clamp, drop micro-windows.
+//! - Phase 1: Claude line-mapping (primary) or NW DP (fallback) assigns each
+//!   asr_word to one ref line, monotonic line order.
+//! - Phase 2: chorus repeat re-emit for long unmatched audio gaps (worship
+//!   songs repeat chorus 3-4× but description lists each unique line once).
+//! - Phase 2.5: trim trailing-outlier matched indices so derived span ≤ 8 s.
+//! - Phase 3: Claude-driven natural-phrase splits for >32-char lines.
+//! - Phase 4: emit AlignedLine list with sub-line word-level timing (second
+//!   LCS within parent's matched word range).
+//! - Phase 5: 8 s display cap, monotonic floor-clamp, drop micro-windows.
 //!
 //! Per `feedback_line_timing_only.md` every emitted `AlignedLine` ships
 //! `words: None`. Per `feedback_no_even_distribution.md` no uniform-spacing
