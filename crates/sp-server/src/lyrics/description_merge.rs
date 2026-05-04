@@ -822,52 +822,42 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
     // Sort by start_ms ascending; ties broken by original order (stable sort).
     lines.sort_by_key(|l| l.start_ms);
 
-    // Drop micro-windows whose original duration is below MIN_LINE_DURATION_MS.
-    // The previous policy inflated them up to MIN_LINE_DURATION_MS, but a
-    // 500 ms emit reads as a flash on the wall (operator wall-verify on
-    // id=132 2026-05-04). Better to leave the wall blank than flash a
-    // sub-readable line. Affects Phase 2 chorus repeats with tiny matched
-    // spans and Phase 4 sub-line splits where the second LCS finds
-    // near-zero overlap.
-    let mut output = Vec::with_capacity(lines.len());
-    let mut floor: u32 = 0;
-    for mut l in std::mem::take(lines) {
-        // Pre-clamp duration check.
+    // Cap original audio span at LONG_LINE_CAP_MS (defensive — Phase 2.5
+    // trim_outlier_indices already enforces this in the matched-index
+    // domain, but a tight cap here protects against any pre-Phase-5 path
+    // that bypasses trim).
+    for l in lines.iter_mut() {
         let dur = l.end_ms.saturating_sub(l.start_ms);
-        if dur < MIN_LINE_DURATION_MS {
-            continue;
-        }
-        // Upper cap.
         if dur > LONG_LINE_CAP_MS {
             l.end_ms = l.start_ms.saturating_add(LONG_LINE_CAP_MS);
         }
-        // Floor-clamp start_ms forward to enforce monotonic non-overlap.
+    }
+
+    // Floor-clamp start_ms forward to enforce monotonic non-overlap.
+    let mut floor: u32 = 0;
+    for l in lines.iter_mut() {
         if l.start_ms < floor {
             l.start_ms = floor;
         }
-        // Drop if floor-clamp collapsed the window below threshold.
-        if l.end_ms.saturating_sub(l.start_ms) < MIN_LINE_DURATION_MS {
-            continue;
-        }
         floor = l.end_ms;
-        output.push(l);
     }
 
-    // Extend each line's end_ms to the next line's start_ms so the wall
-    // never goes blank between adjacent lines. Operator directive
-    // 2026-05-04: NO gap, ever. Even if a line's matched audio span is
-    // short (e.g. "to the Lamb" 921 ms) and the next line is 30 s away,
-    // the line stays visible until the next sung word begins. The last
-    // line keeps its original end_ms (no successor to extend to).
-    let n = output.len();
+    // Extend each line's end_ms to the next line's start_ms (operator
+    // directive: NO gap on the wall, EVER). Last line keeps natural end.
+    let n = lines.len();
     for i in 0..n.saturating_sub(1) {
-        let next_start = output[i + 1].start_ms;
-        if next_start > output[i].end_ms {
-            output[i].end_ms = next_start;
+        let next_start = lines[i + 1].start_ms;
+        if next_start > lines[i].end_ms {
+            lines[i].end_ms = next_start;
         }
     }
 
-    *lines = output;
+    // Drop micro-windows whose POST-EXTENSION duration is still below
+    // MIN_LINE_DURATION_MS — a sub-readable line reads as a flash on the
+    // wall regardless of its source. Extension saves short emits that
+    // are followed by a gap (sustained-note absorption may leave a 1-word
+    // emit which the next-line gap then extends to a readable window).
+    lines.retain(|l| l.end_ms.saturating_sub(l.start_ms) >= MIN_LINE_DURATION_MS);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

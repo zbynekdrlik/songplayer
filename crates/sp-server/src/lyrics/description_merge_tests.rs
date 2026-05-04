@@ -369,8 +369,11 @@ fn apply_cap_and_monotonic_floor_clamps_overlap() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_drops_pre_clamp_micro_window() {
-    // Original duration 200ms < 500ms threshold — dropped, no flash.
+fn apply_cap_and_monotonic_extends_micro_window_through_next_gap() {
+    // 200ms middle line followed by 800ms gap — extension saves it: the
+    // line displays from 2000ms (its real start) through 3000ms (next's
+    // start), total 1000ms ≥ MIN_LINE_DURATION_MS. Wall stays on it
+    // through the silence. This is operator directive: NO gap, ever.
     let mut lines = vec![
         AlignedLine {
             text: "real".into(),
@@ -379,9 +382,9 @@ fn apply_cap_and_monotonic_drops_pre_clamp_micro_window() {
             words: None,
         },
         AlignedLine {
-            text: "flash".into(),
+            text: "short".into(),
             start_ms: 2000,
-            end_ms: 2200, // 200ms — micro-window
+            end_ms: 2200,
             words: None,
         },
         AlignedLine {
@@ -392,9 +395,11 @@ fn apply_cap_and_monotonic_drops_pre_clamp_micro_window() {
         },
     ];
     apply_cap_and_monotonic(&mut lines);
-    assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].text, "real");
-    assert_eq!(lines[1].text, "more");
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].end_ms, 2000, "real extends to short.start");
+    assert_eq!(lines[1].text, "short");
+    assert_eq!(lines[1].start_ms, 2000);
+    assert_eq!(lines[1].end_ms, 3000, "short extends to more.start");
 }
 
 #[test]
