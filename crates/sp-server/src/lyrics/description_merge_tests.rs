@@ -325,10 +325,10 @@ fn apply_cap_and_monotonic_extends_end_to_next_start() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_extension_capped_at_long_line_cap() {
-    // Line A starts at 0, originally ends at 1000. Line B starts at
-    // 30_000 (29s gap). Extension can't run for 29s — cap at A.start +
-    // LONG_LINE_CAP_MS = 8s. Wall blank from 8s to 30s.
+fn apply_cap_and_monotonic_extension_uncapped_no_gap() {
+    // No gap, EVER. Operator directive 2026-05-04. Even a 29 s instrumental
+    // gap between sung phrases: the line stays visible across the whole
+    // silence until the next phrase's first sung word begins.
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -345,10 +345,7 @@ fn apply_cap_and_monotonic_extension_capped_at_long_line_cap() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
-    assert_eq!(
-        lines[0].end_ms, LONG_LINE_CAP_MS,
-        "A.end_ms should cap at start + LONG_LINE_CAP_MS"
-    );
+    assert_eq!(lines[0].end_ms, 30_000, "A extends to B.start, no cap");
     assert_eq!(lines[1].start_ms, 30_000);
 }
 
