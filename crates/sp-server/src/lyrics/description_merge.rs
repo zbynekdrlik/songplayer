@@ -1,40 +1,22 @@
 //! Description / override merge pipeline (issue #78 full fix).
 //!
-//! When the authoritative reference text comes from a clean, segmented source
-//! (YouTube-description extraction or operator override), the reference's line
-//! breaks are themselves the contract we must ship. The original `claude_merge`
-//! Claude-prompted path iterated WhisperX *audio phrases* (split on >500ms
-//! gaps) and emitted one output line per phrase — destroying the reference's
-//! natural segmentation. The first iteration of the fix preserved line count
-//! via deterministic LCS but had three remaining wall problems noted by the
-//! operator on 2026-05-03:
-//!
-//! 1. Chorus repeats were lost. Description lists each unique line ONCE.
-//!    Worship songs repeat chorus 3-4×. After first LCS pass each ref line is
-//!    consumed once; subsequent audio choruses had no ref text → wall blank
-//!    for 130s+. Phase 2 re-emits matched ref lines for chorus repeats.
-//! 2. Lines longer than the LED-wall width (32 chars) overflowed adjacent
-//!    panels. Phase 3 sends long lines to Claude with a hierarchy of natural
-//!    sung-phrase split points (sentence-end → conjunctions → prepositions →
-//!    word boundary) under a hard 32-char cap.
-//! 3. Sub-line timing was wrong: proportional-by-char-count of parent line's
-//!    duration ignored the singer's actual breath pause. Phase 4 maps each
-//!    sub-line back to its constituent ASR words (second LCS within parent's
-//!    matched word range) so sub-line `start_ms`/`end_ms` come from real
-//!    word-level audio timing.
-//!
-//! Plus Phase 5: 8 s long-line cap. When a line's matched audio range stretches
-//! beyond 8 s (the LCS spans an instrumental gap), the line displays for 8 s
-//! then the wall goes blank until the next matched line, instead of stretching
-//! one line for tens of seconds.
+//! Phases:
+//! 1. Claude line-mapping (primary) or NW DP (fallback) — assign each
+//!    asr_word to one ref line, monotonic line order.
+//! 2. Chorus repeat re-emit for long unmatched audio gaps (worship songs
+//!    repeat chorus 3-4× but description lists each unique line once).
+//! 2.5. Trim trailing-outlier matched indices so derived span ≤ 8 s.
+//! 3. Claude-driven natural-phrase splits for >32-char lines (LED wall cap).
+//! 4. Emit AlignedLine list with sub-line word-level timing (second LCS
+//!    within parent's matched word range).
+//! 5. 8 s display cap, monotonic floor-clamp, drop micro-windows.
 //!
 //! Per `feedback_line_timing_only.md` every emitted `AlignedLine` ships
 //! `words: None`. Per `feedback_no_even_distribution.md` no uniform-spacing
 //! ever; all timings derive from real ASR word-timestamps.
 //!
-//! Provenance format: `"{candidate.source}+{asr.provenance}"`. No
-//! `+claude-merge` suffix on the description path because the Claude call here
-//! is only for line-splitting, not semantic merging.
+//! Provenance: `"{candidate.source}+{asr.provenance}"`. No `+claude-merge`
+//! suffix; Claude only splits long lines, no semantic merging.
 
 // Algorithm uses several index-based scans (LCS DP, gap detection, char-index
 // split-point search) where the iter-chain rewrite obscures intent or pulls
@@ -168,6 +150,13 @@ pub async fn process(
         Some(&i) => asr_words[i].start_ms,
         None => u32::MAX,
     });
+
+    // Phase 2.5: trim trailing-outlier matched indices on every emit so its
+    // derived audio span ≤ LONG_LINE_CAP_MS. See `trim_outlier_indices`.
+    for e in emits.iter_mut() {
+        trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
+    }
+
     audit_state.record_phase2(&emits, &asr_words);
 
     // Phase 3: Claude-driven natural-phrase splits for long lines (>32c).
@@ -918,6 +907,29 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Trim trailing-outlier indices so derived span ≤ `LONG_LINE_CAP_MS`.
+/// LCS matchers can pick a far-later word that fits the ref-line pattern
+/// but lies past the real sung instance — id=132 2026-05-04: 5 contiguous
+/// words + 6th from a different chorus, spanning 11.8 s. Trim keeps tail
+/// off until span fits cap; never drops below 2 (CHORUS_REPEAT_MIN floor).
+fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWord]) {
+    if indices.len() <= 2 {
+        return;
+    }
+    indices.sort_unstable();
+    while indices.len() > 2 {
+        let first = indices[0];
+        let last = *indices.last().expect("len > 2");
+        let span = asr_words[last]
+            .end_ms
+            .saturating_sub(asr_words[first].start_ms);
+        if span <= LONG_LINE_CAP_MS {
+            break;
+        }
+        indices.pop();
+    }
+}
 
 fn normalize_word(w: &str) -> String {
     w.chars()

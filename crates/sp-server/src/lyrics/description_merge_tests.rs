@@ -103,6 +103,70 @@ fn detect_chorus_repeats_emits_for_long_unmatched_gap() {
     );
 }
 
+// ── Phase 2.5: trim_outlier_indices ───────────────────────────────────────────
+
+#[test]
+fn trim_outlier_indices_keeps_tight_match_intact() {
+    let asr_track = asr(vec![
+        make_word("a", 0, 100),
+        make_word("b", 200, 400),
+        make_word("c", 500, 700),
+        make_word("d", 800, 1000),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = vec![0, 1, 2, 3];
+    trim_outlier_indices(&mut indices, &asr_words);
+    assert_eq!(indices, vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn trim_outlier_indices_drops_trailing_outlier_past_cap() {
+    // 5 words: [0..4 contiguous within 7.5s] + [5 jumped to 20s].
+    // Span 20s > LONG_LINE_CAP_MS=8s, drop trailing.
+    let asr_track = asr(vec![
+        make_word("a", 0, 500),
+        make_word("b", 1000, 1500),
+        make_word("c", 3000, 3500),
+        make_word("d", 5000, 5500),
+        make_word("e", 7000, 7500),
+        make_word("outlier", 19000, 20000),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = vec![0, 1, 2, 3, 4, 5];
+    trim_outlier_indices(&mut indices, &asr_words);
+    // After trim: [0..4] span 7.5s within cap.
+    assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn trim_outlier_indices_preserves_min_two_entries() {
+    // Even if span exceeds cap, never trim below 2 entries.
+    let asr_track = asr(vec![
+        make_word("a", 0, 100),
+        make_word("b", 50000, 50100), // 50s gap — exceeds cap
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = vec![0, 1];
+    trim_outlier_indices(&mut indices, &asr_words);
+    assert_eq!(indices, vec![0, 1]);
+}
+
+#[test]
+fn trim_outlier_indices_handles_unsorted_input() {
+    // Indices arrive ascending after Phase 1 sort, but defensive: trim should
+    // sort before measuring span.
+    let asr_track = asr(vec![
+        make_word("a", 0, 100),
+        make_word("b", 200, 400),
+        make_word("c", 500, 700),
+        make_word("outlier", 20000, 21000),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = vec![3, 0, 1, 2];
+    trim_outlier_indices(&mut indices, &asr_words);
+    assert_eq!(indices, vec![0, 1, 2]);
+}
+
 // ── Phase 4: aligned_lines_for_emit ───────────────────────────────────────────
 
 #[test]
