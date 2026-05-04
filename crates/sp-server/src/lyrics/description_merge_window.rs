@@ -123,11 +123,11 @@ mod tests {
         // sliding window restricts to windows ≤ LONG_LINE_CAP_MS so it
         // matches a dense close pair only.
         let asr_words = vec![
-            w("holy", 0, 100),         // 0 — earliest "holy"
-            w("you", 1000, 1100),      // 1
-            w("holy", 5000, 5100),     // 2 — viable window start
+            w("holy", 0, 100),          // 0 — earliest "holy"
+            w("you", 1000, 1100),       // 1
+            w("holy", 5000, 5100),      // 2 — viable window start
             w("forever", 12000, 12500), // 3 — end_ms within 5000+8000
-            w("holy", 20000, 20100),   // 4
+            w("holy", 20000, 20100),    // 4
             w("forever", 30000, 30500), // 5
         ];
         let ref_norms: Vec<Vec<String>> = vec![vec!["holy".into(), "forever".into()]];
