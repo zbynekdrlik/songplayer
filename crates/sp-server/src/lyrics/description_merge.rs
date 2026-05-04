@@ -904,34 +904,40 @@ fn normalize_word(w: &str) -> String {
         .collect()
 }
 
+/// Forward-greedy alignment: assign each ref word to the EARLIEST asr word
+/// in order that has matching normalized text. Compared to classic LCS
+/// backtracking (which biases toward LATER asr positions on duplicates),
+/// this leaves later same-text asr tokens free for subsequent ref lines.
+///
+/// id=132 2:35: ref "you are lifted high holy" against asr ["you", "are",
+/// "lifted", "high", "holy"@134, "holy"@135, "forever"@136, ...]. Old LCS
+/// picked "holy"@135 (last) for ref's last word; this stole the second
+/// "holy" from the next line "Holy forever" which then had only [134,
+/// 136] (skipping the absent 135). Phase 5 then floor-clamped "Holy
+/// forever" forward 1.8 s. Forward-greedy picks "holy"@134 (first), so
+/// "Holy forever" gets [135, 136] cleanly.
+///
+/// Trade-off vs LCS: doesn't find the longest common subsequence in
+/// edge cases where ref and asr aren't strictly co-ordered. Acceptable
+/// for our domain — ref text and sung audio share the same temporal
+/// order by construction.
 fn lcs_align(ref_words: &[&str], asr_words: &[&str]) -> Vec<Option<usize>> {
     let n = ref_words.len();
     let m = asr_words.len();
-    if n == 0 || m == 0 {
-        return vec![None; n];
-    }
-    let mut dp = vec![vec![0u32; m + 1]; n + 1];
-    for i in 0..n {
-        for j in 0..m {
-            dp[i + 1][j + 1] = if ref_words[i] == asr_words[j] {
-                dp[i][j] + 1
-            } else {
-                dp[i + 1][j].max(dp[i][j + 1])
-            };
-        }
-    }
     let mut alignment = vec![None; n];
-    let mut i = n;
-    let mut j = m;
-    while i > 0 && j > 0 {
-        if ref_words[i - 1] == asr_words[j - 1] {
-            alignment[i - 1] = Some(j - 1);
-            i -= 1;
-            j -= 1;
-        } else if dp[i - 1][j] >= dp[i][j - 1] {
-            i -= 1;
+    if n == 0 || m == 0 {
+        return alignment;
+    }
+    let mut j = 0;
+    for i in 0..n {
+        while j < m && ref_words[i] != asr_words[j] {
+            j += 1;
+        }
+        if j < m {
+            alignment[i] = Some(j);
+            j += 1;
         } else {
-            j -= 1;
+            break;
         }
     }
     alignment
