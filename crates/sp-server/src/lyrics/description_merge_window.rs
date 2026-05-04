@@ -36,8 +36,16 @@ pub(super) fn best_window_match(
         for start_pos in 0..unconsumed.len() {
             let win_start_ms = asr_words[unconsumed[start_pos]].start_ms;
             let cap_end_ms = win_start_ms.saturating_add(LONG_LINE_CAP_MS);
+            // Cap on word START so a 2-word line whose 2nd word straddles
+            // the cap still matches. The last word's end_ms may extend a
+            // few hundred ms past the cap; Phase 5 will clip the line's
+            // display duration to LONG_LINE_CAP_MS anyway. Without this,
+            // id=132 4:20 "Holy forever": forever.end (262108) was 582ms
+            // past holy(229).start + 8000 — window excluded forever, only
+            // holy matched, < CHORUS_REPEAT_MIN_MATCHED_WORDS, no emit.
             let mut end_pos = start_pos + 1;
-            while end_pos < unconsumed.len() && asr_words[unconsumed[end_pos]].end_ms <= cap_end_ms
+            while end_pos < unconsumed.len()
+                && asr_words[unconsumed[end_pos]].start_ms <= cap_end_ms
             {
                 end_pos += 1;
             }
