@@ -1,6 +1,7 @@
 pub mod aligner;
 pub mod assembly;
 pub mod audio_chunking;
+pub mod audit_ctx;
 pub mod backend;
 pub mod bootstrap;
 pub mod chunking;

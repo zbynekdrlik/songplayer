@@ -114,6 +114,7 @@ pub async fn process(
     ai_client: &AiClient,
     asr: &AlignedTrack,
     candidate: &CandidateText,
+    audit_ctx: Option<&crate::lyrics::audit_ctx::AuditContext<'_>>,
 ) -> Result<AlignedTrack, MergeError> {
     let asr_words = flatten_asr(asr);
     if asr_words.is_empty() {
@@ -126,36 +127,33 @@ pub async fn process(
         return Err(MergeError::NoReference);
     }
 
-    audit::log_asr_words(
-        &asr_words,
-        &candidate.source,
-        &asr.provenance,
-        ref_lines.len(),
-    );
+    let mut audit_state =
+        audit::AuditState::new(ref_lines, &asr_words, &candidate.source, &asr.provenance);
 
     // Phase 1: Claude line-mapping (primary) with NW DP fallback. Claude
     // reads phrasing semantically; the deterministic DP is a guaranteed-correct
     // floor on parse / network / refusal failure. See description_merge_mapping.
-    let mut emits = match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await
-    {
-        Ok(map) => {
-            info!(
-                ref_lines = ref_lines.len(),
-                asr_words = asr_words.len(),
-                "description_merge: claude line-mapping succeeded"
-            );
-            mapping::emits_from_mapping(&map, ref_lines)
-        }
-        Err(e) => {
-            warn!(
-                %e,
-                ref_lines = ref_lines.len(),
-                asr_words = asr_words.len(),
-                "description_merge: claude line-mapping failed; falling back to NW DP"
-            );
-            match_ref_to_asr(ref_lines, &asr_words)
-        }
-    };
+    let (mut emits, phase1_provider) =
+        match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await {
+            Ok(map) => {
+                info!(
+                    ref_lines = ref_lines.len(),
+                    asr_words = asr_words.len(),
+                    "description_merge: claude line-mapping succeeded"
+                );
+                (mapping::emits_from_mapping(&map, ref_lines), "claude")
+            }
+            Err(e) => {
+                warn!(
+                    %e,
+                    ref_lines = ref_lines.len(),
+                    asr_words = asr_words.len(),
+                    "description_merge: claude line-mapping failed; falling back to NW DP"
+                );
+                (match_ref_to_asr(ref_lines, &asr_words), "nw_dp")
+            }
+        };
+    audit_state.record_phase1(phase1_provider, &emits, &asr_words);
 
     // Phase 2: chorus repeat re-emit for long unmatched gaps.
     let extras = detect_chorus_repeats(ref_lines, &asr_words, &emits);
@@ -170,6 +168,7 @@ pub async fn process(
         Some(&i) => asr_words[i].start_ms,
         None => u32::MAX,
     });
+    audit_state.record_phase2(&emits, &asr_words);
 
     // Phase 3: Claude-driven natural-phrase splits for long lines (>32c).
     let needs_split: Vec<(usize, &str)> = emits
@@ -203,10 +202,13 @@ pub async fn process(
         output.extend(lines);
     }
 
-    audit::log_pre_phase5(&output, &emits);
+    audit_state.record_pre_phase5(&output);
 
     // Phase 5: 8 s cap + monotonic enforcement.
     apply_cap_and_monotonic(&mut output);
+    audit_state.record_post_phase5(&output);
+
+    audit_state.write_to_disk(audit_ctx).await;
 
     Ok(AlignedTrack {
         lines: output,

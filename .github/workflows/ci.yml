@@ -689,9 +689,13 @@ jobs:
           Write-Host "Dashboard files deployed to $distTarget"
           Get-ChildItem $distTarget | Select-Object Name
 
-          # Grant Resolume user write access to data directory (ProgramData defaults to read-only for Users)
+          # Grant Resolume user write access to data directory (ProgramData defaults to read-only for Users).
+          # NO /T flag — recursive grant on $DataDir traverses 270k+ files in cache/tools (whisperx_venv,
+          # hf_models, etc.) and runs 25-45 min, blocking deploy. (OI)(CI) inheritance covers all NEW
+          # files created by SongPlayer; existing children already have the ACL from prior /T runs and
+          # don't need it re-applied on every deploy.
           New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
-          icacls $DataDir /grant "Resolume:(OI)(CI)F" /T
+          icacls $DataDir /grant "Resolume:(OI)(CI)F"
           Write-Host "=== Data directory permissions set ==="
 
       - name: Configure auto-start and launch

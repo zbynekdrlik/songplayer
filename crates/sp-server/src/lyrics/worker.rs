@@ -543,6 +543,10 @@ impl LyricsWorker {
                 fetchers,
                 language: "en",
                 vocal_wav: clean_vocal.as_deref(),
+                audit: Some(crate::lyrics::audit_ctx::AuditContext {
+                    cache_dir: &self.cache_dir,
+                    youtube_id: &youtube_id,
+                }),
             })
             .await
         {

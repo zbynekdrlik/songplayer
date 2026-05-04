@@ -62,6 +62,12 @@ pub struct OrchestratorInput<'a> {
     /// Tier-1 `LineSynced` short-circuits before the backend is reached and
     /// therefore succeeds even when this is `None`.
     pub vocal_wav: Option<&'a Path>,
+    /// Per-song debug-output sink. When populated, every alignment + merge
+    /// stage writes a JSON sidecar to `cache_dir` for permanent visibility:
+    /// `{youtube_id}_whisperx_track.json` (raw alignment backend output)
+    /// and `{youtube_id}_descmerge_audit.json` (description-merge per-phase
+    /// state). When `None`, sidecar writes are skipped — used by tests.
+    pub audit: Option<crate::lyrics::audit_ctx::AuditContext<'a>>,
 }
 
 impl Orchestrator {
@@ -129,13 +135,21 @@ impl Orchestrator {
                     .backend
                     .align(wav, None, input.language, &AlignOpts::default())
                     .await?;
+                crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
                     provenance = %asr.provenance,
                     asr_lines = asr.lines.len(),
                     text_candidates = text_candidates.len(),
                     "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
                 );
-                match claude_merge::merge(&self.ai_client, &asr, &text_candidates).await {
+                match claude_merge::merge(
+                    &self.ai_client,
+                    &asr,
+                    &text_candidates,
+                    input.audit.as_ref(),
+                )
+                .await
+                {
                     Ok(merged) => {
                         // Description / override sources go through the
                         // deterministic mapper (issue #78) which preserves
@@ -178,6 +192,7 @@ impl Orchestrator {
                     .backend
                     .align(wav, None, input.language, &AlignOpts::default())
                     .await?;
+                crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
                     provenance = %asr.provenance,
                     asr_lines = asr.lines.len(),
@@ -343,6 +358,7 @@ mod tests {
                 fetchers: vec![fixed_fetcher(candidate)],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+                audit: None,
             })
             .await
             .expect("process should succeed");
@@ -414,6 +430,7 @@ mod tests {
                 fetchers: vec![fixed_fetcher(candidate)],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+                audit: None,
             })
             .await
             .expect("process should succeed");
@@ -470,6 +487,7 @@ mod tests {
                 fetchers: vec![fixed_fetcher(candidate)],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+                audit: None,
             })
             .await
             .expect("fallback must succeed even when Claude is unreachable");
@@ -515,6 +533,7 @@ mod tests {
                 fetchers: vec![empty_fetcher(), empty_fetcher()],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+                audit: None,
             })
             .await
             .expect("process should succeed");
@@ -570,6 +589,7 @@ mod tests {
                 fetchers: vec![],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+                audit: None,
             })
             .await
             .expect("process should succeed");

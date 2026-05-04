@@ -56,6 +56,7 @@ pub async fn merge(
     ai_client: &AiClient,
     asr: &AlignedTrack,
     text_candidates: &[CandidateText],
+    audit: Option<&crate::lyrics::audit_ctx::AuditContext<'_>>,
 ) -> Result<AlignedTrack, MergeError> {
     // Step 1: pick authoritative reference candidate (whole CandidateText, not
     // just its lines — we need the source label to choose the merge path).
@@ -70,7 +71,7 @@ pub async fn merge(
     // natural-phrase splits respecting a hard 32-char cap, word-level sub-line
     // timing, and an 8 s long-line cap. No Claude semantic merge.
     if best.source == "description" || best.source == "override" {
-        return crate::lyrics::description_merge::process(ai_client, asr, best).await;
+        return crate::lyrics::description_merge::process(ai_client, asr, best, audit).await;
     }
 
     let reference_lines = best.lines.clone();
