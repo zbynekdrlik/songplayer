@@ -54,6 +54,9 @@ use crate::lyrics::tier1::CandidateText;
 #[path = "description_merge_mapping.rs"]
 mod mapping;
 
+#[path = "description_merge_audit.rs"]
+mod audit;
+
 /// Hard upper bound for sub-line EN length. The LED wall renders only this
 /// many characters per row; longer lines visually overflow into adjacent UI
 /// panels and are unacceptable.
@@ -122,6 +125,13 @@ pub async fn process(
     if ref_lines.is_empty() {
         return Err(MergeError::NoReference);
     }
+
+    audit::log_asr_words(
+        &asr_words,
+        &candidate.source,
+        &asr.provenance,
+        ref_lines.len(),
+    );
 
     // Phase 1: Claude line-mapping (primary) with NW DP fallback. Claude
     // reads phrasing semantically; the deterministic DP is a guaranteed-correct
@@ -192,6 +202,8 @@ pub async fn process(
         let lines = aligned_lines_for_emit(emit, &asr_words, subs);
         output.extend(lines);
     }
+
+    audit::log_pre_phase5(&output, &emits);
 
     // Phase 5: 8 s cap + monotonic enforcement.
     apply_cap_and_monotonic(&mut output);
