@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::lyrics::audio_chunking::{ParsedLine, merge_overlap, plan_chunks};
+use crate::lyrics::audio_chunking::plan_chunks;
 use crate::lyrics::backend::{
     AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
     BackendError,
@@ -268,7 +268,7 @@ async fn align_chunked(
 
     let plans = plan_chunks(duration_ms);
     let tmp = TempDir::new().map_err(BackendError::Io)?;
-    let mut all: Vec<Vec<ParsedLine>> = Vec::with_capacity(plans.len());
+    let mut all: Vec<AlignedLine> = Vec::new();
 
     for plan in &plans {
         let chunk_path = tmp.path().join(format!("chunk_{}.wav", plan.idx));
@@ -326,31 +326,42 @@ async fn align_chunked(
             .ok_or_else(|| BackendError::Malformed("chunk: no output".into()))?;
         let chunk_lines = parse_output(&output)?;
 
-        // Convert AlignedLine → ParsedLine (audio_chunking::ParsedLine) for merge_overlap.
-        // The merge operates on local (chunk-relative) timings; merge_overlap adds
-        // plan.start_ms internally.
-        let parsed: Vec<ParsedLine> = chunk_lines
-            .into_iter()
-            .map(|l| ParsedLine {
-                text: l.text,
-                start_ms: l.start_ms as u64,
-                end_ms: l.end_ms as u64,
-            })
-            .collect();
-        all.push(parsed);
+        // Shift all timings (line + word) to global by adding plan.start_ms.
+        // Preserve word-level data — description_merge needs it for line
+        // boundary matching. The previous version dropped words via
+        // ParsedLine/merge_overlap; that broke the description path
+        // entirely (words=None → flatten_asr empty → emit_unmatched_only
+        // placeholder timings, all lines collapsed to 1 s windows).
+        let offset = plan.start_ms as u32;
+        for mut line in chunk_lines {
+            line.start_ms = line.start_ms.saturating_add(offset);
+            line.end_ms = line.end_ms.saturating_add(offset);
+            if let Some(ref mut words) = line.words {
+                for w in words.iter_mut() {
+                    w.start_ms = w.start_ms.saturating_add(offset);
+                    w.end_ms = w.end_ms.saturating_add(offset);
+                }
+            }
+            all.push(line);
+        }
     }
 
-    let merged = merge_overlap(&plans, &all);
-    Ok(merged
-        .into_iter()
-        .map(|g| AlignedLine {
-            text: g.text,
-            start_ms: g.start_ms as u32,
-            end_ms: g.end_ms as u32,
-            // Chunked path is line-only; word-merge across chunk boundaries is out of scope.
-            words: None,
-        })
-        .collect())
+    // Dedup overlapping chunks: chunk N+1 starts CHUNK_OVERLAP_MS before
+    // chunk N ends. Words near the boundary appear in both chunks. Sort by
+    // start_ms, then drop any line whose start matches an earlier line's
+    // start within 1500 ms AND has identical normalized text.
+    all.sort_by_key(|l| l.start_ms);
+    let mut deduped: Vec<AlignedLine> = Vec::with_capacity(all.len());
+    for line in all {
+        let dup = deduped.iter().any(|prev| {
+            prev.start_ms.abs_diff(line.start_ms) < 1500
+                && prev.text.trim().eq_ignore_ascii_case(line.text.trim())
+        });
+        if !dup {
+            deduped.push(line);
+        }
+    }
+    Ok(deduped)
 }
 
 fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
