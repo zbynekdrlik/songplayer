@@ -131,15 +131,21 @@ impl Orchestrator {
                             .into(),
                     )
                 })?;
+                // Pass best authoritative candidate's text as initial_prompt
+                // to bias Whisper's LM toward expected phrases. Eliminates
+                // sustained-vowel hallucinations (id=132 2:57 "your, name"
+                // phantom tokens during sustained "forever") and improves
+                // segment boundary detection at line transitions.
+                let prompt_text: Option<String> =
+                    crate::lyrics::claude_merge::best_authoritative_candidate(&text_candidates)
+                        .map(|c| c.lines.join("\n"));
                 let asr = self
                     .backend
                     .align(
                         wav,
-                        None,
+                        prompt_text.as_deref(),
                         input.language,
-                        &AlignOpts {
-                            chunk_trigger_seconds: Some(90),
-                        },
+                        &AlignOpts::default(),
                     )
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
@@ -147,6 +153,7 @@ impl Orchestrator {
                     provenance = %asr.provenance,
                     asr_lines = asr.lines.len(),
                     text_candidates = text_candidates.len(),
+                    has_prompt = prompt_text.is_some(),
                     "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
                 );
                 match claude_merge::merge(
@@ -197,14 +204,7 @@ impl Orchestrator {
                 })?;
                 let asr = self
                     .backend
-                    .align(
-                        wav,
-                        None,
-                        input.language,
-                        &AlignOpts {
-                            chunk_trigger_seconds: Some(90),
-                        },
-                    )
+                    .align(wav, None, input.language, &AlignOpts::default())
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(

@@ -183,7 +183,7 @@ fn source_priority(source: &str) -> u32 {
 /// both `lines` (for merging) and `source` (for choosing the merge path —
 /// description / override go through `description_merge::process`, others go
 /// through Claude). Returns `None` for empty input.
-fn best_authoritative_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
+pub(crate) fn best_authoritative_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
     candidates
         .iter()
         .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
