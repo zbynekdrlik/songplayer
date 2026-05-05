@@ -141,10 +141,7 @@ pub async fn process(
     // Phase 2: chorus repeat re-emit for long unmatched gaps.
     let extras = detect_chorus_repeats(ref_lines, &asr_words, &emits);
     if !extras.is_empty() {
-        info!(
-            count = extras.len(),
-            "description_merge: chorus repeat re-emit"
-        );
+        info!(count = extras.len(), "description_merge: chorus repeats");
     }
     emits.extend(extras);
     emits.sort_by_key(|e| match e.asr_word_indices.first() {
@@ -192,11 +189,13 @@ pub async fn process(
         }
     };
 
-    // Phase 4: emit AlignedLine list with sub-line word timings.
+    // Phase 4: emit AlignedLine. Skip emits with no matched ASR words.
     let mut output: Vec<AlignedLine> = Vec::new();
     for (i, emit) in emits.iter().enumerate() {
-        let subs = split_map.get(&i);
-        let lines = aligned_lines_for_emit(emit, &asr_words, subs);
+        if emit.asr_word_indices.is_empty() {
+            continue;
+        }
+        let lines = aligned_lines_for_emit(emit, &asr_words, split_map.get(&i));
         output.extend(lines);
     }
 
