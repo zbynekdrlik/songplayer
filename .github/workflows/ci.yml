@@ -1163,17 +1163,30 @@ jobs:
             Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project - skipping lookahead gate"
           } else {
             Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips"
-            $identical = $true
-            foreach ($t in $subsNextClips) {
-              if (-not ($subsClips -contains $t)) { $identical = $false; break }
+            Write-Host "  #sp-subs texts:"
+            foreach ($t in $subsClips) { Write-Host "    '$t'" }
+            Write-Host "  #sp-subs-next texts:"
+            foreach ($t in $subsNextClips) { Write-Host "    '$t'" }
+            # Skip the lookahead gate when subs clips are all empty/whitespace.
+            # ytwarmup playlist's continuous picker is non-deterministic — it
+            # may select a vocal-exercise video with no lyrics, in which case
+            # SongPlayer pushes nothing and every clip retains its empty
+            # default. "Empty == empty" is not a regression, so the gate must
+            # only fire when there IS lyric text on #sp-subs to compare.
+            $nonEmptySubs = $subsClips | Where-Object { $_ -and $_.Trim() -ne '' }
+            if ($nonEmptySubs.Count -eq 0) {
+              Write-Host "INFO: #sp-subs clips all empty (video has no lyrics) - skipping lookahead gate"
+            } else {
+              $identical = $true
+              foreach ($t in $subsNextClips) {
+                if (-not ($subsClips -contains $t)) { $identical = $false; break }
+              }
+              if ($identical) {
+                Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
+                exit 1
+              }
+              Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
             }
-            # Identical-only-if BOTH sets match AND the subsClips set has
-            # text to compare against in the first place.
-            if ($subsClips.Count -gt 0 -and $identical) {
-              Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
-              exit 1
-            }
-            Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
           }
 
       - name: Verify NDI output names configured
