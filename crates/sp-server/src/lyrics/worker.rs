@@ -514,8 +514,9 @@ impl LyricsWorker {
             self.clear_processing().await;
             return Err(anyhow::anyhow!("replicate_api_token not configured"));
         }
-        let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> =
-            Arc::new(WhisperXReplicateBackend::new(replicate_token));
+        let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> = Arc::new(
+            WhisperXReplicateBackend::new(replicate_token, self.tools_dir.clone()),
+        );
 
         // Require an AI client for orchestrator construction — claude-merge needs it.
         // If None at runtime, log warning and bail processing for this song.

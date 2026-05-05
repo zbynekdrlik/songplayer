@@ -25,13 +25,35 @@ pub const WHISPERX_VERSION: &str =
 
 pub struct WhisperXReplicateBackend {
     client: ReplicateClient,
+    /// Tools directory containing bundled ffmpeg.exe / ffprobe.exe. Used
+    /// only by the chunked path (`align_chunked`). Bare `Command::new
+    /// ("ffmpeg")` fails on Windows because the bundled tools are NOT in
+    /// PATH — the deploy script doesn't add them.
+    tools_dir: std::path::PathBuf,
 }
 
 impl WhisperXReplicateBackend {
-    pub fn new(api_token: impl Into<String>) -> Self {
+    pub fn new(api_token: impl Into<String>, tools_dir: std::path::PathBuf) -> Self {
         Self {
             client: ReplicateClient::new(api_token),
+            tools_dir,
         }
+    }
+
+    fn ffmpeg_path(&self) -> std::path::PathBuf {
+        self.tools_dir.join(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        })
+    }
+
+    fn ffprobe_path(&self) -> std::path::PathBuf {
+        self.tools_dir.join(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        })
     }
 }
 
@@ -131,7 +153,7 @@ impl AlignmentBackend for WhisperXReplicateBackend {
         // handles long-form audio natively via VAD, so chunking is opt-in.
         let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
         let duration_ms = if opts.chunk_trigger_seconds.is_some() {
-            probe_duration_ms(vocal_wav_path)?
+            probe_duration_ms(&self.ffprobe_path(), vocal_wav_path)?
         } else {
             0 // unused — chunking branch below is unreachable when trigger == u32::MAX
         };
@@ -177,9 +199,9 @@ impl AlignmentBackend for WhisperXReplicateBackend {
 // a real ffprobe binary and a real audio file. The `* 1000.0` conversion is
 // covered by parse_output's ms-conversion tests below.
 #[cfg_attr(test, mutants::skip)]
-fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
+fn probe_duration_ms(ffprobe: &Path, path: &Path) -> Result<u64, BackendError> {
     use std::process::Command;
-    let out = Command::new("ffprobe")
+    let out = Command::new(ffprobe)
         .args([
             "-v",
             "error",
@@ -239,7 +261,7 @@ async fn align_chunked(
             .to_str()
             .ok_or_else(|| BackendError::Malformed("non-utf8 wav path".into()))?;
         let chunk_str = chunk_path.to_str().unwrap();
-        let status = Command::new("ffmpeg")
+        let status = Command::new(backend.ffmpeg_path())
             .args([
                 "-y",
                 "-loglevel",
@@ -415,14 +437,20 @@ mod tests {
 
     #[test]
     fn id_and_revision_are_stable() {
-        let b = WhisperXReplicateBackend::new("test-token");
+        let b = WhisperXReplicateBackend::new(
+            "test-token",
+            std::path::PathBuf::from("/tmp/test-tools"),
+        );
         assert_eq!(b.id(), "whisperx-large-v3");
         assert_eq!(b.revision(), 1);
     }
 
     #[test]
     fn capability_advertises_word_level_and_languages() {
-        let b = WhisperXReplicateBackend::new("test-token");
+        let b = WhisperXReplicateBackend::new(
+            "test-token",
+            std::path::PathBuf::from("/tmp/test-tools"),
+        );
         let cap = b.capability();
         assert!(cap.word_level);
         assert!(cap.segment_level);
@@ -434,7 +462,10 @@ mod tests {
     #[test]
     fn capability_max_audio_seconds_matches_prediction_timeout() {
         use crate::lyrics::replicate_client::PREDICTION_TIMEOUT;
-        let b = WhisperXReplicateBackend::new("test-token");
+        let b = WhisperXReplicateBackend::new(
+            "test-token",
+            std::path::PathBuf::from("/tmp/test-tools"),
+        );
         let cap = b.capability();
         // max_audio_seconds must not exceed PREDICTION_TIMEOUT's seconds so
         // we never advertise handling durations we'd actually time out on.
