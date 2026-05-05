@@ -47,14 +47,6 @@ impl WhisperXReplicateBackend {
             "ffmpeg"
         })
     }
-
-    fn ffprobe_path(&self) -> std::path::PathBuf {
-        self.tools_dir.join(if cfg!(windows) {
-            "ffprobe.exe"
-        } else {
-            "ffprobe"
-        })
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -153,7 +145,7 @@ impl AlignmentBackend for WhisperXReplicateBackend {
         // handles long-form audio natively via VAD, so chunking is opt-in.
         let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
         let duration_ms = if opts.chunk_trigger_seconds.is_some() {
-            probe_duration_ms(&self.ffprobe_path(), vocal_wav_path)?
+            probe_duration_ms(vocal_wav_path)?
         } else {
             0 // unused — chunking branch below is unreachable when trigger == u32::MAX
         };
@@ -192,38 +184,61 @@ impl AlignmentBackend for WhisperXReplicateBackend {
     }
 }
 
-/// Determine audio duration via `ffprobe`. Returns milliseconds.
-// All internal branches require spawning a real `ffprobe` process with a
-// valid audio file path. Mutations on the success-check (!out.status.success())
-// and the arithmetic `secs * 1000.0` are not reachable from unit tests without
-// a real ffprobe binary and a real audio file. The `* 1000.0` conversion is
-// covered by parse_output's ms-conversion tests below.
-#[cfg_attr(test, mutants::skip)]
-fn probe_duration_ms(ffprobe: &Path, path: &Path) -> Result<u64, BackendError> {
-    use std::process::Command;
-    let out = Command::new(ffprobe)
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            path.to_str()
-                .ok_or_else(|| BackendError::Malformed("non-utf8 path".into()))?,
-        ])
-        .output()
-        .map_err(BackendError::Io)?;
-    if !out.status.success() {
-        return Err(BackendError::Rejected("ffprobe failed".into()));
+/// Read WAV header to compute duration. No external binary required.
+/// Vocal stems are PCM WAVs (Mel-Roformer + anvuew dereverb output).
+/// Avoids a hard dep on ffprobe.exe — the tools manager only extracts
+/// ffmpeg.exe from the FFmpeg ZIP, not ffprobe.exe.
+fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut f = File::open(path).map_err(BackendError::Io)?;
+    let mut header = [0u8; 12];
+    f.read_exact(&mut header).map_err(BackendError::Io)?;
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return Err(BackendError::Malformed("not a WAV file".into()));
     }
-    let s = String::from_utf8(out.stdout)
-        .map_err(|e| BackendError::Malformed(format!("ffprobe utf8: {e}")))?;
-    let secs: f64 = s
-        .trim()
-        .parse()
-        .map_err(|e| BackendError::Malformed(format!("ffprobe parse: {e}")))?;
-    Ok((secs * 1000.0) as u64)
+
+    let mut byte_rate: u32 = 0;
+    let mut data_size: u32 = 0;
+    loop {
+        let mut chunk_header = [0u8; 8];
+        if f.read_exact(&mut chunk_header).is_err() {
+            break;
+        }
+        let id = &chunk_header[0..4];
+        let size = u32::from_le_bytes([
+            chunk_header[4],
+            chunk_header[5],
+            chunk_header[6],
+            chunk_header[7],
+        ]);
+        match id {
+            b"fmt " => {
+                let mut fmt = vec![0u8; size as usize];
+                f.read_exact(&mut fmt).map_err(BackendError::Io)?;
+                if fmt.len() >= 12 {
+                    byte_rate = u32::from_le_bytes([fmt[8], fmt[9], fmt[10], fmt[11]]);
+                }
+            }
+            b"data" => {
+                data_size = size;
+                break;
+            }
+            _ => {
+                f.seek(SeekFrom::Current(size as i64))
+                    .map_err(BackendError::Io)?;
+            }
+        }
+    }
+
+    if byte_rate == 0 {
+        return Err(BackendError::Malformed("WAV missing fmt chunk".into()));
+    }
+    if data_size == 0 {
+        return Err(BackendError::Malformed("WAV missing data chunk".into()));
+    }
+    Ok((data_size as u64 * 1000) / byte_rate as u64)
 }
 
 /// Chunked transcription path: slice the vocal WAV into 60s/10s-overlap
