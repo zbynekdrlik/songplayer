@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::lyrics::audio_chunking::plan_chunks;
+use crate::lyrics::audio_chunking::{CHUNK_OVERLAP_MS, plan_chunks};
 use crate::lyrics::backend::{
     AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
     BackendError,
@@ -326,15 +326,28 @@ async fn align_chunked(
             .ok_or_else(|| BackendError::Malformed("chunk: no output".into()))?;
         let chunk_lines = parse_output(&output)?;
 
-        // Shift all timings (line + word) to global by adding plan.start_ms.
-        // Preserve word-level data — description_merge needs it for line
-        // boundary matching. The previous version dropped words via
-        // ParsedLine/merge_overlap; that broke the description path
-        // entirely (words=None → flatten_asr empty → emit_unmatched_only
-        // placeholder timings, all lines collapsed to 1 s windows).
+        // Chunk-ownership dedup: chunk N (N>0) overlaps chunk N-1 by
+        // CHUNK_OVERLAP_MS. Lines whose global start_ms falls in chunk
+        // N's first-overlap region are also produced by chunk N-1 — drop
+        // them here so the merged stream has no duplicates.
+        //
+        // Whisperx may transcribe the SAME audio differently in adjacent
+        // chunks (e.g. id=132 2:25-2:30 produced "Holy, holy forever." in
+        // chunk K and "Holy forever." in chunk K+1). Text-based dedup
+        // misses this; ownership-based dedup catches it regardless of
+        // text differences.
         let offset = plan.start_ms as u32;
+        let drop_below_ms = if plan.idx == 0 {
+            0
+        } else {
+            (plan.start_ms + CHUNK_OVERLAP_MS) as u32
+        };
         for mut line in chunk_lines {
-            line.start_ms = line.start_ms.saturating_add(offset);
+            let global_start = line.start_ms.saturating_add(offset);
+            if global_start < drop_below_ms {
+                continue;
+            }
+            line.start_ms = global_start;
             line.end_ms = line.end_ms.saturating_add(offset);
             if let Some(ref mut words) = line.words {
                 for w in words.iter_mut() {
@@ -346,22 +359,8 @@ async fn align_chunked(
         }
     }
 
-    // Dedup overlapping chunks: chunk N+1 starts CHUNK_OVERLAP_MS before
-    // chunk N ends. Words near the boundary appear in both chunks. Sort by
-    // start_ms, then drop any line whose start matches an earlier line's
-    // start within 1500 ms AND has identical normalized text.
     all.sort_by_key(|l| l.start_ms);
-    let mut deduped: Vec<AlignedLine> = Vec::with_capacity(all.len());
-    for line in all {
-        let dup = deduped.iter().any(|prev| {
-            prev.start_ms.abs_diff(line.start_ms) < 1500
-                && prev.text.trim().eq_ignore_ascii_case(line.text.trim())
-        });
-        if !dup {
-            deduped.push(line);
-        }
-    }
-    Ok(deduped)
+    Ok(all)
 }
 
 fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
