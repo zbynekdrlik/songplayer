@@ -120,6 +120,7 @@ mod tests {
             norm: text.into(),
             start_ms: start,
             end_ms: end,
+            confidence: 0.9,
         }
     }
 

@@ -686,3 +686,117 @@ fn parse_split_response_strips_prose_preamble() {
     assert_eq!(parsed.splits.len(), 1);
     assert_eq!(parsed.splits[0].i, 7);
 }
+
+// ── drop_phantom_clusters ─────────────────────────────────────────────────────
+
+fn aw(norm: &str, start_ms: u32, end_ms: u32, confidence: f32) -> AsrWord {
+    AsrWord {
+        norm: norm.to_string(),
+        start_ms,
+        end_ms,
+        confidence,
+    }
+}
+
+#[test]
+fn phantom_cluster_id132_holy_forever_257_drops_cause_your_name() {
+    // Universal pattern derived from id=132 wall-verify (2026-05-05):
+    // sustained "holy" 2141 ms conf=0.962 ends at 175711 ms; gap 1121 ms;
+    // phantom "Cause"(0.687)+"your"(0.483)+"name"(0.604) at 176832-179014;
+    // gap 7491 ms to next real sung "Is" at 186505 ms. The cluster was
+    // matching "Your name is the highest" prefix and switching the wall
+    // mid-sustained-forever. Filter must drop all three phantom words.
+    let mut words = vec![
+        aw("holy", 173570, 175711, 0.962),
+        aw("cause", 176832, 177573, 0.687),
+        aw("your", 177713, 178153, 0.483),
+        aw("name", 178173, 179014, 0.604),
+        aw("is", 186505, 186665, 0.857),
+        aw("the", 186705, 186845, 0.893),
+    ];
+    drop_phantom_clusters(&mut words);
+    let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
+    assert_eq!(kept, vec!["holy", "is", "the"]);
+}
+
+#[test]
+fn phantom_cluster_keeps_real_short_phrase_inside_phrase_pause() {
+    // Real sung phrase "to the Lamb" with 800 ms pause before/after.
+    // Avg confidence is high (>0.85) — must not be dropped even if
+    // surrounded by pauses.
+    let mut words = vec![
+        aw("worship", 23368, 24249, 0.86),
+        // 721 ms gap (above GAP_BEFORE_MIN)
+        aw("to", 24970, 25110, 0.86),
+        aw("the", 25190, 25750, 0.92),
+        aw("lamb", 25850, 27311, 0.88),
+        // 5400 ms gap (above GAP_AFTER_MIN)
+        aw("and", 32711, 33000, 0.84),
+    ];
+    drop_phantom_clusters(&mut words);
+    assert_eq!(words.len(), 5, "high-confidence phrase must survive");
+}
+
+#[test]
+fn phantom_cluster_keeps_low_conf_word_when_gap_after_too_small() {
+    // Low-confidence cluster but the next word follows tight (no big silence
+    // after) → it's part of the real flow, not an LM artifact.
+    let mut words = vec![
+        aw("end", 1000, 2000, 0.95),
+        // 800 ms gap
+        aw("um", 2800, 3100, 0.40),
+        aw("ah", 3110, 3300, 0.30),
+        // only 200 ms gap (below GAP_AFTER_MIN_MS) → not phantom
+        aw("next", 3500, 4000, 0.95),
+    ];
+    drop_phantom_clusters(&mut words);
+    assert_eq!(words.len(), 4);
+}
+
+#[test]
+fn phantom_cluster_keeps_singleton_low_conf_word() {
+    // Single low-confidence word surrounded by silence — not a cluster.
+    // Existing absorb_sustained_boundary handles per-word artifacts.
+    let mut words = vec![
+        aw("end", 1000, 2000, 0.95),
+        aw("um", 3000, 3300, 0.40),
+        aw("real", 8000, 8500, 0.95),
+    ];
+    drop_phantom_clusters(&mut words);
+    assert_eq!(
+        words.len(),
+        3,
+        "MIN_CLUSTER_LEN=2 — singletons stay (handled elsewhere)"
+    );
+}
+
+#[test]
+fn phantom_cluster_drops_at_song_start() {
+    // Cluster at position 0 — no previous word. Treat song-start as silence.
+    let mut words = vec![
+        aw("foo", 0, 200, 0.30),
+        aw("bar", 220, 400, 0.40),
+        // 5 s gap to first real word
+        aw("real", 5400, 5800, 0.95),
+    ];
+    drop_phantom_clusters(&mut words);
+    let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
+    assert_eq!(kept, vec!["real"]);
+}
+
+#[test]
+fn phantom_cluster_keeps_high_avg_low_min_conf() {
+    // Cluster of 3 words: two high-conf and one low. Avg above threshold.
+    // Should survive — avg, not min, is the gate so a single low-conf
+    // hiccup inside a real phrase doesn't trigger dropping the phrase.
+    let mut words = vec![
+        aw("a", 0, 100, 0.95),
+        aw("hello", 1000, 1500, 0.95),
+        aw("um", 1520, 1700, 0.10),
+        aw("world", 1720, 2200, 0.90),
+        aw("b", 6000, 6200, 0.95),
+    ];
+    drop_phantom_clusters(&mut words);
+    let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
+    assert_eq!(kept, vec!["a", "hello", "um", "world", "b"]);
+}
