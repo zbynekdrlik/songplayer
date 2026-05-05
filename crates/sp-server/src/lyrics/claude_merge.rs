@@ -20,6 +20,9 @@ use crate::lyrics::backend::{AlignedLine, AlignedTrack};
 use crate::lyrics::tier1::CandidateText;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
+//
+// This enum is shared with `description_merge` (description / override path).
+// Both branches return the same error type up to `Orchestrator::process`.
 
 #[derive(Debug, Error)]
 pub enum MergeError {
@@ -33,22 +36,45 @@ pub enum MergeError {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-/// Merge WhisperX timing with authoritative reference text via Claude.
+/// Merge WhisperX timing with authoritative reference text.
 ///
 /// Returns an `AlignedTrack` with line-level timing only (`words: None` on
 /// every line — per `feedback_line_timing_only.md`).
 ///
-/// Provenance format: `"{asr.provenance}+claude-merge"`.
+/// Two paths based on the best authoritative candidate's source label:
+///
+/// 1. `description` / `override` — clean text from a trusted human / extractor
+///    source. Goes through the deterministic mapper which preserves the
+///    reference's exact line count by construction (no Claude call, no
+///    re-segmentation by audio phrasing). Provenance: `"{source}+{asr.provenance}"`.
+///    Fixes issue #78 where description's natural 25-line output was being
+///    re-segmented into 95 audio-phrase fragments unusable on the LED wall.
+///
+/// 2. `genius` / other text-only — Claude semantic merge corrects WhisperX
+///    mishearings against the reference. Provenance: `"{asr.provenance}+claude-merge"`.
 pub async fn merge(
     ai_client: &AiClient,
     asr: &AlignedTrack,
     text_candidates: &[CandidateText],
+    audit: Option<&crate::lyrics::audit_ctx::AuditContext<'_>>,
 ) -> Result<AlignedTrack, MergeError> {
-    // Step 1: pick authoritative reference text.
-    let reference_lines = best_authoritative(text_candidates);
-    if reference_lines.is_empty() {
-        return Err(MergeError::NoReference);
+    // Step 1: pick authoritative reference candidate (whole CandidateText, not
+    // just its lines — we need the source label to choose the merge path).
+    let best = match best_authoritative_candidate(text_candidates) {
+        Some(b) if !b.lines.is_empty() => b,
+        _ => return Err(MergeError::NoReference),
+    };
+
+    // Step 1a: description / override sources go through the full description
+    // pipeline (issue #78 follow-up). That module handles initial LCS map,
+    // chorus repeat re-emit for long unmatched audio gaps, Claude-driven
+    // natural-phrase splits respecting a hard 32-char cap, word-level sub-line
+    // timing, and an 8 s long-line cap. No Claude semantic merge.
+    if best.source == "description" || best.source == "override" {
+        return crate::lyrics::description_merge::process(ai_client, asr, best, audit).await;
     }
+
+    let reference_lines = best.lines.clone();
 
     // Step 2: build phrase-level chunks from WhisperX word timings.
     let phrases = build_phrases(asr);
@@ -149,15 +175,18 @@ fn source_priority(source: &str) -> u32 {
     }
 }
 
-/// Pick the strongest authoritative source: source priority wins; ties broken by
-/// line count (longest wins). Per #72: high-priority short candidates beat
-/// longer noisy low-priority ones.
-fn best_authoritative(candidates: &[CandidateText]) -> Vec<String> {
+/// Pick the strongest authoritative candidate: source priority wins; ties
+/// broken by line count (longest wins). Per #72: high-priority short
+/// candidates beat longer noisy low-priority ones.
+///
+/// Returns a reference to the chosen `CandidateText` so callers can read
+/// both `lines` (for merging) and `source` (for choosing the merge path —
+/// description / override go through `description_merge::process`, others go
+/// through Claude). Returns `None` for empty input.
+pub(crate) fn best_authoritative_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
     candidates
         .iter()
         .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
-        .map(|c| c.lines.clone())
-        .unwrap_or_default()
 }
 
 /// Build phrase-level chunks from all word-timed lines in `asr`.
@@ -226,7 +255,7 @@ fn build_phrases(asr: &AlignedTrack) -> Vec<Phrase> {
 ///
 /// Returns the trimmed word list (may be empty if all words were dropped, though
 /// that can only happen for a 1-word list where the gap check can't apply).
-fn drop_hallucinated_lead_in(
+pub(super) fn drop_hallucinated_lead_in(
     mut words: Vec<crate::lyrics::backend::AlignedWord>,
 ) -> Vec<crate::lyrics::backend::AlignedWord> {
     loop {

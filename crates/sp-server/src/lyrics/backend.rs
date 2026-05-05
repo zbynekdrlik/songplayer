@@ -45,7 +45,6 @@ pub struct AlignmentCapability {
     pub max_audio_seconds: u32,
     /// BCP-47 language codes the backend supports.
     pub languages: &'static [&'static str],
-    pub takes_reference_text: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -90,7 +89,6 @@ pub trait AlignmentBackend: Send + Sync {
     async fn align(
         &self,
         vocal_wav_path: &Path,
-        reference_text: Option<&str>,
         language: &str,
         opts: &AlignOpts,
     ) -> Result<AlignedTrack, BackendError>;
@@ -118,13 +116,11 @@ mod tests {
                 segment_level: true,
                 max_audio_seconds: 600,
                 languages: &["en"],
-                takes_reference_text: false,
             }
         }
         async fn align(
             &self,
             _wav: &Path,
-            _ref_text: Option<&str>,
             _lang: &str,
             _opts: &AlignOpts,
         ) -> Result<AlignedTrack, BackendError> {
@@ -158,12 +154,7 @@ mod tests {
     async fn mock_backend_returns_aligned_track() {
         let b = MockBackend;
         let r = b
-            .align(
-                &PathBuf::from("/tmp/test.wav"),
-                None,
-                "en",
-                &AlignOpts::default(),
-            )
+            .align(&PathBuf::from("/tmp/test.wav"), "en", &AlignOpts::default())
             .await
             .unwrap();
         assert_eq!(r.lines.len(), 1);
@@ -190,7 +181,6 @@ mod tests {
             segment_level: true,
             max_audio_seconds: 3600,
             languages: &["en"],
-            takes_reference_text: false,
         };
         assert!(!cap.word_level);
         assert!(cap.segment_level);

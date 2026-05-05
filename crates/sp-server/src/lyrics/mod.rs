@@ -1,10 +1,12 @@
 pub mod aligner;
 pub mod assembly;
 pub mod audio_chunking;
+pub mod audit_ctx;
 pub mod backend;
 pub mod bootstrap;
 pub mod chunking;
 pub mod claude_merge;
+pub mod description_merge;
 pub mod description_provider;
 pub mod gather;
 pub mod genius;
