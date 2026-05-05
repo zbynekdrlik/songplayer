@@ -131,29 +131,23 @@ impl Orchestrator {
                             .into(),
                     )
                 })?;
-                // Pass best authoritative candidate's text as initial_prompt
-                // to bias Whisper's LM toward expected phrases. Eliminates
-                // sustained-vowel hallucinations (id=132 2:57 "your, name"
-                // phantom tokens during sustained "forever") and improves
-                // segment boundary detection at line transitions.
-                let prompt_text: Option<String> =
-                    crate::lyrics::claude_merge::best_authoritative_candidate(&text_candidates)
-                        .map(|c| c.lines.join("\n"));
+                // initial_prompt experiment (#78) reverted: passing the
+                // description text caused Whisper to over-bias and transcribe
+                // prompt content twice (id=132 wall-verify 2026-05-05 showed
+                // confidence 0.0-0.2 phantom-duplicated phrases, e.g. "Your
+                // name stands above them all" emitted 10x vs ~5x sung). Stay
+                // on full-audio mode without prompt — preserves chorus repeat
+                // detection. Backend `takes_reference_text=true` capability
+                // remains for a future targeted prompt design.
                 let asr = self
                     .backend
-                    .align(
-                        wav,
-                        prompt_text.as_deref(),
-                        input.language,
-                        &AlignOpts::default(),
-                    )
+                    .align(wav, None, input.language, &AlignOpts::default())
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
                     provenance = %asr.provenance,
                     asr_lines = asr.lines.len(),
                     text_candidates = text_candidates.len(),
-                    has_prompt = prompt_text.is_some(),
                     "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
                 );
                 match claude_merge::merge(
