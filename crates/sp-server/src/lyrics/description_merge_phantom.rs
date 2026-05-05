@@ -48,6 +48,8 @@ pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) {
     }
 
     let mut to_drop: Vec<bool> = vec![false; words.len()];
+    let mut clusters_dropped: u32 = 0;
+    let mut words_dropped: u32 = 0;
 
     let mut i = 0;
     while i < words.len() {
@@ -108,6 +110,8 @@ pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) {
         for k in i..j {
             to_drop[k] = true;
         }
+        clusters_dropped += 1;
+        words_dropped += len as u32;
         tracing::debug!(
             cluster_start_ms = words[i].start_ms,
             cluster_end_ms = words[j - 1].end_ms,
@@ -126,4 +130,12 @@ pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) {
         k += 1;
         keep
     });
+
+    if clusters_dropped > 0 {
+        tracing::info!(
+            clusters_dropped,
+            words_dropped,
+            "description_merge: phantom-cluster filter active"
+        );
+    }
 }

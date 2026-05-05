@@ -131,17 +131,9 @@ impl Orchestrator {
                             .into(),
                     )
                 })?;
-                // initial_prompt experiment (#78) reverted: passing the
-                // description text caused Whisper to over-bias and transcribe
-                // prompt content twice (id=132 wall-verify 2026-05-05 showed
-                // confidence 0.0-0.2 phantom-duplicated phrases, e.g. "Your
-                // name stands above them all" emitted 10x vs ~5x sung). Stay
-                // on full-audio mode without prompt — preserves chorus repeat
-                // detection. Backend `takes_reference_text=true` capability
-                // remains for a future targeted prompt design.
                 let asr = self
                     .backend
-                    .align(wav, None, input.language, &AlignOpts::default())
+                    .align(wav, input.language, &AlignOpts::default())
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
@@ -198,7 +190,7 @@ impl Orchestrator {
                 })?;
                 let asr = self
                     .backend
-                    .align(wav, None, input.language, &AlignOpts::default())
+                    .align(wav, input.language, &AlignOpts::default())
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
@@ -258,13 +250,11 @@ mod tests {
                 segment_level: true,
                 max_audio_seconds: 600,
                 languages: &["en"],
-                takes_reference_text: false,
             }
         }
         async fn align(
             &self,
             _wav: &Path,
-            _ref_text: Option<&str>,
             _lang: &str,
             _opts: &AlignOpts,
         ) -> Result<AlignedTrack, BackendError> {

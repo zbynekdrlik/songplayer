@@ -68,21 +68,15 @@ struct WhisperXWord {
 }
 
 /// Build the JSON input payload for a Replicate WhisperX prediction.
-///
-/// `initial_prompt` is included only when `Some`; otherwise the field is
-/// absent so default Whisper behaviour applies. Extracted for unit testing.
-fn build_predict_input(audio_url: &str, language: &str, initial_prompt: Option<&str>) -> Value {
-    let mut input = serde_json::json!({
+/// Extracted for unit testing.
+fn build_predict_input(audio_url: &str, language: &str) -> Value {
+    serde_json::json!({
         "audio_file": audio_url,
         "language": language,
         "align_output": true,
         "diarization": false,
         "batch_size": 32,
-    });
-    if let Some(prompt) = initial_prompt {
-        input["initial_prompt"] = Value::String(prompt.to_string());
-    }
-    input
+    })
 }
 
 /// Parse Replicate's WhisperX JSON output into AlignedLine list.
@@ -139,7 +133,6 @@ impl AlignmentBackend for WhisperXReplicateBackend {
             // a song longer than 1800 s would time out during polling.
             max_audio_seconds: 1_800,
             languages: &["en", "es", "pt", "fr", "de", "it", "nl", "pl", "ru", "uk"],
-            takes_reference_text: true,
         }
     }
 
@@ -147,7 +140,6 @@ impl AlignmentBackend for WhisperXReplicateBackend {
     async fn align(
         &self,
         vocal_wav_path: &Path,
-        reference_text: Option<&str>,
         language: &str,
         opts: &AlignOpts,
     ) -> Result<AlignedTrack, BackendError> {
@@ -158,23 +150,6 @@ impl AlignmentBackend for WhisperXReplicateBackend {
             0
         };
 
-        // Truncate reference text to ~800 chars to stay within Whisper's
-        // 224-token initial_prompt budget (Whisper silently truncates beyond
-        // that; a hard cap surfaces over-long inputs in logs).
-        const MAX_PROMPT_CHARS: usize = 800;
-        let initial_prompt = reference_text.map(|t| {
-            if t.chars().count() > MAX_PROMPT_CHARS {
-                tracing::warn!(
-                    chars = t.chars().count(),
-                    "whisperx: initial_prompt over {} chars, truncating",
-                    MAX_PROMPT_CHARS
-                );
-                t.chars().take(MAX_PROMPT_CHARS).collect::<String>()
-            } else {
-                t.to_string()
-            }
-        });
-
         let lines = if duration_ms / 1000 > trigger as u64 {
             align_chunked(self, vocal_wav_path, language, duration_ms).await?
         } else {
@@ -183,7 +158,7 @@ impl AlignmentBackend for WhisperXReplicateBackend {
                 .upload_file(vocal_wav_path)
                 .await
                 .map_err(replicate_to_backend_err)?;
-            let input = build_predict_input(&url, language, initial_prompt.as_deref());
+            let input = build_predict_input(&url, language);
             let pred = self
                 .client
                 .predict(WHISPERX_VERSION, input)
@@ -328,13 +303,7 @@ async fn align_chunked(
             .upload_file(&chunk_path)
             .await
             .map_err(replicate_to_backend_err)?;
-        let input = serde_json::json!({
-            "audio_file": url,
-            "language": language,
-            "align_output": true,
-            "diarization": false,
-            "batch_size": 32,
-        });
+        let input = build_predict_input(&url, language);
         let pred = backend
             .client
             .predict(WHISPERX_VERSION, input)
@@ -403,32 +372,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_predict_input_includes_initial_prompt_when_some() {
-        let input = build_predict_input(
-            "https://replicate.delivery/foo.wav",
-            "en",
-            Some("Holy forever\nYour name is the highest"),
-        );
-        assert_eq!(
-            input["initial_prompt"],
-            Value::String("Holy forever\nYour name is the highest".into()),
-            "initial_prompt must be passed verbatim to Replicate"
-        );
+    fn build_predict_input_emits_expected_shape() {
+        let input = build_predict_input("https://replicate.delivery/foo.wav", "en");
         assert_eq!(input["audio_file"], "https://replicate.delivery/foo.wav");
         assert_eq!(input["language"], "en");
         assert_eq!(input["align_output"], true);
         assert_eq!(input["diarization"], false);
         assert_eq!(input["batch_size"], 32);
-    }
-
-    #[test]
-    fn build_predict_input_omits_initial_prompt_when_none() {
-        let input = build_predict_input("https://replicate.delivery/foo.wav", "en", None);
-        assert!(
-            input.get("initial_prompt").is_none(),
-            "initial_prompt field MUST be absent when reference text is None \
-             (any present-but-empty value would change Whisper LM behaviour)"
-        );
+        // No `initial_prompt` field — biasing Whisper with full lyrics
+        // caused LM-fallback prompt-leakage on id=132 (#78). The phantom
+        // cluster filter at description_merge_phantom.rs is the chosen
+        // remedy; this regression-asserts no one quietly re-adds the
+        // prompt without explicit design.
+        assert!(input.get("initial_prompt").is_none());
     }
 
     #[test]
