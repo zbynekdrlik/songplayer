@@ -3,9 +3,8 @@
 //! 2.5 trim outlier indices, 2.7 absorb sustained-note tokens at line
 //! boundaries, 3 Claude split for >32c, 4 emit AlignedLine with sub-line
 //! word timing, 5 cap + monotonic + extend end_ms to next.start_ms (no gap).
-//! Per `feedback_line_timing_only.md` `words: None`; per
-//! `feedback_no_even_distribution.md` no uniform spacing.
-//! Provenance: `"{source}+{asr.provenance}"`, no `+claude-merge` suffix.
+//! `words: None` per `feedback_line_timing_only.md`. Provenance:
+//! `"{source}+{asr.provenance}"` (no `+claude-merge` suffix).
 
 // Algorithm uses several index-based scans (LCS DP, gap detection, char-index
 // split-point search) where the iter-chain rewrite obscures intent or pulls
@@ -34,40 +33,37 @@ mod window;
 #[path = "description_merge_absorb.rs"]
 mod absorb;
 
+#[path = "description_merge_phantom.rs"]
+mod phantom;
+
 /// Hard upper bound for sub-line EN length. The LED wall renders only this
 /// many characters per row; longer lines visually overflow into adjacent UI
 /// panels and are unacceptable.
 pub const SUBLINE_MAX_CHARS: usize = 32;
 
-/// Cap on a single line's display duration. When the LCS finds no ref-line
-/// match for an extended window of audio (instrumental, vocal break, chorus
-/// section without unique words), the previous matched line's `end_ms` would
-/// stretch to fill the gap. Cap stops that — line displays for `LONG_LINE_CAP_MS`
-/// then wall goes blank until the next matched line.
+/// Cap on a single line's display duration. Without it, an unmatched
+/// instrumental gap stretches the previous line forever. Beyond this the
+/// wall goes blank until the next matched line.
 pub const LONG_LINE_CAP_MS: u32 = 8000;
 
-/// Minimum gap between consecutive matched lines that triggers chorus-repeat
-/// detection. Below this we trust the LCS gap as a real silence between sung
-/// phrases; above this we look for a ref line that could fill it.
+/// Gap between matched lines that triggers chorus-repeat detection.
+/// Below: trust LCS silence. Above: look for a ref line to fill it.
 const CHORUS_REPEAT_GAP_MS: u32 = 4000;
 
-/// Minimum word-level match score for a chorus repeat to be emitted (matched
-/// ASR words / ref words ratio). Below threshold the gap stays blank.
+/// Min word-level match score (matched/ref ratio) for chorus re-emit.
 const CHORUS_REPEAT_MIN_MATCH_RATIO: f32 = 0.6;
 
-/// Minimum number of ASR words a chorus repeat must match. Without this floor
-/// a 2-word ref like "Holy forever" with ratio 0.5 would emit on a single
-/// "holy" audio word, producing a near-zero-duration display flash.
+/// Min ASR words matched. Floors the ratio so a 2-word ref doesn't emit
+/// on a single audio word and flash invisibly.
 const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
 
-/// Minimum display duration for ANY emitted line. Short matches (single
-/// audio word, fragments) collapse to ~0 ms display windows that flash by
-/// invisibly on the wall. We drop emits below this floor in Phase 5.
+/// Min display duration for any emitted line. Short matches that collapse
+/// to ~0 ms windows flash invisibly on the wall — drop in Phase 5.
 const MIN_LINE_DURATION_MS: u32 = 500;
 
-/// Phase 5 extension policy. Gap ≤ REASONABLE_GAP_MS → fill to next.start
-/// (whisperx often undertimes last word). Gap > REASONABLE_GAP_MS → cap
-/// at natural_end + EXTENSION_TOLERANCE_MS (real instrumental silence).
+/// Phase 5 extension. Gap ≤ REASONABLE_GAP_MS → fill to next.start
+/// (whisperx undertimes last word). Otherwise cap at natural_end +
+/// EXTENSION_TOLERANCE_MS (instrumental silence).
 const EXTENSION_TOLERANCE_MS: u32 = 1500;
 const REASONABLE_GAP_MS: u32 = 4000;
 
@@ -237,127 +233,8 @@ fn flatten_asr(asr: &AlignedTrack) -> Vec<AsrWord> {
             }
         }
     }
-    drop_phantom_clusters(&mut out);
+    phantom::drop_phantom_clusters(&mut out);
     out
-}
-
-/// Drop "phantom clusters" — short sequences of low-confidence words that
-/// WhisperX's language model emits as filler during sustained vocals or
-/// instrumental gaps. These look like real transcribed lyrics but they were
-/// hallucinated, not heard.
-///
-/// Universal acoustic-only signature (no song-specific tuning, no lyric-text
-/// inspection):
-///
-/// - cluster length ≥ 2 words
-/// - gap from previous real word > 700 ms (cluster starts after a clear
-///   silence — not part of an ongoing sung phrase)
-/// - gap to next real word > 3000 ms (cluster is followed by a clear
-///   silence — not a brief pause inside a sung phrase)
-/// - cluster average confidence < 0.70
-///
-/// Both-sided silence is the key. A real sung phrase pulls neighbouring
-/// words within ~300 ms, so a cluster floating in 700/3000 ms gulfs is
-/// almost certainly an LM-fallback artifact. The avg-confidence cap rules
-/// out clean monosyllabic sung interjections (which usually score >0.85).
-///
-/// id=132 2:57 evidence (Holy Forever, Chris Tomlin):
-///   real sustained 'holy' end=175711, gap 1121 ms,
-///   "Cause"(0.687)+"your"(0.483)+"name"(0.604) avg=0.591,
-///   gap 7491 ms to next real word at 186505.
-/// All four conditions met → cluster dropped. The merger no longer matches
-/// these phantom tokens to "Your name is the highest" prefix, so the wall
-/// stays on "Holy forever" through the sustained note.
-fn drop_phantom_clusters(words: &mut Vec<AsrWord>) {
-    const GAP_BEFORE_MIN_MS: u32 = 700;
-    const GAP_AFTER_MIN_MS: u32 = 3000;
-    const MIN_CLUSTER_LEN: usize = 2;
-    const MAX_WORD_CONF: f32 = 0.75; // every cluster word must be below this
-    const MAX_AVG_CONF: f32 = 0.70;
-
-    if words.len() < MIN_CLUSTER_LEN {
-        return;
-    }
-
-    let mut to_drop: Vec<bool> = vec![false; words.len()];
-
-    let mut i = 0;
-    while i < words.len() {
-        // A phantom cluster starts at a low-confidence word that follows a
-        // clear silence (>700 ms) — i.e. the first word in a new run after
-        // an audible gap.
-        if words[i].confidence >= MAX_WORD_CONF {
-            i += 1;
-            continue;
-        }
-        let gap_before = if i == 0 {
-            u32::MAX // song start — count as silence
-        } else {
-            words[i].start_ms.saturating_sub(words[i - 1].end_ms)
-        };
-        if gap_before < GAP_BEFORE_MIN_MS {
-            i += 1;
-            continue;
-        }
-
-        // Cluster extends as long as words stay LOW-confidence AND inner
-        // gaps stay tight. The first high-confidence word OR first wide
-        // inner gap ends the cluster.
-        let mut j = i + 1;
-        while j < words.len() {
-            if words[j].confidence >= MAX_WORD_CONF {
-                break;
-            }
-            let inner_gap = words[j].start_ms.saturating_sub(words[j - 1].end_ms);
-            if inner_gap >= GAP_BEFORE_MIN_MS {
-                break;
-            }
-            j += 1;
-        }
-        let len = j - i;
-        if len < MIN_CLUSTER_LEN {
-            i = j.max(i + 1);
-            continue;
-        }
-
-        let gap_after = if j == words.len() {
-            u32::MAX
-        } else {
-            words[j].start_ms.saturating_sub(words[j - 1].end_ms)
-        };
-        if gap_after < GAP_AFTER_MIN_MS {
-            i = j;
-            continue;
-        }
-
-        let sum: f32 = words[i..j].iter().map(|w| w.confidence).sum();
-        let avg = sum / (len as f32);
-        if avg >= MAX_AVG_CONF {
-            i = j;
-            continue;
-        }
-
-        for k in i..j {
-            to_drop[k] = true;
-        }
-        tracing::debug!(
-            cluster_start_ms = words[i].start_ms,
-            cluster_end_ms = words[j - 1].end_ms,
-            len,
-            avg_conf = avg,
-            gap_before_ms = gap_before,
-            gap_after_ms = gap_after,
-            "description_merge: dropping phantom cluster"
-        );
-        i = j;
-    }
-
-    let mut k = 0;
-    words.retain(|_| {
-        let keep = !to_drop[k];
-        k += 1;
-        keep
-    });
 }
 
 /// Match reference lines to ASR audio words via global Needleman-Wunsch

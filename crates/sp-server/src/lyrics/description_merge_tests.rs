@@ -714,7 +714,7 @@ fn phantom_cluster_id132_holy_forever_257_drops_cause_your_name() {
         aw("is", 186505, 186665, 0.857),
         aw("the", 186705, 186845, 0.893),
     ];
-    drop_phantom_clusters(&mut words);
+    phantom::drop_phantom_clusters(&mut words);
     let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
     assert_eq!(kept, vec!["holy", "is", "the"]);
 }
@@ -733,7 +733,7 @@ fn phantom_cluster_keeps_real_short_phrase_inside_phrase_pause() {
         // 5400 ms gap (above GAP_AFTER_MIN)
         aw("and", 32711, 33000, 0.84),
     ];
-    drop_phantom_clusters(&mut words);
+    phantom::drop_phantom_clusters(&mut words);
     assert_eq!(words.len(), 5, "high-confidence phrase must survive");
 }
 
@@ -749,7 +749,7 @@ fn phantom_cluster_keeps_low_conf_word_when_gap_after_too_small() {
         // only 200 ms gap (below GAP_AFTER_MIN_MS) → not phantom
         aw("next", 3500, 4000, 0.95),
     ];
-    drop_phantom_clusters(&mut words);
+    phantom::drop_phantom_clusters(&mut words);
     assert_eq!(words.len(), 4);
 }
 
@@ -762,7 +762,7 @@ fn phantom_cluster_keeps_singleton_low_conf_word() {
         aw("um", 3000, 3300, 0.40),
         aw("real", 8000, 8500, 0.95),
     ];
-    drop_phantom_clusters(&mut words);
+    phantom::drop_phantom_clusters(&mut words);
     assert_eq!(
         words.len(),
         3,
@@ -779,7 +779,7 @@ fn phantom_cluster_drops_at_song_start() {
         // 5 s gap to first real word
         aw("real", 5400, 5800, 0.95),
     ];
-    drop_phantom_clusters(&mut words);
+    phantom::drop_phantom_clusters(&mut words);
     let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
     assert_eq!(kept, vec!["real"]);
 }
@@ -796,7 +796,7 @@ fn phantom_cluster_keeps_high_avg_low_min_conf() {
         aw("world", 1720, 2200, 0.90),
         aw("b", 6000, 6200, 0.95),
     ];
-    drop_phantom_clusters(&mut words);
+    phantom::drop_phantom_clusters(&mut words);
     let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
     assert_eq!(kept, vec!["a", "hello", "um", "world", "b"]);
 }
