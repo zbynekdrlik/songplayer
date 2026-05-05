@@ -133,7 +133,14 @@ impl Orchestrator {
                 })?;
                 let asr = self
                     .backend
-                    .align(wav, None, input.language, &AlignOpts::default())
+                    .align(
+                        wav,
+                        None,
+                        input.language,
+                        &AlignOpts {
+                            chunk_trigger_seconds: Some(90),
+                        },
+                    )
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
@@ -190,7 +197,14 @@ impl Orchestrator {
                 })?;
                 let asr = self
                     .backend
-                    .align(wav, None, input.language, &AlignOpts::default())
+                    .align(
+                        wav,
+                        None,
+                        input.language,
+                        &AlignOpts {
+                            chunk_trigger_seconds: Some(90),
+                        },
+                    )
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
                 info!(
