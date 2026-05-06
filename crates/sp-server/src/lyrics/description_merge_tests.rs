@@ -979,3 +979,19 @@ fn lcs_align_picks_strictly_higher_count_path() {
         "lcs_align must return verbatim fg or dp; got {result:?}, fg={fg:?}, dp={dp:?}"
     );
 }
+
+#[test]
+fn lcs_align_picker_returns_fg_at_equal_count_distinguishable_indices() {
+    // ref=[a], asr=[a,a]. fg picks asr[0] → [Some(0)]. dp's traceback is
+    // greedy-from-end so it picks asr[1] → [Some(1)]. Both count=1, so
+    // fg_count == dp_count and the picker must return fg under the `>=`
+    // rule. Mutation `>=` ↔ `<` would return dp = [Some(1)] instead.
+    // Kills line 914:17 `>=` ↔ `<` in lcs_align.
+    let r = ["a"];
+    let a = ["a", "a"];
+    assert_eq!(
+        lcs_align(&r, &a),
+        vec![Some(0)],
+        "picker must return fg (>=) at equal count"
+    );
+}

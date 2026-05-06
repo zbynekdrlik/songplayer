@@ -795,12 +795,17 @@ fn asr_with_words(words: Vec<AlignedWord>) -> AlignedTrack {
 #[tokio::test]
 async fn merge_returns_no_reference_when_candidate_lines_empty() {
     // Kills `replace match guard !b.lines.is_empty() with true` at line 64:20.
-    // With the mutation, an empty-lines candidate would proceed past the
-    // guard; downstream code would either crash, hit description_merge with
-    // no reference, or call Claude unnecessarily. Original returns Err(NoReference).
+    // Source must be a NON-special label (not "description"/"override")
+    // so the mutation path goes to the Claude semantic-merge branch
+    // instead of description_merge::process — that branch has its own
+    // empty-ref short-circuit (line 105) which returns NoReference
+    // regardless of which guard is mutated, so it can't distinguish.
+    // With "genius", the mutation gets past line 64 and tries to call
+    // AiClient at the unreachable port → Err(MergeError::Claude(_)).
+    // Original short-circuits at line 64 → Err(MergeError::NoReference).
     let ai = dummy_ai_client();
     let asr = asr_with_words(vec![make_word("a", 0, 100)]);
-    let candidates = vec![cand("description", &[])];
+    let candidates = vec![cand("genius", &[])];
     let result = merge(&ai, &asr, &candidates, None).await;
     assert!(
         matches!(result, Err(MergeError::NoReference)),
