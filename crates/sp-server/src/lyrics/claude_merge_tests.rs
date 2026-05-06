@@ -800,10 +800,7 @@ async fn merge_returns_no_reference_when_candidate_lines_empty() {
     // no reference, or call Claude unnecessarily. Original returns Err(NoReference).
     let ai = dummy_ai_client();
     let asr = asr_with_words(vec![make_word("a", 0, 100)]);
-    let candidates = vec![CandidateText {
-        source: "description".into(),
-        lines: vec![], // empty
-    }];
+    let candidates = vec![cand("description", &[])];
     let result = merge(&ai, &asr, &candidates, None).await;
     assert!(
         matches!(result, Err(MergeError::NoReference)),
@@ -840,10 +837,7 @@ async fn merge_routes_description_source_through_description_merge() {
         make_word("b", 200, 300),
         make_word("c", 400, 500),
     ]);
-    let candidates = vec![CandidateText {
-        source: "description".into(),
-        lines: vec!["a b".into(), "c".into()], // both well under 32 chars
-    }];
+    let candidates = vec![cand("description", &["a b", "c"])]; // both well under 32 chars
     let result = merge(&ai, &asr, &candidates, None).await;
     let track = result.expect("description path must succeed without Claude");
     assert!(
@@ -862,10 +856,7 @@ async fn merge_routes_override_source_through_description_merge() {
         make_word("hello", 0, 200),
         make_word("world", 300, 500),
     ]);
-    let candidates = vec![CandidateText {
-        source: "override".into(),
-        lines: vec!["hello world".into()],
-    }];
+    let candidates = vec![cand("override", &["hello world"])];
     let result = merge(&ai, &asr, &candidates, None).await;
     let track = result.expect("override path must succeed without Claude");
     assert!(
