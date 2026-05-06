@@ -978,3 +978,198 @@ fn phantom_cluster_keeps_high_avg_low_min_conf() {
     let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
     assert_eq!(kept, vec!["a", "hello", "um", "world", "b"]);
 }
+
+// ── phantom_cluster boundary tests (kill mutation survivors) ─────────────────
+
+#[test]
+fn phantom_cluster_returns_zero_counts_when_input_below_min_len() {
+    // words.len() < MIN_CLUSTER_LEN (=2): early-return with (0, 0).
+    // Kills `replace < with ==` and `replace < with <=` at line 46.
+    let mut words = vec![aw("only", 0, 100, 0.30)];
+    let (clusters, dropped) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!((clusters, dropped), (0, 0));
+    assert_eq!(words.len(), 1, "below-min-len input must not be mutated");
+}
+
+#[test]
+fn phantom_cluster_returns_count_two_for_two_clusters() {
+    // Two distinct phantom clusters in one input. Verifies the
+    // `clusters_dropped += 1` accumulator: with `*= 1` the count would
+    // stay at 0; with the correct `+= 1` it reaches 2. Same idea for
+    // `words_dropped += len` (4 words across two clusters of 2 each).
+    let mut words = vec![
+        // Cluster 1: tight low-conf pair after silence, before silence
+        aw("real1", 0, 200, 0.95),
+        aw("p1a", 1000, 1100, 0.30),
+        aw("p1b", 1110, 1200, 0.40),
+        // 5s silence
+        aw("real2", 6200, 6400, 0.95),
+        // Cluster 2: another tight low-conf pair after silence, before silence
+        aw("p2a", 8000, 8100, 0.30),
+        aw("p2b", 8110, 8200, 0.40),
+        aw("real3", 13200, 13400, 0.95),
+    ];
+    let (clusters, dropped) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(clusters, 2, "two distinct clusters expected");
+    assert_eq!(dropped, 4, "four phantom words dropped");
+}
+
+#[test]
+fn phantom_cluster_gap_before_at_threshold_drops() {
+    // gap_before exactly == GAP_BEFORE_MIN_MS (700) is NOT enough — the
+    // check is `gap_before < 700 → skip`, so a gap of exactly 700 does
+    // not skip and the cluster proceeds. Gap=701 to be safe well past
+    // boundary; gap=699 separately verified to NOT trigger cluster start.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        // gap_before = 1000 - 300 = 700 (exactly threshold)
+        aw("p1", 1000, 1100, 0.30),
+        aw("p2", 1110, 1200, 0.40),
+        // 5000 ms silence after
+        aw("real2", 6200, 6400, 0.95),
+    ];
+    let (clusters, _) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(
+        clusters, 1,
+        "gap_before == GAP_BEFORE_MIN_MS must enter cluster"
+    );
+}
+
+#[test]
+fn phantom_cluster_gap_before_below_threshold_does_not_start_cluster() {
+    // gap_before = 699 (one below threshold) — cluster does NOT start.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        aw("p1", 999, 1100, 0.30), // gap = 699
+        aw("p2", 1110, 1200, 0.40),
+        aw("real2", 6200, 6400, 0.95),
+    ];
+    let (clusters, _) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(clusters, 0, "gap_before < GAP_BEFORE_MIN_MS must skip");
+    assert_eq!(words.len(), 4, "no words dropped");
+}
+
+#[test]
+fn phantom_cluster_gap_after_at_threshold_drops() {
+    // gap_after exactly == GAP_AFTER_MIN_MS (3000): NOT enough — `< 3000
+    // → not phantom`. So gap=3001 drops, gap=3000 does NOT. Test gap=3000
+    // (boundary, no drop) and gap=3001 (just over, drop).
+    let mut words_at_threshold = vec![
+        aw("real", 0, 300, 0.95),
+        aw("p1", 1000, 1100, 0.30),
+        aw("p2", 1110, 1200, 0.40),
+        // gap_after = 4200 - 1200 = 3000 (exactly threshold)
+        aw("real2", 4200, 4400, 0.95),
+    ];
+    let (c1, _) = phantom::drop_phantom_clusters(&mut words_at_threshold);
+    assert_eq!(c1, 0, "gap_after == GAP_AFTER_MIN_MS must NOT drop");
+
+    let mut words_just_over = vec![
+        aw("real", 0, 300, 0.95),
+        aw("p1", 1000, 1100, 0.30),
+        aw("p2", 1110, 1200, 0.40),
+        // gap_after = 4201 - 1200 = 3001 (one over)
+        aw("real2", 4201, 4400, 0.95),
+    ];
+    let (c2, _) = phantom::drop_phantom_clusters(&mut words_just_over);
+    assert_eq!(c2, 1, "gap_after = 3001 must drop");
+}
+
+#[test]
+fn phantom_cluster_avg_conf_at_threshold_does_not_drop() {
+    // avg conf exactly == 0.70: `avg >= 0.70 → skip`. So avg of exactly
+    // 0.70 does NOT drop. Verifies the >= guard isn't relaxed to >.
+    // Two words at conf 0.70 each: avg = 0.70.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        aw("p1", 1000, 1100, 0.70),
+        aw("p2", 1110, 1200, 0.70),
+        aw("real2", 6200, 6400, 0.95),
+    ];
+    // Note: 0.70 also fails the per-word `< MAX_WORD_CONF (0.75)` check
+    // for cluster CONTINUATION but starts the cluster (0.70 < 0.75).
+    // Both p1 and p2 satisfy < 0.75. Cluster of len=2. avg=0.70 → SKIP.
+    let (clusters, _) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(clusters, 0, "avg conf == 0.70 must NOT drop");
+}
+
+#[test]
+fn phantom_cluster_high_conf_word_breaks_cluster_growth() {
+    // First word low-conf after silence → cluster starts. Second word
+    // high-conf → cluster ENDS (not absorbed into cluster). Cluster len
+    // = 1, below MIN_CLUSTER_LEN → no drop. Verifies the
+    // `confidence >= MAX_WORD_CONF → break` guard.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        // gap=800
+        aw("low", 1100, 1200, 0.30),
+        aw("HIGH", 1210, 1400, 0.95), // breaks cluster growth
+        aw("real2", 7400, 7600, 0.95),
+    ];
+    let (clusters, _) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(clusters, 0, "high-conf word must end cluster growth");
+    assert_eq!(words.len(), 4, "no words dropped");
+}
+
+#[test]
+fn phantom_cluster_inner_gap_at_threshold_breaks_cluster() {
+    // Inner gap exactly == GAP_BEFORE_MIN_MS (700): `inner_gap >= 700 → break`.
+    // So an inner gap of 700 breaks the cluster (cluster ends at the gap).
+    // Verifies the >= boundary on inner gaps.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        aw("p1", 1100, 1200, 0.30),
+        // inner_gap = 1900 - 1200 = 700 (exactly at threshold)
+        aw("p2", 1900, 2000, 0.40),
+        aw("real2", 7000, 7200, 0.95),
+    ];
+    // Cluster from p1: walks j=1, p1 included. j=2: inner_gap=700, BREAK.
+    // Cluster len=1 < 2 → no drop. i advances to 2 (p2).
+    // p2 alone: gap_before from p1 = 700 (>=700, ok). j=3: real2 high-conf BREAK.
+    // Cluster len=1 < 2 → no drop. Total: no drops.
+    let (clusters, _) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(
+        clusters, 0,
+        "inner gap >= GAP_BEFORE_MIN_MS must break cluster"
+    );
+}
+
+#[test]
+fn phantom_cluster_at_song_end_treats_end_as_silence() {
+    // Cluster as the LAST words: gap_after = u32::MAX (no next word).
+    // Drops. Verifies `j == words.len() → MAX` branch.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        aw("p1", 1100, 1200, 0.30),
+        aw("p2", 1210, 1300, 0.40),
+        // no more words
+    ];
+    let (clusters, dropped) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(clusters, 1);
+    assert_eq!(dropped, 2);
+    let kept: Vec<&str> = words.iter().map(|w| w.norm.as_str()).collect();
+    assert_eq!(kept, vec!["real"]);
+}
+
+#[test]
+fn phantom_cluster_singleton_low_conf_advances_past_word() {
+    // Verifies `i = j.max(i + 1)` advances correctly when len < MIN_CLUSTER_LEN.
+    // If the increment used `+ 0` or `* 1`, i could fail to advance and
+    // infinite loop. If it used `i - 1`, would underflow.
+    // Setup: real, low-conf-singleton-cluster (len=1, no drop), high-conf,
+    // then second cluster. Both clusters separately processed.
+    let mut words = vec![
+        aw("real", 0, 300, 0.95),
+        // gap=800 to low: triggers cluster check. Next is high-conf,
+        // breaks cluster at len=1 → no drop. i advances past low.
+        aw("low1", 1100, 1200, 0.30),
+        aw("hi", 1210, 1500, 0.95),
+        aw("low2", 2300, 2400, 0.30),
+        aw("low3", 2410, 2500, 0.40),
+        // 5s silence
+        aw("real2", 7500, 7700, 0.95),
+    ];
+    let (clusters, dropped) = phantom::drop_phantom_clusters(&mut words);
+    assert_eq!(clusters, 1, "second cluster (low2+low3) drops");
+    assert_eq!(dropped, 2);
+}

@@ -42,9 +42,12 @@ const MAX_WORD_CONF: f32 = 0.75;
 /// to leave headroom for borderline real words.
 const MAX_AVG_CONF: f32 = 0.70;
 
-pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) {
+/// Returns `(clusters_dropped, words_dropped)` so unit tests can assert
+/// the counter accumulator behaviour (otherwise `+= 1` and `*= 1` mutate
+/// to indistinguishable behaviour from outside the function).
+pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) -> (u32, u32) {
     if words.len() < MIN_CLUSTER_LEN {
-        return;
+        return (0, 0);
     }
 
     let mut to_drop: Vec<bool> = vec![false; words.len()];
@@ -138,4 +141,5 @@ pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) {
             "description_merge: phantom-cluster filter active"
         );
     }
+    (clusters_dropped, words_dropped)
 }

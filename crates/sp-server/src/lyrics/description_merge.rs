@@ -233,7 +233,7 @@ fn flatten_asr(asr: &AlignedTrack) -> Vec<AsrWord> {
             }
         }
     }
-    phantom::drop_phantom_clusters(&mut out);
+    let _ = phantom::drop_phantom_clusters(&mut out);
     out
 }
 
