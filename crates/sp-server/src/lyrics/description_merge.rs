@@ -36,9 +36,8 @@ mod absorb;
 #[path = "description_merge_phantom.rs"]
 mod phantom;
 
-/// Hard upper bound for sub-line EN length. The LED wall renders only this
-/// many characters per row; longer lines visually overflow into adjacent UI
-/// panels and are unacceptable.
+/// Hard upper bound for sub-line EN length. LED wall renders this many
+/// chars per row; longer lines overflow into adjacent UI panels.
 pub const SUBLINE_MAX_CHARS: usize = 32;
 
 /// Cap on a single line's display duration. Without it, an unmatched
@@ -995,3 +994,7 @@ fn emit_unmatched_only(asr: &AlignedTrack, candidate: &CandidateText) -> Aligned
 #[cfg(test)]
 #[path = "description_merge_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "description_merge_phantom_tests.rs"]
+mod phantom_tests;

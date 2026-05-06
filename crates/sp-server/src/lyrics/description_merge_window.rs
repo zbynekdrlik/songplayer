@@ -177,12 +177,12 @@ mod tests {
 
     #[test]
     fn best_window_match_finds_pair_when_window_grows_past_start_plus_one() {
-        // ref = [a, b]. asr = [a, b]. cap = LONG_LINE_CAP_MS (8000).
+        // ref = [a, b]. asr = [a, b] with span >= MIN_LINE_DURATION_MS (500).
         // start_pos=0: end_pos starts at 1. asr_words[unconsumed[1]].start_ms = 200,
         // <= cap_end_ms (0 + 8000 = 8000) → end_pos advances to 2. Window covers
         // both words. matched len = 2. Mutation `start_pos + 1` → `start_pos * 1`
         // gives end_pos = 0 (start), zero-width window, no matches → returns None.
-        let asr_words = vec![w("a", 0, 100), w("b", 200, 300)];
+        let asr_words = vec![w("a", 0, 100), w("b", 700, 1000)];
         let ref_norms: Vec<Vec<String>> = vec![vec!["a".into(), "b".into()]];
         let unconsumed = vec![0, 1];
         let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
