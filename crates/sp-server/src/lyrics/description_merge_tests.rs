@@ -342,6 +342,121 @@ fn absorb_sustained_boundary_skips_long_gap() {
     assert_eq!(emits[1].asr_word_indices, vec![1, 2]);
 }
 
+// ── absorb boundary tests (kill mutation survivors) ───────────────────────────
+
+#[test]
+fn absorb_sustained_gap_at_threshold_does_not_break() {
+    // gap exactly == SUSTAINED_NOTE_MAX_GAP_MS (2000): original guard is
+    // `gap > 2000 → break`, so 2000 does NOT break — absorption proceeds.
+    // Kills `>` ↔ `==` and `>` ↔ `>=` at line 118:20.
+    let asr_track = asr(vec![
+        make_word("a", 0, 80),         // prev_dur 80 (artifact)
+        make_word("holy", 100, 200),   // prev's last (also short → artifact-eligible)
+        make_word("holy", 2200, 3000), // gap = 2200-200 = 2000 exactly; long sustained
+        make_word("praise", 3500, 3800),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Be Holy".into(),
+            asr_word_indices: vec![0, 1],
+        },
+        LineEmit {
+            text: "Praise".into(),
+            asr_word_indices: vec![2, 3],
+        },
+    ];
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    // gap=2000 NOT > 2000, NOT broken. Artifact-replacement check fires:
+    // prev_dur=100 (200-100) < 200; next_dur=800 (3000-2200) >= 100*5=500.
+    // → absorb the long "holy" into prev. emits[0] gains idx 2.
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2]);
+    assert_eq!(emits[1].asr_word_indices, vec![3]);
+}
+
+#[test]
+fn absorb_sustained_gap_just_over_threshold_breaks() {
+    // gap == 2001 — `> 2000` true → break, no absorption.
+    let asr_track = asr(vec![
+        make_word("a", 0, 80),
+        make_word("holy", 100, 200),
+        make_word("holy", 2201, 3000), // gap = 2201-200 = 2001
+        make_word("praise", 3500, 3800),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Be Holy".into(),
+            asr_word_indices: vec![0, 1],
+        },
+        LineEmit {
+            text: "Praise".into(),
+            asr_word_indices: vec![2, 3],
+        },
+    ];
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    assert_eq!(
+        emits[0].asr_word_indices,
+        vec![0, 1],
+        "gap > 2000 must break"
+    );
+    assert_eq!(emits[1].asr_word_indices, vec![2, 3]);
+}
+
+#[test]
+fn absorb_sustained_prev_dur_at_artifact_threshold_does_not_replace() {
+    // prev_dur exactly == ARTIFACT_TOKEN_DUR_MS (200): original guard is
+    // `prev_dur < 200 → artifact`, so 200 does NOT trigger artifact-
+    // replacement. Without artifact path, the same-ref-word rule applies
+    // (next ref starts with "holy" → no absorption). Kills `<` ↔ `<=` at
+    // line 135:52.
+    let asr_track = asr(vec![
+        make_word("be", 0, 80),
+        make_word("holy", 100, 300),  // prev_dur = 200 EXACTLY
+        make_word("holy", 350, 2000), // long, but prev_dur not < 200
+        make_word("forever", 2100, 2400),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Be Holy".into(),
+            asr_word_indices: vec![0, 1],
+        },
+        LineEmit {
+            text: "Holy forever".into(),
+            asr_word_indices: vec![2, 3],
+        },
+    ];
+    absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);
+    // prev_dur = 200, NOT < 200 → no artifact-replacement.
+    // next ref starts with "holy" (matches token) → break. No absorption.
+    assert_eq!(emits[0].asr_word_indices, vec![0, 1]);
+    assert_eq!(emits[1].asr_word_indices, vec![2, 3]);
+}
+
+#[test]
+fn absorb_prefix_walks_scan_to_zero_without_match() {
+    // emit.asr_word_indices=[3] (only "d" matched). ref="a b c d" so the
+    // prefix walk-back attempts ref_pos=2,1,0. asr_words[0..3] none match
+    // their target. Inner while predicate `scan > 0` exits cleanly when
+    // scan reaches 0. With `>=` mutation: scan=0 enters body, scan -= 1
+    // underflows usize → debug-mode panic. Kills line 67:24 `>` ↔ `>=`.
+    let asr_track = asr(vec![
+        make_word("x", 0, 100),
+        make_word("y", 200, 300),
+        make_word("z", 400, 500),
+        make_word("d", 600, 700),
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![LineEmit {
+        text: "a b c d".into(),
+        asr_word_indices: vec![3],
+    }];
+    absorb::absorb_prefix_matches(&mut emits, &asr_words);
+    // No matches found in walk-back → emit unchanged.
+    assert_eq!(emits[0].asr_word_indices, vec![3]);
+}
+
 // ── Phase 2.5: trim_outlier_indices ───────────────────────────────────────────
 
 #[test]
