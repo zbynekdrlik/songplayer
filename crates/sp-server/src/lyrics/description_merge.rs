@@ -1,10 +1,9 @@
-//! Description / override merge pipeline (issue #78). Phases: 1 Claude
-//! line-mapping (NW DP fallback), 2 chorus repeat via sliding-window LCS,
-//! 2.5 trim outlier indices, 2.7 absorb sustained-note tokens at line
-//! boundaries, 3 Claude split for >32c, 4 emit AlignedLine with sub-line
-//! word timing, 5 cap + monotonic + extend end_ms to next.start_ms (no gap).
-//! `words: None` per `feedback_line_timing_only.md`. Provenance:
-//! `"{source}+{asr.provenance}"` (no `+claude-merge` suffix).
+//! Description / override merge pipeline (issue #78). Phases:
+//! 1 Claude line-mapping (NW DP fallback), 2 chorus repeat via sliding-
+//! window LCS, 2.5 trim outliers, 2.7 absorb sustained-note tokens,
+//! 3 Claude split >32c, 4 emit AlignedLine, 5 cap + monotonic + extend.
+//! `words: None` (feedback_line_timing_only). Provenance prefix from
+//! source candidate, no `+claude-merge` suffix.
 
 // Algorithm uses several index-based scans (LCS DP, gap detection, char-index
 // split-point search) where the iter-chain rewrite obscures intent or pulls
@@ -40,24 +39,21 @@ mod phantom;
 /// chars per row; longer lines overflow into adjacent UI panels.
 pub const SUBLINE_MAX_CHARS: usize = 32;
 
-/// Cap on a single line's display duration. Without it, an unmatched
-/// instrumental gap stretches the previous line forever. Beyond this the
-/// wall goes blank until the next matched line.
+/// Cap on a line's display duration; without it instrumental gaps
+/// would stretch the prior line forever. Beyond this, wall goes blank.
 pub const LONG_LINE_CAP_MS: u32 = 8000;
 
 /// Gap between matched lines that triggers chorus-repeat detection.
 /// Below: trust LCS silence. Above: look for a ref line to fill it.
 const CHORUS_REPEAT_GAP_MS: u32 = 4000;
 
-/// Min word-level match score (matched/ref ratio) for chorus re-emit.
+/// Min word match ratio (matched/ref) for chorus re-emit.
 const CHORUS_REPEAT_MIN_MATCH_RATIO: f32 = 0.6;
 
-/// Min ASR words matched. Floors the ratio so a 2-word ref doesn't emit
-/// on a single audio word and flash invisibly.
+/// Min ASR words matched. Floors ratio so a 2-word ref needs 2 hits.
 const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
 
-/// Min display duration for any emitted line. Short matches that collapse
-/// to ~0 ms windows flash invisibly on the wall — drop in Phase 5.
+/// Min display duration; below this collapses to invisible flashes.
 const MIN_LINE_DURATION_MS: u32 = 500;
 
 /// Phase 5 extension. Gap ≤ REASONABLE_GAP_MS → fill to next.start
@@ -998,3 +994,7 @@ mod tests;
 #[cfg(test)]
 #[path = "description_merge_phantom_tests.rs"]
 mod phantom_tests;
+
+#[cfg(test)]
+#[path = "description_merge_dp_tests.rs"]
+mod dp_tests;

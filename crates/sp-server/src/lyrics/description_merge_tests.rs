@@ -30,31 +30,6 @@ fn asr(words: Vec<AlignedWord>) -> AlignedTrack {
     }
 }
 
-// ── Phase 1: match_ref_to_asr ─────────────────────────────────────────────────
-
-#[test]
-fn match_ref_to_asr_assigns_words_to_matching_lines() {
-    let ref_lines = vec![
-        "holy is the lord".to_string(),
-        "worthy is the king".to_string(),
-    ];
-    let asr_track = asr(vec![
-        make_word("holy", 0, 500),
-        make_word("is", 600, 800),
-        make_word("the", 900, 1100),
-        make_word("lord", 1200, 1700),
-        make_word("worthy", 3000, 3600),
-        make_word("is", 3700, 3900),
-        make_word("the", 4000, 4200),
-        make_word("king", 4300, 4900),
-    ]);
-    let asr_words = flatten_asr(&asr_track);
-    let emits = match_ref_to_asr(&ref_lines, &asr_words);
-    assert_eq!(emits.len(), 2);
-    assert_eq!(emits[0].asr_word_indices, vec![0, 1, 2, 3]);
-    assert_eq!(emits[1].asr_word_indices, vec![4, 5, 6, 7]);
-}
-
 // ── Phase 2: chorus repeat detection ──────────────────────────────────────────
 
 #[test]
