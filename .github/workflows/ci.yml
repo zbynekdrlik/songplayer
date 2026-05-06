@@ -425,12 +425,28 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: [lint]
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Sharded across 4 parallel jobs. Each job runs ~1/4 of the mutants,
+    # so wall time on a large-diff PR drops from ~4h on a single runner
+    # (which was hitting GitHub's runner kill at exactly 4h01m and never
+    # uploading logs) to ~1h per shard. cargo-mutants `--shard i/n`
+    # randomises within each shard but the assignment is deterministic,
+    # so a survivor surfaces in exactly one shard's failure.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/4', '2/4', '3/4', '4/4']
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Cache key per shard — workspace contents identical, but the
+          # cargo-mutants build artifact directory is per-shard so a
+          # shared key would deadlock concurrent shards on cache write.
+          key: mutants-shard-${{ strategy.job-index }}
       - name: Install cargo-mutants
         run: cargo install cargo-mutants
       # GitHub-hosted ubuntu-latest has 16GB RAM and no swap. cargo-mutants
@@ -496,7 +512,7 @@ jobs:
           # to a normal small-diff scope on future PRs. The swap + disk
           # cleanup + CARGO_BUILD_JOBS=2 stay as belt-and-braces for any
           # future large-diff PR that might OOM the 16GB runner.
-          cargo mutants --in-diff pr.diff --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
+          cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
             --exclude-re 'sp-server/src/downloader/' \
@@ -517,7 +533,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-report
+          name: mutants-report-shard-${{ strategy.job-index }}
           path: mutants-out/
 
   gate:
