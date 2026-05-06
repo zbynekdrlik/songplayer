@@ -436,7 +436,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ['0/4', '1/4', '2/4', '3/4']
+        # 8 shards instead of 4 — large-diff PRs (#82's #78 lyrics work
+        # added 17K lines / 24 files / ~600 mutants) had shard 2/4 hitting
+        # GitHub's runner-shutdown signal at ~2h consistently. 8 shards
+        # halves per-shard wall time to <1h, well under the runner cap.
+        shard: ['0/8', '1/8', '2/8', '3/8', '4/8', '5/8', '6/8', '7/8']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -513,6 +517,24 @@ jobs:
           # to a normal small-diff scope on future PRs. The swap + disk
           # cleanup + CARGO_BUILD_JOBS=2 stay as belt-and-braces for any
           # future large-diff PR that might OOM the 16GB runner.
+          #
+          # === documented equivalent mutations (audit 2026-05-06, PR #82) ===
+          # description_merge.rs:847 < ↔ <= in apply_cap_and_monotonic.
+          #   At boundary start_ms == floor: original is no-op; <= clamps
+          #   to floor which equals start_ms — no observable change.
+          # description_merge.rs:865 > ↔ >= in apply_cap_and_monotonic.
+          #   At boundary new_end == end_ms: assigning the same value is
+          #   a no-op.
+          # description_merge.rs:887 > ↔ >= in trim_outlier_indices.
+          #   At len=1 with >=: body computes span=0 from a single element;
+          #   the inner `if span <= LONG_LINE_CAP_MS { break }` guard exits
+          #   the loop. Same outcome as len=1 not entering with >.
+          # description_merge_phantom.rs:49 < ↔ ==/<= in drop_phantom_clusters.
+          #   Early-return is an optimization. At len < 2 the while-loop in
+          #   the non-early-return path also produces no drops (same (0,0)).
+          # description_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
+          #   `if clusters_dropped > 0` gates an info!() log only. Function
+          #   return value is the same regardless.
           cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
@@ -529,7 +551,15 @@ jobs:
             --exclude-re 'line_splitter\.rs:102:40: replace > with >=' \
             --exclude-re 'line_splitter\.rs:131:' \
             --exclude-re 'line_splitter\.rs:141:' \
-            --exclude-re 'line_splitter\.rs:164:'
+            --exclude-re 'line_splitter\.rs:164:' \
+            --exclude-re 'description_merge\.rs:847:23: replace < with <= in apply_cap_and_monotonic' \
+            --exclude-re 'description_merge\.rs:865:20: replace > with >= in apply_cap_and_monotonic' \
+            --exclude-re 'description_merge\.rs:887:25: replace > with >= in trim_outlier_indices' \
+            --exclude-re 'description_merge_phantom\.rs:49:20: replace < with == in drop_phantom_clusters' \
+            --exclude-re 'description_merge_phantom\.rs:49:20: replace < with <= in drop_phantom_clusters' \
+            --exclude-re 'description_merge_phantom\.rs:137:25: replace > with == in drop_phantom_clusters' \
+            --exclude-re 'description_merge_phantom\.rs:137:25: replace > with < in drop_phantom_clusters' \
+            --exclude-re 'description_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4
