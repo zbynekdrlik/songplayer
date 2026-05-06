@@ -371,6 +371,219 @@ fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
 mod tests {
     use super::*;
 
+    // ── probe_duration_ms tests (kill mutation survivors) ─────────────────────
+
+    /// Build a minimal WAV byte stream: RIFF header + WAVE + fmt chunk
+    /// (16-bit PCM, configurable byte_rate) + data chunk (configurable size).
+    fn build_wav(byte_rate: u32, data_size: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&(36u32 + data_size).to_le_bytes()); // file size
+        buf.extend_from_slice(b"WAVE");
+        // fmt chunk: size 16, audio_format=1 (PCM), channels=1, sample_rate,
+        // byte_rate, block_align=2, bits_per_sample=16.
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        buf.extend_from_slice(&1u16.to_le_bytes()); // 1 channel
+        buf.extend_from_slice(&16000u32.to_le_bytes()); // sample_rate
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes()); // block_align
+        buf.extend_from_slice(&16u16.to_le_bytes()); // bits_per_sample
+        // data chunk
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, data_size as usize));
+        buf
+    }
+
+    fn write_temp_wav(byte_rate: u32, data_size: u32) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&build_wav(byte_rate, data_size)).unwrap();
+        tmp.flush().unwrap();
+        tmp
+    }
+
+    #[test]
+    fn probe_duration_ms_one_second_wav() {
+        // byte_rate = 32000 (16kHz × 2 bytes/sample), data_size = 32000 → 1 s.
+        // Mutation `Ok(0)` and `Ok(1)` short-circuit return the wrong constant;
+        // the arithmetic mutations on `data_size * 1000 / byte_rate` change
+        // the result. Fixed-input arithmetic test catches all of them.
+        let wav = write_temp_wav(32000, 32000);
+        let ms = probe_duration_ms(wav.path()).unwrap();
+        assert_eq!(ms, 1000, "32000 bytes / 32000 byte_rate × 1000 = 1000 ms");
+    }
+
+    #[test]
+    fn probe_duration_ms_half_second_wav() {
+        // 16000 bytes at 32000 byte_rate = 500 ms. Independent value to
+        // discriminate `* with +` vs original arithmetic.
+        let wav = write_temp_wav(32000, 16000);
+        let ms = probe_duration_ms(wav.path()).unwrap();
+        assert_eq!(ms, 500);
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_non_wav_header() {
+        // Header `RIFX...JUNK` — fails the `RIFF` || `WAVE` magic check.
+        // Mutation `||` ↔ `&&` would require BOTH to be wrong simultaneously
+        // before rejecting. Mutation `!=` ↔ `==` would invert the check.
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"RIFX\x00\x00\x00\x00JUNKaaaa").unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_when_wave_marker_corrupt() {
+        // `RIFF...WAVy` (last byte different) — second arm of the `||`
+        // catches this. Kills `||` ↔ `&&` boundary by exercising the
+        // `&header[8..12] != b"WAVE"` branch.
+        use std::io::Write;
+        let mut buf = vec![0u8; 12];
+        buf[0..4].copy_from_slice(b"RIFF");
+        buf[4..8].copy_from_slice(&100u32.to_le_bytes());
+        buf[8..12].copy_from_slice(b"WAVy");
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_missing_fmt_chunk() {
+        // RIFF/WAVE header followed by data-only chunk → byte_rate stays 0.
+        // Kills line 229:18 `==` ↔ `!=` (returns Malformed when byte_rate==0).
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&8u32.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, 8));
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_missing_data_chunk() {
+        // WAV with fmt chunk but no data chunk → data_size stays 0.
+        // Kills line 232:18 `==` ↔ `!=`.
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&36u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&16000u32.to_le_bytes());
+        buf.extend_from_slice(&32000u32.to_le_bytes()); // byte_rate
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        // No data chunk
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_skips_unknown_chunks_to_find_data() {
+        // Insert a `JUNK` chunk between `fmt ` and `data` — the loop's
+        // wildcard arm must seek past it. Kills line 211:13 `delete match
+        // arm b"fmt "` (without the fmt arm, byte_rate stays 0) and
+        // line 218:13 `delete match arm b"data"` (without it, loop never
+        // captures data_size and runs forever or breaks on EOF).
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        // fmt chunk
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&16000u32.to_le_bytes());
+        buf.extend_from_slice(&32000u32.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        // JUNK chunk to skip
+        buf.extend_from_slice(b"JUNK");
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+        // data chunk
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&32000u32.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, 32000));
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let ms = probe_duration_ms(tmp.path()).unwrap();
+        assert_eq!(ms, 1000);
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_short_fmt_chunk() {
+        // fmt chunk shorter than 12 bytes — the `if fmt.len() >= 12` guard
+        // skips parsing byte_rate. Kills line 214:30 `>=` ↔ `<` by
+        // ensuring an 8-byte fmt chunk leaves byte_rate=0 → Malformed.
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&8u32.to_le_bytes()); // shorter than 12
+        buf.extend_from_slice(&[0u8; 8]);
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&32000u32.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, 32000));
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    // ── ffmpeg_path test ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ffmpeg_path_includes_tools_dir_and_binary_name() {
+        // Mutation `replace ffmpeg_path -> PathBuf with Default::default()`
+        // returns an empty path. Real path joins tools_dir + "ffmpeg" or
+        // "ffmpeg.exe" on Windows.
+        let backend =
+            WhisperXReplicateBackend::new("test-token", std::path::PathBuf::from("/opt/tools"));
+        let path = backend.ffmpeg_path();
+        let s = path.to_string_lossy();
+        assert!(
+            s.starts_with("/opt/tools"),
+            "must start with tools_dir; got {s}"
+        );
+        let expected_name = if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
+        assert!(
+            s.ends_with(expected_name),
+            "must end with {expected_name}; got {s}"
+        );
+    }
+
     #[test]
     fn build_predict_input_emits_expected_shape() {
         let input = build_predict_input("https://replicate.delivery/foo.wav", "en");
