@@ -766,3 +766,111 @@ fn try_parse_balanced_escaped_quote_followed_by_closing_braces() {
     assert_eq!(resp.lines.len(), 1);
     assert_eq!(resp.lines[0].text, "a\"}}");
 }
+
+// ── merge() entry-point boundary tests (kill mutation survivors) ──────────
+
+fn dummy_ai_client() -> AiClient {
+    use crate::ai::AiSettings;
+    AiClient::new(AiSettings {
+        api_url: "http://127.0.0.1:1".into(), // unreachable port — never called in these tests
+        api_key: None,
+        model: "test".into(),
+        system_prompt_extra: None,
+    })
+}
+
+fn asr_with_words(words: Vec<AlignedWord>) -> AlignedTrack {
+    AlignedTrack {
+        lines: vec![AlignedLine {
+            text: "phrase".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: Some(words),
+        }],
+        provenance: "whisperx-large-v3@rev1".into(),
+        raw_confidence: 0.9,
+    }
+}
+
+#[tokio::test]
+async fn merge_returns_no_reference_when_candidate_lines_empty() {
+    // Kills `replace match guard !b.lines.is_empty() with true` at line 64:20.
+    // With the mutation, an empty-lines candidate would proceed past the
+    // guard; downstream code would either crash, hit description_merge with
+    // no reference, or call Claude unnecessarily. Original returns Err(NoReference).
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![make_word("a", 0, 100)]);
+    let candidates = vec![CandidateText {
+        source: "description".into(),
+        lines: vec![], // empty
+    }];
+    let result = merge(&ai, &asr, &candidates, None).await;
+    assert!(
+        matches!(result, Err(MergeError::NoReference)),
+        "empty lines must yield Err(NoReference); got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn merge_returns_no_reference_when_no_candidates() {
+    // Empty candidates list — best_authoritative_candidate returns None →
+    // pattern catches that branch via the wildcard arm. Verifies the
+    // outer `match` still dispatches correctly even with no candidates.
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![make_word("a", 0, 100)]);
+    let result = merge(&ai, &asr, &[], None).await;
+    assert!(matches!(result, Err(MergeError::NoReference)));
+}
+
+#[tokio::test]
+async fn merge_routes_description_source_through_description_merge() {
+    // Kills `replace || with &&` at line 73:37.
+    //   Original: `if best.source == "description" || best.source == "override"`
+    //   Mutated:  `if best.source == "description" && best.source == "override"`
+    // The mutation makes the if-branch unreachable (a single source can't equal
+    // BOTH strings simultaneously), so a description-source candidate falls
+    // through to the Claude semantic-merge path which immediately tries to call
+    // the AiClient — that fails because we point it at an unreachable port.
+    // Original code goes through description_merge::process which (with all
+    // ref lines under SUBLINE_MAX_CHARS=32) does no Claude calls and returns
+    // Ok with provenance starting "description+".
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![
+        make_word("a", 0, 100),
+        make_word("b", 200, 300),
+        make_word("c", 400, 500),
+    ]);
+    let candidates = vec![CandidateText {
+        source: "description".into(),
+        lines: vec!["a b".into(), "c".into()], // both well under 32 chars
+    }];
+    let result = merge(&ai, &asr, &candidates, None).await;
+    let track = result.expect("description path must succeed without Claude");
+    assert!(
+        track.provenance.starts_with("description+"),
+        "provenance must mark description path; got {:?}",
+        track.provenance
+    );
+}
+
+#[tokio::test]
+async fn merge_routes_override_source_through_description_merge() {
+    // Same as above for source = "override". Both arms of the `||` must
+    // route to description_merge::process.
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![
+        make_word("hello", 0, 200),
+        make_word("world", 300, 500),
+    ]);
+    let candidates = vec![CandidateText {
+        source: "override".into(),
+        lines: vec!["hello world".into()],
+    }];
+    let result = merge(&ai, &asr, &candidates, None).await;
+    let track = result.expect("override path must succeed without Claude");
+    assert!(
+        track.provenance.starts_with("override+"),
+        "provenance must mark override path; got {:?}",
+        track.provenance
+    );
+}

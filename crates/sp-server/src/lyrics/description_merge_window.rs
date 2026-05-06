@@ -172,4 +172,88 @@ mod tests {
         let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
         assert!(result.is_none());
     }
+
+    // Boundary tests targeting mutation survivors at lines 46, 60, 63, 64, 70, 73.
+
+    #[test]
+    fn best_window_match_finds_pair_when_window_grows_past_start_plus_one() {
+        // ref = [a, b]. asr = [a, b]. cap = LONG_LINE_CAP_MS (8000).
+        // start_pos=0: end_pos starts at 1. asr_words[unconsumed[1]].start_ms = 200,
+        // <= cap_end_ms (0 + 8000 = 8000) → end_pos advances to 2. Window covers
+        // both words. matched len = 2. Mutation `start_pos + 1` → `start_pos * 1`
+        // gives end_pos = 0 (start), zero-width window, no matches → returns None.
+        let asr_words = vec![w("a", 0, 100), w("b", 200, 300)];
+        let ref_norms: Vec<Vec<String>> = vec![vec!["a".into(), "b".into()]];
+        let unconsumed = vec![0, 1];
+        let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
+        assert!(result.is_some(), "must find the pair via window-grow");
+        let (_, _, matched) = result.unwrap();
+        assert_eq!(matched.len(), 2);
+    }
+
+    #[test]
+    fn best_window_match_rejects_single_word_match_below_min_matched_words() {
+        // ref = [a, b, c, d, e]. asr = [a, x, y, z, q]. Only "a" matches —
+        // matched.len() = 1 < CHORUS_REPEAT_MIN_MATCHED_WORDS (=2) → continue.
+        // Original returns None. Mutation `<` ↔ `>` would treat 1 > 2 as false,
+        // proceeding past the guard; subsequent score gate (1/5 = 0.2 < 0.6)
+        // catches it for that mutation. Mutation `<` ↔ `>=` accepts at 1 vs 2
+        // boundary too. Either way the test fails on at least one mutant.
+        let asr_words = vec![
+            w("a", 0, 100),
+            w("x", 200, 300),
+            w("y", 400, 500),
+            w("z", 600, 700),
+            w("q", 800, 900),
+        ];
+        let ref_norms: Vec<Vec<String>> = vec![vec![
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "d".into(),
+            "e".into(),
+        ]];
+        let unconsumed: Vec<usize> = (0..asr_words.len()).collect();
+        let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn best_window_match_rejects_short_span_below_min_line_duration() {
+        // ref = [a, b]. asr = [a, b] but with span 200 ms (< MIN_LINE_DURATION_MS
+        // = 500) → continue. Result: None. Kills span-guard `<` ↔ `==`/`<=`
+        // mutations at line 70 (boundary value of 500). With span = 200, all
+        // three mutations on `<` (==, <=, >) flip the gate behaviour.
+        let asr_words = vec![w("a", 0, 50), w("b", 100, 200)];
+        let ref_norms: Vec<Vec<String>> = vec![vec!["a".into(), "b".into()]];
+        let unconsumed = vec![0, 1];
+        let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
+        assert!(
+            result.is_none(),
+            "span = 200 ms must be rejected (< MIN_LINE_DURATION_MS = 500)"
+        );
+    }
+
+    #[test]
+    fn best_window_match_picks_higher_score_among_candidates() {
+        // Two candidate ref lines, both can match in-window. ref0 has 2 words
+        // both in asr (score 1.0). ref1 has 3 words but only 2 match (score
+        // 2/3 ≈ 0.67). Original: picks ref0 (score 1.0 > 0.67). Mutation
+        // `>` ↔ `<` at the picker's tie-break would pick ref1. Mutation `>`
+        // ↔ `==` (only update on equal scores) would never replace, returning
+        // ref0 which happens to be the first scored — same as original here.
+        // Mutation `>` ↔ `>=` makes equal-score also replace; here scores
+        // differ so it shouldn't observably matter. Strongest test is
+        // `>` ↔ `<` which inverts the tie-break direction.
+        let asr_words = vec![w("a", 0, 100), w("b", 600, 700)];
+        let ref_norms: Vec<Vec<String>> = vec![
+            vec!["a".into(), "b".into()],             // li=0, score 1.0
+            vec!["a".into(), "x".into(), "b".into()], // li=1, score 2/3
+        ];
+        let unconsumed = vec![0, 1];
+        let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
+        assert!(result.is_some());
+        let (li, _score, _) = result.unwrap();
+        assert_eq!(li, 0, "must pick ref line with higher score (1.0 vs 2/3)");
+    }
 }
