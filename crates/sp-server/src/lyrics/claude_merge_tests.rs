@@ -238,7 +238,7 @@ fn source_priority_values() {
     }
 }
 
-// ── best_authoritative tests ──────────────────────────────────────────────
+// ── best_authoritative_candidate tests ────────────────────────────────────
 
 fn cand(source: &str, lines: &[&str]) -> CandidateText {
     CandidateText {
@@ -249,11 +249,19 @@ fn cand(source: &str, lines: &[&str]) -> CandidateText {
     }
 }
 
+/// Helper: compatibility shim that returns just the lines vec, matching the
+/// shape of the original `best_authoritative` for ergonomic test assertions.
+fn best_lines(candidates: &[CandidateText]) -> Vec<String> {
+    best_authoritative_candidate(candidates)
+        .map(|c| c.lines.clone())
+        .unwrap_or_default()
+}
+
 #[test]
 fn best_authoritative_picks_most_lines() {
     // When sources have equal priority, longest wins (tie-break on lines).
     // Both are tier1:genius (same priority) — the one with more lines should win.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand("tier1:genius", &["a", "b"]),
         cand("tier1:genius", &["a", "b", "c", "d"]),
     ]);
@@ -263,7 +271,7 @@ fn best_authoritative_picks_most_lines() {
 #[test]
 fn best_authoritative_uses_priority_for_tie() {
     // Both have 2 lines; spotify wins on priority.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand("genius", &["x", "y"]),
         cand("tier1:spotify", &["a", "b"]),
     ]);
@@ -276,7 +284,7 @@ fn best_authoritative_priority_beats_longer_lower_priority_candidate() {
     // (e.g. tier1:spotify with 12 lines) MUST win over a longer noisy
     // low-priority candidate (e.g. yt_subs with 50 lines). Pre-fix
     // ranking was (lines.len(), priority) which got this backwards.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand(
             "yt_subs",
             &[
@@ -365,7 +373,7 @@ fn best_authoritative_priority_beats_longer_lower_priority_candidate() {
 fn best_authoritative_override_beats_spotify() {
     // Override (priority 5) is the absolute top — even short overrides
     // beat longer Spotify candidates.
-    let result = best_authoritative(&[
+    let result = best_lines(&[
         cand(
             "tier1:spotify",
             &[
@@ -416,8 +424,9 @@ fn best_authoritative_override_beats_spotify() {
 
 #[test]
 fn best_authoritative_empty_returns_empty() {
-    let result = best_authoritative(&[]);
+    let result = best_lines(&[]);
     assert!(result.is_empty());
+    assert!(best_authoritative_candidate(&[]).is_none());
 }
 
 // ── merge output structure test (mock) ────────────────────────────────────
@@ -756,4 +765,108 @@ fn try_parse_balanced_escaped_quote_followed_by_closing_braces() {
     let resp = result.unwrap();
     assert_eq!(resp.lines.len(), 1);
     assert_eq!(resp.lines[0].text, "a\"}}");
+}
+
+// ── merge() entry-point boundary tests (kill mutation survivors) ──────────
+
+fn dummy_ai_client() -> AiClient {
+    use crate::ai::AiSettings;
+    AiClient::new(AiSettings {
+        api_url: "http://127.0.0.1:1".into(), // unreachable port — never called in these tests
+        api_key: None,
+        model: "test".into(),
+        system_prompt_extra: None,
+    })
+}
+
+fn asr_with_words(words: Vec<AlignedWord>) -> AlignedTrack {
+    AlignedTrack {
+        lines: vec![AlignedLine {
+            text: "phrase".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            words: Some(words),
+        }],
+        provenance: "whisperx-large-v3@rev1".into(),
+        raw_confidence: 0.9,
+    }
+}
+
+#[tokio::test]
+async fn merge_returns_no_reference_when_candidate_lines_empty() {
+    // Kills `replace match guard !b.lines.is_empty() with true` at line 64:20.
+    // Source must be a NON-special label (not "description"/"override")
+    // so the mutation path goes to the Claude semantic-merge branch
+    // instead of description_merge::process — that branch has its own
+    // empty-ref short-circuit (line 105) which returns NoReference
+    // regardless of which guard is mutated, so it can't distinguish.
+    // With "genius", the mutation gets past line 64 and tries to call
+    // AiClient at the unreachable port → Err(MergeError::Claude(_)).
+    // Original short-circuits at line 64 → Err(MergeError::NoReference).
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![make_word("a", 0, 100)]);
+    let candidates = vec![cand("genius", &[])];
+    let result = merge(&ai, &asr, &candidates, None).await;
+    assert!(
+        matches!(result, Err(MergeError::NoReference)),
+        "empty lines must yield Err(NoReference); got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn merge_returns_no_reference_when_no_candidates() {
+    // Empty candidates list — best_authoritative_candidate returns None →
+    // pattern catches that branch via the wildcard arm. Verifies the
+    // outer `match` still dispatches correctly even with no candidates.
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![make_word("a", 0, 100)]);
+    let result = merge(&ai, &asr, &[], None).await;
+    assert!(matches!(result, Err(MergeError::NoReference)));
+}
+
+#[tokio::test]
+async fn merge_routes_description_source_through_description_merge() {
+    // Kills `replace || with &&` at line 73:37.
+    //   Original: `if best.source == "description" || best.source == "override"`
+    //   Mutated:  `if best.source == "description" && best.source == "override"`
+    // The mutation makes the if-branch unreachable (a single source can't equal
+    // BOTH strings simultaneously), so a description-source candidate falls
+    // through to the Claude semantic-merge path which immediately tries to call
+    // the AiClient — that fails because we point it at an unreachable port.
+    // Original code goes through description_merge::process which (with all
+    // ref lines under SUBLINE_MAX_CHARS=32) does no Claude calls and returns
+    // Ok with provenance starting "description+".
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![
+        make_word("a", 0, 100),
+        make_word("b", 200, 300),
+        make_word("c", 400, 500),
+    ]);
+    let candidates = vec![cand("description", &["a b", "c"])]; // both well under 32 chars
+    let result = merge(&ai, &asr, &candidates, None).await;
+    let track = result.expect("description path must succeed without Claude");
+    assert!(
+        track.provenance.starts_with("description+"),
+        "provenance must mark description path; got {:?}",
+        track.provenance
+    );
+}
+
+#[tokio::test]
+async fn merge_routes_override_source_through_description_merge() {
+    // Same as above for source = "override". Both arms of the `||` must
+    // route to description_merge::process.
+    let ai = dummy_ai_client();
+    let asr = asr_with_words(vec![
+        make_word("hello", 0, 200),
+        make_word("world", 300, 500),
+    ]);
+    let candidates = vec![cand("override", &["hello world"])];
+    let result = merge(&ai, &asr, &candidates, None).await;
+    let track = result.expect("override path must succeed without Claude");
+    assert!(
+        track.provenance.starts_with("override+"),
+        "provenance must mark override path; got {:?}",
+        track.provenance
+    );
 }

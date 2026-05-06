@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::lyrics::audio_chunking::{ParsedLine, merge_overlap, plan_chunks};
+use crate::lyrics::audio_chunking::{CHUNK_OVERLAP_MS, plan_chunks};
 use crate::lyrics::backend::{
     AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
     BackendError,
@@ -25,13 +25,27 @@ pub const WHISPERX_VERSION: &str =
 
 pub struct WhisperXReplicateBackend {
     client: ReplicateClient,
+    /// Tools directory containing bundled ffmpeg.exe / ffprobe.exe. Used
+    /// only by the chunked path (`align_chunked`). Bare `Command::new
+    /// ("ffmpeg")` fails on Windows because the bundled tools are NOT in
+    /// PATH — the deploy script doesn't add them.
+    tools_dir: std::path::PathBuf,
 }
 
 impl WhisperXReplicateBackend {
-    pub fn new(api_token: impl Into<String>) -> Self {
+    pub fn new(api_token: impl Into<String>, tools_dir: std::path::PathBuf) -> Self {
         Self {
             client: ReplicateClient::new(api_token),
+            tools_dir,
         }
+    }
+
+    fn ffmpeg_path(&self) -> std::path::PathBuf {
+        self.tools_dir.join(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        })
     }
 }
 
@@ -51,6 +65,18 @@ struct WhisperXWord {
     end: Option<f64>,
     #[serde(default)]
     score: Option<f64>,
+}
+
+/// Build the JSON input payload for a Replicate WhisperX prediction.
+/// Extracted for unit testing.
+fn build_predict_input(audio_url: &str, language: &str) -> Value {
+    serde_json::json!({
+        "audio_file": audio_url,
+        "language": language,
+        "align_output": true,
+        "diarization": false,
+        "batch_size": 32,
+    })
 }
 
 /// Parse Replicate's WhisperX JSON output into AlignedLine list.
@@ -107,33 +133,21 @@ impl AlignmentBackend for WhisperXReplicateBackend {
             // a song longer than 1800 s would time out during polling.
             max_audio_seconds: 1_800,
             languages: &["en", "es", "pt", "fr", "de", "it", "nl", "pl", "ru", "uk"],
-            takes_reference_text: false,
         }
     }
 
-    // All internal branches of align() require a live Replicate API call or
-    // a real ffprobe binary. The chunking trigger comparison `duration_ms/1000 >
-    // trigger` and the upload/predict path are covered structurally by
-    // `default_align_opts_never_triggers_chunking` and the replicate_client
-    // tests. End-to-end testing tracked in #65.
     #[cfg_attr(test, mutants::skip)]
     async fn align(
         &self,
         vocal_wav_path: &Path,
-        _reference_text: Option<&str>,
         language: &str,
         opts: &AlignOpts,
     ) -> Result<AlignedTrack, BackendError> {
-        // Probe duration ONLY when chunking might fire — `probe_duration_ms`
-        // shells out to `ffprobe`, which is not bundled (the tools manager
-        // installs ffmpeg.exe only). With default `AlignOpts.chunk_trigger_seconds = None`
-        // we skip probing entirely; WhisperX's faster-whisper backend
-        // handles long-form audio natively via VAD, so chunking is opt-in.
         let trigger = opts.chunk_trigger_seconds.unwrap_or(u32::MAX);
         let duration_ms = if opts.chunk_trigger_seconds.is_some() {
             probe_duration_ms(vocal_wav_path)?
         } else {
-            0 // unused — chunking branch below is unreachable when trigger == u32::MAX
+            0
         };
 
         let lines = if duration_ms / 1000 > trigger as u64 {
@@ -144,13 +158,7 @@ impl AlignmentBackend for WhisperXReplicateBackend {
                 .upload_file(vocal_wav_path)
                 .await
                 .map_err(replicate_to_backend_err)?;
-            let input = serde_json::json!({
-                "audio_file": url,
-                "language": language,
-                "align_output": true,
-                "diarization": false,
-                "batch_size": 32,
-            });
+            let input = build_predict_input(&url, language);
             let pred = self
                 .client
                 .predict(WHISPERX_VERSION, input)
@@ -170,38 +178,61 @@ impl AlignmentBackend for WhisperXReplicateBackend {
     }
 }
 
-/// Determine audio duration via `ffprobe`. Returns milliseconds.
-// All internal branches require spawning a real `ffprobe` process with a
-// valid audio file path. Mutations on the success-check (!out.status.success())
-// and the arithmetic `secs * 1000.0` are not reachable from unit tests without
-// a real ffprobe binary and a real audio file. The `* 1000.0` conversion is
-// covered by parse_output's ms-conversion tests below.
-#[cfg_attr(test, mutants::skip)]
+/// Read WAV header to compute duration. No external binary required.
+/// Vocal stems are PCM WAVs (Mel-Roformer + anvuew dereverb output).
+/// Avoids a hard dep on ffprobe.exe — the tools manager only extracts
+/// ffmpeg.exe from the FFmpeg ZIP, not ffprobe.exe.
 fn probe_duration_ms(path: &Path) -> Result<u64, BackendError> {
-    use std::process::Command;
-    let out = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            path.to_str()
-                .ok_or_else(|| BackendError::Malformed("non-utf8 path".into()))?,
-        ])
-        .output()
-        .map_err(BackendError::Io)?;
-    if !out.status.success() {
-        return Err(BackendError::Rejected("ffprobe failed".into()));
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut f = File::open(path).map_err(BackendError::Io)?;
+    let mut header = [0u8; 12];
+    f.read_exact(&mut header).map_err(BackendError::Io)?;
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return Err(BackendError::Malformed("not a WAV file".into()));
     }
-    let s = String::from_utf8(out.stdout)
-        .map_err(|e| BackendError::Malformed(format!("ffprobe utf8: {e}")))?;
-    let secs: f64 = s
-        .trim()
-        .parse()
-        .map_err(|e| BackendError::Malformed(format!("ffprobe parse: {e}")))?;
-    Ok((secs * 1000.0) as u64)
+
+    let mut byte_rate: u32 = 0;
+    let mut data_size: u32 = 0;
+    loop {
+        let mut chunk_header = [0u8; 8];
+        if f.read_exact(&mut chunk_header).is_err() {
+            break;
+        }
+        let id = &chunk_header[0..4];
+        let size = u32::from_le_bytes([
+            chunk_header[4],
+            chunk_header[5],
+            chunk_header[6],
+            chunk_header[7],
+        ]);
+        match id {
+            b"fmt " => {
+                let mut fmt = vec![0u8; size as usize];
+                f.read_exact(&mut fmt).map_err(BackendError::Io)?;
+                if fmt.len() >= 12 {
+                    byte_rate = u32::from_le_bytes([fmt[8], fmt[9], fmt[10], fmt[11]]);
+                }
+            }
+            b"data" => {
+                data_size = size;
+                break;
+            }
+            _ => {
+                f.seek(SeekFrom::Current(size as i64))
+                    .map_err(BackendError::Io)?;
+            }
+        }
+    }
+
+    if byte_rate == 0 {
+        return Err(BackendError::Malformed("WAV missing fmt chunk".into()));
+    }
+    if data_size == 0 {
+        return Err(BackendError::Malformed("WAV missing data chunk".into()));
+    }
+    Ok((data_size as u64 * 1000) / byte_rate as u64)
 }
 
 /// Chunked transcription path: slice the vocal WAV into 60s/10s-overlap
@@ -231,7 +262,7 @@ async fn align_chunked(
 
     let plans = plan_chunks(duration_ms);
     let tmp = TempDir::new().map_err(BackendError::Io)?;
-    let mut all: Vec<Vec<ParsedLine>> = Vec::with_capacity(plans.len());
+    let mut all: Vec<AlignedLine> = Vec::new();
 
     for plan in &plans {
         let chunk_path = tmp.path().join(format!("chunk_{}.wav", plan.idx));
@@ -239,7 +270,7 @@ async fn align_chunked(
             .to_str()
             .ok_or_else(|| BackendError::Malformed("non-utf8 wav path".into()))?;
         let chunk_str = chunk_path.to_str().unwrap();
-        let status = Command::new("ffmpeg")
+        let status = Command::new(backend.ffmpeg_path())
             .args([
                 "-y",
                 "-loglevel",
@@ -272,13 +303,7 @@ async fn align_chunked(
             .upload_file(&chunk_path)
             .await
             .map_err(replicate_to_backend_err)?;
-        let input = serde_json::json!({
-            "audio_file": url,
-            "language": language,
-            "align_output": true,
-            "diarization": false,
-            "batch_size": 32,
-        });
+        let input = build_predict_input(&url, language);
         let pred = backend
             .client
             .predict(WHISPERX_VERSION, input)
@@ -289,31 +314,41 @@ async fn align_chunked(
             .ok_or_else(|| BackendError::Malformed("chunk: no output".into()))?;
         let chunk_lines = parse_output(&output)?;
 
-        // Convert AlignedLine → ParsedLine (audio_chunking::ParsedLine) for merge_overlap.
-        // The merge operates on local (chunk-relative) timings; merge_overlap adds
-        // plan.start_ms internally.
-        let parsed: Vec<ParsedLine> = chunk_lines
-            .into_iter()
-            .map(|l| ParsedLine {
-                text: l.text,
-                start_ms: l.start_ms as u64,
-                end_ms: l.end_ms as u64,
-            })
-            .collect();
-        all.push(parsed);
+        // Chunk-ownership dedup: chunk N (N>0) overlaps chunk N-1 by
+        // CHUNK_OVERLAP_MS. Lines whose global start_ms falls in chunk
+        // N's first-overlap region are also produced by chunk N-1 — drop
+        // them here so the merged stream has no duplicates.
+        //
+        // Whisperx may transcribe the SAME audio differently in adjacent
+        // chunks (e.g. id=132 2:25-2:30 produced "Holy, holy forever." in
+        // chunk K and "Holy forever." in chunk K+1). Text-based dedup
+        // misses this; ownership-based dedup catches it regardless of
+        // text differences.
+        let offset = plan.start_ms as u32;
+        let drop_below_ms = if plan.idx == 0 {
+            0
+        } else {
+            (plan.start_ms + CHUNK_OVERLAP_MS) as u32
+        };
+        for mut line in chunk_lines {
+            let global_start = line.start_ms.saturating_add(offset);
+            if global_start < drop_below_ms {
+                continue;
+            }
+            line.start_ms = global_start;
+            line.end_ms = line.end_ms.saturating_add(offset);
+            if let Some(ref mut words) = line.words {
+                for w in words.iter_mut() {
+                    w.start_ms = w.start_ms.saturating_add(offset);
+                    w.end_ms = w.end_ms.saturating_add(offset);
+                }
+            }
+            all.push(line);
+        }
     }
 
-    let merged = merge_overlap(&plans, &all);
-    Ok(merged
-        .into_iter()
-        .map(|g| AlignedLine {
-            text: g.text,
-            start_ms: g.start_ms as u32,
-            end_ms: g.end_ms as u32,
-            // Chunked path is line-only; word-merge across chunk boundaries is out of scope.
-            words: None,
-        })
-        .collect())
+    all.sort_by_key(|l| l.start_ms);
+    Ok(all)
 }
 
 fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
@@ -335,6 +370,235 @@ fn replicate_to_backend_err(e: ReplicateError) -> BackendError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── probe_duration_ms tests (kill mutation survivors) ─────────────────────
+
+    /// Build a minimal WAV byte stream: RIFF header + WAVE + fmt chunk
+    /// (16-bit PCM, configurable byte_rate) + data chunk (configurable size).
+    fn build_wav(byte_rate: u32, data_size: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&(36u32 + data_size).to_le_bytes()); // file size
+        buf.extend_from_slice(b"WAVE");
+        // fmt chunk: size 16, audio_format=1 (PCM), channels=1, sample_rate,
+        // byte_rate, block_align=2, bits_per_sample=16.
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        buf.extend_from_slice(&1u16.to_le_bytes()); // 1 channel
+        buf.extend_from_slice(&16000u32.to_le_bytes()); // sample_rate
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes()); // block_align
+        buf.extend_from_slice(&16u16.to_le_bytes()); // bits_per_sample
+        // data chunk
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, data_size as usize));
+        buf
+    }
+
+    fn write_temp_wav(byte_rate: u32, data_size: u32) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&build_wav(byte_rate, data_size)).unwrap();
+        tmp.flush().unwrap();
+        tmp
+    }
+
+    #[test]
+    fn probe_duration_ms_one_second_wav() {
+        // byte_rate = 32000 (16kHz × 2 bytes/sample), data_size = 32000 → 1 s.
+        // Mutation `Ok(0)` and `Ok(1)` short-circuit return the wrong constant;
+        // the arithmetic mutations on `data_size * 1000 / byte_rate` change
+        // the result. Fixed-input arithmetic test catches all of them.
+        let wav = write_temp_wav(32000, 32000);
+        let ms = probe_duration_ms(wav.path()).unwrap();
+        assert_eq!(ms, 1000, "32000 bytes / 32000 byte_rate × 1000 = 1000 ms");
+    }
+
+    #[test]
+    fn probe_duration_ms_half_second_wav() {
+        // 16000 bytes at 32000 byte_rate = 500 ms. Independent value to
+        // discriminate `* with +` vs original arithmetic.
+        let wav = write_temp_wav(32000, 16000);
+        let ms = probe_duration_ms(wav.path()).unwrap();
+        assert_eq!(ms, 500);
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_non_wav_header() {
+        // Header `RIFX...JUNK` — fails the `RIFF` || `WAVE` magic check.
+        // Mutation `||` ↔ `&&` would require BOTH to be wrong simultaneously
+        // before rejecting. Mutation `!=` ↔ `==` would invert the check.
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"RIFX\x00\x00\x00\x00JUNKaaaa").unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_when_wave_marker_corrupt() {
+        // `RIFF...WAVy` (last byte different) — second arm of the `||`
+        // catches this. Kills `||` ↔ `&&` boundary by exercising the
+        // `&header[8..12] != b"WAVE"` branch.
+        use std::io::Write;
+        let mut buf = vec![0u8; 12];
+        buf[0..4].copy_from_slice(b"RIFF");
+        buf[4..8].copy_from_slice(&100u32.to_le_bytes());
+        buf[8..12].copy_from_slice(b"WAVy");
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_missing_fmt_chunk() {
+        // RIFF/WAVE header followed by data-only chunk → byte_rate stays 0.
+        // Kills line 229:18 `==` ↔ `!=` (returns Malformed when byte_rate==0).
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&8u32.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, 8));
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_missing_data_chunk() {
+        // WAV with fmt chunk but no data chunk → data_size stays 0.
+        // Kills line 232:18 `==` ↔ `!=`.
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&36u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&16000u32.to_le_bytes());
+        buf.extend_from_slice(&32000u32.to_le_bytes()); // byte_rate
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        // No data chunk
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    #[test]
+    fn probe_duration_ms_skips_unknown_chunks_to_find_data() {
+        // Insert a `JUNK` chunk between `fmt ` and `data` — the loop's
+        // wildcard arm must seek past it. Kills line 211:13 `delete match
+        // arm b"fmt "` (without the fmt arm, byte_rate stays 0) and
+        // line 218:13 `delete match arm b"data"` (without it, loop never
+        // captures data_size and runs forever or breaks on EOF).
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        // fmt chunk
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&16000u32.to_le_bytes());
+        buf.extend_from_slice(&32000u32.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        // JUNK chunk to skip
+        buf.extend_from_slice(b"JUNK");
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+        // data chunk
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&32000u32.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, 32000));
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let ms = probe_duration_ms(tmp.path()).unwrap();
+        assert_eq!(ms, 1000);
+    }
+
+    #[test]
+    fn probe_duration_ms_rejects_short_fmt_chunk() {
+        // fmt chunk shorter than 12 bytes — the `if fmt.len() >= 12` guard
+        // skips parsing byte_rate. Kills line 214:30 `>=` ↔ `<` by
+        // ensuring an 8-byte fmt chunk leaves byte_rate=0 → Malformed.
+        use std::io::Write;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&8u32.to_le_bytes()); // shorter than 12
+        buf.extend_from_slice(&[0u8; 8]);
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&32000u32.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, 32000));
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&buf).unwrap();
+        tmp.flush().unwrap();
+        let result = probe_duration_ms(tmp.path());
+        assert!(matches!(result, Err(BackendError::Malformed(_))));
+    }
+
+    // ── ffmpeg_path test ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ffmpeg_path_includes_tools_dir_and_binary_name() {
+        // Mutation `replace ffmpeg_path -> PathBuf with Default::default()`
+        // returns an empty path. Real path joins tools_dir + "ffmpeg" or
+        // "ffmpeg.exe" on Windows.
+        let backend =
+            WhisperXReplicateBackend::new("test-token", std::path::PathBuf::from("/opt/tools"));
+        let path = backend.ffmpeg_path();
+        let s = path.to_string_lossy();
+        assert!(
+            s.starts_with("/opt/tools"),
+            "must start with tools_dir; got {s}"
+        );
+        let expected_name = if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
+        assert!(
+            s.ends_with(expected_name),
+            "must end with {expected_name}; got {s}"
+        );
+    }
+
+    #[test]
+    fn build_predict_input_emits_expected_shape() {
+        let input = build_predict_input("https://replicate.delivery/foo.wav", "en");
+        assert_eq!(input["audio_file"], "https://replicate.delivery/foo.wav");
+        assert_eq!(input["language"], "en");
+        assert_eq!(input["align_output"], true);
+        assert_eq!(input["diarization"], false);
+        assert_eq!(input["batch_size"], 32);
+        // No `initial_prompt` field — biasing Whisper with full lyrics
+        // caused LM-fallback prompt-leakage on id=132 (#78). The phantom
+        // cluster filter at description_merge_phantom.rs is the chosen
+        // remedy; this regression-asserts no one quietly re-adds the
+        // prompt without explicit design.
+        assert!(input.get("initial_prompt").is_none());
+    }
 
     #[test]
     fn parses_well_formed_segment_with_words() {
@@ -415,14 +679,20 @@ mod tests {
 
     #[test]
     fn id_and_revision_are_stable() {
-        let b = WhisperXReplicateBackend::new("test-token");
+        let b = WhisperXReplicateBackend::new(
+            "test-token",
+            std::path::PathBuf::from("/tmp/test-tools"),
+        );
         assert_eq!(b.id(), "whisperx-large-v3");
         assert_eq!(b.revision(), 1);
     }
 
     #[test]
     fn capability_advertises_word_level_and_languages() {
-        let b = WhisperXReplicateBackend::new("test-token");
+        let b = WhisperXReplicateBackend::new(
+            "test-token",
+            std::path::PathBuf::from("/tmp/test-tools"),
+        );
         let cap = b.capability();
         assert!(cap.word_level);
         assert!(cap.segment_level);
@@ -434,7 +704,10 @@ mod tests {
     #[test]
     fn capability_max_audio_seconds_matches_prediction_timeout() {
         use crate::lyrics::replicate_client::PREDICTION_TIMEOUT;
-        let b = WhisperXReplicateBackend::new("test-token");
+        let b = WhisperXReplicateBackend::new(
+            "test-token",
+            std::path::PathBuf::from("/tmp/test-tools"),
+        );
         let cap = b.capability();
         // max_audio_seconds must not exceed PREDICTION_TIMEOUT's seconds so
         // we never advertise handling durations we'd actually time out on.
