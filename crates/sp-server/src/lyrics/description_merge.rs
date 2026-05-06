@@ -62,9 +62,7 @@ const MIN_LINE_DURATION_MS: u32 = 500;
 const EXTENSION_TOLERANCE_MS: u32 = 1500;
 const REASONABLE_GAP_MS: u32 = 4000;
 
-/// One ref-line emission with its matched ASR word-stream indices. May be
-/// either an original-pass match (Phase 1) or a chorus-repeat re-emission
-/// (Phase 2).
+/// One ref-line emission + matched ASR word indices (Phase 1 or 2 re-emit).
 #[derive(Clone, Debug)]
 struct LineEmit {
     text: String,
@@ -80,11 +78,8 @@ struct AsrWord {
     confidence: f32,
 }
 
-/// Public entry: full description/override pipeline.
-///
-/// Returns an `AlignedTrack` whose every line has `words: None`, sub-line EN
-/// length ≤ 32 chars, line duration ≤ 8 s, sub-line timings from real ASR
-/// word ranges, and chorus repeats re-emitted to fill long unmatched gaps.
+/// Public entry: full description/override pipeline. Output: words=None,
+/// EN ≤32c, line ≤8s, chorus repeats re-emitted.
 pub async fn process(
     ai_client: &AiClient,
     asr: &AlignedTrack,
@@ -998,3 +993,7 @@ mod phantom_tests;
 #[cfg(test)]
 #[path = "description_merge_dp_tests.rs"]
 mod dp_tests;
+
+#[cfg(test)]
+#[path = "description_merge_split_tests.rs"]
+mod split_tests;
