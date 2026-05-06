@@ -425,17 +425,18 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: [lint]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 240
     # Sharded across 4 parallel jobs. Each job runs ~1/4 of the mutants,
     # so wall time on a large-diff PR drops from ~4h on a single runner
     # (which was hitting GitHub's runner kill at exactly 4h01m and never
-    # uploading logs) to ~1h per shard. cargo-mutants `--shard i/n`
-    # randomises within each shard but the assignment is deterministic,
-    # so a survivor surfaces in exactly one shard's failure.
+    # uploading logs) to under 2h per shard. cargo-mutants `--shard k/n`
+    # is 0-indexed (k must be < n), randomises within each shard, and
+    # assignment is deterministic so a surviving mutant surfaces in
+    # exactly one shard's failure.
     strategy:
       fail-fast: false
       matrix:
-        shard: ['1/4', '2/4', '3/4', '4/4']
+        shard: ['0/4', '1/4', '2/4', '3/4']
     steps:
       - uses: actions/checkout@v4
         with:
