@@ -95,7 +95,7 @@ fn parse_split_response_handles_escaped_quote_in_string() {
     // Escaped `\"` followed by `}}` — without the `esc` tracking, the
     // walker would prematurely flip in_str=false at the `\"`, count
     // both `}}` as real, and truncate the slice early.
-    let raw = r#"{"splits":[{"i":2,"subs":[{"en":"x\"}}"}]}}"#;
+    let raw = r#"{"splits":[{"i":2,"subs":[{"en":"x\"}}"}]}]}"#;
     let parsed = parse_split_response(raw).unwrap();
     assert_eq!(parsed.splits[0].subs[0].en, "x\"}}");
 }
