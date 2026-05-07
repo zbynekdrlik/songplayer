@@ -20,6 +20,7 @@ pub mod spotify_proxy;
 pub mod spotify_resolver;
 pub mod text_reference_merge;
 pub mod tier1;
+pub mod timed_reference_merge;
 pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;

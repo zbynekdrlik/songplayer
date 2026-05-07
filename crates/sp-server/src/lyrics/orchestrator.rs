@@ -25,9 +25,11 @@ use tracing::info;
 use crate::ai::client::AiClient;
 use crate::lyrics::backend::{AlignOpts, AlignedTrack, AlignmentBackend, BackendError};
 use crate::lyrics::claude_merge::best_authoritative_candidate;
+use crate::lyrics::claude_merge::coverage_ok;
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
 use crate::lyrics::text_reference_merge;
 use crate::lyrics::tier1::{FetchFn, Tier1Result, collect};
+use crate::lyrics::timed_reference_merge;
 
 #[derive(Debug, Error)]
 pub enum OrchestratorError {
@@ -100,19 +102,47 @@ impl Orchestrator {
         // Step 2: Branch on Tier-1 outcome.
         match tier1_result {
             Tier1Result::LineSynced(aligned_lines) => {
-                // Authoritative line-synced timing — ship directly, no ASR call.
-                // Apply split_track to enforce the 32-char cap on long yt_subs lines.
+                // Tier-1 short-circuit: authoritative line-synced reference.
+                // Route through timed_reference_merge::process in Mode B
+                // (asr = None) so the same sanitize/phantom-filter/cap pass
+                // applies. Provenance: `{source}+timed-merge`.
                 info!(
                     provenance = %aligned_lines.provenance,
                     lines = aligned_lines.lines.len(),
-                    "orchestrator: Tier-1 short-circuit (line-synced), skipping backend"
+                    "orchestrator: Tier-1 short-circuit (line-synced), routing to timed_reference_merge Mode B"
                 );
-                let pre_split = AlignedTrack {
-                    lines: aligned_lines.lines,
-                    provenance: aligned_lines.provenance,
-                    raw_confidence: 1.0,
-                };
-                Ok(split_track(&pre_split, self.split_cfg))
+                let candidate = aligned_lines_to_candidate(&aligned_lines);
+                let song_duration_ms = candidate
+                    .line_timings
+                    .as_ref()
+                    .and_then(|t| t.last())
+                    .map(|(_, e)| (*e) as u32)
+                    .unwrap_or(0);
+                match timed_reference_merge::process(
+                    None,
+                    &candidate,
+                    song_duration_ms,
+                    input.audit.as_ref(),
+                )
+                .await
+                {
+                    Ok(track) => Ok(track),
+                    Err(e) => {
+                        let fallback_lines = aligned_lines.lines;
+                        let fallback_prov = aligned_lines.provenance;
+                        tracing::warn!(
+                            provenance = %fallback_prov,
+                            error = %e,
+                            "orchestrator: timed_reference_merge failed on LineSynced — falling back to split_track"
+                        );
+                        let pre_split = AlignedTrack {
+                            lines: fallback_lines,
+                            provenance: fallback_prov,
+                            raw_confidence: 1.0,
+                        };
+                        Ok(split_track(&pre_split, self.split_cfg))
+                    }
+                }
             }
             Tier1Result::TextOnly(text_candidates) => {
                 // Text-only path: run WhisperX for word timing, pick best
@@ -151,6 +181,36 @@ impl Orchestrator {
                         return Ok(split_track(&asr, self.split_cfg));
                     }
                 };
+
+                let song_duration_ms = asr.lines.last().map(|l| l.end_ms).unwrap_or(0);
+
+                if best.has_timing && coverage_ok(best, song_duration_ms) {
+                    info!(
+                        provenance = %asr.provenance,
+                        best_source = %best.source,
+                        song_duration_ms,
+                        "orchestrator: Tier-1 TextOnly + timed candidate (coverage_ok) → timed_reference_merge Mode A"
+                    );
+                    match timed_reference_merge::process(
+                        Some(&asr),
+                        best,
+                        song_duration_ms,
+                        input.audit.as_ref(),
+                    )
+                    .await
+                    {
+                        Ok(track) => return Ok(track),
+                        Err(e) => {
+                            tracing::warn!(
+                                provenance = %asr.provenance,
+                                best_source = %best.source,
+                                error = %e,
+                                "orchestrator: timed_reference_merge failed — retrying via text_reference_merge"
+                            );
+                            // fall through to the text_reference_merge branch below
+                        }
+                    }
+                }
 
                 info!(
                     provenance = %asr.provenance,
@@ -204,6 +264,27 @@ impl Orchestrator {
                 Ok(split_track(&asr, self.split_cfg))
             }
         }
+    }
+}
+
+/// Convert a `Tier1::LineSynced` payload into a timed `CandidateText` so
+/// the orchestrator can route it through `timed_reference_merge::process`
+/// (Mode B). Source is taken from the `AlignedLines.provenance` (which is
+/// the original tier1 source label like `"tier1:spotify"`).
+fn aligned_lines_to_candidate(
+    aligned_lines: &crate::lyrics::tier1::AlignedLines,
+) -> crate::lyrics::tier1::CandidateText {
+    let lines: Vec<String> = aligned_lines.lines.iter().map(|l| l.text.clone()).collect();
+    let line_timings: Vec<(u64, u64)> = aligned_lines
+        .lines
+        .iter()
+        .map(|l| (l.start_ms as u64, l.end_ms as u64))
+        .collect();
+    crate::lyrics::tier1::CandidateText {
+        source: aligned_lines.provenance.clone(),
+        lines,
+        line_timings: Some(line_timings),
+        has_timing: true,
     }
 }
 
@@ -371,10 +452,10 @@ mod tests {
             "backend.align must not be called when Tier-1 short-circuits"
         );
 
-        // Provenance must come from the Tier-1 source.
+        // Provenance must come from the Tier-1 source + timed-merge suffix.
         assert_eq!(
-            result.provenance, "tier1:spotify",
-            "provenance must be the tier1 source tag"
+            result.provenance, "tier1:spotify+timed-merge",
+            "LineSynced path now routes through timed_reference_merge Mode B → +timed-merge suffix"
         );
 
         // Per feedback_line_timing_only.md: every line must have words: None.
