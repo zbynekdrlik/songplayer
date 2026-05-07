@@ -495,6 +495,27 @@ fn trim_outlier_indices_keeps_single_entry_intact() {
 }
 
 #[test]
+fn trim_outlier_indices_keeps_contiguous_held_notes_past_cap() {
+    // id=21 "Good Shepherd" 2026-05-07: span 12.4 s due to held vowels on
+    // "enemies" (1.24 s) + "forgiveness" (2.40 s), all gaps < 3 s.
+    // Old impl dropped the tail; new gap-guarded impl preserves it.
+    let asr_track = asr(vec![
+        make_word("a", 0, 100),
+        make_word("b", 1000, 1500),
+        make_word("c", 2500, 3000),
+        make_word("d", 4000, 4500),
+        make_word("e", 5500, 6000),
+        make_word("f", 7000, 8000),
+        make_word("g", 8500, 12500), // 4.5 s held note
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = (0..7).collect::<Vec<_>>();
+    trim_outlier_indices(&mut indices, &asr_words);
+    // All 7 preserved — span 12.5 s > 8 s cap but every gap < 3 s.
+    assert_eq!(indices, (0..7).collect::<Vec<_>>());
+}
+
+#[test]
 fn trim_outlier_indices_handles_unsorted_input() {
     // Indices arrive ascending after Phase 1 sort, but defensive: trim should
     // sort before measuring span.

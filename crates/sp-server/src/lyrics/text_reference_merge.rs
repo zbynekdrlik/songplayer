@@ -35,6 +35,9 @@ mod absorb;
 #[path = "text_reference_merge_phantom.rs"]
 mod phantom;
 
+#[path = "text_reference_merge_trim.rs"]
+mod trim;
+
 /// Hard upper bound for sub-line EN length. LED wall renders this many
 /// chars per row; longer lines overflow into adjacent UI panels.
 pub const SUBLINE_MAX_CHARS: usize = 32;
@@ -71,11 +74,11 @@ struct LineEmit {
 }
 
 #[derive(Clone, Debug)]
-struct AsrWord {
-    norm: String,
-    start_ms: u32,
-    end_ms: u32,
-    confidence: f32,
+pub(super) struct AsrWord {
+    pub(super) norm: String,
+    pub(super) start_ms: u32,
+    pub(super) end_ms: u32,
+    pub(super) confidence: f32,
 }
 
 /// Public entry: full description/override pipeline. Output: words=None,
@@ -864,28 +867,10 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Trim trailing-outlier indices so derived span ≤ `LONG_LINE_CAP_MS`.
-/// LCS can pick far-apart words straddling multi-chorus audio: id=132
-/// saw both [210..214, 221] (11.8 s) and [129, 136] (10.4 s "Holy forever").
-/// Pop trailing until span fits cap; can drop to 1 entry — Phase 5's
-/// MIN_LINE_DURATION_MS drop then rejects single-word residuals.
-fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWord]) {
-    if indices.len() <= 1 {
-        return;
-    }
-    indices.sort_unstable();
-    while indices.len() > 1 {
-        let first = indices[0];
-        let last = *indices.last().expect("len > 1");
-        let span = asr_words[last]
-            .end_ms
-            .saturating_sub(asr_words[first].start_ms);
-        if span <= LONG_LINE_CAP_MS {
-            break;
-        }
-        indices.pop();
-    }
-}
+// `trim_outlier_indices` lives in `text_reference_merge_trim.rs`.
+// `pub(crate) use` so the sibling tests file (which uses `use super::*`)
+// picks it up; otherwise it would only be visible inside this module body.
+pub(crate) use trim::trim_outlier_indices;
 
 fn normalize_word(w: &str) -> String {
     w.chars()
