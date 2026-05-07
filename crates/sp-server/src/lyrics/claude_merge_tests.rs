@@ -203,38 +203,41 @@ fn parse_claude_response_empty_lines_array() {
     assert_eq!(lines.len(), 0);
 }
 
-// ── source_priority tests ─────────────────────────────────────────────────
+// ── priority_with_timing tests ───────────────────────────────────────────
 
-#[test]
-fn source_priority_values() {
-    // Production labels (gather_sources_impl) and tier1: aliases.
-    let cases = [
-        ("override", 5),
-        ("tier1:spotify", 4),
-        ("lrclib", 3),
-        ("tier1:lrclib", 3),
-        ("genius", 2),
-        ("tier1:genius", 2),
-        ("yt_subs", 1),
-        ("tier1:yt_subs", 1),
-        ("description", 0),
-        ("unknown", 0),
-        ("", 0),
-    ];
-    for (s, p) in cases {
-        assert_eq!(source_priority(s), p, "{s}");
-    }
-    // Strict order: override > spotify > lrclib > genius > yt_subs > description.
-    let order = [
-        "override",
-        "tier1:spotify",
-        "lrclib",
-        "genius",
-        "yt_subs",
-        "description",
-    ];
-    for w in order.windows(2) {
-        assert!(source_priority(w[0]) > source_priority(w[1]), "{w:?}");
+#[cfg(test)]
+mod priority_with_timing_tests {
+    use super::*;
+
+    /// Spec table from docs/superpowers/specs/2026-05-07-text-reference-merge-unification-design.md.
+    /// Tier-break: timed sources outrank text-only of the same name; description outranks
+    /// every other text source.
+    #[test]
+    fn matrix_matches_spec_table() {
+        // (source, has_timing, expected_priority)
+        let cases: &[(&str, bool, u32)] = &[
+            ("override", false, 6),
+            ("tier1:spotify", true, 5),
+            ("lrclib", true, 5),
+            ("tier1:lrclib", true, 5),
+            ("tier1:yt_subs", true, 4),
+            ("yt_subs", true, 4),
+            ("description", false, 3),
+            ("lrclib", false, 2),
+            ("tier1:lrclib", false, 2),
+            ("genius", false, 1),
+            ("tier1:genius", false, 1),
+            ("yt_subs", false, 0),
+            ("tier1:yt_subs", false, 0),
+            ("unknown_source", false, 0),
+        ];
+        for (source, has_timing, expected) in cases {
+            assert_eq!(
+                priority_with_timing(source, *has_timing),
+                *expected,
+                "priority_with_timing({source:?}, {has_timing}) expected {expected}",
+            );
+        }
     }
 }
 
@@ -869,4 +872,136 @@ async fn merge_routes_override_source_through_description_merge() {
         "provenance must mark override path; got {:?}",
         track.provenance
     );
+}
+
+#[cfg(test)]
+mod coverage_ok_tests {
+    use super::*;
+    use crate::lyrics::tier1::CandidateText;
+
+    fn cand_with_timings(timings: Vec<(u64, u64)>) -> CandidateText {
+        CandidateText {
+            source: "lrclib".into(),
+            lines: vec!["x".into(); timings.len()],
+            line_timings: Some(timings),
+            has_timing: true,
+        }
+    }
+
+    #[test]
+    fn returns_true_when_span_covers_at_least_80_percent_of_duration() {
+        // 0..240000 ms span, 300000 ms duration → 80% exact → true
+        let c = cand_with_timings(vec![(0, 1000), (239000, 240000)]);
+        assert!(coverage_ok(&c, 300_000));
+    }
+
+    #[test]
+    fn returns_false_when_span_below_80_percent() {
+        // 0..200000 ms span, 300000 ms duration → 66.7% → false
+        let c = cand_with_timings(vec![(0, 1000), (199000, 200000)]);
+        assert!(!coverage_ok(&c, 300_000));
+    }
+
+    #[test]
+    fn returns_false_when_no_timings() {
+        let c = CandidateText {
+            source: "genius".into(),
+            lines: vec!["x".into()],
+            line_timings: None,
+            has_timing: false,
+        };
+        assert!(!coverage_ok(&c, 300_000));
+    }
+
+    #[test]
+    fn returns_false_when_empty_timings() {
+        let c = cand_with_timings(vec![]);
+        assert!(!coverage_ok(&c, 300_000));
+    }
+
+    #[test]
+    fn returns_false_when_duration_zero() {
+        let c = cand_with_timings(vec![(0, 1000)]);
+        assert!(!coverage_ok(&c, 0));
+    }
+}
+
+#[cfg(test)]
+mod best_authoritative_tests {
+    use super::*;
+    use crate::lyrics::tier1::CandidateText;
+
+    fn text_cand(source: &str, line_count: usize) -> CandidateText {
+        CandidateText {
+            source: source.into(),
+            lines: vec!["x".into(); line_count],
+            line_timings: None,
+            has_timing: false,
+        }
+    }
+
+    fn timed_cand(source: &str, line_count: usize, span_ms: u64) -> CandidateText {
+        let timings: Vec<(u64, u64)> = (0..line_count as u64)
+            .map(|i| {
+                let start = i * (span_ms / line_count.max(1) as u64);
+                let end = start + 1000;
+                (start, end)
+            })
+            .collect();
+        CandidateText {
+            source: source.into(),
+            lines: vec!["x".into(); line_count],
+            line_timings: Some(timings),
+            has_timing: true,
+        }
+    }
+
+    /// id=21 "Good Shepherd" regression: description (26 lines) + genius (70 lines)
+    /// both present. Pre-fix: genius wins (priority 2 > description 0). Post-fix:
+    /// description wins (priority 3 > genius 1) by spec.
+    #[test]
+    fn description_beats_genius_when_both_present() {
+        let candidates = vec![text_cand("description", 26), text_cand("genius", 70)];
+        let best = best_authoritative_candidate(&candidates).unwrap();
+        assert_eq!(best.source, "description");
+    }
+
+    #[test]
+    fn override_beats_description() {
+        let candidates = vec![text_cand("description", 26), text_cand("override", 26)];
+        let best = best_authoritative_candidate(&candidates).unwrap();
+        assert_eq!(best.source, "override");
+    }
+
+    #[test]
+    fn timed_lrclib_beats_text_description_regardless_of_coverage() {
+        // Selection layer ignores coverage — that's the routing layer's call.
+        let candidates = vec![
+            text_cand("description", 26),
+            timed_cand("lrclib", 30, 50_000),
+        ];
+        let best = best_authoritative_candidate(&candidates).unwrap();
+        assert_eq!(best.source, "lrclib");
+        assert!(best.has_timing);
+    }
+
+    #[test]
+    fn lrclib_text_beats_genius_text() {
+        let candidates = vec![text_cand("genius", 70), text_cand("lrclib", 26)];
+        let best = best_authoritative_candidate(&candidates).unwrap();
+        assert_eq!(best.source, "lrclib");
+    }
+
+    #[test]
+    fn empty_candidates_returns_none() {
+        let candidates: Vec<CandidateText> = vec![];
+        assert!(best_authoritative_candidate(&candidates).is_none());
+    }
+
+    #[test]
+    fn tie_break_prefers_longer_lines_at_same_priority() {
+        let candidates = vec![text_cand("genius", 30), text_cand("genius", 70)];
+        let best = best_authoritative_candidate(&candidates).unwrap();
+        assert_eq!(best.lines.len(), 70);
+    }
 }

@@ -158,35 +158,84 @@ struct ClaudeResponse {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Tie-break order for `best_authoritative` (production labels match gather.rs).
-fn source_priority(source: &str) -> u32 {
+/// Priority for the `best_authoritative_candidate` selector.
+///
+/// Spec: docs/superpowers/specs/2026-05-07-text-reference-merge-unification-design.md
+/// — text-canonical (description) outranks every other text-only source;
+/// timed sources outrank text-only of the same name; override is highest.
+///
+/// `has_timing` matters because the same source label (`lrclib`, `yt_subs`,
+/// `tier1:lrclib`, `tier1:yt_subs`) can be either timed or text-only depending
+/// on the candidate.
+pub(crate) fn priority_with_timing(source: &str, has_timing: bool) -> u32 {
     if source == "override" {
-        5
-    } else if source.starts_with("tier1:spotify") {
-        4
-    } else if source == "lrclib" || source.starts_with("tier1:lrclib") {
-        3
-    } else if source == "genius" || source.starts_with("tier1:genius") {
-        2
-    } else if source == "yt_subs" || source.starts_with("tier1:yt_subs") {
-        1
-    } else {
-        0
+        return 6;
     }
+    if has_timing {
+        if source.starts_with("tier1:spotify") {
+            return 5;
+        }
+        if source == "lrclib" || source.starts_with("tier1:lrclib") {
+            return 5;
+        }
+        if source == "yt_subs" || source.starts_with("tier1:yt_subs") {
+            return 4;
+        }
+        return 0;
+    }
+    if source == "description" {
+        return 3;
+    }
+    if source == "lrclib" || source.starts_with("tier1:lrclib") {
+        return 2;
+    }
+    if source == "genius" || source.starts_with("tier1:genius") {
+        return 1;
+    }
+    if source == "yt_subs" || source.starts_with("tier1:yt_subs") {
+        return 0;
+    }
+    0
 }
 
-/// Pick the strongest authoritative candidate: source priority wins; ties
-/// broken by line count (longest wins). Per #72: high-priority short
-/// candidates beat longer noisy low-priority ones.
+/// Pick the strongest authoritative candidate by `priority_with_timing`,
+/// breaking ties by line count (longest wins).
 ///
 /// Returns a reference to the chosen `CandidateText` so callers can read
 /// both `lines` (for merging) and `source` (for choosing the merge path —
-/// description / override go through `text_reference_merge::process`, others go
-/// through Claude). Returns `None` for empty input.
+/// timed routes through `timed_reference_merge::process`, text-only routes
+/// through `text_reference_merge::process`). Returns `None` for empty input.
 pub(crate) fn best_authoritative_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
     candidates
         .iter()
-        .max_by_key(|c| (source_priority(&c.source), c.lines.len()))
+        .max_by_key(|c| (priority_with_timing(&c.source, c.has_timing), c.lines.len()))
+}
+
+/// Coverage check for timed-reference routing.
+///
+/// Returns `true` when the candidate has line timings AND the span from the
+/// first line's `start_ms` to the last line's `end_ms` is at least 80% of
+/// `song_duration_ms`. The 80% floor protects against partial-fetch sources
+/// (e.g. spotify returning only the first verse). Below the floor, the timed
+/// routing layer falls back to text-merge.
+///
+/// Returns `false` when:
+/// - `line_timings` is None or empty
+/// - `song_duration_ms` is 0
+/// - the timing span covers less than 80% of `song_duration_ms`
+pub(crate) fn coverage_ok(candidate: &CandidateText, song_duration_ms: u32) -> bool {
+    if song_duration_ms == 0 {
+        return false;
+    }
+    let timings = match &candidate.line_timings {
+        Some(t) if !t.is_empty() => t,
+        _ => return false,
+    };
+    let first_start = timings.first().map(|(s, _)| *s).unwrap_or(0);
+    let last_end = timings.last().map(|(_, e)| *e).unwrap_or(0);
+    let span = last_end.saturating_sub(first_start);
+    let threshold = (song_duration_ms as u64) * 80 / 100;
+    span >= threshold
 }
 
 /// Build phrase-level chunks from all word-timed lines in `asr`.
