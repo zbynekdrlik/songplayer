@@ -1,5 +1,5 @@
 //! Tests for `phantom::drop_phantom_clusters`. Sibling-included from
-//! description_merge.rs to keep description_merge_tests.rs under the
+//! text_reference_merge.rs to keep text_reference_merge_tests.rs under the
 //! 1000-line file-size cap.
 
 #![allow(unused_imports)]

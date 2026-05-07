@@ -1,6 +1,6 @@
-//! Tests for description_merge phases 1, 2, 4, 5 (Phase 3 Claude path needs
+//! Tests for text_reference_merge phases 1, 2, 4, 5 (Phase 3 Claude path needs
 //! a mock AiClient and is exercised end-to-end on win-resolume reprocess
-//! verification, not in unit tests). Sibling-included from description_merge.rs.
+//! verification, not in unit tests). Sibling-included from text_reference_merge.rs.
 
 #![allow(unused_imports)]
 

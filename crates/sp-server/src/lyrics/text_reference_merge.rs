@@ -102,7 +102,7 @@ pub async fn process(
 
     // Phase 1: Claude line-mapping (primary) with NW DP fallback. Claude
     // reads phrasing semantically; the deterministic DP is a guaranteed-correct
-    // floor on parse / network / refusal failure. See description_merge_mapping.
+    // floor on parse / network / refusal failure. See text_reference_merge_mapping.
     let (mut emits, phase1_provider) =
         match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await {
             Ok(map) => {

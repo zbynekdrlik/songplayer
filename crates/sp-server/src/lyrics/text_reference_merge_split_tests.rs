@@ -1,6 +1,6 @@
 //! Tests for the Phase-3 splitting functions: `build_split_prompt`,
 //! `parse_split_response`, `deterministic_split_lines`. Sibling-included
-//! from description_merge.rs to keep the parent files under the
+//! from text_reference_merge.rs to keep the parent files under the
 //! 1000-line file-size cap.
 
 #![allow(unused_imports)]

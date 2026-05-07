@@ -21,7 +21,7 @@ use crate::lyrics::tier1::CandidateText;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 //
-// This enum is shared with `description_merge` (description / override path).
+// This enum is shared with `text_reference_merge` (description / override path).
 // Both branches return the same error type up to `Orchestrator::process`.
 
 #[derive(Debug, Error)]
@@ -181,7 +181,7 @@ fn source_priority(source: &str) -> u32 {
 ///
 /// Returns a reference to the chosen `CandidateText` so callers can read
 /// both `lines` (for merging) and `source` (for choosing the merge path —
-/// description / override go through `description_merge::process`, others go
+/// description / override go through `text_reference_merge::process`, others go
 /// through Claude). Returns `None` for empty input.
 pub(crate) fn best_authoritative_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
     candidates
