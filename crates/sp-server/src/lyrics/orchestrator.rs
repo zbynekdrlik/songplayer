@@ -1,9 +1,9 @@
 //! Orchestrator — drives the tier chain for a single song.
 //!
 //! Flow: Tier-1 collect → branch on LineSynced/TextOnly/None →
-//! WhisperX backend (Tier-2) when needed → claude-merge (TextOnly path) →
-//! SubtitleEdit-port line split. Returns `AlignedTrack`; the caller
-//! (worker) converts to `LyricsTrack` and translates separately.
+//! WhisperX backend (Tier-2) when needed → text_reference_merge (TextOnly path) →
+//! Returns `AlignedTrack`; the caller (worker) converts to `LyricsTrack` and
+//! translates separately.
 //!
 //! The orchestrator does NOT hold fetcher factories. Instead,
 //! `OrchestratorInput.fetchers` carries the per-song `Vec<FetchFn>`
@@ -24,8 +24,9 @@ use tracing::info;
 
 use crate::ai::client::AiClient;
 use crate::lyrics::backend::{AlignOpts, AlignedTrack, AlignmentBackend, BackendError};
-use crate::lyrics::claude_merge;
+use crate::lyrics::claude_merge::best_authoritative_candidate;
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
+use crate::lyrics::text_reference_merge;
 use crate::lyrics::tier1::{FetchFn, Tier1Result, collect};
 
 #[derive(Debug, Error)]
@@ -114,16 +115,19 @@ impl Orchestrator {
                 Ok(split_track(&pre_split, self.split_cfg))
             }
             Tier1Result::TextOnly(text_candidates) => {
-                // Text-only: run WhisperX for timing, then use Claude to semantically
-                // merge authoritative text with WhisperX phrases to correct mishearings.
-                // Claude's prompt asks for the 32-char cap, but Claude is unreliable
-                // on this rule (issue #64 — production observed 9 lines >32ch on
-                // video 86, and 3 unsplit 59-char lines on video 17 like "the rock of
-                // ages, holding to the hope that's never failing."). We apply
-                // split_track AFTER claude_merge as a mechanical safety net. The
-                // splitter only acts on lines OVER max_chars; shorter Claude output
-                // passes through unchanged, so we never double-split.
-                // If claude-merge fails entirely, fall back to split_track on raw WhisperX.
+                // Text-only path: run WhisperX for word timing, pick best
+                // authoritative candidate, then route through
+                // text_reference_merge::process (the unified text-merge
+                // pipeline). Per the 2026-05-07 unification spec the
+                // single-Claude-call merge in claude_merge::merge is retired.
+                //
+                // Provenance shape: `{best.source}+{asr.provenance}` (e.g.
+                // "description+whisperx-large-v3@rev1", "genius+whisperx-large-v3@rev1").
+                //
+                // text_reference_merge runs its own Claude line-split (Phase 3)
+                // internally — no external split_track wrap is needed when it
+                // succeeds. On failure, fall back to split_track on raw
+                // WhisperX so the song still ships timed lyrics.
                 let wav = input.vocal_wav.ok_or_else(|| {
                     OrchestratorError::NoAlignment(
                         "Tier-1 TextOnly path requires a vocal WAV but none was available \
@@ -136,43 +140,42 @@ impl Orchestrator {
                     .align(wav, input.language, &AlignOpts::default())
                     .await?;
                 crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr).await;
+
+                let best = match best_authoritative_candidate(&text_candidates) {
+                    Some(b) if !b.lines.is_empty() => b,
+                    _ => {
+                        info!(
+                            provenance = %asr.provenance,
+                            "orchestrator: TextOnly with no usable candidate — shipping raw WhisperX with line split"
+                        );
+                        return Ok(split_track(&asr, self.split_cfg));
+                    }
+                };
+
                 info!(
                     provenance = %asr.provenance,
                     asr_lines = asr.lines.len(),
                     text_candidates = text_candidates.len(),
-                    "orchestrator: Tier-1 TextOnly — backend called, running claude-merge"
+                    best_source = %best.source,
+                    best_has_timing = best.has_timing,
+                    "orchestrator: Tier-1 TextOnly — backend called, routing to text_reference_merge"
                 );
-                match claude_merge::merge(
+
+                match text_reference_merge::process(
                     &self.ai_client,
                     &asr,
-                    &text_candidates,
+                    best,
                     input.audit.as_ref(),
                 )
                 .await
                 {
-                    Ok(merged) => {
-                        // Description / override sources go through the
-                        // deterministic mapper (issue #78) which preserves
-                        // the reference's natural line breaks. Splitting
-                        // those at 32 chars would re-fragment exactly the
-                        // segmentation we just protected — skip split_track
-                        // for that provenance prefix. Claude-merge output
-                        // for genius/other sources still gets split as a
-                        // safety net (issue #64).
-                        let provenance = merged.provenance.as_str();
-                        if provenance.starts_with("description+")
-                            || provenance.starts_with("override+")
-                        {
-                            Ok(merged)
-                        } else {
-                            Ok(split_track(&merged, self.split_cfg))
-                        }
-                    }
+                    Ok(merged) => Ok(merged),
                     Err(e) => {
                         tracing::warn!(
                             provenance = %asr.provenance,
+                            best_source = %best.source,
                             error = %e,
-                            "orchestrator: claude-merge failed — falling back to raw WhisperX with line split"
+                            "orchestrator: text_reference_merge failed — falling back to raw WhisperX with line split"
                         );
                         Ok(split_track(&asr, self.split_cfg))
                     }
@@ -387,36 +390,40 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 2: Tier-1 TextOnly — backend called, then claude-merge attempted.
-    //         Success path: Claude returns valid JSON → provenance ends with +claude-merge.
+    // Test 2: Tier-1 TextOnly — backend called, routes to text_reference_merge.
+    //         description source: provenance starts with "description+".
     // -----------------------------------------------------------------------
 
     /// When Tier-1 returns `TextOnly`, the orchestrator calls the backend for
-    /// timing and then attempts claude-merge. When Claude succeeds, provenance
-    /// must contain `+claude-merge`.
+    /// timing and routes to `text_reference_merge::process` (no Claude phrase-merge).
+    /// The merged output's provenance starts with `{best.source}+`. For
+    /// description-only it is `description+whisperx-large-v3@rev1`.
     #[tokio::test]
-    async fn tier1_text_only_runs_backend_then_claude_merge() {
+    async fn tier1_text_only_routes_to_text_reference_merge() {
+        use crate::lyrics::tier1::CandidateText;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let server = MockServer::start().await;
-        // Mock Claude returning 1 merged line.
+        // text_reference_merge::process calls Claude internally for line-mapping
+        // (Phase 1) and line-split (Phase 3). Provide a permissive mock that
+        // returns a 500 — text_reference_merge falls back to the deterministic
+        // NW DP path on parse failure, which is fine for this test (we only
+        // assert provenance + lack of +claude-merge suffix).
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "choices": [{"message": {"content": "{\"lines\": [{\"start_ms\": 0, \"end_ms\": 2000, \"text\": \"amazing grace\"}]}"}}]
-            })))
+            .respond_with(ResponseTemplate::new(500))
             .mount(&server)
             .await;
 
         let candidate = CandidateText {
-            source: "genius".into(),
+            source: "description".into(),
             lines: vec!["amazing grace".into(), "how sweet the sound".into()],
             line_timings: None,
             has_timing: false,
         };
 
-        let (mock, call_count) = MockBackend::new(asr_track("mock@rev1"));
+        let (mock, call_count) = MockBackend::new(asr_track("whisperx-large-v3@rev1"));
         let orch = Orchestrator::new(
             Arc::new(mock),
             mock_ai_client(&server.uri()),
@@ -433,35 +440,89 @@ mod tests {
             .await
             .expect("process should succeed");
 
-        // Backend must have been called exactly once.
-        assert_eq!(
-            call_count.load(Ordering::SeqCst),
-            1,
-            "backend.align must be called exactly once on TextOnly path"
-        );
-
-        // Provenance must contain "+claude-merge".
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
         assert!(
-            result.provenance.contains("+claude-merge"),
-            "TextOnly path must run claude-merge; got provenance: {}",
+            result.provenance.starts_with("description+"),
+            "TextOnly with description winner must produce description+... provenance; got: {}",
             result.provenance
         );
-
-        // Per feedback_line_timing_only.md: words must be None on merged output.
+        assert!(
+            !result.provenance.contains("+claude-merge"),
+            "+claude-merge suffix is retired; got: {}",
+            result.provenance
+        );
         for line in &result.lines {
             assert!(line.words.is_none(), "merged output must have words: None");
         }
     }
 
     // -----------------------------------------------------------------------
-    // Test 3: Tier-1 TextOnly fallback — Claude fails → split_track on raw ASR
+    // Test 2b: Tier-1 TextOnly — genius source routes to text_reference_merge.
     // -----------------------------------------------------------------------
 
-    /// When claude-merge fails (e.g., AI server unreachable), the orchestrator
-    /// falls back to split_track on the raw WhisperX output. Provenance must
-    /// NOT contain `+claude-merge`.
+    /// Post-fix: when the best-authoritative candidate is genius (description
+    /// absent), the orchestrator routes to `text_reference_merge::process`
+    /// (NOT the deleted Claude phrase-merge). Provenance starts with
+    /// `genius+`. The retired `+claude-merge` suffix must not appear.
     #[tokio::test]
-    async fn tier1_text_only_fallback_when_claude_fails() {
+    async fn tier1_text_only_with_genius_routes_to_text_reference_merge() {
+        use crate::lyrics::tier1::CandidateText;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let candidate = CandidateText {
+            source: "genius".into(),
+            lines: vec!["amazing grace".into(), "how sweet the sound".into()],
+            line_timings: None,
+            has_timing: false,
+        };
+
+        let (mock, call_count) = MockBackend::new(asr_track("whisperx-large-v3@rev1"));
+        let orch = Orchestrator::new(
+            Arc::new(mock),
+            mock_ai_client(&server.uri()),
+            SplitConfig::default(),
+        );
+
+        let result = orch
+            .process(OrchestratorInput {
+                fetchers: vec![fixed_fetcher(candidate)],
+                language: "en",
+                vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
+                audit: None,
+            })
+            .await
+            .expect("process should succeed");
+
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        assert!(
+            result.provenance.starts_with("genius+"),
+            "genius-winning text-only must produce genius+... provenance; got: {}",
+            result.provenance
+        );
+        assert!(
+            !result.provenance.contains("+claude-merge"),
+            "+claude-merge suffix is retired; got: {}",
+            result.provenance
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 3: Tier-1 TextOnly fallback — text_reference_merge fails → split_track on raw ASR
+    // -----------------------------------------------------------------------
+
+    /// When text_reference_merge fails (e.g., AI server unreachable AND NW-DP
+    /// fallback also fails), the orchestrator falls back to split_track on the
+    /// raw WhisperX output. Provenance must NOT contain `+claude-merge`.
+    #[tokio::test]
+    async fn tier1_text_only_fallback_when_text_reference_merge_fails() {
         // Point at a port nothing is listening on — connection refused = fallback.
         let dead_ai_client = Arc::new(AiClient::new(AiSettings {
             api_url: "http://127.0.0.1:19999/v1".into(),
