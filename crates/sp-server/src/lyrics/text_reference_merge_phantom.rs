@@ -122,7 +122,7 @@ pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) -> (u32, u32) {
             avg_conf = avg,
             gap_before_ms = gap_before,
             gap_after_ms = gap_after,
-            "description_merge: dropping phantom cluster"
+            "text_reference_merge: dropping phantom cluster"
         );
         i = j;
     }
@@ -138,7 +138,7 @@ pub(super) fn drop_phantom_clusters(words: &mut Vec<AsrWord>) -> (u32, u32) {
         tracing::info!(
             clusters_dropped,
             words_dropped,
-            "description_merge: phantom-cluster filter active"
+            "text_reference_merge: phantom-cluster filter active"
         );
     }
     (clusters_dropped, words_dropped)

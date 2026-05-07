@@ -519,20 +519,20 @@ jobs:
           # future large-diff PR that might OOM the 16GB runner.
           #
           # === documented equivalent mutations (audit 2026-05-06, PR #82) ===
-          # description_merge.rs:847 < ↔ <= in apply_cap_and_monotonic.
+          # text_reference_merge.rs:847 < ↔ <= in apply_cap_and_monotonic.
           #   At boundary start_ms == floor: original is no-op; <= clamps
           #   to floor which equals start_ms — no observable change.
-          # description_merge.rs:865 > ↔ >= in apply_cap_and_monotonic.
+          # text_reference_merge.rs:865 > ↔ >= in apply_cap_and_monotonic.
           #   At boundary new_end == end_ms: assigning the same value is
           #   a no-op.
-          # description_merge.rs:887 > ↔ >= in trim_outlier_indices.
+          # text_reference_merge.rs:887 > ↔ >= in trim_outlier_indices.
           #   At len=1 with >=: body computes span=0 from a single element;
           #   the inner `if span <= LONG_LINE_CAP_MS { break }` guard exits
           #   the loop. Same outcome as len=1 not entering with >.
-          # description_merge_phantom.rs:49 < ↔ ==/<= in drop_phantom_clusters.
+          # text_reference_merge_phantom.rs:49 < ↔ ==/<= in drop_phantom_clusters.
           #   Early-return is an optimization. At len < 2 the while-loop in
           #   the non-early-return path also produces no drops (same (0,0)).
-          # description_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
+          # text_reference_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
           #   `if clusters_dropped > 0` gates an info!() log only. Function
           #   return value is the same regardless.
           cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
@@ -552,14 +552,14 @@ jobs:
             --exclude-re 'line_splitter\.rs:131:' \
             --exclude-re 'line_splitter\.rs:141:' \
             --exclude-re 'line_splitter\.rs:164:' \
-            --exclude-re 'description_merge\.rs:847:23: replace < with <= in apply_cap_and_monotonic' \
-            --exclude-re 'description_merge\.rs:865:20: replace > with >= in apply_cap_and_monotonic' \
-            --exclude-re 'description_merge\.rs:887:25: replace > with >= in trim_outlier_indices' \
-            --exclude-re 'description_merge_phantom\.rs:49:20: replace < with == in drop_phantom_clusters' \
-            --exclude-re 'description_merge_phantom\.rs:49:20: replace < with <= in drop_phantom_clusters' \
-            --exclude-re 'description_merge_phantom\.rs:137:25: replace > with == in drop_phantom_clusters' \
-            --exclude-re 'description_merge_phantom\.rs:137:25: replace > with < in drop_phantom_clusters' \
-            --exclude-re 'description_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters'
+            --exclude-re 'text_reference_merge\.rs:847:23: replace < with <= in apply_cap_and_monotonic' \
+            --exclude-re 'text_reference_merge\.rs:865:20: replace > with >= in apply_cap_and_monotonic' \
+            --exclude-re 'text_reference_merge\.rs:887:25: replace > with >= in trim_outlier_indices' \
+            --exclude-re 'text_reference_merge_phantom\.rs:49:20: replace < with == in drop_phantom_clusters' \
+            --exclude-re 'text_reference_merge_phantom\.rs:49:20: replace < with <= in drop_phantom_clusters' \
+            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with == in drop_phantom_clusters' \
+            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with < in drop_phantom_clusters' \
+            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters'
       - name: Upload mutants report
         if: failure()
         uses: actions/upload-artifact@v4

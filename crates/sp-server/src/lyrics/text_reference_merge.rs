@@ -1,4 +1,4 @@
-//! Description / override merge pipeline (issue #78). Phases:
+//! Text-reference merge pipeline (issue #78 + 2026-05-07 unification). Phases:
 //! 1 Claude line-mapping (NW DP fallback), 2 chorus repeat via sliding-
 //! window LCS, 2.5 trim outliers, 2.7 absorb sustained-note tokens,
 //! 3 Claude split >32c, 4 emit AlignedLine, 5 cap + monotonic + extend.
@@ -20,19 +20,19 @@ use crate::lyrics::backend::{AlignedLine, AlignedTrack};
 use crate::lyrics::claude_merge::{MergeError, drop_hallucinated_lead_in};
 use crate::lyrics::tier1::CandidateText;
 
-#[path = "description_merge_mapping.rs"]
+#[path = "text_reference_merge_mapping.rs"]
 mod mapping;
 
-#[path = "description_merge_audit.rs"]
+#[path = "text_reference_merge_audit.rs"]
 mod audit;
 
-#[path = "description_merge_window.rs"]
+#[path = "text_reference_merge_window.rs"]
 mod window;
 
-#[path = "description_merge_absorb.rs"]
+#[path = "text_reference_merge_absorb.rs"]
 mod absorb;
 
-#[path = "description_merge_phantom.rs"]
+#[path = "text_reference_merge_phantom.rs"]
 mod phantom;
 
 /// Hard upper bound for sub-line EN length. LED wall renders this many
@@ -109,7 +109,7 @@ pub async fn process(
                 info!(
                     ref_lines = ref_lines.len(),
                     asr_words = asr_words.len(),
-                    "description_merge: claude line-mapping succeeded"
+                    "text_reference_merge: claude line-mapping succeeded"
                 );
                 (mapping::emits_from_mapping(&map, ref_lines), "claude")
             }
@@ -118,7 +118,7 @@ pub async fn process(
                     %e,
                     ref_lines = ref_lines.len(),
                     asr_words = asr_words.len(),
-                    "description_merge: claude line-mapping failed; falling back to NW DP"
+                    "text_reference_merge: claude line-mapping failed; falling back to NW DP"
                 );
                 (match_ref_to_asr(ref_lines, &asr_words), "nw_dp")
             }
@@ -128,7 +128,7 @@ pub async fn process(
     // Phase 2: chorus repeat re-emit for long unmatched gaps.
     let extras = detect_chorus_repeats(ref_lines, &asr_words, &emits);
     if !extras.is_empty() {
-        info!(count = extras.len(), "description_merge: chorus repeats");
+        info!(count = extras.len(), "text_reference_merge: chorus repeats");
     }
     emits.extend(extras);
     emits.sort_by_key(|e| match e.asr_word_indices.first() {
@@ -169,7 +169,7 @@ pub async fn process(
                 warn!(
                     %e,
                     count = needs_split.len(),
-                    "description_merge: claude split failed, falling back to deterministic word-boundary split"
+                    "text_reference_merge: claude split failed, falling back to deterministic word-boundary split"
                 );
                 deterministic_split_lines(&needs_split)
             }
@@ -455,7 +455,7 @@ fn detect_chorus_repeats(
                         score,
                         win_start_ms = asr_words[*matched.first().expect("non-empty")].start_ms,
                         win_end_ms = asr_words[*matched.last().expect("non-empty")].end_ms,
-                        "description_merge: re-emit chorus repeat (window-bounded)"
+                        "text_reference_merge: re-emit chorus repeat (window-bounded)"
                     );
                     let consumed: std::collections::HashSet<usize> =
                         matched.iter().copied().collect();
@@ -511,7 +511,7 @@ async fn claude_split_lines(
             // deterministic split for this line — partial trust.
             warn!(
                 index = entry.i,
-                "description_merge: claude returned sub-line over {} chars, falling back deterministic for this line",
+                "text_reference_merge: claude returned sub-line over {} chars, falling back deterministic for this line",
                 SUBLINE_MAX_CHARS
             );
             continue;
@@ -983,17 +983,17 @@ fn emit_unmatched_only(asr: &AlignedTrack, candidate: &CandidateText) -> Aligned
 }
 
 #[cfg(test)]
-#[path = "description_merge_tests.rs"]
+#[path = "text_reference_merge_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "description_merge_phantom_tests.rs"]
+#[path = "text_reference_merge_phantom_tests.rs"]
 mod phantom_tests;
 
 #[cfg(test)]
-#[path = "description_merge_dp_tests.rs"]
+#[path = "text_reference_merge_dp_tests.rs"]
 mod dp_tests;
 
 #[cfg(test)]
-#[path = "description_merge_split_tests.rs"]
+#[path = "text_reference_merge_split_tests.rs"]
 mod split_tests;

@@ -71,7 +71,7 @@ pub async fn merge(
     // natural-phrase splits respecting a hard 32-char cap, word-level sub-line
     // timing, and an 8 s long-line cap. No Claude semantic merge.
     if best.source == "description" || best.source == "override" {
-        return crate::lyrics::description_merge::process(ai_client, asr, best, audit).await;
+        return crate::lyrics::text_reference_merge::process(ai_client, asr, best, audit).await;
     }
 
     let reference_lines = best.lines.clone();
