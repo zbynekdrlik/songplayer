@@ -288,3 +288,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "canonical_source_regression_tests.rs"]
+mod canonical_source_regression_tests;
