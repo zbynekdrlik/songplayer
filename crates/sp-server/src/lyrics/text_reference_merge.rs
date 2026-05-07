@@ -843,20 +843,33 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         floor = l.end_ms;
     }
 
-    // Two-tier extension: see EXTENSION_TOLERANCE_MS / REASONABLE_GAP_MS.
+    // Gap-fill: small gaps (≤ REASONABLE_GAP_MS) show next-line text early
+    // because the gap audio is typically next-line's first word that
+    // whisperx misheard (id=21 2:12 "shadow me…" — singer sings "shadow"
+    // during the gap before the matched "me", so wall must show
+    // "shadow me…" not the prior line). Pull lines[i+1].start back to
+    // natural_ends[i]; fill via lines[i].end → lines[i+1].start so wall
+    // never blanks. Large gaps (instrumentals) keep the original
+    // forward-extension capped at EXTENSION_TOLERANCE_MS.
     let n = lines.len();
     for i in 0..n.saturating_sub(1) {
         let next_start = lines[i + 1].start_ms;
         let natural_gap = next_start.saturating_sub(natural_ends[i]);
-        let new_end = if natural_gap <= REASONABLE_GAP_MS {
-            next_start
+        if natural_gap <= REASONABLE_GAP_MS {
+            let new_next_start = natural_ends[i];
+            if new_next_start < lines[i + 1].start_ms {
+                lines[i + 1].start_ms = new_next_start;
+            }
+            if natural_ends[i] > lines[i].end_ms {
+                lines[i].end_ms = natural_ends[i];
+            }
         } else {
-            natural_ends[i]
+            let new_end = natural_ends[i]
                 .saturating_add(EXTENSION_TOLERANCE_MS)
-                .min(next_start)
-        };
-        if new_end > lines[i].end_ms {
-            lines[i].end_ms = new_end;
+                .min(next_start);
+            if new_end > lines[i].end_ms {
+                lines[i].end_ms = new_end;
+            }
         }
     }
 
