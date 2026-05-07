@@ -74,11 +74,11 @@ struct LineEmit {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct AsrWord {
-    pub(super) norm: String,
-    pub(super) start_ms: u32,
-    pub(super) end_ms: u32,
-    pub(super) confidence: f32,
+pub(crate) struct AsrWord {
+    pub(crate) norm: String,
+    pub(crate) start_ms: u32,
+    pub(crate) end_ms: u32,
+    pub(crate) confidence: f32,
 }
 
 /// Public entry: full description/override pipeline. Output: words=None,
