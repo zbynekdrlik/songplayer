@@ -684,9 +684,11 @@ fn apply_cap_and_monotonic_pulls_back_for_id21_shadow_case() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_caps_long_gap_at_tolerance() {
-    // Gap 29 s > REASONABLE_GAP_MS — extension capped at natural_end +
-    // EXTENSION_TOLERANCE_MS=1500. Wall blank from 2500 to 30_000.
+fn apply_cap_and_monotonic_long_gap_pulls_next_back_and_extends_prev() {
+    // Gap 29 s > REASONABLE_GAP_MS. Both sides extend toward each other
+    // by EXTENSION_TOLERANCE_MS so the wall shows next-line text 1.5 s
+    // before the singer actually reaches its first matched word
+    // (id=21 1:01 "Oh, Good Shepherd…" preceded by held "Say" filler).
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -703,12 +705,12 @@ fn apply_cap_and_monotonic_caps_long_gap_at_tolerance() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
-    assert_eq!(
-        lines[0].end_ms,
-        1000 + EXTENSION_TOLERANCE_MS,
-        "long gap → tolerance-capped extension"
+    assert_eq!(lines[0].end_ms, 1000 + EXTENSION_TOLERANCE_MS);
+    assert_eq!(lines[1].start_ms, 30_000 - EXTENSION_TOLERANCE_MS);
+    assert!(
+        lines[1].start_ms > lines[0].end_ms,
+        "blank middle preserved"
     );
-    assert_eq!(lines[1].start_ms, 30_000);
 }
 
 #[test]
