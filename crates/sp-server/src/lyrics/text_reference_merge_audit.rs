@@ -124,10 +124,7 @@ impl AuditState {
         self.phase1_emits = build_emit_rows(emits, asr_words);
     }
 
-    pub(super) fn record_phase1_added_ref_lines(
-        &mut self,
-        added: &[crate::lyrics::text_reference_merge_mapping::AddedRefLine],
-    ) {
+    pub(super) fn record_phase1_added_ref_lines(&mut self, added: &[super::mapping::AddedRefLine]) {
         self.phase1_added_ref_lines = added
             .iter()
             .map(|a| AddedRefLineRecord {

@@ -115,7 +115,7 @@ pub async fn process(
         Vec<LineEmit>,
         &str,
         Vec<String>,
-        Vec<crate::lyrics::text_reference_merge_mapping::AddedRefLine>,
+        Vec<mapping::AddedRefLine>,
     ) = match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await {
         Ok(result) => {
             info!(
@@ -956,7 +956,7 @@ fn emit_unmatched_only(asr: &AlignedTrack, candidate: &CandidateText) -> Aligned
 /// Build the expanded reference-list + an `original → expanded` index map.
 pub(crate) fn expand_ref_lines(
     original: &[String],
-    added: &[crate::lyrics::text_reference_merge_mapping::AddedRefLine],
+    added: &[mapping::AddedRefLine],
 ) -> (Vec<String>, Vec<usize>) {
     let mut expanded: Vec<String> = Vec::with_capacity(original.len() + added.len());
     let mut orig_to_expanded: Vec<usize> = Vec::with_capacity(original.len());
