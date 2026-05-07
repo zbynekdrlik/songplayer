@@ -195,11 +195,15 @@ fn sparse_to_dense(
 }
 
 /// Drop AddedRefLine entries whose `after_line` is out of range. Logs warn.
+/// Stable-sort by `after_line` so Phase 1.5's prev_added_end monotonic
+/// advance picks each line's correct gap window. Same-after_line entries
+/// retain input order so process()'s K-th counter slot calc stays
+/// consistent with expand_ref_lines's iter-and-insert.
 pub(crate) fn validate_added_ref_lines(
     added: &[AddedRefLine],
     n_orig_ref: usize,
 ) -> Vec<AddedRefLine> {
-    added
+    let mut out: Vec<AddedRefLine> = added
         .iter()
         .filter(|a| {
             if a.after_line >= n_orig_ref {
@@ -215,7 +219,9 @@ pub(crate) fn validate_added_ref_lines(
             }
         })
         .cloned()
-        .collect()
+        .collect();
+    out.sort_by_key(|a| a.after_line);
+    out
 }
 
 pub(super) fn emits_from_mapping(map: &[Option<usize>], ref_lines: &[String]) -> Vec<LineEmit> {
@@ -470,5 +476,36 @@ mod tests {
         let validated = validate_added_ref_lines(&added, 3);
         assert_eq!(validated.len(), 1);
         assert_eq!(validated[0].text, "in range");
+    }
+
+    #[test]
+    fn validate_added_ref_lines_sorts_by_after_line() {
+        // Out-of-order input → output must be sorted ascending by after_line.
+        // Same-after_line entries keep their input order (stable sort) so
+        // the K-th-counter slot calc in process() stays correct.
+        let added = vec![
+            AddedRefLine {
+                after_line: 3,
+                text: "C".into(),
+            },
+            AddedRefLine {
+                after_line: 1,
+                text: "A".into(),
+            },
+            AddedRefLine {
+                after_line: 1,
+                text: "B".into(),
+            },
+            AddedRefLine {
+                after_line: 5,
+                text: "D".into(),
+            },
+        ];
+        let validated = validate_added_ref_lines(&added, 10);
+        assert_eq!(validated.len(), 4);
+        assert_eq!(validated[0].text, "A"); // after_line=1, first input
+        assert_eq!(validated[1].text, "B"); // after_line=1, second input (stable)
+        assert_eq!(validated[2].text, "C"); // after_line=3
+        assert_eq!(validated[3].text, "D"); // after_line=5
     }
 }
