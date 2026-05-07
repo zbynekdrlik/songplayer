@@ -49,16 +49,13 @@ fn make_track() -> LyricsTrack {
     }
 }
 
-fn build_engine() -> (
+async fn build_engine() -> (
     PlaybackEngine,
     mpsc::Receiver<crate::resolume::ResolumeCommand>,
     broadcast::Receiver<ServerMsg>,
 ) {
-    let pool = futures::executor::block_on(async {
-        let p = crate::db::create_memory_pool().await.unwrap();
-        crate::db::run_migrations(&p).await.unwrap();
-        p
-    });
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, resolume_rx) = mpsc::channel(16);
     let (ws_tx, ws_rx) = broadcast::channel::<ServerMsg>(16);
@@ -112,7 +109,7 @@ fn install_pipeline(
 
 #[tokio::test]
 async fn dispatch_lyrics_skips_when_no_lyrics_state() {
-    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine();
+    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
     install_pipeline(&mut engine, 99, true, None);
 
     engine.dispatch_lyrics_if_changed(99, 1500);
@@ -126,7 +123,7 @@ async fn dispatch_lyrics_skips_when_no_lyrics_state() {
 
 #[tokio::test]
 async fn dispatch_lyrics_fires_on_first_position_event() {
-    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine();
+    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
     install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
 
     engine.dispatch_lyrics_if_changed(99, 1500); // inside line "alpha" 1000..3000
@@ -163,7 +160,7 @@ async fn dispatch_lyrics_fires_on_first_position_event() {
 
 #[tokio::test]
 async fn dispatch_lyrics_idempotent_on_same_line() {
-    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine();
+    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
     install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
 
     // First call inside "alpha" line: fires.
@@ -185,7 +182,7 @@ async fn dispatch_lyrics_idempotent_on_same_line() {
 
 #[tokio::test]
 async fn dispatch_lyrics_fires_on_line_change() {
-    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine();
+    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
     install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
 
     // First inside "alpha" 1000..3000.
@@ -216,7 +213,7 @@ async fn dispatch_lyrics_fires_on_line_change() {
 
 #[tokio::test]
 async fn dispatch_lyrics_resolume_gated_on_scene_active() {
-    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine();
+    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
     install_pipeline(
         &mut engine,
         99,
@@ -243,7 +240,7 @@ async fn dispatch_lyrics_resolume_gated_on_scene_active() {
 
 #[tokio::test]
 async fn dispatch_lyrics_no_throttle() {
-    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine();
+    let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
     install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
 
     // Two events 100 ms apart on DIFFERENT lines must both fire — proves the
