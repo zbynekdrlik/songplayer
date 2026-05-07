@@ -4,6 +4,7 @@
 //! transitions through the pure [`PlayState`] state machine.  Title timing
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
+mod clear_lyrics;
 mod lyrics_loader;
 pub mod ndi_health;
 pub mod pipeline;
@@ -101,15 +102,9 @@ struct PlaylistPipeline {
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
-    /// Snapshot of the last Resolume `ShowSubtitles` payload signature (or
-    /// `HideSubtitles`-equivalent) we sent. Used by
-    /// `dispatch_lyrics_if_changed` to skip duplicate dispatches at every
-    /// Position event tick. Cleared on song change so the next song's
-    /// first line fires correctly.
+    /// Last Resolume ShowSubtitles signature; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
     last_resolume_subtitles_signature: Option<String>,
-    /// Snapshot of the last karaoke WebSocket lyrics-update line text
-    /// (`line_en`) we sent. Used by `dispatch_lyrics_if_changed` to skip
-    /// duplicate dispatches. Cleared on song change.
+    /// Last karaoke ws line text; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
     last_lyrics_ws_signature: Option<String>,
     /// Last reported playback position (ms). Updated on every Position event
     /// (~500 ms throttle); used by handle_resolume_recovery to re-push the
@@ -834,39 +829,7 @@ impl PlaybackEngine {
         });
     }
 
-    /// Send empty lyrics to dashboard, Resolume AND Presenter to clear
-    /// stale display when the previous song ends or the operator switches
-    /// to a song without lyrics. Without the Presenter clear, the stage
-    /// display kept showing the last line of the previous song until the
-    /// next song's first line pushed — cue for singers got stuck on an
-    /// old verse.
-    #[cfg_attr(test, mutants::skip)]
-    fn clear_lyrics_display(&self, playlist_id: i64) {
-        let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
-            playlist_id,
-            line_en: None,
-            line_sk: None,
-            prev_line_en: None,
-            next_line_en: None,
-            active_word_index: None,
-            word_count: None,
-        });
-        let _ = self
-            .resolume_tx
-            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
-        if let Some(client) = &self.presenter_client {
-            let client = client.clone();
-            tokio::spawn(async move {
-                if let Err(e) = client
-                    .push(crate::presenter::PresenterPayload::empty())
-                    .await
-                {
-                    tracing::warn!(?e, "presenter clear on song-end failed (non-fatal)");
-                }
-            });
-        }
-    }
-
+    // `clear_lyrics_display` lives in `clear_lyrics.rs`.
     // `dispatch_lyrics_if_changed` and `maybe_broadcast_position_update`
     // live in `position_update.rs` (extracted to keep this file lean).
 
