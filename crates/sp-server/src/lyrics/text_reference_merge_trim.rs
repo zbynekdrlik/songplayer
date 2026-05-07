@@ -18,7 +18,7 @@ use super::{AsrWord, LONG_LINE_CAP_MS};
 /// (~2.4 s for "forgiveness" on id=21).
 const TRIM_GAP_MS: u32 = 3000;
 
-pub(super) fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWord]) {
+pub(crate) fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWord]) {
     if indices.len() <= 1 {
         return;
     }
