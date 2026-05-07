@@ -140,6 +140,8 @@ fn cancel_title_timers_aborts_pending_handles() {
             history: std::collections::VecDeque::new(),
             lyrics_state: None,
             last_presenter_text: None,
+            last_resolume_subtitles_signature: None,
+            last_lyrics_ws_signature: None,
             cached_position_ms: 0,
         };
 
