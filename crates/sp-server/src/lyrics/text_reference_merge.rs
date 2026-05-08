@@ -1,13 +1,9 @@
-//! Text-reference merge pipeline (issue #78 + 2026-05-07 unification). Phases:
-//! 1 Claude line-mapping (NW DP fallback), 2 chorus repeat via sliding-
-//! window LCS, 2.5 trim outliers, 2.7 absorb sustained-note tokens,
-//! 3 Claude split >32c, 4 emit AlignedLine, 5 cap + monotonic + extend.
-//! `words: None` (feedback_line_timing_only). Provenance prefix from
-//! source candidate, no `+claude-merge` suffix.
+//! Text-reference merge pipeline (#78 + 2026-05-07 unification).
+//! Phases: 1 Claude line-map (NW DP fallback), 2 chorus repeat via
+//! sliding-window LCS, 2.5 trim outliers, 2.6 prefix absorb,
+//! 2.7 sustained absorb, 2.8 second chorus pass, 3 Claude split >32c,
+//! 4 emit AlignedLine, 5 cap + monotonic. words: None.
 
-// Algorithm uses several index-based scans (LCS DP, gap detection, char-index
-// split-point search) where the iter-chain rewrite obscures intent or pulls
-// awkward zip(enumerate(...)) patterns. Allow indexed loops for this module.
 #![allow(clippy::needless_range_loop)]
 
 use std::collections::HashMap;
@@ -37,34 +33,24 @@ mod window;
 
 /// LED wall char/row cap; longer lines overflow.
 pub const SUBLINE_MAX_CHARS: usize = 32;
-
 /// Cap on a line's display duration; longer = wall goes blank.
 pub const LONG_LINE_CAP_MS: u32 = 8000;
-
-/// Window cap for Phase 2 chorus-repeat matcher. Wider than
-/// `LONG_LINE_CAP_MS` so slow choruses with sustained notes fit one
-/// window; Phase 5 still clips display to `LONG_LINE_CAP_MS`. id=21 4:02:
-/// 12.4s repeat truncated to 6/13 words under 8s cap, below 0.6 gate.
+/// Phase 2 chorus-matcher window cap (wider than LONG_LINE_CAP_MS so
+/// slow choruses with sustained notes fit; Phase 5 still clips display).
 pub(crate) const CHORUS_REPEAT_WINDOW_CAP_MS: u32 = 30000;
-
 /// Gap between matched lines that triggers chorus-repeat detection.
 const CHORUS_REPEAT_GAP_MS: u32 = 4000;
-
 /// Min word match ratio (matched/ref) for chorus re-emit.
 const CHORUS_REPEAT_MIN_MATCH_RATIO: f32 = 0.6;
-
 /// Min ASR words matched. Floors ratio so a 2-word ref needs 2 hits.
 const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
-
 /// Min display duration; below this collapses to invisible flashes.
 const MIN_LINE_DURATION_MS: u32 = 500;
-
-/// Phase 5 extension. Small-gap full pull-back; large-gap pull by
-/// EXTENSION_TOLERANCE_MS (instrumental silence in middle).
+/// Phase 5 extension constants.
 const EXTENSION_TOLERANCE_MS: u32 = 1500;
 const REASONABLE_GAP_MS: u32 = 4000;
 
-/// One ref-line emission + matched ASR word indices (Phase 1 or 2 re-emit).
+/// One ref-line emission + matched ASR word indices.
 #[derive(Clone, Debug)]
 struct LineEmit {
     text: String,
@@ -80,8 +66,7 @@ pub(crate) struct AsrWord {
     pub(crate) confidence: f32,
 }
 
-/// Public entry: full description/override pipeline. Output: words=None,
-/// EN ≤32c, line ≤8s, chorus repeats re-emitted.
+/// Public entry: full pipeline. Output: words=None, EN ≤32c, line ≤8s.
 pub async fn process(
     ai_client: &AiClient,
     asr: &AlignedTrack,
@@ -102,11 +87,9 @@ pub async fn process(
     let mut audit_state =
         audit::AuditState::new(ref_lines, &asr_words, &candidate.source, &asr.provenance);
 
-    // Phase 1: Claude line-mapping (primary) with NW DP fallback. Claude
-    // also returns added_ref_lines for missing-section gaps (≥ 5 s
-    // unmatched audio runs the description omits — id=21 "Good Shepherd"
-    // bridge + outro). These are inserted into an expanded reference list
-    // and aligned in Phase 1.5 below.
+    // Phase 1: Claude line-mapping with NW DP fallback. Claude also
+    // returns added_ref_lines for missing-section gaps (≥5s unmatched
+    // runs); these are aligned in Phase 1.5 against an expanded ref list.
     let (mut emits, phase1_provider, expanded_ref_lines, added_ref_lines): (
         Vec<LineEmit>,
         &str,
@@ -147,9 +130,7 @@ pub async fn process(
     audit_state.record_phase1(phase1_provider, &emits, &asr_words);
     audit_state.record_phase1_added_ref_lines(&added_ref_lines);
 
-    // Phase 1.5: align added reference lines against unmatched ASR-word
-    // windows (one per added line). Added emits join Phase 1 emits and
-    // flow through Phases 2/2.5/2.6/2.7/3/4/5 unchanged.
+    // Phase 1.5: align added ref lines against unmatched ASR windows.
     if !added_ref_lines.is_empty() {
         let (_, orig_to_expanded) = expand_ref_lines(ref_lines, &added_ref_lines);
         let added_expanded_indices: Vec<usize> = {
@@ -193,14 +174,31 @@ pub async fn process(
         None => u32::MAX,
     });
 
-    // Phase 2.5: trim trailing-outlier matched indices on every emit so its
-    // derived audio span ≤ LONG_LINE_CAP_MS. See `trim_outlier_indices`.
+    // Phase 2.5: trim trailing-outlier matched indices ≤ LONG_LINE_CAP_MS.
     for e in emits.iter_mut() {
         trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
     }
 
-    // Phase 2.6: prefix-absorption — attach unconsumed prefix words that
-    // Phase 2's window cap missed (id=132 3:07).
+    // Phase 2.8: second chorus-repeat pass on Phase 2.5-trimmed indices.
+    // Recovers the chorus-repeat tail Claude wrongly attached to the
+    // first-instance ref line (id=21 4:02).
+    let extras2 = detect_chorus_repeats(ref_lines, &asr_words, &emits);
+    if !extras2.is_empty() {
+        info!(
+            count = extras2.len(),
+            "text_reference_merge: chorus repeats (post-trim)"
+        );
+        emits.extend(extras2);
+        emits.sort_by_key(|e| match e.asr_word_indices.first() {
+            Some(&i) => asr_words[i].start_ms,
+            None => u32::MAX,
+        });
+        for e in emits.iter_mut() {
+            trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
+        }
+    }
+
+    // Phase 2.6: prefix-absorb unconsumed prefix words (id=132 3:07).
     absorb::absorb_prefix_matches(&mut emits, &asr_words);
 
     // Phase 2.7: sustained-note absorption — same-text boundary tokens

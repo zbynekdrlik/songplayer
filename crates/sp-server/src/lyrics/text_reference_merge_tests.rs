@@ -899,3 +899,68 @@ fn lcs_align_picker_returns_fg_at_equal_count_distinguishable_indices() {
         "picker must return fg (>=) at equal count"
     );
 }
+
+// ── Phase 2.8: second chorus pass on trim-released indices ───────────────────
+
+#[test]
+fn second_chorus_pass_recovers_indices_released_by_trim() {
+    // Regression for id=21 4:02. Phase 1 (Claude) sometimes maps a single
+    // ref line across two far-apart audio regions: index 0 (the bare "so"
+    // alone) PLUS indices 5..13 (the chorus repeat itself, 12.4 s later).
+    // The emit's span is 39 s which exceeds LONG_LINE_CAP_MS (8 s). With
+    // a 9.8 s gap inside, Phase 2.5 trim_outlier_indices pops the trailing
+    // chorus tail until the span fits. Phase 2 chorus matcher had already
+    // run and saw indices 5..13 as consumed — so the chorus repeat shipped
+    // with no emit of its own. Phase 2.8 (second chorus pass) detects the
+    // released indices and emits the chorus line at its real audio time.
+    let ref_lines = vec!["So all my days I will stay in the house of my Father".into()];
+    let asr_track = asr(vec![
+        make_word("so", 224190, 224270), // 0  — first-instance bare "so"
+        // (Claude wrongly pulled chorus-repeat 1..8 into the same emit.)
+        make_word("all", 234069, 234369),   // 1
+        make_word("my", 234570, 235170),    // 2
+        make_word("days", 235310, 236010),  // 3
+        make_word("i", 236030, 236050),     // 4
+        make_word("will", 236070, 239152),  // 5 — sustained
+        make_word("stay", 239993, 244075),  // 6 — sustained
+        make_word("in", 245036, 245156),    // 7
+        make_word("the", 245256, 245636),   // 8
+        make_word("house", 245696, 246437), // 9
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    // Simulate Phase 1's emit (bare "so" + the whole chorus repeat).
+    let mut emits = vec![LineEmit {
+        text: ref_lines[0].clone(),
+        asr_word_indices: (0..=9).collect(),
+    }];
+    // Apply Phase 2.5 trim. Span 224190→246437 = 22 247 ms > 8 s, max
+    // internal gap = 234069 − 224270 = 9 799 ms ≥ TRIM_GAP_MS, so trim
+    // pops trailing until the span fits.
+    for e in emits.iter_mut() {
+        trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
+    }
+    let after_trim: Vec<usize> = emits[0].asr_word_indices.clone();
+    assert!(
+        !after_trim.contains(&9),
+        "trim must release the chorus tail (idx 9); got {:?}",
+        after_trim
+    );
+    // Phase 2.8 second chorus pass: detects the released chorus indices.
+    let extras = detect_chorus_repeats(&ref_lines, &asr_words, &emits);
+    assert!(
+        !extras.is_empty(),
+        "Phase 2.8 must emit the released chorus repeat; got {:?}",
+        extras
+    );
+    let recovered: std::collections::HashSet<usize> = extras
+        .iter()
+        .flat_map(|e| e.asr_word_indices.iter().copied())
+        .collect();
+    let chorus_indices: std::collections::HashSet<usize> = (1..=9).collect();
+    let intersection: Vec<usize> = recovered.intersection(&chorus_indices).copied().collect();
+    assert!(
+        intersection.len() >= 6,
+        "expected ≥6 chorus-repeat indices recovered; got {:?}",
+        intersection
+    );
+}
