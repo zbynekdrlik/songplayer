@@ -17,8 +17,8 @@
 //! `(min.start_ms, max.end_ms)` is guaranteed ≤ cap.
 
 use super::{
-    AsrWord, CHORUS_REPEAT_MIN_MATCH_RATIO, CHORUS_REPEAT_MIN_MATCHED_WORDS, LONG_LINE_CAP_MS,
-    MIN_LINE_DURATION_MS,
+    AsrWord, CHORUS_REPEAT_MIN_MATCH_RATIO, CHORUS_REPEAT_MIN_MATCHED_WORDS,
+    CHORUS_REPEAT_WINDOW_CAP_MS, MIN_LINE_DURATION_MS,
 };
 
 pub(super) fn best_window_match(
@@ -35,14 +35,15 @@ pub(super) fn best_window_match(
         let ref_strs: Vec<&str> = ref_norms.iter().map(|s| s.as_str()).collect();
         for start_pos in 0..unconsumed.len() {
             let win_start_ms = asr_words[unconsumed[start_pos]].start_ms;
-            let cap_end_ms = win_start_ms.saturating_add(LONG_LINE_CAP_MS);
+            let cap_end_ms = win_start_ms.saturating_add(CHORUS_REPEAT_WINDOW_CAP_MS);
             // Cap on word START so a 2-word line whose 2nd word straddles
-            // the cap still matches. The last word's end_ms may extend a
-            // few hundred ms past the cap; Phase 5 will clip the line's
-            // display duration to LONG_LINE_CAP_MS anyway. Without this,
-            // id=132 4:20 "Holy forever": forever.end (262108) was 582ms
-            // past holy(229).start + 8000 — window excluded forever, only
-            // holy matched, < CHORUS_REPEAT_MIN_MATCHED_WORDS, no emit.
+            // the cap still matches. Phase 5 clips the EMITTED line to
+            // LONG_LINE_CAP_MS anyway, so the matcher can scan a wider
+            // span (CHORUS_REPEAT_WINDOW_CAP_MS = 30s) to recover slow
+            // choruses. id=21 "Good Shepherd" 4:02: chorus repeat sung
+            // over 12.4s — under the prior 8s cap the window shrank to
+            // 6/13 ref words = 0.46 ratio < 0.6 gate, no emit, wall
+            // blank.
             let mut end_pos = start_pos + 1;
             while end_pos < unconsumed.len()
                 && asr_words[unconsumed[end_pos]].start_ms <= cap_end_ms
@@ -126,28 +127,84 @@ mod tests {
 
     #[test]
     fn best_window_match_picks_dense_close_window() {
-        // Audio sequence with two viable "holy" + "forever" pairs and an
-        // unrelated "holy" + "holy" stretch in between. Whole-gap LCS would
-        // have matched the FIRST "holy" with the LAST "forever" (span > 8s);
-        // sliding window restricts to windows ≤ LONG_LINE_CAP_MS so it
-        // matches a dense close pair only.
+        // Whole-gap LCS would match the FIRST "holy" with the LAST
+        // "forever" (span > CHORUS_REPEAT_WINDOW_CAP_MS); the sliding
+        // window restricts to ≤ CHORUS_REPEAT_WINDOW_CAP_MS so it picks a
+        // dense close pair instead.
         let asr_words = vec![
-            w("holy", 0, 100),          // 0 — earliest "holy"
-            w("you", 1000, 1100),       // 1
-            w("holy", 5000, 5100),      // 2 — viable window start
-            w("forever", 12000, 12500), // 3 — end_ms within 5000+8000
-            w("holy", 20000, 20100),    // 4
-            w("forever", 30000, 30500), // 5
+            w("holy", 0, 100),            // 0 — earliest "holy"
+            w("you", 4000, 4100),         // 1
+            w("holy", 20000, 20100),      // 2 — viable window start
+            w("forever", 48000, 48500),   // 3 — end_ms within 20000+30000
+            w("holy", 80000, 80100),      // 4
+            w("forever", 120000, 120500), // 5
         ];
         let ref_norms: Vec<Vec<String>> = vec![vec!["holy".into(), "forever".into()]];
         let unconsumed: Vec<usize> = (0..asr_words.len()).collect();
         let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
         let (line_idx, _score, matched) = result.expect("should match");
         assert_eq!(line_idx, 0);
-        // Span ≤ LONG_LINE_CAP_MS by construction.
+        // Span ≤ CHORUS_REPEAT_WINDOW_CAP_MS by construction.
         let span = asr_words[*matched.last().unwrap()].end_ms
             - asr_words[*matched.first().unwrap()].start_ms;
-        assert!(span <= LONG_LINE_CAP_MS, "span {} exceeds cap", span);
+        assert!(
+            span <= CHORUS_REPEAT_WINDOW_CAP_MS,
+            "span {} exceeds cap",
+            span
+        );
+    }
+
+    #[test]
+    fn best_window_match_recovers_chorus_repeat_with_long_internal_gap() {
+        // Regression for id=21 "Good Shepherd" 4:02: chorus repeat
+        // "all my days I will stay in the house" sung over 12.4 s, then
+        // a 15 s instrumental pause, then "of my father". The 8 s cap
+        // (LONG_LINE_CAP_MS) shrank the window to 6 of 13 ref words and
+        // the chorus pass emitted nothing. With CHORUS_REPEAT_WINDOW_CAP_MS
+        // (30 s) the matcher spans the whole repeat and emits.
+        let asr_words = vec![
+            w("all", 234069, 234369),   // 0
+            w("my", 234570, 235170),    // 1
+            w("days", 235310, 236010),  // 2
+            w("i", 236030, 236050),     // 3
+            w("will", 236070, 239152),  // 4
+            w("stay", 239993, 244075),  // 5 — sustained
+            w("in", 245036, 245156),    // 6
+            w("the", 245256, 245636),   // 7
+            w("house", 245696, 246437), // 8
+        ];
+        let ref_norms: Vec<Vec<String>> = vec![vec![
+            "so".into(),
+            "all".into(),
+            "my".into(),
+            "days".into(),
+            "i".into(),
+            "will".into(),
+            "stay".into(),
+            "in".into(),
+            "the".into(),
+            "house".into(),
+            "of".into(),
+            "my".into(),
+            "father".into(),
+        ]];
+        let unconsumed: Vec<usize> = (0..asr_words.len()).collect();
+        let result = best_window_match(&ref_norms, &unconsumed, &asr_words, &lcs_align_test);
+        let (line_idx, score, matched) = result.expect(
+            "chorus repeat over 12.4 s span MUST match with 30 s window cap (was failing under 8 s cap)",
+        );
+        assert_eq!(line_idx, 0);
+        assert!(
+            matched.len() >= 8,
+            "expected ≥8 matched words (\"all my days i will stay in the house\"); got {}",
+            matched.len()
+        );
+        assert!(
+            score >= CHORUS_REPEAT_MIN_MATCH_RATIO,
+            "score {} below MIN_MATCH_RATIO {}",
+            score,
+            CHORUS_REPEAT_MIN_MATCH_RATIO
+        );
     }
 
     #[test]

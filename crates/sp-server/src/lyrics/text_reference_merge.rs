@@ -41,6 +41,12 @@ pub const SUBLINE_MAX_CHARS: usize = 32;
 /// Cap on a line's display duration; longer = wall goes blank.
 pub const LONG_LINE_CAP_MS: u32 = 8000;
 
+/// Window cap for Phase 2 chorus-repeat matcher. Wider than
+/// `LONG_LINE_CAP_MS` so slow choruses with sustained notes fit one
+/// window; Phase 5 still clips display to `LONG_LINE_CAP_MS`. id=21 4:02:
+/// 12.4s repeat truncated to 6/13 words under 8s cap, below 0.6 gate.
+pub(crate) const CHORUS_REPEAT_WINDOW_CAP_MS: u32 = 30000;
+
 /// Gap between matched lines that triggers chorus-repeat detection.
 const CHORUS_REPEAT_GAP_MS: u32 = 4000;
 
