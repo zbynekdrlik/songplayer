@@ -32,11 +32,20 @@ pub(crate) fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWor
         if span <= LONG_LINE_CAP_MS {
             break;
         }
-        let prev = indices[indices.len() - 2];
-        let gap = asr_words[last]
-            .start_ms
-            .saturating_sub(asr_words[prev].end_ms);
-        if gap < TRIM_GAP_MS {
+        // Find the LARGEST consecutive gap anywhere in the matched range.
+        // If the max gap is below TRIM_GAP_MS the matches are tight (held
+        // notes) and we keep the whole range; Phase 4 sub-line LCS will
+        // split it. If max gap ≥ TRIM_GAP_MS there's an outlier — pop
+        // trailing until the span fits the cap.
+        let max_gap = (1..indices.len())
+            .map(|i| {
+                asr_words[indices[i]]
+                    .start_ms
+                    .saturating_sub(asr_words[indices[i - 1]].end_ms)
+            })
+            .max()
+            .unwrap_or(0);
+        if max_gap < TRIM_GAP_MS {
             break;
         }
         indices.pop();

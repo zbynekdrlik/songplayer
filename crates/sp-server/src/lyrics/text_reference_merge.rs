@@ -41,16 +41,13 @@ mod trim;
 #[path = "text_reference_merge_added.rs"]
 mod added;
 
-/// Hard upper bound for sub-line EN length. LED wall renders this many
-/// chars per row; longer lines overflow into adjacent UI panels.
+/// LED wall char/row cap; longer lines overflow.
 pub const SUBLINE_MAX_CHARS: usize = 32;
 
-/// Cap on a line's display duration; without it instrumental gaps
-/// would stretch the prior line forever. Beyond this, wall goes blank.
+/// Cap on a line's display duration; longer = wall goes blank.
 pub const LONG_LINE_CAP_MS: u32 = 8000;
 
 /// Gap between matched lines that triggers chorus-repeat detection.
-/// Below: trust LCS silence. Above: look for a ref line to fill it.
 const CHORUS_REPEAT_GAP_MS: u32 = 4000;
 
 /// Min word match ratio (matched/ref) for chorus re-emit.
@@ -62,9 +59,8 @@ const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
 /// Min display duration; below this collapses to invisible flashes.
 const MIN_LINE_DURATION_MS: u32 = 500;
 
-/// Phase 5 extension. Gap ≤ REASONABLE_GAP_MS → fill to next.start
-/// (whisperx undertimes last word). Otherwise cap at natural_end +
-/// EXTENSION_TOLERANCE_MS (instrumental silence).
+/// Phase 5 extension. Small-gap full pull-back; large-gap pull by
+/// EXTENSION_TOLERANCE_MS (instrumental silence in middle).
 const EXTENSION_TOLERANCE_MS: u32 = 1500;
 const REASONABLE_GAP_MS: u32 = 4000;
 
@@ -953,7 +949,7 @@ fn emit_unmatched_only(asr: &AlignedTrack, candidate: &CandidateText) -> Aligned
     }
 }
 
-/// Build the expanded reference-list + an `original → expanded` index map.
+/// Expanded ref-list + `original → expanded` index map.
 pub(crate) fn expand_ref_lines(
     original: &[String],
     added: &[mapping::AddedRefLine],
@@ -970,8 +966,7 @@ pub(crate) fn expand_ref_lines(
     (expanded, orig_to_expanded)
 }
 
-/// Rewrite a Phase 1 dense mapping (referencing ORIGINAL ref_lines) into
-/// one referencing the EXPANDED ref_lines.
+/// Rewrite Phase 1 mapping into expanded ref-list indices.
 pub(crate) fn remap_mapping(
     original_map: &[Option<usize>],
     orig_to_expanded: &[usize],
@@ -985,6 +980,10 @@ pub(crate) fn remap_mapping(
 #[cfg(test)]
 #[path = "text_reference_merge_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "text_reference_merge_trim_tests.rs"]
+mod trim_tests;
 
 #[cfg(test)]
 #[path = "text_reference_merge_phantom_tests.rs"]
