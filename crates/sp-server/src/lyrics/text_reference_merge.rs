@@ -20,26 +20,20 @@ use crate::lyrics::backend::{AlignedLine, AlignedTrack};
 use crate::lyrics::claude_merge::{MergeError, drop_hallucinated_lead_in};
 use crate::lyrics::tier1::CandidateText;
 
-#[path = "text_reference_merge_mapping.rs"]
-mod mapping;
-
-#[path = "text_reference_merge_audit.rs"]
-mod audit;
-
-#[path = "text_reference_merge_window.rs"]
-mod window;
-
 #[path = "text_reference_merge_absorb.rs"]
 mod absorb;
-
-#[path = "text_reference_merge_phantom.rs"]
-mod phantom;
-
-#[path = "text_reference_merge_trim.rs"]
-mod trim;
-
 #[path = "text_reference_merge_added.rs"]
 mod added;
+#[path = "text_reference_merge_audit.rs"]
+mod audit;
+#[path = "text_reference_merge_mapping.rs"]
+mod mapping;
+#[path = "text_reference_merge_phantom.rs"]
+mod phantom;
+#[path = "text_reference_merge_trim.rs"]
+mod trim;
+#[path = "text_reference_merge_window.rs"]
+mod window;
 
 /// LED wall char/row cap; longer lines overflow.
 pub const SUBLINE_MAX_CHARS: usize = 32;
@@ -151,8 +145,8 @@ pub async fn process(
     // windows (one per added line). Added emits join Phase 1 emits and
     // flow through Phases 2/2.5/2.6/2.7/3/4/5 unchanged.
     if !added_ref_lines.is_empty() {
+        let (_, orig_to_expanded) = expand_ref_lines(ref_lines, &added_ref_lines);
         let added_expanded_indices: Vec<usize> = {
-            let (_, orig_to_expanded) = expand_ref_lines(ref_lines, &added_ref_lines);
             let mut counts: std::collections::HashMap<usize, usize> = Default::default();
             added_ref_lines
                 .iter()
@@ -166,7 +160,9 @@ pub async fn process(
         };
         let added_emits = added::align_added_lines(
             &expanded_ref_lines,
+            &added_ref_lines,
             &added_expanded_indices,
+            &orig_to_expanded,
             &asr_words,
             &emits,
         );

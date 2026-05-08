@@ -1,43 +1,59 @@
 //! Phase 1.5: align Claude-added reference lines against the unmatched
-//! ASR audio window each one belongs to. Runs after Phase 1's word→line
-//! mapping and after the reference list has been EXPANDED to include the
-//! added lines. Phases 2 / 2.5 / 2.6 / 2.7 / 3 / 4 / 5 then run unchanged
-//! over the expanded reference + the union of Phase 1 + Phase 1.5 emits.
+//! ASR audio window each one belongs to. Each added line carries an
+//! `after_line` index — the original description line it semantically
+//! follows. The audio window for an added line spans from the END of
+//! that description line's matched ASR audio to the START of the next
+//! non-empty description emit.
 
+use std::collections::HashMap;
+
+use super::mapping::AddedRefLine;
 use super::{AsrWord, LineEmit, lcs_align, normalize_word};
 
 pub(crate) fn align_added_lines(
     expanded_ref_lines: &[String],
-    added_expanded_indices: &[usize],
+    added: &[AddedRefLine],
+    expanded_indices: &[usize],
+    orig_to_expanded: &[usize],
     asr_words: &[AsrWord],
     existing_emits: &[LineEmit],
 ) -> Vec<LineEmit> {
-    // Sorted (min_asr_idx, max_asr_idx) for every existing emit.
-    let mut occupied: Vec<(usize, usize)> = existing_emits
-        .iter()
-        .filter_map(|e| {
-            let mn = *e.asr_word_indices.iter().min()?;
-            let mx = *e.asr_word_indices.iter().max()?;
-            Some((mn, mx))
-        })
-        .collect();
-    occupied.sort_unstable();
+    let mut out: Vec<LineEmit> = Vec::with_capacity(added.len());
+    let mut consumed_at: HashMap<usize, usize> = HashMap::new();
 
-    let mut out: Vec<LineEmit> = Vec::with_capacity(added_expanded_indices.len());
-    let mut prev_added_end: Option<usize> = None;
+    for (i, a) in added.iter().enumerate() {
+        let line_text = expanded_ref_lines[expanded_indices[i]].clone();
 
-    for &expanded_idx in added_expanded_indices.iter() {
-        let line_text = expanded_ref_lines[expanded_idx].clone();
+        // Anchor: the description line at `after_line` (in original idx).
+        let after_expanded = match orig_to_expanded.get(a.after_line) {
+            Some(&v) => v,
+            None => {
+                out.push(LineEmit {
+                    text: line_text,
+                    asr_word_indices: Vec::new(),
+                });
+                continue;
+            }
+        };
 
-        // Lower bound = first ASR idx after both the latest already-added
-        // emit's max and the latest occupied span at-or-before this slot.
-        let lo = prev_added_end.map(|e| e + 1).unwrap_or(0);
+        // Lower bound = max ASR idx consumed by the description line's emit
+        // (or by a prior added line at the same after_line). +1 to start AFTER.
+        let prior_max = match consumed_at.get(&a.after_line) {
+            Some(&m) => m,
+            None => existing_emits
+                .get(after_expanded)
+                .and_then(|e| e.asr_word_indices.iter().max().copied())
+                .unwrap_or(0),
+        };
+        let lo = prior_max.saturating_add(1);
 
-        // Upper bound = first occupied min that's strictly greater than lo.
-        let hi = occupied
+        // Upper bound = first non-empty emit AFTER the anchor's slot. Scan
+        // forward through expanded indices; take its min ASR idx.
+        let hi = existing_emits
             .iter()
-            .find(|(mn, _)| *mn > lo)
-            .map(|(mn, _)| *mn)
+            .skip(after_expanded + 1)
+            .filter_map(|e| e.asr_word_indices.iter().min().copied())
+            .next()
             .unwrap_or(asr_words.len());
 
         if lo >= hi {
@@ -57,16 +73,15 @@ pub(crate) fn align_added_lines(
         let line_norms: Vec<&str> = line_norm_owned.iter().map(|s| s.as_str()).collect();
 
         let alignment = lcs_align(&line_norms, &window_norms);
-        let matched_in_window: Vec<usize> =
-            alignment.iter().filter_map(|a| a.map(|j| lo + j)).collect();
+        let matched: Vec<usize> = alignment.iter().filter_map(|a| a.map(|j| lo + j)).collect();
 
-        if let Some(&mx) = matched_in_window.iter().max() {
-            prev_added_end = Some(mx);
+        if let Some(&mx) = matched.iter().max() {
+            consumed_at.insert(a.after_line, mx);
         }
 
         out.push(LineEmit {
             text: line_text,
-            asr_word_indices: matched_in_window,
+            asr_word_indices: matched,
         });
     }
     out
