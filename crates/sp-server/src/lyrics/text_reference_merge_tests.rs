@@ -913,7 +913,8 @@ fn second_chorus_pass_recovers_indices_released_by_trim() {
     // run and saw indices 5..13 as consumed — so the chorus repeat shipped
     // with no emit of its own. Phase 2.8 (second chorus pass) detects the
     // released indices and emits the chorus line at its real audio time.
-    let ref_lines = vec!["So all my days I will stay in the house of my Father".into()];
+    let ref_lines: Vec<String> =
+        vec!["So all my days I will stay in the house of my Father".into()];
     let asr_track = asr(vec![
         make_word("so", 224190, 224270), // 0  — first-instance bare "so"
         // (Claude wrongly pulled chorus-repeat 1..8 into the same emit.)
