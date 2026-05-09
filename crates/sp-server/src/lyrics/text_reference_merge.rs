@@ -498,7 +498,7 @@ struct ClaudeSubLine {
     en: String,
 }
 
-async fn claude_split_lines(
+pub(crate) async fn claude_split_lines(
     ai_client: &AiClient,
     long_lines: &[(usize, &str)],
 ) -> Result<HashMap<usize, Vec<String>>, anyhow::Error> {
@@ -638,7 +638,7 @@ fn deterministic_split_lines(long_lines: &[(usize, &str)]) -> HashMap<usize, Vec
         .collect()
 }
 
-fn deterministic_split_one(text: &str) -> Vec<String> {
+pub(crate) fn deterministic_split_one(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     deterministic_split_recurse(text.trim(), &mut out);
     if out.is_empty() {
@@ -856,7 +856,7 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
 
 pub(crate) use trim::trim_outlier_indices;
 
-fn normalize_word(w: &str) -> String {
+pub(crate) fn normalize_word(w: &str) -> String {
     w.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(|c| c.to_lowercase())
@@ -866,7 +866,7 @@ fn normalize_word(w: &str) -> String {
 /// Forward-greedy + DP, pick whichever has more matches; tie → forward-
 /// greedy. Forward-greedy fixes 2:35 (line 1 takes first dup, line 2
 /// takes second). DP fixes 3:07 (end-anchored long-ref match).
-fn lcs_align(ref_words: &[&str], asr_words: &[&str]) -> Vec<Option<usize>> {
+pub(crate) fn lcs_align(ref_words: &[&str], asr_words: &[&str]) -> Vec<Option<usize>> {
     let fg = lcs_align_forward_greedy(ref_words, asr_words);
     let dp = lcs_align_dp(ref_words, asr_words);
     let fg_count = fg.iter().filter(|x| x.is_some()).count();

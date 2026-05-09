@@ -25,7 +25,7 @@ async fn mode_b_short_circuit_emits_reference_lines_with_timed_merge_provenance(
             ("How sweet the sound", 3000, 6000),
         ],
     );
-    let result = process(None, &candidate, 6000, None)
+    let result = process(None, None, &candidate, 6000, None)
         .await
         .expect("Mode B must succeed for valid timed candidate");
     assert_eq!(result.provenance, "tier1:spotify+timed-merge");
@@ -48,7 +48,7 @@ async fn mode_b_returns_error_when_candidate_has_no_timings() {
         line_timings: None,
         has_timing: false,
     };
-    let result = process(None, &candidate, 6000, None).await;
+    let result = process(None, None, &candidate, 6000, None).await;
     assert!(matches!(result, Err(TimedMergeError::NoTimings)));
 }
 
@@ -60,7 +60,7 @@ async fn mode_b_returns_error_when_candidate_has_zero_lines() {
         line_timings: Some(vec![]),
         has_timing: true,
     };
-    let result = process(None, &candidate, 6000, None).await;
+    let result = process(None, None, &candidate, 6000, None).await;
     assert!(matches!(result, Err(TimedMergeError::EmptyReference)));
 }
 
@@ -91,7 +91,7 @@ async fn mode_a_with_asr_emits_reference_lines_and_timings() {
         raw_confidence: 0.9,
     };
     let candidate = timed_candidate("lrclib", &[("Amazing grace", 0, 3000)]);
-    let result = process(Some(&asr), &candidate, 3000, None)
+    let result = process(None, Some(&asr), &candidate, 3000, None)
         .await
         .expect("Mode A must succeed");
     assert_eq!(result.provenance, "lrclib+timed-merge");

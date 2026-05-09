@@ -28,10 +28,12 @@
 use thiserror::Error;
 use tracing::info;
 
+use crate::ai::client::AiClient;
 use crate::lyrics::audit_ctx::AuditContext;
-use crate::lyrics::backend::{AlignedLine, AlignedTrack};
+use crate::lyrics::backend::{AlignedLine, AlignedTrack, AlignedWord};
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
 use crate::lyrics::tier1::CandidateText;
+use crate::lyrics::yt_subs_split::split_long_line_with_anchors;
 
 #[derive(Debug, Error)]
 pub enum TimedMergeError {
@@ -45,7 +47,15 @@ pub enum TimedMergeError {
 
 /// Public entry: timed-merge for both LineSynced (asr=None) and
 /// timed-TextOnly (asr=Some) routes.
+///
+/// For yt_subs sources with ASR available, long lines (>32 chars) are
+/// re-broken via `yt_subs_split::split_long_line_with_anchors` —
+/// Claude picks karaoke-friendly phrase boundaries; whisperx provides
+/// internal sub-line start_ms; yt_subs anchors are preserved at the
+/// first sub's start and the last sub's end. Short lines and non-yt_subs
+/// timed sources keep the legacy `split_track` path (32-char cap only).
 pub async fn process(
+    ai_client: Option<&AiClient>,
     asr: Option<&AlignedTrack>,
     candidate: &CandidateText,
     song_duration_ms: u32,
@@ -74,6 +84,36 @@ pub async fn process(
         mode = if asr.is_some() { "A" } else { "B" },
         "timed_reference_merge: emit reference timed lines"
     );
+
+    // yt_subs path: re-break long lines via Claude + whisperx boundaries.
+    let is_yt_subs = candidate.source == "yt_subs" || candidate.source.starts_with("tier1:yt_subs");
+    if is_yt_subs && asr.is_some() && ai_client.is_some() {
+        let asr_words: Vec<AlignedWord> = asr
+            .expect("checked")
+            .lines
+            .iter()
+            .filter_map(|l| l.words.as_ref())
+            .flatten()
+            .cloned()
+            .collect();
+        let mut output: Vec<AlignedLine> = Vec::with_capacity(aligned_lines.len());
+        for line in &aligned_lines {
+            let split = split_long_line_with_anchors(
+                ai_client.expect("checked"),
+                &line.text,
+                line.start_ms,
+                line.end_ms,
+                &asr_words,
+            )
+            .await;
+            output.extend(split);
+        }
+        return Ok(AlignedTrack {
+            lines: output,
+            provenance: format!("{}+timed-merge", candidate.source),
+            raw_confidence: asr.map(|a| a.raw_confidence).unwrap_or(1.0),
+        });
+    }
 
     let pre_split = AlignedTrack {
         lines: aligned_lines,

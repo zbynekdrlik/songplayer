@@ -120,6 +120,7 @@ impl Orchestrator {
                     .unwrap_or(0);
                 match timed_reference_merge::process(
                     None,
+                    None,
                     &candidate,
                     song_duration_ms,
                     input.audit.as_ref(),
@@ -192,6 +193,7 @@ impl Orchestrator {
                         "orchestrator: Tier-1 TextOnly + timed candidate (coverage_ok) → timed_reference_merge Mode A"
                     );
                     match timed_reference_merge::process(
+                        Some(self.ai_client.as_ref()),
                         Some(&asr),
                         best,
                         song_duration_ms,

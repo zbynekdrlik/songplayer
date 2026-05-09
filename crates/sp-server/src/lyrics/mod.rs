@@ -25,6 +25,7 @@ pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;
 pub mod youtube_subs;
+pub mod yt_subs_split;
 pub use worker::LyricsWorker;
 pub use worker::queue_update_loop;
 
