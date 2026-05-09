@@ -201,6 +201,12 @@ pub async fn process(
     // Phase 2.6: prefix-absorb unconsumed prefix words (id=132 3:07).
     absorb::absorb_prefix_matches(&mut emits, &asr_words);
 
+    // Phase 2.65: claim leading unmatched ASR words. Whisperx mishearings
+    // (id=21 2:12 "shadow"→"shed on") and lead-in filler ("say"→"oh"
+    // at 1:01) slot here so the line starts at the singer's first
+    // audible sound, not at the first text-matched word.
+    absorb::absorb_leading_unmatched(&mut emits, &asr_words);
+
     // Phase 2.7: sustained-note absorption — same-text boundary tokens
     // stay with prev line so wall doesn't switch mid-sustained-note.
     absorb::absorb_sustained_boundary_tokens(&mut emits, &asr_words);

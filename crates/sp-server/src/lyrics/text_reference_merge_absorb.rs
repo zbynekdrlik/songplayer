@@ -86,6 +86,74 @@ pub(super) fn absorb_prefix_matches(emits: &mut [LineEmit], asr_words: &[AsrWord
     }
 }
 
+/// Maximum lookback when claiming leading unmatched ASR words for an
+/// emit. Singer rarely lead-ins more than 2 s of filler/mistranscription
+/// before reaching the line's first matched word.
+const LEADIN_MAX_MS: u32 = 2000;
+
+/// Phase 2.65 (`absorb_leading_unmatched`): walk each emit backward
+/// through ASR words that are NOT consumed by any emit and NOT inside
+/// the previous emit's matched range. Attach them to the current emit.
+///
+/// Captures the case where whisperx mishears a leading word (id=21
+/// 2:12 "shadow me…" — whisperx transcribed "shadow" as "shed on", LCS
+/// could not match either word, so the line started at "me" 1.22 s
+/// late) and the case where the singer ad-libs filler ("say") before
+/// the line's first matched word (id=21 1:01 "Oh, Good Shepherd…").
+pub(super) fn absorb_leading_unmatched(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
+    if emits.is_empty() {
+        return;
+    }
+    let mut consumed: std::collections::HashSet<usize> = emits
+        .iter()
+        .flat_map(|e| e.asr_word_indices.iter().copied())
+        .collect();
+    let mut order: Vec<usize> = (0..emits.len()).collect();
+    order.sort_by_key(|&i| {
+        emits[i]
+            .asr_word_indices
+            .iter()
+            .min()
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    for o in 0..order.len() {
+        let cur = order[o];
+        let prev_last_matched: Option<usize> = if o == 0 {
+            None
+        } else {
+            emits[order[o - 1]].asr_word_indices.iter().max().copied()
+        };
+        let first_matched = match emits[cur].asr_word_indices.iter().min().copied() {
+            Some(i) => i,
+            None => continue,
+        };
+        let first_ms = asr_words[first_matched].start_ms;
+        let mut to_attach: Vec<usize> = Vec::new();
+        let mut scan = first_matched;
+        while scan > 0 {
+            scan -= 1;
+            if let Some(pm) = prev_last_matched {
+                if scan <= pm {
+                    break;
+                }
+            }
+            if consumed.contains(&scan) {
+                break;
+            }
+            if first_ms.saturating_sub(asr_words[scan].end_ms) > LEADIN_MAX_MS {
+                break;
+            }
+            to_attach.push(scan);
+        }
+        for idx in &to_attach {
+            consumed.insert(*idx);
+        }
+        emits[cur].asr_word_indices.extend(to_attach);
+        emits[cur].asr_word_indices.sort_unstable();
+    }
+}
+
 pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
     for i in 1..emits.len() {
         let (prev_part, next_part) = emits.split_at_mut(i);
