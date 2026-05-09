@@ -201,10 +201,8 @@ pub async fn process(
     // Phase 2.6: prefix-absorb unconsumed prefix words (id=132 3:07).
     absorb::absorb_prefix_matches(&mut emits, &asr_words);
 
-    // Phase 2.65: claim leading unmatched ASR words. Whisperx mishearings
-    // (id=21 2:12 "shadow"→"shed on") and lead-in filler ("say"→"oh"
-    // at 1:01) slot here so the line starts at the singer's first
-    // audible sound, not at the first text-matched word.
+    // Phase 2.65: claim leading unmatched ASR words for misheard
+    // line-start (id=21 2:12 "shadow"→"shed on").
     absorb::absorb_leading_unmatched(&mut emits, &asr_words);
 
     // Phase 2.7: sustained-note absorption — same-text boundary tokens
@@ -781,11 +779,14 @@ fn emit_with_subs(
             .filter_map(|a| a.map(|j| search_start + j))
             .collect();
 
+        // Claim parent-unassigned words between prev sub-line's end and
+        // this match's start (id=21 2:12 "shadow"→"shed on" mishearing).
         let (s_ms, e_ms) = if let (Some(&imin), Some(&imax)) = (
             matched_in_window.iter().min(),
             matched_in_window.iter().max(),
         ) {
-            let s = asr_words[parent_indices[imin]].start_ms;
+            let claim_start = search_start.min(imin);
+            let s = asr_words[parent_indices[claim_start]].start_ms;
             let e = asr_words[parent_indices[imax]].end_ms;
             (s, e)
         } else {
