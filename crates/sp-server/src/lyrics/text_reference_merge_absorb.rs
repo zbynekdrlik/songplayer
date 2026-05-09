@@ -86,20 +86,25 @@ pub(super) fn absorb_prefix_matches(emits: &mut [LineEmit], asr_words: &[AsrWord
     }
 }
 
-/// Maximum lookback when claiming leading unmatched ASR words for an
-/// emit. Singer rarely lead-ins more than 2 s of filler/mistranscription
-/// before reaching the line's first matched word.
-const LEADIN_MAX_MS: u32 = 2000;
+/// Maximum lookback when claiming leading unmatched ASR words. Singer
+/// rarely lead-ins more than 1.5 s of mistranscription before reaching
+/// the line's first matched word.
+const LEADIN_MAX_MS: u32 = 1500;
 
-/// Phase 2.65 (`absorb_leading_unmatched`): walk each emit backward
-/// through ASR words that are NOT consumed by any emit and NOT inside
-/// the previous emit's matched range. Attach them to the current emit.
+/// Phase 2.65 (`absorb_leading_unmatched`): when an emit's FIRST matched
+/// ASR word does NOT correspond to ref-text position 0, the leading ref
+/// word(s) were dropped — usually whisperx misheard them. Walk back
+/// through unconsumed ASR words BETWEEN the previous emit's last matched
+/// word and this emit's first matched word, within `LEADIN_MAX_MS`, and
+/// attach them. Skipped when ref[0] is already first-matched (no leading
+/// gap to fill — avoids over-claiming whisperx vibrato tails of the
+/// previous line as part of the next).
 ///
-/// Captures the case where whisperx mishears a leading word (id=21
-/// 2:12 "shadow me…" — whisperx transcribed "shadow" as "shed on", LCS
-/// could not match either word, so the line started at "me" 1.22 s
-/// late) and the case where the singer ad-libs filler ("say") before
-/// the line's first matched word (id=21 1:01 "Oh, Good Shepherd…").
+/// id=21 2:12 "shadow me for all my history": whisperx transcribed
+/// "shadow" as "shed on"; LCS matched ref[0]="shadow" against nothing,
+/// first matched was ref[1]="me" — Phase 2.65 walks back, attaches "shed"
+/// + "on" so the line's natural start moves to the singer's first
+/// audible sound at 131.741 s instead of 132.961 s.
 pub(super) fn absorb_leading_unmatched(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
     if emits.is_empty() {
         return;
@@ -128,6 +133,21 @@ pub(super) fn absorb_leading_unmatched(emits: &mut [LineEmit], asr_words: &[AsrW
             Some(i) => i,
             None => continue,
         };
+        // Trigger only when ref[0] is NOT the first-matched word.
+        // Avoids absorbing whisperx vibrato tails of the previous line
+        // (the singer's sustained vowel mistranscribed as random
+        // syllables) when this line's first ref word is already
+        // matched correctly.
+        let ref_norms: Vec<String> = emits[cur]
+            .text
+            .split_whitespace()
+            .map(normalize_word)
+            .filter(|s| !s.is_empty())
+            .collect();
+        let first_norm = &asr_words[first_matched].norm;
+        if ref_norms.first().map(|s| s.as_str()) == Some(first_norm.as_str()) {
+            continue;
+        }
         let first_ms = asr_words[first_matched].start_ms;
         let mut to_attach: Vec<usize> = Vec::new();
         let mut scan = first_matched;

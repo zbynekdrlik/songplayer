@@ -206,7 +206,9 @@ fn absorb_leading_unmatched_claims_misheard_lead_words() {
 
 #[test]
 fn absorb_leading_unmatched_stops_at_prev_consumed_boundary() {
-    // Walk back from next.first must NOT cross prev's last matched word.
+    // Walk back must NOT cross prev's last matched word. Trigger
+    // requires ref[0] not first-matched: ref[0]="line" not in asr →
+    // first match is "next" = ref[1].
     let asr_track = asr(vec![
         make_word("a", 0, 100),
         make_word("b", 200, 300), // consumed by prev
@@ -220,33 +222,61 @@ fn absorb_leading_unmatched_stops_at_prev_consumed_boundary() {
             asr_word_indices: vec![0, 1],
         },
         LineEmit {
-            text: "Next line".into(),
+            text: "Line next end".into(),
             asr_word_indices: vec![3],
         },
     ];
     absorb::absorb_leading_unmatched(&mut emits, &asr_words);
-    // idx 2 ("filler") is unconsumed and after prev's last (idx 1) → attach.
     assert_eq!(emits[1].asr_word_indices, vec![2, 3]);
     assert_eq!(emits[0].asr_word_indices, vec![0, 1]);
 }
 
 #[test]
-fn absorb_leading_unmatched_caps_at_2s_lookback() {
-    // Walk back must respect LEADIN_MAX_MS (2 s). Words >2 s before
-    // first matched stay unmatched.
+fn absorb_leading_unmatched_caps_at_lookback_window() {
+    // Walk back must respect LEADIN_MAX_MS (1.5 s). Trigger requires
+    // ref[0] not first-matched: ref[0]="lost" not in asr → first match
+    // is "found" = ref[1].
     let asr_track = asr(vec![
-        make_word("very_old", 0, 100),  // 5 s before first matched
+        make_word("very_old", 0, 100),  // 4.9 s before first matched
         make_word("close", 4500, 4900), // 100 ms before first matched
-        make_word("first_match", 5000, 5300),
+        make_word("found", 5000, 5300),
     ]);
     let asr_words = flatten_asr(&asr_track);
     let mut emits = vec![LineEmit {
-        text: "First match".into(),
+        text: "Lost found".into(),
         asr_word_indices: vec![2],
     }];
     absorb::absorb_leading_unmatched(&mut emits, &asr_words);
-    // "close" within 2 s → attached. "very_old" >2 s → stays unmatched.
     assert_eq!(emits[0].asr_word_indices, vec![1, 2]);
+}
+
+#[test]
+fn absorb_leading_unmatched_skips_when_ref0_already_matched() {
+    // Skip branch: ref[0] equals first-matched ASR word → no leading
+    // gap to fill. Vibrato/sustain tails of prev line mistranscribed
+    // as random syllables must NOT attach to next.
+    let asr_track = asr(vec![
+        make_word("holy", 0, 800),        // 0 — prev's last matched
+        make_word("ee", 900, 1100),       // 1 — vibrato tail (unconsumed)
+        make_word("forever", 1200, 2000), // 2 — next's first matched (= ref[0])
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut emits = vec![
+        LineEmit {
+            text: "Holy".into(),
+            asr_word_indices: vec![0],
+        },
+        LineEmit {
+            text: "Forever".into(),
+            asr_word_indices: vec![2],
+        },
+    ];
+    absorb::absorb_leading_unmatched(&mut emits, &asr_words);
+    assert_eq!(
+        emits[1].asr_word_indices,
+        vec![2],
+        "vibrato tail must NOT attach"
+    );
 }
 
 // ── Phase 2.7: absorb_sustained_boundary_tokens ───────────────────────────────
