@@ -979,21 +979,20 @@ pub(crate) fn remap_mapping(
 }
 
 #[cfg(test)]
-#[path = "text_reference_merge_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "text_reference_merge_trim_tests.rs"]
-mod trim_tests;
-
-#[cfg(test)]
-#[path = "text_reference_merge_phantom_tests.rs"]
-mod phantom_tests;
-
+#[path = "text_reference_merge_absorb_tests.rs"]
+mod absorb_tests;
 #[cfg(test)]
 #[path = "text_reference_merge_dp_tests.rs"]
 mod dp_tests;
-
+#[cfg(test)]
+#[path = "text_reference_merge_phantom_tests.rs"]
+mod phantom_tests;
 #[cfg(test)]
 #[path = "text_reference_merge_split_tests.rs"]
 mod split_tests;
+#[cfg(test)]
+#[path = "text_reference_merge_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "text_reference_merge_trim_tests.rs"]
+mod trim_tests;

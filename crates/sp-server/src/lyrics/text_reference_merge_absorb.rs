@@ -91,20 +91,17 @@ pub(super) fn absorb_prefix_matches(emits: &mut [LineEmit], asr_words: &[AsrWord
 /// the line's first matched word.
 const LEADIN_MAX_MS: u32 = 1500;
 
-/// Phase 2.65 (`absorb_leading_unmatched`): when an emit's FIRST matched
-/// ASR word does NOT correspond to ref-text position 0, the leading ref
-/// word(s) were dropped — usually whisperx misheard them. Walk back
-/// through unconsumed ASR words BETWEEN the previous emit's last matched
-/// word and this emit's first matched word, within `LEADIN_MAX_MS`, and
-/// attach them. Skipped when ref[0] is already first-matched (no leading
-/// gap to fill — avoids over-claiming whisperx vibrato tails of the
-/// previous line as part of the next).
+/// Phase 2.65: when an emit's FIRST matched ASR word does NOT
+/// correspond to ref-text position 0, the leading ref word(s) were
+/// dropped (usually whisperx misheard them). Walks back through
+/// unconsumed ASR words between the previous emit's last matched word
+/// and this emit's first matched word, within LEADIN_MAX_MS, and
+/// attaches them. Skipped when ref[0] is already first-matched.
 ///
-/// id=21 2:12 "shadow me for all my history": whisperx transcribed
-/// "shadow" as "shed on"; LCS matched ref[0]="shadow" against nothing,
-/// first matched was ref[1]="me" — Phase 2.65 walks back, attaches "shed"
-/// + "on" so the line's natural start moves to the singer's first
-/// audible sound at 131.741 s instead of 132.961 s.
+/// id=21 2:12 "shadow me": whisperx wrote "shed on" for "shadow"; LCS
+/// could match neither, first-matched became "me" (ref[1]). Phase 2.65
+/// reattaches "shed" + "on" so natural start moves from 132.961 s back
+/// to 131.741 s.
 pub(super) fn absorb_leading_unmatched(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
     if emits.is_empty() {
         return;
