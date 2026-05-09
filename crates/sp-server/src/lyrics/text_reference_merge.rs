@@ -821,31 +821,26 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         floor = l.end_ms;
     }
 
+    // Phase 5 extension. Only EXTEND prev.end forward into the silent
+    // gap. NEVER pull next.start backward — that switches the wall to
+    // the next line before the singer reaches it. Small gap: extend
+    // prev.end up to next.start (full pull-back of prev). Large gap:
+    // extend prev.end by at most EXTENSION_TOLERANCE_MS (1.5s grace
+    // for sustained held notes the ASR cuts short).
     let n = lines.len();
     for i in 0..n.saturating_sub(1) {
         let next_start = lines[i + 1].start_ms;
         let natural_gap = next_start.saturating_sub(natural_ends[i]);
-        if natural_gap <= REASONABLE_GAP_MS {
-            let new_next_start = natural_ends[i];
-            if new_next_start < lines[i + 1].start_ms {
-                lines[i + 1].start_ms = new_next_start;
-            }
-            if natural_ends[i] > lines[i].end_ms {
-                lines[i].end_ms = natural_ends[i];
-            }
+        if natural_gap == 0 {
+            continue;
+        }
+        let new_end = if natural_gap <= REASONABLE_GAP_MS {
+            next_start
         } else {
-            let new_next_start = next_start
-                .saturating_sub(EXTENSION_TOLERANCE_MS)
-                .max(natural_ends[i]);
-            if new_next_start < lines[i + 1].start_ms {
-                lines[i + 1].start_ms = new_next_start;
-            }
-            let new_end = natural_ends[i]
-                .saturating_add(EXTENSION_TOLERANCE_MS)
-                .min(lines[i + 1].start_ms);
-            if new_end > lines[i].end_ms {
-                lines[i].end_ms = new_end;
-            }
+            natural_ends[i].saturating_add(EXTENSION_TOLERANCE_MS)
+        };
+        if new_end > lines[i].end_ms {
+            lines[i].end_ms = new_end;
         }
     }
 

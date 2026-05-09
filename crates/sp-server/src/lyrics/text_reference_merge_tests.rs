@@ -965,3 +965,56 @@ fn second_chorus_pass_recovers_indices_released_by_trim() {
         intersection
     );
 }
+
+// ── Phase 5: never pull next.start backward ──────────────────────────────────
+
+#[test]
+fn phase5_never_pulls_next_start_backward() {
+    // id=21 regression: 45 of 60 lines had start_ms pulled up to 3.92s
+    // EARLIER than the singer's first word for that line. The wall
+    // switched to the next line before the singer reached it. Phase 5
+    // must extend prev.end forward into the silent gap, NEVER pull
+    // next.start back.
+    let mut lines = vec![
+        AlignedLine {
+            text: "Line one".into(),
+            start_ms: 1000,
+            end_ms: 2000,
+            words: None,
+        },
+        AlignedLine {
+            text: "Line two".into(),
+            start_ms: 5000, // 3 s gap (small)
+            end_ms: 6000,
+            words: None,
+        },
+        AlignedLine {
+            text: "Line three".into(),
+            start_ms: 30000, // 24 s gap (large)
+            end_ms: 31000,
+            words: None,
+        },
+    ];
+    let original_starts: Vec<u32> = lines.iter().map(|l| l.start_ms).collect();
+    apply_cap_and_monotonic(&mut lines);
+    for (i, l) in lines.iter().enumerate() {
+        assert!(
+            l.start_ms >= original_starts[i],
+            "line {} start_ms moved backward from {} to {}: {:?}",
+            i,
+            original_starts[i],
+            l.start_ms,
+            l.text
+        );
+    }
+    // Small-gap branch still extends prev.end up to next.start.
+    assert_eq!(
+        lines[0].end_ms, 5000,
+        "small gap: prev.end fills to next.start"
+    );
+    // Large-gap branch extends prev.end by at most EXTENSION_TOLERANCE_MS (1500).
+    assert_eq!(
+        lines[1].end_ms, 7500,
+        "large gap: prev.end extended by EXTENSION_TOLERANCE_MS only"
+    );
+}
