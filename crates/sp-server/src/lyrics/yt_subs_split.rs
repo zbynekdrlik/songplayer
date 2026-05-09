@@ -58,11 +58,9 @@ pub(crate) async fn split_long_line_with_anchors(
 
     // Claude split (deterministic fallback inside claude_split_lines).
     let lines_in = vec![(0usize, text)];
-    let mut split_map: HashMap<usize, Vec<String>> =
-        match claude_split_lines(ai_client, &lines_in).await {
-            Ok(m) => m,
-            Err(_) => HashMap::new(),
-        };
+    let mut split_map: HashMap<usize, Vec<String>> = claude_split_lines(ai_client, &lines_in)
+        .await
+        .unwrap_or_default();
     let sub_texts = split_map
         .remove(&0)
         .unwrap_or_else(|| deterministic_split_one(text));

@@ -87,9 +87,8 @@ pub async fn process(
 
     // yt_subs path: re-break long lines via Claude + whisperx boundaries.
     let is_yt_subs = candidate.source == "yt_subs" || candidate.source.starts_with("tier1:yt_subs");
-    if is_yt_subs && asr.is_some() && ai_client.is_some() {
-        let asr_words: Vec<AlignedWord> = asr
-            .expect("checked")
+    if let (true, Some(ai), Some(asr_track)) = (is_yt_subs, ai_client, asr) {
+        let asr_words: Vec<AlignedWord> = asr_track
             .lines
             .iter()
             .filter_map(|l| l.words.as_ref())
@@ -99,7 +98,7 @@ pub async fn process(
         let mut output: Vec<AlignedLine> = Vec::with_capacity(aligned_lines.len());
         for line in &aligned_lines {
             let split = split_long_line_with_anchors(
-                ai_client.expect("checked"),
+                ai,
                 &line.text,
                 line.start_ms,
                 line.end_ms,
@@ -111,7 +110,7 @@ pub async fn process(
         return Ok(AlignedTrack {
             lines: output,
             provenance: format!("{}+timed-merge", candidate.source),
-            raw_confidence: asr.map(|a| a.raw_confidence).unwrap_or(1.0),
+            raw_confidence: asr_track.raw_confidence,
         });
     }
 
