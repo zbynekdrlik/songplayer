@@ -525,9 +525,11 @@ fn apply_cap_and_monotonic_floor_clamps_overlap() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_pulls_next_start_back_for_small_gap() {
-    // Gaps ≤ REASONABLE_GAP_MS: pull next.start back to prior.natural_end
-    // (gap audio shows under next line, not prior).
+fn apply_cap_and_monotonic_small_gap_extends_prev_end_only() {
+    // Gaps ≤ REASONABLE_GAP_MS: extend prev.end forward up to next.start.
+    // Next.start NEVER moves backward (whisperx truth wins over our
+    // pull-back). id=21 audit: 45 of 60 lines had wall switching to next
+    // line up to 3.92 s BEFORE singer reached it under the prior pull-back.
     let mut lines = vec![
         AlignedLine {
             text: "real".into(),
@@ -550,46 +552,19 @@ fn apply_cap_and_monotonic_pulls_next_start_back_for_small_gap() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 3);
-    // "short" pulled back to "real".end_ms=1500; "more" pulled back to
-    // "short".natural_end=2200. Each line stays at its natural end_ms.
-    assert_eq!(lines[1].start_ms, 1500);
-    assert_eq!(lines[1].end_ms, 2200);
-    assert_eq!(lines[2].start_ms, 2200);
+    // prev.end extends forward to next.start; next.start unchanged.
+    assert_eq!(lines[0].end_ms, 2000);
+    assert_eq!(lines[1].start_ms, 2000);
+    assert_eq!(lines[1].end_ms, 3000);
+    assert_eq!(lines[2].start_ms, 3000);
     assert_eq!(lines[2].end_ms, 5000);
 }
 
 #[test]
-fn apply_cap_and_monotonic_pulls_back_for_id21_shadow_case() {
-    // id=21 2:12 regression: 1.3 s gap between sub-lines is "shadow on"
-    // — whisperx misheard "shadow"→"shed". Phase 5 pulls N+1 back so
-    // wall shows "shadow me…" at "shadow" sing-start, not at "me".
-    let mut lines = vec![
-        AlignedLine {
-            text: "And Your goodness and mercy".into(),
-            start_ms: 128_459,
-            end_ms: 131_661,
-            words: None,
-        },
-        AlignedLine {
-            text: "shadow me for all my history".into(),
-            start_ms: 132_961,
-            end_ms: 136_943,
-            words: None,
-        },
-    ];
-    apply_cap_and_monotonic(&mut lines);
-    assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].end_ms, 131_661);
-    assert_eq!(lines[1].start_ms, 131_661);
-    assert_eq!(lines[1].end_ms, 136_943);
-}
-
-#[test]
-fn apply_cap_and_monotonic_long_gap_pulls_next_back_and_extends_prev() {
-    // Gap 29 s > REASONABLE_GAP_MS. Both sides extend toward each other
-    // by EXTENSION_TOLERANCE_MS so the wall shows next-line text 1.5 s
-    // before the singer actually reaches its first matched word
-    // (id=21 1:01 "Oh, Good Shepherd…" preceded by held "Say" filler).
+fn apply_cap_and_monotonic_large_gap_extends_prev_only() {
+    // Gap > REASONABLE_GAP_MS. Prev.end extends forward by at most
+    // EXTENSION_TOLERANCE_MS for sustained held notes the ASR cuts
+    // short. Next.start STAYS at the singer's first-word time.
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -607,7 +582,7 @@ fn apply_cap_and_monotonic_long_gap_pulls_next_back_and_extends_prev() {
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].end_ms, 1000 + EXTENSION_TOLERANCE_MS);
-    assert_eq!(lines[1].start_ms, 30_000 - EXTENSION_TOLERANCE_MS);
+    assert_eq!(lines[1].start_ms, 30_000, "next.start must NOT move");
     assert!(
         lines[1].start_ms > lines[0].end_ms,
         "blank middle preserved"
