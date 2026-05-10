@@ -120,50 +120,79 @@ impl Orchestrator {
                 let is_yt_subs = aligned_lines.provenance == "yt_subs"
                     || aligned_lines.provenance.starts_with("tier1:yt_subs");
                 if is_yt_subs {
+                    // yt_subs is the AUTHORITY for what is sung. Trust
+                    // its lines + per-line timing. Only re-break LONG
+                    // phrase clusters into karaoke sub-lines, with
+                    // whisperx providing internal sub-line anchors when
+                    // available and proportional interpolation when
+                    // whisperx missed/mistranscribed words. yt_subs
+                    // text is never dropped or substituted.
                     info!(
                         provenance = %aligned_lines.provenance,
                         lines = aligned_lines.lines.len(),
-                        "orchestrator: Tier-1 yt_subs LineSynced → cluster caption windows + text_reference_merge"
+                        "orchestrator: Tier-1 yt_subs LineSynced → cluster + Claude split + whisperx anchors with proportional fallback"
                     );
-                    let wav = input.vocal_wav.ok_or_else(|| {
-                        OrchestratorError::NoAlignment(
-                            "yt_subs LineSynced path requires a vocal WAV (text_reference_merge \
-                             needs whisperx) but none was available"
-                                .into(),
-                        )
-                    })?;
-                    let asr = self
-                        .backend
-                        .align(wav, input.language, &AlignOpts::default())
-                        .await?;
-                    crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr)
-                        .await;
+                    let wav_opt = input.vocal_wav;
+                    let asr_opt: Option<AlignedTrack> = if let Some(wav) = wav_opt {
+                        match self
+                            .backend
+                            .align(wav, input.language, &AlignOpts::default())
+                            .await
+                        {
+                            Ok(a) => {
+                                crate::lyrics::audit_ctx::write_whisperx_track(
+                                    input.audit.as_ref(),
+                                    &a,
+                                )
+                                .await;
+                                Some(a)
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    %e,
+                                    "orchestrator: yt_subs whisperx align failed; using proportional split only"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    let asr_words: Vec<crate::lyrics::backend::AlignedWord> = asr_opt
+                        .as_ref()
+                        .map(|a| {
+                            a.lines
+                                .iter()
+                                .filter_map(|l| l.words.as_ref())
+                                .flatten()
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     let clustered =
                         crate::lyrics::yt_subs_split::cluster_caption_windows(&aligned_lines.lines);
-                    let candidate = crate::lyrics::tier1::CandidateText {
-                        source: "yt_subs".into(),
-                        lines: clustered.iter().map(|l| l.text.clone()).collect(),
-                        line_timings: None,
-                        has_timing: false,
+                    let mut output: Vec<crate::lyrics::backend::AlignedLine> =
+                        Vec::with_capacity(clustered.len());
+                    for cluster in &clustered {
+                        let split = crate::lyrics::yt_subs_split::split_cluster(
+                            &self.ai_client,
+                            &cluster.text,
+                            cluster.start_ms,
+                            cluster.end_ms,
+                            &asr_words,
+                        )
+                        .await;
+                        output.extend(split);
+                    }
+                    let provenance = match asr_opt.as_ref() {
+                        Some(a) => format!("yt_subs+{}", a.provenance),
+                        None => "yt_subs+timed-merge".into(),
                     };
-                    return match text_reference_merge::process(
-                        &self.ai_client,
-                        &asr,
-                        &candidate,
-                        input.audit.as_ref(),
-                    )
-                    .await
-                    {
-                        Ok(merged) => Ok(merged),
-                        Err(e) => {
-                            tracing::warn!(
-                                provenance = %asr.provenance,
-                                error = %e,
-                                "orchestrator: text_reference_merge failed on yt_subs — falling back to raw WhisperX with line split"
-                            );
-                            Ok(split_track(&asr, self.split_cfg))
-                        }
-                    };
+                    return Ok(AlignedTrack {
+                        lines: output,
+                        provenance,
+                        raw_confidence: asr_opt.map(|a| a.raw_confidence).unwrap_or(1.0),
+                    });
                 }
 
                 // spotify / lrclib short-circuit (no ASR needed).
