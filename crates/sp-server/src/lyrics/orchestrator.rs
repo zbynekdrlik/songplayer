@@ -106,6 +106,12 @@ impl Orchestrator {
                 // Route through timed_reference_merge::process in Mode B
                 // (asr = None) so the same sanitize/phantom-filter/cap pass
                 // applies. Provenance: `{source}+timed-merge`.
+                //
+                // Exception: yt_subs lines are split mid-phrase by YouTube's
+                // caption-display window. timed_reference_merge re-breaks
+                // them via Claude + whisperx word boundaries, which requires
+                // ASR. Run whisperx and pass it (Mode A) for yt_subs only;
+                // spotify / lrclib still short-circuit without ASR.
                 info!(
                     provenance = %aligned_lines.provenance,
                     lines = aligned_lines.lines.len(),
@@ -118,9 +124,45 @@ impl Orchestrator {
                     .and_then(|t| t.last())
                     .map(|(_, e)| (*e) as u32)
                     .unwrap_or(0);
+                let needs_resplit =
+                    candidate.source == "yt_subs" || candidate.source.starts_with("tier1:yt_subs");
+                let asr_for_yt_subs: Option<AlignedTrack> = if needs_resplit {
+                    if let Some(wav) = input.vocal_wav {
+                        match self
+                            .backend
+                            .align(wav, input.language, &AlignOpts::default())
+                            .await
+                        {
+                            Ok(a) => {
+                                crate::lyrics::audit_ctx::write_whisperx_track(
+                                    input.audit.as_ref(),
+                                    &a,
+                                )
+                                .await;
+                                Some(a)
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    %e,
+                                    "orchestrator: yt_subs whisperx align failed; shipping unsplit yt_subs"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let ai_arg = if needs_resplit && asr_for_yt_subs.is_some() {
+                    Some(self.ai_client.as_ref())
+                } else {
+                    None
+                };
                 match timed_reference_merge::process(
-                    None,
-                    None,
+                    ai_arg,
+                    asr_for_yt_subs.as_ref(),
                     &candidate,
                     song_duration_ms,
                     input.audit.as_ref(),
