@@ -86,9 +86,14 @@ pub(crate) async fn split_long_line_with_anchors(
     let mut split_map: HashMap<usize, Vec<String>> = claude_split_lines(ai_client, &lines_in)
         .await
         .unwrap_or_default();
-    let sub_texts = split_map
-        .remove(&0)
-        .unwrap_or_else(|| deterministic_split_one(text));
+    // Use Claude's split only if it produced >1 sub. If Claude refused
+    // or returned a single chunk for a long input, fall through to the
+    // deterministic split which always reduces a long line into many
+    // ≤32-char chunks at word boundaries.
+    let sub_texts = match split_map.remove(&0) {
+        Some(s) if s.len() > 1 => s,
+        _ => deterministic_split_one(text),
+    };
 
     match anchor_subs_to_window(&sub_texts, line_start_ms, line_end_ms, asr_words) {
         Some(out) => out,
