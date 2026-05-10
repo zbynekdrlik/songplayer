@@ -562,11 +562,12 @@ jobs:
             --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with < in drop_phantom_clusters' \
             --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters'
       - name: Upload mutants report
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mutants-report-shard-${{ strategy.job-index }}
           path: mutants-out/
+          if-no-files-found: warn
 
   gate:
     name: Gate
