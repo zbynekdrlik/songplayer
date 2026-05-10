@@ -953,34 +953,9 @@ fn emit_unmatched_only(asr: &AlignedTrack, candidate: &CandidateText) -> Aligned
     }
 }
 
-/// Expanded ref-list + `original → expanded` index map.
-pub(crate) fn expand_ref_lines(
-    original: &[String],
-    added: &[mapping::AddedRefLine],
-) -> (Vec<String>, Vec<usize>) {
-    let mut expanded: Vec<String> = Vec::with_capacity(original.len() + added.len());
-    let mut orig_to_expanded: Vec<usize> = Vec::with_capacity(original.len());
-    for (i, line) in original.iter().enumerate() {
-        orig_to_expanded.push(expanded.len());
-        expanded.push(line.clone());
-        for a in added.iter().filter(|a| a.after_line == i) {
-            expanded.push(a.text.clone());
-        }
-    }
-    (expanded, orig_to_expanded)
-}
-
-/// Rewrite Phase 1 mapping into expanded ref-list indices.
-#[cfg_attr(test, mutants::skip)] // Pure projection: integration-tested via the Phase 1.5 reprocess flow. Direct unit tests would only mirror the .map(.and_then(.get)) shape with no semantic gain.
-pub(crate) fn remap_mapping(
-    original_map: &[Option<usize>],
-    orig_to_expanded: &[usize],
-) -> Vec<Option<usize>> {
-    original_map
-        .iter()
-        .map(|opt| opt.and_then(|li| orig_to_expanded.get(li).copied()))
-        .collect()
-}
+#[path = "text_reference_merge_expand.rs"]
+mod expand;
+use expand::{expand_ref_lines, remap_mapping};
 
 #[cfg(test)]
 #[path = "text_reference_merge_absorb_tests.rs"]
