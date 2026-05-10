@@ -115,9 +115,15 @@ pub(crate) fn anchor_subs_to_window(
     if sub_texts.len() <= 1 {
         return None;
     }
+    // Include whisperx words whose end overlaps the yt_subs window,
+    // not strict-start. yt_subs caption start often lags whisperx
+    // word start by 10-50ms (singer attacks before caption appears),
+    // and a strict `start >= line_start` filter was excluding the
+    // line's true first word — making sub_1 LCS fail and triggering
+    // the unsplit fallback.
     let window: Vec<&AlignedWord> = asr_words
         .iter()
-        .filter(|w| w.start_ms >= line_start_ms && w.start_ms < line_end_ms)
+        .filter(|w| w.end_ms > line_start_ms && w.start_ms < line_end_ms)
         .collect();
     if window.is_empty() {
         return None;
