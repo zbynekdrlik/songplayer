@@ -125,3 +125,16 @@ fn trim_outlier_indices_handles_unsorted_input() {
     trim_outlier_indices(&mut indices, &asr_words);
     assert_eq!(indices, vec![0, 1, 2]);
 }
+
+#[test]
+fn trim_outlier_indices_pops_at_exact_trim_gap_boundary() {
+    // max_gap == TRIM_GAP_MS (3000) AND span > LONG_LINE_CAP_MS (8000)
+    // must pop the trailing outlier — `<` (not `<=`) gates the break.
+    // a.end=500 → b.start=3500: gap = exactly 3000 ms
+    // total span = 9100 - 0 = 9100 > 8000 ms
+    let asr_track = asr(vec![make_word("a", 0, 500), make_word("b", 3500, 9100)]);
+    let asr_words = flatten_asr(&asr_track);
+    let mut indices = vec![0, 1];
+    trim_outlier_indices(&mut indices, &asr_words);
+    assert_eq!(indices, vec![0]);
+}
