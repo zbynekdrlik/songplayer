@@ -157,7 +157,14 @@ pub(crate) fn anchor_subs_to_window(
         sub_first_word.push(Some(search_from + first));
         search_from = (search_from + last + 1).min(window_strs.len());
     }
-    if sub_first_word.iter().any(|x| x.is_none()) {
+    // Drop subs whose LCS produced zero matches — singer either did
+    // not sing those words (yt_subs over-transcribed: chorus repeats /
+    // ad-libs YouTube captioned but whisperx confirms the singer
+    // skipped) or whisperx missed them. yt_subs timing is authoritative
+    // ONLY where whisperx confirms the words. Per ASR-data-only:
+    // never ship a sub-line we cannot anchor to a real whisperx word.
+    let unmatched_count = sub_first_word.iter().filter(|x| x.is_none()).count();
+    if unmatched_count > 0 {
         let unmatched: Vec<&str> = sub_first_word
             .iter()
             .zip(sub_texts.iter())
@@ -167,33 +174,41 @@ pub(crate) fn anchor_subs_to_window(
             line_start_ms,
             line_end_ms,
             unmatched_subs = ?unmatched,
-            "yt_subs anchor: LCS failed for at least one sub, falling back unsplit"
+            "yt_subs anchor: dropping {} sub(s) without whisperx match",
+            unmatched_count
         );
+    }
+    let kept: Vec<(usize, usize, &String)> = sub_texts
+        .iter()
+        .enumerate()
+        .zip(sub_first_word.iter())
+        .filter_map(|((i, text), first)| first.map(|f| (i, f, text)))
+        .collect();
+    if kept.len() < 2 {
         return None;
     }
-    let sub_first_word: Vec<usize> = sub_first_word.into_iter().map(Option::unwrap).collect();
-
-    let n = sub_texts.len();
-    let mut out: Vec<AlignedLine> = Vec::with_capacity(n);
-    for i in 0..n {
-        let start = if i == 0 {
+    let n_orig = sub_texts.len();
+    let mut out: Vec<AlignedLine> = Vec::with_capacity(kept.len());
+    for (k, (orig_i, first, text)) in kept.iter().enumerate() {
+        let start = if *orig_i == 0 {
             line_start_ms
         } else {
-            window[sub_first_word[i]].start_ms
+            window[*first].start_ms
         };
-        let end = if i == n - 1 {
+        let end = if *orig_i == n_orig - 1 || k == kept.len() - 1 {
             line_end_ms
         } else {
-            window[sub_first_word[i + 1]].start_ms
+            // Boundary = next kept sub's first word start.
+            window[kept[k + 1].1].start_ms
         };
         out.push(AlignedLine {
-            text: sub_texts[i].clone(),
+            text: (*text).clone(),
             start_ms: start,
             end_ms: end,
             words: None,
         });
     }
-    for i in 0..n {
+    for i in 0..out.len() {
         if out[i].end_ms <= out[i].start_ms {
             warn!(
                 idx = i,
