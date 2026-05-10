@@ -194,9 +194,7 @@ pub(crate) fn anchor_subs_with_fallback(
         let next_ms = if j == n { cluster_end_ms } else { start_ms[j] };
         if next_ms <= prev_ms {
             // No room — collapse all unanchored subs to prev_ms.
-            for k in i..j {
-                start_ms[k] = prev_ms;
-            }
+            start_ms[i..j].iter_mut().for_each(|s| *s = prev_ms);
         } else {
             // Distribute by char counts of the BRACKETED subs (i-1..j or i-1..n-1).
             let last_bracketed = if j == n { n - 1 } else { j - 1 };
