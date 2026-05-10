@@ -129,57 +129,51 @@ pub(crate) fn anchor_subs_with_fallback(
         search_from += last + 1;
     }
 
-    // Build per-sub start_ms list.
-    let mut start_ms: Vec<u32> = vec![0; n];
-    start_ms[0] = cluster_start_ms;
+    // Pure-proportional baseline: distribute the yt_subs window's
+    // duration across subs by character count. This is yt_subs's
+    // expected timing in the absence of whisperx detail. yt_subs
+    // window total IS authoritative; sub-text length proxies relative
+    // sub time.
+    let weights: Vec<u64> = sub_texts
+        .iter()
+        .map(|t| t.chars().count().max(1) as u64)
+        .collect();
+    let total_w: u64 = weights.iter().sum();
+    let span = cluster_end_ms.saturating_sub(cluster_start_ms) as u64;
+    let mut prop_start: Vec<u32> = vec![cluster_start_ms; n];
+    let mut acc: u64 = 0;
     for i in 1..n {
-        match anchor_w_idx[i] {
-            Some(w_idx) => start_ms[i] = window[w_idx].start_ms,
-            None => start_ms[i] = 0, // placeholder, fill below
-        }
+        acc += weights[i - 1];
+        prop_start[i] = cluster_start_ms + ((acc * span) / total_w) as u32;
     }
 
-    // Proportional fallback for unanchored subs. Walk i from 1..n;
-    // if start_ms[i] == 0 (unanchored), find the next anchored
-    // index j (or n→cluster_end) and interpolate starts for i..j by
-    // character counts of subs i..j-1.
-    let mut i = 1;
-    while i < n {
-        if start_ms[i] != 0 {
-            i += 1;
-            continue;
-        }
-        // Run of unanchored subs from i to next_anchored-1.
-        let mut j = i;
-        while j < n && start_ms[j] == 0 {
-            j += 1;
-        }
-        // Bracket: prev anchor at i-1, next anchor at j (or cluster_end if j == n).
-        let prev_ms = start_ms[i - 1];
-        let next_ms = if j == n { cluster_end_ms } else { start_ms[j] };
-        if next_ms <= prev_ms {
-            // No room — collapse all unanchored subs to prev_ms.
-            start_ms[i..j].iter_mut().for_each(|s| *s = prev_ms);
-        } else {
-            // Distribute by char counts of the BRACKETED subs (i-1..j or i-1..n-1).
-            let last_bracketed = if j == n { n - 1 } else { j - 1 };
-            let weights: Vec<usize> = (i - 1..=last_bracketed)
-                .map(|k| sub_texts[k].chars().count().max(1))
-                .collect();
-            let total: usize = weights.iter().sum();
-            let span = (next_ms - prev_ms) as u64;
-            let mut acc = 0usize;
-            for (offset, w) in weights.iter().enumerate().skip(1) {
-                acc += weights[offset - 1];
-                let frac = (acc as u64 * span) / (total as u64);
-                let idx = i - 1 + offset;
-                if idx <= last_bracketed && start_ms[idx] == 0 {
-                    start_ms[idx] = prev_ms + frac as u32;
-                }
-                let _ = w; // silence unused on the last iteration of the if-branch
+    // Whisperx anchor accepted only if within tolerance of proportional.
+    // Tolerance = max(50% of expected sub duration, 500 ms). When
+    // whisperx places an anchor wildly outside that range, yt_subs's
+    // proportional window timing wins. Prevents "Shout His name JESUS"
+    // collapsing to 0.18 s display because whisperx mistranscribed.
+    let mut start_ms: Vec<u32> = prop_start.clone();
+    for i in 1..n {
+        if let Some(w_idx) = anchor_w_idx[i] {
+            let asr_start = window[w_idx].start_ms;
+            let prop_dur_i = prop_start
+                .get(i + 1)
+                .copied()
+                .unwrap_or(cluster_end_ms)
+                .saturating_sub(prop_start[i]);
+            let tolerance = (prop_dur_i / 2).max(500);
+            if asr_start.abs_diff(prop_start[i]) <= tolerance {
+                start_ms[i] = asr_start;
+            } else {
+                warn!(
+                    sub_idx = i,
+                    asr_start_ms = asr_start,
+                    prop_start_ms = prop_start[i],
+                    tolerance_ms = tolerance,
+                    "yt_subs anchor: whisperx anchor outside proportional tolerance, using proportional"
+                );
             }
         }
-        i = j;
     }
 
     // Enforce strict monotonic + non-zero duration. Push starts forward

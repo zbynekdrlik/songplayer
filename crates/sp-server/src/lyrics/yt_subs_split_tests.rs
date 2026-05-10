@@ -42,6 +42,10 @@ fn anchor_uses_yt_subs_anchors_at_first_start_and_last_end() {
 
 #[test]
 fn anchor_proportionally_fills_unmatched_subs() {
+    // 3 subs: weights 4, 14, 10 (total 28). cluster_dur=6000.
+    // prop_start = [0, 857, 3857]. Whisperx "found"@5000 for sub 2:
+    // |5000-3857|=1143; tolerance=(6000-3857)/2=1071. 1143>1071 →
+    // whisperx anchor REJECTED, use proportional 3857.
     let asr = vec![aw("found", 5000, 5500)];
     let subs = vec![
         "Lost".to_string(),
@@ -51,10 +55,23 @@ fn anchor_proportionally_fills_unmatched_subs() {
     let out = anchor_subs_with_fallback(&subs, 0, 6000, &asr);
     assert_eq!(out.len(), 3);
     assert_eq!(out[0].start_ms, 0);
-    assert_eq!(out[2].start_ms, 5000);
-    assert_eq!(out[1].start_ms, 1111);
-    assert_eq!(out[1].end_ms, 5000);
+    assert_eq!(out[1].start_ms, 857);
+    assert_eq!(out[2].start_ms, 3857);
     assert_eq!(out[2].end_ms, 6000);
+}
+
+#[test]
+fn anchor_accepts_whisperx_when_within_proportional_tolerance() {
+    // Sub 2 prop=3857, whisperx@4000: |4000-3857|=143 < tolerance 1071.
+    // Whisperx anchor accepted.
+    let asr = vec![aw("found", 4000, 4500)];
+    let subs = vec![
+        "Lost".to_string(),
+        "Forgotten word".to_string(),
+        "Found here".to_string(),
+    ];
+    let out = anchor_subs_with_fallback(&subs, 0, 6000, &asr);
+    assert_eq!(out[2].start_ms, 4000);
 }
 
 #[test]
