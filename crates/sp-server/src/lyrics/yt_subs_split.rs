@@ -30,6 +30,7 @@ use crate::lyrics::text_reference_merge::{
     SUBLINE_MAX_CHARS, claude_split_lines, deterministic_split_one, lcs_align, normalize_word,
 };
 use std::collections::HashMap;
+use tracing::warn;
 
 /// Cluster YouTube caption-window adjacent yt_subs lines back into
 /// real phrases. yt_subs auto-captions split mid-phrase wherever the
@@ -157,6 +158,17 @@ pub(crate) fn anchor_subs_to_window(
         search_from = (search_from + last + 1).min(window_strs.len());
     }
     if sub_first_word.iter().any(|x| x.is_none()) {
+        let unmatched: Vec<&str> = sub_first_word
+            .iter()
+            .zip(sub_texts.iter())
+            .filter_map(|(idx, t)| idx.is_none().then_some(t.as_str()))
+            .collect();
+        warn!(
+            line_start_ms,
+            line_end_ms,
+            unmatched_subs = ?unmatched,
+            "yt_subs anchor: LCS failed for at least one sub, falling back unsplit"
+        );
         return None;
     }
     let sub_first_word: Vec<usize> = sub_first_word.into_iter().map(Option::unwrap).collect();
@@ -183,9 +195,24 @@ pub(crate) fn anchor_subs_to_window(
     }
     for i in 0..n {
         if out[i].end_ms <= out[i].start_ms {
+            warn!(
+                idx = i,
+                start = out[i].start_ms,
+                end = out[i].end_ms,
+                text = %out[i].text,
+                "yt_subs anchor: zero-or-negative duration sub, falling back unsplit"
+            );
             return None;
         }
         if i > 0 && out[i].start_ms < out[i - 1].end_ms {
+            warn!(
+                idx = i,
+                this_start = out[i].start_ms,
+                prev_end = out[i - 1].end_ms,
+                this_text = %out[i].text,
+                prev_text = %out[i - 1].text,
+                "yt_subs anchor: non-monotonic boundary, falling back unsplit"
+            );
             return None;
         }
     }
