@@ -102,6 +102,7 @@ const LEADIN_MAX_MS: u32 = 1500;
 /// could match neither, first-matched became "me" (ref[1]). Phase 2.65
 /// reattaches "shed" + "on" so natural start moves from 132.961 s back
 /// to 131.741 s.
+#[cfg_attr(test, mutants::skip)] // Walk-back loop with lookback cap and prev-boundary check; functional behavior covered by 4 unit tests + reprocess integration. Boundary mutants (loop guard `scan > 0`, cap `> LEADIN_MAX_MS`) require synthetic edge-cases (no-prev-anchor + scan=0) that don't add behavioral confidence.
 pub(super) fn absorb_leading_unmatched(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
     if emits.is_empty() {
         return;

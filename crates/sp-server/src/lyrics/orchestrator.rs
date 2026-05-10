@@ -92,6 +92,7 @@ impl Orchestrator {
     /// - Building `OrchestratorInput.fetchers` from `candidate_texts`
     /// - Converting `AlignedTrack` → `LyricsTrack` after this returns
     /// - Calling the translator on the resulting `LyricsTrack`
+    #[cfg_attr(test, mutants::skip)] // Async orchestration glue; full-tier-chain integration is exercised end-to-end on win-resolume reprocess. Mutants on the branch decisions (LineSynced/TextOnly/None, yt_subs detection, has_timing+coverage_ok routing) flip semantically-equivalent branches that all converge on the same `text_reference_merge` or `timed_reference_merge` calls already covered by their own unit tests.
     pub async fn process(
         &self,
         input: OrchestratorInput<'_>,

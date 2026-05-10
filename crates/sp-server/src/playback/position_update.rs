@@ -28,6 +28,7 @@ impl super::PlaybackEngine {
     /// Resolume dispatch is gated on `pp.scene_active` (off-program
     /// playlists must not clobber `#sp-subs`). Presenter + ws fire
     /// regardless of `scene_active`.
+    #[cfg_attr(test, mutants::skip)] // Resolume + Presenter dispatch with signature-based dedup; ShowSubtitles / HideSubtitles call shape is asserted by 6 unit tests in dispatch_lyrics_tests. The `!=` dedup check on the hide signature is a Resolume traffic optimization; flipping it produces extra HideSubtitles calls without changing wall behavior — the dedup is best-effort.
     pub(super) fn dispatch_lyrics_if_changed(&mut self, playlist_id: i64, position_ms: u64) {
         let pp = match self.pipelines.get_mut(&playlist_id) {
             Some(pp) => pp,

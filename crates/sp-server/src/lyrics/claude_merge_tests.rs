@@ -184,6 +184,20 @@ mod coverage_ok_tests {
     }
 
     #[test]
+    fn returns_false_when_empty_timings_at_tiny_duration() {
+        // Pin the `Some(t) if !t.is_empty() => t` match-guard. With the
+        // guard mutated to `if true`, an empty timings vec falls into
+        // the Some arm, computes span=0 and threshold=0 (1*80/100), and
+        // returns true (incorrect). Original guard sends empty to the
+        // `_ => return false` arm.
+        let c = cand_with_timings(vec![]);
+        assert!(
+            !coverage_ok(&c, 1),
+            "empty timings must NOT be treated as covered, even when threshold rounds to 0"
+        );
+    }
+
+    #[test]
     fn returns_false_when_duration_zero() {
         let c = cand_with_timings(vec![(0, 1000)]);
         assert!(!coverage_ok(&c, 0));

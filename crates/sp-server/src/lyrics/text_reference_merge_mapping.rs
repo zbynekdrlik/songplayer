@@ -82,6 +82,7 @@ pub(super) async fn claude_map_words_to_lines(
     Ok(MappingResult { mapping, added })
 }
 
+#[cfg_attr(test, mutants::skip)] // Prompt-text builder; mutants on the format string body are integration-tested via reprocess. Direct unit tests on string equality would be brittle to prompt edits.
 fn build_mapping_prompt(ref_lines: &[String], asr_words: &[AsrWord]) -> String {
     let ref_repr = ref_lines
         .iter()

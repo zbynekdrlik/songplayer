@@ -62,9 +62,8 @@ pub(crate) fn priority_with_timing(source: &str, has_timing: bool) -> u32 {
     if source == "genius" || source.starts_with("tier1:genius") {
         return 1;
     }
-    if source == "yt_subs" || source.starts_with("tier1:yt_subs") {
-        return 0;
-    }
+    // text yt_subs / tier1:yt_subs / unknown sources all fall through
+    // to priority 0 — explicit yt_subs branch is removed as equivalent.
     0
 }
 

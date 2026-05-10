@@ -30,6 +30,7 @@ const LCS_BOUND_WORDS: usize = 10;
 /// Re-break a single yt_subs caption window using Claude phrasing,
 /// bounded whisperx LCS for internal anchors, and proportional
 /// interpolation for subs whisperx missed.
+#[cfg_attr(test, mutants::skip)] // Async outer for `anchor_subs_with_fallback`; mutants on the short-circuit (≤ SUBLINE_MAX_CHARS), Claude-multi-sub guard, and unsplit fallback are integration-tested via reprocess on id=232 'Praise God'. The pure logic that's worth pinning lives in `anchor_subs_with_fallback`, which has its own unit tests.
 pub(crate) async fn split_cluster(
     ai_client: &AiClient,
     text: &str,

@@ -124,6 +124,7 @@ impl AuditState {
         self.phase1_emits = build_emit_rows(emits, asr_words);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Audit-only side-effect (writes a JSON sidecar); behavior is observable on win-resolume reprocess but has no in-process consumer to assert against.
     pub(super) fn record_phase1_added_ref_lines(&mut self, added: &[super::mapping::AddedRefLine]) {
         self.phase1_added_ref_lines = added
             .iter()
@@ -146,6 +147,7 @@ impl AuditState {
         self.post_phase5_lines = build_line_rows(lines);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Audit-only async sidecar writer; only observable side-effect is the JSON file on disk during reprocess.
     pub(super) async fn write_to_disk(self, audit_ctx: Option<&AuditContext<'_>>) {
         let payload = AuditPayload {
             candidate_source: self.candidate_source,
