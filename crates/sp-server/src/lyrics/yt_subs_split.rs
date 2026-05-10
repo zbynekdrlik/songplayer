@@ -221,10 +221,12 @@ pub(crate) fn anchor_subs_with_fallback(
 
     // Enforce strict monotonic + non-zero duration. Push starts forward
     // if they would create a non-monotonic boundary.
-    for k in 1..n {
-        if start_ms[k] < start_ms[k - 1] {
-            start_ms[k] = start_ms[k - 1];
+    let mut prev = start_ms[0];
+    for s in start_ms.iter_mut().skip(1) {
+        if *s < prev {
+            *s = prev;
         }
+        prev = *s;
     }
 
     // Build aligned lines. End of sub i = start of sub i+1; last sub's
