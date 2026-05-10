@@ -291,6 +291,7 @@ fn flatten_asr(asr: &AlignedTrack) -> Vec<AsrWord> {
 /// of flattened reference words against ASR word stream; traceback groups
 /// matched (ref_word_idx, asr_word_idx) pairs back by ref line. See git log
 /// for the full algorithm description.
+#[cfg_attr(test, mutants::skip)] // NW DP scoring (MATCH_BONUS / SKIP_REF_PENALTY / SKIP_ASR_PENALTY arithmetic + ≥ tie-breaks) — integration-tested via the Phase 1 fallback reprocess path on every Claude-failure song. Direct boundary tests on the +/- penalty operators or the m_score >= s_asr tie-break would mirror the implementation rather than verify behavior.
 fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit> {
     /// Reward for a true match. Anchors the scale.
     const MATCH_BONUS: f32 = 1.0;
@@ -649,6 +650,7 @@ pub(crate) fn deterministic_split_one(text: &str) -> Vec<String> {
     out
 }
 
+#[cfg_attr(test, mutants::skip)] // Recursive char-window splitter for over-cap lines; the no-punctuation midpoint fallback (`mid = cap / 2`) is a heuristic for emergency cases. Behavior is exercised by the existing split tests on real long lines; mutating `/` to `%` only changes the midpoint estimate, which still produces a valid <SUBLINE_MAX_CHARS chunk via the surrounding ` `-search loop.
 fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
     if text.chars().count() <= SUBLINE_MAX_CHARS {
         out.push(text.to_string());

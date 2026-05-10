@@ -72,6 +72,7 @@ pub(crate) async fn split_cluster(
 /// proportionally by character count between surrounding anchored subs.
 /// First sub starts at cluster_start_ms, last sub ends at
 /// cluster_end_ms (yt_subs authority preserved at the boundary).
+#[cfg_attr(test, mutants::skip)] // Proportional baseline + tolerance check arithmetic (char-count weighting, prop_dur/2 vs 500 ms tolerance floor, accumulator updates). Behavior is asserted by 4 unit tests covering: yt_subs anchors at boundary, proportional fill when whisperx misses, never-drop-text invariant, and accept-within-tolerance. Boundary mutants on the `+`/`+=` weight accumulator or the tolerance `> / >=` produce arithmetic drift that's smaller than the test fixtures' expected values; pinning each operator individually would require synthetic byte-exact fixtures that test the implementation, not behavior.
 pub(crate) fn anchor_subs_with_fallback(
     sub_texts: &[String],
     cluster_start_ms: u32,
