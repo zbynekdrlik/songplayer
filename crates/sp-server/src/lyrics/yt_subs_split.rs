@@ -31,6 +31,31 @@ use crate::lyrics::text_reference_merge::{
 };
 use std::collections::HashMap;
 
+/// Cluster YouTube caption-window adjacent yt_subs lines back into
+/// real phrases. yt_subs auto-captions split mid-phrase wherever the
+/// caption-display window ends, producing back-to-back lines with
+/// `line[i].end_ms == line[i+1].start_ms`. Real phrase boundaries
+/// always have a non-zero gap (singer pauses, instrumental). Merge
+/// adjacent (gap == 0) lines so the downstream Claude splitter
+/// receives full phrases instead of caption fragments.
+///
+/// Whitespace inside merged text is normalized to single spaces.
+pub(crate) fn cluster_caption_windows(lines: &[AlignedLine]) -> Vec<AlignedLine> {
+    let mut out: Vec<AlignedLine> = Vec::with_capacity(lines.len());
+    for line in lines {
+        if let Some(last) = out.last_mut() {
+            if last.end_ms >= line.start_ms {
+                let merged = format!("{} {}", last.text.trim(), line.text.trim());
+                last.text = merged.split_whitespace().collect::<Vec<_>>().join(" ");
+                last.end_ms = line.end_ms;
+                continue;
+            }
+        }
+        out.push(line.clone());
+    }
+    out
+}
+
 /// Re-break a single yt_subs reference line using Claude phrasing +
 /// whisperx word boundaries. Returns the original line unsplit on any
 /// failure path (Claude error, single-sub split, LCS gap, non-monotonic

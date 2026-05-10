@@ -33,7 +33,7 @@ use crate::lyrics::audit_ctx::AuditContext;
 use crate::lyrics::backend::{AlignedLine, AlignedTrack, AlignedWord};
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
 use crate::lyrics::tier1::CandidateText;
-use crate::lyrics::yt_subs_split::split_long_line_with_anchors;
+use crate::lyrics::yt_subs_split::{cluster_caption_windows, split_long_line_with_anchors};
 
 #[derive(Debug, Error)]
 pub enum TimedMergeError {
@@ -95,8 +95,12 @@ pub async fn process(
             .flatten()
             .cloned()
             .collect();
-        let mut output: Vec<AlignedLine> = Vec::with_capacity(aligned_lines.len());
-        for line in &aligned_lines {
+        // Cluster caption-window adjacent yt_subs lines (gap == 0) so
+        // each cluster represents a real sung phrase — not a YouTube
+        // caption fragment. Real phrase pauses (gap > 0) stay split.
+        let clustered = cluster_caption_windows(&aligned_lines);
+        let mut output: Vec<AlignedLine> = Vec::with_capacity(clustered.len());
+        for line in &clustered {
             let split = split_long_line_with_anchors(
                 ai,
                 &line.text,
