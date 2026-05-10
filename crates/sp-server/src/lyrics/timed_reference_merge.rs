@@ -30,10 +30,9 @@ use tracing::info;
 
 use crate::ai::client::AiClient;
 use crate::lyrics::audit_ctx::AuditContext;
-use crate::lyrics::backend::{AlignedLine, AlignedTrack, AlignedWord};
+use crate::lyrics::backend::{AlignedLine, AlignedTrack};
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
 use crate::lyrics::tier1::CandidateText;
-use crate::lyrics::yt_subs_split::{cluster_caption_windows, split_long_line_with_anchors};
 
 #[derive(Debug, Error)]
 pub enum TimedMergeError {
@@ -46,16 +45,11 @@ pub enum TimedMergeError {
 }
 
 /// Public entry: timed-merge for both LineSynced (asr=None) and
-/// timed-TextOnly (asr=Some) routes.
-///
-/// For yt_subs sources with ASR available, long lines (>32 chars) are
-/// re-broken via `yt_subs_split::split_long_line_with_anchors` —
-/// Claude picks karaoke-friendly phrase boundaries; whisperx provides
-/// internal sub-line start_ms; yt_subs anchors are preserved at the
-/// first sub's start and the last sub's end. Short lines and non-yt_subs
-/// timed sources keep the legacy `split_track` path (32-char cap only).
+/// timed-TextOnly (asr=Some) routes. yt_subs is NOT routed through
+/// here — the orchestrator clusters its caption-window-broken lines
+/// and dispatches to text_reference_merge directly.
 pub async fn process(
-    ai_client: Option<&AiClient>,
+    _ai_client: Option<&AiClient>,
     asr: Option<&AlignedTrack>,
     candidate: &CandidateText,
     song_duration_ms: u32,
@@ -84,39 +78,6 @@ pub async fn process(
         mode = if asr.is_some() { "A" } else { "B" },
         "timed_reference_merge: emit reference timed lines"
     );
-
-    // yt_subs path: re-break long lines via Claude + whisperx boundaries.
-    let is_yt_subs = candidate.source == "yt_subs" || candidate.source.starts_with("tier1:yt_subs");
-    if let (true, Some(ai), Some(asr_track)) = (is_yt_subs, ai_client, asr) {
-        let asr_words: Vec<AlignedWord> = asr_track
-            .lines
-            .iter()
-            .filter_map(|l| l.words.as_ref())
-            .flatten()
-            .cloned()
-            .collect();
-        // Cluster caption-window adjacent yt_subs lines (gap == 0) so
-        // each cluster represents a real sung phrase — not a YouTube
-        // caption fragment. Real phrase pauses (gap > 0) stay split.
-        let clustered = cluster_caption_windows(&aligned_lines);
-        let mut output: Vec<AlignedLine> = Vec::with_capacity(clustered.len());
-        for line in &clustered {
-            let split = split_long_line_with_anchors(
-                ai,
-                &line.text,
-                line.start_ms,
-                line.end_ms,
-                &asr_words,
-            )
-            .await;
-            output.extend(split);
-        }
-        return Ok(AlignedTrack {
-            lines: output,
-            provenance: format!("{}+timed-merge", candidate.source),
-            raw_confidence: asr_track.raw_confidence,
-        });
-    }
 
     let pre_split = AlignedTrack {
         lines: aligned_lines,

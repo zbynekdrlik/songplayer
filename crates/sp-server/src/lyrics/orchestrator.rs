@@ -102,16 +102,71 @@ impl Orchestrator {
         // Step 2: Branch on Tier-1 outcome.
         match tier1_result {
             Tier1Result::LineSynced(aligned_lines) => {
-                // Tier-1 short-circuit: authoritative line-synced reference.
-                // Route through timed_reference_merge::process in Mode B
-                // (asr = None) so the same sanitize/phantom-filter/cap pass
-                // applies. Provenance: `{source}+timed-merge`.
+                // yt_subs has authoritative line text but YouTube auto-caption
+                // line breaks split mid-phrase. The description+whisperx
+                // pipeline (text_reference_merge) already solves chorus
+                // repeats (Phase 2 + 2.8 sliding-window LCS), Claude line
+                // mapping (Phase 1 — far stronger than forward-greedy LCS),
+                // mishearing absorbs (2.6/2.65/2.7), karaoke split (Phase 3
+                // Claude + 4 emit_with_subs), and cap+monotonic (Phase 5).
+                // Route yt_subs through that same pipeline by clustering
+                // caption-window adjacent lines into phrases and treating
+                // them as a text candidate (yt_subs internal timing is
+                // discarded; whisperx provides word-level boundaries).
                 //
-                // Exception: yt_subs lines are split mid-phrase by YouTube's
-                // caption-display window. timed_reference_merge re-breaks
-                // them via Claude + whisperx word boundaries, which requires
-                // ASR. Run whisperx and pass it (Mode A) for yt_subs only;
-                // spotify / lrclib still short-circuit without ASR.
+                // spotify / lrclib still short-circuit through
+                // timed_reference_merge Mode B — their line breaks already
+                // match phrase boundaries.
+                let is_yt_subs = aligned_lines.provenance == "yt_subs"
+                    || aligned_lines.provenance.starts_with("tier1:yt_subs");
+                if is_yt_subs {
+                    info!(
+                        provenance = %aligned_lines.provenance,
+                        lines = aligned_lines.lines.len(),
+                        "orchestrator: Tier-1 yt_subs LineSynced → cluster caption windows + text_reference_merge"
+                    );
+                    let wav = input.vocal_wav.ok_or_else(|| {
+                        OrchestratorError::NoAlignment(
+                            "yt_subs LineSynced path requires a vocal WAV (text_reference_merge \
+                             needs whisperx) but none was available"
+                                .into(),
+                        )
+                    })?;
+                    let asr = self
+                        .backend
+                        .align(wav, input.language, &AlignOpts::default())
+                        .await?;
+                    crate::lyrics::audit_ctx::write_whisperx_track(input.audit.as_ref(), &asr)
+                        .await;
+                    let clustered =
+                        crate::lyrics::yt_subs_split::cluster_caption_windows(&aligned_lines.lines);
+                    let candidate = crate::lyrics::tier1::CandidateText {
+                        source: "yt_subs".into(),
+                        lines: clustered.iter().map(|l| l.text.clone()).collect(),
+                        line_timings: None,
+                        has_timing: false,
+                    };
+                    return match text_reference_merge::process(
+                        &self.ai_client,
+                        &asr,
+                        &candidate,
+                        input.audit.as_ref(),
+                    )
+                    .await
+                    {
+                        Ok(merged) => Ok(merged),
+                        Err(e) => {
+                            tracing::warn!(
+                                provenance = %asr.provenance,
+                                error = %e,
+                                "orchestrator: text_reference_merge failed on yt_subs — falling back to raw WhisperX with line split"
+                            );
+                            Ok(split_track(&asr, self.split_cfg))
+                        }
+                    };
+                }
+
+                // spotify / lrclib short-circuit (no ASR needed).
                 info!(
                     provenance = %aligned_lines.provenance,
                     lines = aligned_lines.lines.len(),
@@ -124,45 +179,9 @@ impl Orchestrator {
                     .and_then(|t| t.last())
                     .map(|(_, e)| (*e) as u32)
                     .unwrap_or(0);
-                let needs_resplit =
-                    candidate.source == "yt_subs" || candidate.source.starts_with("tier1:yt_subs");
-                let asr_for_yt_subs: Option<AlignedTrack> = if needs_resplit {
-                    if let Some(wav) = input.vocal_wav {
-                        match self
-                            .backend
-                            .align(wav, input.language, &AlignOpts::default())
-                            .await
-                        {
-                            Ok(a) => {
-                                crate::lyrics::audit_ctx::write_whisperx_track(
-                                    input.audit.as_ref(),
-                                    &a,
-                                )
-                                .await;
-                                Some(a)
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    %e,
-                                    "orchestrator: yt_subs whisperx align failed; shipping unsplit yt_subs"
-                                );
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                let ai_arg = if needs_resplit && asr_for_yt_subs.is_some() {
-                    Some(self.ai_client.as_ref())
-                } else {
-                    None
-                };
                 match timed_reference_merge::process(
-                    ai_arg,
-                    asr_for_yt_subs.as_ref(),
+                    None,
+                    None,
                     &candidate,
                     song_duration_ms,
                     input.audit.as_ref(),
