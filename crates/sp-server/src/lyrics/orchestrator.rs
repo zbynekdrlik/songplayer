@@ -130,7 +130,7 @@ impl Orchestrator {
                     info!(
                         provenance = %aligned_lines.provenance,
                         lines = aligned_lines.lines.len(),
-                        "orchestrator: Tier-1 yt_subs LineSynced → cluster + Claude split + whisperx anchors with proportional fallback"
+                        "orchestrator: Tier-1 yt_subs LineSynced → per-caption-window Claude split + whisperx anchors with proportional fallback"
                     );
                     let wav_opt = input.vocal_wav;
                     let asr_opt: Option<AlignedTrack> = if let Some(wav) = wav_opt {
@@ -169,16 +169,20 @@ impl Orchestrator {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let clustered =
-                        crate::lyrics::yt_subs_split::cluster_caption_windows(&aligned_lines.lines);
+                    // Process EACH yt_subs caption window individually.
+                    // yt_subs's per-line start_ms / end_ms are authoritative
+                    // and must NOT be merged with neighbors. Long lines
+                    // (>32c) get Claude-split with sub[0] anchored at
+                    // yt_subs.start, sub[N-1] at yt_subs.end, internal
+                    // sub boundaries from whisperx (proportional fallback).
                     let mut output: Vec<crate::lyrics::backend::AlignedLine> =
-                        Vec::with_capacity(clustered.len());
-                    for cluster in &clustered {
+                        Vec::with_capacity(aligned_lines.lines.len());
+                    for line in &aligned_lines.lines {
                         let split = crate::lyrics::yt_subs_split::split_cluster(
                             &self.ai_client,
-                            &cluster.text,
-                            cluster.start_ms,
-                            cluster.end_ms,
+                            &line.text,
+                            line.start_ms,
+                            line.end_ms,
                             &asr_words,
                         )
                         .await;

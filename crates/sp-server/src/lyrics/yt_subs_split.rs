@@ -1,31 +1,18 @@
-//! yt_subs anchored Claude split with whisperx internal anchors and
+//! Per-yt_subs-line Claude split with whisperx internal anchors and
 //! proportional fallback.
 //!
-//! YouTube auto-subs ship line-level timing that is generally accurate;
-//! the line BREAKS reflect the caption-display window so they split
-//! mid-phrase ("Thank You for / today That You have made"). For
-//! karaoke-quality wall display long yt_subs lines are re-broken at
-//! natural phrase boundaries via Claude. yt_subs is the AUTHORITY for
-//! what is sung; whisperx is consulted only to refine internal sub-line
-//! timing where its words match the sub text.
+//! Each yt_subs caption window has its own start_ms and end_ms — those
+//! are AUTHORITATIVE per the user's spec. We process each yt_subs line
+//! individually (no clustering across windows). Long lines (>32c) get
+//! Claude-split into karaoke phrases; the first sub anchors at
+//! line.start_ms, the last sub ends at line.end_ms, and internal sub
+//! boundaries come from whisperx where its words match the sub text
+//! (bounded LCS) or are interpolated proportionally by character count
+//! when whisperx missed/mistranscribed.
 //!
-//! Algorithm per yt_subs phrase cluster (post `cluster_caption_windows`):
-//!
-//! 1. If text fits the 32-char karaoke cap → emit as-is with yt_subs
-//!    timing.
-//! 2. Else, Claude-split into N sub-lines (`claude_split_lines` +
-//!    deterministic fallback).
-//! 3. For each sub, BOUNDED-LCS its words against the next 10 whisperx
-//!    words after the previous sub's last match. Bounded lookahead
-//!    prevents the matcher from jumping far ahead when a stray ref
-//!    word ("so") happens to reappear later in whisperx.
-//! 4. Anchor subs that found whisperx matches at the matched start
-//!    time. For subs where bounded LCS found no match (whisperx missed
-//!    those words OR mistranscribed them), interpolate the start time
-//!    PROPORTIONALLY between the surrounding anchored subs by character
-//!    count. yt_subs sub texts always ship — never dropped.
-//! 5. yt_subs anchors win at the first sub's start (cluster.start_ms)
-//!    and the last sub's end (cluster.end_ms).
+//! yt_subs is the AUTHORITY for what is sung; whisperx is consulted
+//! only for refining internal sub-line boundaries within a single
+//! yt_subs caption window.
 
 use crate::ai::client::AiClient;
 use crate::lyrics::backend::{AlignedLine, AlignedWord};
@@ -37,32 +24,10 @@ use tracing::warn;
 
 /// Bounded LCS lookahead per sub. Larger → matcher can find legitimate
 /// matches that drift; smaller → blocks ref-word reappearance from
-/// pulling search_from far ahead. id=232 cluster 2: "so" reappeared
-/// 23 positions later in whisperx after "For God"; with bound=10 the
-/// matcher stops before reaching it and search_from stays correct.
+/// pulling search_from far ahead.
 const LCS_BOUND_WORDS: usize = 10;
 
-/// Cluster YouTube caption-window adjacent yt_subs lines back into
-/// real phrases. Adjacent (gap == 0 or overlapping) lines merge;
-/// non-adjacent (gap > 0 = real phrase pause) stay split. Whitespace
-/// is normalized to single spaces.
-pub(crate) fn cluster_caption_windows(lines: &[AlignedLine]) -> Vec<AlignedLine> {
-    let mut out: Vec<AlignedLine> = Vec::with_capacity(lines.len());
-    for line in lines {
-        if let Some(last) = out.last_mut() {
-            if last.end_ms >= line.start_ms {
-                let merged = format!("{} {}", last.text.trim(), line.text.trim());
-                last.text = merged.split_whitespace().collect::<Vec<_>>().join(" ");
-                last.end_ms = line.end_ms;
-                continue;
-            }
-        }
-        out.push(line.clone());
-    }
-    out
-}
-
-/// Re-break a single yt_subs phrase cluster using Claude phrasing,
+/// Re-break a single yt_subs caption window using Claude phrasing,
 /// bounded whisperx LCS for internal anchors, and proportional
 /// interpolation for subs whisperx missed.
 pub(crate) async fn split_cluster(
