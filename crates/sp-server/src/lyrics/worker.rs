@@ -277,21 +277,15 @@ impl LyricsWorker {
         &self,
         row: &crate::db::models::VideoLyricsRow,
     ) -> Result<crate::lyrics::provider::SongContext> {
-        // Read the Genius token fresh on every song so operators can add
-        // the setting without restarting the server. Empty string disables
-        // the Genius source entirely.
-        let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
+        // The community lyrics tier moved from Genius HTML scrape (broken
+        // parser truncated multi-section pages) to lyrics.ovh's plain-text
+        // API, which needs no auth. No setting lookup required.
         gather_sources_impl(
             self.ai_client.as_deref(),
             &self.ytdlp_path,
             &self.cache_dir,
             &self.client,
             row,
-            &genius_token,
         )
         .await
     }

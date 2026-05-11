@@ -10,7 +10,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-use crate::lyrics::{genius, lrclib, spotify_proxy::SpotifyLyricsFetcher, youtube_subs};
+use crate::lyrics::{lrclib, lyrics_ovh, spotify_proxy::SpotifyLyricsFetcher, youtube_subs};
 
 /// Returns `true` if any line in the lrclib track has a non-zero `end_ms`,
 /// indicating synced (timestamped) lyrics. `lrclib.rs::parse_plain` emits
@@ -36,7 +36,6 @@ pub(crate) async fn gather_sources_impl(
     cache_dir: &std::path::Path,
     client: &reqwest::Client,
     row: &crate::db::models::VideoLyricsRow,
-    genius_access_token: &str,
 ) -> Result<crate::lyrics::provider::SongContext> {
     use crate::lyrics::provider::{CandidateText, SongContext};
 
@@ -84,16 +83,20 @@ pub(crate) async fn gather_sources_impl(
         None
     };
 
-    // 2a. Genius (documented API + public lyric-page scrape). No timing.
-    let genius_track = if !row.song.is_empty() && !row.artist.is_empty() {
-        match genius::fetch_lyrics(client, genius_access_token, &row.artist, &row.song).await {
-            Ok(Some(t)) => {
-                info!(%youtube_id, line_count = t.lines.len(), "gather: Genius hit");
-                Some(t)
+    // 2a. lyrics.ovh (community lyrics API, no auth, returns plain text).
+    // Replaces the prior Genius HTML scraper that truncated multi-container
+    // pages (Verse 1 + Verse 2 dropped on planetboom Saints, observed
+    // 2026-05-11). lyrics.ovh returns clean text with section markers already
+    // stripped, so no Claude cleanup is required.
+    let lyrics_ovh_lines = if !row.song.is_empty() && !row.artist.is_empty() {
+        match lyrics_ovh::fetch_lyrics(client, &row.artist, &row.song).await {
+            Ok(Some(lines)) => {
+                info!(%youtube_id, line_count = lines.len(), "gather: lyrics.ovh hit");
+                Some(lines)
             }
             Ok(None) => None,
             Err(e) => {
-                warn!("gather: Genius error for {youtube_id}: {e}");
+                warn!("gather: lyrics.ovh error for {youtube_id}: {e}");
                 None
             }
         }
@@ -232,52 +235,19 @@ pub(crate) async fn gather_sources_impl(
             }
         }
     }
-    if let Some(t) = &genius_track {
-        let Some(ai) = ai_client else {
-            anyhow::bail!(
-                "gather: genius candidate present but ai_client is None for {youtube_id}; \
-                 cannot run Claude cleanup"
-            );
-        };
-        let raw_blob: String = t
-            .lines
-            .iter()
-            .map(|l| l.en.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        // _v2 cache filename invalidates pre-2026-05-11 caches written under
-        // the description-prompt. Per id=233 Saints production wall-verify, the
-        // description prompt returned genius input verbatim (no dedup / no
-        // ad-lib strip). Forcing a new cache filename re-runs Claude under the
-        // ScrapedLyrics prompt for every reprocess.
-        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v2.json"));
-        match crate::lyrics::description_provider::clean_lyrics_via_claude(
-            ai,
-            &row.song,
-            &row.artist,
-            &raw_blob,
-            &cache_path,
-            crate::lyrics::description_provider::CleanupMode::ScrapedLyrics,
-        )
-        .await
-        {
-            Ok(Some(cleaned)) if !cleaned.is_empty() => {
-                info!(
-                    %youtube_id,
-                    raw_count = t.lines.len(),
-                    cleaned_count = cleaned.len(),
-                    "gather: genius Claude cleanup complete"
-                );
-                candidate_texts.push(CandidateText {
-                    source: "genius".into(),
-                    lines: cleaned,
-                    has_timing: false,
-                    line_timings: None,
-                });
-            }
-            Ok(_) => anyhow::bail!("gather: genius cleanup returned no lyrics for {youtube_id}"),
-            Err(e) => anyhow::bail!("gather: genius cleanup failed for {youtube_id}: {e}"),
-        }
+    // lyrics.ovh returns clean plain-text lyrics — no section markers, no
+    // contributor banners, no HTML. Push directly as a TextOnly candidate;
+    // no Claude cleanup pass needed (unlike the deprecated Genius scrape).
+    // Source label stays "genius" so `priority_with_timing` keeps the same
+    // ranking slot for this tier (community-curated lyrics-website tier).
+    // The label is historical; the underlying fetcher is `lyrics_ovh.rs`.
+    if let Some(lines) = lyrics_ovh_lines {
+        candidate_texts.push(CandidateText {
+            source: "genius".into(),
+            lines,
+            has_timing: false,
+            line_timings: None,
+        });
     }
 
     // 4. YouTube description lyrics (LLM-extracted). Best-effort.

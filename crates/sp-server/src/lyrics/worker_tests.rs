@@ -256,7 +256,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         cache_dir.path(),
         &reqwest_client,
         &row,
-        "", // no genius token in tests — skip Genius source
     )
     .await
     .unwrap();
@@ -352,7 +351,6 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         cache_dir.path(),
         &reqwest_client,
         &row,
-        "", // no genius token in tests — skip Genius source
     )
     .await;
 
@@ -450,7 +448,6 @@ async fn gather_emits_tier1_spotify_candidate_when_track_id_set() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds with Spotify candidate");
@@ -500,7 +497,6 @@ async fn gather_omits_spotify_when_track_id_is_null() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds via override candidate");
@@ -549,7 +545,6 @@ async fn gather_skips_spotify_on_404() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds when Spotify returns 404");
@@ -607,7 +602,6 @@ async fn gather_skips_spotify_on_proxy_error_field() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds when proxy returns error:true");
@@ -679,53 +673,58 @@ fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
     );
 }
 
-/// Structural regression: the genius branch in `gather.rs` MUST route through
-/// `crate::lyrics::description_provider::clean_lyrics_via_claude` with
-/// `CleanupMode::ScrapedLyrics`, and emit `{youtube_id}_genius_cleaned_v2.json`
-/// as the cache filename (the `_v2` suffix invalidates pre-2026-05-11 caches
-/// written under the description-prompt). Mocking genius's HTTP is impractical
-/// (api.genius.com is a hardcoded const), so this test reads the source file
-/// and asserts on the wiring strings. Matches the pattern of
-/// `gather_sources_call_order_preserves_yt_subs_then_lrclib` already in this
-/// file.
+/// Structural regression: the "genius" tier in `gather.rs` MUST call the
+/// `lyrics_ovh` provider (clean plain-text endpoint, no HTML scraping) and
+/// push directly as a CandidateText with `source: "genius"` (label retained
+/// for `priority_with_timing` compat). The prior Genius HTML scraper was
+/// removed because it truncated multi-container lyric pages — `[Verse 1]`
+/// and `[Verse 2]` were dropped, leaving only `[Bridge]` + outro `[Chorus]`,
+/// and `text_reference_merge` then mis-aligned that partial reference
+/// against full-song WhisperX (planetboom Saints, 2026-05-11).
+///
+/// The lrclib-plain branch still routes through `clean_lyrics_via_claude`
+/// with `CleanupMode::ScrapedLyrics` because LRCLIB plain-text mode can
+/// include section markers that need filtering.
 #[test]
-fn gather_genius_branch_uses_clean_lyrics_via_claude() {
+fn gather_lyrics_ovh_replaces_genius_html_scrape() {
     let src = include_str!("gather.rs");
 
-    // The genius branch must call the shared helper.
+    // genius HTML scraper must be gone from this file's imports.
+    assert!(
+        !src.contains(" genius,"),
+        "gather.rs must NOT import `genius` (HTML scraper deleted)"
+    );
+    assert!(
+        !src.contains("genius::fetch_lyrics"),
+        "gather.rs must NOT call genius::fetch_lyrics (deleted)"
+    );
+    // lyrics_ovh provider must be imported + called.
+    assert!(
+        src.contains("lyrics_ovh"),
+        "gather.rs must reference the lyrics_ovh provider"
+    );
+    assert!(
+        src.contains("lyrics_ovh::fetch_lyrics"),
+        "gather.rs must call lyrics_ovh::fetch_lyrics for the community-lyrics tier"
+    );
+    // Source label "genius" retained for priority_with_timing compat.
+    assert!(
+        src.contains("source: \"genius\""),
+        "lyrics.ovh candidate must keep source: \"genius\" for priority_with_timing compat"
+    );
+
+    // The lrclib-plain branch still uses the shared cleanup helper.
     assert!(
         src.contains("description_provider::clean_lyrics_via_claude"),
-        "gather.rs must call description_provider::clean_lyrics_via_claude in the genius/lrclib branches"
+        "gather.rs must call description_provider::clean_lyrics_via_claude in the lrclib-plain branch"
     );
-    // The genius cache file MUST be named `{youtube_id}_genius_cleaned_v2.json`.
-    assert!(
-        src.contains("_genius_cleaned_v2.json"),
-        "gather.rs must write the genius cleanup cache to {{youtube_id}}_genius_cleaned_v2.json"
-    );
-    // The lrclib cache file MUST be named `{youtube_id}_lrclib_cleaned_v2.json`.
     assert!(
         src.contains("_lrclib_cleaned_v2.json"),
         "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v2.json"
     );
-    // Both branches MUST pass CleanupMode::ScrapedLyrics (description prompt
-    // returned genius input verbatim in production; ScrapedLyrics prompt has
-    // the dedup / ad-lib / hype-intro rules).
     assert!(
         src.contains("CleanupMode::ScrapedLyrics"),
-        "gather.rs genius+lrclib-plain branches must pass CleanupMode::ScrapedLyrics, not Description"
-    );
-    assert!(
-        !src.contains("CleanupMode::Description"),
-        "gather.rs must NOT pass CleanupMode::Description (description path uses the helper internally via fetch_description_lyrics, not from gather.rs directly)"
-    );
-    // Failure mode: bail on Err or null. Verify the error message strings.
-    assert!(
-        src.contains("genius cleanup returned no lyrics"),
-        "gather.rs must bail with 'genius cleanup returned no lyrics' on Ok(None)/empty"
-    );
-    assert!(
-        src.contains("genius cleanup failed"),
-        "gather.rs must bail with 'genius cleanup failed' on Err"
+        "gather.rs lrclib-plain branch must pass CleanupMode::ScrapedLyrics"
     );
     assert!(
         src.contains("lrclib-plain cleanup returned no lyrics"),
@@ -746,8 +745,6 @@ fn gather_genius_branch_uses_clean_lyrics_via_claude() {
         "gather.rs lrclib branch must split via `if real_timing {{` so synced bypasses Claude cleanup"
     );
     // Synced-lrclib arm: must preserve `has_timing: true` inside the synced block.
-    // (One of two `has_timing: true` occurrences in the file; the other is yt_subs.
-    //  String alone isn't enough — assert it appears AFTER `if real_timing {`.)
     let (_, after_if) = src
         .split_once("if real_timing {")
         .expect("split_once on `if real_timing {` should succeed (validated above)");
