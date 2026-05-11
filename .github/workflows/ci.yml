@@ -538,6 +538,12 @@ jobs:
           # text_reference_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
           #   `if clusters_dropped > 0` gates an info!() log only. Function
           #   return value is the same regardless.
+          # Enumerate this shard's mutants FIRST so debugging is possible
+          # even when the runner SIGTERMs mid-run (the upload-artifact step
+          # gets skipped on cancellation). Survives in the live log.
+          echo "=== shard ${{ matrix.shard }} mutant list ==="
+          cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --list 2>&1 || true
+          echo "=== end shard ${{ matrix.shard }} mutant list ==="
           cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
             --exclude-re 'sp-server/src/lib.rs' \
             --exclude-re 'sp-server/src/obs/' \
