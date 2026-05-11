@@ -480,20 +480,27 @@ mod tests {
     }
 
     /// Verifies the depth counter handles MULTIPLE sibling nested divs (e.g.
-    /// header div + an annotation div) before the real lyric content.
+    /// header div + an annotation div) before the real lyric content. Real
+    /// Genius pages separate nested header / annotation content from the
+    /// lyric body with `<br/>` tags inside the outer container — replicate
+    /// that shape so `strip_html_preserving_breaks` produces clean lines.
     #[test]
     fn extract_handles_multiple_sibling_nested_divs() {
         let html = r#"
-        <div data-lyrics-container="true"><div>A</div><div>B</div><div class="annotation"><div>nested</div>note</div>Real line one<br/>Real line two</div>
+        <div data-lyrics-container="true"><div>A</div><div>B</div><div class="annotation"><div>nested</div>note</div><br/>Real line one<br/>Real line two</div>
         "#;
         let track = extract_lyrics_from_html(html).expect("found lyrics");
         let lines: Vec<&str> = track.lines.iter().map(|l| l.en.as_str()).collect();
-        // Sibling-nested divs may contain stray text ("A", "B", "note") which
-        // appears in scrape output BEFORE the real lyrics. The key assertion
-        // is that the REAL lyric lines (after all nested divs) are captured.
+        // The real lyric lines AFTER all nested-div content must be captured
+        // verbatim — proving the depth counter walked past every nested
+        // close before declaring the outer container closed.
         assert!(
-            lines.contains(&"Real line one") && lines.contains(&"Real line two"),
-            "real lyric lines must survive the nested-div sweep: {lines:?}"
+            lines.contains(&"Real line one"),
+            "depth counter must reach 'Real line one' (got: {lines:?})"
+        );
+        assert!(
+            lines.contains(&"Real line two"),
+            "depth counter must reach 'Real line two' (got: {lines:?})"
         );
     }
 
