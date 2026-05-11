@@ -1,13 +1,9 @@
-//! Description / override merge pipeline (issue #78). Phases:
-//! 1 Claude line-mapping (NW DP fallback), 2 chorus repeat via sliding-
-//! window LCS, 2.5 trim outliers, 2.7 absorb sustained-note tokens,
-//! 3 Claude split >32c, 4 emit AlignedLine, 5 cap + monotonic + extend.
-//! `words: None` (feedback_line_timing_only). Provenance prefix from
-//! source candidate, no `+claude-merge` suffix.
+//! Text-reference merge pipeline (#78 + 2026-05-07 unification).
+//! Phases: 1 Claude line-map (NW DP fallback), 2 chorus repeat via
+//! sliding-window LCS, 2.5 trim outliers, 2.6 prefix absorb,
+//! 2.7 sustained absorb, 2.8 second chorus pass, 3 Claude split >32c,
+//! 4 emit AlignedLine, 5 cap + monotonic. words: None.
 
-// Algorithm uses several index-based scans (LCS DP, gap detection, char-index
-// split-point search) where the iter-chain rewrite obscures intent or pulls
-// awkward zip(enumerate(...)) patterns. Allow indexed loops for this module.
 #![allow(clippy::needless_range_loop)]
 
 use std::collections::HashMap;
@@ -20,49 +16,41 @@ use crate::lyrics::backend::{AlignedLine, AlignedTrack};
 use crate::lyrics::claude_merge::{MergeError, drop_hallucinated_lead_in};
 use crate::lyrics::tier1::CandidateText;
 
-#[path = "description_merge_mapping.rs"]
-mod mapping;
-
-#[path = "description_merge_audit.rs"]
+#[path = "text_reference_merge_absorb.rs"]
+mod absorb;
+#[path = "text_reference_merge_added.rs"]
+mod added;
+#[path = "text_reference_merge_audit.rs"]
 mod audit;
-
-#[path = "description_merge_window.rs"]
+#[path = "text_reference_merge_mapping.rs"]
+mod mapping;
+#[path = "text_reference_merge_phantom.rs"]
+mod phantom;
+#[path = "text_reference_merge_trim.rs"]
+mod trim;
+#[path = "text_reference_merge_window.rs"]
 mod window;
 
-#[path = "description_merge_absorb.rs"]
-mod absorb;
-
-#[path = "description_merge_phantom.rs"]
-mod phantom;
-
-/// Hard upper bound for sub-line EN length. LED wall renders this many
-/// chars per row; longer lines overflow into adjacent UI panels.
+/// LED wall char/row cap; longer lines overflow.
 pub const SUBLINE_MAX_CHARS: usize = 32;
-
-/// Cap on a line's display duration; without it instrumental gaps
-/// would stretch the prior line forever. Beyond this, wall goes blank.
+/// Cap on a line's display duration; longer = wall goes blank.
 pub const LONG_LINE_CAP_MS: u32 = 8000;
-
+/// Phase 2 chorus-matcher window cap (wider than LONG_LINE_CAP_MS so
+/// slow choruses with sustained notes fit; Phase 5 still clips display).
+pub(crate) const CHORUS_REPEAT_WINDOW_CAP_MS: u32 = 30000;
 /// Gap between matched lines that triggers chorus-repeat detection.
-/// Below: trust LCS silence. Above: look for a ref line to fill it.
 const CHORUS_REPEAT_GAP_MS: u32 = 4000;
-
 /// Min word match ratio (matched/ref) for chorus re-emit.
 const CHORUS_REPEAT_MIN_MATCH_RATIO: f32 = 0.6;
-
 /// Min ASR words matched. Floors ratio so a 2-word ref needs 2 hits.
 const CHORUS_REPEAT_MIN_MATCHED_WORDS: usize = 2;
-
 /// Min display duration; below this collapses to invisible flashes.
 const MIN_LINE_DURATION_MS: u32 = 500;
-
-/// Phase 5 extension. Gap ≤ REASONABLE_GAP_MS → fill to next.start
-/// (whisperx undertimes last word). Otherwise cap at natural_end +
-/// EXTENSION_TOLERANCE_MS (instrumental silence).
+/// Phase 5 extension constants.
 const EXTENSION_TOLERANCE_MS: u32 = 1500;
 const REASONABLE_GAP_MS: u32 = 4000;
 
-/// One ref-line emission + matched ASR word indices (Phase 1 or 2 re-emit).
+/// One ref-line emission + matched ASR word indices.
 #[derive(Clone, Debug)]
 struct LineEmit {
     text: String,
@@ -71,15 +59,15 @@ struct LineEmit {
 }
 
 #[derive(Clone, Debug)]
-struct AsrWord {
-    norm: String,
-    start_ms: u32,
-    end_ms: u32,
-    confidence: f32,
+pub(crate) struct AsrWord {
+    pub(crate) norm: String,
+    pub(crate) start_ms: u32,
+    pub(crate) end_ms: u32,
+    pub(crate) confidence: f32,
 }
 
-/// Public entry: full description/override pipeline. Output: words=None,
-/// EN ≤32c, line ≤8s, chorus repeats re-emitted.
+/// Public entry: full pipeline. Output: words=None, EN ≤32c, line ≤8s.
+#[cfg_attr(test, mutants::skip)] // Async pipeline orchestration across Phases 1/1.5/2/2.5/2.6/2.65/2.7/2.8/3/4/5; each phase is unit-tested individually. Mutants on the wiring (early-return guards, conditional branch on added_ref_lines, slot-index calc) are end-to-end-tested via reprocess on id=21/132/232.
 pub async fn process(
     ai_client: &AiClient,
     asr: &AlignedTrack,
@@ -100,35 +88,86 @@ pub async fn process(
     let mut audit_state =
         audit::AuditState::new(ref_lines, &asr_words, &candidate.source, &asr.provenance);
 
-    // Phase 1: Claude line-mapping (primary) with NW DP fallback. Claude
-    // reads phrasing semantically; the deterministic DP is a guaranteed-correct
-    // floor on parse / network / refusal failure. See description_merge_mapping.
-    let (mut emits, phase1_provider) =
-        match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await {
-            Ok(map) => {
-                info!(
-                    ref_lines = ref_lines.len(),
-                    asr_words = asr_words.len(),
-                    "description_merge: claude line-mapping succeeded"
-                );
-                (mapping::emits_from_mapping(&map, ref_lines), "claude")
-            }
-            Err(e) => {
-                warn!(
-                    %e,
-                    ref_lines = ref_lines.len(),
-                    asr_words = asr_words.len(),
-                    "description_merge: claude line-mapping failed; falling back to NW DP"
-                );
-                (match_ref_to_asr(ref_lines, &asr_words), "nw_dp")
-            }
-        };
+    // Phase 1: Claude line-mapping with NW DP fallback. Claude also
+    // returns added_ref_lines for missing-section gaps (≥5s unmatched
+    // runs); these are aligned in Phase 1.5 against an expanded ref list.
+    let (mut emits, phase1_provider, expanded_ref_lines, added_ref_lines): (
+        Vec<LineEmit>,
+        &str,
+        Vec<String>,
+        Vec<mapping::AddedRefLine>,
+    ) = match mapping::claude_map_words_to_lines(ai_client, ref_lines, &asr_words).await {
+        Ok(result) => {
+            info!(
+                ref_lines = ref_lines.len(),
+                asr_words = asr_words.len(),
+                added_ref_lines = result.added.len(),
+                "text_reference_merge: claude line-mapping succeeded"
+            );
+            let (expanded, orig_to_expanded) = expand_ref_lines(ref_lines, &result.added);
+            let remapped = remap_mapping(&result.mapping, &orig_to_expanded);
+            (
+                mapping::emits_from_mapping(&remapped, &expanded),
+                "claude",
+                expanded,
+                result.added,
+            )
+        }
+        Err(e) => {
+            warn!(
+                %e,
+                ref_lines = ref_lines.len(),
+                asr_words = asr_words.len(),
+                "text_reference_merge: claude line-mapping failed; falling back to NW DP"
+            );
+            (
+                match_ref_to_asr(ref_lines, &asr_words),
+                "nw_dp",
+                ref_lines.to_vec(),
+                Vec::new(),
+            )
+        }
+    };
     audit_state.record_phase1(phase1_provider, &emits, &asr_words);
+    audit_state.record_phase1_added_ref_lines(&added_ref_lines);
+
+    // Phase 1.5: align added ref lines against unmatched ASR windows.
+    if !added_ref_lines.is_empty() {
+        let (_, orig_to_expanded) = expand_ref_lines(ref_lines, &added_ref_lines);
+        let added_expanded_indices: Vec<usize> = {
+            let mut counts: std::collections::HashMap<usize, usize> = Default::default();
+            added_ref_lines
+                .iter()
+                .map(|a| {
+                    let base = orig_to_expanded[a.after_line];
+                    let k = *counts.get(&a.after_line).unwrap_or(&0);
+                    counts.insert(a.after_line, k + 1);
+                    base + 1 + k
+                })
+                .collect()
+        };
+        let added_emits = added::align_added_lines(
+            &expanded_ref_lines,
+            &added_ref_lines,
+            &added_expanded_indices,
+            &orig_to_expanded,
+            &asr_words,
+            &emits,
+        );
+        info!(
+            count = added_emits.len(),
+            "text_reference_merge: phase 1.5 added-line emits"
+        );
+        emits.extend(added_emits);
+    }
+
+    // From here on, `ref_lines` refers to the expanded reference list.
+    let ref_lines: &[String] = &expanded_ref_lines;
 
     // Phase 2: chorus repeat re-emit for long unmatched gaps.
     let extras = detect_chorus_repeats(ref_lines, &asr_words, &emits);
     if !extras.is_empty() {
-        info!(count = extras.len(), "description_merge: chorus repeats");
+        info!(count = extras.len(), "text_reference_merge: chorus repeats");
     }
     emits.extend(extras);
     emits.sort_by_key(|e| match e.asr_word_indices.first() {
@@ -136,15 +175,36 @@ pub async fn process(
         None => u32::MAX,
     });
 
-    // Phase 2.5: trim trailing-outlier matched indices on every emit so its
-    // derived audio span ≤ LONG_LINE_CAP_MS. See `trim_outlier_indices`.
+    // Phase 2.5: trim trailing-outlier matched indices ≤ LONG_LINE_CAP_MS.
     for e in emits.iter_mut() {
         trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
     }
 
-    // Phase 2.6: prefix-absorption — attach unconsumed prefix words that
-    // Phase 2's window cap missed (id=132 3:07).
+    // Phase 2.8: second chorus-repeat pass on Phase 2.5-trimmed indices.
+    // Recovers the chorus-repeat tail Claude wrongly attached to the
+    // first-instance ref line (id=21 4:02).
+    let extras2 = detect_chorus_repeats(ref_lines, &asr_words, &emits);
+    if !extras2.is_empty() {
+        info!(
+            count = extras2.len(),
+            "text_reference_merge: chorus repeats (post-trim)"
+        );
+        emits.extend(extras2);
+        emits.sort_by_key(|e| match e.asr_word_indices.first() {
+            Some(&i) => asr_words[i].start_ms,
+            None => u32::MAX,
+        });
+        for e in emits.iter_mut() {
+            trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
+        }
+    }
+
+    // Phase 2.6: prefix-absorb unconsumed prefix words (id=132 3:07).
     absorb::absorb_prefix_matches(&mut emits, &asr_words);
+
+    // Phase 2.65: claim leading unmatched ASR words for misheard
+    // line-start (id=21 2:12 "shadow"→"shed on").
+    absorb::absorb_leading_unmatched(&mut emits, &asr_words);
 
     // Phase 2.7: sustained-note absorption — same-text boundary tokens
     // stay with prev line so wall doesn't switch mid-sustained-note.
@@ -169,7 +229,7 @@ pub async fn process(
                 warn!(
                     %e,
                     count = needs_split.len(),
-                    "description_merge: claude split failed, falling back to deterministic word-boundary split"
+                    "text_reference_merge: claude split failed, falling back to deterministic word-boundary split"
                 );
                 deterministic_split_lines(&needs_split)
             }
@@ -227,47 +287,11 @@ fn flatten_asr(asr: &AlignedTrack) -> Vec<AsrWord> {
     out
 }
 
-/// Match reference lines to ASR audio words via global Needleman-Wunsch
-/// alignment with line-aware grouping. Single principled algorithm — every
-/// ref line uses the same DP, no per-line tweaks, no greedy windowing.
-///
-/// State: `dp[i][j]` = best alignment score after consuming `i` reference
-/// words (across all lines, in order) and `j` audio words. Transitions:
-///
-/// - **Match**: `ref[i-1] == asr[j-1]` → `dp[i-1][j-1] + MATCH_BONUS`.
-/// - **Skip ASR**: audio word is filler/mishearing/silence → `dp[i][j-1] +
-///   SKIP_ASR_PENALTY`. Cheap so the algorithm freely emits silences /
-///   instrumental passages between sung phrases.
-/// - **Skip ref**: reference word missing in audio (singer drops a word) →
-///   `dp[i-1][j] + SKIP_REF_PENALTY`. Expensive so we don't drop content.
-///
-/// Leading-edge boundary: `dp[0][j] = 0` lets the song open with arbitrary
-/// silence/intro before the first ref word at zero cost. `dp[i][0]` decays
-/// linearly so ref words can't be "matched" at audio_idx=0 for free.
-///
-/// After the DP forward pass, traceback collects each MATCH transition as a
-/// `(ref_word_idx, asr_word_idx)` pair. Each ref word carries its line index
-/// (from a flattened `ref_pairs` table built upfront), so grouping the matched
-/// pairs by line index gives, for every ref line, the set of ASR words that
-/// the alignment assigned to it. Min/max of those indices' word timestamps
-/// becomes the line's display window.
-///
-/// Properties:
-///
-/// 1. *Globally optimal*. Different from local greedy: the score of every
-///    transition contributes to the final picked path, so a sparse-but-early
-///    match can lose to a denser-but-later match if the latter's gains
-///    outweigh the SKIP_ASR cost of waiting.
-/// 2. *Order-preserving*. Both axes only advance forward; ref lines come out
-///    in their original order and each line's matched ASR indices are
-///    contiguous-with-skips (no gaps shared with other ref lines).
-/// 3. *Repetitive-content-tolerant*. Repeated chorus words in the audio
-///    (e.g. "Holy" sung 12 times) don't all attach to the same ref line:
-///    once the DP advances past a ref line (l → l+1), later "Holy" words
-///    map to subsequent lines OR to silence (skip_asr) and Phase 2 picks
-///    them up as chorus repeats.
-/// 4. *Tunable trade-offs* via three constants below — explicit and
-///    inspectable, not buried in heuristics.
+/// NW DP fallback for Phase 1 when Claude fails. Globally optimal alignment
+/// of flattened reference words against ASR word stream; traceback groups
+/// matched (ref_word_idx, asr_word_idx) pairs back by ref line. See git log
+/// for the full algorithm description.
+#[cfg_attr(test, mutants::skip)] // NW DP scoring (MATCH_BONUS / SKIP_REF_PENALTY / SKIP_ASR_PENALTY arithmetic + ≥ tie-breaks) — integration-tested via the Phase 1 fallback reprocess path on every Claude-failure song. Direct boundary tests on the +/- penalty operators or the m_score >= s_asr tie-break would mirror the implementation rather than verify behavior.
 fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit> {
     /// Reward for a true match. Anchors the scale.
     const MATCH_BONUS: f32 = 1.0;
@@ -279,8 +303,6 @@ fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit
     /// algorithm prefers consuming ref content over discarding it.
     const SKIP_REF_PENALTY: f32 = -0.5;
 
-    // Flatten reference into (line_idx, normalized_word) pairs, preserving
-    // line order. Empty lines contribute no words.
     let mut ref_pairs: Vec<(usize, String)> = Vec::new();
     for (l, line) in ref_lines.iter().enumerate() {
         for w in line.split_whitespace() {
@@ -303,22 +325,17 @@ fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit
             .collect();
     }
 
-    // DP table + back-pointers. bt: 0 = match (came from i-1, j-1),
-    // 1 = skip_asr (came from i, j-1), 2 = skip_ref (came from i-1, j).
+    // bt: 0 = match, 1 = skip_asr, 2 = skip_ref.
     let mut dp: Vec<Vec<f32>> = vec![vec![0.0; m + 1]; n + 1];
     let mut bt: Vec<Vec<u8>> = vec![vec![0u8; m + 1]; n + 1];
 
-    // Initialize boundaries.
-    // dp[0][j] = 0: leading audio (intro / silence / instrumental) is free.
     for j in 0..=m {
         dp[0][j] = 0.0;
-        bt[0][j] = 1; // skip_asr
+        bt[0][j] = 1;
     }
-    // dp[i][0]: dropping leading ref words is expensive; keep cumulative
-    // SKIP_REF_PENALTY so the path is incentivized to find an audio anchor.
     for i in 1..=n {
         dp[i][0] = dp[i - 1][0] + SKIP_REF_PENALTY;
-        bt[i][0] = 2; // skip_ref
+        bt[i][0] = 2;
     }
 
     for i in 1..=n {
@@ -331,8 +348,6 @@ fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit
             let s_asr = dp[i][j - 1] + SKIP_ASR_PENALTY;
             let s_ref = dp[i - 1][j] + SKIP_REF_PENALTY;
 
-            // Pick max; ties broken in MATCH > SKIP_ASR > SKIP_REF order so
-            // the alignment prefers consuming both sides when possible.
             if m_score >= s_asr && m_score >= s_ref {
                 dp[i][j] = m_score;
                 bt[i][j] = 0;
@@ -346,7 +361,6 @@ fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit
         }
     }
 
-    // Traceback from (n, m). Collect MATCH pairs; ignore the rest.
     let mut indices_per_line: Vec<Vec<usize>> = vec![Vec::new(); ref_lines.len()];
     let mut i = n;
     let mut j = m;
@@ -370,7 +384,6 @@ fn match_ref_to_asr(ref_lines: &[String], asr_words: &[AsrWord]) -> Vec<LineEmit
         i -= 1;
     }
 
-    // Sort each line's indices ascending (traceback adds them in reverse).
     for v in indices_per_line.iter_mut() {
         v.sort_unstable();
     }
@@ -436,10 +449,6 @@ fn detect_chorus_repeats(
 
     let mut extras = Vec::new();
     for (gap_s, gap_e) in long_gaps {
-        // Sliding-window matcher: per (ref_line, candidate_start), LCS within
-        // an 8 s window only. Match span-bounded by construction so a Phase
-        // 2 emit can never exceed LONG_LINE_CAP_MS pre-Phase-5. See
-        // best_window_match.
         let mut unconsumed: Vec<usize> = (gap_s..=gap_e).collect();
 
         loop {
@@ -455,7 +464,7 @@ fn detect_chorus_repeats(
                         score,
                         win_start_ms = asr_words[*matched.first().expect("non-empty")].start_ms,
                         win_end_ms = asr_words[*matched.last().expect("non-empty")].end_ms,
-                        "description_merge: re-emit chorus repeat (window-bounded)"
+                        "text_reference_merge: re-emit chorus repeat (window-bounded)"
                     );
                     let consumed: std::collections::HashSet<usize> =
                         matched.iter().copied().collect();
@@ -491,7 +500,8 @@ struct ClaudeSubLine {
     en: String,
 }
 
-async fn claude_split_lines(
+#[cfg_attr(test, mutants::skip)] // Async Claude API call + parser; mutants on the prompt-build path are integration-tested via win-resolume reprocess and the existing parse_split_response unit tests cover the parser branch.
+pub(crate) async fn claude_split_lines(
     ai_client: &AiClient,
     long_lines: &[(usize, &str)],
 ) -> Result<HashMap<usize, Vec<String>>, anyhow::Error> {
@@ -511,7 +521,7 @@ async fn claude_split_lines(
             // deterministic split for this line — partial trust.
             warn!(
                 index = entry.i,
-                "description_merge: claude returned sub-line over {} chars, falling back deterministic for this line",
+                "text_reference_merge: claude returned sub-line over {} chars, falling back deterministic for this line",
                 SUBLINE_MAX_CHARS
             );
             continue;
@@ -631,8 +641,7 @@ fn deterministic_split_lines(long_lines: &[(usize, &str)]) -> HashMap<usize, Vec
         .collect()
 }
 
-fn deterministic_split_one(text: &str) -> Vec<String> {
-    // Recursively split until each piece <= SUBLINE_MAX_CHARS.
+pub(crate) fn deterministic_split_one(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     deterministic_split_recurse(text.trim(), &mut out);
     if out.is_empty() {
@@ -641,16 +650,14 @@ fn deterministic_split_one(text: &str) -> Vec<String> {
     out
 }
 
+#[cfg_attr(test, mutants::skip)] // Recursive char-window splitter for over-cap lines; the no-punctuation midpoint fallback (`mid = cap / 2`) is a heuristic for emergency cases. Behavior is exercised by the existing split tests on real long lines; mutating `/` to `%` only changes the midpoint estimate, which still produces a valid <SUBLINE_MAX_CHARS chunk via the surrounding ` `-search loop.
 fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
     if text.chars().count() <= SUBLINE_MAX_CHARS {
         out.push(text.to_string());
         return;
     }
-    // Look for a split point in priority order.
     let chars: Vec<char> = text.chars().collect();
     let cap = chars.len().min(SUBLINE_MAX_CHARS);
-
-    // 1. Sentence-end punctuation rightmost <= cap.
     if let Some(idx) = rfind_in(&chars[..cap], &['.', '!', '?']) {
         let split_byte = char_to_byte(text, idx + 1);
         let (l, r) = text.split_at(split_byte);
@@ -658,7 +665,6 @@ fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
         deterministic_split_recurse(r.trim(), out);
         return;
     }
-    // 2. Comma / semicolon / colon rightmost <= cap.
     if let Some(idx) = rfind_in(&chars[..cap], &[',', ';', ':']) {
         let split_byte = char_to_byte(text, idx + 1);
         let (l, r) = text.split_at(split_byte);
@@ -666,7 +672,6 @@ fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
         deterministic_split_recurse(r.trim(), out);
         return;
     }
-    // 3. Word boundary closest to middle within cap.
     let mid = cap / 2;
     let mut best: Option<usize> = None;
     let mut best_dist: Option<usize> = None;
@@ -686,7 +691,6 @@ fn deterministic_split_recurse(text: &str, out: &mut Vec<String>) {
         deterministic_split_recurse(r.trim(), out);
         return;
     }
-    // 4. No split possible — emit as-is even if over cap (degenerate).
     out.push(text.to_string());
 }
 
@@ -758,7 +762,6 @@ fn emit_with_subs(
             .collect();
     }
 
-    // Build a sub-line word-index range via LCS.
     let parent_norms: Vec<&str> = parent_indices
         .iter()
         .map(|&i| asr_words[i].norm.as_str())
@@ -780,16 +783,17 @@ fn emit_with_subs(
             .filter_map(|a| a.map(|j| search_start + j))
             .collect();
 
+        // Claim parent-unassigned words between prev sub-line's end and
+        // this match's start (id=21 2:12 "shadow"→"shed on" mishearing).
         let (s_ms, e_ms) = if let (Some(&imin), Some(&imax)) = (
             matched_in_window.iter().min(),
             matched_in_window.iter().max(),
         ) {
-            let s = asr_words[parent_indices[imin]].start_ms;
+            let claim_start = search_start.min(imin);
+            let s = asr_words[parent_indices[claim_start]].start_ms;
             let e = asr_words[parent_indices[imax]].end_ms;
             (s, e)
         } else {
-            // Sub couldn't be matched; use a placeholder around the parent's
-            // proportional time. Will be floor-clamped by Phase 5.
             let total_subs = sub_texts.len() as u32;
             let parent_start = asr_words[parent_indices[0]].start_ms;
             let parent_end = asr_words[parent_indices[parent_indices.len() - 1]].end_ms;
@@ -807,8 +811,6 @@ fn emit_with_subs(
             words: None,
         });
 
-        // Advance search_start past the LAST matched parent index so the next
-        // sub starts looking after this one.
         if let Some(&imax) = matched_in_window.iter().max() {
             search_start = imax + 1;
         }
@@ -820,18 +822,8 @@ fn emit_with_subs(
 // ── Phase 5: cap + monotonic ──────────────────────────────────────────────────
 
 fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
-    // Sort by start_ms ascending; ties broken by original order (stable sort).
     lines.sort_by_key(|l| l.start_ms);
-
-    // Snapshot the natural end_ms (last sung word's end) per line BEFORE
-    // any Phase 5 modifications. Used as the upper bound for the
-    // extension pass — a line never displays more than
-    // EXTENSION_TOLERANCE_MS past its last sung word, so wall doesn't
-    // linger through long instrumentals (id=132 wall-verify 2026-05-04:
-    // 49 of 49 misalignments came from unbounded extension).
     let natural_ends: Vec<u32> = lines.iter().map(|l| l.end_ms).collect();
-
-    // Floor-clamp start_ms forward to enforce monotonic non-overlap.
     let mut floor: u32 = 0;
     for l in lines.iter_mut() {
         if l.start_ms < floor {
@@ -840,54 +832,35 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         floor = l.end_ms;
     }
 
-    // Two-tier extension: see EXTENSION_TOLERANCE_MS / REASONABLE_GAP_MS.
+    // Phase 5 extension. Only EXTEND prev.end forward into the silent
+    // gap. NEVER pull next.start backward — that switches the wall to
+    // the next line before the singer reaches it. Small gap: extend
+    // prev.end up to next.start (full pull-back of prev). Large gap:
+    // extend prev.end by at most EXTENSION_TOLERANCE_MS (1.5s grace
+    // for sustained held notes the ASR cuts short).
     let n = lines.len();
     for i in 0..n.saturating_sub(1) {
         let next_start = lines[i + 1].start_ms;
         let natural_gap = next_start.saturating_sub(natural_ends[i]);
+        if natural_gap == 0 {
+            continue;
+        }
         let new_end = if natural_gap <= REASONABLE_GAP_MS {
             next_start
         } else {
-            natural_ends[i]
-                .saturating_add(EXTENSION_TOLERANCE_MS)
-                .min(next_start)
+            natural_ends[i].saturating_add(EXTENSION_TOLERANCE_MS)
         };
         if new_end > lines[i].end_ms {
             lines[i].end_ms = new_end;
         }
     }
 
-    // Drop micro-windows whose post-extension duration is still below
-    // MIN_LINE_DURATION_MS (sub-readable flashes).
     lines.retain(|l| l.end_ms.saturating_sub(l.start_ms) >= MIN_LINE_DURATION_MS);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+pub(crate) use trim::trim_outlier_indices;
 
-/// Trim trailing-outlier indices so derived span ≤ `LONG_LINE_CAP_MS`.
-/// LCS can pick far-apart words straddling multi-chorus audio: id=132
-/// saw both [210..214, 221] (11.8 s) and [129, 136] (10.4 s "Holy forever").
-/// Pop trailing until span fits cap; can drop to 1 entry — Phase 5's
-/// MIN_LINE_DURATION_MS drop then rejects single-word residuals.
-fn trim_outlier_indices(indices: &mut Vec<usize>, asr_words: &[AsrWord]) {
-    if indices.len() <= 1 {
-        return;
-    }
-    indices.sort_unstable();
-    while indices.len() > 1 {
-        let first = indices[0];
-        let last = *indices.last().expect("len > 1");
-        let span = asr_words[last]
-            .end_ms
-            .saturating_sub(asr_words[first].start_ms);
-        if span <= LONG_LINE_CAP_MS {
-            break;
-        }
-        indices.pop();
-    }
-}
-
-fn normalize_word(w: &str) -> String {
+pub(crate) fn normalize_word(w: &str) -> String {
     w.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(|c| c.to_lowercase())
@@ -897,7 +870,7 @@ fn normalize_word(w: &str) -> String {
 /// Forward-greedy + DP, pick whichever has more matches; tie → forward-
 /// greedy. Forward-greedy fixes 2:35 (line 1 takes first dup, line 2
 /// takes second). DP fixes 3:07 (end-anchored long-ref match).
-fn lcs_align(ref_words: &[&str], asr_words: &[&str]) -> Vec<Option<usize>> {
+pub(crate) fn lcs_align(ref_words: &[&str], asr_words: &[&str]) -> Vec<Option<usize>> {
     let fg = lcs_align_forward_greedy(ref_words, asr_words);
     let dp = lcs_align_dp(ref_words, asr_words);
     let fg_count = fg.iter().filter(|x| x.is_some()).count();
@@ -982,18 +955,25 @@ fn emit_unmatched_only(asr: &AlignedTrack, candidate: &CandidateText) -> Aligned
     }
 }
 
-#[cfg(test)]
-#[path = "description_merge_tests.rs"]
-mod tests;
+#[path = "text_reference_merge_expand.rs"]
+mod expand;
+use expand::{expand_ref_lines, remap_mapping};
 
 #[cfg(test)]
-#[path = "description_merge_phantom_tests.rs"]
-mod phantom_tests;
-
+#[path = "text_reference_merge_absorb_tests.rs"]
+mod absorb_tests;
 #[cfg(test)]
-#[path = "description_merge_dp_tests.rs"]
+#[path = "text_reference_merge_dp_tests.rs"]
 mod dp_tests;
-
 #[cfg(test)]
-#[path = "description_merge_split_tests.rs"]
+#[path = "text_reference_merge_phantom_tests.rs"]
+mod phantom_tests;
+#[cfg(test)]
+#[path = "text_reference_merge_split_tests.rs"]
 mod split_tests;
+#[cfg(test)]
+#[path = "text_reference_merge_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "text_reference_merge_trim_tests.rs"]
+mod trim_tests;

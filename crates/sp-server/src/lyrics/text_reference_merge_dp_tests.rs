@@ -1,5 +1,5 @@
 //! Tests for the Phase-1 NW-DP `match_ref_to_asr` function. Sibling-
-//! included from description_merge.rs to keep description_merge_tests.rs
+//! included from text_reference_merge.rs to keep text_reference_merge_tests.rs
 //! under the 1000-line file-size cap.
 
 #![allow(unused_imports)]

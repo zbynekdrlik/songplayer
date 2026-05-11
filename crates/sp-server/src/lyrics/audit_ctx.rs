@@ -18,9 +18,9 @@
 //! always available — no log rotation issues.
 //!
 //! Construction is `Option<AuditContext>` plumbed through
-//! `OrchestratorInput.audit → claude_merge::merge → description_merge::
-//! process`. When `None`, every stage skips its sidecar write — keeps unit
-//! tests free of file-system side effects without a per-test setup.
+//! `OrchestratorInput.audit → text_reference_merge::process`. When `None`,
+//! every stage skips its sidecar write — keeps unit tests free of
+//! file-system side effects without a per-test setup.
 
 use std::path::{Path, PathBuf};
 

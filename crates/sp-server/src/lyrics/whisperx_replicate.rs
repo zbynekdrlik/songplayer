@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(input["batch_size"], 32);
         // No `initial_prompt` field — biasing Whisper with full lyrics
         // caused LM-fallback prompt-leakage on id=132 (#78). The phantom
-        // cluster filter at description_merge_phantom.rs is the chosen
+        // cluster filter at text_reference_merge_phantom.rs is the chosen
         // remedy; this regression-asserts no one quietly re-adds the
         // prompt without explicit design.
         assert!(input.get("initial_prompt").is_none());

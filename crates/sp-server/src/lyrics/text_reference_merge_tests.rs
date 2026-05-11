@@ -1,6 +1,6 @@
-//! Tests for description_merge phases 1, 2, 4, 5 (Phase 3 Claude path needs
+//! Tests for text_reference_merge phases 1, 2, 4, 5 (Phase 3 Claude path needs
 //! a mock AiClient and is exercised end-to-end on win-resolume reprocess
-//! verification, not in unit tests). Sibling-included from description_merge.rs.
+//! verification, not in unit tests). Sibling-included from text_reference_merge.rs.
 
 #![allow(unused_imports)]
 
@@ -432,84 +432,6 @@ fn absorb_prefix_walks_scan_to_zero_without_match() {
     assert_eq!(emits[0].asr_word_indices, vec![3]);
 }
 
-// ── Phase 2.5: trim_outlier_indices ───────────────────────────────────────────
-
-#[test]
-fn trim_outlier_indices_keeps_tight_match_intact() {
-    let asr_track = asr(vec![
-        make_word("a", 0, 100),
-        make_word("b", 200, 400),
-        make_word("c", 500, 700),
-        make_word("d", 800, 1000),
-    ]);
-    let asr_words = flatten_asr(&asr_track);
-    let mut indices = vec![0, 1, 2, 3];
-    trim_outlier_indices(&mut indices, &asr_words);
-    assert_eq!(indices, vec![0, 1, 2, 3]);
-}
-
-#[test]
-fn trim_outlier_indices_drops_trailing_outlier_past_cap() {
-    // 5 words: [0..4 contiguous within 7.5s] + [5 jumped to 20s].
-    // Span 20s > LONG_LINE_CAP_MS=8s, drop trailing.
-    let asr_track = asr(vec![
-        make_word("a", 0, 500),
-        make_word("b", 1000, 1500),
-        make_word("c", 3000, 3500),
-        make_word("d", 5000, 5500),
-        make_word("e", 7000, 7500),
-        make_word("outlier", 19000, 20000),
-    ]);
-    let asr_words = flatten_asr(&asr_track);
-    let mut indices = vec![0, 1, 2, 3, 4, 5];
-    trim_outlier_indices(&mut indices, &asr_words);
-    // After trim: [0..4] span 7.5s within cap.
-    assert_eq!(indices, vec![0, 1, 2, 3, 4]);
-}
-
-#[test]
-fn trim_outlier_indices_drops_to_single_when_two_entry_span_exceeds_cap() {
-    // 2-entry emit with span > cap — trim drops the trailing outlier so
-    // only [0] remains. Phase 5 will then reject the single-word residual
-    // via its MIN_LINE_DURATION_MS micro-window drop. Reproduces id=132
-    // 2026-05-04 case where Phase 2 LCS for "Holy forever" picked the
-    // first "holy" + a far-later "forever" across multiple sung phrases.
-    let asr_track = asr(vec![
-        make_word("a", 0, 100),
-        make_word("b", 50000, 50100), // 50s gap — exceeds cap
-    ]);
-    let asr_words = flatten_asr(&asr_track);
-    let mut indices = vec![0, 1];
-    trim_outlier_indices(&mut indices, &asr_words);
-    assert_eq!(indices, vec![0]);
-}
-
-#[test]
-fn trim_outlier_indices_keeps_single_entry_intact() {
-    // Single-entry input is untouched (no second word to compare span).
-    let asr_track = asr(vec![make_word("a", 1000, 1500)]);
-    let asr_words = flatten_asr(&asr_track);
-    let mut indices = vec![0];
-    trim_outlier_indices(&mut indices, &asr_words);
-    assert_eq!(indices, vec![0]);
-}
-
-#[test]
-fn trim_outlier_indices_handles_unsorted_input() {
-    // Indices arrive ascending after Phase 1 sort, but defensive: trim should
-    // sort before measuring span.
-    let asr_track = asr(vec![
-        make_word("a", 0, 100),
-        make_word("b", 200, 400),
-        make_word("c", 500, 700),
-        make_word("outlier", 20000, 21000),
-    ]);
-    let asr_words = flatten_asr(&asr_track);
-    let mut indices = vec![3, 0, 1, 2];
-    trim_outlier_indices(&mut indices, &asr_words);
-    assert_eq!(indices, vec![0, 1, 2]);
-}
-
 // ── Phase 4: aligned_lines_for_emit ───────────────────────────────────────────
 
 #[test]
@@ -603,11 +525,11 @@ fn apply_cap_and_monotonic_floor_clamps_overlap() {
 }
 
 #[test]
-fn apply_cap_and_monotonic_extends_micro_window_within_tolerance() {
-    // 200 ms middle line followed by 800 ms gap. Extension caps at
-    // natural_end + tolerance: 2200 + 1500 = 3700, then min with
-    // next.start = 3000 → end_ms = 3000. Final dur = 1000 ms,
-    // ≥ MIN_LINE_DURATION_MS. Kept.
+fn apply_cap_and_monotonic_small_gap_extends_prev_end_only() {
+    // Gaps ≤ REASONABLE_GAP_MS: extend prev.end forward up to next.start.
+    // Next.start NEVER moves backward (whisperx truth wins over our
+    // pull-back). id=21 audit: 45 of 60 lines had wall switching to next
+    // line up to 3.92 s BEFORE singer reached it under the prior pull-back.
     let mut lines = vec![
         AlignedLine {
             text: "real".into(),
@@ -630,37 +552,19 @@ fn apply_cap_and_monotonic_extends_micro_window_within_tolerance() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 3);
+    // prev.end extends forward to next.start; next.start unchanged.
+    assert_eq!(lines[0].end_ms, 2000);
     assert_eq!(lines[1].start_ms, 2000);
     assert_eq!(lines[1].end_ms, 3000);
+    assert_eq!(lines[2].start_ms, 3000);
+    assert_eq!(lines[2].end_ms, 5000);
 }
 
 #[test]
-fn apply_cap_and_monotonic_fills_reasonable_gap_to_next_start() {
-    // Gap 1500 ms ≤ REASONABLE_GAP_MS — extension reaches B.start fully.
-    let mut lines = vec![
-        AlignedLine {
-            text: "A".into(),
-            start_ms: 0,
-            end_ms: 2000,
-            words: None,
-        },
-        AlignedLine {
-            text: "B".into(),
-            start_ms: 3500,
-            end_ms: 5000,
-            words: None,
-        },
-    ];
-    apply_cap_and_monotonic(&mut lines);
-    assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].end_ms, 3500, "reasonable gap fully bridged");
-    assert_eq!(lines[1].start_ms, 3500);
-}
-
-#[test]
-fn apply_cap_and_monotonic_caps_long_gap_at_tolerance() {
-    // Gap 29 s > REASONABLE_GAP_MS — extension capped at natural_end +
-    // EXTENSION_TOLERANCE_MS=1500. Wall blank from 2500 to 30_000.
+fn apply_cap_and_monotonic_large_gap_extends_prev_only() {
+    // Gap > REASONABLE_GAP_MS. Prev.end extends forward by at most
+    // EXTENSION_TOLERANCE_MS for sustained held notes the ASR cuts
+    // short. Next.start STAYS at the singer's first-word time.
     let mut lines = vec![
         AlignedLine {
             text: "A".into(),
@@ -677,12 +581,12 @@ fn apply_cap_and_monotonic_caps_long_gap_at_tolerance() {
     ];
     apply_cap_and_monotonic(&mut lines);
     assert_eq!(lines.len(), 2);
-    assert_eq!(
-        lines[0].end_ms,
-        1000 + EXTENSION_TOLERANCE_MS,
-        "long gap → tolerance-capped extension"
+    assert_eq!(lines[0].end_ms, 1000 + EXTENSION_TOLERANCE_MS);
+    assert_eq!(lines[1].start_ms, 30_000, "next.start must NOT move");
+    assert!(
+        lines[1].start_ms > lines[0].end_ms,
+        "blank middle preserved"
     );
-    assert_eq!(lines[1].start_ms, 30_000);
 }
 
 #[test]
@@ -968,5 +872,124 @@ fn lcs_align_picker_returns_fg_at_equal_count_distinguishable_indices() {
         lcs_align(&r, &a),
         vec![Some(0)],
         "picker must return fg (>=) at equal count"
+    );
+}
+
+// ── Phase 2.8: second chorus pass on trim-released indices ───────────────────
+
+#[test]
+fn second_chorus_pass_recovers_indices_released_by_trim() {
+    // Regression for id=21 4:02. Phase 1 (Claude) sometimes maps a single
+    // ref line across two far-apart audio regions: index 0 (the bare "so"
+    // alone) PLUS indices 5..13 (the chorus repeat itself, 12.4 s later).
+    // The emit's span is 39 s which exceeds LONG_LINE_CAP_MS (8 s). With
+    // a 9.8 s gap inside, Phase 2.5 trim_outlier_indices pops the trailing
+    // chorus tail until the span fits. Phase 2 chorus matcher had already
+    // run and saw indices 5..13 as consumed — so the chorus repeat shipped
+    // with no emit of its own. Phase 2.8 (second chorus pass) detects the
+    // released indices and emits the chorus line at its real audio time.
+    let ref_lines: Vec<String> =
+        vec!["So all my days I will stay in the house of my Father".into()];
+    let asr_track = asr(vec![
+        make_word("so", 224190, 224270), // 0  — first-instance bare "so"
+        // (Claude wrongly pulled chorus-repeat 1..8 into the same emit.)
+        make_word("all", 234069, 234369),   // 1
+        make_word("my", 234570, 235170),    // 2
+        make_word("days", 235310, 236010),  // 3
+        make_word("i", 236030, 236050),     // 4
+        make_word("will", 236070, 239152),  // 5 — sustained
+        make_word("stay", 239993, 244075),  // 6 — sustained
+        make_word("in", 245036, 245156),    // 7
+        make_word("the", 245256, 245636),   // 8
+        make_word("house", 245696, 246437), // 9
+    ]);
+    let asr_words = flatten_asr(&asr_track);
+    // Simulate Phase 1's emit (bare "so" + the whole chorus repeat).
+    let mut emits = vec![LineEmit {
+        text: ref_lines[0].clone(),
+        asr_word_indices: (0..=9).collect(),
+    }];
+    // Apply Phase 2.5 trim. Span 224190→246437 = 22 247 ms > 8 s, max
+    // internal gap = 234069 − 224270 = 9 799 ms ≥ TRIM_GAP_MS, so trim
+    // pops trailing until the span fits.
+    for e in emits.iter_mut() {
+        trim_outlier_indices(&mut e.asr_word_indices, &asr_words);
+    }
+    let after_trim: Vec<usize> = emits[0].asr_word_indices.clone();
+    assert!(
+        !after_trim.contains(&9),
+        "trim must release the chorus tail (idx 9); got {:?}",
+        after_trim
+    );
+    // Phase 2.8 second chorus pass: detects the released chorus indices.
+    let extras = detect_chorus_repeats(&ref_lines, &asr_words, &emits);
+    assert!(
+        !extras.is_empty(),
+        "Phase 2.8 must emit the released chorus repeat; got {:?}",
+        extras
+    );
+    let recovered: std::collections::HashSet<usize> = extras
+        .iter()
+        .flat_map(|e| e.asr_word_indices.iter().copied())
+        .collect();
+    let chorus_indices: std::collections::HashSet<usize> = (1..=9).collect();
+    let intersection: Vec<usize> = recovered.intersection(&chorus_indices).copied().collect();
+    assert!(
+        intersection.len() >= 6,
+        "expected ≥6 chorus-repeat indices recovered; got {:?}",
+        intersection
+    );
+}
+
+// ── Phase 5: never pull next.start backward ──────────────────────────────────
+
+#[test]
+fn phase5_never_pulls_next_start_backward() {
+    // id=21 regression: 45 of 60 lines had start_ms pulled up to 3.92s
+    // EARLIER than the singer's first word for that line. The wall
+    // switched to the next line before the singer reached it. Phase 5
+    // must extend prev.end forward into the silent gap, NEVER pull
+    // next.start back.
+    let mut lines = vec![
+        AlignedLine {
+            text: "Line one".into(),
+            start_ms: 1000,
+            end_ms: 2000,
+            words: None,
+        },
+        AlignedLine {
+            text: "Line two".into(),
+            start_ms: 5000, // 3 s gap (small)
+            end_ms: 6000,
+            words: None,
+        },
+        AlignedLine {
+            text: "Line three".into(),
+            start_ms: 30000, // 24 s gap (large)
+            end_ms: 31000,
+            words: None,
+        },
+    ];
+    let original_starts: Vec<u32> = lines.iter().map(|l| l.start_ms).collect();
+    apply_cap_and_monotonic(&mut lines);
+    for (i, l) in lines.iter().enumerate() {
+        assert!(
+            l.start_ms >= original_starts[i],
+            "line {} start_ms moved backward from {} to {}: {:?}",
+            i,
+            original_starts[i],
+            l.start_ms,
+            l.text
+        );
+    }
+    // Small-gap branch still extends prev.end up to next.start.
+    assert_eq!(
+        lines[0].end_ms, 5000,
+        "small gap: prev.end fills to next.start"
+    );
+    // Large-gap branch extends prev.end by at most EXTENSION_TOLERANCE_MS (1500).
+    assert_eq!(
+        lines[1].end_ms, 7500,
+        "large gap: prev.end extended by EXTENSION_TOLERANCE_MS only"
     );
 }

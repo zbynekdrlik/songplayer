@@ -37,30 +37,52 @@ use super::{AsrWord, LineEmit};
 #[derive(Debug, Deserialize)]
 struct ClaudeMappingResponse {
     assignments: Vec<Assignment>,
+    /// Per spec 2026-05-07: Claude may return additional reference lines
+    /// for runs of unmatched ASR words ≥ 5 s. `default` so older Claude
+    /// responses (no `added_ref_lines` key) still parse.
+    #[serde(default)]
+    added_ref_lines: Vec<AddedRefLine>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Assignment {
     /// ASR word index — into the flattened ASR word stream.
     a: usize,
-    /// Reference line index — into the description's line list.
+    /// Reference line index — into the ORIGINAL description's line list.
+    /// Pipeline rewrites these into expanded indices after augmentation.
     l: usize,
+}
+
+/// Reference line added by Claude to fill a missing-section gap.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct AddedRefLine {
+    pub after_line: usize,
+    pub text: String,
+}
+
+/// Phase 1 Claude output: dense mapping + added reference lines.
+pub(crate) struct MappingResult {
+    pub mapping: Vec<Option<usize>>,
+    pub added: Vec<AddedRefLine>,
 }
 
 pub(super) async fn claude_map_words_to_lines(
     ai_client: &AiClient,
     ref_lines: &[String],
     asr_words: &[AsrWord],
-) -> Result<Vec<Option<usize>>, anyhow::Error> {
+) -> Result<MappingResult, anyhow::Error> {
     if ref_lines.is_empty() || asr_words.is_empty() {
         anyhow::bail!("empty input to claude line-mapping");
     }
     let prompt = build_mapping_prompt(ref_lines, asr_words);
     let raw = ai_client.chat("", &prompt).await?;
     let parsed: ClaudeMappingResponse = parse_first_json_object(&raw)?;
-    sparse_to_dense(&parsed.assignments, ref_lines.len(), asr_words.len())
+    let mapping = sparse_to_dense(&parsed.assignments, ref_lines.len(), asr_words.len())?;
+    let added = validate_added_ref_lines(&parsed.added_ref_lines, ref_lines.len());
+    Ok(MappingResult { mapping, added })
 }
 
+#[cfg_attr(test, mutants::skip)] // Prompt-text builder; mutants on the format string body are integration-tested via reprocess. Direct unit tests on string equality would be brittle to prompt edits.
 fn build_mapping_prompt(ref_lines: &[String], asr_words: &[AsrWord]) -> String {
     let ref_repr = ref_lines
         .iter()
@@ -79,19 +101,32 @@ fn build_mapping_prompt(ref_lines: &[String], asr_words: &[AsrWord]) -> String {
     format!(
         r#"You receive a worship-song reference text (clean lines from a YouTube description) and a WhisperX audio transcription word stream (with mishearings and possible filler).
 
-TASK: list which ASR words map to which reference lines. Skip words you don't want to assign — just don't include them in the output.
+TASK: list which ASR words map to which reference lines, AND list any reference lines that should be ADDED to fill audio sections the description omitted.
 
-OUTPUT SCHEMA: {{"assignments": [{{"a": <asr_word_idx>, "l": <ref_line_idx>}}, ...]}}
+OUTPUT SCHEMA: {{
+  "assignments": [{{"a": <asr_word_idx>, "l": <ref_line_idx>}}, ...],
+  "added_ref_lines": [{{"after_line": <ref_line_idx>, "text": "<string>"}}, ...]
+}}
 
-Each assignment says "ASR word `a` belongs to reference line `l`". Words you omit default to skip (filler, mishearings, instrumental, ad-libs, chorus-repeat words for a separate pass).
+ASSIGNMENTS — each entry says "ASR word `a` belongs to reference line `l`". Words you omit default to skip (filler, mishearings, instrumental, ad-libs, chorus-repeat words for a separate pass).
 
-VALIDATION RULES (your output is rejected if any rule is broken):
+ASSIGNMENT VALIDATION RULES (your output is rejected if any rule is broken):
 - `a` values STRICTLY INCREASING — each entry's `a` is greater than the previous entry's `a`. No duplicates.
 - `l` values MONOTONIC NON-DECREASING — each entry's `l` is >= the previous entry's `l`. Once you advance past line K, no later assignment maps to a line < K.
 - `a` in [0, {n_asr}). `l` in [0, {n_ref}).
 - A reference line MAY receive zero assignments (singer dropped it) — that's fine.
 - For chorus REPEATS in audio: assign words to the FIRST occurrence in the reference and OMIT later repeats. A separate pass handles repeats.
 - Use ASR start_ms timing to pick natural phrase boundaries when ambiguous.
+
+ADDED REFERENCE LINES — fill missing-section gaps the description omitted:
+- Add a line ONLY when the audio contains a run of unmatched ASR words ≥ 5 SECONDS long that you cannot map to any existing reference line.
+- Each added line's text MUST be grammatically clean (capitalised, punctuated, mishearings corrected against song context).
+- Each added line MUST be ≤ 64 characters; longer phrasing splits into multiple added lines, all sharing the same after_line index in the order they were sung.
+- `after_line` is the index in REFERENCE LINES (the original numbered list below) AFTER WHICH the added line semantically belongs. Use the index of the closest preceding description line whose mapped audio ends BEFORE the unmatched run.
+- DO NOT add lines for unmatched runs < 5 seconds — those are typically filler ("Say", "Oh") or chorus-repeats that a separate pass will recover.
+- DO NOT modify, reorder, or drop existing reference lines — only the assignments field assigns audio to them.
+- DO NOT add lines that DUPLICATE existing reference text exactly — those are chorus-repeats; leave them unmatched and the chorus-repeat pass will re-emit the existing line.
+- If the description is complete (no ≥ 5 s unmatched runs), return `"added_ref_lines": []`.
 
 REFERENCE LINES (numbered):
 {ref_repr}
@@ -158,6 +193,36 @@ fn sparse_to_dense(
         last_l = Some(a.l);
     }
     Ok(dense)
+}
+
+/// Drop AddedRefLine entries whose `after_line` is out of range. Logs warn.
+/// Stable-sort by `after_line` so Phase 1.5's prev_added_end monotonic
+/// advance picks each line's correct gap window. Same-after_line entries
+/// retain input order so process()'s K-th counter slot calc stays
+/// consistent with expand_ref_lines's iter-and-insert.
+pub(crate) fn validate_added_ref_lines(
+    added: &[AddedRefLine],
+    n_orig_ref: usize,
+) -> Vec<AddedRefLine> {
+    let mut out: Vec<AddedRefLine> = added
+        .iter()
+        .filter(|a| {
+            if a.after_line >= n_orig_ref {
+                tracing::warn!(
+                    after_line = a.after_line,
+                    n_orig_ref,
+                    text = %a.text,
+                    "text_reference_merge: dropping added_ref_line — after_line out of range"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+    out.sort_by_key(|a| a.after_line);
+    out
 }
 
 pub(super) fn emits_from_mapping(map: &[Option<usize>], ref_lines: &[String]) -> Vec<LineEmit> {
@@ -370,5 +435,78 @@ mod tests {
         let raw = "no json here";
         let r: Result<ClaudeMappingResponse, _> = parse_first_json_object(raw);
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn parse_mapping_response_extracts_added_ref_lines() {
+        let raw = r#"{
+            "assignments": [{"a": 0, "l": 0}, {"a": 1, "l": 0}],
+            "added_ref_lines": [
+                {"after_line": 0, "text": "There's no place I'd rather be"},
+                {"after_line": 0, "text": "No one like the king"}
+            ]
+        }"#;
+        let p: ClaudeMappingResponse = parse_first_json_object(raw).unwrap();
+        assert_eq!(p.assignments.len(), 2);
+        assert_eq!(p.added_ref_lines.len(), 2);
+        assert_eq!(p.added_ref_lines[0].after_line, 0);
+        assert_eq!(p.added_ref_lines[0].text, "There's no place I'd rather be");
+        assert_eq!(p.added_ref_lines[1].text, "No one like the king");
+    }
+
+    #[test]
+    fn parse_mapping_response_handles_missing_added_field() {
+        let raw = r#"{"assignments":[{"a":0,"l":0}]}"#;
+        let p: ClaudeMappingResponse = parse_first_json_object(raw).unwrap();
+        assert_eq!(p.assignments.len(), 1);
+        assert!(p.added_ref_lines.is_empty());
+    }
+
+    #[test]
+    fn validate_added_drops_out_of_range_after_line() {
+        let added = vec![
+            AddedRefLine {
+                after_line: 0,
+                text: "in range".into(),
+            },
+            AddedRefLine {
+                after_line: 99,
+                text: "out of range".into(),
+            },
+        ];
+        let validated = validate_added_ref_lines(&added, 3);
+        assert_eq!(validated.len(), 1);
+        assert_eq!(validated[0].text, "in range");
+    }
+
+    #[test]
+    fn validate_added_ref_lines_sorts_by_after_line() {
+        // Out-of-order input → output must be sorted ascending by after_line.
+        // Same-after_line entries keep their input order (stable sort) so
+        // the K-th-counter slot calc in process() stays correct.
+        let added = vec![
+            AddedRefLine {
+                after_line: 3,
+                text: "C".into(),
+            },
+            AddedRefLine {
+                after_line: 1,
+                text: "A".into(),
+            },
+            AddedRefLine {
+                after_line: 1,
+                text: "B".into(),
+            },
+            AddedRefLine {
+                after_line: 5,
+                text: "D".into(),
+            },
+        ];
+        let validated = validate_added_ref_lines(&added, 10);
+        assert_eq!(validated.len(), 4);
+        assert_eq!(validated[0].text, "A"); // after_line=1, first input
+        assert_eq!(validated[1].text, "B"); // after_line=1, second input (stable)
+        assert_eq!(validated[2].text, "C"); // after_line=3
+        assert_eq!(validated[3].text, "D"); // after_line=5
     }
 }

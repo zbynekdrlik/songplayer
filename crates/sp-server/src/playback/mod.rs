@@ -4,6 +4,7 @@
 //! transitions through the pure [`PlayState`] state machine.  Title timing
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
+mod clear_lyrics;
 mod lyrics_loader;
 pub mod ndi_health;
 pub mod pipeline;
@@ -101,6 +102,10 @@ struct PlaylistPipeline {
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
+    /// Last Resolume ShowSubtitles signature; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
+    last_resolume_subtitles_signature: Option<String>,
+    /// Last karaoke ws line text; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
+    last_lyrics_ws_signature: Option<String>,
     /// Last reported playback position (ms). Updated on every Position event
     /// (~500 ms throttle); used by handle_resolume_recovery to re-push the
     /// current subtitle line. The re-push line may be up to one Position
@@ -236,6 +241,8 @@ impl PlaybackEngine {
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
                 last_presenter_text: None,
+                last_resolume_subtitles_signature: None,
+                last_lyrics_ws_signature: None,
                 cached_position_ms: 0,
             }
         });
@@ -521,13 +528,18 @@ impl PlaybackEngine {
                 position_ms,
                 duration_ms,
             } => {
-                // Throttled re-broadcast of NowPlaying with the updated
-                // position. Title hide is timer-based (spawned in the
-                // Started handler above) so no position-driven hide work
-                // happens here.
+                // Lyrics fast path — no throttle. Fires Resolume ShowSubtitles,
+                // Presenter push, and karaoke WebSocket when the current/next
+                // line differs from the per-pipeline snapshot. Bounded by one
+                // Position event tick (~33 ms).
+                //
+                // Throttled NowPlaying rebroadcast for the dashboard progress
+                // bar. Title hide is timer-based (spawned in the Started
+                // handler above) so no position-driven hide work happens here.
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cached_position_ms = *position_ms;
                 }
+                self.dispatch_lyrics_if_changed(playlist_id, *position_ms);
                 self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {
@@ -698,6 +710,8 @@ impl PlaybackEngine {
             }
             pp.current_video_id = Some(video_id);
             pp.last_presenter_text = None;
+            pp.last_resolume_subtitles_signature = None;
+            pp.last_lyrics_ws_signature = None;
             pp.state = PlayState::Playing { video_id };
             info!(
                 playlist_id,
@@ -815,41 +829,9 @@ impl PlaybackEngine {
         });
     }
 
-    /// Send empty lyrics to dashboard, Resolume AND Presenter to clear
-    /// stale display when the previous song ends or the operator switches
-    /// to a song without lyrics. Without the Presenter clear, the stage
-    /// display kept showing the last line of the previous song until the
-    /// next song's first line pushed — cue for singers got stuck on an
-    /// old verse.
-    #[cfg_attr(test, mutants::skip)]
-    fn clear_lyrics_display(&self, playlist_id: i64) {
-        let _ = self.ws_event_tx.send(ServerMsg::LyricsUpdate {
-            playlist_id,
-            line_en: None,
-            line_sk: None,
-            prev_line_en: None,
-            next_line_en: None,
-            active_word_index: None,
-            word_count: None,
-        });
-        let _ = self
-            .resolume_tx
-            .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
-        if let Some(client) = &self.presenter_client {
-            let client = client.clone();
-            tokio::spawn(async move {
-                if let Err(e) = client
-                    .push(crate::presenter::PresenterPayload::empty())
-                    .await
-                {
-                    tracing::warn!(?e, "presenter clear on song-end failed (non-fatal)");
-                }
-            });
-        }
-    }
-
-    // `maybe_broadcast_position_update` lives in `position_update.rs`
-    // (extracted to keep this file under the 1000-line cap).
+    // `clear_lyrics_display` lives in `clear_lyrics.rs`.
+    // `dispatch_lyrics_if_changed` and `maybe_broadcast_position_update`
+    // live in `position_update.rs` (extracted to keep this file lean).
 
     /// Execute a [`PlayAction`] produced by the state machine.
     ///
@@ -978,6 +960,9 @@ impl PlaybackEngine {
 // Tests
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
+#[path = "dispatch_lyrics_tests.rs"]
+mod dispatch_lyrics_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;

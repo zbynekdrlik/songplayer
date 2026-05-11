@@ -44,6 +44,12 @@ struct AlignedLineRow {
     end_ms: u32,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AddedRefLineRecord {
+    after_line: usize,
+    text: String,
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct AuditPayload {
     candidate_source: String,
@@ -53,6 +59,7 @@ pub(super) struct AuditPayload {
     asr_words: Vec<AsrWordRow>,
     /// "claude" or "nw_dp" — which Phase-1 algorithm produced the initial emits.
     phase1_provider: Option<&'static str>,
+    phase1_added_ref_lines: Vec<AddedRefLineRecord>,
     phase1_emits: Vec<EmitRow>,
     /// Includes Phase 2 chorus-repeat re-emissions, sorted by start_ms.
     phase2_emits: Vec<EmitRow>,
@@ -69,6 +76,7 @@ pub(super) struct AuditState {
     ref_line_count: usize,
     asr_words_snapshot: Vec<AsrWordRow>,
     phase1_provider: Option<&'static str>,
+    phase1_added_ref_lines: Vec<AddedRefLineRecord>,
     phase1_emits: Vec<EmitRow>,
     phase2_emits: Vec<EmitRow>,
     pre_phase5_lines: Vec<AlignedLineRow>,
@@ -98,6 +106,7 @@ impl AuditState {
             ref_line_count: ref_lines.len(),
             asr_words_snapshot,
             phase1_provider: None,
+            phase1_added_ref_lines: Vec::new(),
             phase1_emits: Vec::new(),
             phase2_emits: Vec::new(),
             pre_phase5_lines: Vec::new(),
@@ -115,6 +124,17 @@ impl AuditState {
         self.phase1_emits = build_emit_rows(emits, asr_words);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Audit-only side-effect (writes a JSON sidecar); behavior is observable on win-resolume reprocess but has no in-process consumer to assert against.
+    pub(super) fn record_phase1_added_ref_lines(&mut self, added: &[super::mapping::AddedRefLine]) {
+        self.phase1_added_ref_lines = added
+            .iter()
+            .map(|a| AddedRefLineRecord {
+                after_line: a.after_line,
+                text: a.text.clone(),
+            })
+            .collect();
+    }
+
     pub(super) fn record_phase2(&mut self, emits: &[LineEmit], asr_words: &[AsrWord]) {
         self.phase2_emits = build_emit_rows(emits, asr_words);
     }
@@ -127,6 +147,7 @@ impl AuditState {
         self.post_phase5_lines = build_line_rows(lines);
     }
 
+    #[cfg_attr(test, mutants::skip)] // Audit-only async sidecar writer; only observable side-effect is the JSON file on disk during reprocess.
     pub(super) async fn write_to_disk(self, audit_ctx: Option<&AuditContext<'_>>) {
         let payload = AuditPayload {
             candidate_source: self.candidate_source,
@@ -135,6 +156,7 @@ impl AuditState {
             asr_word_count: self.asr_words_snapshot.len(),
             asr_words: self.asr_words_snapshot,
             phase1_provider: self.phase1_provider,
+            phase1_added_ref_lines: self.phase1_added_ref_lines,
             phase1_emits: self.phase1_emits,
             phase2_emits: self.phase2_emits,
             pre_phase5_lines: self.pre_phase5_lines,

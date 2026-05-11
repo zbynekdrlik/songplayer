@@ -1,6 +1,6 @@
 //! Tests for the Phase-3 splitting functions: `build_split_prompt`,
 //! `parse_split_response`, `deterministic_split_lines`. Sibling-included
-//! from description_merge.rs to keep the parent files under the
+//! from text_reference_merge.rs to keep the parent files under the
 //! 1000-line file-size cap.
 
 #![allow(unused_imports)]
@@ -155,4 +155,74 @@ fn deterministic_split_lines_preserves_input_indices() {
     );
     let subs = result.get(&7).unwrap();
     assert!(!subs.is_empty());
+}
+
+// ── Phase 4: emit_with_subs leading-claim ─────────────────────────────────────
+
+#[test]
+fn emit_with_subs_pulls_start_back_for_misheard_leading_word() {
+    // id=21 2:12 regression. Parent emit "And Your goodness and mercy
+    // shadow me for all my history 'til I see Heaven" matched parent
+    // ASR words including whisperx mishearings ("shed","on" for
+    // "shadow"). Phase 4 sub-line LCS splits into three sub-lines.
+    // Sub-line "shadow me…" cannot match "shadow" against "shed" or
+    // "on" (LCS picks "me" first). The unmatched parent words "shed",
+    // "on" sit between the previous sub-line's last match and this
+    // sub-line's first match — they belong to the singer's first
+    // audible sound on this line. emit_with_subs pulls sub-line start
+    // back to the first parent-unassigned word.
+    use crate::lyrics::backend::{AlignedLine, AlignedTrack, AlignedWord};
+    fn mw(text: &str, s: u32, e: u32) -> AlignedWord {
+        AlignedWord {
+            text: text.into(),
+            start_ms: s,
+            end_ms: e,
+            confidence: 0.9,
+        }
+    }
+    let asr_track = AlignedTrack {
+        lines: vec![AlignedLine {
+            text: "(combined)".into(),
+            start_ms: 0,
+            end_ms: 200000,
+            words: Some(vec![
+                mw("and", 128459, 128579),
+                mw("your", 128639, 129038),
+                mw("goodness", 129079, 130039),
+                mw("and", 130580, 130759),
+                mw("mercy", 130800, 131661),
+                mw("shed", 131741, 132541),
+                mw("on", 132781, 132941),
+                mw("me", 132961, 133401),
+                mw("for", 133942, 134222),
+                mw("all", 134502, 134742),
+                mw("my", 134802, 135162),
+                mw("history", 135222, 136943),
+                mw("till", 137383, 137603),
+                mw("i", 138043, 138083),
+                mw("see", 138203, 138484),
+                mw("heaven", 138544, 141265),
+            ]),
+        }],
+        provenance: "whisperx-large-v3@rev1".into(),
+        raw_confidence: 0.9,
+    };
+    let asr_words = flatten_asr(&asr_track);
+    let emit = LineEmit {
+        text: "And Your goodness and mercy shadow me for all my history 'til I see Heaven".into(),
+        asr_word_indices: (0..16).collect(),
+    };
+    let subs = vec![
+        "And Your goodness and mercy".to_string(),
+        "shadow me for all my history".to_string(),
+        "'til I see Heaven".to_string(),
+    ];
+    let lines = aligned_lines_for_emit(&emit, &asr_words, Some(&subs));
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[1].text, "shadow me for all my history");
+    assert_eq!(
+        lines[1].start_ms, 131741,
+        "sub-line start must pull back to first unassigned parent word ('shed' at 131741), not jump to 'me' at 132961"
+    );
+    assert_eq!(lines[1].end_ms, 136943);
 }

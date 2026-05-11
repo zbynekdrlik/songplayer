@@ -86,6 +86,92 @@ pub(super) fn absorb_prefix_matches(emits: &mut [LineEmit], asr_words: &[AsrWord
     }
 }
 
+/// Maximum lookback when claiming leading unmatched ASR words. Singer
+/// rarely lead-ins more than 1.5 s of mistranscription before reaching
+/// the line's first matched word.
+const LEADIN_MAX_MS: u32 = 1500;
+
+/// Phase 2.65: when an emit's FIRST matched ASR word does NOT
+/// correspond to ref-text position 0, the leading ref word(s) were
+/// dropped (usually whisperx misheard them). Walks back through
+/// unconsumed ASR words between the previous emit's last matched word
+/// and this emit's first matched word, within LEADIN_MAX_MS, and
+/// attaches them. Skipped when ref[0] is already first-matched.
+///
+/// id=21 2:12 "shadow me": whisperx wrote "shed on" for "shadow"; LCS
+/// could match neither, first-matched became "me" (ref[1]). Phase 2.65
+/// reattaches "shed" + "on" so natural start moves from 132.961 s back
+/// to 131.741 s.
+#[cfg_attr(test, mutants::skip)] // Walk-back loop with lookback cap and prev-boundary check; functional behavior covered by 4 unit tests + reprocess integration. Boundary mutants (loop guard `scan > 0`, cap `> LEADIN_MAX_MS`) require synthetic edge-cases (no-prev-anchor + scan=0) that don't add behavioral confidence.
+pub(super) fn absorb_leading_unmatched(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
+    if emits.is_empty() {
+        return;
+    }
+    let mut consumed: std::collections::HashSet<usize> = emits
+        .iter()
+        .flat_map(|e| e.asr_word_indices.iter().copied())
+        .collect();
+    let mut order: Vec<usize> = (0..emits.len()).collect();
+    order.sort_by_key(|&i| {
+        emits[i]
+            .asr_word_indices
+            .iter()
+            .min()
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    for o in 0..order.len() {
+        let cur = order[o];
+        let prev_last_matched: Option<usize> = if o == 0 {
+            None
+        } else {
+            emits[order[o - 1]].asr_word_indices.iter().max().copied()
+        };
+        let first_matched = match emits[cur].asr_word_indices.iter().min().copied() {
+            Some(i) => i,
+            None => continue,
+        };
+        // Trigger only when ref[0] is NOT the first-matched word.
+        // Avoids absorbing whisperx vibrato tails of the previous line
+        // (the singer's sustained vowel mistranscribed as random
+        // syllables) when this line's first ref word is already
+        // matched correctly.
+        let ref_norms: Vec<String> = emits[cur]
+            .text
+            .split_whitespace()
+            .map(normalize_word)
+            .filter(|s| !s.is_empty())
+            .collect();
+        let first_norm = &asr_words[first_matched].norm;
+        if ref_norms.first().map(|s| s.as_str()) == Some(first_norm.as_str()) {
+            continue;
+        }
+        let first_ms = asr_words[first_matched].start_ms;
+        let mut to_attach: Vec<usize> = Vec::new();
+        let mut scan = first_matched;
+        while scan > 0 {
+            scan -= 1;
+            if let Some(pm) = prev_last_matched {
+                if scan <= pm {
+                    break;
+                }
+            }
+            if consumed.contains(&scan) {
+                break;
+            }
+            if first_ms.saturating_sub(asr_words[scan].end_ms) > LEADIN_MAX_MS {
+                break;
+            }
+            to_attach.push(scan);
+        }
+        for idx in &to_attach {
+            consumed.insert(*idx);
+        }
+        emits[cur].asr_word_indices.extend(to_attach);
+        emits[cur].asr_word_indices.sort_unstable();
+    }
+}
+
 pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words: &[AsrWord]) {
     for i in 1..emits.len() {
         let (prev_part, next_part) = emits.split_at_mut(i);

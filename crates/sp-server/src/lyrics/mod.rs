@@ -6,7 +6,6 @@ pub mod backend;
 pub mod bootstrap;
 pub mod chunking;
 pub mod claude_merge;
-pub mod description_merge;
 pub mod description_provider;
 pub mod gather;
 pub mod genius;
@@ -19,11 +18,14 @@ pub mod replicate_client;
 pub mod reprocess;
 pub mod spotify_proxy;
 pub mod spotify_resolver;
+pub mod text_reference_merge;
 pub mod tier1;
+pub mod timed_reference_merge;
 pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;
 pub mod youtube_subs;
+pub mod yt_subs_split;
 pub use worker::LyricsWorker;
 pub use worker::queue_update_loop;
 
@@ -287,3 +289,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "canonical_source_regression_tests.rs"]
+mod canonical_source_regression_tests;
