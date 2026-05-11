@@ -211,7 +211,7 @@ pub(crate) async fn fetch_raw_description(
 /// cache at `cache_path`.
 ///
 /// Returns:
-/// - `Ok(Some(lines))` — Claude produced clean lines (non-empty).
+/// - `Ok(Some(lines))` — Claude produced lines (may be empty; callers must guard `!lines.is_empty()`).
 /// - `Ok(None)`        — Claude returned `{"lines": null}` (refusal / no lyrics).
 /// - `Err(_)`          — transport error, malformed JSON, or IO error.
 ///
@@ -223,14 +223,18 @@ pub(crate) async fn fetch_raw_description(
 /// persisted so subsequent reprocesses skip Claude. On `Err`, no cache is
 /// written so the next attempt retries.
 pub async fn clean_lyrics_via_claude(
-    ai: &crate::ai::client::AiClient,
+    ai: &AiClient,
     title: &str,
     artist: &str,
     raw_blob: &str,
-    cache_path: &std::path::Path,
+    cache_path: &Path,
 ) -> Result<Option<Vec<String>>> {
     // Fast path: cache already records a decision.
     if let Some(cached) = read_lyrics_cache(cache_path).await? {
+        debug!(
+            cache_path = %cache_path.display(),
+            "clean_lyrics_via_claude: cache hit"
+        );
         return Ok(cached);
     }
 
@@ -263,15 +267,6 @@ pub async fn fetch_description_lyrics(
     artist: &str,
 ) -> Result<Option<Vec<String>>> {
     let lyrics_cache_path = cache_dir.join(format!("{youtube_id}_description_lyrics.json"));
-
-    // Fast path: cached lyrics decision already on disk.
-    if let Some(cached) = read_lyrics_cache(&lyrics_cache_path).await? {
-        debug!(
-            youtube_id,
-            "description_provider: cache hit (extracted lyrics)"
-        );
-        return Ok(cached);
-    }
 
     // Raw description fetch (cached separately).
     let Some(description) = fetch_raw_description(ytdlp_path, youtube_id, cache_dir).await? else {
