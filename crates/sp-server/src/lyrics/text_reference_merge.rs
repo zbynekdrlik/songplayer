@@ -26,8 +26,6 @@ mod audit;
 mod mapping;
 #[path = "text_reference_merge_phantom.rs"]
 mod phantom;
-#[path = "text_reference_merge_short_line_merge.rs"]
-mod short_line_merge;
 #[path = "text_reference_merge_trim.rs"]
 mod trim;
 #[path = "text_reference_merge_window.rs"]
@@ -857,18 +855,8 @@ fn apply_cap_and_monotonic(lines: &mut Vec<AlignedLine>) {
         }
     }
 
-    // Merge sub-fade-duration adjacent lines (Resolume 1 s subtitle fade
-    // cannot complete on < 1 s lines). See sibling module for algo +
-    // Saints id=233 regression context.
-    short_line_merge::merge_short_adjacent_lines(lines, RESOLUME_FADE_MS, MERGED_LINE_CAP_MS);
     lines.retain(|l| l.end_ms.saturating_sub(l.start_ms) >= MIN_LINE_DURATION_MS);
 }
-
-/// `resolume::handlers::FADE_DURATION_MS` = 1000 ms.
-const RESOLUME_FADE_MS: u32 = 1000;
-/// Cap on a merged line. 4 s preserves karaoke pace.
-const MERGED_LINE_CAP_MS: u32 = 4000;
-pub(crate) use short_line_merge::merge_short_adjacent_lines;
 
 pub(crate) use trim::trim_outlier_indices;
 
@@ -977,9 +965,6 @@ mod absorb_tests;
 #[cfg(test)]
 #[path = "text_reference_merge_dp_tests.rs"]
 mod dp_tests;
-#[cfg(test)]
-#[path = "text_reference_merge_merge_tests.rs"]
-mod merge_tests;
 #[cfg(test)]
 #[path = "text_reference_merge_phantom_tests.rs"]
 mod phantom_tests;
