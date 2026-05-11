@@ -679,78 +679,6 @@ fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
     );
 }
 
-#[tokio::test]
-async fn gather_lrclib_synced_skips_cleanup_pushes_timed_candidate() {
-    use crate::ai::AiSettings;
-    use crate::ai::client::AiClient;
-    use crate::db::models::VideoLyricsRow;
-    use crate::lyrics::worker::gather_sources_impl;
-
-    let cache_dir = tempfile::tempdir().unwrap();
-
-    // Claude mock that returns 500 — synced lrclib must bypass Claude entirely.
-    let claude_mock = wiremock::MockServer::start().await;
-    wiremock::Mock::given(wiremock::matchers::method("POST"))
-        .and(wiremock::matchers::path("/v1/chat/completions"))
-        .respond_with(wiremock::ResponseTemplate::new(500)) // would Err if called
-        .mount(&claude_mock)
-        .await;
-
-    let ai = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", claude_mock.uri()),
-        api_key: Some("test".into()),
-        model: "stub".into(),
-        system_prompt_extra: None,
-    });
-
-    let row = VideoLyricsRow {
-        id: 2,
-        youtube_id: "vidLRCS".into(),
-        song: "Test Song".into(),
-        artist: "Test Artist".into(),
-        duration_ms: Some(180_000),
-        audio_file_path: None,
-        youtube_url: "https://www.youtube.com/watch?v=vidLRCS".into(),
-        lyrics_override_text: None,
-        lyrics_time_offset_ms: 0,
-        spotify_track_id: None,
-        spotify_resolved_at: None,
-    };
-
-    // Pre-seed empty description so it doesn't muddy the assertions.
-    tokio::fs::write(
-        cache_dir.path().join("vidLRCS_description_lyrics.json"),
-        "{\"lines\":null}",
-    )
-    .await
-    .unwrap();
-
-    // Assert no `vidLRCS_lrclib_cleaned.json` cache file is created when
-    // lrclib_track has real timing. This holds even when lrclib HTTP isn't
-    // mockable, since the gather code only invokes clean_lyrics_via_claude
-    // for plain (zero-timing) lyrics.
-    let reqwest_client = reqwest::Client::new();
-    let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
-
-    // We don't care about the gather result — only that the lrclib cleanup
-    // cache file was never created.
-    let _ = gather_sources_impl(
-        Some(&ai),
-        &bogus_ytdlp,
-        cache_dir.path(),
-        &reqwest_client,
-        &row,
-        "",
-    )
-    .await;
-
-    let cleaned_path = cache_dir.path().join("vidLRCS_lrclib_cleaned.json");
-    assert!(
-        !cleaned_path.exists(),
-        "lrclib-synced path must NOT create the cleaned-lyrics cache file"
-    );
-}
-
 /// Structural regression: the genius branch in `gather.rs` MUST route through
 /// `crate::lyrics::description_provider::clean_lyrics_via_claude` and emit
 /// `{youtube_id}_genius_cleaned.json` as the cache filename. Mocking genius's
@@ -760,7 +688,7 @@ async fn gather_lrclib_synced_skips_cleanup_pushes_timed_candidate() {
 /// already in this file.
 #[test]
 fn gather_genius_branch_uses_clean_lyrics_via_claude() {
-    let src = std::fs::read_to_string("src/lyrics/gather.rs").expect("read gather.rs");
+    let src = include_str!("gather.rs");
 
     // The genius branch must call the shared helper.
     assert!(
@@ -793,5 +721,30 @@ fn gather_genius_branch_uses_clean_lyrics_via_claude() {
     assert!(
         src.contains("lrclib-plain cleanup failed"),
         "gather.rs must bail with 'lrclib-plain cleanup failed' on Err"
+    );
+    // Synced-lrclib arm: must call the detection helper.
+    assert!(
+        src.contains("lrclib_track_has_real_timing(t)"),
+        "gather.rs lrclib branch must call lrclib_track_has_real_timing(t) for synced/plain detection"
+    );
+    // Synced-lrclib arm: must branch via `if real_timing {`.
+    assert!(
+        src.contains("if real_timing {"),
+        "gather.rs lrclib branch must split via `if real_timing {{` so synced bypasses Claude cleanup"
+    );
+    // Synced-lrclib arm: must preserve `has_timing: true` inside the synced block.
+    // (One of two `has_timing: true` occurrences in the file; the other is yt_subs.
+    //  String alone isn't enough — assert it appears AFTER `if real_timing {`.)
+    let (_, after_if) = src
+        .split_once("if real_timing {")
+        .expect("split_once on `if real_timing {` should succeed (validated above)");
+    assert!(
+        after_if.contains("has_timing: true,"),
+        "synced-lrclib arm must push CandidateText with has_timing: true"
+    );
+    // lrclib_track_has_real_timing must be defined as pub(crate) at the top of the file.
+    assert!(
+        src.contains("pub(crate) fn lrclib_track_has_real_timing("),
+        "lrclib_track_has_real_timing must be pub(crate) so worker_tests can call it"
     );
 }
