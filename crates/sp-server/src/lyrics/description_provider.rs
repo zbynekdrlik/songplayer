@@ -206,6 +206,45 @@ pub(crate) async fn fetch_raw_description(
     Ok(Some(text))
 }
 
+/// Claude-clean a raw lyrics blob. Reuses the description-extraction prompt
+/// (`build_description_extraction_prompt`). Reads / writes the cleaned-lines
+/// cache at `cache_path`.
+///
+/// Returns:
+/// - `Ok(Some(lines))` — Claude produced clean lines (non-empty).
+/// - `Ok(None)`        — Claude returned `{"lines": null}` (refusal / no lyrics).
+/// - `Err(_)`          — transport error, malformed JSON, or IO error.
+///
+/// Caller policy decides whether `Ok(None)` is fatal:
+/// - description: `Ok(None)` is normal (description had no lyrics).
+/// - genius / lrclib-plain: `Ok(None)` is fatal (caller must bail).
+///
+/// Cache contract matches `write_lyrics_cache`: on success the result is
+/// persisted so subsequent reprocesses skip Claude. On `Err`, no cache is
+/// written so the next attempt retries.
+pub async fn clean_lyrics_via_claude(
+    ai: &crate::ai::client::AiClient,
+    title: &str,
+    artist: &str,
+    raw_blob: &str,
+    cache_path: &std::path::Path,
+) -> Result<Option<Vec<String>>> {
+    // Fast path: cache already records a decision.
+    if let Some(cached) = read_lyrics_cache(cache_path).await? {
+        return Ok(cached);
+    }
+
+    let (system, user) = build_description_extraction_prompt(title, artist, raw_blob);
+    let raw = ai
+        .chat_with_timeout(&system, &user, 180)
+        .await
+        .context("Claude clean_lyrics chat failed")?;
+    let parsed = parse_claude_response(&raw).context("Claude response malformed")?;
+
+    write_lyrics_cache(cache_path, parsed.as_deref()).await?;
+    Ok(parsed)
+}
+
 /// Fetch and extract lyrics from a YouTube video description.
 ///
 /// Caches both the raw description and the extracted lyrics JSON per
@@ -245,26 +284,18 @@ pub async fn fetch_description_lyrics(
         return Ok(None);
     }
 
-    // Call Claude. On any error, return Ok(None) WITHOUT writing a cache
-    // entry so the next reprocess retries.
-    let (system, user) = build_description_extraction_prompt(title, artist, &description);
-    let raw = match ai.chat_with_timeout(&system, &user, 180).await {
-        Ok(r) => r,
+    // Delegate Claude call + cache write to the shared helper.
+    // description-specific policy: swallow Claude errors to Ok(None) so other
+    // gather sources (yt_subs / lrclib / genius) still get a chance. The
+    // shared helper does NOT write the cache on Err, so the next reprocess
+    // retries cleanly.
+    match clean_lyrics_via_claude(ai, title, artist, &description, &lyrics_cache_path).await {
+        Ok(parsed) => Ok(parsed),
         Err(e) => {
-            warn!(youtube_id, %e, "description_provider: Claude extraction failed");
-            return Ok(None);
+            warn!(youtube_id, %e, "description_provider: Claude cleanup failed");
+            Ok(None)
         }
-    };
-    let parsed = match parse_claude_response(&raw) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(youtube_id, %e, "description_provider: Claude response malformed");
-            return Ok(None);
-        }
-    };
-    // Persist the decision (Some or None) so next reprocess skips Claude.
-    write_lyrics_cache(&lyrics_cache_path, parsed.as_deref()).await?;
-    Ok(parsed)
+    }
 }
 
 #[cfg(test)]
@@ -676,5 +707,143 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cache, Some(None), "empty description must cache null");
+    }
+
+    #[tokio::test]
+    async fn clean_lyrics_via_claude_returns_parsed_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("vidCLEAN_genius_cleaned.json");
+
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"lines\": [\"Line A\", \"Line B\"]}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let out = clean_lyrics_via_claude(
+            &ai,
+            "Song",
+            "Artist",
+            "Line A\nLine B\nLine A\nLine B",
+            &cache_path,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out, Some(vec!["Line A".to_string(), "Line B".to_string()]));
+        // Cache file written.
+        let cache = read_lyrics_cache(&cache_path).await.unwrap();
+        assert_eq!(cache, Some(Some(vec!["Line A".into(), "Line B".into()])));
+    }
+
+    #[tokio::test]
+    async fn clean_lyrics_via_claude_uses_cache_on_second_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("vidCACHED_genius_cleaned.json");
+
+        // Pre-seed the cache to skip the Claude call entirely.
+        write_lyrics_cache(
+            &cache_path,
+            Some(&["cached A".to_string(), "cached B".to_string()]),
+        )
+        .await
+        .unwrap();
+
+        // Intentionally bogus AI URL — if the helper ignores cache and tries
+        // to call Claude, the call will fail (and the test will fail with Err
+        // instead of the expected cached value).
+        let ai = AiClient::new(AiSettings {
+            api_url: "http://127.0.0.1:1/v1".into(),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let out = clean_lyrics_via_claude(&ai, "Song", "Artist", "raw input", &cache_path)
+            .await
+            .unwrap();
+
+        assert_eq!(out, Some(vec!["cached A".into(), "cached B".into()]));
+    }
+
+    #[tokio::test]
+    async fn clean_lyrics_via_claude_returns_err_on_claude_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("vidERR_genius_cleaned.json");
+
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&mock)
+            .await;
+
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let out = clean_lyrics_via_claude(&ai, "Song", "Artist", "raw input", &cache_path).await;
+
+        assert!(out.is_err(), "expected Err on Claude 500, got: {out:?}");
+        // Cache file must NOT exist — failed runs are retryable.
+        assert!(!cache_path.exists(), "cache file should not exist on Err");
+    }
+
+    #[tokio::test]
+    async fn clean_lyrics_via_claude_returns_none_when_claude_says_null() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("vidNULL_genius_cleaned.json");
+
+        let mock = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"lines\": null}"
+                        }
+                    }]
+                })),
+            )
+            .mount(&mock)
+            .await;
+
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let out = clean_lyrics_via_claude(&ai, "Song", "Artist", "buy my album", &cache_path)
+            .await
+            .unwrap();
+
+        assert_eq!(out, None);
+        // Null decision IS cached so we don't re-call Claude.
+        let cache = read_lyrics_cache(&cache_path).await.unwrap();
+        assert_eq!(cache, Some(None));
     }
 }
