@@ -103,7 +103,19 @@ pub async fn fetch_lyrics(
 
     let lines: Vec<String> = raw
         .lines()
-        .map(|l| l.trim().to_string())
+        // Normalize any Unicode whitespace (U+00A0 NBSP, U+2005 EN QUAD,
+        // U+202F NARROW NBSP, U+FEFF ZWNBSP, etc.) to plain ASCII space.
+        // lyrics.ovh upstream data sporadically ships these (verified 2026-05-11
+        // on planetboom Saints: 4× U+2005 in raw response). Downstream renderers
+        // (Resolume text input) treat them as glyphs, producing visible
+        // artifacts on the wall.
+        .map(|l| {
+            l.chars()
+                .map(|c| if c.is_whitespace() { ' ' } else { c })
+                .collect::<String>()
+                .trim()
+                .to_string()
+        })
         .filter(|l| !l.is_empty())
         .collect();
 
