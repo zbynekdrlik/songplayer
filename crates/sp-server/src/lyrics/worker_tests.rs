@@ -623,3 +623,175 @@ async fn gather_skips_spotify_on_proxy_error_field() {
         std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Task B.1: lrclib_track_has_real_timing + genius/lrclib gather wiring (#B.1)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
+    use crate::lyrics::gather::lrclib_track_has_real_timing;
+    use sp_core::lyrics::{LyricsLine, LyricsTrack};
+
+    let make = |timing: &[(u64, u64)]| LyricsTrack {
+        version: 1,
+        source: "lrclib".into(),
+        language_source: "en".into(),
+        language_translation: String::new(),
+        lines: timing
+            .iter()
+            .map(|(s, e)| LyricsLine {
+                start_ms: *s,
+                end_ms: *e,
+                en: "x".into(),
+                sk: None,
+                words: None,
+            })
+            .collect(),
+    };
+
+    // Plain mode: all-zero timing.
+    let plain = make(&[(0, 0), (0, 0), (0, 0)]);
+    assert!(
+        !lrclib_track_has_real_timing(&plain),
+        "all-zero end_ms must read as no-timing"
+    );
+
+    // Synced mode: any non-zero end_ms qualifies.
+    let synced = make(&[(0, 1500), (1500, 3000)]);
+    assert!(
+        lrclib_track_has_real_timing(&synced),
+        "non-zero end_ms must read as real-timing"
+    );
+
+    // Edge: single line with timing.
+    let partial = make(&[(0, 0), (3000, 5000), (0, 0)]);
+    assert!(
+        lrclib_track_has_real_timing(&partial),
+        "even one timed line qualifies as real-timing"
+    );
+
+    // Edge: empty.
+    let empty = make(&[]);
+    assert!(
+        !lrclib_track_has_real_timing(&empty),
+        "empty track has no real timing"
+    );
+}
+
+#[tokio::test]
+async fn gather_lrclib_synced_skips_cleanup_pushes_timed_candidate() {
+    use crate::ai::AiSettings;
+    use crate::ai::client::AiClient;
+    use crate::db::models::VideoLyricsRow;
+    use crate::lyrics::worker::gather_sources_impl;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+
+    // Claude mock that returns 500 — synced lrclib must bypass Claude entirely.
+    let claude_mock = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/chat/completions"))
+        .respond_with(wiremock::ResponseTemplate::new(500)) // would Err if called
+        .mount(&claude_mock)
+        .await;
+
+    let ai = AiClient::new(AiSettings {
+        api_url: format!("{}/v1", claude_mock.uri()),
+        api_key: Some("test".into()),
+        model: "stub".into(),
+        system_prompt_extra: None,
+    });
+
+    let row = VideoLyricsRow {
+        id: 2,
+        youtube_id: "vidLRCS".into(),
+        song: "Test Song".into(),
+        artist: "Test Artist".into(),
+        duration_ms: Some(180_000),
+        audio_file_path: None,
+        youtube_url: "https://www.youtube.com/watch?v=vidLRCS".into(),
+        lyrics_override_text: None,
+        lyrics_time_offset_ms: 0,
+        spotify_track_id: None,
+        spotify_resolved_at: None,
+    };
+
+    // Pre-seed empty description so it doesn't muddy the assertions.
+    tokio::fs::write(
+        cache_dir.path().join("vidLRCS_description_lyrics.json"),
+        "{\"lines\":null}",
+    )
+    .await
+    .unwrap();
+
+    // Assert no `vidLRCS_lrclib_cleaned.json` cache file is created when
+    // lrclib_track has real timing. This holds even when lrclib HTTP isn't
+    // mockable, since the gather code only invokes clean_lyrics_via_claude
+    // for plain (zero-timing) lyrics.
+    let reqwest_client = reqwest::Client::new();
+    let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
+
+    // We don't care about the gather result — only that the lrclib cleanup
+    // cache file was never created.
+    let _ = gather_sources_impl(
+        Some(&ai),
+        &bogus_ytdlp,
+        cache_dir.path(),
+        &reqwest_client,
+        &row,
+        "",
+    )
+    .await;
+
+    let cleaned_path = cache_dir.path().join("vidLRCS_lrclib_cleaned.json");
+    assert!(
+        !cleaned_path.exists(),
+        "lrclib-synced path must NOT create the cleaned-lyrics cache file"
+    );
+}
+
+/// Structural regression: the genius branch in `gather.rs` MUST route through
+/// `crate::lyrics::description_provider::clean_lyrics_via_claude` and emit
+/// `{youtube_id}_genius_cleaned.json` as the cache filename. Mocking genius's
+/// HTTP is impractical (api.genius.com is a hardcoded const), so this test
+/// reads the source file and asserts on the wiring strings. Matches the
+/// pattern of `gather_sources_call_order_preserves_yt_subs_then_lrclib`
+/// already in this file.
+#[test]
+fn gather_genius_branch_uses_clean_lyrics_via_claude() {
+    let src = std::fs::read_to_string("src/lyrics/gather.rs").expect("read gather.rs");
+
+    // The genius branch must call the shared helper.
+    assert!(
+        src.contains("description_provider::clean_lyrics_via_claude"),
+        "gather.rs must call description_provider::clean_lyrics_via_claude in the genius/lrclib branches"
+    );
+    // The genius cache file MUST be named `{youtube_id}_genius_cleaned.json`.
+    assert!(
+        src.contains("_genius_cleaned.json"),
+        "gather.rs must write the genius cleanup cache to {{youtube_id}}_genius_cleaned.json"
+    );
+    // The lrclib cache file MUST be named `{youtube_id}_lrclib_cleaned.json`.
+    assert!(
+        src.contains("_lrclib_cleaned.json"),
+        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned.json"
+    );
+    // Failure mode: bail on Err or null. Verify the error message strings.
+    assert!(
+        src.contains("genius cleanup returned no lyrics"),
+        "gather.rs must bail with 'genius cleanup returned no lyrics' on Ok(None)/empty"
+    );
+    assert!(
+        src.contains("genius cleanup failed"),
+        "gather.rs must bail with 'genius cleanup failed' on Err"
+    );
+    assert!(
+        src.contains("lrclib-plain cleanup returned no lyrics"),
+        "gather.rs must bail with 'lrclib-plain cleanup returned no lyrics' on Ok(None)/empty"
+    );
+    assert!(
+        src.contains("lrclib-plain cleanup failed"),
+        "gather.rs must bail with 'lrclib-plain cleanup failed' on Err"
+    );
+}

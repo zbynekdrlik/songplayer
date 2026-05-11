@@ -12,6 +12,14 @@ use tracing::{debug, info, warn};
 
 use crate::lyrics::{genius, lrclib, spotify_proxy::SpotifyLyricsFetcher, youtube_subs};
 
+/// Returns `true` if any line in the lrclib track has a non-zero `end_ms`,
+/// indicating synced (timestamped) lyrics. `lrclib.rs::parse_plain` emits
+/// all-zero timing for the `plainLyrics` fallback path, so this detects
+/// that case.
+pub(crate) fn lrclib_track_has_real_timing(t: &sp_core::lyrics::LyricsTrack) -> bool {
+    t.lines.iter().any(|l| l.end_ms > 0)
+}
+
 /// Free function containing the `gather_sources` logic so it can be tested
 /// without constructing a full `LyricsWorker`.
 ///
@@ -164,20 +172,103 @@ pub(crate) async fn gather_sources_impl(
         });
     }
     if let Some(t) = &lrclib_track {
-        candidate_texts.push(CandidateText {
-            source: "lrclib".into(),
-            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-            has_timing: true,
-            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-        });
+        // lrclib.rs::parse_plain emits lines with start_ms=0/end_ms=0; only
+        // synced lyrics have real timestamps. Detect via the helper so the
+        // logic is unit-testable.
+        let real_timing = lrclib_track_has_real_timing(t);
+        if real_timing {
+            candidate_texts.push(CandidateText {
+                source: "lrclib".into(),
+                lines: t.lines.iter().map(|l| l.en.clone()).collect(),
+                has_timing: true,
+                line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
+            });
+        } else {
+            let Some(ai) = ai_client else {
+                anyhow::bail!(
+                    "gather: lrclib-plain candidate present but ai_client is None for {youtube_id}; \
+                     cannot run Claude cleanup"
+                );
+            };
+            let raw_blob: String = t
+                .lines
+                .iter()
+                .map(|l| l.en.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned.json"));
+            match crate::lyrics::description_provider::clean_lyrics_via_claude(
+                ai,
+                &row.song,
+                &row.artist,
+                &raw_blob,
+                &cache_path,
+            )
+            .await
+            {
+                Ok(Some(cleaned)) if !cleaned.is_empty() => {
+                    info!(
+                        %youtube_id,
+                        raw_count = t.lines.len(),
+                        cleaned_count = cleaned.len(),
+                        "gather: lrclib-plain Claude cleanup complete"
+                    );
+                    candidate_texts.push(CandidateText {
+                        source: "lrclib".into(),
+                        lines: cleaned,
+                        has_timing: false,
+                        line_timings: None,
+                    });
+                }
+                Ok(_) => anyhow::bail!(
+                    "gather: lrclib-plain cleanup returned no lyrics for {youtube_id}"
+                ),
+                Err(e) => {
+                    anyhow::bail!("gather: lrclib-plain cleanup failed for {youtube_id}: {e}")
+                }
+            }
+        }
     }
     if let Some(t) = &genius_track {
-        candidate_texts.push(CandidateText {
-            source: "genius".into(),
-            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-            has_timing: false,
-            line_timings: None,
-        });
+        let Some(ai) = ai_client else {
+            anyhow::bail!(
+                "gather: genius candidate present but ai_client is None for {youtube_id}; \
+                 cannot run Claude cleanup"
+            );
+        };
+        let raw_blob: String = t
+            .lines
+            .iter()
+            .map(|l| l.en.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned.json"));
+        match crate::lyrics::description_provider::clean_lyrics_via_claude(
+            ai,
+            &row.song,
+            &row.artist,
+            &raw_blob,
+            &cache_path,
+        )
+        .await
+        {
+            Ok(Some(cleaned)) if !cleaned.is_empty() => {
+                info!(
+                    %youtube_id,
+                    raw_count = t.lines.len(),
+                    cleaned_count = cleaned.len(),
+                    "gather: genius Claude cleanup complete"
+                );
+                candidate_texts.push(CandidateText {
+                    source: "genius".into(),
+                    lines: cleaned,
+                    has_timing: false,
+                    line_timings: None,
+                });
+            }
+            Ok(_) => anyhow::bail!("gather: genius cleanup returned no lyrics for {youtube_id}"),
+            Err(e) => anyhow::bail!("gather: genius cleanup failed for {youtube_id}: {e}"),
+        }
     }
 
     // 4. YouTube description lyrics (LLM-extracted). Best-effort.
