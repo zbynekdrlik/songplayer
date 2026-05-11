@@ -10,7 +10,9 @@ use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-use crate::lyrics::{lrclib, lyrics_ovh, spotify_proxy::SpotifyLyricsFetcher, youtube_subs};
+use crate::lyrics::{
+    genius, lrclib, lyrics_ovh, spotify_proxy::SpotifyLyricsFetcher, youtube_subs,
+};
 
 /// Returns `true` if any line in the lrclib track has a non-zero `end_ms`,
 /// indicating synced (timestamped) lyrics. `lrclib.rs::parse_plain` emits
@@ -36,6 +38,7 @@ pub(crate) async fn gather_sources_impl(
     cache_dir: &std::path::Path,
     client: &reqwest::Client,
     row: &crate::db::models::VideoLyricsRow,
+    genius_access_token: &str,
 ) -> Result<crate::lyrics::provider::SongContext> {
     use crate::lyrics::provider::{CandidateText, SongContext};
 
@@ -83,11 +86,9 @@ pub(crate) async fn gather_sources_impl(
         None
     };
 
-    // 2a. lyrics.ovh (community lyrics API, no auth, returns plain text).
-    // Replaces the prior Genius HTML scraper that truncated multi-container
-    // pages (Verse 1 + Verse 2 dropped on planetboom Saints, observed
-    // 2026-05-11). lyrics.ovh returns clean text with section markers already
-    // stripped, so no Claude cleanup is required.
+    // 2a. lyrics.ovh (community lyrics API, no auth, clean plain text).
+    // Tried FIRST because the response is already free of HTML, section
+    // markers, and contributor banners — no parser fragility.
     let lyrics_ovh_lines = if !row.song.is_empty() && !row.artist.is_empty() {
         match lyrics_ovh::fetch_lyrics(client, &row.artist, &row.song).await {
             Ok(Some(lines)) => {
@@ -103,6 +104,28 @@ pub(crate) async fn gather_sources_impl(
     } else {
         None
     };
+
+    // 2b. Genius FALLBACK — only consulted when lyrics.ovh did not return a
+    // match. Genius has a wider catalog than lyrics.ovh; the prior HTML
+    // parser bug (naive `</div>` find truncating multi-container pages,
+    // observed 2026-05-11 on planetboom Saints) is fixed by
+    // `find_matching_div_close` counting nested div depth.
+    let genius_track =
+        if lyrics_ovh_lines.is_none() && !row.song.is_empty() && !row.artist.is_empty() {
+            match genius::fetch_lyrics(client, genius_access_token, &row.artist, &row.song).await {
+                Ok(Some(t)) => {
+                    info!(%youtube_id, line_count = t.lines.len(), "gather: Genius fallback hit");
+                    Some(t)
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    warn!("gather: Genius fallback error for {youtube_id}: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
     // 3. Spotify (operator pasted track URL via dashboard). Authoritative
     //    LINE_SYNCED lyrics for songs the other Tier-1 sources miss
@@ -237,10 +260,10 @@ pub(crate) async fn gather_sources_impl(
     }
     // lyrics.ovh returns clean plain-text lyrics — no section markers, no
     // contributor banners, no HTML. Push directly as a TextOnly candidate;
-    // no Claude cleanup pass needed (unlike the deprecated Genius scrape).
-    // Source label stays "genius" so `priority_with_timing` keeps the same
-    // ranking slot for this tier (community-curated lyrics-website tier).
-    // The label is historical; the underlying fetcher is `lyrics_ovh.rs`.
+    // no Claude cleanup pass needed. Source label "genius" preserves the
+    // existing `priority_with_timing` ranking slot for the community-
+    // lyrics-website tier; lyrics.ovh and Genius are equivalent at that
+    // priority (both fan-curated text references).
     if let Some(lines) = lyrics_ovh_lines {
         candidate_texts.push(CandidateText {
             source: "genius".into(),
@@ -248,6 +271,53 @@ pub(crate) async fn gather_sources_impl(
             has_timing: false,
             line_timings: None,
         });
+    } else if let Some(t) = &genius_track {
+        // Genius fallback — only reached when lyrics.ovh missed. The HTML
+        // parser bug that truncated multi-container pages is fixed; the
+        // resulting text may still benefit from Claude cleanup because
+        // Genius HTML preserves section-marker artifacts in some pages.
+        let Some(ai) = ai_client else {
+            anyhow::bail!(
+                "gather: genius fallback present but ai_client is None for {youtube_id}; \
+                 cannot run Claude cleanup"
+            );
+        };
+        let raw_blob: String = t
+            .lines
+            .iter()
+            .map(|l| l.en.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v2.json"));
+        match crate::lyrics::description_provider::clean_lyrics_via_claude(
+            ai,
+            &row.song,
+            &row.artist,
+            &raw_blob,
+            &cache_path,
+            crate::lyrics::description_provider::CleanupMode::ScrapedLyrics,
+        )
+        .await
+        {
+            Ok(Some(cleaned)) if !cleaned.is_empty() => {
+                info!(
+                    %youtube_id,
+                    raw_count = t.lines.len(),
+                    cleaned_count = cleaned.len(),
+                    "gather: genius fallback Claude cleanup complete"
+                );
+                candidate_texts.push(CandidateText {
+                    source: "genius".into(),
+                    lines: cleaned,
+                    has_timing: false,
+                    line_timings: None,
+                });
+            }
+            Ok(_) => {
+                anyhow::bail!("gather: genius fallback cleanup returned no lyrics for {youtube_id}")
+            }
+            Err(e) => anyhow::bail!("gather: genius fallback cleanup failed for {youtube_id}: {e}"),
+        }
     }
 
     // 4. YouTube description lyrics (LLM-extracted). Best-effort.

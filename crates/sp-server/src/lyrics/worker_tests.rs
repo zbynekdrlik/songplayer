@@ -256,6 +256,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         cache_dir.path(),
         &reqwest_client,
         &row,
+        "",
     )
     .await
     .unwrap();
@@ -351,6 +352,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         cache_dir.path(),
         &reqwest_client,
         &row,
+        "",
     )
     .await;
 
@@ -448,6 +450,7 @@ async fn gather_emits_tier1_spotify_candidate_when_track_id_set() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
+        "",
     )
     .await
     .expect("gather succeeds with Spotify candidate");
@@ -497,6 +500,7 @@ async fn gather_omits_spotify_when_track_id_is_null() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
+        "",
     )
     .await
     .expect("gather succeeds via override candidate");
@@ -545,6 +549,7 @@ async fn gather_skips_spotify_on_404() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
+        "",
     )
     .await
     .expect("gather succeeds when Spotify returns 404");
@@ -602,6 +607,7 @@ async fn gather_skips_spotify_on_proxy_error_field() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
+        "",
     )
     .await
     .expect("gather succeeds when proxy returns error:true");
@@ -673,50 +679,55 @@ fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
     );
 }
 
-/// Structural regression: the "genius" tier in `gather.rs` MUST call the
-/// `lyrics_ovh` provider (clean plain-text endpoint, no HTML scraping) and
-/// push directly as a CandidateText with `source: "genius"` (label retained
-/// for `priority_with_timing` compat). The prior Genius HTML scraper was
-/// removed because it truncated multi-container lyric pages — `[Verse 1]`
-/// and `[Verse 2]` were dropped, leaving only `[Bridge]` + outro `[Chorus]`,
-/// and `text_reference_merge` then mis-aligned that partial reference
-/// against full-song WhisperX (planetboom Saints, 2026-05-11).
+/// Structural regression: gather.rs must call lyrics.ovh as the PRIMARY
+/// community-lyrics source and fall back to Genius (with the fixed nested-
+/// div parser) when lyrics.ovh returns no match. Both push CandidateText
+/// with `source: "genius"` so `priority_with_timing` keeps the same ranking
+/// slot regardless of which provider supplied the text.
 ///
-/// The lrclib-plain branch still routes through `clean_lyrics_via_claude`
-/// with `CleanupMode::ScrapedLyrics` because LRCLIB plain-text mode can
-/// include section markers that need filtering.
+/// Why both: lyrics.ovh has a smaller catalog than Genius. lyrics.ovh
+/// returns clean plain text (no parsing fragility) so it's preferred when
+/// available. Genius covers the long tail; its HTML parser now correctly
+/// counts nested div depth (`find_matching_div_close`) so multi-container
+/// pages no longer drop verses (planetboom Saints regression 2026-05-11).
 #[test]
-fn gather_lyrics_ovh_replaces_genius_html_scrape() {
+fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
     let src = include_str!("gather.rs");
 
-    // genius HTML scraper must be gone from this file's imports.
-    assert!(
-        !src.contains(" genius,"),
-        "gather.rs must NOT import `genius` (HTML scraper deleted)"
-    );
-    assert!(
-        !src.contains("genius::fetch_lyrics"),
-        "gather.rs must NOT call genius::fetch_lyrics (deleted)"
-    );
-    // lyrics_ovh provider must be imported + called.
-    assert!(
-        src.contains("lyrics_ovh"),
-        "gather.rs must reference the lyrics_ovh provider"
-    );
+    // lyrics.ovh must be imported and called BEFORE genius.
     assert!(
         src.contains("lyrics_ovh::fetch_lyrics"),
         "gather.rs must call lyrics_ovh::fetch_lyrics for the community-lyrics tier"
     );
+    assert!(
+        src.contains("genius::fetch_lyrics"),
+        "gather.rs must call genius::fetch_lyrics as fallback when lyrics.ovh misses"
+    );
+    let lyrics_ovh_pos = src
+        .find("lyrics_ovh::fetch_lyrics")
+        .expect("lyrics_ovh call exists");
+    let genius_pos = src
+        .find("genius::fetch_lyrics")
+        .expect("genius call exists");
+    assert!(
+        lyrics_ovh_pos < genius_pos,
+        "lyrics_ovh must be called BEFORE genius (primary/fallback order)"
+    );
+    // Genius branch must be gated on lyrics.ovh returning None.
+    assert!(
+        src.contains("lyrics_ovh_lines.is_none()"),
+        "genius fallback must be gated on lyrics.ovh returning None"
+    );
     // Source label "genius" retained for priority_with_timing compat.
     assert!(
         src.contains("source: \"genius\""),
-        "lyrics.ovh candidate must keep source: \"genius\" for priority_with_timing compat"
+        "community-lyrics candidate must keep source: \"genius\" for priority_with_timing compat"
     );
 
     // The lrclib-plain branch still uses the shared cleanup helper.
     assert!(
         src.contains("description_provider::clean_lyrics_via_claude"),
-        "gather.rs must call description_provider::clean_lyrics_via_claude in the lrclib-plain branch"
+        "gather.rs must call description_provider::clean_lyrics_via_claude"
     );
     assert!(
         src.contains("_lrclib_cleaned_v2.json"),

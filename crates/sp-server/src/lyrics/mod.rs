@@ -8,6 +8,7 @@ pub mod chunking;
 pub mod claude_merge;
 pub mod description_provider;
 pub mod gather;
+pub mod genius;
 pub mod line_splitter;
 pub mod lrclib;
 pub mod lyrics_ovh;
