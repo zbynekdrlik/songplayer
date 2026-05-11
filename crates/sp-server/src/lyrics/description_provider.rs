@@ -11,54 +11,15 @@ use tracing::{debug, warn};
 
 use crate::ai::client::AiClient;
 
-/// Build the Claude extraction prompt for a single video description.
-///
-/// Empty system prompt — soft-framing in user message instead. Mirrors the
-/// `text_merge.rs` pattern: CLIProxyAPI OAuth Claude reverts to conversational
-/// mode on lyrics content when given a direct-instruction system prompt,
-/// producing preamble instead of JSON. Framing the task as "I'm building a
-/// karaoke app" positions Claude as a software engineer and makes JSON output
-/// reliable. Returns `(system, user)`.
-pub fn build_description_extraction_prompt(
-    title: &str,
-    artist: &str,
-    description: &str,
-) -> (String, String) {
-    // Empty system prompt: soft-framing in user message instead. Matches the
-    // text_merge.rs pattern — CLIProxyAPI OAuth Claude refuses to produce
-    // structured JSON from a direct "extract lyrics" system prompt because
-    // song lyrics trigger content-policy caution and Claude reverts to
-    // conversational mode. Framing the task as "I'm building a karaoke app"
-    // positions Claude as a software engineer and makes JSON output reliable.
-    let system = String::new();
-    let user = format!(
-        "I'm building a karaoke subtitle app for a church. I need to extract the song's \
-         lyrics from this YouTube video description so my app can display them synced to \
-         the music.\n\n\
-         Return a JSON object with exactly one key, \"lines\", whose value is either:\n\
-           - an array of strings (one per lyric line, in reading order, in the song's original language), OR\n\
-           - null, when the description contains NO lyrics.\n\
-         \n\
-         Rules:\n\
-         1. Strip section markers (\"Verse 1:\", \"Chorus:\", \"Bridge:\", etc.), keep the line text.\n\
-         2. Preserve non-English lyrics as-is. Do NOT translate.\n\
-         3. Ignore: artist bio, social links, streaming/buy links, copyright notices, producer/\n\
-            writer credits, album promo, tour dates, comment/like/subscribe prompts.\n\
-         4. If multiple languages appear (e.g., English + Spanish side-by-side or verse/translation \
-            blocks), include ALL lines in reading order — downstream reconciliation handles dedupe.\n\
-         5. Do not fabricate lyrics. If you are not confident the text is the song's lyrics, \
-            return {{\"lines\": null}}.\n\
-         6. Output ONLY the JSON object. No preamble, no markdown fences, no commentary. \
-            Start your response with {{ and end with }}.\n\n\
-         Video title: {title}\n\
-         Artist: {artist}\n\n\
-         Description:\n\
-         ---\n\
-         {description}\n\
-         ---"
-    );
-    (system, user)
-}
+// Prompts split into a sibling module (description_provider_prompts.rs) so
+// this file stays under the 1000-line cap. Re-export the public surface
+// (`CleanupMode`, `build_description_extraction_prompt`,
+// `build_scraped_lyrics_cleanup_prompt`) so external callers stay unchanged.
+#[path = "description_provider_prompts.rs"]
+mod prompts;
+pub use prompts::{
+    CleanupMode, build_description_extraction_prompt, build_scraped_lyrics_cleanup_prompt,
+};
 
 /// Parse Claude's response to the description extraction prompt.
 ///
@@ -228,6 +189,7 @@ pub async fn clean_lyrics_via_claude(
     artist: &str,
     raw_blob: &str,
     cache_path: &Path,
+    mode: CleanupMode,
 ) -> Result<Option<Vec<String>>> {
     // Fast path: cache already records a decision.
     if let Some(cached) = read_lyrics_cache(cache_path).await? {
@@ -238,7 +200,10 @@ pub async fn clean_lyrics_via_claude(
         return Ok(cached);
     }
 
-    let (system, user) = build_description_extraction_prompt(title, artist, raw_blob);
+    let (system, user) = match mode {
+        CleanupMode::Description => build_description_extraction_prompt(title, artist, raw_blob),
+        CleanupMode::ScrapedLyrics => build_scraped_lyrics_cleanup_prompt(title, artist, raw_blob),
+    };
     let raw = ai
         .chat_with_timeout(&system, &user, 180)
         .await
@@ -284,7 +249,16 @@ pub async fn fetch_description_lyrics(
     // gather sources (yt_subs / lrclib / genius) still get a chance. The
     // shared helper does NOT write the cache on Err, so the next reprocess
     // retries cleanly.
-    match clean_lyrics_via_claude(ai, title, artist, &description, &lyrics_cache_path).await {
+    match clean_lyrics_via_claude(
+        ai,
+        title,
+        artist,
+        &description,
+        &lyrics_cache_path,
+        CleanupMode::Description,
+    )
+    .await
+    {
         Ok(parsed) => Ok(parsed),
         Err(e) => {
             warn!(youtube_id, %e, "description_provider: Claude cleanup failed");
@@ -738,6 +712,7 @@ mod tests {
             "Artist",
             "Line A\nLine B\nLine A\nLine B",
             &cache_path,
+            CleanupMode::ScrapedLyrics,
         )
         .await
         .unwrap();
@@ -771,9 +746,16 @@ mod tests {
             system_prompt_extra: None,
         });
 
-        let out = clean_lyrics_via_claude(&ai, "Song", "Artist", "raw input", &cache_path)
-            .await
-            .unwrap();
+        let out = clean_lyrics_via_claude(
+            &ai,
+            "Song",
+            "Artist",
+            "raw input",
+            &cache_path,
+            CleanupMode::ScrapedLyrics,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(out, Some(vec!["cached A".into(), "cached B".into()]));
     }
@@ -797,7 +779,15 @@ mod tests {
             system_prompt_extra: None,
         });
 
-        let out = clean_lyrics_via_claude(&ai, "Song", "Artist", "raw input", &cache_path).await;
+        let out = clean_lyrics_via_claude(
+            &ai,
+            "Song",
+            "Artist",
+            "raw input",
+            &cache_path,
+            CleanupMode::ScrapedLyrics,
+        )
+        .await;
 
         assert!(out.is_err(), "expected Err on Claude 500, got: {out:?}");
         // Cache file must NOT exist — failed runs are retryable.
@@ -832,13 +822,135 @@ mod tests {
             system_prompt_extra: None,
         });
 
-        let out = clean_lyrics_via_claude(&ai, "Song", "Artist", "buy my album", &cache_path)
-            .await
-            .unwrap();
+        let out = clean_lyrics_via_claude(
+            &ai,
+            "Song",
+            "Artist",
+            "buy my album",
+            &cache_path,
+            CleanupMode::ScrapedLyrics,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(out, None);
         // Null decision IS cached so we don't re-call Claude.
         let cache = read_lyrics_cache(&cache_path).await.unwrap();
         assert_eq!(cache, Some(None));
+    }
+
+    /// Sanity-checks the dedup / ad-lib / hype-intro instructions are present
+    /// in the scraped-lyrics prompt. Catches accidental prompt regressions that
+    /// would silently fall back to description-style behavior (which on genius
+    /// input produces no cleanup — confirmed in production on id=233 Saints,
+    /// 2026-05-11).
+    #[test]
+    fn scraped_lyrics_prompt_mentions_dedup_adlib_intro_rules() {
+        let (system, user) = build_scraped_lyrics_cleanup_prompt(
+            "Saints",
+            "planetboom",
+            "Has He changed your life?\nIt's the power of Jesus\nIt's the power of Jesus",
+        );
+        assert!(
+            system.is_empty(),
+            "soft-framing must use empty system prompt"
+        );
+        // Dedup must be explicit; mere "duplicate" is not enough — test for the
+        // distinguishing word "consecutive" so paraphrases that lose the rule fail.
+        assert!(
+            user.to_lowercase().contains("dedupe") || user.to_lowercase().contains("dedup"),
+            "scraped-lyrics prompt must instruct dedup of consecutive identical lines"
+        );
+        assert!(
+            user.to_lowercase().contains("consecutive"),
+            "scraped-lyrics prompt must mention 'consecutive' (non-consecutive repeats kept)"
+        );
+        // Ad-libs / vocalizations.
+        assert!(
+            user.to_lowercase().contains("ad-lib") || user.to_lowercase().contains("vocaliz"),
+            "scraped-lyrics prompt must mention ad-libs / vocalizations"
+        );
+        // Hype intros.
+        assert!(
+            user.to_lowercase().contains("intro"),
+            "scraped-lyrics prompt must mention DJ / hype intros"
+        );
+        // Title / artist / blob must appear.
+        assert!(user.contains("Saints"), "title missing from prompt");
+        assert!(user.contains("planetboom"), "artist missing from prompt");
+        assert!(
+            user.contains("It's the power of Jesus"),
+            "raw blob missing from prompt"
+        );
+        // JSON output contract preserved.
+        assert!(
+            user.contains("\"lines\""),
+            "scraped-lyrics prompt must request `lines` JSON key"
+        );
+    }
+
+    /// Verifies `clean_lyrics_via_claude` actually dispatches on `CleanupMode`.
+    /// A regression in the match arm (e.g., both modes using the description
+    /// prompt) would silently make the genius path useless. The test stubs
+    /// Claude and inspects the request body to confirm the SCRAPED prompt's
+    /// rule-text was sent, not the description prompt's.
+    #[tokio::test]
+    async fn clean_lyrics_via_claude_dispatches_scraped_prompt_on_scrapedmode() {
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use wiremock::matchers::{method, path};
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("vidMODE_genius_cleaned_v2.json");
+        let captured_body = Arc::new(Mutex::new(String::new()));
+
+        let mock = wiremock::MockServer::start().await;
+        let captured = captured_body.clone();
+        wiremock::Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(move |req: &wiremock::Request| {
+                let body = String::from_utf8_lossy(&req.body).to_string();
+                *captured.lock().unwrap() = body;
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"lines\": [\"x\"]}"
+                        }
+                    }]
+                }))
+            })
+            .mount(&mock)
+            .await;
+
+        let ai = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", mock.uri()),
+            api_key: Some("test".into()),
+            model: "stub".into(),
+            system_prompt_extra: None,
+        });
+
+        let _ = clean_lyrics_via_claude(
+            &ai,
+            "Song",
+            "Artist",
+            "raw",
+            &cache_path,
+            CleanupMode::ScrapedLyrics,
+        )
+        .await
+        .unwrap();
+
+        let body = captured_body.lock().unwrap().clone();
+        // SCRAPED-prompt rule text must appear in the outgoing request, NOT
+        // the description-prompt's signature phrases.
+        assert!(
+            body.to_lowercase().contains("dedup"),
+            "ScrapedLyrics mode must send the dedup-rule prompt; body: {body}"
+        );
+        assert!(
+            !body.contains("from this YouTube video description"),
+            "ScrapedLyrics mode must NOT send the description-prompt text; body: {body}"
+        );
     }
 }

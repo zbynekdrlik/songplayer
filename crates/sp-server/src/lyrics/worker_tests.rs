@@ -680,12 +680,14 @@ fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
 }
 
 /// Structural regression: the genius branch in `gather.rs` MUST route through
-/// `crate::lyrics::description_provider::clean_lyrics_via_claude` and emit
-/// `{youtube_id}_genius_cleaned.json` as the cache filename. Mocking genius's
-/// HTTP is impractical (api.genius.com is a hardcoded const), so this test
-/// reads the source file and asserts on the wiring strings. Matches the
-/// pattern of `gather_sources_call_order_preserves_yt_subs_then_lrclib`
-/// already in this file.
+/// `crate::lyrics::description_provider::clean_lyrics_via_claude` with
+/// `CleanupMode::ScrapedLyrics`, and emit `{youtube_id}_genius_cleaned_v2.json`
+/// as the cache filename (the `_v2` suffix invalidates pre-2026-05-11 caches
+/// written under the description-prompt). Mocking genius's HTTP is impractical
+/// (api.genius.com is a hardcoded const), so this test reads the source file
+/// and asserts on the wiring strings. Matches the pattern of
+/// `gather_sources_call_order_preserves_yt_subs_then_lrclib` already in this
+/// file.
 #[test]
 fn gather_genius_branch_uses_clean_lyrics_via_claude() {
     let src = include_str!("gather.rs");
@@ -695,15 +697,26 @@ fn gather_genius_branch_uses_clean_lyrics_via_claude() {
         src.contains("description_provider::clean_lyrics_via_claude"),
         "gather.rs must call description_provider::clean_lyrics_via_claude in the genius/lrclib branches"
     );
-    // The genius cache file MUST be named `{youtube_id}_genius_cleaned.json`.
+    // The genius cache file MUST be named `{youtube_id}_genius_cleaned_v2.json`.
     assert!(
-        src.contains("_genius_cleaned.json"),
-        "gather.rs must write the genius cleanup cache to {{youtube_id}}_genius_cleaned.json"
+        src.contains("_genius_cleaned_v2.json"),
+        "gather.rs must write the genius cleanup cache to {{youtube_id}}_genius_cleaned_v2.json"
     );
-    // The lrclib cache file MUST be named `{youtube_id}_lrclib_cleaned.json`.
+    // The lrclib cache file MUST be named `{youtube_id}_lrclib_cleaned_v2.json`.
     assert!(
-        src.contains("_lrclib_cleaned.json"),
-        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned.json"
+        src.contains("_lrclib_cleaned_v2.json"),
+        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v2.json"
+    );
+    // Both branches MUST pass CleanupMode::ScrapedLyrics (description prompt
+    // returned genius input verbatim in production; ScrapedLyrics prompt has
+    // the dedup / ad-lib / hype-intro rules).
+    assert!(
+        src.contains("CleanupMode::ScrapedLyrics"),
+        "gather.rs genius+lrclib-plain branches must pass CleanupMode::ScrapedLyrics, not Description"
+    );
+    assert!(
+        !src.contains("CleanupMode::Description"),
+        "gather.rs must NOT pass CleanupMode::Description (description path uses the helper internally via fetch_description_lyrics, not from gather.rs directly)"
     );
     // Failure mode: bail on Err or null. Verify the error message strings.
     assert!(

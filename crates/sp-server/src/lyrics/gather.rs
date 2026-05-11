@@ -196,13 +196,16 @@ pub(crate) async fn gather_sources_impl(
                 .map(|l| l.en.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned.json"));
+            // _v2 cache filename invalidates pre-2026-05-11 caches written
+            // under the description-prompt (no dedup / no ad-lib strip).
+            let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned_v2.json"));
             match crate::lyrics::description_provider::clean_lyrics_via_claude(
                 ai,
                 &row.song,
                 &row.artist,
                 &raw_blob,
                 &cache_path,
+                crate::lyrics::description_provider::CleanupMode::ScrapedLyrics,
             )
             .await
             {
@@ -242,13 +245,19 @@ pub(crate) async fn gather_sources_impl(
             .map(|l| l.en.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned.json"));
+        // _v2 cache filename invalidates pre-2026-05-11 caches written under
+        // the description-prompt. Per id=233 Saints production wall-verify, the
+        // description prompt returned genius input verbatim (no dedup / no
+        // ad-lib strip). Forcing a new cache filename re-runs Claude under the
+        // ScrapedLyrics prompt for every reprocess.
+        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v2.json"));
         match crate::lyrics::description_provider::clean_lyrics_via_claude(
             ai,
             &row.song,
             &row.artist,
             &raw_blob,
             &cache_path,
+            crate::lyrics::description_provider::CleanupMode::ScrapedLyrics,
         )
         .await
         {
