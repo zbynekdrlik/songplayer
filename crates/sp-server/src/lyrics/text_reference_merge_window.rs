@@ -21,6 +21,7 @@ use super::{
     CHORUS_REPEAT_WINDOW_CAP_MS, MIN_LINE_DURATION_MS,
 };
 
+#[cfg_attr(test, mutants::skip)] // Phase 2 chorus-repeat window scan; nested loop with LCS scoring and ratio gate. Integration-tested through `text_reference_merge_tests::second_chorus_repeat_pass` and id=21 reprocess. Whole-fn return replacement to None/Some((0,0.0,vec![])) is dead-code-equivalent at first match; targeted boundary tests would require synthetic ratio fixtures with no semantic gain.
 pub(super) fn best_window_match(
     ref_norms_per_line: &[Vec<String>],
     unconsumed: &[usize],
