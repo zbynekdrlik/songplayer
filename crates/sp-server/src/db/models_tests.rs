@@ -751,6 +751,10 @@ async fn quarantine_video_lyrics_handles_missing_cache_file() {
         .unwrap();
 
     assert!(!outcome.deleted_cache_file);
+    assert!(
+        outcome.previous_source.is_none(),
+        "previous_source must be None when row had NULL lyrics_source"
+    );
     let source: String = sqlx::query_scalar("SELECT lyrics_source FROM videos WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
