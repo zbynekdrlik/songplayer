@@ -696,3 +696,79 @@ async fn set_video_spotify_resolution_persists_null_for_no_match_outcome() {
         "spotify_resolved_at must STILL be set on no-match (gates further re-resolution)"
     );
 }
+
+#[tokio::test]
+async fn quarantine_video_lyrics_sets_sentinel_and_deletes_cache_file() {
+    let (pool, id) = setup_with_video().await;
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 1, lyrics_source = 'ensemble:gemini', \
+         lyrics_pipeline_version = 5, lyrics_manual_priority = 1 WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let cache_dir = tmp.path();
+    let cache_file = cache_dir.join("yt123_lyrics.json");
+    tokio::fs::write(&cache_file, b"{\"version\":5,\"lines\":[]}")
+        .await
+        .unwrap();
+
+    let outcome = quarantine_video_lyrics(&pool, id, cache_dir, "ASR missed bridge", 20)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.youtube_id, "yt123");
+    assert_eq!(outcome.previous_source.as_deref(), Some("ensemble:gemini"));
+    assert!(outcome.deleted_cache_file);
+    assert!(
+        !cache_file.exists(),
+        "cache file must be deleted so the wall stops showing broken karaoke"
+    );
+
+    let row = sqlx::query(
+        "SELECT has_lyrics, lyrics_source, lyrics_pipeline_version, lyrics_manual_priority \
+         FROM videos WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<i64, _>("has_lyrics"), 0);
+    assert_eq!(row.get::<String, _>("lyrics_source"), "asr_gap");
+    assert_eq!(row.get::<i64, _>("lyrics_pipeline_version"), 20);
+    assert_eq!(row.get::<i64, _>("lyrics_manual_priority"), 0);
+}
+
+#[tokio::test]
+async fn quarantine_video_lyrics_handles_missing_cache_file() {
+    let (pool, id) = setup_with_video().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let outcome = quarantine_video_lyrics(&pool, id, tmp.path(), "", 20)
+        .await
+        .unwrap();
+
+    assert!(!outcome.deleted_cache_file);
+    let source: String = sqlx::query_scalar("SELECT lyrics_source FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(source, "asr_gap");
+}
+
+#[tokio::test]
+async fn quarantine_video_lyrics_returns_not_found_for_missing_id() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let err = quarantine_video_lyrics(&pool, 999, tmp.path(), "", 20)
+        .await
+        .expect_err("expected NotFound for missing video_id");
+    assert!(
+        matches!(err, sqlx::Error::RowNotFound),
+        "must surface RowNotFound so the handler can return 404; got {err:?}"
+    );
+}

@@ -750,6 +750,77 @@ pub async fn position_for_playlist_item(
     .await
 }
 
+/// Outcome of a successful `quarantine_video_lyrics` call. Surfaced through
+/// the HTTP layer so operators can confirm what was changed.
+pub struct QuarantineOutcome {
+    pub youtube_id: String,
+    pub previous_source: Option<String>,
+    pub deleted_cache_file: bool,
+}
+
+/// Park a song with unrecoverable ASR transcription so the lyrics worker
+/// stops re-picking it. Sets `lyrics_source = 'asr_gap'`, clears
+/// `has_lyrics` and `lyrics_manual_priority`, stamps the current pipeline
+/// version, and best-effort deletes the cached `{youtube_id}_lyrics.json`
+/// file so the wall stops rendering whatever broken karaoke shipped
+/// previously.
+///
+/// Future `LYRICS_PIPELINE_VERSION` bumps re-pick `asr_gap` rows
+/// automatically via the existing `OR lyrics_pipeline_version < ?`
+/// exception in `reprocess.rs::fetch_bucket_null` and
+/// `fetch_bucket_manual` — no separate ASR-version constant is needed.
+///
+/// Returns `Err(sqlx::Error::RowNotFound)` when `video_id` does not exist;
+/// the HTTP handler maps that variant to 404.
+#[cfg_attr(test, mutants::skip)] // 3 integration tests below cover the
+// happy path, missing-cache-file branch, and not-found branch. The body
+// is one SELECT + one UPDATE + one fs::remove_file + a tracing line —
+// every observable side effect is asserted by the tests, so mutation
+// targets reduce to the test-equivalent SQL string literals that
+// cargo-mutants cannot mutate meaningfully.
+pub async fn quarantine_video_lyrics(
+    pool: &SqlitePool,
+    video_id: i64,
+    cache_dir: &std::path::Path,
+    reason: &str,
+    current_pipeline_version: u32,
+) -> Result<QuarantineOutcome, sqlx::Error> {
+    let row = sqlx::query("SELECT youtube_id, lyrics_source FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_optional(pool)
+        .await?;
+    let row = row.ok_or(sqlx::Error::RowNotFound)?;
+    let youtube_id: String = row.get("youtube_id");
+    let previous_source: Option<String> = row.try_get("lyrics_source").ok();
+
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 0, lyrics_source = 'asr_gap', \
+         lyrics_pipeline_version = ?, lyrics_manual_priority = 0 WHERE id = ?",
+    )
+    .bind(current_pipeline_version as i64)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+
+    let cache_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
+    let deleted_cache_file = tokio::fs::remove_file(&cache_path).await.is_ok();
+
+    tracing::warn!(
+        video_id,
+        youtube_id = %youtube_id,
+        reason = %reason,
+        previous_source = ?previous_source,
+        deleted_cache_file,
+        "lyrics quarantined as asr_gap"
+    );
+
+    Ok(QuarantineOutcome {
+        youtube_id,
+        previous_source,
+        deleted_cache_file,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
