@@ -685,4 +685,82 @@ mod tests {
             Some("https://genius.com/actual-song")
         );
     }
+
+    // -----------------------------------------------------------------
+    // find_matching_div_close mutation-killers
+    //
+    // The nested-div parser landed in commit 78858a0 to fix the Saints
+    // truncation bug. The two existing extract_* tests exercise it via
+    // the public HTML scraper, but mutation testing surfaced 7 surviving
+    // mutants on the bound checks (lines 257, 264, 275) and the
+    // separator-char OR chain (line 277). These tests call the helper
+    // directly with synthetic byte sequences that distinguish real from
+    // mutated behavior on each guarded condition.
+
+    #[test]
+    fn find_matching_div_close_recognizes_div_followed_by_close_bracket() {
+        // Kills 277:53 (`==` for b'>') and the OR mutants gating it.
+        let html = "<div>noop</div>OUTER</div>";
+        let close_pos = find_matching_div_close(html, 0).expect("must find outer close");
+        assert_eq!(close_pos, html.rfind("</div>").unwrap());
+    }
+
+    #[test]
+    fn find_matching_div_close_recognizes_div_followed_by_whitespace() {
+        // Kills 277 `==` mutants for each of space / tab / newline / CR
+        // and the OR mutants gating them. Each iteration places a fresh
+        // nested `<div{sep}...>` inside the outer container; mutated
+        // code would fail to count the open and mis-detect the close.
+        for sep in [' ', '\t', '\n', '\r'] {
+            let html = format!("<div{sep}class=\"x\">noop</div>OUTER</div>");
+            let close_pos = find_matching_div_close(&html, 0)
+                .unwrap_or_else(|| panic!("must find outer close with sep={sep:?}"));
+            assert_eq!(close_pos, html.rfind("</div>").unwrap(), "with sep={sep:?}");
+        }
+    }
+
+    #[test]
+    fn find_matching_div_close_rejects_non_div_tag_starts() {
+        // Kills 277 mutants on the separator-char check: `<divider>` shares
+        // the `<div` prefix but the next byte is `i` (not whitespace / `>`),
+        // so depth must NOT increment. With a mutated `||` → `&&` the
+        // function would treat `<divider>` as a nested open, causing the
+        // outer close to be mis-detected.
+        let html = "<divider>noop</divider>OUTER</div>";
+        let close_pos = find_matching_div_close(html, 0).expect("outer close must be found");
+        assert_eq!(close_pos, html.rfind("</div>").unwrap());
+    }
+
+    #[test]
+    fn find_matching_div_close_returns_none_on_unbalanced_html() {
+        // Kills 257:13 (`<` → `<=`): mutated while bound `i <= bytes.len()`
+        // would read bytes[bytes.len()] on the loop exit iteration → OOB
+        // panic. Real code exits cleanly and returns None.
+        let html = "<div><div>noise without any close";
+        assert!(find_matching_div_close(html, 0).is_none());
+    }
+
+    #[test]
+    fn find_matching_div_close_handles_trailing_open_at_buffer_end() {
+        // Kills 275:27 (`<` → `<=`): the open-branch bound check. With
+        // `<=`, when the string ends with `<div` (exactly 4 bytes), the
+        // mutant admits the branch, slice access bytes[i..i+4] succeeds,
+        // then bytes[i + open.len()] reads past the buffer → panic. Real
+        // code rejects the open and returns None.
+        let html = "<div>content<div";
+        assert_eq!(find_matching_div_close(html, 5), None);
+    }
+
+    #[test]
+    fn find_matching_div_close_finds_close_when_initial_i_is_small() {
+        // Kills 264:14 (`+` → `-`) and 275:14 (`+` → `-`): with subtraction,
+        // `i - close.len()` (or `i - open.len()`) underflows in usize for
+        // small i, making the bound check always false. The close-branch
+        // would be skipped entirely and the function would return None
+        // instead of finding the close at byte 5.
+        let html = "abcde</div>";
+        let close_pos = find_matching_div_close(html, 0)
+            .expect("must find </div> when i is smaller than close.len()");
+        assert_eq!(close_pos, 5);
+    }
 }
