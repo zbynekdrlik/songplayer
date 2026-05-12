@@ -128,6 +128,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/lyrics/clear-manual-queue",
             axum::routing::post(lyrics::post_clear_manual),
         )
+        .route(
+            "/api/v1/lyrics/quarantine",
+            axum::routing::post(lyrics::quarantine_lyrics),
+        )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
         // AI proxy

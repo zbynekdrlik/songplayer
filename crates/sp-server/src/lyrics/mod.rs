@@ -11,6 +11,7 @@ pub mod gather;
 pub mod genius;
 pub mod line_splitter;
 pub mod lrclib;
+pub mod lyrics_ovh;
 pub mod orchestrator;
 pub mod provider;
 pub mod renderer;

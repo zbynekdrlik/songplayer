@@ -256,7 +256,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         cache_dir.path(),
         &reqwest_client,
         &row,
-        "", // no genius token in tests — skip Genius source
+        "",
     )
     .await
     .unwrap();
@@ -352,7 +352,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         cache_dir.path(),
         &reqwest_client,
         &row,
-        "", // no genius token in tests — skip Genius source
+        "",
     )
     .await;
 
@@ -622,4 +622,150 @@ async fn gather_skips_spotify_on_proxy_error_field() {
     unsafe {
         std::env::remove_var("SPOTIFY_LYRICS_PROXY_BASE");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Task B.1: lrclib_track_has_real_timing + genius/lrclib gather wiring (#B.1)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
+    use crate::lyrics::gather::lrclib_track_has_real_timing;
+    use sp_core::lyrics::{LyricsLine, LyricsTrack};
+
+    let make = |timing: &[(u64, u64)]| LyricsTrack {
+        version: 1,
+        source: "lrclib".into(),
+        language_source: "en".into(),
+        language_translation: String::new(),
+        lines: timing
+            .iter()
+            .map(|(s, e)| LyricsLine {
+                start_ms: *s,
+                end_ms: *e,
+                en: "x".into(),
+                sk: None,
+                words: None,
+            })
+            .collect(),
+    };
+
+    // Plain mode: all-zero timing.
+    let plain = make(&[(0, 0), (0, 0), (0, 0)]);
+    assert!(
+        !lrclib_track_has_real_timing(&plain),
+        "all-zero end_ms must read as no-timing"
+    );
+
+    // Synced mode: any non-zero end_ms qualifies.
+    let synced = make(&[(0, 1500), (1500, 3000)]);
+    assert!(
+        lrclib_track_has_real_timing(&synced),
+        "non-zero end_ms must read as real-timing"
+    );
+
+    // Edge: single line with timing.
+    let partial = make(&[(0, 0), (3000, 5000), (0, 0)]);
+    assert!(
+        lrclib_track_has_real_timing(&partial),
+        "even one timed line qualifies as real-timing"
+    );
+
+    // Edge: empty.
+    let empty = make(&[]);
+    assert!(
+        !lrclib_track_has_real_timing(&empty),
+        "empty track has no real timing"
+    );
+}
+
+/// Structural regression: gather.rs must call lyrics.ovh as the PRIMARY
+/// community-lyrics source and fall back to Genius (with the fixed nested-
+/// div parser) when lyrics.ovh returns no match. Both push CandidateText
+/// with `source: "genius"` so `priority_with_timing` keeps the same ranking
+/// slot regardless of which provider supplied the text.
+///
+/// Why both: lyrics.ovh has a smaller catalog than Genius. lyrics.ovh
+/// returns clean plain text (no parsing fragility) so it's preferred when
+/// available. Genius covers the long tail; its HTML parser now correctly
+/// counts nested div depth (`find_matching_div_close`) so multi-container
+/// pages no longer drop verses (planetboom Saints regression 2026-05-11).
+#[test]
+fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
+    let src = include_str!("gather.rs");
+
+    // lyrics.ovh must be imported and called BEFORE genius.
+    assert!(
+        src.contains("lyrics_ovh::fetch_lyrics"),
+        "gather.rs must call lyrics_ovh::fetch_lyrics for the community-lyrics tier"
+    );
+    assert!(
+        src.contains("genius::fetch_lyrics"),
+        "gather.rs must call genius::fetch_lyrics as fallback when lyrics.ovh misses"
+    );
+    let lyrics_ovh_pos = src
+        .find("lyrics_ovh::fetch_lyrics")
+        .expect("lyrics_ovh call exists");
+    let genius_pos = src
+        .find("genius::fetch_lyrics")
+        .expect("genius call exists");
+    assert!(
+        lyrics_ovh_pos < genius_pos,
+        "lyrics_ovh must be called BEFORE genius (primary/fallback order)"
+    );
+    // Genius branch must be gated on lyrics.ovh returning None.
+    assert!(
+        src.contains("lyrics_ovh_lines.is_none()"),
+        "genius fallback must be gated on lyrics.ovh returning None"
+    );
+    // Source label "genius" retained for priority_with_timing compat.
+    assert!(
+        src.contains("source: \"genius\""),
+        "community-lyrics candidate must keep source: \"genius\" for priority_with_timing compat"
+    );
+
+    // The lrclib-plain branch still uses the shared cleanup helper.
+    assert!(
+        src.contains("description_provider::clean_lyrics_via_claude"),
+        "gather.rs must call description_provider::clean_lyrics_via_claude"
+    );
+    assert!(
+        src.contains("_lrclib_cleaned_v2.json"),
+        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v2.json"
+    );
+    assert!(
+        src.contains("CleanupMode::ScrapedLyrics"),
+        "gather.rs lrclib-plain branch must pass CleanupMode::ScrapedLyrics"
+    );
+    assert!(
+        src.contains("lrclib-plain cleanup returned no lyrics"),
+        "gather.rs must bail with 'lrclib-plain cleanup returned no lyrics' on Ok(None)/empty"
+    );
+    assert!(
+        src.contains("lrclib-plain cleanup failed"),
+        "gather.rs must bail with 'lrclib-plain cleanup failed' on Err"
+    );
+    // Synced-lrclib arm: must call the detection helper.
+    assert!(
+        src.contains("lrclib_track_has_real_timing(t)"),
+        "gather.rs lrclib branch must call lrclib_track_has_real_timing(t) for synced/plain detection"
+    );
+    // Synced-lrclib arm: must branch via `if real_timing {`.
+    assert!(
+        src.contains("if real_timing {"),
+        "gather.rs lrclib branch must split via `if real_timing {{` so synced bypasses Claude cleanup"
+    );
+    // Synced-lrclib arm: must preserve `has_timing: true` inside the synced block.
+    let (_, after_if) = src
+        .split_once("if real_timing {")
+        .expect("split_once on `if real_timing {` should succeed (validated above)");
+    assert!(
+        after_if.contains("has_timing: true,"),
+        "synced-lrclib arm must push CandidateText with has_timing: true"
+    );
+    // lrclib_track_has_real_timing must be defined as pub(crate) at the top of the file.
+    assert!(
+        src.contains("pub(crate) fn lrclib_track_has_real_timing("),
+        "lrclib_track_has_real_timing must be pub(crate) so worker_tests can call it"
+    );
 }

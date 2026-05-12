@@ -58,6 +58,21 @@ pub async fn translate_via_claude(
 
     let non_empty = translations.iter().filter(|t| !t.is_empty()).count();
     if non_empty == 0 && line_count > 0 {
+        // Surface the raw Claude response in the application log so an
+        // operator can see EXACTLY why parsing produced zero translations
+        // (content-policy refusal text, empty body, malformed numbering,
+        // 5-hour OAuth quota wall, etc.). The response is bounded at 4000
+        // characters so a verbose Claude refusal doesn't blow up the log
+        // line beyond what `tracing` will keep in memory comfortably.
+        let snippet: String = response.chars().take(4000).collect();
+        let truncated = response.chars().count() > 4000;
+        tracing::warn!(
+            line_count,
+            response_len = response.chars().count(),
+            truncated,
+            response = %snippet,
+            "translate_via_claude: parse returned 0 translations — raw Claude response logged for diagnosis"
+        );
         return Err(anyhow!("Claude translation returned no translations"));
     }
 

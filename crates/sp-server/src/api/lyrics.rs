@@ -314,6 +314,69 @@ pub async fn post_clear_manual(State(state): State<AppState>) -> impl IntoRespon
     }
 }
 
+/// Request body for `POST /api/v1/lyrics/quarantine`.
+///
+/// `reason` is optional free-text; it is logged via `tracing::warn` for an
+/// audit trail but never persisted to the DB. Keeping it out of the schema
+/// avoids a migration. See
+/// `docs/superpowers/specs/2026-05-12-asr-gap-quarantine-design.md`.
+#[derive(Debug, Deserialize)]
+pub struct QuarantineRequest {
+    pub video_id: i64,
+    #[serde(default)]
+    pub reason: String,
+}
+
+/// Response body for `POST /api/v1/lyrics/quarantine`. `previous_source` is
+/// JSON `null` when the row had `lyrics_source IS NULL` before the call.
+#[derive(Debug, Serialize)]
+pub struct QuarantineResponse {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub previous_source: Option<String>,
+    pub deleted_cache_file: bool,
+}
+
+/// POST /api/v1/lyrics/quarantine
+///
+/// Park a song with unrecoverable ASR transcription. Sets the row's
+/// `lyrics_source` to `'asr_gap'`, clears `has_lyrics` and
+/// `lyrics_manual_priority`, stamps the current `LYRICS_PIPELINE_VERSION`,
+/// and best-effort deletes the cached `_lyrics.json` file. See
+/// `db::models::quarantine_video_lyrics` for the DB-level contract.
+#[cfg_attr(test, mutants::skip)] // Thin glue: parse request → call helper →
+// map RowNotFound to 404 → wrap outcome in 200 JSON. Both branches plus
+// the JSON shape are covered by `quarantine_endpoint_marks_row_and_deletes_cache`
+// and `quarantine_endpoint_returns_404_for_missing_video` in routes_tests.rs.
+pub async fn quarantine_lyrics(
+    State(state): State<crate::AppState>,
+    Json(req): Json<QuarantineRequest>,
+) -> impl IntoResponse {
+    use crate::lyrics::LYRICS_PIPELINE_VERSION;
+    match crate::db::models::quarantine_video_lyrics(
+        &state.pool,
+        req.video_id,
+        &state.cache_dir,
+        &req.reason,
+        LYRICS_PIPELINE_VERSION,
+    )
+    .await
+    {
+        Ok(outcome) => Json(QuarantineResponse {
+            video_id: req.video_id,
+            youtube_id: outcome.youtube_id,
+            previous_source: outcome.previous_source,
+            deleted_cache_file: outcome.deleted_cache_file,
+        })
+        .into_response(),
+        Err(sqlx::Error::RowNotFound) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            warn!("quarantine_lyrics error for video {}: {e}", req.video_id);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

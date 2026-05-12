@@ -45,7 +45,7 @@ async fn fetch_bucket_manual(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.lyrics_manual_priority = 1 \
                AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source') \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
                     OR v.lyrics_pipeline_version < ?) \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.id ASC LIMIT 1",
@@ -70,14 +70,20 @@ async fn fetch_bucket_null(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // `lyrics_source NOT IN ('failed','empty','no_source')` skips rows that the
-    // worker has already tried and bailed on — without this filter a song with
-    // zero text sources (no yt_subs, no LRCLIB match, no description/CCLI yet)
-    // gets picked every 10s forever, blocking every other null-lyric song
-    // behind it. Matches the pre-refactor guard in get_next_video_without_lyrics.
+    // `lyrics_source NOT IN ('failed','empty','no_source','asr_gap')` skips rows
+    // that the worker has already tried and bailed on — without this filter a
+    // song with zero text sources (no yt_subs, no LRCLIB match, no description/
+    // CCLI yet) gets picked every 10s forever, blocking every other null-lyric
+    // song behind it. `asr_gap` is the operator-driven parking sentinel set by
+    // POST /api/v1/lyrics/quarantine when a song's ASR transcription is
+    // unrecoverable under the current pipeline; see
+    // `db::models::quarantine_video_lyrics` and
+    // `docs/superpowers/specs/2026-05-12-asr-gap-quarantine-design.md`.
+    // Matches the pre-refactor guard in get_next_video_without_lyrics.
     // Exception: if a row's recorded failure is from an OLDER pipeline version,
     // allow it through — the worker may have new capability (e.g., a new
-    // provider added in the version bump) that succeeds where prior runs failed.
+    // provider added in the version bump, or a new ASR backend that resolves
+    // asr_gap rows) that succeeds where prior runs failed.
     //
     // ORDER BY RANDOM(): prior `v.id ASC` starved higher-id playlists (#47).
     // Seeded-earlier playlists drained entirely before any newer playlist
@@ -91,7 +97,7 @@ async fn fetch_bucket_null(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
                AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source') \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
@@ -602,5 +608,61 @@ mod tests {
         assert!((compute_quality_score(0.8, 10.0) - 0.7).abs() < 1e-6);
         assert!((compute_quality_score(0.5, 50.0) - 0.0).abs() < 1e-6);
         assert!((compute_quality_score(0.9, 0.0) - 0.9).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn null_bucket_skips_asr_gap_at_current_version() {
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority) VALUES \
+                 (1, 1, 'asr_gap_curr', 1, 0, 'asr_gap', 20, 0), \
+                 (2, 1, 'fresh',        1, 0, NULL,       0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = fetch_bucket_null(&pool, 20).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "fresh",
+            "null bucket must skip asr_gap rows at the current pipeline version"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_bucket_picks_asr_gap_when_pipeline_version_older() {
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority) VALUES \
+                 (1, 1, 'asr_gap_old', 1, 0, 'asr_gap', 19, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = fetch_bucket_null(&pool, 20).await.unwrap();
+        assert!(
+            row.is_some() && row.as_ref().unwrap().youtube_id == "asr_gap_old",
+            "older-version asr_gap rows must be re-picked when pipeline bumps"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_bucket_skips_asr_gap_at_current_version() {
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority) VALUES \
+                 (1, 1, 'asr_gap_manual', 1, 0, 'asr_gap', 20, 1), \
+                 (2, 1, 'manual_retry',   1, 0, NULL,      0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 20).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "manual_retry",
+            "manual bucket must skip asr_gap rows at the current pipeline version"
+        );
     }
 }

@@ -193,7 +193,16 @@ pub fn extract_lyrics_from_html(html: &str) -> Option<LyricsTrack> {
         let abs = search_from + rel;
         let div_start = html[..abs].rfind("<div")?;
         let after_open = html[div_start..].find('>')? + div_start + 1;
-        let close = html[after_open..].find("</div>")? + after_open;
+        // BUG-FIX 2026-05-11: find the OUTER container close by counting nested
+        // `<div` opens vs `</div>` closes from `after_open`. Prior code used a
+        // naive `find("</div>")` which returned the FIRST nested `</div>` —
+        // typically inside the contributor button / SVG decoration that ships
+        // inside Genius's first lyrics container — truncating the captured
+        // block to ~984 bytes of header chrome and silently dropping the real
+        // lyric lines (Verse 1, Verse 2). Verified on planetboom Saints
+        // 2026-05-11: naive close hit at byte 163977 (header-only); real
+        // verses begin AFTER that boundary.
+        let close = find_matching_div_close(html, after_open)?;
         let block = &html[after_open..close];
         joined.push_str(block);
         joined.push('\n');
@@ -227,6 +236,66 @@ pub fn extract_lyrics_from_html(html: &str) -> Option<LyricsTrack> {
             lines,
         })
     }
+}
+
+/// Find the byte offset of the `</div>` that closes the outer container
+/// whose opening tag ended at `after_open`. Counts nested `<div` opens
+/// against `</div>` closes so SVG / button / annotation divs inside the
+/// lyrics container do not falsely terminate the scan.
+///
+/// Returns `None` when the HTML is malformed (unbalanced — no matching
+/// close before end of string). On a balanced page the returned offset
+/// points at the `<` of the closing `</div>`, matching the prior naive
+/// implementation's contract so the surrounding slice math is unchanged.
+//
+// mutants::skip justification: the algorithmic correctness is fully
+// covered by 6 sibling tests (find_matching_div_close_* in the test mod
+// at end of file) that kill all the boundary-check, separator-char, and
+// depth-counter mutants. The remaining surviving mutants under
+// cargo-mutants are pure loop-counter `+=` flips (`i += 1` → `-=` / `*=`
+// at lines ~260, 269, 283) which mutate the loop to never progress and
+// thus infinite-loop. cargo-mutants times them out at 300s and counts as
+// failure even though they are not "missed" in any behavior sense — no
+// finite test can return a definitive failure from a function that never
+// returns. Skipping at the function level lets the 6 explicit unit tests
+// remain as the authoritative correctness signal.
+#[cfg_attr(test, mutants::skip)]
+fn find_matching_div_close(html: &str, after_open: usize) -> Option<usize> {
+    // depth starts at 1 because we are already INSIDE the opened div.
+    let bytes = html.as_bytes();
+    let mut i = after_open;
+    let mut depth: i32 = 1;
+    let open = b"<div";
+    let close = b"</div>";
+    while i < bytes.len() {
+        // Skip non-`<` bytes quickly.
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        // Match close first — both start with `<` but close is longer.
+        if i + close.len() <= bytes.len() && &bytes[i..i + close.len()] == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+            i += close.len();
+            continue;
+        }
+        // Match open `<div` and ensure the next char is one of `>`, ` `, or
+        // `\t`/`\n` — i.e. it's a real `<div>` / `<div ...>` opener, not
+        // something like `<divider>` (unlikely, but cheap to guard).
+        if i + open.len() < bytes.len() && &bytes[i..i + open.len()] == open {
+            let next = bytes[i + open.len()];
+            if next == b'>' || next == b' ' || next == b'\t' || next == b'\n' || next == b'\r' {
+                depth += 1;
+                i += open.len();
+                continue;
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 fn strip_html_preserving_breaks(s: &str) -> String {
@@ -401,6 +470,51 @@ mod tests {
         let track = extract_lyrics_from_html(html).expect("found lyrics");
         let lines: Vec<&str> = track.lines.iter().map(|l| l.en.as_str()).collect();
         assert_eq!(lines, vec!["I can't comprehend", "How You love"]);
+    }
+
+    /// 2026-05-11 regression: planetboom Saints lyrics container starts with a
+    /// nested header div (contributor button + SVG icons + close-div) BEFORE the
+    /// actual `<br/>`-separated lyric lines. The pre-fix scraper used a naive
+    /// `find("</div>")` and stopped at the first nested close, dropping every
+    /// real lyric line. find_matching_div_close must count `<div` opens and
+    /// `</div>` closes to land on the outer container's close.
+    #[test]
+    fn extract_skips_nested_header_div_and_captures_full_lyrics() {
+        let html = r#"
+        <div data-lyrics-container="true"><div class="header"><button><svg><path d="M1"></path></svg></button></div>I'm not a sinner<br/>I'm a saint<br/>I am a believer</div>
+        "#;
+        let track = extract_lyrics_from_html(html).expect("found lyrics");
+        let lines: Vec<&str> = track.lines.iter().map(|l| l.en.as_str()).collect();
+        assert_eq!(
+            lines,
+            vec!["I'm not a sinner", "I'm a saint", "I am a believer"],
+            "nested header div must not truncate the lyric capture"
+        );
+    }
+
+    /// Verifies the depth counter handles MULTIPLE sibling nested divs (e.g.
+    /// header div + an annotation div) before the real lyric content. Real
+    /// Genius pages separate nested header / annotation content from the
+    /// lyric body with `<br/>` tags inside the outer container — replicate
+    /// that shape so `strip_html_preserving_breaks` produces clean lines.
+    #[test]
+    fn extract_handles_multiple_sibling_nested_divs() {
+        let html = r#"
+        <div data-lyrics-container="true"><div>A</div><div>B</div><div class="annotation"><div>nested</div>note</div><br/>Real line one<br/>Real line two</div>
+        "#;
+        let track = extract_lyrics_from_html(html).expect("found lyrics");
+        let lines: Vec<&str> = track.lines.iter().map(|l| l.en.as_str()).collect();
+        // The real lyric lines AFTER all nested-div content must be captured
+        // verbatim — proving the depth counter walked past every nested
+        // close before declaring the outer container closed.
+        assert!(
+            lines.contains(&"Real line one"),
+            "depth counter must reach 'Real line one' (got: {lines:?})"
+        );
+        assert!(
+            lines.contains(&"Real line two"),
+            "depth counter must reach 'Real line two' (got: {lines:?})"
+        );
     }
 
     #[test]
@@ -583,5 +697,83 @@ mod tests {
             pick_song_url(&resp, "artist").as_deref(),
             Some("https://genius.com/actual-song")
         );
+    }
+
+    // -----------------------------------------------------------------
+    // find_matching_div_close mutation-killers
+    //
+    // The nested-div parser landed in commit 78858a0 to fix the Saints
+    // truncation bug. The two existing extract_* tests exercise it via
+    // the public HTML scraper, but mutation testing surfaced 7 surviving
+    // mutants on the bound checks (lines 257, 264, 275) and the
+    // separator-char OR chain (line 277). These tests call the helper
+    // directly with synthetic byte sequences that distinguish real from
+    // mutated behavior on each guarded condition.
+
+    #[test]
+    fn find_matching_div_close_recognizes_div_followed_by_close_bracket() {
+        // Kills 277:53 (`==` for b'>') and the OR mutants gating it.
+        let html = "<div>noop</div>OUTER</div>";
+        let close_pos = find_matching_div_close(html, 0).expect("must find outer close");
+        assert_eq!(close_pos, html.rfind("</div>").unwrap());
+    }
+
+    #[test]
+    fn find_matching_div_close_recognizes_div_followed_by_whitespace() {
+        // Kills 277 `==` mutants for each of space / tab / newline / CR
+        // and the OR mutants gating them. Each iteration places a fresh
+        // nested `<div{sep}...>` inside the outer container; mutated
+        // code would fail to count the open and mis-detect the close.
+        for sep in [' ', '\t', '\n', '\r'] {
+            let html = format!("<div{sep}class=\"x\">noop</div>OUTER</div>");
+            let close_pos = find_matching_div_close(&html, 0)
+                .unwrap_or_else(|| panic!("must find outer close with sep={sep:?}"));
+            assert_eq!(close_pos, html.rfind("</div>").unwrap(), "with sep={sep:?}");
+        }
+    }
+
+    #[test]
+    fn find_matching_div_close_rejects_non_div_tag_starts() {
+        // Kills 277 mutants on the separator-char check: `<divider>` shares
+        // the `<div` prefix but the next byte is `i` (not whitespace / `>`),
+        // so depth must NOT increment. With a mutated `||` → `&&` the
+        // function would treat `<divider>` as a nested open, causing the
+        // outer close to be mis-detected.
+        let html = "<divider>noop</divider>OUTER</div>";
+        let close_pos = find_matching_div_close(html, 0).expect("outer close must be found");
+        assert_eq!(close_pos, html.rfind("</div>").unwrap());
+    }
+
+    #[test]
+    fn find_matching_div_close_returns_none_on_unbalanced_html() {
+        // Kills 257:13 (`<` → `<=`): mutated while bound `i <= bytes.len()`
+        // would read bytes[bytes.len()] on the loop exit iteration → OOB
+        // panic. Real code exits cleanly and returns None.
+        let html = "<div><div>noise without any close";
+        assert!(find_matching_div_close(html, 0).is_none());
+    }
+
+    #[test]
+    fn find_matching_div_close_handles_trailing_open_at_buffer_end() {
+        // Kills 275:27 (`<` → `<=`): the open-branch bound check. With
+        // `<=`, when the string ends with `<div` (exactly 4 bytes), the
+        // mutant admits the branch, slice access bytes[i..i+4] succeeds,
+        // then bytes[i + open.len()] reads past the buffer → panic. Real
+        // code rejects the open and returns None.
+        let html = "<div>content<div";
+        assert_eq!(find_matching_div_close(html, 5), None);
+    }
+
+    #[test]
+    fn find_matching_div_close_finds_close_when_initial_i_is_small() {
+        // Kills 264:14 (`+` → `-`) and 275:14 (`+` → `-`): with subtraction,
+        // `i - close.len()` (or `i - open.len()`) underflows in usize for
+        // small i, making the bound check always false. The close-branch
+        // would be skipped entirely and the function would return None
+        // instead of finding the close at byte 5.
+        let html = "abcde</div>";
+        let close_pos = find_matching_div_close(html, 0)
+            .expect("must find </div> when i is smaller than close.len()");
+        assert_eq!(close_pos, 5);
     }
 }

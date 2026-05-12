@@ -279,7 +279,8 @@ impl LyricsWorker {
     ) -> Result<crate::lyrics::provider::SongContext> {
         // Read the Genius token fresh on every song so operators can add
         // the setting without restarting the server. Empty string disables
-        // the Genius source entirely.
+        // the Genius fallback. Genius is only consulted when lyrics.ovh
+        // returns no match (see gather.rs).
         let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
             .await
             .ok()

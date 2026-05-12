@@ -873,3 +873,85 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
     assert_eq!(arr[0]["ndi_name"].as_str(), Some("SP-test"));
     assert_eq!(arr[0]["state"], serde_json::json!("Playing"));
 }
+
+#[tokio::test]
+async fn quarantine_endpoint_marks_row_and_deletes_cache() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache_dir = tmp.path().to_path_buf();
+    let state = test_state_with_cache_dir(cache_dir.clone()).await;
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+         lyrics_source, lyrics_pipeline_version) VALUES \
+             (42, 1, 'ytQUAR', 1, 1, 'ensemble:gemini', 20)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let cache_file = cache_dir.join("ytQUAR_lyrics.json");
+    tokio::fs::write(&cache_file, b"{\"version\":20,\"lines\":[]}")
+        .await
+        .unwrap();
+
+    let resp = app(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/lyrics/quarantine")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "video_id": 42,
+                        "reason": "ASR missed bridge"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["video_id"], 42);
+    assert_eq!(json["youtube_id"], "ytQUAR");
+    assert_eq!(json["previous_source"], "ensemble:gemini");
+    assert_eq!(json["deleted_cache_file"], true);
+
+    assert!(!cache_file.exists(), "cache file must be gone");
+    let source: String = sqlx::query_scalar("SELECT lyrics_source FROM videos WHERE id = 42")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(source, "asr_gap");
+}
+
+#[tokio::test]
+async fn quarantine_endpoint_returns_404_for_missing_video() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state_with_cache_dir(tmp.path().to_path_buf()).await;
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/lyrics/quarantine")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({"video_id": 999, "reason": ""}))
+                        .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
