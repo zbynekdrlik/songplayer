@@ -792,7 +792,14 @@ pub async fn quarantine_video_lyrics(
         .await?;
     let row = row.ok_or(sqlx::Error::RowNotFound)?;
     let youtube_id: String = row.get("youtube_id");
-    let previous_source: Option<String> = row.try_get("lyrics_source").ok();
+    // `try_get::<Option<String>, _>` returns Ok(None) for NULL, Ok(Some(s)) for
+    // non-null. Plain `try_get::<String, _>().ok()` does NOT work because sqlx
+    // 0.8 SQLite decodes NULL TEXT into `String` as Ok("") rather than Err —
+    // observed on CI 2026-05-12, leaks `Some("")` into the audit log and
+    // breaks the JSON-null response contract.
+    let previous_source: Option<String> = row
+        .try_get::<Option<String>, _>("lyrics_source")
+        .unwrap_or(None);
 
     sqlx::query(
         "UPDATE videos SET has_lyrics = 0, lyrics_source = 'asr_gap', \
