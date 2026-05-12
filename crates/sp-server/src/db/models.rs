@@ -752,6 +752,7 @@ pub async fn position_for_playlist_item(
 
 /// Outcome of a successful `quarantine_video_lyrics` call. Surfaced through
 /// the HTTP layer so operators can confirm what was changed.
+#[derive(Debug)]
 pub struct QuarantineOutcome {
     pub youtube_id: String,
     pub previous_source: Option<String>,
