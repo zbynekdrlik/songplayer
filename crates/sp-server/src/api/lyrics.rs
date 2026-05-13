@@ -377,6 +377,67 @@ pub async fn quarantine_lyrics(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ProbeRequest {
+    pub video_id: i64,
+}
+
+// HTTP handler: dispatches to lyrics::probe::probe_sources_impl. Behavior
+// (per-provider availability) is covered by probe_tests.rs unit tests;
+// this handler is thin Axum glue + the 404 / 200 + JSON-shape integration
+// tests in this file's test module.
+#[cfg_attr(test, mutants::skip)]
+pub async fn post_probe_sources(
+    State(state): State<AppState>,
+    Json(req): Json<ProbeRequest>,
+) -> impl IntoResponse {
+    // Load the video row.
+    let row_opt: Option<crate::db::models::VideoLyricsRow> =
+        sqlx::query_as::<_, crate::db::models::VideoLyricsRow>(
+            "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
+                COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
+                p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
+                v.spotify_track_id, v.spotify_resolved_at \
+         FROM videos v JOIN playlists p ON p.id = v.playlist_id \
+         WHERE v.id = ?",
+        )
+        .bind(req.video_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten();
+    let Some(row) = row_opt else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // Pull ytdlp path + genius token (best-effort; probe degrades gracefully).
+    let ytdlp_path = state
+        .tool_paths
+        .read()
+        .await
+        .as_ref()
+        .map(|tp| tp.ytdlp.clone())
+        .unwrap_or_else(|| std::path::PathBuf::from("/nonexistent/ytdlp"));
+    let genius_token = crate::db::models::get_setting(&state.pool, "genius_access_token")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let client = reqwest::Client::new();
+
+    let report = crate::lyrics::probe::probe_sources_impl(
+        Some(&state.ai_client),
+        &ytdlp_path,
+        &state.cache_dir,
+        &client,
+        &row,
+        &genius_token,
+    )
+    .await;
+
+    Json(report).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,6 +454,45 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    /// Returns `(AppState, TempDir)`. Caller must keep `TempDir` alive for the
+    /// duration of the test or the temp directory is deleted immediately.
+    async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
+        use std::sync::Arc;
+        use tokio::sync::{RwLock, broadcast, mpsc};
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().to_path_buf();
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let (event_tx, _) = broadcast::channel(16);
+        let (engine_tx, _) = mpsc::channel(16);
+        let (sync_tx, _) = mpsc::channel(16);
+        let (resolume_tx, _) = mpsc::channel(16);
+        let (obs_rebuild_tx, _) = broadcast::channel(4);
+        let state = crate::AppState {
+            pool,
+            event_tx,
+            engine_tx,
+            obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
+            tools_status: Arc::new(RwLock::new(crate::ToolsStatus::default())),
+            tool_paths: Arc::new(RwLock::new(None)),
+            sync_tx,
+            resolume_tx,
+            obs_rebuild_tx,
+            cache_dir: cache_dir.clone(),
+            ai_proxy: Arc::new(crate::ai::proxy::ProxyManager::new(
+                cache_dir,
+                crate::ai::proxy::ProxyManager::default_port(),
+            )),
+            ai_client: Arc::new(crate::ai::client::AiClient::new(
+                crate::ai::AiSettings::default(),
+            )),
+            presenter_client: None,
+            resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
+            ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        };
+        (state, tmp)
     }
 
     #[tokio::test]
@@ -467,5 +567,79 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(res.rows_affected(), 2, "only 2 stale rows should flip");
+    }
+
+    #[tokio::test]
+    async fn probe_sources_returns_404_for_missing_video_id() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (state, _temp) = test_state_with_cache_dir().await;
+        let app = crate::api::router(state, None);
+
+        let req = Request::builder()
+            .uri("/api/v1/lyrics/probe-sources")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"video_id": 99999}"#))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn probe_sources_returns_report_with_six_probes_for_known_video() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let (state, _temp) = test_state_with_cache_dir().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, title, song, artist, normalized) \
+             VALUES (5, 1, 'ytidX', 't', 'song', 'artist', 1)",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let app = crate::api::router(state, None);
+        let req = Request::builder()
+            .uri("/api/v1/lyrics/probe-sources")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"video_id": 5}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["video_id"], 5);
+        assert_eq!(json["youtube_id"], "ytidX");
+        let probes = json["probes"].as_array().expect("probes array");
+        assert_eq!(probes.len(), 6);
+        let provider_names: Vec<&str> = probes
+            .iter()
+            .map(|p| p["provider"].as_str().unwrap())
+            .collect();
+        for expected in [
+            "yt_subs",
+            "description",
+            "lyrics_ovh",
+            "genius",
+            "lrclib",
+            "spotify",
+        ] {
+            assert!(provider_names.contains(&expected), "missing {expected}");
+        }
     }
 }

@@ -132,6 +132,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/lyrics/quarantine",
             axum::routing::post(lyrics::quarantine_lyrics),
         )
+        .route(
+            "/api/v1/lyrics/probe-sources",
+            axum::routing::post(lyrics::post_probe_sources),
+        )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
         // AI proxy
