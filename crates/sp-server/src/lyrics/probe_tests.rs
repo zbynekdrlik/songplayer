@@ -117,3 +117,70 @@ async fn probe_reports_yt_subs_and_description_skipped_when_ytdlp_unavailable() 
     assert!(!yt_subs.available);
     assert!(!descr.available);
 }
+
+#[tokio::test]
+async fn probe_description_unavailable_when_no_ai_client_present() {
+    // Without ai_client the probe cannot Claude-validate description text;
+    // YouTube descriptions are mostly promo/social copy with zero lyrics,
+    // so the safe default is "unavailable" rather than the old "raw lines
+    // count > 0 ⇒ available" heuristic that lied for id=175 Jesus Saves.
+    let report = probe_sources_impl(
+        None,
+        std::path::Path::new("/nonexistent/ytdlp"),
+        std::path::Path::new("/tmp"),
+        &reqwest::Client::new(),
+        &fixture_row("Song", "Artist", None),
+        "",
+    )
+    .await;
+    let descr = report
+        .probes
+        .iter()
+        .find(|p| p.provider == "description")
+        .unwrap();
+    assert!(!descr.available);
+    assert!(
+        descr.note.to_lowercase().contains("no ai_client")
+            || descr.note.to_lowercase().contains("claude-validate"),
+        "expected note about missing Claude validation, got: {}",
+        descr.note
+    );
+}
+
+#[tokio::test]
+async fn probe_emits_provider_url_for_every_provider() {
+    let report = probe_sources_impl(
+        None,
+        std::path::Path::new("/nonexistent/ytdlp"),
+        std::path::Path::new("/tmp"),
+        &reqwest::Client::new(),
+        &fixture_row("Jesus Saves", "Chris Tomlin", Some("4abcDeFg")),
+        "",
+    )
+    .await;
+    for p in &report.probes {
+        assert!(
+            !p.provider_url.is_empty(),
+            "provider {} has empty provider_url",
+            p.provider
+        );
+    }
+    let url = |name: &str| {
+        report
+            .probes
+            .iter()
+            .find(|p| p.provider == name)
+            .unwrap()
+            .provider_url
+            .clone()
+    };
+    assert!(url("yt_subs").starts_with("https://youtube.com/watch?v="));
+    assert!(url("description").starts_with("https://youtube.com/watch?v="));
+    assert!(
+        url("lyrics_ovh").contains("api.lyrics.ovh")
+            || url("lyrics_ovh") == "https://www.lyrics.ovh/"
+    );
+    assert!(url("genius").starts_with("https://genius.com/"));
+    assert!(url("lrclib").starts_with("https://lrclib.net/"));
+    assert!(url("spotify").starts_with("https://open.spotify.com/"));
+}
