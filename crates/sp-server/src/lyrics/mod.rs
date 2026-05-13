@@ -13,6 +13,7 @@ pub mod line_splitter;
 pub mod lrclib;
 pub mod lyrics_ovh;
 pub mod orchestrator;
+pub mod probe;
 pub mod provider;
 pub mod renderer;
 pub mod replicate_client;
@@ -290,6 +291,9 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod probe_tests;
 
 #[cfg(test)]
 #[path = "canonical_source_regression_tests.rs"]
