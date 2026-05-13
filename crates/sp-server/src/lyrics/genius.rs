@@ -150,14 +150,52 @@ pub async fn fetch_lyrics(
     Ok(extract_lyrics_from_html(&html))
 }
 
+/// URL-slug substrings that indicate the Genius page is a NOT a single-song
+/// lyrics page (e.g. release calendars, top-N lists, annotated discographies).
+/// These pages contain song titles and artist names mixed with unrelated text,
+/// so Claude cleanup downstream correctly returns "no lyrics" — but only
+/// after the worker burns ~30s on Demucs + Claude. Filter them at the search
+/// stage so neither the probe nor the worker is misled.
+///
+/// First seen 2026-05-13 on Jireh / New Heights Worship: Genius search returned
+/// `genius.com/Christian-genius-june-2021-singles-release-calendar-annotated`
+/// as a `hit_type=="song"` result. The probe declared "available=true,
+/// 238 lines", the operator approved reprocess, the worker pulled the page,
+/// Claude rejected it, worker bailed at `no_source`. ~3 min wasted.
+const GENIUS_NON_SONG_URL_PATTERNS: &[&str] = &[
+    "release-calendar",
+    "release-schedule",
+    "singles-release",
+    "annotated",
+    "top-songs",
+    "top-tracks",
+    "playlist",
+    "discography",
+    "songs-released",
+];
+
+/// Returns true when the Genius URL slug matches any known non-song-page
+/// pattern. The slug check is case-insensitive and substring-based; this is
+/// intentionally conservative — false positives would only cost a downstream
+/// Claude cleanup attempt that would have failed anyway.
+fn genius_url_is_non_song_page(url: &str) -> bool {
+    let lc = url.to_ascii_lowercase();
+    GENIUS_NON_SONG_URL_PATTERNS.iter().any(|p| lc.contains(p))
+}
+
 /// Pick the best song-type hit from a Genius search response. Prefers a
 /// hit whose `primary_artist.name` contains the expected artist; falls
-/// back to the first song hit if no artist match.
+/// back to the first song hit if no artist match. Rejects hits whose URL
+/// matches `GENIUS_NON_SONG_URL_PATTERNS` — those pages are calendars /
+/// lists / discographies, not per-song lyrics.
 fn pick_song_url(resp: &SearchResponse, artist: &str) -> Option<String> {
     let artist_lc = artist.trim().to_ascii_lowercase();
     let mut fallback: Option<&str> = None;
     for hit in &resp.response.hits {
         if hit.hit_type != "song" {
+            continue;
+        }
+        if genius_url_is_non_song_page(&hit.result.url) {
             continue;
         }
         if fallback.is_none() {
@@ -663,6 +701,96 @@ mod tests {
             vec!["alpha", "bravo", "charlie", "delta"],
             "two containers must be extracted in order with no duplicates"
         );
+    }
+
+    #[test]
+    fn genius_url_is_non_song_page_flags_known_bad_slugs() {
+        let bad = [
+            "https://genius.com/Christian-genius-june-2021-singles-release-calendar-annotated",
+            "https://genius.com/Genius-2024-release-schedule-annotated",
+            "https://genius.com/Maverick-city-music-discography-annotated",
+            "https://genius.com/Spotify-top-songs-2024",
+            "https://genius.com/Best-worship-songs-playlist",
+        ];
+        for url in bad {
+            assert!(
+                genius_url_is_non_song_page(url),
+                "expected non-song flag for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn genius_url_is_non_song_page_allows_real_song_slugs() {
+        let good = [
+            "https://genius.com/Maverick-city-music-jireh-lyrics",
+            "https://genius.com/Chris-tomlin-jesus-saves-lyrics",
+            "https://genius.com/Planetshakers-the-house-lyrics",
+        ];
+        for url in good {
+            assert!(
+                !genius_url_is_non_song_page(url),
+                "expected per-song slug to pass for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_song_url_rejects_release_calendar_hit_in_favor_of_real_song() {
+        // Regression for 2026-05-13 Jireh probe: Genius search returned a
+        // "Christian-genius-...release-calendar-annotated" page as a
+        // hit_type=song result, which then got picked up and downstream Claude
+        // cleanup correctly bailed at no-lyrics. The non-song-page filter must
+        // skip such hits even when they appear before the real song result.
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![
+                    SearchHit {
+                        hit_type: "song".into(),
+                        result: HitResult {
+                            url:
+                                "https://genius.com/Christian-genius-june-2021-singles-release-calendar-annotated"
+                                    .into(),
+                            primary_artist: Some(ArtistRef {
+                                name: Some("Christian Genius".into()),
+                            }),
+                        },
+                    },
+                    SearchHit {
+                        hit_type: "song".into(),
+                        result: HitResult {
+                            url: "https://genius.com/Maverick-city-music-jireh-lyrics".into(),
+                            primary_artist: Some(ArtistRef {
+                                name: Some("Maverick City Music".into()),
+                            }),
+                        },
+                    },
+                ],
+            },
+        };
+        assert_eq!(
+            pick_song_url(&resp, "Maverick City Music").as_deref(),
+            Some("https://genius.com/Maverick-city-music-jireh-lyrics")
+        );
+    }
+
+    #[test]
+    fn pick_song_url_returns_none_when_only_non_song_pages_match() {
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![SearchHit {
+                    hit_type: "song".into(),
+                    result: HitResult {
+                        url: "https://genius.com/Genius-2025-singles-release-calendar-annotated"
+                            .into(),
+                        primary_artist: Some(ArtistRef {
+                            name: Some("Genius".into()),
+                        }),
+                    },
+                }],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, "Genius"), None);
     }
 
     #[test]
