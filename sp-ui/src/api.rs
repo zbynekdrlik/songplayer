@@ -217,10 +217,23 @@ pub async fn post_live_move_item(
 }
 
 /// POST to jump-and-play a specific video on a custom playlist.
-pub async fn post_live_play_video(playlist_id: i64, video_id: i64) -> Result<(), String> {
+///
+/// When `position_ms` is `Some(ms)`, the server seeks atomically to that
+/// offset before starting frame submission — eliminates the race between
+/// a plain play-video + delayed seek dance (issue #88). Existing callers
+/// that pass `None` retain the previous behaviour (play from 0).
+pub async fn post_live_play_video(
+    playlist_id: i64,
+    video_id: i64,
+    position_ms: Option<u64>,
+) -> Result<(), String> {
+    let mut body = serde_json::json!({ "video_id": video_id });
+    if let Some(ms) = position_ms {
+        body["position_ms"] = serde_json::json!(ms);
+    }
     post_json_empty(
         &format!("/api/v1/playlists/{playlist_id}/play-video"),
-        &serde_json::json!({ "video_id": video_id }),
+        &body,
     )
     .await
 }

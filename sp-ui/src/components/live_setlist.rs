@@ -1,10 +1,10 @@
 //! Primary control surface of `/live`: the current set list with per-row
 //! actions and the global playback bar. "Pause" + "Play" on the global bar
-//! remember the paused song+position client-side and resume via play-video
-//! + seek — the server state machine treats `SceneOff` as Stop, so a plain
-//! `/play` POST after `/pause` would select a fresh random song instead of
-//! continuing. The pause/seek dance keeps the operator's one-tap resume
-//! working without a backend state-machine rewrite.
+//! remember the paused song+position client-side and resume via a single
+//! play-video request with `position_ms` — the server pipeline seeks
+//! atomically before frame submission (issue #88). The server state machine
+//! treats `SceneOff` as Stop, so a plain `/play` POST after `/pause` would
+//! select a fresh random song instead of resuming at the saved position.
 
 use leptos::prelude::*;
 
@@ -121,8 +121,10 @@ pub fn LiveSetList(
                                                 paused_state.set(None);
                                                 leptos::task::spawn_local(async move {
                                                     if let Err(e) = api::post_live_play_video(
-                                                        playlist_id, video_id,
-                                                    ).await {
+                                                        playlist_id, video_id, None,
+                                                    )
+                                                    .await
+                                                    {
                                                         error_msg.set(e);
                                                     }
                                                 });
@@ -220,21 +222,26 @@ pub fn LiveSetList(
                         paused_state.set(None);
                         leptos::task::spawn_local(async move {
                             if let Some((video_id, position_ms)) = resume {
+                                // Atomic play-from-position (issue #88): send
+                                // video_id + position_ms in one request so the
+                                // pipeline seeks BEFORE frame submission. The old
+                                // play-video + 300ms delay + seek dance was racy —
+                                // seek landed in the outer-loop no-op arm when MF
+                                // preload exceeded 300ms.
                                 if let Err(e) = api::post_live_play_video(
-                                    playlist_id, video_id,
-                                ).await {
+                                    playlist_id,
+                                    video_id,
+                                    Some(position_ms),
+                                )
+                                .await
+                                {
                                     error_msg.set(e);
-                                    return;
                                 }
-                                // Small delay so the pipeline has loaded the
-                                // new song before the seek — seek is a no-op
-                                // while the pipeline is idle.
-                                gloo_timers::future::TimeoutFuture::new(300).await;
-                                let _ = api::seek_playlist(playlist_id, position_ms).await;
                             } else {
                                 let _ = api::post_empty(
                                     &format!("/api/v1/playback/{playlist_id}/play"),
-                                ).await;
+                                )
+                                .await;
                             }
                         });
                     }
