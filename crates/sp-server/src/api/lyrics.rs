@@ -44,15 +44,25 @@ pub(crate) async fn fetch_queue_counts(
 ) -> Result<(i64, i64, i64), sqlx::Error> {
     let b0: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.lyrics_manual_priority = 1 AND p.is_active = 1 AND v.normalized = 1",
+         WHERE v.lyrics_manual_priority = 1 \
+               AND (v.lyrics_source IS NULL \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
+                    OR v.lyrics_pipeline_version < ?) \
+               AND p.is_active = 1 AND v.normalized = 1",
     )
+    .bind(current_version as i64)
     .fetch_one(pool)
     .await?;
     let b1: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-         WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) AND v.lyrics_manual_priority = 0 \
-         AND p.is_active = 1 AND v.normalized = 1",
+         WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
+               AND (v.lyrics_source IS NULL \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
+                    OR v.lyrics_pipeline_version < ?) \
+               AND v.lyrics_manual_priority = 0 \
+               AND p.is_active = 1 AND v.normalized = 1",
     )
+    .bind(current_version as i64)
     .fetch_one(pool)
     .await?;
     let b2: i64 = sqlx::query_scalar(
@@ -652,6 +662,70 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn queue_counts_exclude_failed_states_at_current_version() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // bucket0 candidates (manual_priority=1):
+        //   - id=20 no_source at current pv → SHOULD BE EXCLUDED (worker can't pop)
+        //   - id=21 asr_gap at current pv   → SHOULD BE EXCLUDED
+        //   - id=22 no_source at OLDER pv   → INCLUDED (version-bump exception)
+        //   - id=23 lyrics_source=NULL      → INCLUDED
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, has_lyrics, lyrics_manual_priority, lyrics_source, lyrics_pipeline_version) \
+             VALUES (20, 1, 'y20', 's', 'a', 1, 0, 1, 'no_source', 7), \
+                    (21, 1, 'y21', 's', 'a', 1, 0, 1, 'asr_gap',  7), \
+                    (22, 1, 'y22', 's', 'a', 1, 0, 1, 'no_source', 5), \
+                    (23, 1, 'y23', 's', 'a', 1, 0, 1, NULL,        7)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (b0, _b1, _b2) = fetch_queue_counts(&pool, 7).await.unwrap();
+        assert_eq!(
+            b0, 2,
+            "bucket0 should include only id=22 (older pv) + id=23 (NULL source)"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bucket1_excludes_failed_states_at_current_version() {
+        let pool = create_memory_pool().await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // bucket1 candidates (manual_priority=0, has_lyrics=0):
+        //   - id=30 no_source at current pv → EXCLUDED
+        //   - id=31 no_source at older pv   → INCLUDED
+        //   - id=32 lyrics_source=NULL      → INCLUDED
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, has_lyrics, lyrics_manual_priority, lyrics_source, lyrics_pipeline_version) \
+             VALUES (30, 1, 'y30', 's', 'a', 1, 0, 0, 'no_source', 7), \
+                    (31, 1, 'y31', 's', 'a', 1, 0, 0, 'no_source', 5), \
+                    (32, 1, 'y32', 's', 'a', 1, 0, 0, NULL,        7)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (_b0, b1, _b2) = fetch_queue_counts(&pool, 7).await.unwrap();
+        assert_eq!(
+            b1, 2,
+            "bucket1 should include only id=31 (older pv) + id=32 (NULL source)"
+        );
     }
 
     #[tokio::test]
