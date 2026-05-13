@@ -732,7 +732,6 @@ mod tests {
     async fn probe_sources_returns_report_with_six_probes_for_known_video() {
         use axum::body::Body;
         use axum::http::Request;
-        use http_body_util::BodyExt;
         use tower::ServiceExt;
 
         let (state, _temp) = test_state_with_cache_dir().await;
@@ -760,7 +759,9 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::OK);
-        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(json["video_id"], 5);
         assert_eq!(json["youtube_id"], "ytidX");
