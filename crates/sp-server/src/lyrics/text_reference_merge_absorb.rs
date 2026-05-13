@@ -15,14 +15,7 @@
 //! tokens) at line boundaries all stay with prev so wall doesn't switch
 //! mid-sustained-note (id=132 2:55).
 
-use tracing::debug;
-
 use super::{AsrWord, LineEmit, normalize_word};
-
-/// Phase 4 start-artefact detection constants. See `start_ms_skipping_artefact`.
-const START_ARTIFACT_DUR_MS: u32 = 100;
-const START_ARTIFACT_MAX_CONF: f32 = 0.05;
-const START_ARTIFACT_GAP_MS: u32 = 1500;
 
 /// Maximum gap between two same-text ASR tokens to treat as one sustained
 /// note (singer holding a vowel). Above this, treat as two separate words.
@@ -242,53 +235,5 @@ pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words
             prev.asr_word_indices.push(next_first);
             next.asr_word_indices.remove(0);
         }
-    }
-}
-
-/// Phase 4: return the `start_ms` for a line's matched ASR words, skipping
-/// the first matched word if it is a forced-alignment boundary artefact:
-/// near-zero confidence, very short duration, AND a large gap to the second
-/// matched word.
-///
-/// id=227 evidence: WhisperX fused "thank you for the wonders..." into one
-/// ASR segment. Forced-alignment placed "for" at 57682-57742ms (60ms,
-/// conf=0.0) immediately after the second "you" (57602-57662ms, 20ms gap),
-/// then jumped 2602ms to "the" (60344ms). "for" is a ghost timestamp — the
-/// singer hasn't started "For the wonders" yet. Without this skip, L9 starts
-/// at 57682ms which causes Phase 5 to cap L8 "Thank You, Thank You" at a
-/// 1722ms window while the singer is still holding the note.
-pub(super) fn start_ms_skipping_artefact(
-    indices: &[usize],
-    asr_words: &[AsrWord],
-    imin: usize,
-) -> u32 {
-    let mut sorted = indices.to_vec();
-    sorted.sort_unstable();
-    if sorted.len() < 2 {
-        return asr_words[imin].start_ms;
-    }
-    let first_idx = sorted[0];
-    let second_idx = sorted[1];
-    let first = &asr_words[first_idx];
-    let second = &asr_words[second_idx];
-    let dur = first.end_ms.saturating_sub(first.start_ms);
-    let gap = second.start_ms.saturating_sub(first.end_ms);
-    if dur < START_ARTIFACT_DUR_MS
-        && first.confidence < START_ARTIFACT_MAX_CONF
-        && gap > START_ARTIFACT_GAP_MS
-    {
-        debug!(
-            first_word = %first.norm,
-            first_start_ms = first.start_ms,
-            first_end_ms = first.end_ms,
-            dur_ms = dur,
-            confidence = first.confidence,
-            gap_to_second_ms = gap,
-            second_start_ms = second.start_ms,
-            "emit_single: skipping start-artefact first word; using second word start"
-        );
-        second.start_ms
-    } else {
-        first.start_ms
     }
 }

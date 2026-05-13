@@ -728,11 +728,7 @@ fn emit_single(emit: &LineEmit, asr_words: &[AsrWord]) -> AlignedLine {
         emit.asr_word_indices.iter().min(),
         emit.asr_word_indices.iter().max(),
     ) {
-        (Some(&imin), Some(&imax)) => {
-            let start_ms =
-                absorb::start_ms_skipping_artefact(&emit.asr_word_indices, asr_words, imin);
-            (start_ms, asr_words[imax].end_ms)
-        }
+        (Some(&imin), Some(&imax)) => (asr_words[imin].start_ms, asr_words[imax].end_ms),
         _ => (0, 0), // unmatched line; floor-clamped later
     };
     AlignedLine {
