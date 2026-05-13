@@ -203,9 +203,57 @@ async fn play_video_sends_engine_command() {
         crate::EngineCommand::PlayVideo {
             playlist_id,
             video_id,
+            position_ms,
         } => {
             assert_eq!(playlist_id, ytlive_id);
             assert_eq!(video_id, v1);
+            assert_eq!(
+                position_ms, None,
+                "no position_ms in plain play-video request"
+            );
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+/// play-video with position_ms in the request body must forward it to the
+/// engine command. Verifies the atomic play-from-position API path (issue #88).
+#[tokio::test]
+async fn play_video_with_position_ms_forwards_to_engine() {
+    let (pool, ytlive_id, v1, _) = setup().await;
+    crate::db::models::append_playlist_item(&pool, ytlive_id, v1)
+        .await
+        .unwrap();
+
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let body = format!(r#"{{"video_id": {v1}, "position_ms": 15000}}"#);
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{ytlive_id}/play-video"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let cmd = engine_rx.recv().await.expect("engine command");
+    match cmd {
+        crate::EngineCommand::PlayVideo {
+            playlist_id,
+            video_id,
+            position_ms,
+        } => {
+            assert_eq!(playlist_id, ytlive_id);
+            assert_eq!(video_id, v1);
+            assert_eq!(
+                position_ms,
+                Some(15000),
+                "position_ms must be forwarded to engine"
+            );
         }
         other => panic!("unexpected command: {other:?}"),
     }
