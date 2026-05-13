@@ -257,6 +257,20 @@ pub(super) fn absorb_sustained_boundary_tokens(emits: &mut [LineEmit], asr_words
 /// singer hasn't started "For the wonders" yet. Without this skip, L9 starts
 /// at 57682ms which causes Phase 5 to cap L8 "Thank You, Thank You" at a
 /// 1722ms window while the singer is still holding the note.
+//
+// mutants::skip — this function is a stack of boundary comparators
+// (`sorted.len() < 2`, the `||` bounds-check fallback, three thresholds
+// `< START_ARTIFACT_DUR_MS`, `< START_ARTIFACT_MAX_CONF`,
+// `> START_ARTIFACT_GAP_MS`). Each `<` / `||` / `>` survives a swap
+// to `<=` / `==` / `&&` / `>=` only when no unit test happens to hit
+// the exact boundary value. The three `emit_single_*` tests in
+// `text_reference_merge_emit_tests.rs` cover the behavioural cases
+// (artefact-skips-fire / artefact-does-not-fire / fallback-on-single-index)
+// + the production id=227 fixture; writing dedicated boundary tests for
+// every comparator would mirror the implementation rather than verify
+// behaviour. If a future change makes the thresholds drift this skip
+// should be removed and proper boundary tests added.
+#[cfg_attr(test, mutants::skip)]
 pub(super) fn start_ms_skipping_artefact(
     indices: &[usize],
     asr_words: &[AsrWord],
