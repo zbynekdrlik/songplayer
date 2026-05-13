@@ -613,6 +613,7 @@ impl PlaybackEngine {
                     pp.pipeline.send(PipelineCommand::Play {
                         video: video_path.into(),
                         audio: audio_path.into(),
+                        start_position_ms: None,
                     });
 
                     // Broadcast the state change so the dashboard updates.
@@ -658,7 +659,12 @@ impl PlaybackEngine {
     /// history stack so `Previous` still walks the history.
     // mutants::skip: I/O-heavy orchestrator — covered by handle_play_video integration tests in playback/tests.rs.
     #[cfg_attr(test, mutants::skip)]
-    pub async fn handle_play_video(&mut self, playlist_id: i64, video_id: i64) {
+    pub async fn handle_play_video(
+        &mut self,
+        playlist_id: i64,
+        video_id: i64,
+        position_ms: Option<u64>,
+    ) {
         // Resolve paths first — if the video row is unknown, no side-effects.
         let paths = match crate::db::models::get_song_paths(&self.pool, video_id).await {
             Ok(Some(p)) => p,
@@ -716,11 +722,13 @@ impl PlaybackEngine {
             info!(
                 playlist_id,
                 video_id, %video_path, %audio_path,
+                position_ms,
                 "PlayVideo → jumping to clicked song"
             );
             pp.pipeline.send(PipelineCommand::Play {
                 video: video_path.into(),
                 audio: audio_path.into(),
+                start_position_ms: position_ms,
             });
 
             let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
@@ -877,6 +885,7 @@ impl PlaybackEngine {
                                     pp.pipeline.send(PipelineCommand::Play {
                                         video: video_path.into(),
                                         audio: audio_path.into(),
+                                        start_position_ms: None,
                                     });
 
                                     if let Err(e) = crate::db::models::record_play(
@@ -919,6 +928,7 @@ impl PlaybackEngine {
                                 pp.pipeline.send(PipelineCommand::Play {
                                     video: video_path.into(),
                                     audio: audio_path.into(),
+                                    start_position_ms: None,
                                 });
                             }
                             Ok(None) => {

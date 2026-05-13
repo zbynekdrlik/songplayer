@@ -96,9 +96,15 @@ pub enum EngineCommand {
     /// new position. For youtube playlists it behaves like Previous
     /// (plays the given video but does not affect the random-unplayed
     /// selector; the next Skip will pick a fresh random video).
+    ///
+    /// When `position_ms` is `Some(ms)`, the pipeline seeks to that
+    /// offset before starting frame submission — atomic play-from-position
+    /// that eliminates the race in the old play-video + delayed seek dance
+    /// (see issue #88).
     PlayVideo {
         playlist_id: i64,
         video_id: i64,
+        position_ms: Option<u64>,
     },
     /// Seek the currently-playing song on the given playlist to `position_ms`.
     /// No-op when no pipeline exists or no song is loaded.
@@ -595,8 +601,8 @@ pub async fn start(
                         EngineCommand::SetMode { playlist_id, mode } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
                         }
-                        EngineCommand::PlayVideo { playlist_id, video_id } => {
-                            engine.handle_play_video(playlist_id, video_id).await;
+                        EngineCommand::PlayVideo { playlist_id, video_id, position_ms } => {
+                            engine.handle_play_video(playlist_id, video_id, position_ms).await;
                         }
                         EngineCommand::SceneChanged { playlist_id, on_program } => {
                             // VideosAvailable + SceneOn (on program) or

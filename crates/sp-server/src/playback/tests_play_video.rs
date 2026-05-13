@@ -65,7 +65,7 @@ async fn handle_play_video_updates_current_position_on_custom_playlist() {
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
     // Jump to video 200 (position 1).
-    engine.handle_play_video(ytlive_id, 200).await;
+    engine.handle_play_video(ytlive_id, 200, None).await;
 
     // DB side-effect: current_position advanced to 1.
     let pos: i64 = sqlx::query_scalar("SELECT current_position FROM playlists WHERE id = ?")
@@ -133,7 +133,7 @@ async fn handle_play_video_with_unknown_video_is_noop() {
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
     // Video 999 does not exist.
-    engine.handle_play_video(ytlive_id, 999).await;
+    engine.handle_play_video(ytlive_id, 999, None).await;
 
     let pos: i64 = sqlx::query_scalar("SELECT current_position FROM playlists WHERE id = ?")
         .bind(ytlive_id)
