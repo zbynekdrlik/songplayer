@@ -269,12 +269,6 @@ pub(super) fn start_ms_skipping_artefact(
     }
     let first_idx = sorted[0];
     let second_idx = sorted[1];
-    // Defensive: phantom-cluster drop (`flatten_asr`) can shrink `asr_words`
-    // after the caller computed indices, leaving stale indices that overshoot
-    // the live slice. Fall back to imin in that case rather than panic.
-    if first_idx >= asr_words.len() || second_idx >= asr_words.len() {
-        return asr_words.get(imin).map(|w| w.start_ms).unwrap_or(0);
-    }
     let first = &asr_words[first_idx];
     let second = &asr_words[second_idx];
     let dur = first.end_ms.saturating_sub(first.start_ms);
