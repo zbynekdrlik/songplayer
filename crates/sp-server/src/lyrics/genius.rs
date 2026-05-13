@@ -183,23 +183,27 @@ fn genius_url_is_non_song_page(url: &str) -> bool {
     GENIUS_NON_SONG_URL_PATTERNS.iter().any(|p| lc.contains(p))
 }
 
-/// Pick the best song-type hit from a Genius search response. Prefers a
-/// hit whose `primary_artist.name` contains the expected artist; falls
-/// back to the first song hit if no artist match. Rejects hits whose URL
-/// matches `GENIUS_NON_SONG_URL_PATTERNS` — those pages are calendars /
-/// lists / discographies, not per-song lyrics.
+/// Pick the best song-type hit from a Genius search response.
+///
+/// Returns `Some(url)` ONLY when a hit has `primary_artist.name` containing
+/// the requested artist substring (case-insensitive). No fallback to the
+/// first song hit — a search for "New Heights Worship Jireh" must not pick
+/// up a different artist's track that happens to mention "Jireh", which is
+/// what the 2026-05-13 Urban-d Who-do-you-serve incident caused.
+///
+/// Rejects hits whose URL matches `GENIUS_NON_SONG_URL_PATTERNS` — those
+/// pages are calendars / lists / discographies, not per-song lyrics.
 fn pick_song_url(resp: &SearchResponse, artist: &str) -> Option<String> {
     let artist_lc = artist.trim().to_ascii_lowercase();
-    let mut fallback: Option<&str> = None;
+    if artist_lc.is_empty() {
+        return None;
+    }
     for hit in &resp.response.hits {
         if hit.hit_type != "song" {
             continue;
         }
         if genius_url_is_non_song_page(&hit.result.url) {
             continue;
-        }
-        if fallback.is_none() {
-            fallback = Some(&hit.result.url);
         }
         if let Some(pa) = hit.result.primary_artist.as_ref()
             && let Some(name) = pa.name.as_ref()
@@ -208,7 +212,7 @@ fn pick_song_url(resp: &SearchResponse, artist: &str) -> Option<String> {
             return Some(hit.result.url.clone());
         }
     }
-    fallback.map(|s| s.to_string())
+    None
 }
 
 /// Strip lyrics from the `data-lyrics-container="true"` regions of a
@@ -594,7 +598,12 @@ mod tests {
     }
 
     #[test]
-    fn pick_song_url_falls_back_to_first_hit_when_no_artist_match() {
+    fn pick_song_url_returns_none_when_no_artist_match() {
+        // STRICT artist match: a hit without any `primary_artist.name`
+        // containing the requested artist must NOT win. Behavior changed
+        // 2026-05-13 (Urban-d Who-do-you-serve incident): the previous
+        // fallback-to-first-hit allowed wrong-artist pages whose lyrics
+        // happened to contain the searched song's title as a reference.
         let resp = SearchResponse {
             response: SearchResponseInner {
                 hits: vec![SearchHit {
@@ -606,10 +615,51 @@ mod tests {
                 }],
             },
         };
-        assert_eq!(
-            pick_song_url(&resp, "unknown").as_deref(),
-            Some("https://genius.com/first-hit")
-        );
+        assert_eq!(pick_song_url(&resp, "unknown"), None);
+    }
+
+    #[test]
+    fn pick_song_url_rejects_wrong_artist_even_when_url_looks_like_lyrics() {
+        // Regression for 2026-05-13 Jireh (id=81) wrong-text incident:
+        // Genius search for "New Heights Worship Jireh" returned
+        // genius.com/Urban-d-who-do-you-serve-lyrics as a hit_type=song with
+        // primary_artist=Urban-d. The old fallback-to-first-hit logic
+        // accepted it because the URL looked song-like and the bad-pattern
+        // filter doesn't trigger. The correct behavior is None — no artist
+        // match, no result.
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![SearchHit {
+                    hit_type: "song".into(),
+                    result: HitResult {
+                        url: "https://genius.com/Urban-d-who-do-you-serve-lyrics".into(),
+                        primary_artist: Some(ArtistRef {
+                            name: Some("Urban-d".into()),
+                        }),
+                    },
+                }],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, "New Heights Worship"), None);
+    }
+
+    #[test]
+    fn pick_song_url_returns_none_when_artist_arg_is_empty() {
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![SearchHit {
+                    hit_type: "song".into(),
+                    result: HitResult {
+                        url: "https://genius.com/some-song-lyrics".into(),
+                        primary_artist: Some(ArtistRef {
+                            name: Some("Whoever".into()),
+                        }),
+                    },
+                }],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, ""), None);
+        assert_eq!(pick_song_url(&resp, "   "), None);
     }
 
     /// Kills the `+=` → `-=`, `+=` → `*=` TIMEOUT mutants on line 257, and
