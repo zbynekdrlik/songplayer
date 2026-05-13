@@ -970,6 +970,9 @@ mod absorb_tests;
 #[path = "text_reference_merge_dp_tests.rs"]
 mod dp_tests;
 #[cfg(test)]
+#[path = "text_reference_merge_emit_tests.rs"]
+mod emit_tests;
+#[cfg(test)]
 #[path = "text_reference_merge_phantom_tests.rs"]
 mod phantom_tests;
 #[cfg(test)]
