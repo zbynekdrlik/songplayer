@@ -1117,16 +1117,33 @@ jobs:
       - name: Verify Resolume title delivery
         shell: powershell
         run: |
-          # Check if Resolume API is reachable. If not, the operator hasn't
-          # started Resolume - log INFO and skip (do not fail CI on operator
-          # environment issues).
+          # Resolume liveness gate (issue #89). The previous behaviour was to
+          # skip when Resolume was unreachable - that silently passed CI even
+          # when the LED wall was dark. The 2026-05-13 Thank You verify
+          # session shipped 70 correct subtitle dispatches to a stuck Resolume
+          # before the operator caught it manually. The pipeline must fail
+          # when Resolume is not reachable OR not responding (hung).
+          #
+          # 1. REST reachable
           try {
             $null = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/product" -TimeoutSec 5
           } catch {
-            Write-Host "INFO: Resolume Arena REST API not reachable on 127.0.0.1:8090 - skipping Resolume verification"
-            Write-Host "  ($_)"
-            exit 0
+            Write-Error "FAIL: Resolume Arena REST API not reachable on 127.0.0.1:8090. The LED wall is dark. Start Resolume on win-resolume and re-run deploy. ($_)"
+            exit 1
           }
+
+          # 2. Process responding (catches GUI hang where the REST may still
+          # answer cached responses but the composition is frozen).
+          $arena = Get-Process -Name "Arena" -ErrorAction SilentlyContinue
+          if (-not $arena) {
+            Write-Error "FAIL: Resolume Arena process not found despite REST API responding. Diagnostic mismatch - investigate."
+            exit 1
+          }
+          if (-not $arena.Responding) {
+            Write-Error "FAIL: Resolume Arena process is not responding (GUI hang). REST may answer cached responses but the composition is frozen. Restart Arena on win-resolume and re-run deploy."
+            exit 1
+          }
+          Write-Host "OK: Resolume reachable + Responding=True"
 
           # Find a playlist with videos and trigger playback.
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"

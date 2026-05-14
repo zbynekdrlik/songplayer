@@ -28,8 +28,15 @@ use tracing::{debug, error};
 #[derive(Debug)]
 pub enum PipelineCommand {
     /// Start playing a song. Both the video sidecar (`.mp4`) and the audio
-    /// sidecar (`.flac`) must exist.
-    Play { video: PathBuf, audio: PathBuf },
+    /// sidecar (`.flac`) must exist. When `start_position_ms` is `Some(ms)`,
+    /// the inner decode loop seeks to that offset BEFORE starting frame
+    /// submission — atomic play-from-position eliminating the race between
+    /// a separate Play+Seek dance (see issue #88).
+    Play {
+        video: PathBuf,
+        audio: PathBuf,
+        start_position_ms: Option<u64>,
+    },
     /// Pause playback (send black frames).
     Pause,
     /// Resume playback after pause.
@@ -222,7 +229,11 @@ fn run_loop_stub(
                 info!(playlist_id, "pipeline thread shutting down");
                 break;
             }
-            Ok(PipelineCommand::Play { video, audio }) => {
+            Ok(PipelineCommand::Play {
+                video,
+                audio,
+                start_position_ms: _,
+            }) => {
                 warn!(
                     ?video,
                     ?audio,
@@ -334,12 +345,17 @@ fn run_loop_windows(
                 break;
             }
 
-            Ok(PipelineCommand::Play { video, audio }) => {
+            Ok(PipelineCommand::Play {
+                video,
+                audio,
+                start_position_ms,
+            }) => {
                 info!(
                     playlist_id,
                     prev_paused = paused,
                     ?video,
                     ?audio,
+                    start_position_ms,
                     "pipeline: Play received (paused -> false)"
                 );
                 // Inner loop: decode current song; on NewPlay, restart decode
@@ -347,6 +363,9 @@ fn run_loop_windows(
                 // Error; returns true on Shutdown.
                 let mut current_video = video;
                 let mut current_audio = audio;
+                // `start_position_ms` only applies to the first decode_and_send
+                // call; subsequent calls triggered by NewPlay start from 0.
+                let mut current_start_ms = start_position_ms;
                 let shutdown_requested = loop {
                     info!(
                         ?current_video,
@@ -366,6 +385,7 @@ fn run_loop_windows(
                         &mut paused,
                         &mut last_heartbeat,
                         &mut consecutive_bad_polls,
+                        current_start_ms,
                     ) {
                         DecodeResult::Ended => {
                             paused = false;
@@ -388,10 +408,12 @@ fn run_loop_windows(
                         DecodeResult::NewPlay {
                             video: new_v,
                             audio: new_a,
+                            start_position_ms: new_start_ms,
                         } => {
                             info!(?new_v, ?new_a, playlist_id, "switching to new song");
                             current_video = new_v;
                             current_audio = new_a;
+                            current_start_ms = new_start_ms;
                             continue;
                         }
                         DecodeResult::Error(msg) => {
@@ -449,7 +471,11 @@ enum DecodeResult {
     /// Shutdown command received — thread should exit.
     Shutdown,
     /// A new Play command arrived mid-playback.
-    NewPlay { video: PathBuf, audio: PathBuf },
+    NewPlay {
+        video: PathBuf,
+        audio: PathBuf,
+        start_position_ms: Option<u64>,
+    },
     /// Decoder error.
     Error(String),
 }
@@ -469,6 +495,7 @@ fn decode_and_send(
     paused: &mut bool,
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
+    start_position_ms: Option<u64>,
 ) -> DecodeResult {
     use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder, SymphoniaAudioReader};
 
@@ -502,6 +529,27 @@ fn decode_and_send(
     let (num, den) = decoder.frame_rate();
     submitter.set_frame_rate(num as i32, den as i32);
 
+    // Atomic play-from-position (issue #88): seek BEFORE the frame-submission
+    // loop so there is no race window between Play and Seek. Seek failures are
+    // non-fatal — the song still plays from 0 with a logged warning so the
+    // operator always gets audio/video rather than a silent abort.
+    if let Some(ms) = start_position_ms {
+        if let Err(e) = decoder.seek(ms) {
+            warn!(
+                playlist_id,
+                start_position_ms = ms,
+                ?e,
+                "decode_and_send: seek to start_position_ms failed — playing from 0"
+            );
+        } else {
+            info!(
+                playlist_id,
+                start_position_ms = ms,
+                "decode_and_send: seeked to start position"
+            );
+        }
+    }
+
     // Report start. Duration is sample-accurate from the FLAC STREAMINFO so
     // it is always correct at open time — no more duration=0 bug.
     let _ = event_tx.send((
@@ -525,9 +573,17 @@ fn decode_and_send(
                 submitter.flush();
                 return DecodeResult::Stopped;
             }
-            Ok(PipelineCommand::Play { video, audio }) => {
+            Ok(PipelineCommand::Play {
+                video,
+                audio,
+                start_position_ms,
+            }) => {
                 submitter.flush();
-                return DecodeResult::NewPlay { video, audio };
+                return DecodeResult::NewPlay {
+                    video,
+                    audio,
+                    start_position_ms,
+                };
             }
             Ok(PipelineCommand::Pause) => {
                 *paused = true;

@@ -160,6 +160,12 @@ pub async fn get_items(
 #[derive(Debug, Deserialize)]
 pub struct PlayVideoRequest {
     pub video_id: i64,
+    /// Optional playback start position in milliseconds. When present the
+    /// engine seeks to this offset atomically before starting frame
+    /// submission — eliminates the race in the old play-video + delayed
+    /// seek dance (issue #88). Callers that omit this field default to 0.
+    #[serde(default)]
+    pub position_ms: Option<u64>,
 }
 
 // HTTP handler: sends EngineCommand::PlayVideo to the engine after
@@ -209,6 +215,7 @@ pub async fn post_play_video(
         .send(crate::EngineCommand::PlayVideo {
             playlist_id,
             video_id: req.video_id,
+            position_ms: req.position_ms,
         })
         .await;
     StatusCode::NO_CONTENT.into_response()

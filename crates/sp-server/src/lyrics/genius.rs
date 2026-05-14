@@ -150,18 +150,60 @@ pub async fn fetch_lyrics(
     Ok(extract_lyrics_from_html(&html))
 }
 
-/// Pick the best song-type hit from a Genius search response. Prefers a
-/// hit whose `primary_artist.name` contains the expected artist; falls
-/// back to the first song hit if no artist match.
+/// URL-slug substrings that indicate the Genius page is a NOT a single-song
+/// lyrics page (e.g. release calendars, top-N lists, annotated discographies).
+/// These pages contain song titles and artist names mixed with unrelated text,
+/// so Claude cleanup downstream correctly returns "no lyrics" — but only
+/// after the worker burns ~30s on Demucs + Claude. Filter them at the search
+/// stage so neither the probe nor the worker is misled.
+///
+/// First seen 2026-05-13 on Jireh / New Heights Worship: Genius search returned
+/// `genius.com/Christian-genius-june-2021-singles-release-calendar-annotated`
+/// as a `hit_type=="song"` result. The probe declared "available=true,
+/// 238 lines", the operator approved reprocess, the worker pulled the page,
+/// Claude rejected it, worker bailed at `no_source`. ~3 min wasted.
+const GENIUS_NON_SONG_URL_PATTERNS: &[&str] = &[
+    "release-calendar",
+    "release-schedule",
+    "singles-release",
+    "annotated",
+    "top-songs",
+    "top-tracks",
+    "playlist",
+    "discography",
+    "songs-released",
+];
+
+/// Returns true when the Genius URL slug matches any known non-song-page
+/// pattern. The slug check is case-insensitive and substring-based; this is
+/// intentionally conservative — false positives would only cost a downstream
+/// Claude cleanup attempt that would have failed anyway.
+fn genius_url_is_non_song_page(url: &str) -> bool {
+    let lc = url.to_ascii_lowercase();
+    GENIUS_NON_SONG_URL_PATTERNS.iter().any(|p| lc.contains(p))
+}
+
+/// Pick the best song-type hit from a Genius search response.
+///
+/// Returns `Some(url)` ONLY when a hit has `primary_artist.name` containing
+/// the requested artist substring (case-insensitive). No fallback to the
+/// first song hit — a search for "New Heights Worship Jireh" must not pick
+/// up a different artist's track that happens to mention "Jireh", which is
+/// what the 2026-05-13 Urban-d Who-do-you-serve incident caused.
+///
+/// Rejects hits whose URL matches `GENIUS_NON_SONG_URL_PATTERNS` — those
+/// pages are calendars / lists / discographies, not per-song lyrics.
 fn pick_song_url(resp: &SearchResponse, artist: &str) -> Option<String> {
     let artist_lc = artist.trim().to_ascii_lowercase();
-    let mut fallback: Option<&str> = None;
+    if artist_lc.is_empty() {
+        return None;
+    }
     for hit in &resp.response.hits {
         if hit.hit_type != "song" {
             continue;
         }
-        if fallback.is_none() {
-            fallback = Some(&hit.result.url);
+        if genius_url_is_non_song_page(&hit.result.url) {
+            continue;
         }
         if let Some(pa) = hit.result.primary_artist.as_ref()
             && let Some(name) = pa.name.as_ref()
@@ -170,7 +212,7 @@ fn pick_song_url(resp: &SearchResponse, artist: &str) -> Option<String> {
             return Some(hit.result.url.clone());
         }
     }
-    fallback.map(|s| s.to_string())
+    None
 }
 
 /// Strip lyrics from the `data-lyrics-container="true"` regions of a
@@ -556,7 +598,12 @@ mod tests {
     }
 
     #[test]
-    fn pick_song_url_falls_back_to_first_hit_when_no_artist_match() {
+    fn pick_song_url_returns_none_when_no_artist_match() {
+        // STRICT artist match: a hit without any `primary_artist.name`
+        // containing the requested artist must NOT win. Behavior changed
+        // 2026-05-13 (Urban-d Who-do-you-serve incident): the previous
+        // fallback-to-first-hit allowed wrong-artist pages whose lyrics
+        // happened to contain the searched song's title as a reference.
         let resp = SearchResponse {
             response: SearchResponseInner {
                 hits: vec![SearchHit {
@@ -568,10 +615,51 @@ mod tests {
                 }],
             },
         };
-        assert_eq!(
-            pick_song_url(&resp, "unknown").as_deref(),
-            Some("https://genius.com/first-hit")
-        );
+        assert_eq!(pick_song_url(&resp, "unknown"), None);
+    }
+
+    #[test]
+    fn pick_song_url_rejects_wrong_artist_even_when_url_looks_like_lyrics() {
+        // Regression for 2026-05-13 Jireh (id=81) wrong-text incident:
+        // Genius search for "New Heights Worship Jireh" returned
+        // genius.com/Urban-d-who-do-you-serve-lyrics as a hit_type=song with
+        // primary_artist=Urban-d. The old fallback-to-first-hit logic
+        // accepted it because the URL looked song-like and the bad-pattern
+        // filter doesn't trigger. The correct behavior is None — no artist
+        // match, no result.
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![SearchHit {
+                    hit_type: "song".into(),
+                    result: HitResult {
+                        url: "https://genius.com/Urban-d-who-do-you-serve-lyrics".into(),
+                        primary_artist: Some(ArtistRef {
+                            name: Some("Urban-d".into()),
+                        }),
+                    },
+                }],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, "New Heights Worship"), None);
+    }
+
+    #[test]
+    fn pick_song_url_returns_none_when_artist_arg_is_empty() {
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![SearchHit {
+                    hit_type: "song".into(),
+                    result: HitResult {
+                        url: "https://genius.com/some-song-lyrics".into(),
+                        primary_artist: Some(ArtistRef {
+                            name: Some("Whoever".into()),
+                        }),
+                    },
+                }],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, ""), None);
+        assert_eq!(pick_song_url(&resp, "   "), None);
     }
 
     /// Kills the `+=` → `-=`, `+=` → `*=` TIMEOUT mutants on line 257, and
@@ -663,6 +751,96 @@ mod tests {
             vec!["alpha", "bravo", "charlie", "delta"],
             "two containers must be extracted in order with no duplicates"
         );
+    }
+
+    #[test]
+    fn genius_url_is_non_song_page_flags_known_bad_slugs() {
+        let bad = [
+            "https://genius.com/Christian-genius-june-2021-singles-release-calendar-annotated",
+            "https://genius.com/Genius-2024-release-schedule-annotated",
+            "https://genius.com/Maverick-city-music-discography-annotated",
+            "https://genius.com/Spotify-top-songs-2024",
+            "https://genius.com/Best-worship-songs-playlist",
+        ];
+        for url in bad {
+            assert!(
+                genius_url_is_non_song_page(url),
+                "expected non-song flag for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn genius_url_is_non_song_page_allows_real_song_slugs() {
+        let good = [
+            "https://genius.com/Maverick-city-music-jireh-lyrics",
+            "https://genius.com/Chris-tomlin-jesus-saves-lyrics",
+            "https://genius.com/Planetshakers-the-house-lyrics",
+        ];
+        for url in good {
+            assert!(
+                !genius_url_is_non_song_page(url),
+                "expected per-song slug to pass for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_song_url_rejects_release_calendar_hit_in_favor_of_real_song() {
+        // Regression for 2026-05-13 Jireh probe: Genius search returned a
+        // "Christian-genius-...release-calendar-annotated" page as a
+        // hit_type=song result, which then got picked up and downstream Claude
+        // cleanup correctly bailed at no-lyrics. The non-song-page filter must
+        // skip such hits even when they appear before the real song result.
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![
+                    SearchHit {
+                        hit_type: "song".into(),
+                        result: HitResult {
+                            url:
+                                "https://genius.com/Christian-genius-june-2021-singles-release-calendar-annotated"
+                                    .into(),
+                            primary_artist: Some(ArtistRef {
+                                name: Some("Christian Genius".into()),
+                            }),
+                        },
+                    },
+                    SearchHit {
+                        hit_type: "song".into(),
+                        result: HitResult {
+                            url: "https://genius.com/Maverick-city-music-jireh-lyrics".into(),
+                            primary_artist: Some(ArtistRef {
+                                name: Some("Maverick City Music".into()),
+                            }),
+                        },
+                    },
+                ],
+            },
+        };
+        assert_eq!(
+            pick_song_url(&resp, "Maverick City Music").as_deref(),
+            Some("https://genius.com/Maverick-city-music-jireh-lyrics")
+        );
+    }
+
+    #[test]
+    fn pick_song_url_returns_none_when_only_non_song_pages_match() {
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![SearchHit {
+                    hit_type: "song".into(),
+                    result: HitResult {
+                        url: "https://genius.com/Genius-2025-singles-release-calendar-annotated"
+                            .into(),
+                        primary_artist: Some(ArtistRef {
+                            name: Some("Genius".into()),
+                        }),
+                    },
+                }],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, "Genius"), None);
     }
 
     #[test]

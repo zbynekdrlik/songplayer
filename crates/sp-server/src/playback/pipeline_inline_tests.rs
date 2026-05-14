@@ -42,6 +42,7 @@ fn pipeline_play_emits_event_on_non_windows() {
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/test_video.mp4"),
         audio: PathBuf::from("/tmp/test_audio.flac"),
+        start_position_ms: None,
     });
     // Give the thread a moment to process.
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -79,6 +80,7 @@ fn seek_does_not_collide_with_other_variants() {
         PipelineCommand::Play {
             video: PathBuf::new(),
             audio: PathBuf::new(),
+            start_position_ms: None,
         },
         PipelineCommand::Pause,
         PipelineCommand::Resume,
@@ -113,16 +115,19 @@ fn pipeline_processes_multiple_sequential_plays() {
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/song-a_video.mp4"),
         audio: PathBuf::from("/tmp/song-a_audio.flac"),
+        start_position_ms: None,
     });
     std::thread::sleep(std::time::Duration::from_millis(30));
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/song-b_video.mp4"),
         audio: PathBuf::from("/tmp/song-b_audio.flac"),
+        start_position_ms: None,
     });
     std::thread::sleep(std::time::Duration::from_millis(30));
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/song-c_video.mp4"),
         audio: PathBuf::from("/tmp/song-c_audio.flac"),
+        start_position_ms: None,
     });
     std::thread::sleep(std::time::Duration::from_millis(50));
     pipeline.shutdown();
@@ -143,6 +148,43 @@ fn pipeline_processes_multiple_sequential_plays() {
             event_count, 3,
             "expected 3 Error events (one per Play), got {event_count}"
         );
+    }
+
+    let _ = event_rx;
+}
+
+/// Structural test: `PipelineCommand::Play` with `start_position_ms: Some(5000)`
+/// must be accepted by the pipeline without panicking or hanging.
+/// Full seek verification against a real MF decoder is not available on Linux
+/// CI — this test validates variant construction and channel round-trip only.
+#[test]
+fn play_with_start_position_ms_is_accepted() {
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let pipeline = PlaybackPipeline::spawn("test-start-pos".into(), None, event_tx, 7);
+
+    pipeline.send(PipelineCommand::Play {
+        video: PathBuf::from("/tmp/test_video.mp4"),
+        audio: PathBuf::from("/tmp/test_audio.flac"),
+        start_position_ms: Some(5000),
+    });
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    pipeline.shutdown();
+
+    // On non-Windows the stub emits an Error event (no MF). We just verify
+    // the pipeline accepted the command — i.e. it didn't panic or hang.
+    #[cfg(not(windows))]
+    {
+        let (id, event) = event_rx.try_recv().expect("should have received an event");
+        assert_eq!(id, 7);
+        match event {
+            PipelineEvent::Error(msg) => {
+                assert!(
+                    msg.contains("Windows"),
+                    "error should mention Windows: {msg}"
+                );
+            }
+            other => panic!("expected Error event, got {other:?}"),
+        }
     }
 
     let _ = event_rx;
