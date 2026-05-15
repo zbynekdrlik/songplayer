@@ -237,11 +237,12 @@ pub fn LiveSetList(
                                 {
                                     error_msg.set(e);
                                 }
-                            } else {
-                                let _ = api::post_empty(
-                                    &format!("/api/v1/playback/{playlist_id}/play"),
-                                )
-                                .await;
+                            } else if let Err(e) = api::post_empty(
+                                &format!("/api/v1/playback/{playlist_id}/play"),
+                            )
+                            .await
+                            {
+                                error_msg.set(e);
                             }
                         });
                     }
@@ -258,9 +259,11 @@ pub fn LiveSetList(
                         });
                         paused_state.set(snapshot);
                         leptos::task::spawn_local(async move {
-                            let _ = api::post_empty(
+                            if let Err(e) = api::post_empty(
                                 &format!("/api/v1/playback/{playlist_id}/pause"),
-                            ).await;
+                            ).await {
+                                error_msg.set(e);
+                            }
                         });
                     }
                 >"⏸"</button>
@@ -268,9 +271,11 @@ pub fn LiveSetList(
                     class="live-setlist-control-btn"
                     on:click=move |_| {
                         leptos::task::spawn_local(async move {
-                            let _ = api::post_empty(
+                            if let Err(e) = api::post_empty(
                                 &format!("/api/v1/playback/{playlist_id}/skip"),
-                            ).await;
+                            ).await {
+                                error_msg.set(e);
+                            }
                         });
                     }
                 >"⏭"</button>
@@ -278,9 +283,11 @@ pub fn LiveSetList(
                     class="live-setlist-control-btn"
                     on:click=move |_| {
                         leptos::task::spawn_local(async move {
-                            let _ = api::post_empty(
+                            if let Err(e) = api::post_empty(
                                 &format!("/api/v1/playback/{playlist_id}/previous"),
-                            ).await;
+                            ).await {
+                                error_msg.set(e);
+                            }
                         });
                     }
                 >"⏮"</button>
@@ -297,10 +304,12 @@ pub fn LiveSetList(
                         let val = event_target_value(&ev);
                         leptos::task::spawn_local(async move {
                             let body = serde_json::json!({ "mode": val });
-                            let _ = api::put_json_empty(
+                            if let Err(e) = api::put_json_empty(
                                 &format!("/api/v1/playback/{playlist_id}/mode"),
                                 &body,
-                            ).await;
+                            ).await {
+                                error_msg.set(e);
+                            }
                         });
                     }
                 >
