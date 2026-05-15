@@ -141,14 +141,17 @@ impl ObsClient {
                         &mut cmd_rx,
                         &mut rebuild_rx,
                     ) => {
+                        // #80: every disconnect, including a clean
+                        // server-side close, MUST fall through to the
+                        // backoff + reconnect path. The only terminal
+                        // state for this loop is an explicit
+                        // shutdown.recv() (handled in the other select
+                        // arm). Previously `Ok(()) => break` left
+                        // SongPlayer permanently OBS-deaf on a 2026-05-03
+                        // clean-close in production.
                         match result {
-                            Ok(()) => {
-                                info!("OBS connection closed cleanly");
-                                break;
-                            }
-                            Err(e) => {
-                                warn!("OBS connection error: {e}");
-                            }
+                            Ok(()) => info!("OBS connection closed cleanly; will reconnect"),
+                            Err(e) => warn!("OBS connection error: {e}"),
                         }
                     }
                 }

@@ -5,6 +5,8 @@
 //! under the file-size cap and lets each test file stay narrowly focused.
 
 use super::probe::{ProbeReport, ProbeResult, probe_sources_impl};
+use crate::ai::AiSettings;
+use crate::ai::client::AiClient;
 use crate::db::models::VideoLyricsRow;
 
 fn fixture_row(song: &str, artist: &str, spotify_track_id: Option<&str>) -> VideoLyricsRow {
@@ -143,6 +145,63 @@ async fn probe_description_unavailable_when_no_ai_client_present() {
         descr.note.to_lowercase().contains("no ai_client")
             || descr.note.to_lowercase().contains("claude-validate"),
         "expected note about missing Claude validation, got: {}",
+        descr.note
+    );
+}
+
+#[tokio::test]
+async fn probe_description_reports_error_when_fetch_fails() {
+    // #93 follow-up: cover the `Err(e)` arm in probe.rs:141-147.
+    //
+    // The Err path in `fetch_description_lyrics` fires when the
+    // description cache write fails. Reproduce that by:
+    //   1. Pre-seeding `{id}_description.txt` with empty content so
+    //      `fetch_raw_description` hits the cache (no subprocess needed).
+    //   2. Pre-creating `{id}_description_lyrics.json` as a *directory* so
+    //      that the empty-description `write_lyrics_cache(None).await?`
+    //      branch fails with "Is a directory" and propagates Err.
+    //
+    // The existing tests cover the `None` (no ai_client) and the
+    // implicit `Ok(_)` (no lyrics) skip paths — this test pins the
+    // third outcome that's been silently uncovered.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let cache_dir = tmp.path();
+    let youtube_id = "ytid_test";
+
+    // (1) Cached description, empty → fetch_raw_description returns
+    // Ok(Some("")) → fetch_description_lyrics enters the
+    // `description.trim().is_empty()` branch.
+    tokio::fs::write(cache_dir.join(format!("{youtube_id}_description.txt")), "")
+        .await
+        .unwrap();
+
+    // (2) Sabotage the lyrics-cache JSON write by occupying its path
+    // with a directory.
+    tokio::fs::create_dir(cache_dir.join(format!("{youtube_id}_description_lyrics.json")))
+        .await
+        .unwrap();
+
+    let ai = AiClient::new(AiSettings::default());
+    let report = probe_sources_impl(
+        Some(&ai),
+        std::path::Path::new("/nonexistent/ytdlp"),
+        cache_dir,
+        &reqwest::Client::new(),
+        &fixture_row("Song", "Artist", None),
+        "",
+    )
+    .await;
+
+    let descr = report
+        .probes
+        .iter()
+        .find(|p| p.provider == "description")
+        .expect("description probe must be present");
+    assert!(!descr.available);
+    assert_eq!(descr.line_count, 0);
+    assert!(
+        descr.note.starts_with("error:"),
+        "expected `error:` prefix when fetch_description_lyrics returns Err, got: {}",
         descr.note
     );
 }

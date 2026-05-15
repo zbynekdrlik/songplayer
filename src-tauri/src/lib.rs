@@ -21,6 +21,10 @@ pub fn run() {
 
     // Create Tokio runtime for sp-server.
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    // Clone the runtime handle BEFORE moving `runtime` into the background
+    // thread — the tray Exit handler needs it to block on the server's
+    // JoinHandle during graceful shutdown (#81).
+    let runtime_handle = runtime.handle().clone();
 
     // Determine data directory.
     let data_dir = data_directory();
@@ -30,10 +34,11 @@ pub fn run() {
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
     let shutdown_tx_clone = shutdown_tx.clone();
 
-    // Spawn sp-server in background.
+    // Spawn sp-server in background and keep the JoinHandle so the tray
+    // Exit handler can await its completion before exiting the process.
     let server_data_dir = data_dir.clone();
     let server_shutdown = shutdown_tx.subscribe();
-    runtime.spawn(async move {
+    let server_join = runtime.spawn(async move {
         // Look for dist/ next to the executable (NSIS install puts it there).
         let exe_dir = std::env::current_exe()
             .ok()
@@ -52,6 +57,7 @@ pub fn run() {
             tracing::error!("Server error: {e}");
         }
     });
+    let server_join = std::sync::Arc::new(std::sync::Mutex::new(Some(server_join)));
 
     // Keep runtime alive in background thread.
     let _runtime_guard = std::thread::spawn(move || {
@@ -61,6 +67,8 @@ pub fn run() {
     });
 
     // Build Tauri app.
+    let server_join_for_tray = server_join.clone();
+    let runtime_handle_for_tray = runtime_handle.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Focus existing window on second launch attempt.
@@ -73,7 +81,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             // Setup tray icon.
-            tray::setup_tray(app.handle(), shutdown_tx_clone)?;
+            tray::setup_tray(
+                app.handle(),
+                shutdown_tx_clone,
+                runtime_handle_for_tray.clone(),
+                server_join_for_tray.clone(),
+            )?;
 
             // Hide window on close (minimize to tray).
             let window = app.get_webview_window("main").unwrap();

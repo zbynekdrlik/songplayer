@@ -73,3 +73,25 @@ test("settings endpoint returns data", async ({ request }) => {
   expect(json).toHaveProperty("obs_websocket_url");
   expect(json).toHaveProperty("gemini_model");
 });
+
+test("dashboard navbar shows version label matching backend (#85)", async ({
+  page,
+  request,
+}) => {
+  // Foundation per ~/devel/airuleset/modules/quality/version-on-dashboard.md:
+  // every web dashboard must display the deployed version visibly on every
+  // page, build-time injected from the same source as the backend.
+  await page.goto("/");
+  await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
+
+  const label = page.locator('[data-testid="version"]');
+  await expect(label).toBeVisible();
+  const text = (await label.textContent())?.trim() ?? "";
+  expect(text).toMatch(/^v\d+\.\d+\.\d+(-dev\.\d+)?$/);
+
+  const statusResp = await request.get("/api/v1/status");
+  expect(statusResp.status()).toBe(200);
+  const status = await statusResp.json();
+  expect(status).toHaveProperty("version");
+  expect(text).toBe(`v${status.version}`);
+});

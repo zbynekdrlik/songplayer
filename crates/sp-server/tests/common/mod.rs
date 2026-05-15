@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -42,6 +43,12 @@ pub struct FakeObsState {
     /// broke scene detection on 2026-04-19 (production OBS returned
     /// nothing for GetInputList; the old code wiped the NDI source map).
     pub suppress_get_input_list: bool,
+    /// When true, the fake server sends a WebSocket Close frame immediately
+    /// after replying with `Identified`. This reproduces the 2026-05-03
+    /// production failure mode behind #80: a clean server-side close
+    /// caused the reconnect loop to terminate instead of backing off and
+    /// reconnecting.
+    pub close_after_identify: bool,
 }
 
 /// A fake OBS WebSocket server listening on a random localhost port.
@@ -50,6 +57,9 @@ pub struct FakeObsServer {
     shutdown_tx: Option<oneshot::Sender<()>>,
     event_tx: mpsc::Sender<Value>,
     state: Arc<Mutex<FakeObsState>>,
+    /// Incremented each time the accept loop completes a TCP accept(). Used
+    /// by reconnect tests to assert the client reopened the connection.
+    accept_count: Arc<AtomicUsize>,
 }
 
 impl FakeObsServer {
@@ -68,9 +78,18 @@ impl FakeObsServer {
         let (event_tx, event_rx) = mpsc::channel::<Value>(32);
         let state = Arc::new(Mutex::new(initial));
         let state_clone = state.clone();
+        let accept_count = Arc::new(AtomicUsize::new(0));
+        let accept_count_clone = accept_count.clone();
 
         tokio::spawn(async move {
-            run_accept_loop(listener, shutdown_rx, event_rx, state_clone).await;
+            run_accept_loop(
+                listener,
+                shutdown_rx,
+                event_rx,
+                state_clone,
+                accept_count_clone,
+            )
+            .await;
         });
 
         Self {
@@ -78,7 +97,15 @@ impl FakeObsServer {
             shutdown_tx: Some(shutdown_tx),
             event_tx,
             state,
+            accept_count,
         }
+    }
+
+    /// How many TCP connections has the accept loop served? Used by the
+    /// reconnect tests to assert that after a clean close the client
+    /// reopened the connection (count >= 2) instead of giving up (count == 1).
+    pub fn accept_count(&self) -> usize {
+        self.accept_count.load(Ordering::SeqCst)
     }
 
     /// WebSocket URL clients should connect to.
@@ -121,6 +148,7 @@ async fn run_accept_loop(
     mut shutdown_rx: oneshot::Receiver<()>,
     event_rx: mpsc::Receiver<Value>,
     state: Arc<Mutex<FakeObsState>>,
+    accept_count: Arc<AtomicUsize>,
 ) {
     // Wrap event_rx in a Mutex so `handle_client` can borrow it when a client connects.
     let event_rx = Arc::new(Mutex::new(event_rx));
@@ -130,6 +158,7 @@ async fn run_accept_loop(
             accept_result = listener.accept() => {
                 match accept_result {
                     Ok((tcp, _)) => {
+                        accept_count.fetch_add(1, Ordering::SeqCst);
                         let ws = match tokio_tungstenite::accept_async(tcp).await {
                             Ok(s) => s,
                             Err(_) => continue,
@@ -186,6 +215,11 @@ async fn handle_client(
                             .await
                             .is_err()
                         {
+                            return;
+                        }
+                        let close_now = { state.lock().await.close_after_identify };
+                        if close_now {
+                            let _ = write.send(Message::Close(None)).await;
                             return;
                         }
                         break;
