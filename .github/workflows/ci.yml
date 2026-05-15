@@ -407,6 +407,26 @@ jobs:
           fi
           echo "OK: All Rust files are within the 1000-line limit."
 
+  red-green-order:
+    # Enforces regression-test-first.md commit ordering on PRs: every
+    # `fix(#N)` commit in the PR must be preceded by a `test(#N)` commit
+    # with the same issue number. See scripts/check-red-green-order.sh
+    # and issue #92.
+    name: RED-GREEN Commit Order
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Self-test the check script
+        run: scripts/check-red-green-order.sh --self-test
+      - name: Check PR commit ordering
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          scripts/check-red-green-order.sh "$BASE_SHA..$HEAD_SHA"
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -594,6 +614,7 @@ jobs:
       - frontend-e2e
       - test-integrity
       - file-size
+      - red-green-order
       - coverage
       - mutation-testing
     steps:
@@ -601,7 +622,7 @@ jobs:
         run: |
           results='${{ toJSON(needs) }}'
           echo "Job results: $results"
-          # version-check, dev-version-check, mutation-testing are conditional — skipped is acceptable
+          # version-check, dev-version-check, mutation-testing, red-green-order are conditional — skipped is acceptable
           for job in lint test test-wasm security build-windows build-wasm build-tauri frontend-e2e test-integrity file-size coverage; do
             result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
             echo "$job: $result"
