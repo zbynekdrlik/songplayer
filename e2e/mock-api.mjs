@@ -125,11 +125,72 @@ app.post("/api/v1/playlists/:id/sync", (_req, res) => {
   res.json({ status: "syncing" });
 });
 
-// Live-setlist items (custom-kind playlists). Empty by default — the /live
-// global Play/Pause/Skip controls render unconditionally so the playback
-// error-handling specs don't need rows here.
-app.get("/api/v1/playlists/:id/items", (_req, res) => {
+// Live-setlist state (custom-kind playlists). In-memory; survives within
+// a single mock-api process so the /live page persistence test (#39)
+// reloads and finds the items still there. Tests that need a clean slate
+// POST to `/__mock/live-reset`.
+let liveItems = [];
+
+function makeLiveRow(video_id, position) {
+  // Look up the source video from the catalog if available so the row
+  // matches the dashboard's expectations (song / artist labels).
+  const v = videos.find((x) => x.id === video_id);
+  return {
+    video_id,
+    youtube_id: v?.youtube_id || `yt-${video_id}`,
+    song: v?.title || `Song ${video_id}`,
+    artist: v?.artist || "Mock Artist",
+    position,
+    has_lyrics: true,
+  };
+}
+
+app.get("/api/v1/playlists/:id/items", (req, res) => {
+  if (Number(req.params.id) === 184) {
+    res.json([...liveItems]);
+    return;
+  }
   res.json([]);
+});
+
+app.post("/api/v1/playlists/:id/items", (req, res) => {
+  const id = Number(req.params.id);
+  const { video_id } = req.body || {};
+  if (id !== 184 || typeof video_id !== "number") {
+    res.status(400).json({ error: "expected ytlive playlist + video_id" });
+    return;
+  }
+  if (liveItems.some((r) => r.video_id === video_id)) {
+    res.json({ status: "already_present" });
+    return;
+  }
+  const position = liveItems.length + 1;
+  liveItems.push(makeLiveRow(video_id, position));
+  res.json({ status: "added", position });
+});
+
+app.delete("/api/v1/playlists/:id/items/:vid", (req, res) => {
+  const id = Number(req.params.id);
+  const vid = Number(req.params.vid);
+  if (id !== 184) {
+    res.status(404).json({ error: "no such playlist" });
+    return;
+  }
+  liveItems = liveItems.filter((r) => r.video_id !== vid);
+  // Re-compact positions so the UI shows 1..N contiguous.
+  liveItems = liveItems.map((r, idx) => ({ ...r, position: idx + 1 }));
+  res.status(204).end();
+});
+
+app.post("/api/v1/playlists/:id/play-video", (_req, res) => {
+  // No-op for the mock — the WS interval already streams NowPlaying
+  // updates, so the dashboard sees activity without us replaying.
+  res.status(204).end();
+});
+
+app.post("/__mock/live-reset", (_req, res) => {
+  liveItems = [];
+  res.json({ status: "reset" });
 });
 
 // Playback controls.
