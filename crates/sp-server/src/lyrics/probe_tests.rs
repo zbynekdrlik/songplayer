@@ -171,20 +171,15 @@ async fn probe_description_reports_error_when_fetch_fails() {
     // (1) Cached description, empty → fetch_raw_description returns
     // Ok(Some("")) → fetch_description_lyrics enters the
     // `description.trim().is_empty()` branch.
-    tokio::fs::write(
-        cache_dir.join(format!("{youtube_id}_description.txt")),
-        "",
-    )
-    .await
-    .unwrap();
+    tokio::fs::write(cache_dir.join(format!("{youtube_id}_description.txt")), "")
+        .await
+        .unwrap();
 
     // (2) Sabotage the lyrics-cache JSON write by occupying its path
     // with a directory.
-    tokio::fs::create_dir(
-        cache_dir.join(format!("{youtube_id}_description_lyrics.json")),
-    )
-    .await
-    .unwrap();
+    tokio::fs::create_dir(cache_dir.join(format!("{youtube_id}_description_lyrics.json")))
+        .await
+        .unwrap();
 
     let ai = AiClient::new(AiSettings::default());
     let report = probe_sources_impl(
