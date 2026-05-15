@@ -82,8 +82,14 @@ impl FakeObsServer {
         let accept_count_clone = accept_count.clone();
 
         tokio::spawn(async move {
-            run_accept_loop(listener, shutdown_rx, event_rx, state_clone, accept_count_clone)
-                .await;
+            run_accept_loop(
+                listener,
+                shutdown_rx,
+                event_rx,
+                state_clone,
+                accept_count_clone,
+            )
+            .await;
         });
 
         Self {
