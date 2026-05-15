@@ -578,12 +578,10 @@ pub async fn start(
                 Some(cmd) = engine_rx.recv() => {
                     match cmd {
                         EngineCommand::Play { playlist_id } => {
-                            // Manual Play from the dashboard: mirror the
-                            // scene-active path so the engine state
-                            // machine gets the same VideosAvailable +
-                            // SceneOn sequence that handle_scene_change
-                            // now performs internally.
-                            engine.handle_scene_change(playlist_id, true).await;
+                            // Manual /play from the dashboard. Engine
+                            // dispatches resume-vs-scene-on based on
+                            // whether Pause captured a snapshot. #88.
+                            engine.handle_engine_play(playlist_id).await;
                         }
                         EngineCommand::Pause { playlist_id } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOff).await;

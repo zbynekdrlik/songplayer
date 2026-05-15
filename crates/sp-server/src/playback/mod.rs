@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 mod clear_lyrics;
+mod engine_play;
 mod lyrics_loader;
 pub mod ndi_health;
 pub mod pipeline;
@@ -111,6 +112,8 @@ struct PlaylistPipeline {
     /// current subtitle line. The re-push line may be up to one Position
     /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
+    /// Pause snapshot; consumed on manual /play to resume same song. #88.
+    paused_at: Option<(i64, u64)>,
 }
 
 impl PlaylistPipeline {
@@ -244,6 +247,7 @@ impl PlaybackEngine {
                 last_resolume_subtitles_signature: None,
                 last_lyrics_ws_signature: None,
                 cached_position_ms: 0,
+                paused_at: None,
             }
         });
     }
@@ -718,6 +722,7 @@ impl PlaybackEngine {
             pp.last_presenter_text = None;
             pp.last_resolume_subtitles_signature = None;
             pp.last_lyrics_ws_signature = None;
+            pp.paused_at = None;
             pp.state = PlayState::Playing { video_id };
             info!(
                 playlist_id,
@@ -943,9 +948,10 @@ impl PlaybackEngine {
             }
 
             PlayAction::Pause => {
-                if let Some(pp) = self.pipelines.get(&playlist_id) {
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.paused_at = pp.current_video_id.map(|v| (v, pp.cached_position_ms));
                     pp.pipeline.send(PipelineCommand::Pause);
-                    debug!(playlist_id, "paused pipeline");
+                    debug!(playlist_id, paused_at = ?pp.paused_at, "paused pipeline");
                 }
             }
 
