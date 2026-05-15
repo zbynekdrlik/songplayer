@@ -177,9 +177,7 @@ where
             }
         }
     }
-    if flipped > 0 {
-        tracing::info!(flipped, "self-heal: flipped rows with non-48 kHz audio");
-    }
+    tracing::info!(flipped, "self-heal: sample-rate sweep complete");
     Ok(flipped)
 }
 
