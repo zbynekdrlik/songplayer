@@ -147,6 +147,106 @@ pub async fn startup_sync_active_playlists(
 }
 
 #[cfg(test)]
+mod sample_rate_self_heal_tests {
+    use super::*;
+    use crate::db;
+
+    async fn seed_normalized_row(
+        pool: &SqlitePool,
+        youtube_id: &str,
+        audio_path: Option<&str>,
+        normalized: i64,
+    ) -> i64 {
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, normalized, audio_file_path)
+             VALUES (1, ?, 't', ?, ?)",
+        )
+        .bind(youtube_id)
+        .bind(normalized)
+        .bind(audio_path)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar::<_, i64>("SELECT id FROM videos WHERE youtube_id = ?")
+            .bind(youtube_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn read_normalized(pool: &SqlitePool, id: i64) -> i64 {
+        sqlx::query_scalar::<_, i64>("SELECT normalized FROM videos WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn flips_192k_row_to_unnormalized_and_leaves_48k_alone() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        let id_48k = seed_normalized_row(&pool, "y48k", Some("/cache/48k.flac"), 1).await;
+        let id_192k = seed_normalized_row(&pool, "y192k", Some("/cache/192k.flac"), 1).await;
+
+        let probe = |path: &Path| -> Option<u32> {
+            match path.to_str() {
+                Some("/cache/48k.flac") => Some(48_000),
+                Some("/cache/192k.flac") => Some(192_000),
+                _ => None,
+            }
+        };
+        let flipped = flip_wrong_sample_rate_rows(&pool, probe).await.unwrap();
+        assert_eq!(flipped, 1, "exactly the 192k row should be flipped");
+
+        assert_eq!(read_normalized(&pool, id_48k).await, 1);
+        assert_eq!(read_normalized(&pool, id_192k).await, 0);
+    }
+
+    #[tokio::test]
+    async fn skips_rows_with_no_audio_path() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        let id_none = seed_normalized_row(&pool, "noaudio", None, 1).await;
+        // Probe should never run; if it does and returns 192k the row
+        // would flip — assert it stayed at 1.
+        let flipped = flip_wrong_sample_rate_rows(&pool, |_| Some(192_000))
+            .await
+            .unwrap();
+        assert_eq!(flipped, 0);
+        assert_eq!(read_normalized(&pool, id_none).await, 1);
+    }
+
+    #[tokio::test]
+    async fn ignores_unnormalized_rows_even_at_wrong_sample_rate() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        let id = seed_normalized_row(&pool, "raw", Some("/cache/raw.flac"), 0).await;
+        let flipped = flip_wrong_sample_rate_rows(&pool, |_| Some(192_000))
+            .await
+            .unwrap();
+        assert_eq!(flipped, 0);
+        assert_eq!(read_normalized(&pool, id).await, 0);
+    }
+
+    #[tokio::test]
+    async fn probe_returning_none_leaves_row_alone() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        let id = seed_normalized_row(&pool, "ymissing", Some("/cache/gone.flac"), 1).await;
+        // None means the probe failed (file gone, ffprobe missing, etc.).
+        // Don't touch the row — we'd lose state on a transient I/O error.
+        let flipped = flip_wrong_sample_rate_rows(&pool, |_| None).await.unwrap();
+        assert_eq!(flipped, 0);
+        assert_eq!(read_normalized(&pool, id).await, 1);
+    }
+}
+
+#[cfg(test)]
 mod sync_filter_tests {
     use super::*;
     use crate::db;
