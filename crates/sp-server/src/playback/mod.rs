@@ -111,8 +111,7 @@ struct PlaylistPipeline {
     /// current subtitle line. The re-push line may be up to one Position
     /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
-    /// Snapshot captured on Pause; consumed on manual /play to resume
-    /// the same song at the recorded position instead of SelectAndPlay. #88.
+    /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
 }
 
@@ -252,8 +251,7 @@ impl PlaybackEngine {
         });
     }
 
-    /// Consume the paused snapshot for `playlist_id`. Returns `None`
-    /// when never paused or pipeline missing. #88.
+    /// Consume paused snapshot for `playlist_id`; `None` if never paused. #88.
     pub fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
         self.pipelines
             .get_mut(&playlist_id)
@@ -730,6 +728,7 @@ impl PlaybackEngine {
             pp.last_presenter_text = None;
             pp.last_resolume_subtitles_signature = None;
             pp.last_lyrics_ws_signature = None;
+            pp.paused_at = None;
             pp.state = PlayState::Playing { video_id };
             info!(
                 playlist_id,
@@ -955,9 +954,10 @@ impl PlaybackEngine {
             }
 
             PlayAction::Pause => {
-                if let Some(pp) = self.pipelines.get(&playlist_id) {
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.paused_at = pp.current_video_id.map(|v| (v, pp.cached_position_ms));
                     pp.pipeline.send(PipelineCommand::Pause);
-                    debug!(playlist_id, "paused pipeline");
+                    debug!(playlist_id, paused_at = ?pp.paused_at, "paused pipeline");
                 }
             }
 
