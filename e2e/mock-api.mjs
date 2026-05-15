@@ -118,21 +118,67 @@ app.post("/api/v1/playlists/:id/sync", (_req, res) => {
   res.json({ status: "syncing" });
 });
 
-// Playback controls
+// Live-setlist items (custom-kind playlists). Empty by default — the /live
+// global Play/Pause/Skip controls render unconditionally so the playback
+// error-handling specs don't need rows here.
+app.get("/api/v1/playlists/:id/items", (_req, res) => {
+  res.json([]);
+});
+
+// Playback controls.
+// Tests can flip individual endpoints to a fail mode via the admin
+// helper below so the UI's error-handling path is exercisable.
+const failModes = {
+  play: false,
+  pause: false,
+  skip: false,
+  previous: false,
+  mode: false,
+};
+
+function maybeFail(kind, res) {
+  if (failModes[kind]) {
+    res.status(500).json({ error: `mock: ${kind} fail-mode` });
+    return true;
+  }
+  return false;
+}
+
 app.post("/api/v1/playback/:id/play", (_req, res) => {
+  if (maybeFail("play", res)) return;
   res.json({ status: "playing" });
 });
 
 app.post("/api/v1/playback/:id/pause", (_req, res) => {
+  if (maybeFail("pause", res)) return;
   res.json({ status: "paused" });
 });
 
 app.post("/api/v1/playback/:id/skip", (_req, res) => {
+  if (maybeFail("skip", res)) return;
   res.json({ status: "skipped" });
 });
 
+app.post("/api/v1/playback/:id/previous", (_req, res) => {
+  if (maybeFail("previous", res)) return;
+  res.json({ status: "rewound" });
+});
+
 app.put("/api/v1/playback/:id/mode", (_req, res) => {
+  if (maybeFail("mode", res)) return;
   res.json({ status: "mode_changed" });
+});
+
+// Admin: flip a playback endpoint into 500-failure mode.
+// Test-only — used by Playwright specs to assert the UI's error path.
+app.post("/__mock/fail-mode", (req, res) => {
+  const { kind, enabled } = req.body || {};
+  if (!(kind in failModes)) {
+    res.status(400).json({ error: `unknown kind: ${kind}` });
+    return;
+  }
+  failModes[kind] = !!enabled;
+  res.json({ kind, enabled: failModes[kind] });
 });
 
 // Control endpoint (used by playback_controls component via WebSocket ClientMsg)
