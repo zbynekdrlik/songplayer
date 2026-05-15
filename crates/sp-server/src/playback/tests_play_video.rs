@@ -280,6 +280,119 @@ async fn pause_captures_paused_at_snapshot_for_manual_resume() {
     );
 }
 
+/// Regression: Issue #88 — Pause MUST NOT capture a spurious snapshot
+/// when `current_video_id` is `None` (e.g. fresh pipeline with no video
+/// loaded yet). A bad future refactor like `unwrap_or(0)` would inject
+/// a paused_at = Some((0, 0)) that a subsequent `/play` would try to
+/// resume — `handle_play_video(0, ...)` would fail at the DB lookup
+/// but the failure surface should never even be reached.
+#[tokio::test]
+async fn pause_with_no_current_video_does_not_capture_snapshot() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (9, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+    );
+    engine.ensure_pipeline(9, "SP-fast");
+
+    // current_video_id stays None (no song loaded). Drive a Pause anyway —
+    // the state machine fires Playing+SceneOff but our pipeline is in Idle.
+    // Either way, paused_at must NOT be Some((0, ...)).
+    engine
+        .handle_command(9, crate::playback::state::PlayEvent::SceneOff)
+        .await;
+
+    assert_eq!(
+        engine.take_paused_snapshot(9),
+        None,
+        "Pause with current_video_id=None must NOT capture spurious snapshot"
+    );
+}
+
+/// Regression: Issue #88 — `handle_engine_play` is the dispatch surface
+/// `lib.rs::EngineCommand::Play` invokes. When a Pause snapshot exists, it
+/// MUST consume it and resume the same video (NOT fall through to
+/// SelectAndPlay which returns None for custom playlists at end-of-setlist
+/// and forks to a different video on continuous playlists).
+#[tokio::test]
+async fn handle_engine_play_resumes_paused_video_when_snapshot_present() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (10, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (77, 10, 'paused', 1, '/cache/p_video.mp4', '/cache/p_audio.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+    );
+    engine.ensure_pipeline(10, "SP-fast");
+    if let Some(pp) = engine.pipelines.get_mut(&10) {
+        pp.paused_at = Some((77, 42_000));
+    }
+
+    // Manual /play dispatch — what lib.rs calls.
+    engine.handle_engine_play(10).await;
+
+    let pp = engine.pipelines.get(&10).unwrap();
+    assert_eq!(
+        pp.current_video_id,
+        Some(77),
+        "handle_engine_play must resume the paused video, not pick a different one"
+    );
+    assert_eq!(
+        pp.state,
+        PlayState::Playing { video_id: 77 },
+        "engine state must transition to Playing on resume"
+    );
+    // Snapshot consumed.
+    assert_eq!(
+        engine.take_paused_snapshot(10),
+        None,
+        "handle_engine_play must consume the snapshot"
+    );
+}
+
 /// Regression: Issue #88 — after Pause has captured a snapshot, calling
 /// handle_play_video for ANY video (even the same one, but in particular
 /// a different one the user clicked in the setlist) MUST clear the

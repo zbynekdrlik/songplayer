@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 mod clear_lyrics;
+mod engine_play;
 mod lyrics_loader;
 pub mod ndi_health;
 pub mod pipeline;
@@ -249,13 +250,6 @@ impl PlaybackEngine {
                 paused_at: None,
             }
         });
-    }
-
-    /// Consume paused snapshot for `playlist_id`; `None` if never paused. #88.
-    pub fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
-        self.pipelines
-            .get_mut(&playlist_id)
-            .and_then(|pp| pp.paused_at.take())
     }
 
     /// Receive the next pipeline event (for use in external select! loops).

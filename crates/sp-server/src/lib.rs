@@ -578,28 +578,10 @@ pub async fn start(
                 Some(cmd) = engine_rx.recv() => {
                     match cmd {
                         EngineCommand::Play { playlist_id } => {
-                            // Manual /play from the dashboard. If a Pause
-                            // captured a paused_at snapshot, resume the
-                            // same video at the recorded position
-                            // (issue #88 — the old path ran SelectAndPlay
-                            // which returns None on custom playlists at
-                            // the end and forks to a different video on
-                            // continuous playlists; the wall stayed
-                            // paused either way). Otherwise mirror the
-                            // scene-on path that selects a fresh video.
-                            if let Some((video_id, position_ms)) =
-                                engine.take_paused_snapshot(playlist_id)
-                            {
-                                engine
-                                    .handle_play_video(
-                                        playlist_id,
-                                        video_id,
-                                        Some(position_ms),
-                                    )
-                                    .await;
-                            } else {
-                                engine.handle_scene_change(playlist_id, true).await;
-                            }
+                            // Manual /play from the dashboard. Engine
+                            // dispatches resume-vs-scene-on based on
+                            // whether Pause captured a snapshot. #88.
+                            engine.handle_engine_play(playlist_id).await;
                         }
                         EngineCommand::Pause { playlist_id } => {
                             engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOff).await;
