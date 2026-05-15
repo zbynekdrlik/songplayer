@@ -122,6 +122,40 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #89 — Resolume Arena liveness gate.
+   *
+   * If Arena is hung, the LED wall is dark even though SongPlayer is
+   * dispatching subtitles to SP-live NDI correctly. Without this check
+   * the post-deploy run reports green while the operator-visible
+   * surface is broken (the failure mode behind the 2026-05-13 Thank
+   * You verify session and earlier wall-dark incidents).
+   *
+   * Probes Arena's REST endpoint with a tight 5 s timeout — a hung
+   * Arena either times out at the TCP layer or hangs past the wall
+   * clock; a healthy one returns the composition JSON in <2 s.
+   */
+  test("Resolume Arena REST is responding (wall is alive)", async () => {
+    const url = process.env.RESOLUME_REST_URL || "http://127.0.0.1:8090/api/v1/composition";
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    let resp: Response;
+    try {
+      resp = await fetch(url, { signal: controller.signal });
+    } catch (err) {
+      throw new Error(
+        `Resolume Arena unreachable at ${url}: ${err}. ` +
+          `Arena is likely hung or not running — restart Arena before re-running deploy.`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(
+      resp.ok,
+      `Resolume Arena returned non-2xx status=${resp.status} from ${url} — wall may be dark.`,
+    ).toBeTruthy();
+  });
+
+  /**
    * Issue #8 — dashboard Play button.
    * Click the Play button on any playlist that has videos and assert
    * that SongPlayer responds with a 2xx (not 405). Playwright waits
