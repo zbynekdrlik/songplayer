@@ -25,6 +25,12 @@
 
 set -euo pipefail
 
+# Resolve $0 to an absolute path BEFORE any subshell `cd` happens. The
+# self-test sub-process invokes "$SCRIPT" from a tmp working directory,
+# so a relative $0 (e.g. `scripts/check-red-green-order.sh` as CI calls
+# it) would fail with rc=127 (command not found).
+SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
 check_range() {
     local range="$1"
     # `--reverse` makes the order chronological: ancestor first.
@@ -93,12 +99,11 @@ self_test() {
         git tag fixture-bad
     )
 
-    local script="$0"
     local good_rc bad_rc
     good_rc=0
     bad_rc=0
-    ( cd "$tmp" && "$script" fixture-base..fixture-good >/dev/null 2>&1 ) || good_rc=$?
-    ( cd "$tmp" && "$script" fixture-base..fixture-bad >/dev/null 2>&1 ) || bad_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-good >/dev/null 2>&1 ) || good_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-bad >/dev/null 2>&1 ) || bad_rc=$?
 
     if [ "$good_rc" -ne 0 ]; then
         echo "self-test FAIL: well-formed range expected rc=0, got $good_rc"
