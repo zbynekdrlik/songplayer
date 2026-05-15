@@ -645,6 +645,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reprocess_reports_asr_gap_rows_separately() {
+        // Regression for #91: when the operator reprocesses a set that
+        // includes an `asr_gap`-quarantined row, the response must report
+        // it under `blocked_by_asr_gap` so the dashboard can show it.
+        // Without this field the response (`{"queued": 1}`) was a lie —
+        // the row was flagged manual_priority=1 but worker SQL excludes
+        // `asr_gap`, so it never gets popped.
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (state, _temp) = test_state_with_cache_dir().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, lyrics_source) \
+             VALUES (30, 1, 'y30', 's', 'a', 1, 'asr_gap'), \
+                    (31, 1, 'y31', 's', 'a', 1, 'no_source'), \
+                    (32, 1, 'y32', 's', 'a', 1, 'yt_subs')",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let app = crate::api::router(state.clone(), None);
+        let req = Request::builder()
+            .uri("/api/v1/lyrics/reprocess")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"video_ids":[30,31,32]}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["queued"].as_i64(), Some(3));
+        assert_eq!(parsed["blocked_by_asr_gap"].as_i64(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn reprocess_by_playlist_reports_blocked_asr_gap_count() {
+        // Same contract as the video_ids branch — the playlist-scoped
+        // reprocess must also surface asr_gap counts.
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (state, _temp) = test_state_with_cache_dir().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (5, 'p5', 'u', 'n', 1)",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, lyrics_source) \
+             VALUES (40, 5, 'y40', 's', 'a', 1, 'asr_gap'), \
+                    (41, 5, 'y41', 's', 'a', 1, 'asr_gap'), \
+                    (42, 5, 'y42', 's', 'a', 1, 'no_source')",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let app = crate::api::router(state.clone(), None);
+        let req = Request::builder()
+            .uri("/api/v1/lyrics/reprocess")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"playlist_id":5}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["queued"].as_i64(), Some(3));
+        assert_eq!(parsed["blocked_by_asr_gap"].as_i64(), Some(2));
+    }
+
+    #[tokio::test]
     async fn probe_sources_returns_404_for_missing_video_id() {
         use axum::body::Body;
         use axum::http::{Request, StatusCode};
