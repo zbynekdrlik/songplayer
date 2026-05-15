@@ -5,6 +5,8 @@
 //! under the file-size cap and lets each test file stay narrowly focused.
 
 use super::probe::{ProbeReport, ProbeResult, probe_sources_impl};
+use crate::ai::AiSettings;
+use crate::ai::client::AiClient;
 use crate::db::models::VideoLyricsRow;
 
 fn fixture_row(song: &str, artist: &str, spotify_track_id: Option<&str>) -> VideoLyricsRow {
@@ -143,6 +145,37 @@ async fn probe_description_unavailable_when_no_ai_client_present() {
         descr.note.to_lowercase().contains("no ai_client")
             || descr.note.to_lowercase().contains("claude-validate"),
         "expected note about missing Claude validation, got: {}",
+        descr.note
+    );
+}
+
+#[tokio::test]
+async fn probe_description_reports_error_when_fetch_fails() {
+    // #93 follow-up: cover the `Err(e)` arm in probe.rs:141-147. With an
+    // ai_client present but a bogus ytdlp path, `fetch_description_lyrics`
+    // propagates the subprocess error via `?` from `fetch_raw_description`,
+    // so the probe records `note: "error: ..."` (the third outcome, not the
+    // `Ok(None)` skip path that the existing tests already cover).
+    let ai = AiClient::new(AiSettings::default());
+    let report = probe_sources_impl(
+        Some(&ai),
+        std::path::Path::new("/nonexistent/ytdlp"),
+        std::path::Path::new("/tmp"),
+        &reqwest::Client::new(),
+        &fixture_row("Song", "Artist", None),
+        "",
+    )
+    .await;
+    let descr = report
+        .probes
+        .iter()
+        .find(|p| p.provider == "description")
+        .expect("description probe must be present");
+    assert!(!descr.available);
+    assert_eq!(descr.line_count, 0);
+    assert!(
+        descr.note.starts_with("error:"),
+        "expected `error:` prefix when fetch_description_lyrics returns Err, got: {}",
         descr.note
     );
 }

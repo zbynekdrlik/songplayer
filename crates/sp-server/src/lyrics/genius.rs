@@ -844,6 +844,49 @@ mod tests {
     }
 
     #[test]
+    fn pick_song_url_returns_none_when_artist_match_is_non_song_and_song_is_wrong_artist() {
+        // #93 follow-up: covers the third combo that the existing
+        // `pick_song_url_rejects_release_calendar_hit_in_favor_of_real_song`
+        // and `pick_song_url_returns_none_when_only_non_song_pages_match`
+        // tests don't exercise.
+        //
+        // Hit 1: bad URL (non-song page, filter trips) BUT primary_artist
+        // matches the search. Filter must reject before the artist match
+        // can return Some.
+        // Hit 2: good URL BUT primary_artist does NOT match. Artist gate
+        // must reject.
+        // Expected: None — neither hit individually satisfies both
+        // criteria.
+        let resp = SearchResponse {
+            response: SearchResponseInner {
+                hits: vec![
+                    SearchHit {
+                        hit_type: "song".into(),
+                        result: HitResult {
+                            url:
+                                "https://genius.com/Maverick-city-music-2025-singles-release-calendar-annotated"
+                                    .into(),
+                            primary_artist: Some(ArtistRef {
+                                name: Some("Maverick City Music".into()),
+                            }),
+                        },
+                    },
+                    SearchHit {
+                        hit_type: "song".into(),
+                        result: HitResult {
+                            url: "https://genius.com/Other-artist-jireh-lyrics".into(),
+                            primary_artist: Some(ArtistRef {
+                                name: Some("Other Artist".into()),
+                            }),
+                        },
+                    },
+                ],
+            },
+        };
+        assert_eq!(pick_song_url(&resp, "Maverick City Music"), None);
+    }
+
+    #[test]
     fn pick_song_url_skips_non_song_hit_types() {
         // Genius returns other hit types (e.g. "lyric", "album"); we must
         // ignore them so we don't try to scrape a non-lyrics page.
