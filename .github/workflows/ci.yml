@@ -492,6 +492,12 @@ jobs:
           sudo docker image prune -af 2>/dev/null || true
           sudo swapoff /swapfile 2>/dev/null || true
           sudo rm -f /swapfile
+          # /mnt/swapfile may already exist on the runner image with an
+          # active swap, which makes `fallocate` fail with "Text file
+          # busy" (observed twice on PR #97 shards 3/8 and 5/8). Swap
+          # it off + remove before reallocating.
+          sudo swapoff /mnt/swapfile 2>/dev/null || true
+          sudo rm -f /mnt/swapfile
           sudo fallocate -l 24G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
