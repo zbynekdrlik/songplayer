@@ -45,22 +45,26 @@ check_range() {
     local violations=()
 
     while IFS=$'\t' read -r sha subject; do
-        # Capture every #N mentioned in a test(...) subject.
-        if [[ "$subject" =~ ^test\( ]]; then
-            while read -r issue; do
-                [ -n "$issue" ] || continue
-                test_seen[$issue]="$sha"
-            done < <(echo "$subject" | grep -oE '#[0-9]+' | tr -d '#')
+        # Record any test(#N) commit so a following fix(#N) can pair against
+        # it. We match #N strictly inside the parens — `test(#94):` records
+        # 94. `test: …` plain doesn't trigger; `test(refactor):` doesn't
+        # either (no issue reference, nothing to pair).
+        if [[ "$subject" =~ ^test\(#([0-9]+)\) ]]; then
+            test_seen[${BASH_REMATCH[1]}]="$sha"
         fi
-        # For every #N mentioned in a fix(...) subject, require that we've
-        # already seen a test(#N) earlier in this range.
-        if [[ "$subject" =~ ^fix\( ]]; then
-            while read -r issue; do
-                [ -n "$issue" ] || continue
-                if [ -z "${test_seen[$issue]:-}" ]; then
-                    violations+=("$sha #$issue $subject")
-                fi
-            done < <(echo "$subject" | grep -oE '#[0-9]+' | tr -d '#')
+        # Only flag `fix(#N):` — a bug-fix commit explicitly tagged with an
+        # issue number — as needing a paired test commit. `fix(ci):`,
+        # `fix(scope):`, and `fix: …` plain are excluded because they may
+        # not refer to an issue at all; mentions of `#N` in the rest of the
+        # subject (e.g. "(PR #97)") are bundle references, not bug-fix
+        # claims. The pre-push hook in airuleset is the broader,
+        # label-aware enforcement; this CI gate covers the specific
+        # `fix(#N)` convention SongPlayer uses.
+        if [[ "$subject" =~ ^fix\(#([0-9]+)\) ]]; then
+            issue="${BASH_REMATCH[1]}"
+            if [ -z "${test_seen[$issue]:-}" ]; then
+                violations+=("$sha #$issue $subject")
+            fi
         fi
     done <<< "$log"
 
