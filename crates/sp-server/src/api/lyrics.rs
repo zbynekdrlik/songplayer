@@ -236,6 +236,14 @@ pub struct ReprocessRequest {
 #[derive(Debug, Serialize)]
 pub struct ReprocessResponse {
     pub queued: i64,
+    /// Count of rows in the requested set whose `lyrics_source = 'asr_gap'`.
+    /// Those rows have their `manual_priority` flag set but the worker pop
+    /// SQL excludes the asr_gap sentinel, so they will not be reprocessed
+    /// without a pipeline-version bump (#91). Defaults to 0 for the
+    /// reprocess-all-stale endpoint where the scope is "stale rows only"
+    /// — those by definition cannot be asr_gap (asr_gap has has_lyrics=0).
+    #[serde(default)]
+    pub blocked_by_asr_gap: i64,
 }
 
 // HTTP handler: validates video_ids/playlist_id shape + dispatches to SQL UPDATE. Covered by reprocess_video_ids_sets_manual_priority + Playwright.
@@ -247,6 +255,21 @@ pub async fn post_reprocess(
     match (req.video_ids, req.playlist_id) {
         (Some(ids), _) if !ids.is_empty() => {
             let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
+            let blocked_sql = format!(
+                "SELECT COUNT(*) FROM videos WHERE lyrics_source = 'asr_gap' AND id IN ({})",
+                placeholders.join(",")
+            );
+            let mut blocked_q = sqlx::query_scalar::<_, i64>(&blocked_sql);
+            for id in &ids {
+                blocked_q = blocked_q.bind(*id);
+            }
+            let blocked_by_asr_gap = match blocked_q.fetch_one(&state.pool).await {
+                Ok(n) => n,
+                Err(e) => {
+                    warn!("post_reprocess asr_gap count error: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            };
             let sql = format!(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
                         lyrics_source = CASE \
@@ -263,6 +286,7 @@ pub async fn post_reprocess(
             match q.execute(&state.pool).await {
                 Ok(r) => Json(ReprocessResponse {
                     queued: r.rows_affected() as i64,
+                    blocked_by_asr_gap,
                 })
                 .into_response(),
                 Err(e) => {
@@ -272,6 +296,19 @@ pub async fn post_reprocess(
             }
         }
         (_, Some(pid)) => {
+            let blocked_by_asr_gap = match sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM videos WHERE lyrics_source = 'asr_gap' AND playlist_id = ?",
+            )
+            .bind(pid)
+            .fetch_one(&state.pool)
+            .await
+            {
+                Ok(n) => n,
+                Err(e) => {
+                    warn!("post_reprocess asr_gap count error: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            };
             match sqlx::query(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
                         lyrics_source = CASE \
@@ -286,6 +323,7 @@ pub async fn post_reprocess(
             {
                 Ok(r) => Json(ReprocessResponse {
                     queued: r.rows_affected() as i64,
+                    blocked_by_asr_gap,
                 })
                 .into_response(),
                 Err(e) => {
@@ -311,6 +349,7 @@ pub async fn post_reprocess_all_stale(State(state): State<AppState>) -> impl Int
     match res {
         Ok(r) => Json(ReprocessResponse {
             queued: r.rows_affected() as i64,
+            blocked_by_asr_gap: 0,
         })
         .into_response(),
         Err(e) => {
@@ -327,6 +366,7 @@ pub async fn post_clear_manual(State(state): State<AppState>) -> impl IntoRespon
     match res {
         Ok(r) => Json(ReprocessResponse {
             queued: r.rows_affected() as i64,
+            blocked_by_asr_gap: 0,
         })
         .into_response(),
         Err(e) => {
