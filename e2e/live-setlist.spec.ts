@@ -41,7 +41,7 @@ test.describe("live setlist playback errors surface to operator", () => {
       timeout: 10000,
     });
 
-    await page.getByRole("button", { name: "⏸" }).click();
+    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏸" }).click();
 
     await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
       timeout: 5000,
@@ -59,7 +59,7 @@ test.describe("live setlist playback errors surface to operator", () => {
       timeout: 10000,
     });
 
-    await page.getByRole("button", { name: "⏭" }).click();
+    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏭" }).click();
 
     await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
       timeout: 5000,
@@ -77,7 +77,7 @@ test.describe("live setlist playback errors surface to operator", () => {
       timeout: 10000,
     });
 
-    await page.getByRole("button", { name: "⏮" }).click();
+    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏮" }).click();
 
     await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
       timeout: 5000,
@@ -95,7 +95,7 @@ test.describe("live setlist playback errors surface to operator", () => {
       timeout: 10000,
     });
 
-    await page.getByRole("button", { name: "▶ Play" }).click();
+    await page.locator(".live-setlist-controls").getByRole("button", { name: "▶ Play" }).click();
 
     await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
       timeout: 5000,
