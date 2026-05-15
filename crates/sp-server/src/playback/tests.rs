@@ -143,6 +143,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             last_resolume_subtitles_signature: None,
             last_lyrics_ws_signature: None,
             cached_position_ms: 0,
+            paused_at: None,
         };
 
         assert!(pp.title_show_abort.is_some());
