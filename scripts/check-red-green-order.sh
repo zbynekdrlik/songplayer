@@ -52,16 +52,16 @@ check_range() {
         if [[ "$subject" =~ ^test\(#([0-9]+)\) ]]; then
             test_seen[${BASH_REMATCH[1]}]="$sha"
         fi
-        # Only flag `fix(#N):` — a bug-fix commit explicitly tagged with an
-        # issue number — as needing a paired test commit. `fix(ci):`,
-        # `fix(scope):`, and `fix: …` plain are excluded because they may
-        # not refer to an issue at all; mentions of `#N` in the rest of the
-        # subject (e.g. "(PR #97)") are bundle references, not bug-fix
-        # claims. The pre-push hook in airuleset is the broader,
-        # label-aware enforcement; this CI gate covers the specific
-        # `fix(#N)` convention SongPlayer uses.
-        if [[ "$subject" =~ ^fix\(#([0-9]+)\) ]]; then
-            issue="${BASH_REMATCH[1]}"
+        # Flag every bug-prefix subject that explicitly tags an issue —
+        # `fix(#N):`, `bug(#N):`, `bugfix(#N):`, `hotfix(#N):`,
+        # `regression(#N):`, `repair(#N):`, `patch(#N):` — as needing a
+        # paired test commit. The prefix set matches the airuleset
+        # pre-push hook in `regression-test-first.md`. Scope-only forms
+        # like `fix(ci):` / `fix: …` plain remain excluded (no #N to
+        # pair against); bundle references in trailers ("(PR #97)") are
+        # not bug-fix claims.
+        if [[ "$subject" =~ ^(fix|bug|bugfix|hotfix|regression|repair|patch)\(#([0-9]+)\) ]]; then
+            issue="${BASH_REMATCH[2]}"
             if [ -z "${test_seen[$issue]:-}" ]; then
                 violations+=("$sha #$issue $subject")
             fi
