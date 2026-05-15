@@ -245,6 +245,20 @@ mod sample_rate_self_heal_tests {
     use super::*;
     use crate::db;
 
+    async fn seed_pool() -> SqlitePool {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        // Videos.playlist_id has a FK; insert a real playlist first.
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name)
+             VALUES (1, 'p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
     async fn seed_normalized_row(
         pool: &SqlitePool,
         youtube_id: &str,
@@ -278,8 +292,7 @@ mod sample_rate_self_heal_tests {
 
     #[tokio::test]
     async fn flips_192k_row_to_unnormalized_and_leaves_48k_alone() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
+        let pool = seed_pool().await;
 
         let id_48k = seed_normalized_row(&pool, "y48k", Some("/cache/48k.flac"), 1).await;
         let id_192k = seed_normalized_row(&pool, "y192k", Some("/cache/192k.flac"), 1).await;
@@ -300,8 +313,7 @@ mod sample_rate_self_heal_tests {
 
     #[tokio::test]
     async fn skips_rows_with_no_audio_path() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
+        let pool = seed_pool().await;
 
         let id_none = seed_normalized_row(&pool, "noaudio", None, 1).await;
         // Probe should never run; if it does and returns 192k the row
@@ -315,8 +327,7 @@ mod sample_rate_self_heal_tests {
 
     #[tokio::test]
     async fn ignores_unnormalized_rows_even_at_wrong_sample_rate() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
+        let pool = seed_pool().await;
 
         let id = seed_normalized_row(&pool, "raw", Some("/cache/raw.flac"), 0).await;
         let flipped = flip_wrong_sample_rate_rows(&pool, |_| Some(192_000))
@@ -328,8 +339,7 @@ mod sample_rate_self_heal_tests {
 
     #[tokio::test]
     async fn probe_returning_none_leaves_row_alone() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
+        let pool = seed_pool().await;
 
         let id = seed_normalized_row(&pool, "ymissing", Some("/cache/gone.flac"), 1).await;
         // None means the probe failed (file gone, ffprobe missing, etc.).
