@@ -115,6 +115,100 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     Ok(())
 }
 
+/// Probe sample rates of every `normalized = 1` row's `audio_file_path`
+/// and flip any row whose audio is not at 48 kHz back to `normalized = 0`
+/// so the download worker re-normalizes it.
+///
+/// Background: pre-PR-#38 cache files were sometimes 192 kHz (yt-dlp
+/// produced FLAC at the source sample rate). `sp_decoder::SplitSyncedDecoder`
+/// requires 48 kHz and rejects anything else with a hard error at
+/// playback time — the operator sees the wall stay dark on what looks
+/// like a fresh-cached song. This self-heal flips the DB row back to
+/// `normalized = 0` so the download worker re-processes it under the
+/// post-#38 pipeline that always passes `-ar 48000 -ac 2` to ffmpeg.
+///
+/// `probe` is injected so unit tests can drive arbitrary sample rates
+/// without spawning ffprobe / opening real FLAC files. Production
+/// callers pass [`probe_sample_rate_symphonia`].
+///
+/// Returns the number of rows flipped.
+pub async fn flip_wrong_sample_rate_rows<F>(
+    pool: &SqlitePool,
+    probe: F,
+) -> Result<usize, sqlx::Error>
+where
+    F: Fn(&Path) -> Option<u32>,
+{
+    let rows = sqlx::query(
+        "SELECT id, youtube_id, audio_file_path FROM videos
+         WHERE normalized = 1 AND audio_file_path IS NOT NULL AND audio_file_path <> ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut flipped = 0usize;
+    for row in rows {
+        let id: i64 = row.get("id");
+        let yt: String = row.get("youtube_id");
+        let path_str: String = row.get("audio_file_path");
+        let path = Path::new(&path_str);
+        match probe(path) {
+            Some(48_000) => {}
+            Some(other) => {
+                tracing::warn!(
+                    video_id = id,
+                    youtube_id = %yt,
+                    sample_rate = other,
+                    path = %path.display(),
+                    "self-heal: audio not at 48 kHz; flipping normalized=0 for re-normalize"
+                );
+                sqlx::query("UPDATE videos SET normalized = 0 WHERE id = ?")
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
+                flipped += 1;
+            }
+            None => {
+                tracing::warn!(
+                    video_id = id,
+                    youtube_id = %yt,
+                    path = %path.display(),
+                    "self-heal: sample-rate probe failed; leaving normalized state unchanged"
+                );
+            }
+        }
+    }
+    if flipped > 0 {
+        tracing::info!(flipped, "self-heal: flipped rows with non-48 kHz audio");
+    }
+    Ok(flipped)
+}
+
+/// Production sample-rate probe backed by Symphonia's FLAC reader.
+/// Returns `None` if the file is missing, unreadable, or not a
+/// recognised audio format — caller treats `None` as "leave row alone".
+///
+/// `cfg_attr(test, mutants::skip)`: the function is exercised by
+/// `flip_wrong_sample_rate_rows`'s injectable probe in unit tests;
+/// covering it directly would need a real FLAC fixture per branch and
+/// mutation testing would add no signal — it's a thin Symphonia
+/// wrapper.
+#[cfg_attr(test, mutants::skip)]
+pub fn probe_sample_rate_symphonia(audio_path: &Path) -> Option<u32> {
+    match sp_decoder::SymphoniaAudioReader::open(audio_path) {
+        Ok(reader) => {
+            use sp_decoder::AudioStream;
+            Some(reader.sample_rate())
+        }
+        Err(e) => {
+            tracing::debug!(
+                path = %audio_path.display(),
+                "probe_sample_rate_symphonia: open failed: {e}"
+            );
+            None
+        }
+    }
+}
+
 /// Trigger a one-time playlist sync for every active playlist at startup.
 /// Legacy Python parity with `tools.py::trigger_startup_sync`.
 pub async fn startup_sync_active_playlists(
