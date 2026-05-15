@@ -13,6 +13,7 @@ pub mod playlist;
 pub mod presenter;
 pub mod reprocess;
 pub mod resolume;
+pub mod shutdown;
 pub mod startup;
 
 use std::collections::HashMap;
