@@ -111,6 +111,9 @@ struct PlaylistPipeline {
     /// current subtitle line. The re-push line may be up to one Position
     /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
+    /// Snapshot captured on Pause; consumed on manual /play to resume
+    /// the same song at the recorded position instead of SelectAndPlay. #88.
+    paused_at: Option<(i64, u64)>,
 }
 
 impl PlaylistPipeline {
@@ -244,8 +247,17 @@ impl PlaybackEngine {
                 last_resolume_subtitles_signature: None,
                 last_lyrics_ws_signature: None,
                 cached_position_ms: 0,
+                paused_at: None,
             }
         });
+    }
+
+    /// Consume the paused snapshot for `playlist_id`. Returns `None`
+    /// when never paused or pipeline missing. #88.
+    pub fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
+        self.pipelines
+            .get_mut(&playlist_id)
+            .and_then(|pp| pp.paused_at.take())
     }
 
     /// Receive the next pipeline event (for use in external select! loops).

@@ -205,6 +205,144 @@ async fn started_event_unconditionally_resets_lyrics_state() {
     );
 }
 
+/// Regression: Issue #88 — when the user clicks Pause, the engine MUST
+/// capture (current_video_id, cached_position_ms) into `paused_at` so a
+/// subsequent manual /play can resume the same video at the recorded
+/// position. Before the fix, plain /play ran SelectAndPlay which either
+/// picked a different video (continuous playlists) or returned None
+/// (custom playlists at the end), leaving the wall paused with no way
+/// to resume.
+#[tokio::test]
+async fn pause_captures_paused_at_snapshot_for_manual_resume() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, has_lyrics, normalized) \
+         VALUES (42, 7, 'paused_id', 'Song', 'Artist', 0, 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+    );
+    engine.ensure_pipeline(7, "SP-fast");
+
+    // Simulate "song playing, position advanced": engine bookkeeping has
+    // current_video_id + cached_position_ms set by handle_play_video +
+    // Position events. Drive those fields directly so the test stays
+    // hermetic (no real pipeline thread / decoder needed).
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.current_video_id = Some(42);
+        pp.state = PlayState::Playing { video_id: 42 };
+        pp.cached_position_ms = 85_240;
+    }
+
+    // User clicks Pause → state machine fires PlayAction::Pause.
+    engine
+        .handle_command(7, crate::playback::state::PlayEvent::SceneOff)
+        .await;
+
+    // The engine MUST have recorded the snapshot so manual /play can
+    // resume. Without this, /play falls through to SelectAndPlay and the
+    // wall stays paused on custom playlists.
+    let snapshot = engine.take_paused_snapshot(7);
+    assert_eq!(
+        snapshot,
+        Some((42, 85_240)),
+        "Pause must capture (current_video_id, cached_position_ms) for resume"
+    );
+
+    // Second take returns None — consume-on-use semantics.
+    assert_eq!(
+        engine.take_paused_snapshot(7),
+        None,
+        "take_paused_snapshot must consume the slot"
+    );
+}
+
+/// Regression: Issue #88 — after Pause has captured a snapshot, calling
+/// handle_play_video for ANY video (even the same one, but in particular
+/// a different one the user clicked in the setlist) MUST clear the
+/// snapshot so it can't be stale-applied to a later /play.
+#[tokio::test]
+async fn handle_play_video_clears_paused_at_snapshot() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (8, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (vid, slug) in [(50_i64, "a"), (60_i64, "b")] {
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+             VALUES (?, 8, ?, 1, ?, ?)",
+        )
+        .bind(vid)
+        .bind(slug)
+        .bind(format!("/cache/{slug}_video.mp4"))
+        .bind(format!("/cache/{slug}_audio.flac"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(
+        pool,
+        std::path::PathBuf::from("/tmp/test-cache"),
+        obs_tx,
+        None,
+        resolume_tx,
+        ws_tx,
+        None,
+        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+    );
+    engine.ensure_pipeline(8, "SP-fast");
+
+    // Pre-load a paused snapshot so the test exercises the clear-on-play
+    // path even without driving Pause through the state machine.
+    if let Some(pp) = engine.pipelines.get_mut(&8) {
+        pp.paused_at = Some((50, 12_000));
+    }
+
+    // User clicks a different song's ▶ in the setlist.
+    engine.handle_play_video(8, 60, None).await;
+
+    // The stale snapshot must be cleared — otherwise the next /play
+    // would jump back to video 50@12s instead of continuing 60.
+    assert_eq!(
+        engine.take_paused_snapshot(8),
+        None,
+        "handle_play_video must clear stale paused_at snapshot"
+    );
+}
+
 /// Regression: Started event with malformed lyrics JSON on disk MUST set
 /// lyrics_state=None and warn — not panic, not preserve stale state.
 /// Covers the Err(e) branch of load_lyrics_for_video.
