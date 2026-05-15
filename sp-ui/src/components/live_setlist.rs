@@ -254,6 +254,11 @@ pub fn LiveSetList(
                         // BEFORE we POST /pause — the server transitions to
                         // WaitingForScene on pause and the NowPlaying stream
                         // stops updating. Save first, pause after.
+                        //
+                        // If the POST fails (the silent-no-op case #94
+                        // surfaced), roll the snapshot back so the next ▶
+                        // Play click doesn't try to resume a song the
+                        // server never paused. Caught by review on PR #97.
                         let snapshot = store.now_playing.with(|map| {
                             map.get(&playlist_id).map(|np| (np.video_id, np.position_ms))
                         });
@@ -263,6 +268,7 @@ pub fn LiveSetList(
                                 &format!("/api/v1/playback/{playlist_id}/pause"),
                             ).await {
                                 error_msg.set(e);
+                                paused_state.set(None);
                             }
                         });
                     }
