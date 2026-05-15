@@ -45,6 +45,14 @@ pub struct LyricsSongEntry {
     pub manual_priority: bool,
 }
 
+/// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).
+/// Used to surface `blocked_by_asr_gap > 0` to the operator (#98).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReprocessOutcome {
+    pub queued: i64,
+    pub blocked_by_asr_gap: i64,
+}
+
 /// Information about what is currently playing on a playlist.
 #[derive(Debug, Clone)]
 pub struct NowPlayingInfo {
@@ -87,6 +95,7 @@ pub struct DashboardStore {
     pub resolume_hosts: RwSignal<Vec<ResolumeHost>>,
     pub lyrics_queue: RwSignal<Option<LyricsQueueInfo>>,
     pub lyrics_songs: RwSignal<Vec<LyricsSongEntry>>,
+    pub last_reprocess: RwSignal<Option<ReprocessOutcome>>,
 }
 
 impl DashboardStore {
@@ -103,6 +112,7 @@ impl DashboardStore {
             resolume_hosts: RwSignal::new(vec![]),
             lyrics_queue: RwSignal::new(None),
             lyrics_songs: RwSignal::new(vec![]),
+            last_reprocess: RwSignal::new(None),
         }
     }
 

@@ -5,7 +5,7 @@ use leptos::task::spawn_local;
 
 use crate::api;
 use crate::components::lyrics_song_row::LyricsSongRow;
-use crate::store::LyricsSongEntry;
+use crate::store::{DashboardStore, LyricsSongEntry, ReprocessOutcome};
 
 #[component]
 pub fn LyricsPlaylistSection(
@@ -29,9 +29,21 @@ pub fn LyricsPlaylistSection(
     });
 
     let pid = playlist_id;
+    let store = expect_context::<DashboardStore>();
+    let last_reprocess = store.last_reprocess;
     let on_reprocess_playlist = move |_| {
         spawn_local(async move {
-            let _ = api::post_reprocess_playlist(pid).await;
+            if let Ok(v) = api::post_reprocess_playlist(pid).await {
+                let queued = v.get("queued").and_then(|x| x.as_i64()).unwrap_or(0);
+                let blocked = v
+                    .get("blocked_by_asr_gap")
+                    .and_then(|x| x.as_i64())
+                    .unwrap_or(0);
+                last_reprocess.set(Some(ReprocessOutcome {
+                    queued,
+                    blocked_by_asr_gap: blocked,
+                }));
+            }
         });
     };
 
