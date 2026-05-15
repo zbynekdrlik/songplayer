@@ -1,16 +1,29 @@
 //! System tray icon and menu setup.
 
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
+use tokio::runtime::Handle as RuntimeHandle;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
 use crate::tray_icons;
+
+/// Max time the tray Exit handler waits for the server task to finish
+/// draining workers / closing NDI / closing OBS WS / flushing DB before
+/// it terminates the process anyway. 30 s is longer than every documented
+/// per-subsystem cleanup step in #81 combined.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn setup_tray(
     app: &AppHandle,
     shutdown_tx: broadcast::Sender<()>,
+    runtime_handle: RuntimeHandle,
+    server_join: Arc<Mutex<Option<JoinHandle<()>>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let version_label = format!("SongPlayer v{}", env!("BUILD_VERSION"));
     let version_item = MenuItem::with_id(app, "version", &version_label, false, None::<&str>)?;
@@ -63,8 +76,25 @@ pub fn setup_tray(
                 let _ = app.clipboard().write_text(&dashboard_url_for_copy);
             }
             "quit" => {
+                // #81: broadcast shutdown, then BLOCK on the server task
+                // join with a real wall-clock timeout. The previous code
+                // slept a fixed 500 ms and then called app.exit(0)
+                // regardless — that aborted NDI sender Drop, in-flight
+                // OBS WebSocket close, Replicate API calls, and the
+                // sqlx pool drain. Combined with #80 that left the next
+                // restart in a stale-network state.
                 let _ = shutdown_tx.send(());
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                if let Some(handle) = server_join.lock().ok().and_then(|mut g| g.take()) {
+                    let ok = runtime_handle.block_on(sp_server::shutdown::await_server_join(
+                        handle,
+                        SHUTDOWN_TIMEOUT,
+                    ));
+                    if !ok {
+                        tracing::warn!(
+                            "server task did not finish within {SHUTDOWN_TIMEOUT:?}; exiting anyway"
+                        );
+                    }
+                }
                 app.exit(0);
             }
             _ => {}
