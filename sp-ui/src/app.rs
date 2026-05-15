@@ -121,6 +121,16 @@ pub fn App() -> impl IntoView {
                     }
                 }}
             </span>
+            // Version label on every route. Compile-time injected from
+            // sp_core::config::VERSION (CARGO_PKG_VERSION via the workspace
+            // VERSION file + scripts/sync-version.sh) so the displayed value
+            // matches the deployed binary AND the backend `/api/v1/status`
+            // `version` field — single git-tag source per
+            // version-on-dashboard.md. data-testid is the contract the
+            // Playwright assertion + post-deploy verification reads.
+            <span class="version-label" data-testid="version">
+                {format!("v{}", sp_core::config::VERSION)}
+            </span>
         </nav>
         <main class="content">
             {move || match page.get() {

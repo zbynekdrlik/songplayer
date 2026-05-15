@@ -1,11 +1,18 @@
 import express from "express";
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
+import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Read the workspace VERSION file so the mock's /api/v1/status `version`
+// field matches the same source the WASM frontend reads via
+// sp_core::config::VERSION → CARGO_PKG_VERSION → workspace VERSION. The
+// dashboard version-label spec asserts the two are equal (#85).
+const SP_VERSION = readFileSync(join(__dirname, "..", "VERSION"), "utf8").trim();
 
 const app = express();
 app.use(express.json());
@@ -201,6 +208,7 @@ app.patch("/api/v1/settings", (req, res) => {
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({
+    version: SP_VERSION,
     obs_connected: false,
     active_scene: null,
     ytdlp_available: true,

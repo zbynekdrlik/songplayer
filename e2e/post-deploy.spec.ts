@@ -122,6 +122,34 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #85 — version label on every page matches backend.
+   *
+   * Post-deploy verification: dashboard's `[data-testid="version"]` must
+   * be visible AND equal `v{status.version}` from the backend. Catches
+   * silent deploy failures (frontend cached, backend updated; or vice
+   * versa) per version-on-dashboard.md.
+   */
+  test("dashboard version label matches deployed backend (#85)", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/");
+    const label = page.locator('[data-testid="version"]');
+    await expect(label).toBeVisible({ timeout: 15_000 });
+    const text = (await label.textContent())?.trim() ?? "";
+    expect(text).toMatch(/^v\d+\.\d+\.\d+(-dev\.\d+)?$/);
+
+    const statusResp = await request.get("/api/v1/status");
+    expect(statusResp.status()).toBe(200);
+    const status = (await statusResp.json()) as { version: string };
+    expect(status.version, "backend /api/v1/status must include version field").toBeTruthy();
+    expect(
+      text,
+      `frontend label "${text}" must equal backend v${status.version}`,
+    ).toBe(`v${status.version}`);
+  });
+
+  /**
    * Issue #89 — Resolume Arena liveness gate.
    *
    * If Arena is hung, the LED wall is dark even though SongPlayer is
