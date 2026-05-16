@@ -165,6 +165,18 @@ use sp_core::lyrics::LyricsTrack;
 ///   protected once generated.
 pub const LYRICS_PIPELINE_VERSION: u32 = 20;
 
+/// Alignment-model identifier written to `lyrics_alignment_model` for the
+/// raw-ship-through path (line-timed text source, no whisperx alignment ran).
+pub const ALIGNMENT_MODEL_NONE: &str = "none";
+
+/// Alignment-model identifier for the line-timed merge module path (e.g.
+/// `lrclib+timed-merge` source label). No whisperx alignment ran.
+pub const ALIGNMENT_MODEL_TIMED_MERGE: &str = "timed-merge";
+
+/// Alignment-model identifier for whisperx large-v3 rev1 (current default
+/// alignment model for description + yt_subs+whisperx paths).
+pub const ALIGNMENT_MODEL_WHISPERX_V3_REV1: &str = "whisperx-large-v3@rev1";
+
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
 /// - Strips inline bracketed noise like `[music]`, `[applause]`, `[laughter]`

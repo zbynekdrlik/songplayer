@@ -45,7 +45,7 @@ async fn fetch_bucket_manual(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.lyrics_manual_priority = 1 \
                AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
                     OR v.lyrics_pipeline_version < ?) \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.id ASC LIMIT 1",
@@ -70,15 +70,13 @@ async fn fetch_bucket_null(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // `lyrics_source NOT IN ('failed','empty','no_source','asr_gap')` skips rows
-    // that the worker has already tried and bailed on — without this filter a
-    // song with zero text sources (no yt_subs, no LRCLIB match, no description/
-    // CCLI yet) gets picked every 10s forever, blocking every other null-lyric
-    // song behind it. `asr_gap` is the operator-driven parking sentinel set by
-    // POST /api/v1/lyrics/quarantine when a song's ASR transcription is
-    // unrecoverable under the current pipeline; see
-    // `db::models::quarantine_video_lyrics` and
-    // `docs/superpowers/specs/2026-05-12-asr-gap-quarantine-design.md`.
+    // `lyrics_source NOT IN ('failed','empty','no_source','asr_gap','unsupported_source')`
+    // skips rows the worker has parked: terminal failure modes (`failed`,
+    // `empty`, `no_source`), the ASR-gap quarantine sentinel (`asr_gap`,
+    // per #86), and the new source-gating sentinel (`unsupported_source`,
+    // per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md).
+    // Without this filter a song with zero usable text sources gets picked
+    // every 10s forever, blocking every other null-lyric song behind it.
     // Matches the pre-refactor guard in get_next_video_without_lyrics.
     // Exception: if a row's recorded failure is from an OLDER pipeline version,
     // allow it through — the worker may have new capability (e.g., a new
@@ -97,7 +95,7 @@ async fn fetch_bucket_null(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
                AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
+                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
@@ -663,6 +661,60 @@ mod tests {
         assert_eq!(
             row.youtube_id, "manual_retry",
             "manual bucket must skip asr_gap rows at the current pipeline version"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_bucket_skips_unsupported_source_at_current_version() {
+        // Seed a row that PASSES every filter EXCEPT the NOT IN sentinel:
+        //   - has_lyrics=0 → null-bucket eligible
+        //   - manual_priority=0 (default) → not manual-bucket
+        //   - normalized=1 → passes the normalize filter
+        //   - lyrics_pipeline_version=20 (current) → version-fallback OR-arm is FALSE
+        //   - lyrics_source='unsupported_source' → sentinel value in the NOT IN list
+        // With the skip-list extension, the NOT IN OR-arm is FALSE; with all three
+        // OR-arms FALSE, the row is excluded. Without the extension,
+        // 'unsupported_source' NOT IN ('failed','empty','no_source','asr_gap') would
+        // be TRUE → row WOULD be picked → test would fail.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, \
+                                 lyrics_source, lyrics_pipeline_version, normalized) \
+             VALUES (1, 'aaa', 't', 0, 'unsupported_source', 20, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let next = get_next_video_for_lyrics(&pool, 20).await.unwrap();
+        assert!(
+            next.is_none(),
+            "unsupported_source row must be excluded by the NOT IN clause"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_bucket_skips_unsupported_source_at_current_version() {
+        // Same construction as the null-bucket test but with manual_priority=1
+        // so the row routes to fetch_bucket_manual. Both buckets share the
+        // same NOT IN clause; the sentinel must block both.
+        // pipeline_version=20 (current) ensures the version-fallback OR-arm is
+        // FALSE, leaving the NOT IN as the sole filter.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, \
+                                 lyrics_source, lyrics_pipeline_version, \
+                                 lyrics_manual_priority, normalized) \
+             VALUES (1, 'bbb', 't2', 1, 'unsupported_source', 20, 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let next = get_next_video_for_lyrics(&pool, 20).await.unwrap();
+        assert!(
+            next.is_none(),
+            "unsupported_source row must NOT be picked from manual bucket even with priority=1"
         );
     }
 }

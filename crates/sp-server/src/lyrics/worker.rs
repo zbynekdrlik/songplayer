@@ -428,6 +428,37 @@ impl LyricsWorker {
             }
         };
 
+        // GATE: per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md,
+        // refuse to run expensive alignment (Demucs + whisperx, ~3 min/song) on
+        // text sources we know produce poor wall output. Allowed set is
+        // yt_subs/lrclib/spotify (line-timed) and description (curated). Anything
+        // else (genius, lrclib-plain-without-timing, no_source) gets the
+        // `unsupported_source` sentinel and is parked until a future-model PR.
+        if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
+            let names: Vec<&str> = ctx
+                .candidate_texts
+                .iter()
+                .map(|c| c.source.as_str())
+                .collect();
+            tracing::warn!(
+                video_id,
+                youtube_id = %youtube_id,
+                candidate_sources = ?names,
+                "lyrics: no allowed text source — marking unsupported_source"
+            );
+            if let Err(e) = crate::db::models::mark_unsupported_source(
+                &self.pool,
+                video_id,
+                LYRICS_PIPELINE_VERSION,
+            )
+            .await
+            {
+                warn!("worker: mark_unsupported_source error for {youtube_id}: {e}");
+            }
+            self.clear_processing().await;
+            return Ok(());
+        }
+
         self.broadcast_stage(
             video_id,
             &youtube_id,
@@ -605,12 +636,39 @@ impl LyricsWorker {
         let json_bytes = serde_json::to_vec(&track)?;
         tokio::fs::write(&json_path, &json_bytes).await?;
 
+        // Pick the alignment-model literal for this success path. Logic
+        // mirrors the table in the spec ("Per-song processing metadata"):
+        //   - source label contains `whisperx` → WHISPERX_V3_REV1
+        //   - source label contains `timed-merge` → TIMED_MERGE
+        //   - source label is exactly `yt_subs` / `lrclib` / `spotify` (raw
+        //     ship-through, no alignment ran) → NONE
+        //   - anything else → None (NULL — unknown model, e.g. legacy
+        //     ensemble:gemini paths that may still appear in `track.source`)
+        //
+        // Precedence note: `whisperx` is checked FIRST so that a compound
+        // label like `lrclib+timed-merge+whisperx-large-v3@rev1` (theoretical;
+        // not observed in the current catalog) reports the dominant alignment
+        // step (whisperx, the expensive one) rather than `timed-merge`. If a
+        // future pipeline emits such a compound label, audit queries see
+        // whisperx as the alignment model — which is correct.
+        let alignment_model: Option<&'static str> = if track.source.contains("whisperx") {
+            Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
+        } else if track.source.contains("timed-merge") {
+            Some(crate::lyrics::ALIGNMENT_MODEL_TIMED_MERGE)
+        } else if track.source == "yt_subs" || track.source == "lrclib" || track.source == "spotify"
+        {
+            Some(crate::lyrics::ALIGNMENT_MODEL_NONE)
+        } else {
+            None
+        };
+
         crate::db::models::mark_video_lyrics_complete(
             &self.pool,
             video_id,
             &track.source,
             LYRICS_PIPELINE_VERSION,
             None,
+            alignment_model,
         )
         .await?;
 
