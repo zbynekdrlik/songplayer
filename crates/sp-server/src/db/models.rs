@@ -455,9 +455,11 @@ pub async fn mark_video_lyrics_complete(
     quality_score: Option<f32>,
     alignment_model: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    // lyrics_alignment_model is Option because some success paths (raw line-timed
-    // ship-through) genuinely have no alignment model. Callers pass
-    // Some("none") if they want the explicit literal vs None.
+    // lyrics_alignment_model is Option<&str>: None writes SQL NULL — reserved
+    // for legacy paths where no alignment ran AND the literal is unknown.
+    // For raw line-timed ship-through (yt_subs / lrclib / spotify, no whisperx),
+    // callers MUST pass Some(ALIGNMENT_MODEL_NONE) so the DB records the
+    // explicit literal "none" rather than the ambiguous NULL.
     sqlx::query(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
          lyrics_pipeline_version = ?, lyrics_quality_score = ?, \

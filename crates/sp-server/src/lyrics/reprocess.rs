@@ -665,7 +665,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_source_not_picked_by_get_next_video_for_lyrics() {
+    async fn null_bucket_skips_unsupported_source_at_current_version() {
         // Seed a row that PASSES every filter EXCEPT the NOT IN sentinel:
         //   - has_lyrics=0 → null-bucket eligible
         //   - manual_priority=0 (default) → not manual-bucket
@@ -676,14 +676,7 @@ mod tests {
         // OR-arms FALSE, the row is excluded. Without the extension,
         // 'unsupported_source' NOT IN ('failed','empty','no_source','asr_gap') would
         // be TRUE → row WOULD be picked → test would fail.
-        let pool = crate::db::create_memory_pool().await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p', 'u', 1)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, \
                                  lyrics_source, lyrics_pipeline_version, normalized) \
@@ -701,20 +694,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_source_not_picked_by_manual_bucket() {
-        // Same construction as test #1 but with manual_priority=1 so the row
-        // routes to fetch_bucket_manual instead of fetch_bucket_null. Both
-        // buckets share the same NOT IN clause; the sentinel must block both.
+    async fn manual_bucket_skips_unsupported_source_at_current_version() {
+        // Same construction as the null-bucket test but with manual_priority=1
+        // so the row routes to fetch_bucket_manual. Both buckets share the
+        // same NOT IN clause; the sentinel must block both.
         // pipeline_version=20 (current) ensures the version-fallback OR-arm is
         // FALSE, leaving the NOT IN as the sole filter.
-        let pool = crate::db::create_memory_pool().await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p', 'u', 1)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, \
                                  lyrics_source, lyrics_pipeline_version, \
