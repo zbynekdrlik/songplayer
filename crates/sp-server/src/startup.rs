@@ -115,6 +115,98 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     Ok(())
 }
 
+/// Probe sample rates of every `normalized = 1` row's `audio_file_path`
+/// and flip any row whose audio is not at 48 kHz back to `normalized = 0`
+/// so the download worker re-normalizes it.
+///
+/// Background: pre-PR-#38 cache files were sometimes 192 kHz (yt-dlp
+/// produced FLAC at the source sample rate). `sp_decoder::SplitSyncedDecoder`
+/// requires 48 kHz and rejects anything else with a hard error at
+/// playback time — the operator sees the wall stay dark on what looks
+/// like a fresh-cached song. This self-heal flips the DB row back to
+/// `normalized = 0` so the download worker re-processes it under the
+/// post-#38 pipeline that always passes `-ar 48000 -ac 2` to ffmpeg.
+///
+/// `probe` is injected so unit tests can drive arbitrary sample rates
+/// without spawning ffprobe / opening real FLAC files. Production
+/// callers pass [`probe_sample_rate_symphonia`].
+///
+/// Returns the number of rows flipped.
+pub async fn flip_wrong_sample_rate_rows<F>(
+    pool: &SqlitePool,
+    probe: F,
+) -> Result<usize, sqlx::Error>
+where
+    F: Fn(&Path) -> Option<u32>,
+{
+    let rows = sqlx::query(
+        "SELECT id, youtube_id, audio_file_path FROM videos
+         WHERE normalized = 1 AND audio_file_path IS NOT NULL AND audio_file_path <> ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut flipped = 0usize;
+    for row in rows {
+        let id: i64 = row.get("id");
+        let yt: String = row.get("youtube_id");
+        let path_str: String = row.get("audio_file_path");
+        let path = Path::new(&path_str);
+        match probe(path) {
+            Some(48_000) => {}
+            Some(other) => {
+                tracing::warn!(
+                    video_id = id,
+                    youtube_id = %yt,
+                    sample_rate = other,
+                    path = %path.display(),
+                    "self-heal: audio not at 48 kHz; flipping normalized=0 for re-normalize"
+                );
+                sqlx::query("UPDATE videos SET normalized = 0 WHERE id = ?")
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
+                flipped += 1;
+            }
+            None => {
+                tracing::warn!(
+                    video_id = id,
+                    youtube_id = %yt,
+                    path = %path.display(),
+                    "self-heal: sample-rate probe failed; leaving normalized state unchanged"
+                );
+            }
+        }
+    }
+    tracing::info!(flipped, "self-heal: sample-rate sweep complete");
+    Ok(flipped)
+}
+
+/// Production sample-rate probe backed by Symphonia's FLAC reader.
+/// Returns `None` if the file is missing, unreadable, or not a
+/// recognised audio format — caller treats `None` as "leave row alone".
+///
+/// `cfg_attr(test, mutants::skip)`: the function is exercised by
+/// `flip_wrong_sample_rate_rows`'s injectable probe in unit tests;
+/// covering it directly would need a real FLAC fixture per branch and
+/// mutation testing would add no signal — it's a thin Symphonia
+/// wrapper.
+#[cfg_attr(test, mutants::skip)]
+pub fn probe_sample_rate_symphonia(audio_path: &Path) -> Option<u32> {
+    match sp_decoder::SymphoniaAudioReader::open(audio_path) {
+        Ok(reader) => {
+            use sp_decoder::AudioStream;
+            Some(reader.sample_rate())
+        }
+        Err(e) => {
+            tracing::debug!(
+                path = %audio_path.display(),
+                "probe_sample_rate_symphonia: open failed: {e}"
+            );
+            None
+        }
+    }
+}
+
 /// Trigger a one-time playlist sync for every active playlist at startup.
 /// Legacy Python parity with `tools.py::trigger_startup_sync`.
 pub async fn startup_sync_active_playlists(
@@ -144,6 +236,116 @@ pub async fn startup_sync_active_playlists(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod sample_rate_self_heal_tests {
+    use super::*;
+    use crate::db;
+
+    async fn seed_pool() -> SqlitePool {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        // Videos.playlist_id has a FK; insert a real playlist first.
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name)
+             VALUES (1, 'p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn seed_normalized_row(
+        pool: &SqlitePool,
+        youtube_id: &str,
+        audio_path: Option<&str>,
+        normalized: i64,
+    ) -> i64 {
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, normalized, audio_file_path)
+             VALUES (1, ?, 't', ?, ?)",
+        )
+        .bind(youtube_id)
+        .bind(normalized)
+        .bind(audio_path)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar::<_, i64>("SELECT id FROM videos WHERE youtube_id = ?")
+            .bind(youtube_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn read_normalized(pool: &SqlitePool, id: i64) -> i64 {
+        sqlx::query_scalar::<_, i64>("SELECT normalized FROM videos WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn flips_192k_row_to_unnormalized_and_leaves_48k_alone() {
+        let pool = seed_pool().await;
+
+        let id_48k = seed_normalized_row(&pool, "y48k", Some("/cache/48k.flac"), 1).await;
+        let id_192k = seed_normalized_row(&pool, "y192k", Some("/cache/192k.flac"), 1).await;
+
+        let probe = |path: &Path| -> Option<u32> {
+            match path.to_str() {
+                Some("/cache/48k.flac") => Some(48_000),
+                Some("/cache/192k.flac") => Some(192_000),
+                _ => None,
+            }
+        };
+        let flipped = flip_wrong_sample_rate_rows(&pool, probe).await.unwrap();
+        assert_eq!(flipped, 1, "exactly the 192k row should be flipped");
+
+        assert_eq!(read_normalized(&pool, id_48k).await, 1);
+        assert_eq!(read_normalized(&pool, id_192k).await, 0);
+    }
+
+    #[tokio::test]
+    async fn skips_rows_with_no_audio_path() {
+        let pool = seed_pool().await;
+
+        let id_none = seed_normalized_row(&pool, "noaudio", None, 1).await;
+        // Probe should never run; if it does and returns 192k the row
+        // would flip — assert it stayed at 1.
+        let flipped = flip_wrong_sample_rate_rows(&pool, |_| Some(192_000))
+            .await
+            .unwrap();
+        assert_eq!(flipped, 0);
+        assert_eq!(read_normalized(&pool, id_none).await, 1);
+    }
+
+    #[tokio::test]
+    async fn ignores_unnormalized_rows_even_at_wrong_sample_rate() {
+        let pool = seed_pool().await;
+
+        let id = seed_normalized_row(&pool, "raw", Some("/cache/raw.flac"), 0).await;
+        let flipped = flip_wrong_sample_rate_rows(&pool, |_| Some(192_000))
+            .await
+            .unwrap();
+        assert_eq!(flipped, 0);
+        assert_eq!(read_normalized(&pool, id).await, 0);
+    }
+
+    #[tokio::test]
+    async fn probe_returning_none_leaves_row_alone() {
+        let pool = seed_pool().await;
+
+        let id = seed_normalized_row(&pool, "ymissing", Some("/cache/gone.flac"), 1).await;
+        // None means the probe failed (file gone, ffprobe missing, etc.).
+        // Don't touch the row — we'd lose state on a transient I/O error.
+        let flipped = flip_wrong_sample_rate_rows(&pool, |_| None).await.unwrap();
+        assert_eq!(flipped, 0);
+        assert_eq!(read_normalized(&pool, id).await, 1);
+    }
 }
 
 #[cfg(test)]

@@ -52,16 +52,16 @@ check_range() {
         if [[ "$subject" =~ ^test\(#([0-9]+)\) ]]; then
             test_seen[${BASH_REMATCH[1]}]="$sha"
         fi
-        # Only flag `fix(#N):` — a bug-fix commit explicitly tagged with an
-        # issue number — as needing a paired test commit. `fix(ci):`,
-        # `fix(scope):`, and `fix: …` plain are excluded because they may
-        # not refer to an issue at all; mentions of `#N` in the rest of the
-        # subject (e.g. "(PR #97)") are bundle references, not bug-fix
-        # claims. The pre-push hook in airuleset is the broader,
-        # label-aware enforcement; this CI gate covers the specific
-        # `fix(#N)` convention SongPlayer uses.
-        if [[ "$subject" =~ ^fix\(#([0-9]+)\) ]]; then
-            issue="${BASH_REMATCH[1]}"
+        # Flag every bug-prefix subject that explicitly tags an issue —
+        # `fix(#N):`, `bug(#N):`, `bugfix(#N):`, `hotfix(#N):`,
+        # `regression(#N):`, `repair(#N):`, `patch(#N):` — as needing a
+        # paired test commit. The prefix set matches the airuleset
+        # pre-push hook in `regression-test-first.md`. Scope-only forms
+        # like `fix(ci):` / `fix: …` plain remain excluded (no #N to
+        # pair against); bundle references in trailers ("(PR #97)") are
+        # not bug-fix claims.
+        if [[ "$subject" =~ ^(fix|bug|bugfix|hotfix|regression|repair|patch)\(#([0-9]+)\) ]]; then
+            issue="${BASH_REMATCH[2]}"
             if [ -z "${test_seen[$issue]:-}" ]; then
                 violations+=("$sha #$issue $subject")
             fi
@@ -101,13 +101,47 @@ self_test() {
         # Fixture 2: violation — fix commit with no preceding test commit.
         git commit --allow-empty -q -m "fix(#99): rushed fix without test"
         git tag fixture-bad
+
+        # Fixture 3: well-formed across all bug-prefix subjects accepted by
+        # the airuleset pre-push hook — every prefix has a paired test(#N).
+        git commit --allow-empty -q -m "test(#201): regression for bug"
+        git commit --allow-empty -q -m "bug(#201): the bug"
+        git commit --allow-empty -q -m "test(#202): regression for bugfix"
+        git commit --allow-empty -q -m "bugfix(#202): the bugfix"
+        git commit --allow-empty -q -m "test(#203): regression for hotfix"
+        git commit --allow-empty -q -m "hotfix(#203): the hotfix"
+        git commit --allow-empty -q -m "test(#204): regression for regression"
+        git commit --allow-empty -q -m "regression(#204): re-introduce check"
+        git commit --allow-empty -q -m "test(#205): regression for repair"
+        git commit --allow-empty -q -m "repair(#205): the repair"
+        git commit --allow-empty -q -m "test(#206): regression for patch"
+        git commit --allow-empty -q -m "patch(#206): the patch"
+        git tag fixture-prefixes-good
+
+        # Fixture 4: bug(#N) without preceding test(#N) — must fail.
+        git commit --allow-empty -q -m "bug(#301): rushed bug fix without test"
+        git tag fixture-bug-bad
+        # Fixture 5: hotfix(#N) without preceding test(#N) — must fail.
+        git commit --allow-empty -q -m "hotfix(#302): rushed hotfix without test"
+        git tag fixture-hotfix-bad
+        # Fixture 6: regression(#N) without preceding test(#N) — must fail.
+        git commit --allow-empty -q -m "regression(#303): rushed regression without test"
+        git tag fixture-regression-bad
     )
 
-    local good_rc bad_rc
+    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc
     good_rc=0
     bad_rc=0
+    prefixes_good_rc=0
+    bug_bad_rc=0
+    hotfix_bad_rc=0
+    regression_bad_rc=0
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-good >/dev/null 2>&1 ) || good_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-bad >/dev/null 2>&1 ) || bad_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-bad..fixture-prefixes-good >/dev/null 2>&1 ) || prefixes_good_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-prefixes-good..fixture-bug-bad >/dev/null 2>&1 ) || bug_bad_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-bug-bad..fixture-hotfix-bad >/dev/null 2>&1 ) || hotfix_bad_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-hotfix-bad..fixture-regression-bad >/dev/null 2>&1 ) || regression_bad_rc=$?
 
     if [ "$good_rc" -ne 0 ]; then
         echo "self-test FAIL: well-formed range expected rc=0, got $good_rc"
@@ -117,7 +151,23 @@ self_test() {
         echo "self-test FAIL: violation range expected rc=1, got $bad_rc"
         return 1
     fi
-    echo "ok: self-test passed (well-formed → rc=0, violation → rc=1)"
+    if [ "$prefixes_good_rc" -ne 0 ]; then
+        echo "self-test FAIL: all-prefix paired range expected rc=0, got $prefixes_good_rc"
+        return 1
+    fi
+    if [ "$bug_bad_rc" -ne 1 ]; then
+        echo "self-test FAIL: bug(#N) without test expected rc=1, got $bug_bad_rc"
+        return 1
+    fi
+    if [ "$hotfix_bad_rc" -ne 1 ]; then
+        echo "self-test FAIL: hotfix(#N) without test expected rc=1, got $hotfix_bad_rc"
+        return 1
+    fi
+    if [ "$regression_bad_rc" -ne 1 ]; then
+        echo "self-test FAIL: regression(#N) without test expected rc=1, got $regression_bad_rc"
+        return 1
+    fi
+    echo "ok: self-test passed (all bug-prefix subjects gate correctly)"
     return 0
 }
 

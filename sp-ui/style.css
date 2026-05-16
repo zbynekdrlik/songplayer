@@ -422,6 +422,15 @@ body {
 .lyrics-queue-counts li { margin: 4px 0; }
 .lyrics-queue-counts button { margin-left: 10px; }
 .lyrics-processing { background: #222; padding: 8px; margin-bottom: 8px; border-radius: 4px; }
+.reprocess-asr-gap-banner {
+    background: #3a2a00;
+    color: #ffc857;
+    border: 1px solid #ffc857;
+    padding: 8px 12px;
+    margin: 8px 0;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
 .source-chip { background: #333; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; }
 .quality-text { color: #999; font-size: 0.85em; }
 

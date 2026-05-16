@@ -342,6 +342,20 @@ pub async fn start(
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
 
+                // Defensive self-heal for #40: any normalized=1 row whose
+                // FLAC is not at 48 kHz would explode in
+                // SplitSyncedDecoder. Flip them back to normalized=0 so
+                // the download worker re-normalizes under the post-#38
+                // pipeline (which pins -ar 48000 -ac 2).
+                if let Err(e) = startup::flip_wrong_sample_rate_rows(
+                    &startup_sync_pool,
+                    startup::probe_sample_rate_symphonia,
+                )
+                .await
+                {
+                    tracing::warn!("self-heal: sample-rate sweep failed: {e}");
+                }
+
                 // Startup sync fires AFTER tools are ready so the sync
                 // worker doesn't silently drop the requests.
                 if let Err(e) =

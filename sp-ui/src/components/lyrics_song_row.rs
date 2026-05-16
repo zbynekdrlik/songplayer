@@ -5,13 +5,15 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::store::LyricsSongEntry;
+use crate::store::{DashboardStore, LyricsSongEntry, ReprocessOutcome};
 
 #[component]
 pub fn LyricsSongRow(
     entry: LyricsSongEntry,
     on_details: Callback<i64>,
 ) -> impl IntoView {
+    let store = expect_context::<DashboardStore>();
+    let last_reprocess = store.last_reprocess;
     let status_class = if !entry.has_lyrics {
         "status-none"
     } else if entry.is_stale {
@@ -42,7 +44,17 @@ pub fn LyricsSongRow(
 
     let on_reprocess = move |_| {
         spawn_local(async move {
-            let _ = api::post_reprocess_videos(&[video_id]).await;
+            if let Ok(v) = api::post_reprocess_videos(&[video_id]).await {
+                let queued = v.get("queued").and_then(|x| x.as_i64()).unwrap_or(0);
+                let blocked = v
+                    .get("blocked_by_asr_gap")
+                    .and_then(|x| x.as_i64())
+                    .unwrap_or(0);
+                last_reprocess.set(Some(ReprocessOutcome {
+                    queued,
+                    blocked_by_asr_gap: blocked,
+                }));
+            }
         });
     };
     let on_details_click = move |_| on_details.run(video_id);

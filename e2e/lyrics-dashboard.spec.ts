@@ -74,6 +74,61 @@ test.describe("Lyrics dashboard — reprocess triggers", () => {
     await page.getByRole("button", { name: "Reprocess all stale" }).click();
     await postPromise;
   });
+
+  // Regression for #98: the WASM dashboard must surface
+  // `blocked_by_asr_gap` from the reprocess response (PR #97 shipped the
+  // backend field). Operator needs to see when N rows in the request set
+  // were parked at `lyrics_source='asr_gap'` and require a pipeline
+  // version bump to retry — not a silent `queued: 1`.
+  test("reprocess banner surfaces blocked_by_asr_gap from response", async ({
+    page,
+    request,
+  }) => {
+    const set = await request.post("/__mock/reprocess-result", {
+      data: { queued: 1, blocked_by_asr_gap: 2 },
+    });
+    expect(set.ok()).toBeTruthy();
+    try {
+      await navigateToLyrics(page);
+      await page
+        .locator(".lyrics-song-row button")
+        .filter({ hasText: "Reprocess" })
+        .first()
+        .click();
+      await expect(page.locator(".reprocess-asr-gap-banner")).toBeVisible({
+        timeout: 5000,
+      });
+      await expect(page.locator(".reprocess-asr-gap-banner")).toContainText(
+        "asr_gap",
+      );
+      await expect(page.locator(".reprocess-asr-gap-banner")).toContainText("2");
+    } finally {
+      // Always reset so later tests start clean.
+      await request.post("/__mock/reprocess-result", {
+        data: { queued: 1, blocked_by_asr_gap: 0 },
+      });
+    }
+  });
+
+  test("reprocess banner stays hidden when blocked_by_asr_gap=0", async ({
+    page,
+    request,
+  }) => {
+    // Default mock state already returns blocked_by_asr_gap=0, but be
+    // explicit for the assertion's intent.
+    await request.post("/__mock/reprocess-result", {
+      data: { queued: 1, blocked_by_asr_gap: 0 },
+    });
+    await navigateToLyrics(page);
+    await page
+      .locator(".lyrics-song-row button")
+      .filter({ hasText: "Reprocess" })
+      .first()
+      .click();
+    // Give the response time to flow through; banner must NOT appear.
+    await page.waitForTimeout(500);
+    await expect(page.locator(".reprocess-asr-gap-banner")).toHaveCount(0);
+  });
 });
 
 test.describe("Lyrics dashboard — song detail modal", () => {
