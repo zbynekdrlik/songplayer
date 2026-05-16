@@ -15,6 +15,12 @@ export default defineConfig({
   testIgnore: ["**/post-deploy*.spec.ts"],
   timeout: 30000,
   retries: 0,
+  // Single worker: the mock-api process keeps in-memory state
+  // (failModes, liveItems, reprocessResult) that multiple parallel
+  // workers would stomp. The whole suite runs in ~10s so the speed
+  // cost is negligible compared to the flake cost of cross-worker
+  // 500s leaking into unrelated specs.
+  workers: 1,
   use: {
     baseURL: "http://127.0.0.1:8920",
     headless: true,
