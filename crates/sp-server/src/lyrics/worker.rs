@@ -644,6 +644,13 @@ impl LyricsWorker {
         //     ship-through, no alignment ran) → NONE
         //   - anything else → None (NULL — unknown model, e.g. legacy
         //     ensemble:gemini paths that may still appear in `track.source`)
+        //
+        // Precedence note: `whisperx` is checked FIRST so that a compound
+        // label like `lrclib+timed-merge+whisperx-large-v3@rev1` (theoretical;
+        // not observed in the current catalog) reports the dominant alignment
+        // step (whisperx, the expensive one) rather than `timed-merge`. If a
+        // future pipeline emits such a compound label, audit queries see
+        // whisperx as the alignment model — which is correct.
         let alignment_model: Option<&'static str> = if track.source.contains("whisperx") {
             Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
         } else if track.source.contains("timed-merge") {

@@ -780,17 +780,27 @@ async fn quarantine_video_lyrics_returns_not_found_for_missing_id() {
 #[tokio::test]
 async fn mark_video_lyrics_writes_processed_at_and_null_model_on_failure() {
     let (pool, video_id) = setup_with_video().await;
+    // Seed manual_priority=1 so the assertion below proves the failure path
+    // clears it (regression for the 2026-05-16 10-row dangling-flag bug).
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
+        .bind(video_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     mark_video_lyrics(&pool, video_id, false, Some("failed"), 20)
         .await
         .unwrap();
-    let row =
-        sqlx::query("SELECT lyrics_processed_at, lyrics_alignment_model FROM videos WHERE id = ?")
-            .bind(video_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let row = sqlx::query(
+        "SELECT lyrics_processed_at, lyrics_alignment_model, lyrics_manual_priority \
+         FROM videos WHERE id = ?",
+    )
+    .bind(video_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let processed_at: Option<String> = row.try_get("lyrics_processed_at").ok().flatten();
     let model: Option<String> = row.try_get("lyrics_alignment_model").ok().flatten();
+    let priority: i64 = row.get("lyrics_manual_priority");
     assert!(
         processed_at.is_some(),
         "processed_at must be set on failure path"
@@ -798,6 +808,10 @@ async fn mark_video_lyrics_writes_processed_at_and_null_model_on_failure() {
     assert!(
         model.is_none(),
         "alignment_model must be NULL on failure path"
+    );
+    assert_eq!(
+        priority, 0,
+        "manual_priority must be cleared on failure path (regression for dangling flag bug)"
     );
 }
 

@@ -425,8 +425,16 @@ pub async fn mark_video_lyrics(
     // lyrics_processed_at = strftime() so the timestamp comes from SQLite
     // (no clock-skew between server process and DB). lyrics_alignment_model
     // = NULL because the failure path has no successful alignment to record.
+    //
+    // lyrics_manual_priority = 0: this helper is the worker's terminal-failure
+    // exit (`no_source` / `empty` / `failed`). The row is now parked by the
+    // skip-list (`reprocess.rs::fetch_bucket_*`), so the manual flag has no
+    // future meaning. Without clearing it, audit queries report dangling
+    // queue entries (10 rows observed in production after the 2026-05-16
+    // catalog reprocess).
     sqlx::query(
         "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ?, \
+         lyrics_manual_priority = 0, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
          WHERE id = ?",
@@ -441,11 +449,18 @@ pub async fn mark_video_lyrics(
 }
 
 /// Persist a successful lyrics processing run: sets has_lyrics=1, records source,
-/// pipeline_version, quality_score, and clears manual_priority — all in one query.
+/// pipeline_version, quality_score, alignment_model, and clears manual_priority
+/// — all in one query.
 ///
 /// `quality_score` is `None` for fallback paths (e.g. ensemble timeout) to avoid
 /// writing 0.0 which would poison the `ORDER BY lyrics_quality_score ASC NULLS FIRST`
 /// stale-bucket selector — songs with 0.0 score sort before all real scores.
+///
+/// `alignment_model` distinguishes between "no model ran" (None → SQL NULL,
+/// legacy / unknown) and "model literal `none`" (`Some(ALIGNMENT_MODEL_NONE)`,
+/// raw line-timed ship-through where whisperx was deliberately skipped). See
+/// the precedence comment in `worker.rs::process_song` near line 639 for how
+/// callers derive the literal from the source label.
 #[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration tests below
 pub async fn mark_video_lyrics_complete(
     pool: &SqlitePool,
