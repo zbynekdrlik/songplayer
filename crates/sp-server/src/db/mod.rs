@@ -27,6 +27,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (16, MIGRATION_V16),
     (17, MIGRATION_V17),
     (18, MIGRATION_V18),
+    (19, MIGRATION_V19),
 ];
 
 const MIGRATION_V1: &str = "
@@ -250,6 +251,15 @@ ALTER TABLE videos ADD COLUMN spotify_resolved_at TEXT;
 UPDATE videos SET spotify_resolved_at = datetime('now') WHERE spotify_track_id IS NOT NULL;
 ";
 
+// V19: Add lyrics_processed_at + lyrics_alignment_model columns for audit
+// and reprocess-decision SQL queries. Both NULLABLE. Existing rows stay
+// NULL — honest signal that we do not know when/how they were processed.
+// See docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md.
+const MIGRATION_V19: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_processed_at TEXT;
+ALTER TABLE videos ADD COLUMN lyrics_alignment_model TEXT;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -326,3 +336,7 @@ mod tests;
 #[path = "mod_tests_v18.rs"]
 #[cfg(test)]
 mod tests_v18;
+
+#[path = "mod_tests_v19.rs"]
+#[cfg(test)]
+mod tests_v19;
