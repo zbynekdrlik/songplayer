@@ -666,10 +666,16 @@ mod tests {
 
     #[tokio::test]
     async fn unsupported_source_not_picked_by_get_next_video_for_lyrics() {
-        // Seed a pool with one video at `lyrics_source = 'unsupported_source'`
-        // AND `pipeline_version < current` AND `has_lyrics = 1`. Without the
-        // skip-list extension this row would be picked up by the stale-bucket
-        // path; with it, the call must return None (no row to process).
+        // Seed a row that PASSES every filter EXCEPT the NOT IN sentinel:
+        //   - has_lyrics=0 → null-bucket eligible
+        //   - manual_priority=0 (default) → not manual-bucket
+        //   - normalized=1 → passes the normalize filter
+        //   - lyrics_pipeline_version=20 (current) → version-fallback OR-arm is FALSE
+        //   - lyrics_source='unsupported_source' → sentinel value in the NOT IN list
+        // With the skip-list extension, the NOT IN OR-arm is FALSE; with all three
+        // OR-arms FALSE, the row is excluded. Without the extension,
+        // 'unsupported_source' NOT IN ('failed','empty','no_source','asr_gap') would
+        // be TRUE → row WOULD be picked → test would fail.
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
         sqlx::query(
@@ -679,8 +685,9 @@ mod tests {
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, lyrics_source, lyrics_pipeline_version) \
-             VALUES (1, 'aaa', 't', 1, 'unsupported_source', 5)",
+            "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, \
+                                 lyrics_source, lyrics_pipeline_version, normalized) \
+             VALUES (1, 'aaa', 't', 0, 'unsupported_source', 20, 1)",
         )
         .execute(&pool)
         .await
@@ -689,15 +696,17 @@ mod tests {
         let next = get_next_video_for_lyrics(&pool, 20).await.unwrap();
         assert!(
             next.is_none(),
-            "row at unsupported_source must NOT be picked by stale-bucket selector"
+            "unsupported_source row must be excluded by the NOT IN clause"
         );
     }
 
     #[tokio::test]
     async fn unsupported_source_not_picked_by_manual_bucket() {
-        // Even when `lyrics_manual_priority = 1`, an `unsupported_source` row must
-        // stay parked — the sentinel acts as a permanent "do not retry under this
-        // pipeline" mark until a future-model PR lifts it.
+        // Same construction as test #1 but with manual_priority=1 so the row
+        // routes to fetch_bucket_manual instead of fetch_bucket_null. Both
+        // buckets share the same NOT IN clause; the sentinel must block both.
+        // pipeline_version=20 (current) ensures the version-fallback OR-arm is
+        // FALSE, leaving the NOT IN as the sole filter.
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
         sqlx::query(
@@ -707,9 +716,10 @@ mod tests {
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, lyrics_source, \
-                                 lyrics_pipeline_version, lyrics_manual_priority) \
-             VALUES (1, 'bbb', 't2', 1, 'unsupported_source', 5, 1)",
+            "INSERT INTO videos (playlist_id, youtube_id, title, has_lyrics, \
+                                 lyrics_source, lyrics_pipeline_version, \
+                                 lyrics_manual_priority, normalized) \
+             VALUES (1, 'bbb', 't2', 1, 'unsupported_source', 20, 1, 1)",
         )
         .execute(&pool)
         .await
@@ -718,7 +728,7 @@ mod tests {
         let next = get_next_video_for_lyrics(&pool, 20).await.unwrap();
         assert!(
             next.is_none(),
-            "row at unsupported_source must NOT be picked even with manual_priority=1"
+            "unsupported_source row must NOT be picked from manual bucket even with priority=1"
         );
     }
 }
