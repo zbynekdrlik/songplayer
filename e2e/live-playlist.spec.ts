@@ -163,6 +163,9 @@ test.describe("/live page — primary operator surface (#39)", () => {
     await addRow(page, request, 0);
     const vid2 = await addRow(page, request, 1);
     await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(2);
+    // ✕ triggers `window.confirm()` so a stray tap during a live set
+    // doesn't silently drop a song. Auto-accept once for this click.
+    page.once("dialog", (d) => d.accept());
     await page
       .locator(".live-setlist-table tbody tr")
       .nth(0)
