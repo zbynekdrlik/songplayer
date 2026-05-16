@@ -368,7 +368,13 @@ app.post('/api/v1/lyrics/reprocess', (_req, res) =>
   res.json({ ...reprocessResult }),
 );
 app.post('/api/v1/lyrics/reprocess-all-stale', (_req, res) =>
-  res.json({ queued: 187, blocked_by_asr_gap: reprocessResult.blocked_by_asr_gap }),
+  // Matches backend: `post_reprocess_all_stale` hard-codes
+  // `blocked_by_asr_gap: 0` — the all-stale path doesn't filter for
+  // asr_gap rows yet (tracked separately for follow-up). The mock
+  // must mirror the contract, otherwise a Playwright test driving
+  // the all-stale path could show a banner that production would
+  // never surface.
+  res.json({ queued: 187, blocked_by_asr_gap: 0 }),
 );
 app.post('/api/v1/lyrics/clear-manual-queue', (_req, res) => res.json({ queued: 2 }));
 
