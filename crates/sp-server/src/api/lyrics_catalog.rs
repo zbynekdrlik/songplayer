@@ -34,12 +34,16 @@ pub struct ReprocessCatalogResponse {
 pub async fn reprocess_catalog_with_new_gate(State(state): State<AppState>) -> impl IntoResponse {
     use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
-    // Step 1: restamp v21 anomaly.
+    // Step 1: restamp v21 anomaly. Hardcoded `> 20` per spec — this is a
+    // one-shot anomaly fix for the 77 rows produced by a reverted code path
+    // that bumped LYRICS_PIPELINE_VERSION without approval. Parameterizing
+    // on LYRICS_PIPELINE_VERSION would silently widen the blast radius if
+    // the constant is ever (legitimately) bumped in the future. The literal
+    // 20 locks the one-shot semantics.
     let restamped = match sqlx::query(
         "UPDATE videos SET lyrics_pipeline_version = 19 \
-         WHERE lyrics_pipeline_version > ?",
+         WHERE lyrics_pipeline_version > 20",
     )
-    .bind(LYRICS_PIPELINE_VERSION as i64)
     .execute(&state.pool)
     .await
     {
