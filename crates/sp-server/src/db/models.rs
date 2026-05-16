@@ -422,8 +422,13 @@ pub async fn mark_video_lyrics(
     lyrics_source: Option<&str>,
     pipeline_version: u32,
 ) -> Result<(), sqlx::Error> {
+    // lyrics_processed_at = strftime() so the timestamp comes from SQLite
+    // (no clock-skew between server process and DB). lyrics_alignment_model
+    // = NULL because the failure path has no successful alignment to record.
     sqlx::query(
-        "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ? \
+        "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ?, \
+         lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+         lyrics_alignment_model = NULL \
          WHERE id = ?",
     )
     .bind(has_lyrics as i32)
@@ -441,22 +446,30 @@ pub async fn mark_video_lyrics(
 /// `quality_score` is `None` for fallback paths (e.g. ensemble timeout) to avoid
 /// writing 0.0 which would poison the `ORDER BY lyrics_quality_score ASC NULLS FIRST`
 /// stale-bucket selector — songs with 0.0 score sort before all real scores.
-#[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration test below
+#[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration tests below
 pub async fn mark_video_lyrics_complete(
     pool: &SqlitePool,
     video_id: i64,
     source: &str,
     pipeline_version: u32,
     quality_score: Option<f32>,
+    alignment_model: Option<&str>,
 ) -> Result<(), sqlx::Error> {
+    // lyrics_alignment_model is Option because some success paths (raw line-timed
+    // ship-through) genuinely have no alignment model. Callers pass
+    // Some("none") if they want the explicit literal vs None.
     sqlx::query(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
          lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
-         lyrics_manual_priority = 0 WHERE id = ?",
+         lyrics_manual_priority = 0, \
+         lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+         lyrics_alignment_model = ? \
+         WHERE id = ?",
     )
     .bind(source)
     .bind(pipeline_version as i64)
     .bind(quality_score.map(|q| q as f64))
+    .bind(alignment_model)
     .bind(video_id)
     .execute(pool)
     .await?;
@@ -516,12 +529,20 @@ pub async fn get_next_video_missing_translation(
 }
 
 /// Reset lyrics fields for a video so it will be re-processed.
+///
+/// Also clears `lyrics_processed_at` and `lyrics_alignment_model` because
+/// "reset" means "forget when/how this was processed" — leaving the old
+/// timestamp/model would make audit queries misleading.
 #[cfg_attr(test, mutants::skip)]
 pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE id = ?")
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL, \
+         lyrics_processed_at = NULL, lyrics_alignment_model = NULL \
+         WHERE id = ?",
+    )
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -803,7 +824,10 @@ pub async fn quarantine_video_lyrics(
 
     sqlx::query(
         "UPDATE videos SET has_lyrics = 0, lyrics_source = 'asr_gap', \
-         lyrics_pipeline_version = ?, lyrics_manual_priority = 0 WHERE id = ?",
+         lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
+         lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+         lyrics_alignment_model = NULL \
+         WHERE id = ?",
     )
     .bind(current_pipeline_version as i64)
     .bind(video_id)
@@ -827,6 +851,48 @@ pub async fn quarantine_video_lyrics(
         previous_source,
         deleted_cache_file,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Unsupported-source sentinel
+// ---------------------------------------------------------------------------
+
+/// Mark a video as having no allowed text source. Parallel to `quarantine_video_lyrics`
+/// (asr_gap) but for the case where the gather pass found candidates but none of
+/// them passed `is_allowed_text_source` — typically genius-only, lrclib-plain
+/// without timing, or no_source-then-just-whisperx.
+///
+/// Sets `lyrics_source = 'unsupported_source'`, clears `has_lyrics` and
+/// `lyrics_manual_priority`, stamps the current pipeline version and timestamp,
+/// nulls out `lyrics_alignment_model` (nothing aligned). The stale-bucket
+/// `NOT IN (...)` skip-list in `reprocess.rs` is extended in Task 5 to
+/// exclude this sentinel so the worker does not loop on it.
+///
+/// A future-model PR retires the sentinel via a dedicated admin endpoint
+/// (parallel to whatever asr_gap-retire endpoint ships next). See
+/// `docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md`.
+#[cfg_attr(test, mutants::skip)] // Single UPDATE — observable side effects
+// are all covered by `mark_unsupported_source_writes_all_fields` and
+// `mark_unsupported_source_clears_manual_priority` in models_tests.rs;
+// remaining mutation targets reduce to SQL string literals which cargo-mutants
+// cannot mutate meaningfully.
+pub async fn mark_unsupported_source(
+    pool: &SqlitePool,
+    video_id: i64,
+    current_pipeline_version: u32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 0, lyrics_source = 'unsupported_source', \
+         lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
+         lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+         lyrics_alignment_model = NULL \
+         WHERE id = ?",
+    )
+    .bind(current_pipeline_version as i64)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

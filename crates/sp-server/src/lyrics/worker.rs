@@ -605,12 +605,32 @@ impl LyricsWorker {
         let json_bytes = serde_json::to_vec(&track)?;
         tokio::fs::write(&json_path, &json_bytes).await?;
 
+        // Pick the alignment-model literal for this success path. Logic
+        // mirrors the table in the spec ("Per-song processing metadata"):
+        //   - source label contains `whisperx` → WHISPERX_V3_REV1
+        //   - source label contains `timed-merge` → TIMED_MERGE
+        //   - source label is exactly `yt_subs` / `lrclib` / `spotify` (raw
+        //     ship-through, no alignment ran) → NONE
+        //   - anything else → None (NULL — unknown model, e.g. legacy
+        //     ensemble:gemini paths that may still appear in `track.source`)
+        let alignment_model: Option<&'static str> = if track.source.contains("whisperx") {
+            Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
+        } else if track.source.contains("timed-merge") {
+            Some(crate::lyrics::ALIGNMENT_MODEL_TIMED_MERGE)
+        } else if track.source == "yt_subs" || track.source == "lrclib" || track.source == "spotify"
+        {
+            Some(crate::lyrics::ALIGNMENT_MODEL_NONE)
+        } else {
+            None
+        };
+
         crate::db::models::mark_video_lyrics_complete(
             &self.pool,
             video_id,
             &track.source,
             LYRICS_PIPELINE_VERSION,
             None,
+            alignment_model,
         )
         .await?;
 
