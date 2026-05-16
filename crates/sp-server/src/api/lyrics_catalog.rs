@@ -20,10 +20,10 @@
 
 use crate::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ReprocessCatalogResponse {
     pub restamped: u64,
     pub dangling_cleared: u64,
