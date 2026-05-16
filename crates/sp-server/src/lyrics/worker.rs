@@ -428,6 +428,37 @@ impl LyricsWorker {
             }
         };
 
+        // GATE: per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md,
+        // refuse to run expensive alignment (Demucs + whisperx, ~3 min/song) on
+        // text sources we know produce poor wall output. Allowed set is
+        // yt_subs/lrclib/spotify (line-timed) and description (curated). Anything
+        // else (genius, lrclib-plain-without-timing, no_source) gets the
+        // `unsupported_source` sentinel and is parked until a future-model PR.
+        if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
+            let names: Vec<&str> = ctx
+                .candidate_texts
+                .iter()
+                .map(|c| c.source.as_str())
+                .collect();
+            tracing::warn!(
+                video_id,
+                youtube_id = %youtube_id,
+                candidate_sources = ?names,
+                "lyrics: no allowed text source — marking unsupported_source"
+            );
+            if let Err(e) = crate::db::models::mark_unsupported_source(
+                &self.pool,
+                video_id,
+                LYRICS_PIPELINE_VERSION,
+            )
+            .await
+            {
+                warn!("worker: mark_unsupported_source error for {youtube_id}: {e}");
+            }
+            self.clear_processing().await;
+            return Ok(());
+        }
+
         self.broadcast_stage(
             video_id,
             &youtube_id,
