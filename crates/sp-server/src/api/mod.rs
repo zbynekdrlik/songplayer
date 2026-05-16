@@ -3,6 +3,7 @@
 pub mod ai;
 pub mod live;
 pub mod lyrics;
+pub mod lyrics_catalog;
 pub mod routes;
 pub mod websocket;
 
@@ -127,6 +128,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/lyrics/clear-manual-queue",
             axum::routing::post(lyrics::post_clear_manual),
+        )
+        .route(
+            "/api/v1/lyrics/reprocess-catalog-with-new-gate",
+            axum::routing::post(lyrics_catalog::reprocess_catalog_with_new_gate),
         )
         .route(
             "/api/v1/lyrics/quarantine",
