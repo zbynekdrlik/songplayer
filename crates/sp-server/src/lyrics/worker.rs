@@ -333,7 +333,6 @@ impl LyricsWorker {
         use crate::lyrics::{
             LYRICS_PIPELINE_VERSION,
             orchestrator::{Orchestrator, OrchestratorInput},
-            tier1::FetchFn,
             whisperx_replicate::WhisperXReplicateBackend,
         };
 
@@ -513,21 +512,13 @@ impl LyricsWorker {
         )
         .await;
 
-        // Build Tier-1 fetchers from candidate_texts gathered above.
-        // Each provider::CandidateText becomes a FetchFn closure that immediately
-        // returns the pre-fetched candidate without any additional I/O.
-        let fetchers: Vec<FetchFn> = ctx
+        // Convert provider::CandidateText → tier1::CandidateText for the
+        // orchestrator. All I/O already happened in `gather_sources`; the
+        // orchestrator runs `tier1::pick_best` on these directly.
+        let candidates: Vec<crate::lyrics::tier1::CandidateText> = ctx
             .candidate_texts
             .into_iter()
-            .map(|c| {
-                let t1c = crate::lyrics::tier1::CandidateText::from(c);
-                let boxed = Arc::new(t1c);
-                let f: FetchFn = Arc::new(move || {
-                    let candidate = (*boxed).clone();
-                    Box::pin(async move { Some(candidate) })
-                });
-                f
-            })
+            .map(crate::lyrics::tier1::CandidateText::from)
             .collect();
 
         // Build the WhisperX backend using the Replicate API token from settings.
@@ -573,7 +564,7 @@ impl LyricsWorker {
         );
         let aligned = match orch
             .process(OrchestratorInput {
-                fetchers,
+                candidates,
                 language: "en",
                 vocal_wav: clean_vocal.as_deref(),
                 audit: Some(crate::lyrics::audit_ctx::AuditContext {

@@ -6,10 +6,12 @@
 //! translates separately.
 //!
 //! The orchestrator does NOT hold fetcher factories. Instead,
-//! `OrchestratorInput.fetchers` carries the per-song `Vec<FetchFn>`
-//! already built by the worker from `candidate_texts`. This keeps
-//! the orchestrator stateless between songs and trivially unit-testable
-//! — tests inject mock fetchers inline without any factory machinery.
+//! `OrchestratorInput.candidates` carries the per-song pre-resolved
+//! `Vec<CandidateText>` built by the worker from `candidate_texts`.
+//! All I/O happens upstream in `gather_sources`; the orchestrator just
+//! picks the best candidate via `tier1::pick_best`. `tier1::collect`
+//! + `FetchFn` remain exported for any future fetcher that genuinely
+//! needs orchestrator-time parallel I/O.
 //!
 //! Per `feedback_no_legacy_code.md`: this module imports NONE of
 //! the legacy providers (gemini_provider, qwen3_provider,
@@ -28,7 +30,7 @@ use crate::lyrics::claude_merge::best_authoritative_candidate;
 use crate::lyrics::claude_merge::coverage_ok;
 use crate::lyrics::line_splitter::{SplitConfig, split_track};
 use crate::lyrics::text_reference_merge;
-use crate::lyrics::tier1::{FetchFn, Tier1Result, collect};
+use crate::lyrics::tier1::{CandidateText, Tier1Result, pick_best};
 use crate::lyrics::timed_reference_merge;
 
 #[derive(Debug, Error)]
@@ -47,15 +49,16 @@ pub struct Orchestrator {
 
 /// Per-song input to `Orchestrator::process`.
 ///
-/// `fetchers` is a `Vec<FetchFn>` built by the worker from the song's
-/// `candidate_texts` (and any Spotify fetcher keyed on `spotify_track_id`).
-/// Each closure captures its own per-song arguments; the orchestrator
-/// calls `tier1::collect(fetchers)` which runs them in parallel.
+/// `candidates` is the pre-resolved candidate list built by the worker
+/// from `gather_sources` (and any Spotify fetcher keyed on
+/// `spotify_track_id`). All I/O has already happened in
+/// `gather_sources_impl`, so the orchestrator passes them straight to
+/// `tier1::pick_best` without re-wrapping in async closures.
+/// `tier1::collect` + `FetchFn` remain exported for future fetchers that
+/// genuinely need per-song parallel I/O at orchestrator time.
 pub struct OrchestratorInput<'a> {
-    /// Pre-built per-song Tier-1 fetcher list. Built by the worker from
-    /// `candidate_texts` (and optional Spotify fetcher). The orchestrator
-    /// drives `tier1::collect(fetchers)` with these.
-    pub fetchers: Vec<FetchFn>,
+    /// Pre-resolved Tier-1 candidates for this song.
+    pub candidates: Vec<CandidateText>,
     /// BCP-47 language code for the ASR backend (e.g. "en").
     pub language: &'a str,
     /// Path to the Mel-Roformer + anvuew dereverb vocal stem.
@@ -89,7 +92,7 @@ impl Orchestrator {
     /// Run the full tier chain for one song and return an `AlignedTrack`.
     ///
     /// The caller (worker) is responsible for:
-    /// - Building `OrchestratorInput.fetchers` from `candidate_texts`
+    /// - Building `OrchestratorInput.candidates` from `candidate_texts`
     /// - Converting `AlignedTrack` → `LyricsTrack` after this returns
     /// - Calling the translator on the resulting `LyricsTrack`
     #[cfg_attr(test, mutants::skip)] // Async orchestration glue; full-tier-chain integration is exercised end-to-end on win-resolume reprocess. Mutants on the branch decisions (LineSynced/TextOnly/None, yt_subs detection, has_timing+coverage_ok routing) flip semantically-equivalent branches that all converge on the same `text_reference_merge` or `timed_reference_merge` calls already covered by their own unit tests.
@@ -97,8 +100,8 @@ impl Orchestrator {
         &self,
         input: OrchestratorInput<'_>,
     ) -> Result<AlignedTrack, OrchestratorError> {
-        // Step 1: Run all Tier-1 fetchers in parallel and pick the best result.
-        let tier1_result = collect(input.fetchers).await;
+        // Step 1: Pick the best Tier-1 candidate from the pre-resolved list.
+        let tier1_result = pick_best(input.candidates);
 
         // Step 2: Branch on Tier-1 outcome.
         match tier1_result {
@@ -533,7 +536,7 @@ mod tests {
         AlignOpts, AlignedLine, AlignedTrack, AlignedWord, AlignmentBackend, AlignmentCapability,
         BackendError,
     };
-    use crate::lyrics::tier1::{CandidateText, FetchFn};
+    use crate::lyrics::tier1::CandidateText;
     use async_trait::async_trait;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -611,19 +614,6 @@ mod tests {
         }
     }
 
-    /// Helper: build a FetchFn that always returns `Some(candidate)`.
-    fn fixed_fetcher(candidate: CandidateText) -> FetchFn {
-        Arc::new(move || {
-            let c = candidate.clone();
-            Box::pin(async move { Some(c) })
-        })
-    }
-
-    /// Helper: build a FetchFn that returns `None` (fetcher failed / missing).
-    fn empty_fetcher() -> FetchFn {
-        Arc::new(|| Box::pin(async { None }))
-    }
-
     /// Build an AiClient pointed at a wiremock server URL.
     fn mock_ai_client(api_url: &str) -> Arc<AiClient> {
         Arc::new(AiClient::new(AiSettings {
@@ -674,7 +664,7 @@ mod tests {
 
         let result = orch
             .process(OrchestratorInput {
-                fetchers: vec![fixed_fetcher(candidate)],
+                candidates: vec![candidate],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
                 audit: None,
@@ -750,7 +740,7 @@ mod tests {
 
         let result = orch
             .process(OrchestratorInput {
-                fetchers: vec![fixed_fetcher(candidate)],
+                candidates: vec![candidate],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
                 audit: None,
@@ -811,7 +801,7 @@ mod tests {
 
         let result = orch
             .process(OrchestratorInput {
-                fetchers: vec![fixed_fetcher(candidate)],
+                candidates: vec![candidate],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
                 audit: None,
@@ -861,7 +851,7 @@ mod tests {
 
         let result = orch
             .process(OrchestratorInput {
-                fetchers: vec![fixed_fetcher(candidate)],
+                candidates: vec![candidate],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
                 audit: None,
@@ -907,7 +897,7 @@ mod tests {
 
         let result = orch
             .process(OrchestratorInput {
-                fetchers: vec![empty_fetcher(), empty_fetcher()],
+                candidates: vec![],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
                 audit: None,
@@ -963,7 +953,7 @@ mod tests {
 
         let result = orch
             .process(OrchestratorInput {
-                fetchers: vec![],
+                candidates: vec![],
                 language: "en",
                 vocal_wav: Some(&PathBuf::from("/tmp/test.wav")),
                 audit: None,
