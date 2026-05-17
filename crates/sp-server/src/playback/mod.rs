@@ -163,19 +163,34 @@ pub struct PlaybackEngine {
     ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
 }
 
+/// Construction-time configuration for [`PlaybackEngine`]. Bundling these
+/// fields into a struct avoids the 8-arg positional `new` that prompted
+/// `#[allow(clippy::too_many_arguments)]` and makes call sites readable
+/// at every test setup.
+pub struct PlaybackEngineConfig {
+    pub pool: SqlitePool,
+    pub cache_dir: PathBuf,
+    pub obs_event_tx: broadcast::Sender<ObsEvent>,
+    pub obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
+    pub resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
+    pub ws_event_tx: broadcast::Sender<ServerMsg>,
+    pub presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
+    pub ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
+}
+
 impl PlaybackEngine {
     /// Create a new playback engine. Loads the NDI SDK once on Windows.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        pool: SqlitePool,
-        cache_dir: PathBuf,
-        obs_event_tx: broadcast::Sender<ObsEvent>,
-        obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
-        resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,
-        ws_event_tx: broadcast::Sender<ServerMsg>,
-        presenter_client: Option<Arc<crate::presenter::PresenterClient>>,
-        ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
-    ) -> Self {
+    pub fn new(cfg: PlaybackEngineConfig) -> Self {
+        let PlaybackEngineConfig {
+            pool,
+            cache_dir,
+            obs_event_tx,
+            obs_cmd_tx,
+            resolume_tx,
+            ws_event_tx,
+            presenter_client,
+            ndi_health_registry,
+        } = cfg;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         #[cfg(windows)]
