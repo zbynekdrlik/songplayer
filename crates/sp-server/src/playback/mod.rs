@@ -816,6 +816,9 @@ mod dispatch_lyrics_tests;
 #[path = "tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "tests_history.rs"]
+mod tests_history;
+#[cfg(test)]
 #[path = "tests_play_video.rs"]
 mod tests_play_video;
 #[cfg(test)]
