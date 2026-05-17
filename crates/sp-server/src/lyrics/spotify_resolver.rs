@@ -9,6 +9,9 @@
 //! resolution attempt is recorded (success OR no-match), the gate keeps
 //! the worker from re-querying Claude on every reprocess.
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use crate::ai::client::AiClient;
 use crate::lyrics::spotify_proxy::SpotifyLyricsFetcher;
 
@@ -16,6 +19,28 @@ use crate::lyrics::spotify_proxy::SpotifyLyricsFetcher;
 /// LINE_SYNCED lines to count as a real match. A track returning 3 lines is
 /// almost certainly a wrong-track or instrumental match.
 const MIN_VERIFIED_LINES: usize = 10;
+
+/// Initial cool-down after a transport-level resolver failure (#75). The
+/// worker polls every ~5s; without this, every song with a stale gate would
+/// re-call Claude every cycle for the entire duration of a CLIProxyAPI / Claude
+/// outage. 60s is short enough to keep recovery fast, long enough to absorb
+/// the bursty failure modes (auth token refresh, brief outage).
+const INITIAL_BACKOFF_SECS: u64 = 60;
+
+/// Hard cap so exponential growth doesn't park us silent for hours after a
+/// long outage. 10 minutes is plenty — the next normal poll cycle past
+/// recovery picks up the row.
+const MAX_BACKOFF_SECS: u64 = 600;
+
+#[derive(Default)]
+struct BackoffState {
+    /// Wall time after which a resolve attempt is allowed again. `None`
+    /// means "no cool-down active".
+    silent_until: Option<Instant>,
+    /// Used to grow the cool-down exponentially when the outage drags on.
+    /// Cleared on success / no-match.
+    consecutive_failures: u32,
+}
 
 /// Outcome of a single resolve attempt.
 #[derive(Debug)]
@@ -34,6 +59,14 @@ pub enum ResolveOutcome {
 
 pub struct SpotifyResolver {
     fetcher: SpotifyLyricsFetcher,
+    /// Process-wide cool-down so a Claude outage doesn't burn one call per
+    /// active song per ~5s worker tick. `std::sync::Mutex` (not the tokio
+    /// async variant) — no `.await` is held under the lock, and a sync
+    /// mutex makes `in_backoff` non-async so the worker's pre-gather hook
+    /// can short-circuit without taking on extra `.await` ceremony. The
+    /// worker queries `in_backoff()` before calling `resolve()`; `resolve()`
+    /// also short-circuits on `in_backoff()` for non-worker callers.
+    backoff: Mutex<BackoffState>,
 }
 
 impl Default for SpotifyResolver {
@@ -46,7 +79,36 @@ impl SpotifyResolver {
     pub fn new() -> Self {
         Self {
             fetcher: SpotifyLyricsFetcher::new(),
+            backoff: Mutex::new(BackoffState::default()),
         }
+    }
+
+    /// `true` while the resolver is in cool-down after a recent transport
+    /// failure (#75). Callers (the worker pre-gather hook) MUST query this
+    /// before `resolve()` to skip the call entirely instead of paying for
+    /// another Claude round-trip during an ongoing outage.
+    pub fn in_backoff(&self) -> bool {
+        let s = self.backoff.lock().expect("backoff mutex poisoned");
+        matches!(s.silent_until, Some(t) if Instant::now() < t)
+    }
+
+    /// Record a transport failure: bump the consecutive-failure counter and
+    /// extend `silent_until` exponentially up to `MAX_BACKOFF_SECS`.
+    fn note_failure(&self) {
+        let mut s = self.backoff.lock().expect("backoff mutex poisoned");
+        s.consecutive_failures = s.consecutive_failures.saturating_add(1);
+        // 60s, 120s, 240s, 480s, 600s (capped). Use saturating_sub so the
+        // first failure (count=1) gives 2^0 = 1x multiplier.
+        let shift = s.consecutive_failures.saturating_sub(1).min(4);
+        let secs = (INITIAL_BACKOFF_SECS << shift).min(MAX_BACKOFF_SECS);
+        s.silent_until = Some(Instant::now() + Duration::from_secs(secs));
+    }
+
+    /// Clear the cool-down state after Claude responds (success OR NoMatch).
+    fn note_recovery(&self) {
+        let mut s = self.backoff.lock().expect("backoff mutex poisoned");
+        s.consecutive_failures = 0;
+        s.silent_until = None;
     }
 
     /// Build the prompt that asks Claude for the canonical Spotify track ID.
@@ -118,10 +180,28 @@ impl SpotifyResolver {
     ) -> ResolveOutcome {
         let (system, user) = Self::build_prompt(song, artist, youtube_id);
 
+        // Defense in depth: even if a caller skips the in_backoff() gate,
+        // refuse to hit Claude while we're in cool-down. The worker's
+        // pre-gather hook normally checks first; this branch covers other
+        // call sites (admin endpoints, future scripts).
+        if self.in_backoff() {
+            return ResolveOutcome::Error(anyhow::anyhow!(
+                "spotify_resolver: in cool-down after recent transport failure"
+            ));
+        }
+
         let raw = match ai_client.chat(&system, &user).await {
             Ok(s) => s,
-            Err(e) => return ResolveOutcome::Error(e),
+            Err(e) => {
+                self.note_failure();
+                return ResolveOutcome::Error(e);
+            }
         };
+
+        // Claude responded — even if its reply is unparseable, the API
+        // itself is healthy. Clear the cool-down so the next song doesn't
+        // pay an unnecessary backoff.
+        self.note_recovery();
 
         let candidate = match Self::parse_reply(&raw) {
             Some(id) => id,
@@ -445,6 +525,91 @@ mod integration_tests {
         assert!(
             matches!(outcome, ResolveOutcome::Error(_)),
             "expected Error on Claude HTTP 500, got {outcome:?}"
+        );
+    }
+
+    // ----- #75 cool-down state machine ------------------------------------
+
+    #[test]
+    fn in_backoff_is_false_when_resolver_is_fresh() {
+        let resolver = SpotifyResolver::new();
+        assert!(
+            !resolver.in_backoff(),
+            "fresh resolver must allow the first call"
+        );
+    }
+
+    #[test]
+    fn note_failure_arms_the_cool_down() {
+        let resolver = SpotifyResolver::new();
+        resolver.note_failure();
+        assert!(
+            resolver.in_backoff(),
+            "after a transport failure the resolver must be in cool-down"
+        );
+    }
+
+    #[test]
+    fn note_recovery_clears_the_cool_down() {
+        let resolver = SpotifyResolver::new();
+        resolver.note_failure();
+        assert!(resolver.in_backoff());
+        resolver.note_recovery();
+        assert!(
+            !resolver.in_backoff(),
+            "successful Claude reply must clear the cool-down"
+        );
+    }
+
+    #[test]
+    fn note_failure_grows_exponentially_up_to_cap() {
+        // Five sequential failures grow the silent-until window through
+        // 60 → 120 → 240 → 480 → 600 (cap). We can't assert the wall clock
+        // without injection, so check that consecutive_failures advances
+        // and that the silent_until window is strictly increasing for the
+        // first four steps (before the cap kicks in).
+        let resolver = SpotifyResolver::new();
+        let mut last: Option<Instant> = None;
+        for i in 0..4 {
+            resolver.note_failure();
+            let s = resolver.backoff.lock().unwrap();
+            assert_eq!(s.consecutive_failures, (i as u32) + 1);
+            if let Some(prev) = last {
+                assert!(
+                    s.silent_until.unwrap() > prev,
+                    "silent_until must grow with each failure"
+                );
+            }
+            last = s.silent_until;
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_short_circuits_with_error_when_in_backoff() {
+        // After a manually-armed cool-down the resolver MUST refuse to
+        // call Claude — even if the AiClient would have succeeded. The
+        // wiremock has expect(0) so any HTTP call would fail the test.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let claude_mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "role": "assistant", "content": "NONE" }}]
+            })))
+            .expect(0)
+            .mount(&claude_mock)
+            .await;
+
+        let resolver = SpotifyResolver::new();
+        resolver.note_failure();
+
+        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let outcome = resolver.resolve(&ai, "Song", "Artist", "aaaaaaaaaaa").await;
+        assert!(
+            matches!(outcome, ResolveOutcome::Error(_)),
+            "in-backoff resolve must short-circuit with Error (no Claude call), got {outcome:?}"
         );
     }
 }

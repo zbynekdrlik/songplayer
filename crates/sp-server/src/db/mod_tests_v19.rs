@@ -1,8 +1,7 @@
 //! V19 migration tests. Sibling file split from mod_tests.rs to honor
 //! the airuleset 1000-line cap.
 
-#![allow(unused_imports)]
-
+use super::test_helpers::{apply_first_n, column_names};
 use super::*;
 
 async fn setup() -> SqlitePool {
@@ -11,48 +10,10 @@ async fn setup() -> SqlitePool {
     pool
 }
 
-/// Apply V1..V18 manually so a test can seed pre-V19 data and then trigger
-/// V19 in isolation. Mirrors `apply_through_v17` in `mod_tests_v18.rs`.
-async fn apply_through_v18(pool: &SqlitePool) {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS schema_version (
-            version INTEGER PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
-    // MIGRATIONS[..18] is V1..V18 inclusive (18 entries), leaving V19
-    // (the last one) for the caller to apply via run_migrations.
-    for &(version, sql) in &MIGRATIONS[..18] {
-        let mut tx = pool.begin().await.unwrap();
-        for stmt in sql.split(';') {
-            let s = stmt.trim();
-            if !s.is_empty() {
-                sqlx::query(s).execute(&mut *tx).await.unwrap();
-            }
-        }
-        sqlx::query("INSERT INTO schema_version (version) VALUES (?)")
-            .bind(version)
-            .execute(&mut *tx)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
-    }
-}
-
 #[tokio::test]
 async fn migration_v19_adds_lyrics_processed_at_column() {
     let pool = setup().await;
-    let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r.get::<String, _>("name"))
-        .collect();
+    let cols = column_names(&pool, "videos").await;
     assert!(
         cols.contains(&"lyrics_processed_at".to_string()),
         "V19 must add lyrics_processed_at column; got: {cols:?}"
@@ -62,13 +23,7 @@ async fn migration_v19_adds_lyrics_processed_at_column() {
 #[tokio::test]
 async fn migration_v19_adds_lyrics_alignment_model_column() {
     let pool = setup().await;
-    let cols: Vec<String> = sqlx::query("PRAGMA table_info(videos)")
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r.get::<String, _>("name"))
-        .collect();
+    let cols = column_names(&pool, "videos").await;
     assert!(
         cols.contains(&"lyrics_alignment_model".to_string()),
         "V19 must add lyrics_alignment_model column; got: {cols:?}"
@@ -78,7 +33,7 @@ async fn migration_v19_adds_lyrics_alignment_model_column() {
 #[tokio::test]
 async fn migration_v19_leaves_existing_rows_with_null_for_new_columns() {
     let pool = create_memory_pool().await.unwrap();
-    apply_through_v18(&pool).await;
+    apply_first_n(&pool, 18).await;
 
     sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
         .execute(&pool)

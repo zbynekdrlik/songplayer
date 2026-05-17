@@ -361,32 +361,33 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
 
 // Mutable reprocess result so tests can drive the dashboard's banner
 // path for #98 (blocked_by_asr_gap surfacing). Defaults to a no-block
-// outcome so existing specs keep their expectations.
+// outcome so existing specs keep their expectations. Both the targeted
+// reprocess and the all-stale sweep share the same shape now that #101
+// landed — the all-stale handler computes the asr_gap count.
 const reprocessResult = { queued: 1, blocked_by_asr_gap: 0 };
+const reprocessAllStaleResult = { queued: 187, blocked_by_asr_gap: 0 };
 
 app.post('/api/v1/lyrics/reprocess', (_req, res) =>
   res.json({ ...reprocessResult }),
 );
 app.post('/api/v1/lyrics/reprocess-all-stale', (_req, res) =>
-  // Matches backend: `post_reprocess_all_stale` hard-codes
-  // `blocked_by_asr_gap: 0` — the all-stale path doesn't filter for
-  // asr_gap rows yet (tracked separately for follow-up). The mock
-  // must mirror the contract, otherwise a Playwright test driving
-  // the all-stale path could show a banner that production would
-  // never surface.
-  res.json({ queued: 187, blocked_by_asr_gap: 0 }),
+  res.json({ ...reprocessAllStaleResult }),
 );
 app.post('/api/v1/lyrics/clear-manual-queue', (_req, res) => res.json({ queued: 2 }));
 
 // Admin: set the next reprocess response shape.
 // Test-only — used by Playwright specs to drive the asr_gap banner.
+// `target` selects which endpoint the override applies to:
+//   omitted / "reprocess" → /api/v1/lyrics/reprocess
+//   "all-stale"           → /api/v1/lyrics/reprocess-all-stale
 app.post('/__mock/reprocess-result', (req, res) => {
-  const { queued, blocked_by_asr_gap } = req.body || {};
-  if (typeof queued === 'number') reprocessResult.queued = queued;
+  const { queued, blocked_by_asr_gap, target } = req.body || {};
+  const slot = target === 'all-stale' ? reprocessAllStaleResult : reprocessResult;
+  if (typeof queued === 'number') slot.queued = queued;
   if (typeof blocked_by_asr_gap === 'number') {
-    reprocessResult.blocked_by_asr_gap = blocked_by_asr_gap;
+    slot.blocked_by_asr_gap = blocked_by_asr_gap;
   }
-  res.json({ ...reprocessResult });
+  res.json({ ...slot });
 });
 
 // SPA fallback — serve index.html for unmatched routes

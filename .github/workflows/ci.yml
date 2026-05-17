@@ -1278,15 +1278,27 @@ jobs:
             if ($nonEmptySubs.Count -eq 0) {
               Write-Host "INFO: #sp-subs clips all empty (video has no lyrics) - skipping lookahead gate"
             } else {
-              $identical = $true
-              foreach ($t in $subsNextClips) {
-                if (-not ($subsClips -contains $t)) { $identical = $false; break }
+              # Songs legitimately have consecutive repeated lyric lines
+              # (e.g. "Everything I need" sung 4× in a chorus). When the
+              # 15s capture lands on such a section, every #sp-subs and
+              # #sp-subs-next clip carries the same text — that is correct
+              # behaviour, not a missing lookahead. ~87% of allowed-set
+              # songs have at least one consecutive-duplicate-line pair, so
+              # the gate must tolerate it (see issue #105).
+              $distinctSubs = $nonEmptySubs | Select-Object -Unique
+              if ($distinctSubs.Count -eq 1) {
+                Write-Host "INFO: #sp-subs has only one distinct text ('$($distinctSubs[0])') - repeated-line section, skipping lookahead gate"
+              } else {
+                $identical = $true
+                foreach ($t in $subsNextClips) {
+                  if (-not ($subsClips -contains $t)) { $identical = $false; break }
+                }
+                if ($identical) {
+                  Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
+                  exit 1
+                }
+                Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
               }
-              if ($identical) {
-                Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
-                exit 1
-              }
-              Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
             }
           }
 
