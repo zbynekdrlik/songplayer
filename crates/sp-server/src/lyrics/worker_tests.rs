@@ -769,3 +769,90 @@ fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
         "lrclib_track_has_real_timing must be pub(crate) so worker_tests can call it"
     );
 }
+
+// ---------------------------------------------------------------------
+// #76 — pin the four guards of the Spotify pre-gather hook so dropping
+// any one of them surfaces in CI instead of silently hammering Claude
+// or panicking on missing fields.
+// ---------------------------------------------------------------------
+
+#[test]
+fn should_resolve_spotify_returns_true_when_all_guards_pass() {
+    use crate::lyrics::worker::should_resolve_spotify;
+    assert!(should_resolve_spotify(
+        None,
+        None,
+        true,
+        "Amazing Grace",
+        "John Newton",
+    ));
+}
+
+#[test]
+fn should_resolve_spotify_blocks_when_track_id_already_set() {
+    use crate::lyrics::worker::should_resolve_spotify;
+    assert!(!should_resolve_spotify(
+        Some("3n3Ppam7vgaVa1iaRUc9Lp"),
+        None,
+        true,
+        "Amazing Grace",
+        "John Newton",
+    ));
+}
+
+#[test]
+fn should_resolve_spotify_blocks_when_resolved_at_already_recorded() {
+    use crate::lyrics::worker::should_resolve_spotify;
+    assert!(!should_resolve_spotify(
+        None,
+        Some("2026-05-17T00:00:00Z"),
+        true,
+        "Amazing Grace",
+        "John Newton",
+    ));
+}
+
+#[test]
+fn should_resolve_spotify_blocks_when_ai_client_absent() {
+    use crate::lyrics::worker::should_resolve_spotify;
+    assert!(!should_resolve_spotify(
+        None,
+        None,
+        false,
+        "Amazing Grace",
+        "John Newton",
+    ));
+}
+
+#[test]
+fn should_resolve_spotify_blocks_when_song_empty() {
+    use crate::lyrics::worker::should_resolve_spotify;
+    assert!(!should_resolve_spotify(None, None, true, "", "John Newton",));
+}
+
+#[test]
+fn should_resolve_spotify_blocks_when_artist_empty() {
+    use crate::lyrics::worker::should_resolve_spotify;
+    assert!(!should_resolve_spotify(
+        None,
+        None,
+        true,
+        "Amazing Grace",
+        "",
+    ));
+}
+
+/// Structural guard: the call site in `process_song` MUST route through
+/// `should_resolve_spotify`. If a future change inlines the four checks
+/// back into `process_song`, this test fires so the regression is
+/// blocked at PR review instead of after Claude has been hammered for a
+/// few hours under a worker outage.
+#[test]
+fn process_song_routes_through_should_resolve_spotify() {
+    let src = include_str!("worker.rs");
+    assert!(
+        src.contains("if should_resolve_spotify("),
+        "process_song must route the Spotify pre-gather decision through \
+         should_resolve_spotify so #76's guard-pinning unit tests apply"
+    );
+}

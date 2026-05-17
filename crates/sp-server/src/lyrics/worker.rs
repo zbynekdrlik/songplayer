@@ -62,6 +62,29 @@ struct RetryBackoff {
 /// sibling `gather` module so `worker.rs` stays under the 1000-line cap.
 pub(crate) use crate::lyrics::gather::gather_sources_impl;
 
+/// Pure decision for the Spotify pre-gather hook (#73). Returns `true`
+/// only when ALL four guards are satisfied:
+/// - `spotify_track_id` is NULL (no resolved id yet)
+/// - `spotify_resolved_at` is NULL (no prior attempt recorded)
+/// - an AI client is configured (CLIProxyAPI present)
+/// - both `song` and `artist` are non-empty
+///
+/// Extracted from `process_song` so the guards are pinned by unit tests
+/// (#76) instead of relying on a regression to land before being noticed.
+pub(crate) fn should_resolve_spotify(
+    spotify_track_id: Option<&str>,
+    spotify_resolved_at: Option<&str>,
+    ai_client_present: bool,
+    song: &str,
+    artist: &str,
+) -> bool {
+    spotify_track_id.is_none()
+        && spotify_resolved_at.is_none()
+        && ai_client_present
+        && !song.is_empty()
+        && !artist.is_empty()
+}
+
 impl LyricsWorker {
     pub fn new(
         pool: SqlitePool,
@@ -358,62 +381,69 @@ impl LyricsWorker {
         // Spotify auto-resolution gate (#73). Run Claude once per song lifetime
         // when `spotify_track_id` is NULL and we've never recorded an attempt.
         // The result (success OR no-match) is persisted with a timestamp so the
-        // gate short-circuits on subsequent reprocesses.
-        if row.spotify_track_id.is_none() && row.spotify_resolved_at.is_none() {
+        // gate short-circuits on subsequent reprocesses. The four guards are
+        // centralized in `should_resolve_spotify` so #76 unit tests can pin them.
+        if should_resolve_spotify(
+            row.spotify_track_id.as_deref(),
+            row.spotify_resolved_at.as_deref(),
+            self.ai_client.is_some(),
+            &row.song,
+            &row.artist,
+        ) {
+            // `ai_client` presence was verified above; this `if let` is
+            // structurally infallible but keeps the borrow explicit.
             if let Some(ai_client) = self.ai_client.as_deref() {
-                if !row.song.is_empty() && !row.artist.is_empty() {
-                    use crate::lyrics::spotify_resolver::ResolveOutcome;
-                    let outcome = self
-                        .spotify_resolver
-                        .resolve(ai_client, &row.song, &row.artist, &row.youtube_id)
-                        .await;
-                    match outcome {
-                        ResolveOutcome::Resolved(id) => {
-                            if let Err(e) = crate::db::models::set_video_spotify_resolution(
-                                &self.pool,
-                                row.id,
-                                Some(&id),
-                            )
-                            .await
-                            {
-                                warn!(
-                                    "worker: failed to persist resolved spotify_track_id for {}: {e}",
-                                    row.youtube_id
-                                );
-                            } else {
-                                info!(
-                                    youtube_id = %row.youtube_id,
-                                    track_id = %id,
-                                    "spotify_resolver: resolved + verified"
-                                );
-                                row.spotify_track_id = Some(id);
-                            }
-                        }
-                        ResolveOutcome::NoMatch => {
-                            if let Err(e) = crate::db::models::set_video_spotify_resolution(
-                                &self.pool, row.id, None,
-                            )
-                            .await
-                            {
-                                warn!(
-                                    "worker: failed to persist no-match for {}: {e}",
-                                    row.youtube_id
-                                );
-                            } else {
-                                debug!(
-                                    youtube_id = %row.youtube_id,
-                                    "spotify_resolver: no canonical match"
-                                );
-                            }
-                        }
-                        ResolveOutcome::Error(e) => {
+                use crate::lyrics::spotify_resolver::ResolveOutcome;
+                let outcome = self
+                    .spotify_resolver
+                    .resolve(ai_client, &row.song, &row.artist, &row.youtube_id)
+                    .await;
+                match outcome {
+                    ResolveOutcome::Resolved(id) => {
+                        if let Err(e) = crate::db::models::set_video_spotify_resolution(
+                            &self.pool,
+                            row.id,
+                            Some(&id),
+                        )
+                        .await
+                        {
                             warn!(
-                                "worker: spotify resolution transport error for {}: {e}",
+                                "worker: failed to persist resolved spotify_track_id for {}: {e}",
                                 row.youtube_id
                             );
-                            // Intentionally do NOT persist resolved_at — leaves
-                            // the row eligible for retry on the next worker pass.
+                        } else {
+                            info!(
+                                youtube_id = %row.youtube_id,
+                                track_id = %id,
+                                "spotify_resolver: resolved + verified"
+                            );
+                            row.spotify_track_id = Some(id);
                         }
+                    }
+                    ResolveOutcome::NoMatch => {
+                        if let Err(e) = crate::db::models::set_video_spotify_resolution(
+                            &self.pool, row.id, None,
+                        )
+                        .await
+                        {
+                            warn!(
+                                "worker: failed to persist no-match for {}: {e}",
+                                row.youtube_id
+                            );
+                        } else {
+                            debug!(
+                                youtube_id = %row.youtube_id,
+                                "spotify_resolver: no canonical match"
+                            );
+                        }
+                    }
+                    ResolveOutcome::Error(e) => {
+                        warn!(
+                            "worker: spotify resolution transport error for {}: {e}",
+                            row.youtube_id
+                        );
+                        // Intentionally do NOT persist resolved_at — leaves
+                        // the row eligible for retry on the next worker pass.
                     }
                 }
             }
