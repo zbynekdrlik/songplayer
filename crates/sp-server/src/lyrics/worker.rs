@@ -389,7 +389,8 @@ impl LyricsWorker {
             self.ai_client.is_some(),
             &row.song,
             &row.artist,
-        ) {
+        ) && !self.spotify_resolver.in_backoff().await
+        {
             // `ai_client` presence was verified above; this `if let` is
             // structurally infallible but keeps the borrow explicit.
             if let Some(ai_client) = self.ai_client.as_deref() {
