@@ -1286,7 +1286,7 @@ jobs:
               # songs have at least one consecutive-duplicate-line pair, so
               # the gate must tolerate it (see issue #105).
               $distinctSubs = $nonEmptySubs | Select-Object -Unique
-              if ($distinctSubs.Count -le 1) {
+              if ($distinctSubs.Count -eq 1) {
                 Write-Host "INFO: #sp-subs has only one distinct text ('$($distinctSubs[0])') - repeated-line section, skipping lookahead gate"
               } else {
                 $identical = $true

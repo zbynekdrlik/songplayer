@@ -339,11 +339,20 @@ pub async fn post_reprocess(
 pub async fn post_reprocess_all_stale(State(state): State<AppState>) -> impl IntoResponse {
     use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
-    // Count asr_gap-parked stale rows that the worker will skip (#101).
-    // Post-quarantine, asr_gap rows have `has_lyrics = 0`; the dashboard
-    // banner uses this to tell the operator how many stale rows are
-    // blocked behind the asr_gap escape hatch and out of reach of the
-    // "Reprocess all stale" button alone.
+    // Count asr_gap-parked rows at a stale pipeline_version (#101). NOTE:
+    // this SELECT is intentionally COMPLEMENTARY to the UPDATE below — the
+    // UPDATE targets `has_lyrics = 1` (rows that will be re-queued); the
+    // COUNT targets `has_lyrics = 0 AND lyrics_source = 'asr_gap'` (rows
+    // the all-stale sweep would MISS because they were quarantined under
+    // the asr_gap escape hatch). The dashboard banner uses the count to
+    // tell the operator how much work is blocked behind asr_gap and out of
+    // reach of the "Reprocess all stale" button.
+    //
+    // Asymmetry vs `post_reprocess` (targeted): the targeted path counts
+    // asr_gap rows WITHOUT a pipeline_version filter because the operator
+    // explicitly picked those rows and the banner should fire regardless
+    // of version. The all-stale sweep is implicitly scoped to stale-only,
+    // so its asr_gap count matches that scope.
     let blocked_by_asr_gap = match sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM videos \
          WHERE has_lyrics = 0 AND lyrics_source = 'asr_gap' \

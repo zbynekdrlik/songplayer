@@ -8,8 +8,6 @@
 //! literal correctness, `align_track_to_lyrics_track` field mapping,
 //! and the gather → candidate pipeline.
 
-#![allow(unused_imports)]
-
 use super::*;
 
 /// Audit: retired symbols must not appear in worker.rs.
