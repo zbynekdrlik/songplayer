@@ -9,9 +9,9 @@
 //! `OrchestratorInput.candidates` carries the per-song pre-resolved
 //! `Vec<CandidateText>` built by the worker from `candidate_texts`.
 //! All I/O happens upstream in `gather_sources`; the orchestrator just
-//! picks the best candidate via `tier1::pick_best`. `tier1::collect`
-//! + `FetchFn` remain exported for any future fetcher that genuinely
-//! needs orchestrator-time parallel I/O.
+//! picks the best candidate via `tier1::pick_best`. `tier1::collect` +
+//! `FetchFn` remain exported for any future fetcher that genuinely needs
+//! orchestrator-time parallel I/O.
 //!
 //! Per `feedback_no_legacy_code.md`: this module imports NONE of
 //! the legacy providers (gemini_provider, qwen3_provider,
@@ -51,11 +51,11 @@ pub struct Orchestrator {
 ///
 /// `candidates` is the pre-resolved candidate list built by the worker
 /// from `gather_sources` (and any Spotify fetcher keyed on
-/// `spotify_track_id`). All I/O has already happened in
-/// `gather_sources_impl`, so the orchestrator passes them straight to
-/// `tier1::pick_best` without re-wrapping in async closures.
-/// `tier1::collect` + `FetchFn` remain exported for future fetchers that
-/// genuinely need per-song parallel I/O at orchestrator time.
+/// `spotify_track_id`). All I/O has already happened in `gather_sources_impl`,
+/// so the orchestrator passes them straight to `tier1::pick_best` without
+/// re-wrapping in async closures. `tier1::collect` + `FetchFn` remain
+/// exported for future fetchers that genuinely need per-song parallel I/O
+/// at orchestrator time.
 pub struct OrchestratorInput<'a> {
     /// Pre-resolved Tier-1 candidates for this song.
     pub candidates: Vec<CandidateText>,
