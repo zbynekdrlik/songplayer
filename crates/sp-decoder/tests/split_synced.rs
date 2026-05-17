@@ -21,6 +21,7 @@
 
 #![cfg(windows)]
 
+use sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
 use sp_decoder::{
     MediaFoundationVideoReader, MediaStream, SplitSyncedDecoder, SymphoniaAudioReader,
 };
@@ -51,7 +52,6 @@ fn reports_audio_duration_as_canonical_duration() {
 
 #[test]
 fn next_synced_yields_pairs_within_tolerance() {
-    const TOLERANCE_MS: u64 = 40;
     let mut dec = open_decoder();
 
     let mut prev_video_ts: Option<u64> = None;
@@ -75,7 +75,7 @@ fn next_synced_yields_pairs_within_tolerance() {
         // be arbitrarily earlier (e.g. the first decode iteration pulls
         // multiple early audio chunks before the first video frame is
         // requested).
-        let deadline = video.timestamp_ms + TOLERANCE_MS;
+        let deadline = video.timestamp_ms + DEFAULT_TOLERANCE_MS;
         for af in &audio_chunks {
             assert!(
                 af.timestamp_ms <= deadline,
@@ -83,7 +83,7 @@ fn next_synced_yields_pairs_within_tolerance() {
                 af.timestamp_ms,
                 deadline,
                 video.timestamp_ms,
-                TOLERANCE_MS,
+                DEFAULT_TOLERANCE_MS,
             );
         }
 

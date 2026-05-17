@@ -14,7 +14,6 @@
 //!
 //! Closes #19.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 use sp_server::db::{create_memory_pool, models, run_migrations};
@@ -190,6 +189,4 @@ async fn cleanup_legacy_is_safe_on_already_deleted_files() {
         path,
     }]);
     // No assertion — completing without panicking is the test.
-    // Suppress unused warning on the import.
-    let _: HashSet<String> = HashSet::new();
 }
