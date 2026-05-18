@@ -1,5 +1,6 @@
 //! OBS WebSocket v5 client with scene detection and text source control.
 
+pub mod dispatcher;
 pub mod ndi_discovery;
 pub mod scene;
 pub mod text;
@@ -9,16 +10,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
-use futures::stream::{SplitSink, SplitStream};
+use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
+use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::ndi_discovery::rebuild_ndi_source_map;
 use crate::obs::scene::check_scene_items;
 use crate::obs::text::get_current_scene_request;
@@ -72,6 +75,23 @@ pub struct ObsConfig {
 /// Mapping of NDI source name to playlist ID (for scene detection).
 pub type NdiSourceMap = Arc<RwLock<HashMap<String, i64>>>;
 
+/// Shared writer for the OBS WebSocket — wrapped in an Arc + Mutex so
+/// helper tasks spawned from the main loop can take turns sending
+/// requests without serialising on the response-await.
+///
+/// Note: this is `tokio::sync::Mutex`, NOT `std::sync::Mutex`. The lock
+/// is held across `.await` so it must be the async variant.
+pub(crate) type SharedWrite = std::sync::Arc<
+    tokio::sync::Mutex<
+        futures::stream::SplitSink<
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+            tokio_tungstenite::tungstenite::Message,
+        >,
+    >,
+>;
+
 /// Commands that can be sent to the OBS WebSocket connection loop.
 pub enum ObsCommand {
     SetTextSource { source_name: String, text: String },
@@ -86,6 +106,17 @@ pub enum ObsEvent {
         scene_name: String,
         active_playlist_ids: HashSet<i64>,
     },
+}
+
+/// Internal messages from the reader task to the main loop.
+enum ReaderMessage {
+    /// `CurrentProgramSceneChanged` arrived. Main loop must issue
+    /// follow-up GetSceneItemList queries (via dispatcher) and emit
+    /// the upstream `ObsEvent::SceneChanged`.
+    SceneChange { scene_name: String },
+    /// Stream closed cleanly OR errored. Main loop must exit so the
+    /// outer reconnect loop fires.
+    Closed,
 }
 
 /// OBS WebSocket v5 client handle.
@@ -174,7 +205,6 @@ impl ObsClient {
         Self { state, cmd_tx }
     }
 
-    /// Update a text source in OBS.
     /// Get a clone of the command sender for use by other components.
     pub fn cmd_sender(&self) -> mpsc::Sender<ObsCommand> {
         self.cmd_tx.clone()
@@ -207,6 +237,75 @@ pub fn compute_auth(password: &str, challenge: &str, salt: &str) -> String {
     engine.encode(Sha256::digest(format!("{secret}{challenge}").as_bytes()))
 }
 
+/// Reader task: owns the SplitStream<read> after handshake. Reads
+/// every inbound message and routes it: op=5 events go to the
+/// internal mpsc → main loop (which then issues follow-up queries
+/// via the dispatcher), op=7 responses go to the dispatcher's
+/// pending map. Other op codes are debug-logged.
+///
+/// Exits when the WebSocket closes or read errors. Always sends
+/// `ReaderMessage::Closed` and calls `dispatcher.drain_and_close()`
+/// before returning so no waiter hangs forever and the main loop
+/// drops cleanly.
+async fn run_reader_task(
+    mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    dispatcher: Dispatcher,
+    reader_tx: mpsc::Sender<ReaderMessage>,
+) {
+    loop {
+        match read.next().await {
+            Some(Ok(Message::Text(text))) => {
+                let json: serde_json::Value = match serde_json::from_str(&text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("OBS reader: invalid JSON: {e}");
+                        continue;
+                    }
+                };
+                let op = json["op"].as_u64().unwrap_or(u64::MAX);
+                match op {
+                    5 => {
+                        let event_type = json["d"]["eventType"].as_str().unwrap_or("");
+                        debug!("OBS event: {event_type}");
+                        if event_type == "CurrentProgramSceneChanged"
+                            && let Some(scene_name) = json["d"]["eventData"]["sceneName"].as_str()
+                        {
+                            let _ = reader_tx
+                                .send(ReaderMessage::SceneChange {
+                                    scene_name: scene_name.to_string(),
+                                })
+                                .await;
+                        }
+                    }
+                    7 => {
+                        let req_id = json["d"]["requestId"].as_str().unwrap_or("").to_string();
+                        if req_id.is_empty() {
+                            warn!("OBS reader: op=7 without requestId, dropping");
+                            continue;
+                        }
+                        dispatcher.complete(&req_id, json);
+                    }
+                    _ => {
+                        debug!("unhandled OBS message op={op}");
+                    }
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => {
+                info!("OBS WebSocket closed");
+                break;
+            }
+            Some(Ok(_)) => {} // ping/pong/binary
+            Some(Err(e)) => {
+                warn!("OBS reader: stream error: {e}");
+                break;
+            }
+        }
+    }
+
+    dispatcher.drain_and_close();
+    let _ = reader_tx.send(ReaderMessage::Closed).await;
+}
+
 /// Main connection loop: connect, authenticate, handle messages.
 async fn connect_and_run(
     config: &ObsConfig,
@@ -220,7 +319,7 @@ async fn connect_and_run(
     let (ws_stream, _) = tokio_tungstenite::connect_async(&config.url).await?;
     let (mut write, mut read) = ws_stream.split();
 
-    // Step 1: Receive Hello (op 0).
+    // Step 1: Hello (op 0).
     let hello = read_json_message(&mut read).await?;
     let op = hello["op"].as_u64().unwrap_or(u64::MAX);
     if op != 0 {
@@ -228,36 +327,31 @@ async fn connect_and_run(
     }
     debug!("received OBS Hello");
 
-    // Step 2: Send Identify (op 1).
+    // Step 2: Identify (op 1).
     let mut identify_data = serde_json::json!({
         "rpcVersion": 1,
         "eventSubscriptions": 4  // Scenes events
     });
-
-    if let Some(password) = &config.password {
-        if let Some(auth) = hello["d"]["authentication"].as_object() {
-            let challenge = auth
-                .get("challenge")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing auth challenge"))?;
-            let salt = auth
-                .get("salt")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing auth salt"))?;
-            identify_data["authentication"] =
-                serde_json::Value::String(compute_auth(password, challenge, salt));
-        }
+    if let Some(password) = &config.password
+        && let Some(auth) = hello["d"]["authentication"].as_object()
+    {
+        let challenge = auth
+            .get("challenge")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("missing auth challenge"))?;
+        let salt = auth
+            .get("salt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("missing auth salt"))?;
+        identify_data["authentication"] =
+            serde_json::Value::String(compute_auth(password, challenge, salt));
     }
-
-    let identify_msg = serde_json::json!({
-        "op": 1,
-        "d": identify_data,
-    });
+    let identify_msg = serde_json::json!({"op": 1, "d": identify_data});
     write
         .send(Message::Text(identify_msg.to_string().into()))
         .await?;
 
-    // Step 3: Receive Identified (op 2).
+    // Step 3: Identified (op 2).
     let identified = read_json_message(&mut read).await?;
     let op = identified["op"].as_u64().unwrap_or(u64::MAX);
     if op != 2 {
@@ -271,19 +365,25 @@ async fn connect_and_run(
     }
     let _ = event_tx.send(ObsEvent::Connected);
 
-    // Rebuild the NDI source map from the DB + OBS inputs before we start
-    // listening for scene-change events.
-    //
-    // Retry-on-empty: observed in production — immediately after OBS
-    // reconnect (or after win-resolume reboot when OBS is still coming
-    // up), the first GetInputList call can return nothing or an empty
-    // input array while OBS finishes populating its state. Without retry
-    // the map stays at size=0, scene detection silently fails, and the
-    // only fix was a manual SongPlayer restart — unacceptable mid-event.
-    // Up to 5 attempts with 2 s spacing (10 s total) gives OBS time to
-    // settle without blocking startup if it legitimately has no inputs.
+    // Step 4: build dispatcher + spawn reader task.
+    // Wrap the write half in Arc<Mutex<>> so tasks spawned from the
+    // main loop can each take the lock briefly for a send, then release
+    // it before awaiting the op=7 response — concurrent tasks do NOT
+    // serialise on the response wait.
+    let dispatcher = Dispatcher::new();
+    let (reader_tx, mut reader_rx) = mpsc::channel::<ReaderMessage>(32);
+    let reader_handle = tokio::spawn(run_reader_task(read, dispatcher.clone(), reader_tx));
+    let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
+
+    // JoinSet tracks all tasks spawned in the main loop body. On loop
+    // exit, abort_all() prevents detached tasks from running against a
+    // dead write half across reconnects.
+    let mut spawned_tasks: JoinSet<()> = JoinSet::new();
+
+    // Step 5: initial NDI source map rebuild (same retry-on-empty
+    // policy as before — the rebuild now goes via the dispatcher).
     for attempt in 1..=5 {
-        let result = rebuild_ndi_source_map(&mut write, &mut read, pool).await;
+        let result = rebuild_ndi_source_map(&write, &dispatcher, pool).await;
         let is_empty = result.as_ref().map(|m| m.is_empty()).unwrap_or(true);
         apply_rebuild_result(ndi_sources, result).await;
         if !is_empty {
@@ -300,135 +400,191 @@ async fn connect_and_run(
         }
     }
 
-    // Fetch initial scene.
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let req = get_current_scene_request(&request_id);
-    write.send(Message::Text(req.to_string().into())).await?;
+    // Step 6: initial GetCurrentProgramScene via dispatcher.
+    let initial_scene_req_id = uuid::Uuid::new_v4().to_string();
+    let initial_scene_req = get_current_scene_request(&initial_scene_req_id);
+    match dispatcher
+        .send_and_await(
+            &write,
+            initial_scene_req_id,
+            Message::Text(initial_scene_req.to_string().into()),
+            DEFAULT_RESPONSE_TIMEOUT,
+        )
+        .await
+    {
+        Ok(response) => {
+            if let Some(scene_name) =
+                response["d"]["responseData"]["currentProgramSceneName"].as_str()
+            {
+                let sources = ndi_sources.read().await;
+                let active_ids = check_scene_items(&write, &dispatcher, scene_name, &sources).await;
+                drop(sources);
 
-    // Step 4: Message loop.
-    loop {
+                {
+                    let mut s = state.write().await;
+                    s.current_scene = Some(scene_name.to_string());
+                    s.active_playlist_ids = active_ids.clone();
+                }
+
+                let _ = event_tx.send(ObsEvent::SceneChanged {
+                    scene_name: scene_name.to_string(),
+                    active_playlist_ids: active_ids,
+                });
+            } else {
+                debug!("initial GetCurrentProgramScene response had no scene name");
+            }
+        }
+        Err(DispatcherError::Closed) => {
+            // Dispatcher closed before reply — reader task already died.
+            // Bail so the outer reconnect loop fires immediately.
+            spawned_tasks.abort_all();
+            reader_handle.abort();
+            if let Err(e) = reader_handle.await
+                && !e.is_cancelled()
+            {
+                warn!("OBS reader task exited with error: {e}");
+            }
+            anyhow::bail!("reader task closed during initial GetCurrentProgramScene");
+        }
+        Err(DispatcherError::Timeout) => {
+            debug!("initial GetCurrentProgramScene timed out");
+        }
+    }
+
+    // Step 7: main loop — thin router: each arm spawns a task to do
+    // the work. The write half is shared via Arc<Mutex<>> so helper
+    // tasks lock it briefly for the send and release before awaiting
+    // the op=7 response, preventing the main loop from blocking on
+    // in-flight requests.
+    let result = loop {
         tokio::select! {
-            msg = read.next() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        let json: serde_json::Value = serde_json::from_str(&text)?;
-                        handle_message(
-                            json,
-                            &mut write,
-                            &mut read,
-                            ndi_sources,
-                            state,
-                            event_tx,
-                        ).await?;
+            reader_msg = reader_rx.recv() => {
+                match reader_msg {
+                    Some(ReaderMessage::SceneChange { scene_name }) => {
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                        let state = std::sync::Arc::clone(state);
+                        let event_tx = event_tx.clone();
+                        spawned_tasks.spawn(async move {
+                            let sources = ndi_sources.read().await;
+                            let active_ids =
+                                check_scene_items(&write, &dispatcher, &scene_name, &sources)
+                                    .await;
+                            drop(sources);
+
+                            {
+                                let mut s = state.write().await;
+                                s.current_scene = Some(scene_name.clone());
+                                s.active_playlist_ids = active_ids.clone();
+                            }
+
+                            let _ = event_tx.send(ObsEvent::SceneChanged {
+                                scene_name,
+                                active_playlist_ids: active_ids,
+                            });
+                        });
                     }
-                    Some(Ok(Message::Close(_))) | None => {
-                        info!("OBS WebSocket closed");
-                        return Ok(());
+                    Some(ReaderMessage::Closed) | None => {
+                        break Ok(());
                     }
-                    Some(Ok(_)) => {} // ping/pong/binary ignored
-                    Some(Err(e)) => return Err(e.into()),
                 }
             }
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     ObsCommand::SetTextSource { source_name, text } => {
-                        let req_id = uuid::Uuid::new_v4().to_string();
-                        let req = text::set_text_request(&req_id, &source_name, &text);
-                        write.send(Message::Text(req.to_string().into())).await?;
-                        info!(source_name, "sent SetTextSource to OBS");
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        spawned_tasks.spawn(async move {
+                            let req_id = uuid::Uuid::new_v4().to_string();
+                            let req = text::set_text_request(&req_id, &source_name, &text);
+                            match dispatcher
+                                .send_and_await(
+                                    &write,
+                                    req_id,
+                                    Message::Text(req.to_string().into()),
+                                    DEFAULT_RESPONSE_TIMEOUT,
+                                )
+                                .await
+                            {
+                                Ok(response) => {
+                                    let ok = response["d"]["requestStatus"]["result"]
+                                        .as_bool()
+                                        .unwrap_or(false);
+                                    if ok {
+                                        info!(source_name, "SetTextSource ok");
+                                    } else {
+                                        let code = response["d"]["requestStatus"]["code"]
+                                            .as_u64()
+                                            .unwrap_or(0);
+                                        let comment = response["d"]["requestStatus"]["comment"]
+                                            .as_str()
+                                            .unwrap_or("");
+                                        warn!(
+                                            source_name,
+                                            code,
+                                            comment,
+                                            "SetTextSource: OBS reported failure"
+                                        );
+                                    }
+                                }
+                                Err(DispatcherError::Closed) => {
+                                    warn!(
+                                        source_name,
+                                        "SetTextSource: dispatcher closed before reply"
+                                    );
+                                }
+                                Err(DispatcherError::Timeout) => {
+                                    warn!(source_name, "SetTextSource: timed out");
+                                }
+                            }
+                        });
                     }
                 }
             }
             rebuild_result = rebuild_rx.recv() => {
-                match rebuild_result {
+                let should_rebuild = match rebuild_result {
                     Ok(()) => {
                         debug!("received rebuild signal, refreshing NDI source map");
-                        apply_rebuild_result(
-                            ndi_sources,
-                            rebuild_ndi_source_map(&mut write, &mut read, pool).await,
-                        )
-                        .await;
+                        true
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!(
                             "rebuild signal channel lagged by {n} messages, \
                              refreshing NDI source map once"
                         );
+                        true
+                    }
+                    Err(broadcast::error::RecvError::Closed) => false,
+                };
+                if should_rebuild {
+                    let write = std::sync::Arc::clone(&write);
+                    let dispatcher = dispatcher.clone();
+                    let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                    let pool = pool.clone();
+                    spawned_tasks.spawn(async move {
                         apply_rebuild_result(
-                            ndi_sources,
-                            rebuild_ndi_source_map(&mut write, &mut read, pool).await,
+                            &ndi_sources,
+                            rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
                         )
                         .await;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        // Channel closed — ignore, the shutdown path will catch it.
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Handle a parsed OBS WebSocket message.
-async fn handle_message(
-    msg: serde_json::Value,
-    write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    ndi_sources: &NdiSourceMap,
-    state: &Arc<RwLock<ObsState>>,
-    event_tx: &broadcast::Sender<ObsEvent>,
-) -> Result<(), anyhow::Error> {
-    let op = msg["op"].as_u64().unwrap_or(u64::MAX);
-
-    match op {
-        // Event (op 5)
-        5 => {
-            let event_type = msg["d"]["eventType"].as_str().unwrap_or("");
-            debug!("OBS event: {event_type}");
-
-            if event_type == "CurrentProgramSceneChanged" {
-                if let Some(scene_name) = msg["d"]["eventData"]["sceneName"].as_str() {
-                    let sources = ndi_sources.read().await;
-                    let active_ids = check_scene_items(write, read, scene_name, &sources).await;
-
-                    let mut s = state.write().await;
-                    s.current_scene = Some(scene_name.to_string());
-                    s.active_playlist_ids = active_ids.clone();
-
-                    let _ = event_tx.send(ObsEvent::SceneChanged {
-                        scene_name: scene_name.to_string(),
-                        active_playlist_ids: active_ids,
                     });
                 }
             }
         }
-        // RequestResponse (op 7) — handle GetCurrentProgramScene response.
-        7 => {
-            let request_type = msg["d"]["requestType"].as_str().unwrap_or("");
-            if request_type == "GetCurrentProgramScene" {
-                if let Some(scene_name) =
-                    msg["d"]["responseData"]["currentProgramSceneName"].as_str()
-                {
-                    let sources = ndi_sources.read().await;
-                    let active_ids = check_scene_items(write, read, scene_name, &sources).await;
+    };
 
-                    let mut s = state.write().await;
-                    s.current_scene = Some(scene_name.to_string());
-                    s.active_playlist_ids = active_ids.clone();
-
-                    let _ = event_tx.send(ObsEvent::SceneChanged {
-                        scene_name: scene_name.to_string(),
-                        active_playlist_ids: active_ids,
-                    });
-                }
-            }
-        }
-        _ => {
-            debug!("unhandled OBS message op={op}");
-        }
+    spawned_tasks.abort_all();
+    reader_handle.abort();
+    // Reader task exit observation: aborted handles return JoinError, panics
+    // surface here. We don't propagate but DO log so silent reader panics are
+    // visible in logs.
+    if let Err(e) = reader_handle.await
+        && !e.is_cancelled()
+    {
+        warn!("OBS reader task exited with error: {e}");
     }
-
-    Ok(())
+    result
 }
 
 /// Read the next text message from the WebSocket and parse as JSON.
