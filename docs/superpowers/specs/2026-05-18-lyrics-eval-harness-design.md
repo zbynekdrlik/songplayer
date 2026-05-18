@@ -117,7 +117,7 @@ When the user types `/lyrics-eval`, Claude follows `SKILL.md`:
 
 ### 5.3 Initial build
 
-`python eval/lyrics/build_manifest.py` is a one-shot helper. It connects (read-only) to the production SongPlayer DB on win-resolume (via `mcp__win-resolume__FileRead` of `songplayer.db` or the existing `/api/v1/lyrics/probe-sources` route), filters songs by allowed `gold_source`, presents the candidates to the user for category bucketing + final pick, writes `manifest.json`. Run once during PR1. The resulting `manifest.json` is committed and treated as stable thereafter — modifications are explicit PRs of their own.
+`python eval/lyrics/build_manifest.py` is a one-shot helper. It queries the production SongPlayer HTTP API on win-resolume (`http://10.77.9.201:8920/api/v1/lyrics/probe-sources` + the existing songs listing endpoint), filters songs by `lyrics_source ∈ {lrclib_synced, spotify_proxy, yt_subs_manual}`, presents the candidates to the user for category bucketing + final pick, writes `manifest.json`. HTTP rather than direct DB access keeps the helper portable (no Python sqlite binding against a remote-FS DB file) and avoids any chance of concurrent writes from the live worker. Run once during PR1. The resulting `manifest.json` is committed and treated as stable thereafter — modifications are explicit PRs of their own.
 
 ## 6. Audio prep (`eval/lyrics/audio_prep.py`)
 
@@ -125,7 +125,7 @@ Single-file Python script invoked with `--video-id <id>` (and optional `--force`
 
 Flow:
 1. Check the eval vocal cache at `C:\ProgramData\SongPlayer\eval-cache\<video_id>_vocal16k.wav` on win-resolume. If present and `--force` is not set, print the path and exit zero.
-2. Otherwise, download the audio with yt-dlp (audio-only, smallest acceptable format), invoke the same Mel-Roformer + anvuew dereverb path that the production pipeline uses, and write the dereverbed 16 kHz mono WAV into the eval cache. Print the path.
+2. Otherwise, download the audio with yt-dlp (audio-only, smallest acceptable format), then invoke the `audio_separator` Python package directly from the existing lyrics-bootstrap venv on win-resolume — same package + same `dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt` checkpoint the production `crates/sp-server/src/lyrics/aligner.rs::preprocess_vocals` uses, just called from Python rather than through the Rust shim. Write the dereverbed 16 kHz mono WAV into the eval cache. Print the path.
 
 Path always returned as a win-resolume FS absolute path. Subsequent backend calls run on win-resolume (via `mcp__win-resolume__Shell`), so no file ever needs to cross the network.
 
@@ -277,7 +277,7 @@ Out of scope (filed elsewhere):
 
 - Any additional backend caller (Gemini, Qwen, future SOTA) → issue #111.
 - Routing the no-text-source path through a raw-ASR backend → issue #112.
-- `/lyrics-research` web-search command. Deferred — either folded into the `/lyrics-eval` skill as a sibling command, or filed as its own follow-up issue after PR1 lands.
+- `/lyrics-research` web-search command. Deferred to a follow-up issue after PR1 lands — keeps PR1 focused on the scoring rig.
 - Any CI cron / scheduled run / GH Action workflow → explicitly rejected per `feedback_lyrics_eval_claude_orchestrated.md`.
 
 ## 11. Testing
@@ -301,6 +301,5 @@ The following are open in the sense that the writing-plans skill should turn the
 - Concrete category-by-category fixture pick (decided interactively during `build_manifest.py` first run).
 - Exact text of `judge_prompt.md` v1 (drafted during PR1 implementation; refined by observation during the first real run).
 - Exact CI step name + position for `pytest eval/` and `ruff check eval/`.
-- Whether `/lyrics-research` ships as a sibling skill in PR1 or as a follow-up PR.
 
 These open items are NOT additional design forks. They are implementation-time decisions the writing-plans skill turns into ordered steps.
