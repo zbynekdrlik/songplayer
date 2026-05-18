@@ -117,7 +117,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install ruff + pytest + jsonschema
+      - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3
       - name: Lint with ruff
         run: ruff check eval/
