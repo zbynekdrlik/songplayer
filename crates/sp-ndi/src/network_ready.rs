@@ -79,7 +79,12 @@ where
 /// NDI sender only runs on Windows (see `cfg(windows)` gate at
 /// `crates/sp-server/src/playback/mod.rs:196`), so on Linux there is no
 /// NDI runtime to gate.
+// mutants::skip — wires Win32 list_active_ipv4_addresses() into the pure
+// gate. Only exercisable on a Windows runner with a real adapter table;
+// Linux mutation testing cannot reach it. The pure helper
+// wait_for_network_ready_with_probe is mutation-covered.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 pub(crate) fn wait_for_network_ready() -> bool {
     info!(
         "NDI: waiting for non-APIPA IPv4 adapter (cap {:?}, poll {:?}) — see issue #60",
@@ -111,7 +116,11 @@ pub(crate) fn wait_for_network_ready() -> bool {
     result
 }
 
+// mutants::skip — trivial stub for non-Windows; SongPlayer's NDI sender
+// only runs on Windows, so this function exists solely to satisfy the
+// unconditional call site in ndi_sdk::NdiLib::load.
 #[cfg(not(windows))]
+#[cfg_attr(test, mutants::skip)]
 pub(crate) fn wait_for_network_ready() -> bool {
     true
 }
@@ -122,7 +131,13 @@ pub(crate) fn wait_for_network_ready() -> bool {
 /// On non-Windows builds NDI sender is not used (see `cfg(windows)` gate at
 /// `crates/sp-server/src/playback/mod.rs:196`), so this function isn't
 /// compiled at all there — only Windows callers reach it.
+// mutants::skip — Win32 FFI wrapper around GetAdaptersAddresses. The
+// adapter-table walk + SOCKADDR_IN dereference can only be exercised on a
+// real Windows runner; Linux mutation testing cannot validate it. The
+// pure gate that consumes this fn (wait_for_network_ready_with_probe) is
+// mutation-covered through injected probes.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 pub(crate) fn list_active_ipv4_addresses() -> Vec<Ipv4Addr> {
     use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR, WIN32_ERROR};
     use windows::Win32::NetworkManagement::IpHelper::{
