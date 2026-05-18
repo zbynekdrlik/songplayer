@@ -438,24 +438,53 @@ async fn connect_and_run(
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     ObsCommand::SetTextSource { source_name, text } => {
-                        // Fire-and-forget: SetInputSettings replies
-                        // with an op=7 success/failure status. We
-                        // don't currently surface it. Task 5
-                        // tightens this to wait + log status.
                         let req_id = uuid::Uuid::new_v4().to_string();
                         let req = text::set_text_request(&req_id, &source_name, &text);
+                        let rx = dispatcher.register(req_id.clone()).await;
                         if let Err(e) = write
                             .send(Message::Text(req.to_string().into()))
                             .await
                         {
-                            // Break instead of `?` so the cleanup path
-                            // at the bottom of connect_and_run always
-                            // runs reader_handle.abort(). Using `?` here
-                            // would propagate past the abort call and
-                            // orphan the reader task.
+                            dispatcher.cancel(&req_id).await;
                             break Err(e.into());
                         }
-                        info!(source_name, "sent SetTextSource to OBS");
+
+                        match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
+                            Ok(Ok(response)) => {
+                                let ok = response["d"]["requestStatus"]["result"]
+                                    .as_bool()
+                                    .unwrap_or(false);
+                                if ok {
+                                    info!(source_name, "SetTextSource ok");
+                                } else {
+                                    let code = response["d"]["requestStatus"]["code"]
+                                        .as_u64()
+                                        .unwrap_or(0);
+                                    let comment = response["d"]["requestStatus"]["comment"]
+                                        .as_str()
+                                        .unwrap_or("");
+                                    warn!(
+                                        source_name,
+                                        code,
+                                        comment,
+                                        "SetTextSource: OBS reported failure"
+                                    );
+                                }
+                            }
+                            Ok(Err(_)) => {
+                                warn!(
+                                    source_name,
+                                    "SetTextSource: dispatcher closed before reply"
+                                );
+                            }
+                            Err(_) => {
+                                // tokio::time::timeout fired; remove the
+                                // stale registration so a late op=7 isn't
+                                // treated as unmatched.
+                                dispatcher.cancel(&req_id).await;
+                                warn!(source_name, "SetTextSource: timed out");
+                            }
+                        }
                     }
                 }
             }
