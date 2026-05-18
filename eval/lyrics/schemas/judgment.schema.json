@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "judgment.schema.json",
+  "title": "Lyrics Eval Per-Fixture Judgment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "video_id",
+    "score",
+    "verdict",
+    "wer_estimate",
+    "line_timing_assessment",
+    "hallucination_count",
+    "hallucination_details",
+    "coverage_pct",
+    "wall_acceptable",
+    "reasoning",
+    "judged_at",
+    "judge_model",
+    "judge_prompt_revision"
+  ],
+  "properties": {
+    "video_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{11}$"},
+    "score": {"type": "integer", "minimum": 0, "maximum": 10},
+    "verdict": {"type": "string", "enum": ["match", "partial", "miss", "hallucination"]},
+    "wer_estimate": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "line_timing_assessment": {"type": "string"},
+    "hallucination_count": {"type": "integer", "minimum": 0},
+    "hallucination_details": {"type": "string"},
+    "coverage_pct": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "wall_acceptable": {"type": "boolean"},
+    "reasoning": {"type": "string", "minLength": 1},
+    "judged_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "judge_model": {"type": "string", "minLength": 1},
+    "judge_prompt_revision": {"type": "integer", "minimum": 1}
+  }
+}
