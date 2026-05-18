@@ -18,3 +18,6 @@ e2e/test-results/
 .playwright-mcp/
 **/__pycache__/
 *.pyc
+
+# Lyrics eval local cache (vocal stems, downloaded audio)
+eval/lyrics/.eval-cache/
