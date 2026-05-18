@@ -24,9 +24,15 @@
     "score": {"type": "integer", "minimum": 0, "maximum": 10},
     "verdict": {"type": "string", "enum": ["match", "partial", "miss", "hallucination"]},
     "wer_estimate": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-    "line_timing_assessment": {"type": "string"},
+    "line_timing_assessment": {
+      "type": "string",
+      "description": "Free-text assessment of line-timing accuracy. Empty string is allowed when no timing data was available (e.g. instrumental track, or candidate produced no timed segments)."
+    },
     "hallucination_count": {"type": "integer", "minimum": 0},
-    "hallucination_details": {"type": "string"},
+    "hallucination_details": {
+      "type": "string",
+      "description": "Free-text description of any hallucinated content. Empty string when hallucination_count is 0."
+    },
     "coverage_pct": {"type": "number", "minimum": 0.0, "maximum": 1.0},
     "wall_acceptable": {"type": "boolean"},
     "reasoning": {"type": "string", "minLength": 1},
