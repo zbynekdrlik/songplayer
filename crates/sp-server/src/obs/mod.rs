@@ -1,5 +1,6 @@
 //! OBS WebSocket v5 client with scene detection and text source control.
 
+pub mod dispatcher;
 pub mod ndi_discovery;
 pub mod scene;
 pub mod text;
