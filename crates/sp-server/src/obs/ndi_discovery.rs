@@ -8,13 +8,12 @@
 
 use std::collections::HashMap;
 
-use futures::SinkExt;
 use sqlx::{Row, SqlitePool};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
 use crate::obs::SharedWrite;
-use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
+use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::text::{get_input_list_request, get_input_settings_request};
 
 /// Query OBS for its NDI inputs and return a map of
@@ -174,28 +173,22 @@ async fn fetch_ndi_input_names(
 ) -> Option<Vec<String>> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_input_list_request(&req_id);
-    let rx = dispatcher.register(req_id.clone()).await;
-
-    // Acquire the write lock JUST for the send so other tasks can grab
-    // it while we wait for the op=7 response below.
+    let response = match dispatcher
+        .send_and_await(
+            write,
+            req_id,
+            Message::Text(req.to_string().into()),
+            DEFAULT_RESPONSE_TIMEOUT,
+        )
+        .await
     {
-        let mut w = write.lock().await;
-        if let Err(e) = w.send(Message::Text(req.to_string().into())).await {
-            drop(w);
-            warn!("fetch_ndi_input_names: send GetInputList failed: {e}");
-            dispatcher.cancel(&req_id).await;
-            return None;
-        }
-    }
-
-    let response = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(_)) => {
-            warn!("fetch_ndi_input_names: dispatcher closed before reply");
-            return None;
-        }
-        Err(_) => {
+        Ok(v) => v,
+        Err(DispatcherError::Timeout) => {
             warn!("fetch_ndi_input_names: GetInputList timed out");
+            return None;
+        }
+        Err(DispatcherError::Closed) => {
+            warn!("fetch_ndi_input_names: dispatcher closed before reply");
             return None;
         }
     };
@@ -218,30 +211,22 @@ async fn fetch_input_ndi_sender_name(
 ) -> Option<String> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_input_settings_request(&req_id, input_name);
-    let rx = dispatcher.register(req_id.clone()).await;
-
-    // Acquire the write lock JUST for the send so other tasks can grab
-    // it while we wait for the op=7 response below.
+    let response = match dispatcher
+        .send_and_await(
+            write,
+            req_id,
+            Message::Text(req.to_string().into()),
+            DEFAULT_RESPONSE_TIMEOUT,
+        )
+        .await
     {
-        let mut w = write.lock().await;
-        if let Err(e) = w.send(Message::Text(req.to_string().into())).await {
-            drop(w);
-            warn!(
-                "fetch_input_ndi_sender_name: send GetInputSettings failed for {input_name}: {e}"
-            );
-            dispatcher.cancel(&req_id).await;
-            return None;
-        }
-    }
-
-    let response = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(_)) => {
-            warn!("fetch_input_ndi_sender_name: dispatcher closed before reply for {input_name}");
-            return None;
-        }
-        Err(_) => {
+        Ok(v) => v,
+        Err(DispatcherError::Timeout) => {
             warn!("fetch_input_ndi_sender_name: GetInputSettings timed out for {input_name}");
+            return None;
+        }
+        Err(DispatcherError::Closed) => {
+            warn!("fetch_input_ndi_sender_name: dispatcher closed before reply for {input_name}");
             return None;
         }
     };

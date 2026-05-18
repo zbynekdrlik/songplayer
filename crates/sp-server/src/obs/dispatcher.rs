@@ -3,20 +3,19 @@
 //! Owns a `request_id → oneshot::Sender<Value>` pending map. A single
 //! reader task reads every inbound op=7 message and calls
 //! `Dispatcher::complete(req_id, payload)`, which forwards the payload
-//! to the waiter registered for that request_id. Callers register
-//! before sending the request, send via the SplitSink half, and await
-//! the receiver with `await_response`.
+//! to the waiter registered for that request_id. Callers use
+//! `send_and_await` to register, send, and await in one call.
 //!
 //! Replaces the per-call `wait_for_response` helpers in
 //! `ndi_discovery.rs` and `scene.rs` that consumed and dropped any
 //! op=5 event arriving while a request was in flight (issue #43).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::warn;
 
@@ -27,6 +26,17 @@ pub enum DispatcherError {
     Timeout,
     Closed,
 }
+
+impl std::fmt::Display for DispatcherError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout => write!(f, "OBS dispatcher: response timed out"),
+            Self::Closed => write!(f, "OBS dispatcher: closed before reply"),
+        }
+    }
+}
+
+impl std::error::Error for DispatcherError {}
 
 #[derive(Clone, Default)]
 pub struct Dispatcher {
@@ -39,42 +49,59 @@ impl Dispatcher {
     }
 
     /// Register a waiter for a future op=7 response with the given
-    /// `request_id`. Returns the receiver half; the caller awaits it
-    /// (typically via `await_response`).
+    /// `request_id`. Returns the receiver half.
     ///
     /// If a waiter is already registered for the same `request_id`,
-    /// it is replaced. The previous oneshot::Sender is dropped and
-    /// its receiver observes an `Err(_)`. Callers MUST generate
-    /// unique UUID request IDs (all current call sites already do
-    /// via `uuid::Uuid::new_v4`).
-    pub async fn register(&self, req_id: String) -> oneshot::Receiver<Value> {
+    /// it is replaced and a WARN is emitted. The previous
+    /// oneshot::Sender is dropped and its receiver observes an
+    /// `Err(_)`. Callers MUST generate unique UUID request IDs (all
+    /// current call sites already do via `uuid::Uuid::new_v4`).
+    pub fn register(&self, req_id: String) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
-        let mut guard = self.pending.lock().await;
+        let mut guard = self
+            .pending
+            .lock()
+            .expect("dispatcher pending lock poisoned");
+        if guard.contains_key(&req_id) {
+            warn!(
+                request_id = %req_id,
+                "OBS dispatcher: duplicate registration — first waiter will fail"
+            );
+        }
         guard.insert(req_id, tx);
         rx
     }
 
-    /// Register + await + per-call timeout. Returns the response JSON
-    /// on success, `Timeout` if `timeout_dur` elapses before a
-    /// matching op=7 arrives, or `Closed` if the dispatcher was
-    /// drained while the call was pending.
+    /// Register, send via `write`, then await the matching op=7 response
+    /// with `timeout_dur`. Releases the write lock as soon as the send
+    /// completes so concurrent helpers don't serialise on the response
+    /// wait. Cleans up the pending entry on timeout / send-error.
     ///
-    /// On timeout the registration is removed so a late-arriving
-    /// response does not leak into the pending map.
-    pub async fn await_response(
+    /// `req_id` MUST be unique (callers generate `uuid::Uuid::new_v4`).
+    /// `msg` is the JSON request body already serialised as a `Message::Text`.
+    pub async fn send_and_await(
         &self,
+        write: &crate::obs::SharedWrite,
         req_id: String,
+        msg: tokio_tungstenite::tungstenite::Message,
         timeout_dur: Duration,
     ) -> Result<Value, DispatcherError> {
-        let rx = self.register(req_id.clone()).await;
+        use futures::SinkExt;
+
+        let rx = self.register(req_id.clone());
+        {
+            let mut w = write.lock().await;
+            if w.send(msg).await.is_err() {
+                drop(w);
+                self.cancel(&req_id);
+                return Err(DispatcherError::Closed);
+            }
+        }
         match timeout(timeout_dur, rx).await {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(_)) => Err(DispatcherError::Closed),
             Err(_) => {
-                // Remove our stale entry so the reader task does not
-                // try to deliver into a dropped channel later.
-                let mut guard = self.pending.lock().await;
-                guard.remove(&req_id);
+                self.cancel(&req_id);
                 Err(DispatcherError::Timeout)
             }
         }
@@ -84,8 +111,11 @@ impl Dispatcher {
     /// any. An unmatched response is logged at WARN — it means the
     /// sender gave up (timed out, was dropped) before the response
     /// arrived.
-    pub async fn complete(&self, req_id: &str, value: Value) {
-        let mut guard = self.pending.lock().await;
+    pub fn complete(&self, req_id: &str, value: Value) {
+        let mut guard = self
+            .pending
+            .lock()
+            .expect("dispatcher pending lock poisoned");
         match guard.remove(req_id) {
             Some(tx) => {
                 // If the receiver was already dropped (e.g. caller
@@ -110,16 +140,22 @@ impl Dispatcher {
     /// arriving response is treated as unmatched + logged at WARN
     /// (cannot happen in practice for cancelled-before-send, but the
     /// cleanup keeps the map size bounded).
-    pub async fn cancel(&self, req_id: &str) {
-        let mut guard = self.pending.lock().await;
+    pub fn cancel(&self, req_id: &str) {
+        let mut guard = self
+            .pending
+            .lock()
+            .expect("dispatcher pending lock poisoned");
         let _ = guard.remove(req_id);
     }
 
     /// Drop every pending waiter so its receiver observes `Err(_)`.
     /// Called by the reader task on connection close so no caller
     /// hangs on a never-arriving response.
-    pub async fn drain_and_close(&self) {
-        let mut guard = self.pending.lock().await;
+    pub fn drain_and_close(&self) {
+        let mut guard = self
+            .pending
+            .lock()
+            .expect("dispatcher pending lock poisoned");
         guard.clear();
     }
 }
@@ -133,51 +169,22 @@ mod tests {
     #[tokio::test]
     async fn register_and_complete_delivers_payload() {
         let d = Dispatcher::default();
-        let rx = d.register("req-1".to_string()).await;
+        let rx = d.register("req-1".to_string());
 
         let payload = json!({"op": 7, "d": {"requestId": "req-1", "ok": true}});
-        d.complete("req-1", payload.clone()).await;
+        d.complete("req-1", payload.clone());
 
         let got = rx.await.expect("oneshot must deliver");
         assert_eq!(got, payload);
     }
 
     #[tokio::test]
-    async fn await_response_returns_payload_on_complete() {
-        let d = Dispatcher::default();
-        let d2 = d.clone();
-
-        let waiter = tokio::spawn(async move {
-            d2.await_response("req-2".to_string(), Duration::from_secs(1))
-                .await
-        });
-
-        // Give the spawn time to register.
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let payload = json!({"op": 7, "d": {"requestId": "req-2"}});
-        d.complete("req-2", payload.clone()).await;
-
-        let result = waiter.await.expect("task joins").expect("ok");
-        assert_eq!(result, payload);
-    }
-
-    #[tokio::test]
-    async fn await_response_returns_timeout_when_no_response() {
-        let d = Dispatcher::default();
-        let result = d
-            .await_response("req-3".to_string(), Duration::from_millis(50))
-            .await;
-        assert!(matches!(result, Err(DispatcherError::Timeout)));
-    }
-
-    #[tokio::test]
     async fn drain_and_close_fails_all_pending() {
         let d = Dispatcher::default();
-        let rx_a = d.register("a".to_string()).await;
-        let rx_b = d.register("b".to_string()).await;
+        let rx_a = d.register("a".to_string());
+        let rx_b = d.register("b".to_string());
 
-        d.drain_and_close().await;
+        d.drain_and_close();
 
         assert!(rx_a.await.is_err(), "drain must close oneshot");
         assert!(rx_b.await.is_err(), "drain must close oneshot");
@@ -188,19 +195,19 @@ mod tests {
         // Unmatched op=7 (sender gave up / timed out) MUST be a soft
         // case — log + drop, not crash.
         let d = Dispatcher::default();
-        d.complete("nobody-cares", json!({})).await;
+        d.complete("nobody-cares", json!({}));
         // If we reach here without panicking the test passes.
     }
 
     #[tokio::test]
     async fn cancel_removes_pending_entry() {
         let d = Dispatcher::default();
-        let rx = d.register("cancel-me".to_string()).await;
-        d.cancel("cancel-me").await;
+        let rx = d.register("cancel-me".to_string());
+        d.cancel("cancel-me");
         // Sender dropped → rx must observe Err.
         assert!(rx.await.is_err(), "cancel must drop the sender");
         // Subsequent complete is a soft no-op (no waiter).
-        d.complete("cancel-me", serde_json::json!("late")).await;
+        d.complete("cancel-me", serde_json::json!("late"));
     }
 
     #[tokio::test]
@@ -211,10 +218,10 @@ mod tests {
         // mistake; we want it to fail loudly on the first waiter,
         // not silently merge the channels.
         let d = Dispatcher::default();
-        let rx_first = d.register("dup".to_string()).await;
-        let rx_second = d.register("dup".to_string()).await;
+        let rx_first = d.register("dup".to_string());
+        let rx_second = d.register("dup".to_string());
 
-        d.complete("dup", json!("v")).await;
+        d.complete("dup", json!("v"));
 
         assert!(
             rx_first.await.is_err(),

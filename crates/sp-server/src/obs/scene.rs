@@ -2,12 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use futures::SinkExt;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 
 use crate::obs::SharedWrite;
-use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
+use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::text::get_scene_items_request;
 
 /// Check which NDI sources are present in a given scene.
@@ -52,27 +51,21 @@ async fn check_scene_items_recursive(
     let request_id = uuid::Uuid::new_v4().to_string();
     let req = get_scene_items_request(&request_id, scene_name);
 
-    let rx = dispatcher.register(request_id.clone()).await;
-
-    // Acquire the write lock JUST for the send so other tasks can grab
-    // it while we wait for the op=7 response below.
+    let items = match dispatcher
+        .send_and_await(
+            write,
+            request_id,
+            Message::Text(req.to_string().into()),
+            DEFAULT_RESPONSE_TIMEOUT,
+        )
+        .await
     {
-        let mut w = write.lock().await;
-        if let Err(e) = w.send(Message::Text(req.to_string().into())).await {
-            drop(w);
-            warn!("failed to send GetSceneItemList: {e}");
-            dispatcher.cancel(&request_id).await;
-            return;
-        }
-    }
-
-    let items = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(_)) => {
+        Ok(v) => v,
+        Err(DispatcherError::Closed) => {
             warn!("no response for GetSceneItemList request (dispatcher closed)");
             return;
         }
-        Err(_) => {
+        Err(DispatcherError::Timeout) => {
             warn!("timed out waiting for GetSceneItemList for '{scene_name}'");
             return;
         }

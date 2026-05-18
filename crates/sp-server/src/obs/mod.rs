@@ -14,13 +14,13 @@ use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use tokio::net::TcpStream;
 use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
-use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
+use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::ndi_discovery::rebuild_ndi_source_map;
 use crate::obs::scene::check_scene_items;
 use crate::obs::text::get_current_scene_request;
@@ -204,7 +204,6 @@ impl ObsClient {
         Self { state, cmd_tx }
     }
 
-    /// Update a text source in OBS.
     /// Get a clone of the command sender for use by other components.
     pub fn cmd_sender(&self) -> mpsc::Sender<ObsCommand> {
         self.cmd_tx.clone()
@@ -283,7 +282,7 @@ async fn run_reader_task(
                             warn!("OBS reader: op=7 without requestId, dropping");
                             continue;
                         }
-                        dispatcher.complete(&req_id, json).await;
+                        dispatcher.complete(&req_id, json);
                     }
                     _ => {
                         debug!("unhandled OBS message op={op}");
@@ -302,7 +301,7 @@ async fn run_reader_task(
         }
     }
 
-    dispatcher.drain_and_close().await;
+    dispatcher.drain_and_close();
     let _ = reader_tx.send(ReaderMessage::Closed).await;
 }
 
@@ -375,6 +374,11 @@ async fn connect_and_run(
     let reader_handle = tokio::spawn(run_reader_task(read, dispatcher.clone(), reader_tx));
     let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
 
+    // JoinSet tracks all tasks spawned in the main loop body. On loop
+    // exit, abort_all() prevents detached tasks from running against a
+    // dead write half across reconnects.
+    let mut spawned_tasks: JoinSet<()> = JoinSet::new();
+
     // Step 5: initial NDI source map rebuild (same retry-on-empty
     // policy as before — the rebuild now goes via the dispatcher).
     for attempt in 1..=5 {
@@ -395,44 +399,55 @@ async fn connect_and_run(
         }
     }
 
-    // Step 6: initial GetCurrentProgramScene via dispatcher (was a
-    // hard-coded op=7 branch in handle_message; now a normal waiter).
+    // Step 6: initial GetCurrentProgramScene via dispatcher.
     let initial_scene_req_id = uuid::Uuid::new_v4().to_string();
     let initial_scene_req = get_current_scene_request(&initial_scene_req_id);
-    let initial_scene_rx = dispatcher.register(initial_scene_req_id.clone()).await;
+    match dispatcher
+        .send_and_await(
+            &write,
+            initial_scene_req_id,
+            Message::Text(initial_scene_req.to_string().into()),
+            DEFAULT_RESPONSE_TIMEOUT,
+        )
+        .await
     {
-        let mut w = write.lock().await;
-        if let Err(e) = w
-            .send(Message::Text(initial_scene_req.to_string().into()))
-            .await
-        {
-            drop(w);
-            // Reader task is already spawned — must abort it before returning
-            // so it doesn't outlive the connection attempt.
+        Ok(response) => {
+            if let Some(scene_name) =
+                response["d"]["responseData"]["currentProgramSceneName"].as_str()
+            {
+                let sources = ndi_sources.read().await;
+                let active_ids = check_scene_items(&write, &dispatcher, scene_name, &sources).await;
+                drop(sources);
+
+                {
+                    let mut s = state.write().await;
+                    s.current_scene = Some(scene_name.to_string());
+                    s.active_playlist_ids = active_ids.clone();
+                }
+
+                let _ = event_tx.send(ObsEvent::SceneChanged {
+                    scene_name: scene_name.to_string(),
+                    active_playlist_ids: active_ids,
+                });
+            } else {
+                debug!("initial GetCurrentProgramScene response had no scene name");
+            }
+        }
+        Err(DispatcherError::Closed) => {
+            // Dispatcher closed before reply — reader task already died.
+            // Bail so the outer reconnect loop fires immediately.
+            spawned_tasks.abort_all();
             reader_handle.abort();
-            dispatcher.cancel(&initial_scene_req_id).await;
-            return Err(e.into());
+            if let Err(e) = reader_handle.await
+                && !e.is_cancelled()
+            {
+                warn!("OBS reader task exited with error: {e}");
+            }
+            anyhow::bail!("reader task closed during initial GetCurrentProgramScene");
         }
-    }
-    if let Ok(Ok(response)) = tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, initial_scene_rx).await
-        && let Some(scene_name) = response["d"]["responseData"]["currentProgramSceneName"].as_str()
-    {
-        let sources = ndi_sources.read().await;
-        let active_ids = check_scene_items(&write, &dispatcher, scene_name, &sources).await;
-        drop(sources);
-
-        {
-            let mut s = state.write().await;
-            s.current_scene = Some(scene_name.to_string());
-            s.active_playlist_ids = active_ids.clone();
+        Err(DispatcherError::Timeout) => {
+            debug!("initial GetCurrentProgramScene timed out");
         }
-
-        let _ = event_tx.send(ObsEvent::SceneChanged {
-            scene_name: scene_name.to_string(),
-            active_playlist_ids: active_ids,
-        });
-    } else {
-        debug!("initial GetCurrentProgramScene did not return a scene name");
     }
 
     // Step 7: main loop — thin router: each arm spawns a task to do
@@ -450,7 +465,7 @@ async fn connect_and_run(
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let state = std::sync::Arc::clone(state);
                         let event_tx = event_tx.clone();
-                        tokio::spawn(async move {
+                        spawned_tasks.spawn(async move {
                             let sources = ndi_sources.read().await;
                             let active_ids =
                                 check_scene_items(&write, &dispatcher, &scene_name, &sources)
@@ -479,23 +494,19 @@ async fn connect_and_run(
                     ObsCommand::SetTextSource { source_name, text } => {
                         let write = std::sync::Arc::clone(&write);
                         let dispatcher = dispatcher.clone();
-                        tokio::spawn(async move {
+                        spawned_tasks.spawn(async move {
                             let req_id = uuid::Uuid::new_v4().to_string();
                             let req = text::set_text_request(&req_id, &source_name, &text);
-                            let rx = dispatcher.register(req_id.clone()).await;
+                            match dispatcher
+                                .send_and_await(
+                                    &write,
+                                    req_id,
+                                    Message::Text(req.to_string().into()),
+                                    DEFAULT_RESPONSE_TIMEOUT,
+                                )
+                                .await
                             {
-                                let mut w = write.lock().await;
-                                if let Err(e) =
-                                    w.send(Message::Text(req.to_string().into())).await
-                                {
-                                    drop(w);
-                                    dispatcher.cancel(&req_id).await;
-                                    warn!(source_name, "SetTextSource: send failed: {e}");
-                                    return;
-                                }
-                            }
-                            match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
-                                Ok(Ok(response)) => {
+                                Ok(response) => {
                                     let ok = response["d"]["requestStatus"]["result"]
                                         .as_bool()
                                         .unwrap_or(false);
@@ -516,14 +527,13 @@ async fn connect_and_run(
                                         );
                                     }
                                 }
-                                Ok(Err(_)) => {
+                                Err(DispatcherError::Closed) => {
                                     warn!(
                                         source_name,
                                         "SetTextSource: dispatcher closed before reply"
                                     );
                                 }
-                                Err(_) => {
-                                    dispatcher.cancel(&req_id).await;
+                                Err(DispatcherError::Timeout) => {
                                     warn!(source_name, "SetTextSource: timed out");
                                 }
                             }
@@ -532,50 +542,47 @@ async fn connect_and_run(
                 }
             }
             rebuild_result = rebuild_rx.recv() => {
-                match rebuild_result {
+                let should_rebuild = match rebuild_result {
                     Ok(()) => {
                         debug!("received rebuild signal, refreshing NDI source map");
-                        let write = std::sync::Arc::clone(&write);
-                        let dispatcher = dispatcher.clone();
-                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
-                        let pool = pool.clone();
-                        tokio::spawn(async move {
-                            apply_rebuild_result(
-                                &ndi_sources,
-                                rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
-                            )
-                            .await;
-                        });
+                        true
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!(
                             "rebuild signal channel lagged by {n} messages, \
                              refreshing NDI source map once"
                         );
-                        let write = std::sync::Arc::clone(&write);
-                        let dispatcher = dispatcher.clone();
-                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
-                        let pool = pool.clone();
-                        tokio::spawn(async move {
-                            apply_rebuild_result(
-                                &ndi_sources,
-                                rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
-                            )
-                            .await;
-                        });
+                        true
                     }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        // Channel closed — outer shutdown will catch it.
-                    }
+                    Err(broadcast::error::RecvError::Closed) => false,
+                };
+                if should_rebuild {
+                    let write = std::sync::Arc::clone(&write);
+                    let dispatcher = dispatcher.clone();
+                    let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                    let pool = pool.clone();
+                    spawned_tasks.spawn(async move {
+                        apply_rebuild_result(
+                            &ndi_sources,
+                            rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
+                        )
+                        .await;
+                    });
                 }
             }
         }
     };
 
-    // Reader task may still be alive on the OK path (clean close); on
-    // the Err path it might already be gone. Either way the
-    // dispatcher gets drained when the task exits.
+    spawned_tasks.abort_all();
     reader_handle.abort();
+    // Reader task exit observation: aborted handles return JoinError, panics
+    // surface here. We don't propagate but DO log so silent reader panics are
+    // visible in logs.
+    if let Err(e) = reader_handle.await
+        && !e.is_cancelled()
+    {
+        warn!("OBS reader task exited with error: {e}");
+    }
     result
 }
 
