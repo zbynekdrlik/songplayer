@@ -536,16 +536,16 @@ pub async fn start(
     });
 
     // 10. Playback engine (bridges API commands to the engine state machine)
-    let mut engine = playback::PlaybackEngine::new(
-        pool.clone(),
-        config.cache_dir.clone(),
+    let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {
+        pool: pool.clone(),
+        cache_dir: config.cache_dir.clone(),
         obs_event_tx,
         obs_cmd_tx,
-        resolume_cmd_tx,
-        event_tx.clone(),
+        resolume_tx: resolume_cmd_tx,
+        ws_event_tx: event_tx.clone(),
         presenter_client,
         ndi_health_registry,
-    );
+    });
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)

@@ -16,6 +16,26 @@ fn user_agent() -> String {
 const LRCLIB_BASE: &str = "https://lrclib.net/api/get";
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
+/// Maximum allowed delta (seconds) between LRCLIB's recorded duration and
+/// the YouTube duration we're aligning against. LRCLIB's `GET /api/get`
+/// fuzzy-matches by duration server-side but the tolerance is undocumented;
+/// in practice the API has returned records up to ~30 s off the queried
+/// duration when the song title+artist is unique enough. A 10-second gap
+/// is a strong signal that the LRCLIB record is from a different
+/// recording (live cut vs studio, radio edit vs full version, etc.) where
+/// the lyrics' timing won't align with our audio. See issue #63.
+const LRCLIB_DURATION_TOLERANCE_SECS: u32 = 10;
+
+/// Pure predicate: does the LRCLIB record's duration fall within
+/// `tolerance_s` of the requested YouTube duration? Extracted so it can be
+/// unit-tested at exact boundary values without standing up a wiremock
+/// server.
+#[inline]
+fn is_duration_acceptable(lrclib_dur_s: f32, requested_dur_s: u32, tolerance_s: u32) -> bool {
+    let delta = (lrclib_dur_s - requested_dur_s as f32).abs();
+    delta <= tolerance_s as f32
+}
+
 // ---------------------------------------------------------------------------
 // LRCLIB API response shape
 // ---------------------------------------------------------------------------
@@ -25,6 +45,11 @@ const REQUEST_TIMEOUT_SECS: u64 = 10;
 struct LrclibResponse {
     synced_lyrics: Option<String>,
     plain_lyrics: Option<String>,
+    /// Duration in seconds as reported by LRCLIB. Used to cross-check
+    /// against the YouTube recording's duration (issue #63). Optional
+    /// because some legacy records omit it.
+    #[serde(default)]
+    duration: Option<f32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +91,22 @@ pub async fn fetch_lyrics(
 
     let response = response.error_for_status()?;
     let body: LrclibResponse = response.json().await?;
+
+    // Cross-check duration. LRCLIB's server-side `?duration=` filter is
+    // loose enough to occasionally return records from a different
+    // recording of the same song (live cut vs studio); reject those
+    // before we align them against the audio. See issue #63.
+    if let Some(lrclib_dur) = body.duration {
+        if !is_duration_acceptable(lrclib_dur, duration_s, LRCLIB_DURATION_TOLERANCE_SECS) {
+            debug!(
+                lrclib_duration = lrclib_dur,
+                youtube_duration = duration_s,
+                tolerance = LRCLIB_DURATION_TOLERANCE_SECS,
+                "LRCLIB: rejecting record — duration delta exceeds tolerance"
+            );
+            return Ok(None);
+        }
+    }
 
     // Prefer synced lyrics (LRC format with timestamps)
     if let Some(lrc) = body.synced_lyrics.filter(|s| !s.trim().is_empty()) {
@@ -226,6 +267,51 @@ pub fn parse_plain(text: &str) -> Option<LyricsTrack> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- is_duration_acceptable (issue #63) ----
+
+    #[test]
+    fn duration_acceptable_exact_match() {
+        assert!(is_duration_acceptable(302.0, 302, 10));
+    }
+
+    #[test]
+    fn duration_acceptable_within_tolerance_below() {
+        // 5 s shorter than requested, under 10 s tolerance
+        assert!(is_duration_acceptable(297.0, 302, 10));
+    }
+
+    #[test]
+    fn duration_acceptable_within_tolerance_above() {
+        // 5 s longer than requested
+        assert!(is_duration_acceptable(307.0, 302, 10));
+    }
+
+    #[test]
+    fn duration_acceptable_at_exact_tolerance_boundary() {
+        // delta == tolerance must accept (the rule is "exceeds tolerance" rejects)
+        assert!(is_duration_acceptable(312.0, 302, 10));
+        assert!(is_duration_acceptable(292.0, 302, 10));
+    }
+
+    #[test]
+    fn duration_rejected_above_tolerance() {
+        // 11 s longer — rejected (live cut suspicion)
+        assert!(!is_duration_acceptable(313.0, 302, 10));
+    }
+
+    #[test]
+    fn duration_rejected_below_tolerance() {
+        // 11 s shorter — rejected (radio edit suspicion)
+        assert!(!is_duration_acceptable(291.0, 302, 10));
+    }
+
+    #[test]
+    fn duration_rejected_extreme_delta() {
+        // 4:30 LRCLIB record for 5:02 YouTube cut — the exact failure
+        // mode that motivated issue #63.
+        assert!(!is_duration_acceptable(270.0, 302, 10));
+    }
 
     // ---- parse_lrc_timestamp ----
 

@@ -20,16 +20,18 @@ async fn handle_scene_change_off_sends_hide_title_and_subs() {
     let (obs_tx, _obs_rx) = broadcast::channel(16);
     let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
 
     engine.ensure_pipeline(7, "SP-fast");
     // Force the pipeline into scene_active = true so the transition
@@ -72,16 +74,18 @@ async fn handle_scene_change_off_noop_when_already_off_program() {
     let (obs_tx, _obs_rx) = broadcast::channel(16);
     let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
 
     engine.ensure_pipeline(7, "SP-fast");
     // Pipeline is created with scene_active = false (default).
@@ -138,16 +142,18 @@ async fn scene_go_on_refreshes_title_for_already_playing() {
     let (obs_tx, _obs_rx) = broadcast::channel(16);
     let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
 
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {
@@ -217,16 +223,18 @@ async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
     let (obs_tx, _obs_rx) = broadcast::channel(16);
     let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {
         pp.state = PlayState::Playing { video_id: 42 };

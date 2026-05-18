@@ -59,16 +59,17 @@ async fn build_engine() -> (
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, resolume_rx) = mpsc::channel(16);
     let (ws_tx, ws_rx) = broadcast::channel::<ServerMsg>(16);
-    let engine = PlaybackEngine::new(
+    let engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None, // presenter_client = None: tests don't assert presenter HTTP push.
-        Arc::new(NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        // presenter_client = None: tests don't assert presenter HTTP push.
+        presenter_client: None,
+        ndi_health_registry: Arc::new(NdiHealthRegistry::new()),
+    });
     (engine, resolume_rx, ws_rx)
 }
 

@@ -52,16 +52,18 @@ async fn handle_play_video_updates_current_position_on_custom_playlist() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
-        pool.clone(),
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool: pool.clone(),
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
     // Jump to video 200 (position 1).
@@ -120,16 +122,18 @@ async fn handle_play_video_with_unknown_video_is_noop() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
-        pool.clone(),
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool: pool.clone(),
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(ytlive_id, "SP-live");
 
     // Video 999 does not exist.
@@ -174,16 +178,18 @@ async fn started_event_unconditionally_resets_lyrics_state() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {
         pp.current_video_id = Some(1);
@@ -235,16 +241,18 @@ async fn pause_captures_paused_at_snapshot_for_manual_resume() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(7, "SP-fast");
 
     // Simulate "song playing, position advanced": engine bookkeeping has
@@ -302,16 +310,18 @@ async fn pause_with_no_current_video_does_not_capture_snapshot() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(9, "SP-fast");
 
     // current_video_id stays None (no song loaded). Drive a Pause anyway —
@@ -356,16 +366,18 @@ async fn handle_engine_play_resumes_paused_video_when_snapshot_present() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(10, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&10) {
         pp.paused_at = Some((77, 42_000));
@@ -426,16 +438,18 @@ async fn handle_play_video_clears_paused_at_snapshot() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(8, "SP-fast");
 
     // Pre-load a paused snapshot so the test exercises the clear-on-play
@@ -492,16 +506,18 @@ async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        cache_dir.path().to_path_buf(),
-        obs_tx,
-        None,
+        cache_dir: cache_dir.path().to_path_buf(),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        None,
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(7, "SP-fast");
     if let Some(pp) = engine.pipelines.get_mut(&7) {
         pp.current_video_id = Some(1);

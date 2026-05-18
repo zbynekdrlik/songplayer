@@ -351,8 +351,8 @@ fn compute_degraded_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::playback::PlaybackEngine;
     use crate::playback::state::PlayState;
+    use crate::playback::{PlaybackEngine, PlaybackEngineConfig};
     use sp_core::ws::ServerMsg;
     use sqlx::SqlitePool;
     use std::path::PathBuf;
@@ -367,16 +367,16 @@ mod tests {
         let (resolume_tx, _) = mpsc::channel(16);
         let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
         let registry = Arc::new(NdiHealthRegistry::new());
-        let engine = PlaybackEngine::new(
+        let engine = PlaybackEngine::new(PlaybackEngineConfig {
             pool,
-            PathBuf::from("/tmp"),
-            obs_tx,
-            None,
+            cache_dir: PathBuf::from("/tmp"),
+            obs_event_tx: obs_tx,
+            obs_cmd_tx: None,
             resolume_tx,
-            ws_tx,
-            None,
-            registry.clone(),
-        );
+            ws_event_tx: ws_tx,
+            presenter_client: None,
+            ndi_health_registry: registry.clone(),
+        });
         (engine, registry)
     }
 

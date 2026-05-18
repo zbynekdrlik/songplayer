@@ -47,16 +47,18 @@ async fn presenter_empty_payload_on_song_end() {
     let (obs_tx, _) = broadcast::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
-        std::path::PathBuf::from("/tmp/test-cache-song-end"),
-        obs_tx,
-        None,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache-song-end"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
         resolume_tx,
-        ws_tx,
-        Some(presenter_client),
-        std::sync::Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-    );
+        ws_event_tx: ws_tx,
+        presenter_client: Some(presenter_client),
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
     engine.ensure_pipeline(77, "SP-test");
 
     // Fire Ended — handler should call clear_lyrics_display which
