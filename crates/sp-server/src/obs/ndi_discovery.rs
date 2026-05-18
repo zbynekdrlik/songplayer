@@ -7,24 +7,17 @@
 //! and scene-driven playback never fired (issue #11).
 
 use std::collections::HashMap;
-use std::time::Duration;
 
-use futures::stream::{SplitSink, SplitStream};
-use futures::{SinkExt, StreamExt};
+use futures::SinkExt;
+use futures::stream::SplitSink;
 use sqlx::{Row, SqlitePool};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
+use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 use crate::obs::text::{get_input_list_request, get_input_settings_request};
-
-/// Total wall-clock cap on `wait_for_response`. Without this bound the
-/// rebuild-retry loop would hang on `read.next().await` when OBS drops
-/// a response, silently consuming unrelated messages that arrived
-/// later (scene changes, events). Keep short — a healthy OBS responds
-/// in milliseconds; 2 seconds is generous.
-const WAIT_FOR_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Query OBS for its NDI inputs and return a map of
 /// `OBS input name → playlist_id` for the playlists whose `ndi_output_name`
@@ -48,14 +41,11 @@ const WAIT_FOR_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 /// source inputs — both legitimate steady states.
 pub async fn rebuild_ndi_source_map(
     write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    dispatcher: &Dispatcher,
     pool: &SqlitePool,
 ) -> Option<HashMap<String, i64>> {
     let mut map = HashMap::new();
 
-    // 1) Load active playlists {ndi_output_name → playlist_id} from DB.
-    //    A DB read failure is a real signal something is wrong — return
-    //    None so callers keep the last good map.
     let by_ndi_name = match load_playlist_ndi_names(pool).await {
         Ok(m) => m,
         Err(e) => {
@@ -69,11 +59,7 @@ pub async fn rebuild_ndi_source_map(
         return Some(map);
     }
 
-    // 2) Query OBS for NDI source inputs. A `None` return means the
-    //    WebSocket response never arrived / was malformed — NOT that
-    //    OBS truly has zero inputs. Treat as failure so the stale map
-    //    survives until the next successful rebuild.
-    let input_names = match fetch_ndi_input_names(write, read).await {
+    let input_names = match fetch_ndi_input_names(write, dispatcher).await {
         Some(names) => names,
         None => {
             warn!(
@@ -89,10 +75,8 @@ pub async fn rebuild_ndi_source_map(
         return Some(map);
     }
 
-    // 3) For each OBS NDI input, read its settings to find the NDI sender name
-    //    and match against the DB playlists.
     for input_name in input_names {
-        let sender_name = match fetch_input_ndi_sender_name(write, read, &input_name).await {
+        let sender_name = match fetch_input_ndi_sender_name(write, dispatcher, &input_name).await {
             Some(s) => s,
             None => {
                 debug!(
@@ -188,16 +172,27 @@ async fn load_playlist_ndi_names(pool: &SqlitePool) -> Result<HashMap<String, i6
 /// names. Returns `None` if the request failed or the response was malformed.
 async fn fetch_ndi_input_names(
     write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    dispatcher: &Dispatcher,
 ) -> Option<Vec<String>> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_input_list_request(&req_id);
+    let rx = dispatcher.register(req_id.clone()).await;
     if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
         warn!("fetch_ndi_input_names: send GetInputList failed: {e}");
         return None;
     }
 
-    let response = wait_for_response(read, &req_id).await?;
+    let response = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
+        Ok(Ok(v)) => v,
+        Ok(Err(_)) => {
+            warn!("fetch_ndi_input_names: dispatcher closed before reply");
+            return None;
+        }
+        Err(_) => {
+            warn!("fetch_ndi_input_names: GetInputList timed out");
+            return None;
+        }
+    };
     let arr = response["d"]["responseData"]["inputs"].as_array()?;
 
     Some(
@@ -212,65 +207,31 @@ async fn fetch_ndi_input_names(
 /// from). Returns `None` if the setting is absent.
 async fn fetch_input_ndi_sender_name(
     write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    dispatcher: &Dispatcher,
     input_name: &str,
 ) -> Option<String> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_input_settings_request(&req_id, input_name);
+    let rx = dispatcher.register(req_id.clone()).await;
     if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
         warn!("fetch_input_ndi_sender_name: send GetInputSettings failed for {input_name}: {e}");
         return None;
     }
 
-    let response = wait_for_response(read, &req_id).await?;
+    let response = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
+        Ok(Ok(v)) => v,
+        Ok(Err(_)) => {
+            warn!("fetch_input_ndi_sender_name: dispatcher closed before reply for {input_name}");
+            return None;
+        }
+        Err(_) => {
+            warn!("fetch_input_ndi_sender_name: GetInputSettings timed out for {input_name}");
+            return None;
+        }
+    };
     response["d"]["responseData"]["inputSettings"]["ndi_source_name"]
         .as_str()
         .map(|s| s.to_string())
-}
-
-/// Read incoming WebSocket messages until a `RequestResponse` (op 7) with the
-/// given request ID is found, then return it. Skips events and mismatched
-/// responses. Returns `None` on close, 100-iteration cap, or a total wall-
-/// clock timeout of `WAIT_FOR_RESPONSE_TIMEOUT`.
-///
-/// The timeout matters in the transient-failure case that broke the
-/// 2026-04-19 event: when OBS drops a request's response, the old
-/// implementation would block on `read.next().await` indefinitely and
-/// silently consume any OTHER messages that arrived (including scene
-/// change events). Bounding the total wait means rebuild-failure no
-/// longer eats adjacent events.
-async fn wait_for_response(
-    read: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    request_id: &str,
-) -> Option<serde_json::Value> {
-    let deadline = tokio::time::Instant::now() + WAIT_FOR_RESPONSE_TIMEOUT;
-    for _ in 0..100 {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return None;
-        }
-        let next = match tokio::time::timeout(remaining, read.next()).await {
-            Ok(msg) => msg,
-            Err(_) => return None,
-        };
-        match next {
-            Some(Ok(Message::Text(text))) => {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                    let op = json["op"].as_u64().unwrap_or(u64::MAX);
-                    if op == 7 && json["d"]["requestId"].as_str() == Some(request_id) {
-                        return Some(json);
-                    }
-                }
-            }
-            Some(Ok(Message::Close(_))) | None => return None,
-            Some(Ok(_)) => continue,
-            Some(Err(e)) => {
-                warn!("wait_for_response: WebSocket read error: {e}");
-                return None;
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]

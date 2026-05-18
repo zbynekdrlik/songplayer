@@ -11,8 +11,6 @@
 //! `ndi_discovery.rs` and `scene.rs` that consumed and dropped any
 //! op=5 event arriving while a request was in flight (issue #43).
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
