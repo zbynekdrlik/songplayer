@@ -4,7 +4,7 @@
     {
       "video_id": "BW_vUblj_RA",
       "category": "dense_vocal",
-      "gold_source": "lrclib_synced",
+      "gold_source": "lrclib",
       "gold_lines": [
         {"text": "I'm not a sinner, I'm a saint", "start_ms": 25800, "end_ms": 27500}
       ],

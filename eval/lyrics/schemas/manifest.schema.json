@@ -28,7 +28,7 @@
           },
           "gold_source": {
             "type": "string",
-            "enum": ["lrclib_synced", "spotify_proxy", "yt_subs_manual"]
+            "enum": ["lrclib", "spotify", "yt_subs"]
           },
           "gold_lines": {
             "type": "array",
