@@ -383,3 +383,140 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
     let _ = shutdown_tx.send(());
     fake_obs.shutdown().await;
 }
+
+/// Issue #43 regression: a `CurrentProgramSceneChanged` event that
+/// arrives WHILE an op=7 waiter (`wait_for_response`) is reading the
+/// shared stream MUST be delivered to subscribers. The buggy code
+/// consumed and dropped the event inside `wait_for_response`.
+///
+/// Setup:
+/// 1. Spawn FakeObsServer with `suppress_get_input_list = true` so
+///    every GetInputList request hangs without a reply. This keeps
+///    the rebuild-helper's `wait_for_response` actively reading the
+///    stream for the full 2 s timeout.
+/// 2. Wait for the client to connect and run its initial rebuild
+///    (which immediately times out per the suppression flag).
+/// 3. Trigger another rebuild explicitly via the broadcast — this
+///    opens a fresh 2 s `wait_for_response` window.
+/// 4. While that window is open, push a `CurrentProgramSceneChanged`
+///    event.
+/// 5. Assert that `ObsEvent::SceneChanged` is observed within 500 ms.
+///
+/// Against the buggy code the event is consumed by `wait_for_response`
+/// and the assertion fails (3 s timeout). After the fix it arrives
+/// immediately because the reader task routes op=5 separately from
+/// op=7.
+#[tokio::test]
+async fn event_during_pending_request_must_be_delivered_fast() {
+    let pool = db::create_memory_pool().await.unwrap();
+    db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active)
+         VALUES (7, 'ytfast', 'https://yt/f', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut fake_state = FakeObsState::default();
+    fake_state
+        .inputs
+        .insert("sp-fast_video".into(), "ndi_source".into());
+    fake_state.input_settings.insert(
+        "sp-fast_video".into(),
+        serde_json::json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
+    );
+    fake_state.scene_items.insert(
+        "sp-fast".into(),
+        vec![("sp-fast_video".into(), false, "ndi_source".into())],
+    );
+    // Force every GetInputList to hang for its full timeout. This
+    // creates the "stream is being read by wait_for_response" window
+    // that the bug requires.
+    fake_state.suppress_get_input_list = true;
+
+    let fake_obs = FakeObsServer::spawn_with_state(fake_state).await;
+
+    let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
+    let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
+    let (obs_event_tx, mut obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+    let (obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
+
+    let _client = obs::ObsClient::spawn(
+        obs::ObsConfig {
+            url: fake_obs.url(),
+            password: None,
+        },
+        pool.clone(),
+        ndi_sources.clone(),
+        obs_state.clone(),
+        obs_event_tx.clone(),
+        obs_rebuild_rx,
+        shutdown_rx,
+    );
+
+    // Wait for connect.
+    let connect_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if obs_state.read().await.connected {
+            break;
+        }
+        if std::time::Instant::now() > connect_deadline {
+            panic!("ObsClient did not connect within 5s");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Let the initial rebuild attempts run + time out. The startup
+    // path retries 5x with 2s spacing = up to 10s of in-flight
+    // wait_for_response windows. We don't need to wait that whole
+    // window — we trigger our own fresh rebuild below.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Drain any startup events.
+    while obs_event_rx.try_recv().is_ok() {}
+
+    // Open a fresh wait_for_response window by firing a rebuild
+    // signal. The fake OBS will not respond, so wait_for_response
+    // sits on read.next() for the full 2 s timeout.
+    let _ = obs_rebuild_tx.send(());
+
+    // Wait a small slice so the rebuild has definitely started its
+    // wait_for_response loop, but well before the 2 s timeout.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Push the scene-change event INTO the window. Against the buggy
+    // code this gets consumed and dropped by wait_for_response.
+    fake_obs.push_program_scene_change("sp-fast").await;
+
+    // The event MUST arrive within 500 ms — far less than the 2 s
+    // wait window. After the fix the reader task delivers it
+    // immediately.
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    let active_ids = loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, obs_event_rx.recv()).await {
+            Ok(Ok(obs::ObsEvent::SceneChanged {
+                scene_name,
+                active_playlist_ids,
+            })) if scene_name == "sp-fast" => break active_playlist_ids,
+            Ok(Ok(_other)) => continue,
+            Ok(Err(e)) => panic!("event channel error: {e}"),
+            Err(_) => panic!(
+                "SceneChanged for sp-fast NOT delivered within 500ms — \
+                 event was eaten by in-flight wait_for_response. \
+                 This is the #43 regression."
+            ),
+        }
+    };
+
+    assert!(
+        active_ids.contains(&7),
+        "active_playlist_ids should contain 7, got {active_ids:?}"
+    );
+
+    let _ = shutdown_tx.send(());
+    fake_obs.shutdown().await;
+}
