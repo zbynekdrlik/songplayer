@@ -179,6 +179,7 @@ async fn fetch_ndi_input_names(
     let rx = dispatcher.register(req_id.clone()).await;
     if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
         warn!("fetch_ndi_input_names: send GetInputList failed: {e}");
+        dispatcher.cancel(&req_id).await;
         return None;
     }
 
@@ -215,6 +216,7 @@ async fn fetch_input_ndi_sender_name(
     let rx = dispatcher.register(req_id.clone()).await;
     if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
         warn!("fetch_input_ndi_sender_name: send GetInputSettings failed for {input_name}: {e}");
+        dispatcher.cancel(&req_id).await;
         return None;
     }
 

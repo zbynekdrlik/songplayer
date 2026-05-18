@@ -57,6 +57,7 @@ async fn check_scene_items_recursive(
     let rx = dispatcher.register(request_id.clone()).await;
     if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
         warn!("failed to send GetSceneItemList: {e}");
+        dispatcher.cancel(&request_id).await;
         return;
     }
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
-use futures::stream::{SplitSink, SplitStream};
+use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -378,9 +378,16 @@ async fn connect_and_run(
     let initial_scene_req_id = uuid::Uuid::new_v4().to_string();
     let initial_scene_req = get_current_scene_request(&initial_scene_req_id);
     let initial_scene_rx = dispatcher.register(initial_scene_req_id.clone()).await;
-    write
+    if let Err(e) = write
         .send(Message::Text(initial_scene_req.to_string().into()))
-        .await?;
+        .await
+    {
+        // Reader task is already spawned — must abort it before returning
+        // so it doesn't outlive the connection attempt.
+        reader_handle.abort();
+        dispatcher.cancel(&initial_scene_req_id).await;
+        return Err(e.into());
+    }
     if let Ok(Ok(response)) = tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, initial_scene_rx).await
         && let Some(scene_name) = response["d"]["responseData"]["currentProgramSceneName"].as_str()
     {
@@ -437,7 +444,17 @@ async fn connect_and_run(
                         // tightens this to wait + log status.
                         let req_id = uuid::Uuid::new_v4().to_string();
                         let req = text::set_text_request(&req_id, &source_name, &text);
-                        write.send(Message::Text(req.to_string().into())).await?;
+                        if let Err(e) = write
+                            .send(Message::Text(req.to_string().into()))
+                            .await
+                        {
+                            // Break instead of `?` so the cleanup path
+                            // at the bottom of connect_and_run always
+                            // runs reader_handle.abort(). Using `?` here
+                            // would propagate past the abort call and
+                            // orphan the reader task.
+                            break Err(e.into());
+                        }
                         info!(source_name, "sent SetTextSource to OBS");
                     }
                 }

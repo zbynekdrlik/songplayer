@@ -103,6 +103,18 @@ impl Dispatcher {
         }
     }
 
+    /// Cancel a pending registration without delivering anything. Used
+    /// by callers that registered a waiter but then failed to send the
+    /// matching request (e.g. write-side error). Removes the entry from
+    /// the pending map and drops the `oneshot::Sender` so any later
+    /// arriving response is treated as unmatched + logged at WARN
+    /// (cannot happen in practice for cancelled-before-send, but the
+    /// cleanup keeps the map size bounded).
+    pub async fn cancel(&self, req_id: &str) {
+        let mut guard = self.pending.lock().await;
+        let _ = guard.remove(req_id);
+    }
+
     /// Drop every pending waiter so its receiver observes `Err(_)`.
     /// Called by the reader task on connection close so no caller
     /// hangs on a never-arriving response.
@@ -178,6 +190,17 @@ mod tests {
         let d = Dispatcher::default();
         d.complete("nobody-cares", json!({})).await;
         // If we reach here without panicking the test passes.
+    }
+
+    #[tokio::test]
+    async fn cancel_removes_pending_entry() {
+        let d = Dispatcher::default();
+        let rx = d.register("cancel-me".to_string()).await;
+        d.cancel("cancel-me").await;
+        // Sender dropped → rx must observe Err.
+        assert!(rx.await.is_err(), "cancel must drop the sender");
+        // Subsequent complete is a soft no-op (no waiter).
+        d.complete("cancel-me", serde_json::json!("late")).await;
     }
 
     #[tokio::test]
