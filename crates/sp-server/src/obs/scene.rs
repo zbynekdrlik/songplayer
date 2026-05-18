@@ -3,12 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use futures::SinkExt;
-use futures::stream::SplitSink;
-use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, warn};
 
+use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 use crate::obs::text::get_scene_items_request;
 
@@ -17,7 +15,7 @@ use crate::obs::text::get_scene_items_request;
 /// Sends `GetSceneItemList` for the scene, checks each item name against the
 /// NDI source map. Recurses into nested scenes / group sources.
 pub async fn check_scene_items(
-    write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    write: &SharedWrite,
     dispatcher: &Dispatcher,
     scene_name: &str,
     ndi_sources: &HashMap<String, i64>,
@@ -39,7 +37,7 @@ pub async fn check_scene_items(
 const MAX_RECURSION_DEPTH: u32 = 5;
 
 async fn check_scene_items_recursive(
-    write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    write: &SharedWrite,
     dispatcher: &Dispatcher,
     scene_name: &str,
     ndi_sources: &HashMap<String, i64>,
@@ -55,10 +53,17 @@ async fn check_scene_items_recursive(
     let req = get_scene_items_request(&request_id, scene_name);
 
     let rx = dispatcher.register(request_id.clone()).await;
-    if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
-        warn!("failed to send GetSceneItemList: {e}");
-        dispatcher.cancel(&request_id).await;
-        return;
+
+    // Acquire the write lock JUST for the send so other tasks can grab
+    // it while we wait for the op=7 response below.
+    {
+        let mut w = write.lock().await;
+        if let Err(e) = w.send(Message::Text(req.to_string().into())).await {
+            drop(w);
+            warn!("failed to send GetSceneItemList: {e}");
+            dispatcher.cancel(&request_id).await;
+            return;
+        }
     }
 
     let items = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {

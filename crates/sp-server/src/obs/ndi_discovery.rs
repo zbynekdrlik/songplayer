@@ -9,13 +9,11 @@
 use std::collections::HashMap;
 
 use futures::SinkExt;
-use futures::stream::SplitSink;
 use sqlx::{Row, SqlitePool};
-use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
+use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 use crate::obs::text::{get_input_list_request, get_input_settings_request};
 
@@ -40,7 +38,7 @@ use crate::obs::text::{get_input_list_request, get_input_settings_request};
 /// genuinely has no active playlists, or OBS genuinely has no NDI
 /// source inputs — both legitimate steady states.
 pub async fn rebuild_ndi_source_map(
-    write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    write: &SharedWrite,
     dispatcher: &Dispatcher,
     pool: &SqlitePool,
 ) -> Option<HashMap<String, i64>> {
@@ -171,16 +169,23 @@ async fn load_playlist_ndi_names(pool: &SqlitePool) -> Result<HashMap<String, i6
 /// Issue `GetInputList` filtered to NDI sources and return the list of input
 /// names. Returns `None` if the request failed or the response was malformed.
 async fn fetch_ndi_input_names(
-    write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    write: &SharedWrite,
     dispatcher: &Dispatcher,
 ) -> Option<Vec<String>> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_input_list_request(&req_id);
     let rx = dispatcher.register(req_id.clone()).await;
-    if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
-        warn!("fetch_ndi_input_names: send GetInputList failed: {e}");
-        dispatcher.cancel(&req_id).await;
-        return None;
+
+    // Acquire the write lock JUST for the send so other tasks can grab
+    // it while we wait for the op=7 response below.
+    {
+        let mut w = write.lock().await;
+        if let Err(e) = w.send(Message::Text(req.to_string().into())).await {
+            drop(w);
+            warn!("fetch_ndi_input_names: send GetInputList failed: {e}");
+            dispatcher.cancel(&req_id).await;
+            return None;
+        }
     }
 
     let response = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
@@ -207,17 +212,26 @@ async fn fetch_ndi_input_names(
 /// `ndi_source_name` setting (the NDI sender name that the OBS input receives
 /// from). Returns `None` if the setting is absent.
 async fn fetch_input_ndi_sender_name(
-    write: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    write: &SharedWrite,
     dispatcher: &Dispatcher,
     input_name: &str,
 ) -> Option<String> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_input_settings_request(&req_id, input_name);
     let rx = dispatcher.register(req_id.clone()).await;
-    if let Err(e) = write.send(Message::Text(req.to_string().into())).await {
-        warn!("fetch_input_ndi_sender_name: send GetInputSettings failed for {input_name}: {e}");
-        dispatcher.cancel(&req_id).await;
-        return None;
+
+    // Acquire the write lock JUST for the send so other tasks can grab
+    // it while we wait for the op=7 response below.
+    {
+        let mut w = write.lock().await;
+        if let Err(e) = w.send(Message::Text(req.to_string().into())).await {
+            drop(w);
+            warn!(
+                "fetch_input_ndi_sender_name: send GetInputSettings failed for {input_name}: {e}"
+            );
+            dispatcher.cancel(&req_id).await;
+            return None;
+        }
     }
 
     let response = match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {

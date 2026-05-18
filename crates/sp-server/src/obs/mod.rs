@@ -74,6 +74,23 @@ pub struct ObsConfig {
 /// Mapping of NDI source name to playlist ID (for scene detection).
 pub type NdiSourceMap = Arc<RwLock<HashMap<String, i64>>>;
 
+/// Shared writer for the OBS WebSocket — wrapped in an Arc + Mutex so
+/// helper tasks spawned from the main loop can take turns sending
+/// requests without serialising on the response-await.
+///
+/// Note: this is `tokio::sync::Mutex`, NOT `std::sync::Mutex`. The lock
+/// is held across `.await` so it must be the async variant.
+pub(crate) type SharedWrite = std::sync::Arc<
+    tokio::sync::Mutex<
+        futures::stream::SplitSink<
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+            tokio_tungstenite::tungstenite::Message,
+        >,
+    >,
+>;
+
 /// Commands that can be sent to the OBS WebSocket connection loop.
 pub enum ObsCommand {
     SetTextSource { source_name: String, text: String },
@@ -349,14 +366,19 @@ async fn connect_and_run(
     let _ = event_tx.send(ObsEvent::Connected);
 
     // Step 4: build dispatcher + spawn reader task.
+    // Wrap the write half in Arc<Mutex<>> so tasks spawned from the
+    // main loop can each take the lock briefly for a send, then release
+    // it before awaiting the op=7 response — concurrent tasks do NOT
+    // serialise on the response wait.
     let dispatcher = Dispatcher::new();
     let (reader_tx, mut reader_rx) = mpsc::channel::<ReaderMessage>(32);
     let reader_handle = tokio::spawn(run_reader_task(read, dispatcher.clone(), reader_tx));
+    let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
 
     // Step 5: initial NDI source map rebuild (same retry-on-empty
     // policy as before — the rebuild now goes via the dispatcher).
     for attempt in 1..=5 {
-        let result = rebuild_ndi_source_map(&mut write, &dispatcher, pool).await;
+        let result = rebuild_ndi_source_map(&write, &dispatcher, pool).await;
         let is_empty = result.as_ref().map(|m| m.is_empty()).unwrap_or(true);
         apply_rebuild_result(ndi_sources, result).await;
         if !is_empty {
@@ -378,27 +400,32 @@ async fn connect_and_run(
     let initial_scene_req_id = uuid::Uuid::new_v4().to_string();
     let initial_scene_req = get_current_scene_request(&initial_scene_req_id);
     let initial_scene_rx = dispatcher.register(initial_scene_req_id.clone()).await;
-    if let Err(e) = write
-        .send(Message::Text(initial_scene_req.to_string().into()))
-        .await
     {
-        // Reader task is already spawned — must abort it before returning
-        // so it doesn't outlive the connection attempt.
-        reader_handle.abort();
-        dispatcher.cancel(&initial_scene_req_id).await;
-        return Err(e.into());
+        let mut w = write.lock().await;
+        if let Err(e) = w
+            .send(Message::Text(initial_scene_req.to_string().into()))
+            .await
+        {
+            drop(w);
+            // Reader task is already spawned — must abort it before returning
+            // so it doesn't outlive the connection attempt.
+            reader_handle.abort();
+            dispatcher.cancel(&initial_scene_req_id).await;
+            return Err(e.into());
+        }
     }
     if let Ok(Ok(response)) = tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, initial_scene_rx).await
         && let Some(scene_name) = response["d"]["responseData"]["currentProgramSceneName"].as_str()
     {
         let sources = ndi_sources.read().await;
-        let active_ids = check_scene_items(&mut write, &dispatcher, scene_name, &sources).await;
+        let active_ids = check_scene_items(&write, &dispatcher, scene_name, &sources).await;
         drop(sources);
 
-        let mut s = state.write().await;
-        s.current_scene = Some(scene_name.to_string());
-        s.active_playlist_ids = active_ids.clone();
-        drop(s);
+        {
+            let mut s = state.write().await;
+            s.current_scene = Some(scene_name.to_string());
+            s.active_playlist_ids = active_ids.clone();
+        }
 
         let _ = event_tx.send(ObsEvent::SceneChanged {
             scene_name: scene_name.to_string(),
@@ -408,26 +435,38 @@ async fn connect_and_run(
         debug!("initial GetCurrentProgramScene did not return a scene name");
     }
 
-    // Step 7: main loop — write side + reader-event side.
+    // Step 7: main loop — thin router: each arm spawns a task to do
+    // the work. The write half is shared via Arc<Mutex<>> so helper
+    // tasks lock it briefly for the send and release before awaiting
+    // the op=7 response, preventing the main loop from blocking on
+    // in-flight requests.
     let result = loop {
         tokio::select! {
             reader_msg = reader_rx.recv() => {
                 match reader_msg {
                     Some(ReaderMessage::SceneChange { scene_name }) => {
-                        let sources = ndi_sources.read().await;
-                        let active_ids =
-                            check_scene_items(&mut write, &dispatcher, &scene_name, &sources)
-                                .await;
-                        drop(sources);
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                        let state = std::sync::Arc::clone(state);
+                        let event_tx = event_tx.clone();
+                        tokio::spawn(async move {
+                            let sources = ndi_sources.read().await;
+                            let active_ids =
+                                check_scene_items(&write, &dispatcher, &scene_name, &sources)
+                                    .await;
+                            drop(sources);
 
-                        let mut s = state.write().await;
-                        s.current_scene = Some(scene_name.clone());
-                        s.active_playlist_ids = active_ids.clone();
-                        drop(s);
+                            {
+                                let mut s = state.write().await;
+                                s.current_scene = Some(scene_name.clone());
+                                s.active_playlist_ids = active_ids.clone();
+                            }
 
-                        let _ = event_tx.send(ObsEvent::SceneChanged {
-                            scene_name,
-                            active_playlist_ids: active_ids,
+                            let _ = event_tx.send(ObsEvent::SceneChanged {
+                                scene_name,
+                                active_playlist_ids: active_ids,
+                            });
                         });
                     }
                     Some(ReaderMessage::Closed) | None => {
@@ -438,53 +477,57 @@ async fn connect_and_run(
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     ObsCommand::SetTextSource { source_name, text } => {
-                        let req_id = uuid::Uuid::new_v4().to_string();
-                        let req = text::set_text_request(&req_id, &source_name, &text);
-                        let rx = dispatcher.register(req_id.clone()).await;
-                        if let Err(e) = write
-                            .send(Message::Text(req.to_string().into()))
-                            .await
-                        {
-                            dispatcher.cancel(&req_id).await;
-                            break Err(e.into());
-                        }
-
-                        match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
-                            Ok(Ok(response)) => {
-                                let ok = response["d"]["requestStatus"]["result"]
-                                    .as_bool()
-                                    .unwrap_or(false);
-                                if ok {
-                                    info!(source_name, "SetTextSource ok");
-                                } else {
-                                    let code = response["d"]["requestStatus"]["code"]
-                                        .as_u64()
-                                        .unwrap_or(0);
-                                    let comment = response["d"]["requestStatus"]["comment"]
-                                        .as_str()
-                                        .unwrap_or("");
-                                    warn!(
-                                        source_name,
-                                        code,
-                                        comment,
-                                        "SetTextSource: OBS reported failure"
-                                    );
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        tokio::spawn(async move {
+                            let req_id = uuid::Uuid::new_v4().to_string();
+                            let req = text::set_text_request(&req_id, &source_name, &text);
+                            let rx = dispatcher.register(req_id.clone()).await;
+                            {
+                                let mut w = write.lock().await;
+                                if let Err(e) =
+                                    w.send(Message::Text(req.to_string().into())).await
+                                {
+                                    drop(w);
+                                    dispatcher.cancel(&req_id).await;
+                                    warn!(source_name, "SetTextSource: send failed: {e}");
+                                    return;
                                 }
                             }
-                            Ok(Err(_)) => {
-                                warn!(
-                                    source_name,
-                                    "SetTextSource: dispatcher closed before reply"
-                                );
+                            match tokio::time::timeout(DEFAULT_RESPONSE_TIMEOUT, rx).await {
+                                Ok(Ok(response)) => {
+                                    let ok = response["d"]["requestStatus"]["result"]
+                                        .as_bool()
+                                        .unwrap_or(false);
+                                    if ok {
+                                        info!(source_name, "SetTextSource ok");
+                                    } else {
+                                        let code = response["d"]["requestStatus"]["code"]
+                                            .as_u64()
+                                            .unwrap_or(0);
+                                        let comment = response["d"]["requestStatus"]["comment"]
+                                            .as_str()
+                                            .unwrap_or("");
+                                        warn!(
+                                            source_name,
+                                            code,
+                                            comment,
+                                            "SetTextSource: OBS reported failure"
+                                        );
+                                    }
+                                }
+                                Ok(Err(_)) => {
+                                    warn!(
+                                        source_name,
+                                        "SetTextSource: dispatcher closed before reply"
+                                    );
+                                }
+                                Err(_) => {
+                                    dispatcher.cancel(&req_id).await;
+                                    warn!(source_name, "SetTextSource: timed out");
+                                }
                             }
-                            Err(_) => {
-                                // tokio::time::timeout fired; remove the
-                                // stale registration so a late op=7 isn't
-                                // treated as unmatched.
-                                dispatcher.cancel(&req_id).await;
-                                warn!(source_name, "SetTextSource: timed out");
-                            }
-                        }
+                        });
                     }
                 }
             }
@@ -492,22 +535,34 @@ async fn connect_and_run(
                 match rebuild_result {
                     Ok(()) => {
                         debug!("received rebuild signal, refreshing NDI source map");
-                        apply_rebuild_result(
-                            ndi_sources,
-                            rebuild_ndi_source_map(&mut write, &dispatcher, pool).await,
-                        )
-                        .await;
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                        let pool = pool.clone();
+                        tokio::spawn(async move {
+                            apply_rebuild_result(
+                                &ndi_sources,
+                                rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
+                            )
+                            .await;
+                        });
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!(
                             "rebuild signal channel lagged by {n} messages, \
                              refreshing NDI source map once"
                         );
-                        apply_rebuild_result(
-                            ndi_sources,
-                            rebuild_ndi_source_map(&mut write, &dispatcher, pool).await,
-                        )
-                        .await;
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                        let pool = pool.clone();
+                        tokio::spawn(async move {
+                            apply_rebuild_result(
+                                &ndi_sources,
+                                rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
+                            )
+                            .await;
+                        });
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         // Channel closed — outer shutdown will catch it.
