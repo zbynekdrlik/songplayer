@@ -17,20 +17,27 @@
 //! if the cap is hit the caller proceeds anyway in degraded mode (matches
 //! today's failure shape, but with explicit diagnostic logs).
 
+#[cfg(any(test, windows))]
 use std::net::Ipv4Addr;
+#[cfg(any(test, windows))]
 use std::thread::sleep;
+#[cfg(any(test, windows))]
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use tracing::{info, warn};
 
 /// Maximum total time spent waiting for a real adapter before giving up.
+#[cfg(windows)]
 pub(crate) const MAX_WAIT: Duration = Duration::from_secs(60);
 
 /// Time between adapter-table probes while waiting.
+#[cfg(windows)]
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Returns `true` if `addr` is a regular LAN address (not link-local /
 /// APIPA, not loopback). NDI mDNS uses IPv4, so only v4 is considered.
+#[cfg(any(test, windows))]
 pub(crate) fn is_real_ipv4(addr: Ipv4Addr) -> bool {
     !addr.is_loopback() && !addr.is_link_local()
 }
@@ -42,6 +49,7 @@ pub(crate) fn is_real_ipv4(addr: Ipv4Addr) -> bool {
 /// timeout. The caller decides what to do on timeout — current usage is to
 /// log a warn and proceed with `NDIlib_initialize` anyway (matches today's
 /// failure mode but adds diagnostic visibility).
+#[cfg(any(test, windows))]
 pub(crate) fn wait_for_network_ready_with_probe<F>(
     mut probe: F,
     max_wait: Duration,
@@ -104,22 +112,16 @@ pub(crate) fn wait_for_network_ready() -> bool {
 }
 
 #[cfg(not(windows))]
-#[allow(dead_code)]
 pub(crate) fn wait_for_network_ready() -> bool {
     true
 }
 
-/// Probe the OS adapter table and return all IPv4 addresses currently bound
-/// to any operational adapter. Stub for the non-Windows build (NDI sender
-/// only runs on Windows in this project anyway — see `cfg(windows)` gate at
-/// `crates/sp-server/src/playback/mod.rs:196`).
-#[cfg(not(windows))]
-pub(crate) fn list_active_ipv4_addresses() -> Vec<Ipv4Addr> {
-    Vec::new()
-}
-
 /// Probe the Win32 adapter table via `GetAdaptersAddresses` and return every
 /// IPv4 address on an operational (`IfOperStatusUp`) adapter.
+///
+/// On non-Windows builds NDI sender is not used (see `cfg(windows)` gate at
+/// `crates/sp-server/src/playback/mod.rs:196`), so this function isn't
+/// compiled at all there — only Windows callers reach it.
 #[cfg(windows)]
 pub(crate) fn list_active_ipv4_addresses() -> Vec<Ipv4Addr> {
     use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR, WIN32_ERROR};
