@@ -7,6 +7,7 @@ use libloading::{Library, Symbol};
 use tracing::{debug, error, info};
 
 use crate::error::NdiError;
+use crate::network_ready;
 use crate::types::{
     NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_tally_t,
     NDIlib_video_frame_v2_t,
@@ -94,6 +95,13 @@ impl NdiLib {
                 &library,
                 b"NDIlib_send_get_no_connections\0",
             )?;
+
+            // Gate NDIlib_initialize() on adapter readiness — the runtime
+            // binds its mDNS announce socket once at init and never re-evaluates.
+            // If we initialize while only APIPA is up (Scheduled-Task AtLogon
+            // boot before DHCP completes), the wall stays dark forever. See
+            // issue #60 + crates/sp-ndi/src/network_ready.rs.
+            network_ready::wait_for_network_ready();
 
             // Call NDIlib_initialize — required before any other NDI call.
             info!("Calling NDIlib_initialize()");

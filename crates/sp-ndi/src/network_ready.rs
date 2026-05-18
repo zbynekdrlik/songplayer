@@ -18,14 +18,15 @@
 //! today's failure shape, but with explicit diagnostic logs).
 
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
+
+use tracing::{info, warn};
 
 /// Maximum total time spent waiting for a real adapter before giving up.
-#[allow(dead_code)]
 pub(crate) const MAX_WAIT: Duration = Duration::from_secs(60);
 
 /// Time between adapter-table probes while waiting.
-#[allow(dead_code)]
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Returns `true` if `addr` is a regular LAN address (not link-local /
@@ -49,26 +50,153 @@ pub(crate) fn wait_for_network_ready_with_probe<F>(
 where
     F: FnMut() -> Vec<Ipv4Addr>,
 {
-    let _ = (max_wait, poll_interval, &mut probe);
-    todo!("wait_for_network_ready_with_probe: implemented in GREEN commit")
+    let started = Instant::now();
+    loop {
+        let addrs = probe();
+        if addrs.iter().copied().any(is_real_ipv4) {
+            return true;
+        }
+        if started.elapsed() >= max_wait {
+            return false;
+        }
+        sleep(poll_interval);
+    }
+}
+
+/// Convenience wrapper: probe Win32 adapter table and wait at most
+/// [`MAX_WAIT`] for a non-APIPA, non-loopback IPv4 to appear. Returns
+/// `true` if a real adapter was found, `false` on timeout.
+///
+/// On non-Windows builds this returns `true` immediately — SongPlayer's
+/// NDI sender only runs on Windows (see `cfg(windows)` gate at
+/// `crates/sp-server/src/playback/mod.rs:196`), so on Linux there is no
+/// NDI runtime to gate.
+#[cfg(windows)]
+pub(crate) fn wait_for_network_ready() -> bool {
+    info!(
+        "NDI: waiting for non-APIPA IPv4 adapter (cap {:?}, poll {:?}) — see issue #60",
+        MAX_WAIT, POLL_INTERVAL
+    );
+    let result = wait_for_network_ready_with_probe(
+        || {
+            let addrs = list_active_ipv4_addresses();
+            info!(
+                "NDI network-readiness probe: {} address(es): {:?}",
+                addrs.len(),
+                addrs
+            );
+            addrs
+        },
+        MAX_WAIT,
+        POLL_INTERVAL,
+    );
+    if result {
+        info!("NDI network ready — proceeding with NDIlib_initialize()");
+    } else {
+        warn!(
+            "NDI network NOT ready after {:?} — proceeding with NDIlib_initialize() anyway; \
+             mDNS may bind to APIPA, NDI receivers may not see senders until process restart \
+             (see issue #60)",
+            MAX_WAIT
+        );
+    }
+    result
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub(crate) fn wait_for_network_ready() -> bool {
+    true
 }
 
 /// Probe the OS adapter table and return all IPv4 addresses currently bound
-/// to any non-disabled adapter. Stub for the non-Windows build (NDI sender
+/// to any operational adapter. Stub for the non-Windows build (NDI sender
 /// only runs on Windows in this project anyway — see `cfg(windows)` gate at
 /// `crates/sp-server/src/playback/mod.rs:196`).
 #[cfg(not(windows))]
-#[allow(dead_code)]
 pub(crate) fn list_active_ipv4_addresses() -> Vec<Ipv4Addr> {
     Vec::new()
 }
 
 /// Probe the Win32 adapter table via `GetAdaptersAddresses` and return every
-/// non-disabled IPv4 address. Implemented in GREEN.
+/// IPv4 address on an operational (`IfOperStatusUp`) adapter.
 #[cfg(windows)]
-#[allow(dead_code)]
 pub(crate) fn list_active_ipv4_addresses() -> Vec<Ipv4Addr> {
-    todo!("list_active_ipv4_addresses: implemented in GREEN commit")
+    use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR, WIN32_ERROR};
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
+        GET_ADAPTERS_ADDRESSES_FLAGS, GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH,
+    };
+    use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+    use windows::Win32::Networking::WinSock::{AF_INET, SOCKADDR_IN};
+
+    let flags: GET_ADAPTERS_ADDRESSES_FLAGS =
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+
+    // Per MSDN guidance, start with 15 KB and double on overflow up to 64 KB.
+    let mut size: u32 = 15 * 1024;
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut result: WIN32_ERROR = ERROR_BUFFER_OVERFLOW;
+
+    for _ in 0..4 {
+        buffer.resize(size as usize, 0);
+        let addr_ptr = buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH;
+        // SAFETY: AF_INET.0 fits in u32 (it's 2); buffer is sized to `size`;
+        // GetAdaptersAddresses signature documented at MSDN; on overflow it
+        // updates `size` to the required value.
+        let rc = unsafe {
+            GetAdaptersAddresses(AF_INET.0 as u32, flags, None, Some(addr_ptr), &mut size)
+        };
+        result = WIN32_ERROR(rc);
+        if result == NO_ERROR {
+            break;
+        }
+        if result != ERROR_BUFFER_OVERFLOW {
+            warn!("GetAdaptersAddresses failed: rc={}", rc);
+            return Vec::new();
+        }
+        size = size.saturating_mul(2);
+    }
+
+    if result != NO_ERROR {
+        warn!("GetAdaptersAddresses kept overflowing — bailing");
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    // SAFETY: NO_ERROR means the buffer was populated with a linked list of
+    // IP_ADAPTER_ADDRESSES_LH headed by buffer.as_ptr().
+    let mut adapter_ptr = buffer.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
+    while !adapter_ptr.is_null() {
+        // SAFETY: adapter_ptr is non-null and points into our buffer; the
+        // OS guarantees the linked-list shape.
+        let adapter = unsafe { &*adapter_ptr };
+
+        if adapter.OperStatus == IfOperStatusUp {
+            let mut unicast_ptr = adapter.FirstUnicastAddress;
+            while !unicast_ptr.is_null() {
+                // SAFETY: unicast_ptr is a OS-owned linked-list node.
+                let unicast = unsafe { &*unicast_ptr };
+                let sockaddr = unicast.Address.lpSockaddr;
+                if !sockaddr.is_null() {
+                    // SAFETY: AF_INET-filtered call means every entry is SOCKADDR_IN.
+                    let sa_family = unsafe { (*sockaddr).sa_family };
+                    if sa_family == AF_INET {
+                        let sin = sockaddr as *const SOCKADDR_IN;
+                        // SAFETY: sin points to a SOCKADDR_IN (AF_INET branch).
+                        let bytes = unsafe { (*sin).sin_addr.S_un.S_addr };
+                        // SOCKADDR_IN stores the address in network byte order.
+                        let addr = Ipv4Addr::from(u32::from_be(bytes));
+                        out.push(addr);
+                    }
+                }
+                unicast_ptr = unicast.Next;
+            }
+        }
+        adapter_ptr = adapter.Next;
+    }
+
+    out
 }
 
 #[cfg(test)]
