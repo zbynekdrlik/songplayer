@@ -390,20 +390,22 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
 /// consumed and dropped the event inside `wait_for_response`.
 ///
 /// Setup:
-/// 1. Spawn FakeObsServer with `suppress_get_input_list = true` so
-///    every GetInputList request hangs without a reply. This keeps
-///    the rebuild-helper's `wait_for_response` actively reading the
-///    stream for the full 2 s timeout.
-/// 2. Wait for the client to connect and run its initial rebuild
-///    (which immediately times out per the suppression flag).
-/// 3. Trigger another rebuild explicitly via the broadcast — this
-///    opens a fresh 2 s `wait_for_response` window.
-/// 4. While that window is open, push a `CurrentProgramSceneChanged`
-///    event.
-/// 5. Assert that `ObsEvent::SceneChanged` is observed within 500 ms.
+/// 1. Spawn FakeObsServer WITHOUT suppression so the initial rebuild
+///    succeeds and populates `ndi_sources`.
+/// 2. Wait for `obs_state.connected` to flip true (5 s deadline).
+/// 3. Wait 250 ms for the initial rebuild to finish populating the map.
+/// 4. Assert that `ndi_sources` contains the expected entry (precondition).
+/// 5. Flip suppression ON via `update_state` — future GetInputList
+///    requests will now hang without a reply.
+/// 6. Drain any pre-existing events from the channel.
+/// 7. Fire a rebuild signal to open a fresh `wait_for_response` window.
+/// 8. Wait 100 ms so the rebuild has started its `wait_for_response`
+///    loop, but well before the 2 s timeout.
+/// 9. Push a `CurrentProgramSceneChanged` event into that window.
+/// 10. Assert that `ObsEvent::SceneChanged` arrives within 500 ms.
 ///
 /// Against the buggy code the event is consumed by `wait_for_response`
-/// and the assertion fails (3 s timeout). After the fix it arrives
+/// and the assertion fails (500 ms timeout). After the fix it arrives
 /// immediately because the reader task routes op=5 separately from
 /// op=7.
 #[tokio::test]
@@ -431,10 +433,8 @@ async fn event_during_pending_request_must_be_delivered_fast() {
         "sp-fast".into(),
         vec![("sp-fast_video".into(), false, "ndi_source".into())],
     );
-    // Force every GetInputList to hang for its full timeout. This
-    // creates the "stream is being read by wait_for_response" window
-    // that the bug requires.
-    fake_state.suppress_get_input_list = true;
+    // Do NOT set suppress_get_input_list here — let the initial rebuild
+    // succeed so ndi_sources is populated before we flip suppression on.
 
     let fake_obs = FakeObsServer::spawn_with_state(fake_state).await;
 
@@ -457,7 +457,7 @@ async fn event_during_pending_request_must_be_delivered_fast() {
         shutdown_rx,
     );
 
-    // Wait for connect.
+    // Wait for the initial (successful) rebuild to populate the map.
     let connect_deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         if obs_state.read().await.connected {
@@ -468,19 +468,30 @@ async fn event_during_pending_request_must_be_delivered_fast() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
-    // Let the initial rebuild attempts run + time out. The startup
-    // path retries 5x with 2s spacing = up to 10s of in-flight
-    // wait_for_response windows. We don't need to wait that whole
-    // window — we trigger our own fresh rebuild below.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Precondition: ndi_sources must be populated by the initial rebuild.
+    {
+        let map = ndi_sources.read().await;
+        assert_eq!(
+            map.get("sp-fast_video"),
+            Some(&7),
+            "initial rebuild must populate the map, got {map:?}"
+        );
+    }
 
-    // Drain any startup events.
+    // Flip suppression ON so future GetInputList requests hang.
+    // This creates the wait_for_response window that the bug requires.
+    fake_obs
+        .update_state(|s| s.suppress_get_input_list = true)
+        .await;
+
+    // Drain any startup events so the assertion below is unambiguous.
     while obs_event_rx.try_recv().is_ok() {}
 
-    // Open a fresh wait_for_response window by firing a rebuild
-    // signal. The fake OBS will not respond, so wait_for_response
-    // sits on read.next() for the full 2 s timeout.
+    // Open a fresh wait_for_response window by firing a rebuild signal.
+    // The fake OBS will not respond, so wait_for_response sits on
+    // read.next() for the full 2 s timeout.
     let _ = obs_rebuild_tx.send(());
 
     // Wait a small slice so the rebuild has definitely started its
