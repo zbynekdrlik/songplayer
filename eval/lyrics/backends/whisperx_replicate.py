@@ -34,6 +34,9 @@ REPLICATE_BASE = "https://api.replicate.com/v1"
 
 # Polling cadence for prediction status. ~2s matches the existing Rust client.
 PREDICT_POLL_INTERVAL_S = 2.0
+# Maximum total wall-clock wait for a single prediction.
+# Mirrors crates/sp-server/src/lyrics/whisperx_replicate.rs::PREDICTION_TIMEOUT (1800s).
+PREDICT_TIMEOUT_S = 1800
 
 
 def build_predict_input(audio_url: str, language: str) -> dict[str, Any]:
@@ -57,7 +60,10 @@ def upload_file(wav_path: Path, token: str) -> str:
         )
     r.raise_for_status()
     payload = r.json()
-    return payload["urls"]["get"]
+    url = (payload.get("urls") or {}).get("get")
+    if not url:
+        raise RuntimeError(f"replicate /files response missing urls.get: {payload!r}")
+    return url
 
 
 def run_prediction(audio_url: str, language: str, token: str) -> dict[str, Any]:
@@ -77,8 +83,13 @@ def run_prediction(audio_url: str, language: str, token: str) -> dict[str, Any]:
     r.raise_for_status()
     pred = r.json()
     poll_url = pred["urls"]["get"]
+    deadline = time.time() + PREDICT_TIMEOUT_S
     while True:
         time.sleep(PREDICT_POLL_INTERVAL_S)
+        if time.time() > deadline:
+            raise RuntimeError(
+                f"replicate prediction timed out after {PREDICT_TIMEOUT_S}s"
+            )
         rr = requests.get(
             poll_url,
             headers={"Authorization": f"Token {token}"},
@@ -88,7 +99,10 @@ def run_prediction(audio_url: str, language: str, token: str) -> dict[str, Any]:
         cur = rr.json()
         status = cur.get("status")
         if status == "succeeded":
-            return cur["output"]
+            output = cur.get("output")
+            if output is None:
+                raise RuntimeError("replicate prediction succeeded but output is null")
+            return output
         if status in {"failed", "canceled"}:
             raise RuntimeError(f"replicate prediction {status}: {cur.get('error')!r}")
 
@@ -123,7 +137,7 @@ def parse_output(output: dict[str, Any]) -> list[dict[str, Any]]:
                     "text": (w.get("word") or "").strip(),
                     "start_ms": int(round(float(ws) * 1000)),
                     "end_ms": int(round(float(we) * 1000)),
-                    "confidence": float(w.get("score") or 0.0),
+                    "confidence": float(w.get("score") or 0.9),
                 }
             )
         lines.append(
@@ -190,7 +204,9 @@ def main(argv: list[str] | None = None) -> int:
         wav_path=str(args.wav),
         duration_ms=estimate_duration_ms(lines),
         lines=lines,
-        raw_confidence=float(output.get("confidence", 0.0)),
+        # Replicate's WhisperX has no top-level confidence field; hardcoded to 0.9
+        # matching the Rust client's AlignedTrack default (unwrap_or(0.9)).
+        raw_confidence=0.9,
         metadata={
             "model": "victor-upmeet/whisperx",
             "model_version": WHISPERX_VERSION,

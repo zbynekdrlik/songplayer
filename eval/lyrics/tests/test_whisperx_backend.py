@@ -128,10 +128,32 @@ def test_estimate_duration_ms_returns_zero_on_empty() -> None:
 
 
 def test_pinned_version_hash_matches_rust_constant() -> None:
-    """Mirror the constant in crates/sp-server/src/lyrics/whisperx_replicate.rs.
+    """Mirror the WHISPERX_VERSION constant in
+    crates/sp-server/src/lyrics/whisperx_replicate.rs.
 
-    If this fails, the Rust impl bumped the pin without updating the eval
-    backend — bring them back in sync.
+    Reads the Rust source at test time so this test fails if EITHER side
+    drifts, not just if the Python-side literal disagrees with itself.
     """
-    expected = "84d2ad2d6194fe98a17d2b60bef1c7f910c46b2f6fd38996ca457afd9c8abfcb"
-    assert wx.WHISPERX_VERSION == expected
+    import re
+
+    rust_src = (
+        Path(__file__).resolve().parents[3]
+        / "crates"
+        / "sp-server"
+        / "src"
+        / "lyrics"
+        / "whisperx_replicate.rs"
+    ).read_text(encoding="utf-8")
+    # Match e.g. `pub const WHISPERX_VERSION: &str =
+    #     "84d2ad2d...";`  — multi-line tolerant.
+    match = re.search(
+        r'pub const WHISPERX_VERSION\s*:\s*&str\s*=\s*"([0-9a-f]+)"\s*;',
+        rust_src,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match, "could not locate WHISPERX_VERSION in Rust source"
+    rust_value = match.group(1)
+    assert wx.WHISPERX_VERSION == rust_value, (
+        f"WHISPERX_VERSION drift: python={wx.WHISPERX_VERSION!r} "
+        f"rust={rust_value!r}"
+    )
