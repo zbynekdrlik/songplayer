@@ -164,7 +164,6 @@ impl Dispatcher {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn register_and_complete_delivers_payload() {
