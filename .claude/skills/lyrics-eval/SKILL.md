@@ -27,15 +27,27 @@ Re-read those before any structural change to this skill.
 2. **win-resolume reachable.** `mcp__win-resolume__Ping` returns success. If
    not → STOP and report.
 3. **SongPlayer HTTP API reachable.** `curl -m 5 http://10.77.9.201:8920/api/v1/status` returns 200.
-4. **REPLICATE_API_TOKEN set** in the win-resolume environment (or the local
-   shell, if the backend caller is being invoked from dev). If missing → STOP
-   and ask the user.
+4. **Backend API key set** in the environment where the backend wrapper will
+   run (typically win-resolume; the dev host for cross-checks):
+
+   | Backend | Required env var |
+   |---|---|
+   | `whisperx-large-v3` | `REPLICATE_API_TOKEN` |
+   | `gemini-3-1-flash-lite` | `OPENROUTER_API_KEY` |
+   | `assemblyai-universal-3-pro` | `ASSEMBLYAI_API_KEY` |
+
+   Only the chosen backend's key is required. Missing → STOP and ask the
+   user. Production keys are stored in the SongPlayer settings DB on
+   win-resolume; on dev they live in the shell environment.
 
 ## Phase 1 — Configure the run
 
 Ask the user (one `AskUserQuestion`):
 
-- **Backend** to test (default `whisperx-large-v3`; the production champion).
+- **Backend** to test. Three are shipped today:
+  - `whisperx-large-v3` (production champion as of CHAMPION.md)
+  - `gemini-3-1-flash-lite` (OpenRouter; reference data point)
+  - `assemblyai-universal-3-pro` (eval front-runner: 7.6 mean, 5/5 wall-pass on the 5-fixture pilot — promotion to production is a separate PR)
 - **Fixtures** subset: `all`, a category name, or a comma-separated list of
   `video_id`s.
 

@@ -41,14 +41,24 @@ def expected_cache_path(cache_dir: Path, video_id: str) -> Path:
 def download_audio_with_ytdlp(video_id: str, work_dir: Path) -> Path:
     """yt-dlp the audio (bestaudio, extracted to WAV) and return the file path."""
     out_template = str(work_dir / f"{video_id}.%(ext)s")
+    # Resolve yt-dlp + ffmpeg from production tools dir (Windows).
+    import os as _os
+
+    tools_dir = _os.environ.get(
+        "SONGPLAYER_TOOLS_DIR", r"C:\ProgramData\SongPlayer\cache\tools"
+    )
+    ytdlp = str(
+        Path(tools_dir) / ("yt-dlp.exe" if sys.platform == "win32" else "yt-dlp")
+    )
     cmd = [
-        "yt-dlp",
-        "-q",
+        ytdlp,
         "-f",
         "bestaudio",
         "-x",
         "--audio-format",
         "wav",
+        "--ffmpeg-location",
+        tools_dir,
         "-o",
         out_template,
         f"https://www.youtube.com/watch?v={video_id}",
@@ -82,7 +92,14 @@ def run_preprocess_vocals(
         "--models-dir",
         str(models_dir),
     ]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    import os as _os
+
+    env = _os.environ.copy()
+    tools_dir = env.get(
+        "SONGPLAYER_TOOLS_DIR", r"C:\ProgramData\SongPlayer\cache\tools"
+    )
+    env["PATH"] = tools_dir + _os.pathsep + env.get("PATH", "")
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr)
         raise RuntimeError(

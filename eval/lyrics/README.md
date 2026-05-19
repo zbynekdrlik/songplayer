@@ -16,7 +16,7 @@ See:
 | `manifest.json` | Pinned fixture set (24 songs with line-synced gold, ~4 per category). Rebuild via `build_manifest.py`. |
 | `build_manifest.py` | One-shot helper to (re)build the manifest from the production SongPlayer HTTP API. |
 | `audio_prep.py` | yt-dlp + Mel-Roformer + anvuew dereverb on win-resolume. Shells out to `scripts/lyrics_worker.py preprocess-vocals`. |
-| `backends/` | One Python file per backend. PR1 ships `whisperx_replicate.py` (baseline). |
+| `backends/` | One Python file per backend. Ships `whisperx_large_v3.py` (baseline / current champion), `gemini_3_1_flash_lite.py` (OpenRouter), and `assemblyai_universal_3_pro.py` (eval front-runner — 7.6 mean, 5/5 wall-pass on the 5-fixture pilot). |
 | `judge_prompt.md` | Versioned judge prompt Claude follows when scoring fixtures. |
 | `schemas/` | JSONSchemas (`manifest`, `report`, `judgment`). |
 | `reports/` | Committed per-run reports + `CHAMPION.md` + `history.md`. |
@@ -24,16 +24,26 @@ See:
 
 ## Adding a new backend
 
-Out of scope for PR1; see issue [#111](https://github.com/zbynekdrlik/songplayer/issues/111).
+1. Drop `backends/<backend_id_with_hyphens_to_underscores>.py` (e.g.
+   `backends/whisperx_large_v3.py` exposes `BACKEND_ID = "whisperx-large-v3"`)
+   following the same CLI contract as the existing wrappers: `--wav` (input
+   WAV path), `--out` (output JSON path), read API token from env. Emits the
+   documented backend-output JSON shape (`{backend_id, backend_revision,
+   wav_path, duration_ms, lines, raw_confidence, metadata}`).
+2. Read the matching env var (see Phase 0 table in
+   `.claude/skills/lyrics-eval/SKILL.md`); fail fast with a clear message if
+   missing.
+3. Optional unit test under `tests/test_<backend_id>_backend.py` exercising
+   the per-vendor parser (line splitter, response decoder, etc.) — schema
+   tests guard the output shape automatically.
+4. Run `/lyrics-eval` against the new backend on the existing manifest.
+5. Diff vs current `CHAMPION.md`. If it wins decisively, propose promotion in
+   a separate PR that edits `CHAMPION.md` and (if the production pipeline is
+   to be swapped) wires the backend into `crates/sp-server/src/lyrics/`.
 
-When the time comes:
-
-1. Drop `backends/<backend_id_with_hyphens_to_underscores>.py` (e.g. `backends/whisperx_large_v3.py` emits `BACKEND_ID = "whisperx-large-v3"`) following the same I/O contract as
-   `whisperx_large_v3.py` (`--wav`, `--out`; writes the documented JSON shape).
-2. Optional unit test under `tests/test_<backend_id>_backend.py`.
-3. Run `/lyrics-eval` against the new backend on the existing manifest.
-4. Diff vs champion. If it wins decisively, propose promotion in a separate PR
-   that edits `CHAMPION.md`.
+Dead-end backends are dropped (wrapper deleted) but their `history.md` row
+stays so future evals don't re-test them. Current dropped set:
+`nemotron-3-nano-omni`, `mimo-v2-5`, `mimo-v2-omni`, `assemblyai-universal-2`.
 
 ## Local cache
 
