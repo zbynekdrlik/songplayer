@@ -414,9 +414,52 @@ pub(crate) fn is_allowed_text_source(
     })
 }
 
+/// Returns true if `gather_sources` returned ANY text candidate, regardless
+/// of whether the gate accepts it. The asr_path branch uses this to decide
+/// whether to try ASR-based alignment on a song whose only candidates are
+/// untimed (genius, lrclib-untimed, etc.). Songs with zero candidates skip
+/// asr_path and remain marked `no_text_source`.
+pub(crate) fn has_any_text_candidate(
+    candidates: &[crate::lyrics::provider::CandidateText],
+) -> bool {
+    candidates.iter().any(|c| !c.lines.is_empty())
+}
+
 #[cfg(test)]
 #[path = "orchestrator_gate_tests.rs"]
 mod is_allowed_text_source_tests;
+
+#[cfg(test)]
+mod has_any_text_candidate_tests {
+    use super::has_any_text_candidate;
+    use crate::lyrics::provider::CandidateText;
+
+    fn c(source: &str, lines: Vec<&str>) -> CandidateText {
+        CandidateText {
+            source: source.to_string(),
+            lines: lines.into_iter().map(String::from).collect(),
+            line_timings: None,
+            has_timing: false,
+        }
+    }
+
+    #[test]
+    fn returns_false_on_empty_list() {
+        assert!(!has_any_text_candidate(&[]));
+    }
+
+    #[test]
+    fn returns_false_when_all_candidates_empty() {
+        let cands = vec![c("genius", vec![]), c("lrclib", vec![])];
+        assert!(!has_any_text_candidate(&cands));
+    }
+
+    #[test]
+    fn returns_true_when_any_candidate_has_lines() {
+        let cands = vec![c("genius", vec![]), c("lrclib", vec!["a line"])];
+        assert!(has_any_text_candidate(&cands));
+    }
+}
 
 #[cfg(test)]
 #[path = "orchestrator_tests.rs"]
