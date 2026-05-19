@@ -39,16 +39,26 @@ pub enum MergeError {
 ///
 /// Strips a leading ```json ... ``` fence if present (Claude sometimes wraps
 /// JSON output in markdown despite "Output JSON only" instructions). Then
-/// runs strict deserialization. Any `start_ms` or `end_ms` field present in
-/// the response triggers `MergeError::HasMsFields` BEFORE serde so the error
-/// message clearly says "ms fields banned" rather than serde's generic
-/// "unknown field" message. Other unknown fields trigger `MergeError::Parse`.
+/// runs strict deserialization. Any `start_ms` or `end_ms` key present in a
+/// `lines[]` object triggers `MergeError::HasMsFields` — the check is
+/// intentionally narrow (lines only) so Claude mentioning "start_ms" in the
+/// `notes` field does NOT cause a false positive. Other unknown fields trigger
+/// `MergeError::Parse`.
 pub fn parse_response(body: &str) -> Result<ClaudeMergeResult, MergeError> {
     let stripped = strip_json_fence(body);
-    if stripped.contains("\"start_ms\"") || stripped.contains("\"end_ms\"") {
-        return Err(MergeError::HasMsFields);
+    // Parse to Value first so the ms-field check can walk the structure
+    // precisely (lines[] only — the spec ban only applies there).
+    let value: serde_json::Value = serde_json::from_str(stripped).map_err(MergeError::Parse)?;
+    if let Some(lines) = value.get("lines").and_then(|v| v.as_array()) {
+        for line in lines {
+            if let Some(obj) = line.as_object() {
+                if obj.contains_key("start_ms") || obj.contains_key("end_ms") {
+                    return Err(MergeError::HasMsFields);
+                }
+            }
+        }
     }
-    serde_json::from_str(stripped).map_err(MergeError::Parse)
+    serde_json::from_value(value).map_err(MergeError::Parse)
 }
 
 fn strip_json_fence(body: &str) -> &str {
@@ -80,8 +90,10 @@ pub trait MergeChat: Send + Sync {
 
 /// Build prompt → call Claude → parse → return ClaudeMergeResult.
 ///
-/// Single retry on `MergeError::Parse` with the prompt unchanged (CLIProxyAPI
-/// is non-deterministic on JSON formatting and sometimes recovers).
+/// Single retry on `MergeError::Parse`. On retry the user prompt is appended
+/// with a stricter directive: CLIProxyAPI occasionally wraps JSON in markdown
+/// fences or prefixes prose despite the system rules; the reinforced instruction
+/// usually recovers.
 pub async fn merge<C: MergeChat + ?Sized>(
     chat: &C,
     input: &ClaudeMergeInput<'_>,
@@ -94,9 +106,16 @@ pub async fn merge<C: MergeChat + ?Sized>(
     match parse_response(&first) {
         Ok(r) => Ok(r),
         Err(MergeError::Parse(_)) => {
-            // Single retry; if it fails again, propagate so orchestrator falls back.
+            // Append a stricter directive on retry; CLIProxyAPI occasionally
+            // wraps JSON in markdown fences or prefixes prose despite the
+            // system rules. The reinforced instruction usually recovers.
+            let stricter = format!(
+                "{user}\n\nIMPORTANT: Previous response was unparseable JSON. \
+                 Output ONLY valid JSON matching the schema. No markdown fences, \
+                 no prose, no explanation."
+            );
             let second = chat
-                .chat(SYSTEM_PROMPT, &user)
+                .chat(SYSTEM_PROMPT, &stricter)
                 .await
                 .map_err(MergeError::Transport)?;
             parse_response(&second)
@@ -171,6 +190,24 @@ mod tests {
         let err = parse_response(body).expect_err("must err");
         // serde produces Parse, not HasMsFields, for non-ms unknown fields.
         assert!(matches!(err, MergeError::Parse(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn ms_keyword_in_notes_does_not_trigger_has_ms_fields() {
+        // Claude can mention 'start_ms' in the notes field (e.g. as part of
+        // an explanation). That must NOT be confused with actual ms-valued
+        // line fields (the v15-prevention rule applies to lines[*].start_ms /
+        // end_ms only).
+        let body = r#"{
+            "disagreement": false,
+            "notes": "I ignored start_ms in input — used word indices only",
+            "lines": [
+                {"text": "Hello", "start_word_idx": 0, "end_word_idx": 0}
+            ]
+        }"#;
+        let r = parse_response(body).expect("must parse");
+        assert!(!r.disagreement);
+        assert_eq!(r.lines.len(), 1);
     }
 
     use crate::lyrics::asr_path::aai_backend::AaiWord;

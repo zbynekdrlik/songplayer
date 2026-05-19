@@ -137,7 +137,8 @@ impl LyricsWorker {
 
         let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
         let result =
-            crate::lyrics::asr_path::run(&aai, ai_client.as_ref(), &wav, &tier1_cands, None).await;
+            crate::lyrics::asr_path::run(&aai, ai_client.as_ref(), &wav, &tier1_cands, Some("en"))
+                .await;
 
         match result {
             Ok(crate::lyrics::asr_path::AsrOutput::Merged { lines, source })
@@ -215,17 +216,34 @@ impl LyricsWorker {
                 warn!(
                     youtube_id = %youtube_id,
                     reason,
-                    "asr_path: quarantining — empty transcript or fallback"
+                    "asr_path: quarantining as asr_gap"
                 );
-                if let Err(e) = crate::db::models::mark_unsupported_source(
+                if let Err(e) = crate::db::models::quarantine_video_lyrics(
                     &self.pool,
                     video_id,
+                    &self.cache_dir,
+                    reason,
                     LYRICS_PIPELINE_VERSION,
                 )
                 .await
                 {
-                    warn!("worker: mark_unsupported_source: {e}");
+                    warn!("worker: quarantine_video_lyrics: {e}");
                 }
+            }
+            Err(crate::lyrics::asr_path::AsrError::QuotaExhausted) => {
+                warn!(
+                    youtube_id = %youtube_id,
+                    "asr_path: AAI quota exhausted — surface to operator"
+                );
+                // Emit a stage event so dashboard can highlight quota state.
+                // The frontend displays "stage" string; "asr_quota_exhausted"
+                // is a distinct label operators can grep for.
+                let _ = self.events_tx.send(ServerMsg::LyricsProcessingStage {
+                    video_id,
+                    youtube_id: youtube_id.to_string(),
+                    stage: "asr_quota_exhausted".to_string(),
+                    provider: Some("assemblyai".to_string()),
+                });
             }
             Err(e) => {
                 warn!(

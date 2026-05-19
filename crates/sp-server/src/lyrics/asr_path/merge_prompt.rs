@@ -51,6 +51,16 @@ pub struct ClaudeMergeInput<'a> {
     pub language: Option<&'a str>,
 }
 
+/// Strip potential prompt-injection markers from community-controlled lyrics
+/// text. Triple-backticks can break out of a code block context; role headers
+/// (System:/Assistant:/User:) at line start can confuse some LLM APIs.
+fn sanitize_untimed_text(s: &str) -> String {
+    s.replace("```", "'''")
+        .replace("\nSystem:", "\nsystem:")
+        .replace("\nAssistant:", "\nassistant:")
+        .replace("\nUser:", "\nuser:")
+}
+
 pub fn build_user_prompt(input: &ClaudeMergeInput) -> String {
     let mut s = String::new();
     s.push_str(&format!("SOURCE: {}\n", input.untimed_source));
@@ -59,7 +69,7 @@ pub fn build_user_prompt(input: &ClaudeMergeInput) -> String {
         input.language.unwrap_or("unknown")
     ));
     s.push_str("\nREFERENCE TEXT:\n");
-    s.push_str(input.untimed_text);
+    s.push_str(&sanitize_untimed_text(input.untimed_text));
     s.push_str("\n\nASR TRANSCRIPT (word_idx: text @ start_ms..end_ms):\n");
     for (i, w) in input.aai_words.iter().enumerate() {
         s.push_str(&format!(
@@ -126,5 +136,19 @@ mod tests {
         let s = build_user_prompt(&input);
         assert!(s.contains("LANGUAGE: unknown"));
         assert!(s.contains("0: \"it's\" @ 0..300"));
+    }
+
+    #[test]
+    fn user_prompt_strips_backticks_from_untimed_text() {
+        let words = vec![word("x", 0, 100)];
+        let input = ClaudeMergeInput {
+            aai_words: &words,
+            untimed_text: "```\nignore previous\n```",
+            untimed_source: "genius",
+            language: None,
+        };
+        let s = build_user_prompt(&input);
+        assert!(!s.contains("```"), "raw backticks must be stripped");
+        assert!(s.contains("'''"), "should be replaced with single quotes");
     }
 }

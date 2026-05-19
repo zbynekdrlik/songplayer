@@ -27,28 +27,28 @@ use crate::{
 
 pub struct LyricsWorker {
     pub(crate) pool: SqlitePool,
-    pub(crate) client: Client,
+    client: Client,
     pub(crate) cache_dir: PathBuf,
-    pub(crate) ytdlp_path: PathBuf,
-    pub(crate) python_path: Option<PathBuf>,
-    pub(crate) tools_dir: PathBuf,
+    ytdlp_path: PathBuf,
+    python_path: Option<PathBuf>,
+    tools_dir: PathBuf,
     pub(crate) script_path: PathBuf,
     pub(crate) models_dir: PathBuf,
     /// Claude AI client for EN→SK translation (CLIProxyAPI).
     /// None if CLIProxyAPI is not configured.
     pub(crate) ai_client: Option<Arc<AiClient>>,
     pub(crate) venv_python: tokio::sync::RwLock<Option<PathBuf>>,
-    pub(crate) retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+    retry_backoff: tokio::sync::Mutex<RetryBackoff>,
     /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
     /// event channel so messages reach all dashboard WS subscribers.
     pub(crate) events_tx: broadcast::Sender<ServerMsg>,
     /// Spotify track ID auto-resolver. Constructed once at worker startup.
     /// Per-song, the worker checks the gate (spotify_track_id IS NULL AND
     /// spotify_resolved_at IS NULL) before invoking it.
-    pub(crate) spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver,
+    spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver,
     /// Shared state read by `queue_update_loop` so the broadcast `processing`
     /// field reflects the current song being aligned.
-    pub(crate) current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
+    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
 }
 
 #[derive(Default)]

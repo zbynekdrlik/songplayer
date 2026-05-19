@@ -124,6 +124,52 @@ impl AaiBackend {
         }
     }
 
+    /// Retry helper: up to 3 extra attempts (5 s / 20 s / 60 s backoff) on
+    /// transient HTTP transport failures (`AaiError::Http`). Non-transient
+    /// errors (QuotaExhausted, Parse, Remote, UnexpectedStatus, Timeout)
+    /// bubble immediately without retry.
+    async fn send_with_retry<F, Fut, T>(mut f: F) -> Result<T, AaiError>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, AaiError>>,
+    {
+        let backoffs = [
+            Duration::from_secs(5),
+            Duration::from_secs(20),
+            Duration::from_secs(60),
+        ];
+        let mut last_err: Option<AaiError> = None;
+        for (attempt, backoff) in std::iter::once(Duration::ZERO)
+            .chain(backoffs.iter().copied())
+            .enumerate()
+        {
+            if attempt > 0 {
+                tokio::time::sleep(backoff).await;
+            }
+            match f().await {
+                Ok(v) => return Ok(v),
+                // QuotaExhausted is NOT transient — bubble immediately.
+                Err(AaiError::QuotaExhausted) => return Err(AaiError::QuotaExhausted),
+                // Semantic errors — not retried.
+                Err(
+                    e @ (AaiError::Parse(_)
+                    | AaiError::Remote(_)
+                    | AaiError::UnexpectedStatus(_)
+                    | AaiError::Timeout(_)),
+                ) => return Err(e),
+                // Http (transport failure / 5xx) — retry.
+                Err(e @ AaiError::Http(_)) => {
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        "AAI HTTP transient error: {e} — retrying"
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| AaiError::Http("retry budget exhausted".into())))
+    }
+
     pub async fn transcribe(&self, audio_path: &Path) -> Result<AaiTranscript, AaiError> {
         let bytes = tokio::fs::read(audio_path)
             .await
@@ -134,29 +180,32 @@ impl AaiBackend {
     }
 
     async fn upload(&self, bytes: Vec<u8>) -> Result<String, AaiError> {
-        let resp = self
-            .http
-            .post(format!("{}/upload", self.api_base))
-            .header("authorization", &self.api_key)
-            .timeout(UPLOAD_TIMEOUT)
-            .body(bytes)
-            .send()
-            .await
-            .map_err(|e| AaiError::Http(format!("upload send: {e}")))?;
-        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(AaiError::QuotaExhausted);
-        }
-        let resp = resp
-            .error_for_status()
-            .map_err(|e| AaiError::Http(format!("upload status: {e}")))?;
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AaiError::Http(format!("upload json: {e}")))?;
-        body.get("upload_url")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| AaiError::Http("upload response missing upload_url".into()))
+        Self::send_with_retry(|| async {
+            let resp = self
+                .http
+                .post(format!("{}/upload", self.api_base))
+                .header("authorization", &self.api_key)
+                .timeout(UPLOAD_TIMEOUT)
+                .body(bytes.clone())
+                .send()
+                .await
+                .map_err(|e| AaiError::Http(format!("upload send: {e}")))?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                return Err(AaiError::QuotaExhausted);
+            }
+            let resp = resp
+                .error_for_status()
+                .map_err(|e| AaiError::Http(format!("upload status: {e}")))?;
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| AaiError::Http(format!("upload json: {e}")))?;
+            body.get("upload_url")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| AaiError::Http("upload response missing upload_url".into()))
+        })
+        .await
     }
 
     async fn create_transcript(&self, audio_url: &str) -> Result<String, AaiError> {
@@ -168,29 +217,32 @@ impl AaiBackend {
             "speaker_labels": false,
             "language_detection": true,
         });
-        let resp = self
-            .http
-            .post(format!("{}/transcript", self.api_base))
-            .header("authorization", &self.api_key)
-            .timeout(CONTROL_TIMEOUT)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| AaiError::Http(format!("create send: {e}")))?;
-        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(AaiError::QuotaExhausted);
-        }
-        let resp = resp
-            .error_for_status()
-            .map_err(|e| AaiError::Http(format!("create status: {e}")))?;
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AaiError::Http(format!("create json: {e}")))?;
-        body.get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| AaiError::Http("create response missing id".into()))
+        Self::send_with_retry(|| async {
+            let resp = self
+                .http
+                .post(format!("{}/transcript", self.api_base))
+                .header("authorization", &self.api_key)
+                .timeout(CONTROL_TIMEOUT)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| AaiError::Http(format!("create send: {e}")))?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                return Err(AaiError::QuotaExhausted);
+            }
+            let resp = resp
+                .error_for_status()
+                .map_err(|e| AaiError::Http(format!("create status: {e}")))?;
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| AaiError::Http(format!("create json: {e}")))?;
+            body.get("id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| AaiError::Http("create response missing id".into()))
+        })
+        .await
     }
 
     async fn poll_until_done(&self, transcript_id: &str) -> Result<AaiTranscript, AaiError> {
@@ -201,24 +253,26 @@ impl AaiBackend {
                 return Err(AaiError::Timeout(POLL_TIMEOUT_S));
             }
             tokio::time::sleep(POLL_INTERVAL).await;
-            let resp = self
-                .http
-                .get(&url)
-                .header("authorization", &self.api_key)
-                .timeout(CONTROL_TIMEOUT)
-                .send()
-                .await
-                .map_err(|e| AaiError::Http(format!("poll send: {e}")))?;
-            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                return Err(AaiError::QuotaExhausted);
-            }
-            let resp = resp
-                .error_for_status()
-                .map_err(|e| AaiError::Http(format!("poll status: {e}")))?;
-            let text = resp
-                .text()
-                .await
-                .map_err(|e| AaiError::Http(format!("poll body: {e}")))?;
+            let text = Self::send_with_retry(|| async {
+                let resp = self
+                    .http
+                    .get(&url)
+                    .header("authorization", &self.api_key)
+                    .timeout(CONTROL_TIMEOUT)
+                    .send()
+                    .await
+                    .map_err(|e| AaiError::Http(format!("poll send: {e}")))?;
+                if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    return Err(AaiError::QuotaExhausted);
+                }
+                let resp = resp
+                    .error_for_status()
+                    .map_err(|e| AaiError::Http(format!("poll status: {e}")))?;
+                resp.text()
+                    .await
+                    .map_err(|e| AaiError::Http(format!("poll body: {e}")))
+            })
+            .await?;
             let raw: serde_json::Value = serde_json::from_str(&text).map_err(AaiError::Parse)?;
             let status = raw
                 .get("status")

@@ -29,27 +29,40 @@ pub const SOURCE_FALLBACK: &str = "asr:aai-u3-pro";
 
 #[derive(Debug)]
 pub enum AsrOutput {
+    /// Claude-merge produced usable line splits referencing AAI words.
+    /// Persisted with source = "asr:aai-u3-pro+claude-merge".
     Merged {
         lines: Vec<LyricsLine>,
         source: &'static str,
     },
+    /// Claude declined the merge (disagreement / malformed / refusal) or the
+    /// resolver rejected its output. Lines come from raw AAI silence-gap split.
+    /// Persisted with source = "asr:aai-u3-pro".
     Fallback {
         lines: Vec<LyricsLine>,
         source: &'static str,
     },
-    Quarantine {
-        reason: &'static str,
-    },
+    /// No usable output — empty transcript or empty fallback. Worker quarantines
+    /// the row as `asr_gap`. The reason string is logged + persisted in the
+    /// audit trail.
+    Quarantine { reason: &'static str },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum AsrError {
+    /// HTTP 429 from AAI — quota cap reached. Surfaced to operator via
+    /// dashboard event; the song stays unprocessed for retry on next worker tick.
     #[error("AAI quota exhausted — surface to user, no row write")]
     QuotaExhausted,
+    /// Underlying AAI failure — transport / parse / remote `status: error`.
     #[error("AAI transcription failed: {0}")]
     Aai(#[from] AaiError),
+    /// Claude HTTP transport failed (network / 5xx). Orchestrator falls back
+    /// to raw AAI silence-gap split.
     #[error("Claude merge transport failed: {0}")]
     MergeTransport(String),
+    /// No candidate with non-empty lines — caller should not have entered
+    /// asr_path. Indicates a routing bug upstream.
     #[error("no usable untimed text candidate found")]
     NoCandidate,
 }
