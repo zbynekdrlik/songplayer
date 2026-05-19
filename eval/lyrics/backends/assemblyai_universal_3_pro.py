@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""assemblyai_universal_2.py — AssemblyAI Universal-2 dedicated ASR backend.
+"""assemblyai_universal_3_pro.py — AssemblyAI Universal-3 Pro flagship ASR.
 
 Dedicated speech-to-text (NOT an audio-LLM): the model returns word-level
 timestamps from its acoustic alignment directly, so timing precision is
@@ -7,17 +7,17 @@ intrinsic rather than emitted as `[mm:ss.mmm]` strings by an LLM.
 
 Three-step API:
   1. POST /v2/upload  (raw bytes; returns short-lived upload_url)
-  2. POST /v2/transcript  ({audio_url, speech_model: "universal-2", ...})
+  2. POST /v2/transcript  ({audio_url, speech_models: ["universal-3-pro"], ...})
   3. GET /v2/transcript/{id}  poll until status == "completed" | "error"
 
 Line-grouping: AssemblyAI returns `words[]` only (no sentence/line
 boundaries native). We split into lines on silence gaps > LINE_GAP_MS.
 
-Pricing as of 2026-05-19: $0.15/hr (~$0.01 per 4-minute song) with
+Pricing as of 2026-05-19: $0.21/hr (~$0.014 per 4-minute song) with
 185 free hours per account.
 
 Usage:
-    python eval/lyrics/backends/assemblyai_universal_2.py \\
+    python eval/lyrics/backends/assemblyai_universal_3_pro.py \\
         --wav /abs/path/vocal16k.wav \\
         --out /tmp/result.json
 
@@ -35,10 +35,10 @@ from typing import Any
 
 import requests
 
-BACKEND_ID = "assemblyai-universal-2"
+BACKEND_ID = "assemblyai-universal-3-pro"
 BACKEND_REVISION = 1
 API_BASE = "https://api.assemblyai.com/v2"
-SPEECH_MODEL = "universal-2"
+SPEECH_MODEL = "universal-3-pro"
 
 # Silence gap threshold for "new line" — typical lyric line break.
 # Most sung lines have <500 ms gaps within them and >800 ms between them.
