@@ -1,0 +1,97 @@
+{
+  "run_id": "2026-05-19T06:06:09Z",
+  "backend_id": "whisperx-large-v3",
+  "backend_revision": 1,
+  "judge_model": "claude-opus-4-7",
+  "judge_prompt_revision": 1,
+  "fixtures_run": 5,
+  "fixtures_passed_wall": 1,
+  "aggregate": {
+    "mean_score": 4.4,
+    "median_score": 4,
+    "scores_by_category": {
+      "dense_vocal": 5.0,
+      "reverb_heavy": 4.0,
+      "instrumental_breaks": 3.0,
+      "multi_language": 3.0,
+      "clean_pop": 7.0
+    }
+  },
+  "per_fixture": [
+    {
+      "video_id": "5JW87KKDTcU",
+      "score": 5,
+      "verdict": "partial",
+      "wer_estimate": 0.4,
+      "line_timing_assessment": "Median absolute offset 163ms (under 400ms), mean 287ms — timing is acceptable on the lines that matched. No systematic drift direction.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.597,
+      "wall_acceptable": false,
+      "reasoning": "WhisperX produced 42 lines against 62 gold (coverage 60%, 25 gold lines missing). Timing on matched lines is acceptable for a wall display. But losing 40% of the gold lines means significant chunks of the song would have no on-screen lyrics. Not wall-acceptable for production.",
+      "judged_at": "2026-05-19T06:06:09Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "p74PDWAFk0A",
+      "score": 4,
+      "verdict": "partial",
+      "wer_estimate": 0.39,
+      "line_timing_assessment": "Median absolute offset 420ms (just over the 400ms wall-acceptable threshold), mean 494ms. Over-segmentation: 149 candidate lines against 137 gold means whisperx is splitting some gold lines into multiple shorter segments.",
+      "hallucination_count": 1,
+      "hallucination_details": "Single cluster of 'let's go.' x4 at 341.7s — a producer ad-lib or backing-vocal phrase whisperx interpreted as a repeated lyric line.",
+      "coverage_pct": 0.613,
+      "wall_acceptable": false,
+      "reasoning": "Long song (8 min, reverb-heavy). Heavy over-segmentation (65 extra candidate lines past the matched 84), median timing offset just over wall-acceptable threshold, plus a hallucination cluster. Coverage of gold is 61% but the 65 extras would clutter the wall.",
+      "judged_at": "2026-05-19T06:06:09Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "s8o2YuTBYk4",
+      "score": 3,
+      "verdict": "hallucination",
+      "wer_estimate": 0.49,
+      "line_timing_assessment": "Median absolute offset 434ms, mean 492ms — both over the 400ms wall-acceptable threshold. Half the gold lines have no matching candidate (49% missing).",
+      "hallucination_count": 1,
+      "hallucination_details": "Cluster of 'i'm gonna praise you with my hands raise' x8 starting at 122.2s — whisperx fell into a loop on a repeated chant section. 8 identical lines in a row.",
+      "coverage_pct": 0.512,
+      "wall_acceptable": false,
+      "reasoning": "Instrumental-break category exposes the failure mode: when the vocal track is sparse, whisperx hallucinates by repeating a recently-heard phrase. The 8-line repetition cluster would be very visible on the wall. Combined with 49% missing coverage, this is unusable for production.",
+      "judged_at": "2026-05-19T06:06:09Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "tCivrrU4SSM",
+      "score": 3,
+      "verdict": "miss",
+      "wer_estimate": 0.57,
+      "line_timing_assessment": "Median absolute offset 1094ms, mean 977ms — far over the 400ms threshold. Lines are arriving on the wall over a second after the singer says them, which is the most visible failure mode for a karaoke display.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.426,
+      "wall_acceptable": false,
+      "reasoning": "Multi-language category. WhisperX produced only 24 lines against 47 gold (49% loss) and the lines it did produce drift over a second behind. No hallucination clusters but the timing alone makes this unusable on the wall.",
+      "judged_at": "2026-05-19T06:06:09Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "YbGFYaA0SbY",
+      "score": 7,
+      "verdict": "match",
+      "wer_estimate": 0.15,
+      "line_timing_assessment": "Median absolute offset 256ms, mean 354ms — both comfortably under the 400ms wall-acceptable threshold.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.852,
+      "wall_acceptable": true,
+      "reasoning": "Clean-pop track with isolated vocals (post-dereverb) — whisperx's sweet spot. 85% coverage, 56 candidate lines vs 54 gold (close 1:1), no hallucinations, timing within tolerance. This is the only fixture in this baseline that would actually ship to the wall.",
+      "judged_at": "2026-05-19T06:06:09Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    }
+  ]
+}

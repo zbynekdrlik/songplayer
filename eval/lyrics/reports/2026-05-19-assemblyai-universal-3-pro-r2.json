@@ -1,0 +1,97 @@
+{
+  "run_id": "2026-05-19T13:30:00Z",
+  "backend_id": "assemblyai-universal-3-pro",
+  "backend_revision": 2,
+  "judge_model": "claude-opus-4-7",
+  "judge_prompt_revision": 1,
+  "fixtures_run": 5,
+  "fixtures_passed_wall": 5,
+  "aggregate": {
+    "mean_score": 7.6,
+    "median_score": 7,
+    "scores_by_category": {
+      "dense_vocal": 7.0,
+      "reverb_heavy": 7.0,
+      "instrumental_breaks": 8.0,
+      "multi_language": 9.0,
+      "clean_pop": 7.0
+    }
+  },
+  "per_fixture": [
+    {
+      "video_id": "5JW87KKDTcU",
+      "score": 7,
+      "verdict": "match",
+      "wer_estimate": 0.2,
+      "line_timing_assessment": "Median absolute offset 200ms, signed median -27ms. Comfortably inside wall tolerance.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.71,
+      "wall_acceptable": true,
+      "reasoning": "Dense_vocal fixture. r2's tighter LINE_GAP_MS=400 nearly doubled coverage (37% → 71%) without timing regression. Zero hallucinations, sub-30ms drift. Score 7 — first wall-acceptable result on this category in the eval (whisperx 5, Gemini 6, MiMo 4 all failed).",
+      "judged_at": "2026-05-19T13:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "p74PDWAFk0A",
+      "score": 7,
+      "verdict": "match",
+      "wer_estimate": 0.25,
+      "line_timing_assessment": "Median absolute offset 386ms — JUST inside the ±400ms wall gate. Signed median +159ms. Big improvement from r1 (721ms median_abs).",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.635,
+      "wall_acceptable": true,
+      "reasoning": "Reverb_heavy 8-minute fixture — the hardest in the pilot. r2's tighter line-splitter pulled median timing from 721ms to 386ms (inside gate) AND raised coverage 40% → 64%. The reverb in this specific recording still scatters word boundaries; 64% coverage means ~50 gold lines still unmatched, likely the dense chorus where AAI consolidates. Score 7 — first wall-acceptable reverb_heavy result in the entire eval.",
+      "judged_at": "2026-05-19T13:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "s8o2YuTBYk4",
+      "score": 8,
+      "verdict": "match",
+      "wer_estimate": 0.15,
+      "line_timing_assessment": "Median absolute offset 188ms, signed median -47ms — essentially perfect.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.854,
+      "wall_acceptable": true,
+      "reasoning": "Instrumental_breaks. 85% coverage with sub-50ms drift, zero hallucinations. Whisperx had a x8 repetition cluster on this exact song; Gemini and MiMo also struggled. AAI Universal-3 Pro is clean. Score 8.",
+      "judged_at": "2026-05-19T13:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "tCivrrU4SSM",
+      "score": 9,
+      "verdict": "match",
+      "wer_estimate": 0.1,
+      "line_timing_assessment": "Median absolute offset 174ms, signed median +95ms.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.915,
+      "wall_acceptable": true,
+      "reasoning": "Multi_language. 92% coverage — the best result on the toughest category in the entire eval. Whisperx scored 3, Gemini 4, MiMo 4, all failing both coverage and timing. AAI Universal-3 Pro scores 9 here — sub-200ms drift, near-complete line coverage, zero hallucinations. Single biggest category win in the project.",
+      "judged_at": "2026-05-19T13:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "YbGFYaA0SbY",
+      "score": 7,
+      "verdict": "match",
+      "wer_estimate": 0.22,
+      "line_timing_assessment": "Median absolute offset 178ms, signed median -123ms.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.741,
+      "wall_acceptable": true,
+      "reasoning": "Clean_pop. 74% coverage with sub-130ms drift. Whisperx scored 7 on this fixture (its strong category) — AAI r2 matches that score with slightly tighter timing. Note: r2 cand_count=76 against gold 54; some over-segmentation (the 400ms gap occasionally splits mid-line). A LINE_GAP_MS=500 may be the optimum.",
+      "judged_at": "2026-05-19T13:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    }
+  ]
+}
