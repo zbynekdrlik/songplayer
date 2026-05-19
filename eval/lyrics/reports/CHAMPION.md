@@ -11,5 +11,4 @@
 
 | Date | Backend | Revision | Decision | Reason |
 |------|---------|----------|----------|--------|
-| 2026-05-18 | whisperx-large-v3 | 1 | initial baseline | only production backend at the time the harness was built |
-| 2026-05-19 | whisperx-large-v3 | 1 | baseline measured | first /lyrics-eval run committed (5-fixture pass); mean 4.4 sets the bar that #111 / #112 candidate backends must clear |
+| 2026-05-19 | whisperx-large-v3 | 1 | initial baseline measured | only production backend at harness build time; first /lyrics-eval run (5-fixture pass) set the bar that #111 / #112 candidate backends must clear |

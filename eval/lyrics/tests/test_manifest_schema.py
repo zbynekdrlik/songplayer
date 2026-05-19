@@ -43,7 +43,7 @@ def test_invalid_manifest_rejected_for_bad_category(schema: dict[str, Any]) -> N
             {
                 "video_id": "BW_vUblj_RA",
                 "category": "not_in_enum",
-                "gold_source": "lrclib_synced",
+                "gold_source": "lrclib",
                 "gold_lines": [{"text": "hello", "start_ms": 0, "end_ms": 1000}],
             }
         ],

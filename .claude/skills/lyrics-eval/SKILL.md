@@ -45,6 +45,8 @@ Load `eval/lyrics/manifest.json`. Validate against
 Load the current `eval/lyrics/reports/CHAMPION.md` to know what to diff against
 at the end.
 
+- **Backend-id ↔ filename convention:** the file at `eval/lyrics/backends/X.py` exposes `BACKEND_ID = "X-with-underscores-replaced-by-hyphens"` (e.g. `whisperx_large_v3.py` → `BACKEND_ID = "whisperx-large-v3"`). Filenames use underscores so Python can import them; report labels use hyphens because that is what is persisted in CHAMPION.md and history.md.
+
 ## Phase 2 — Per-fixture loop
 
 For each selected fixture, in manifest order:
@@ -59,13 +61,13 @@ For each selected fixture, in manifest order:
 2. **Backend call.** On win-resolume:
    ```
    mcp__win-resolume__Shell:
-       python <repo>\eval\lyrics\backends\<backend_id>.py \
+       python <repo>\eval\lyrics\backends\<backend_id_with_hyphens_to_underscores>.py \
            --wav <wav_path> \
            --out C:\ProgramData\SongPlayer\eval-cache\<id>_result.json
    ```
    On failure: if Claude has reason to believe the backend prompt could be
    tuned (e.g. timeouts on dense chorus, repetition loops, malformed JSON),
-   propose a concrete edit to `eval/lyrics/backends/<backend_id>.py`, apply
+   propose a concrete edit to `eval/lyrics/backends/<backend_id_with_hyphens_to_underscores>.py`, apply
    it, and retry once. Per `feedback_eval_iteration_python_not_rust.md`, Claude
    has free hands here.
 3. **Judge.** Read the result JSON + the fixture's `gold_lines`. Apply the

@@ -59,7 +59,7 @@ songplayer/
 - **Skill** (`.claude/skills/lyrics-eval/SKILL.md`) — instructions Claude follows when the user invokes `/lyrics-eval`. Lays out preconditions, the per-fixture flow, the judge prompt template, and the report contract.
 - **Fixture manifest** (`manifest.json`) — pinned list of ~30 songs with gold lyrics + line timings, organised by category.
 - **Audio prep** (`audio_prep.py`) — yt-dlp + Mel-Roformer + anvuew dereverb, cached on win-resolume.
-- **Backend caller** (`backends/<id>.py`) — one standalone Python file per backend; reads vocal WAV path, calls the model, writes candidate output JSON. Claude can edit the file mid-eval to tune prompts.
+- **Backend caller** (`backends/<backend_id_with_hyphens_to_underscores>.py`) — one standalone Python file per backend; reads vocal WAV path, calls the model, writes candidate output JSON. Claude can edit the file mid-eval to tune prompts.
 - **Judge** — Claude itself, applied via the versioned judge prompt in `judge_prompt.md`.
 - **Report writer** — Claude writes per-run JSON + Markdown twin, appends one row to `history.md`, and rewrites `CHAMPION.md` when the user approves a promotion.
 
@@ -79,7 +79,7 @@ When the user types `/lyrics-eval`, Claude follows `SKILL.md`:
 3. **Load** the manifest + the prior champion report for diff context.
 4. **For each fixture:**
    1. `python eval/lyrics/audio_prep.py --video-id <id>` → cached vocal-stem WAV path on win-resolume.
-   2. `python eval/lyrics/backends/<backend>.py --wav <path> --out <result.json>` → candidate output JSON. If output looks off, Claude is free to edit the backend file (system message, retry rule, chunk size), re-run on the failing fixture, and continue.
+   2. `python eval/lyrics/backends/<backend_id_with_hyphens_to_underscores>.py --wav <path> --out <result.json>` → candidate output JSON. If output looks off, Claude is free to edit the backend file (system message, retry rule, chunk size), re-run on the failing fixture, and continue.
    3. Claude reads the candidate JSON + the gold lines/timings from the manifest, applies the `judge_prompt.md` template, and emits a structured judgment (score 0–10, verdict, hallucination details, wall_acceptable boolean, reasoning).
    4. Print a per-fixture one-liner so the user can intervene if a judgment looks wrong.
 5. **Aggregate** per-fixture judgments → mean score, median score, scores-by-category, wall-pass count.
@@ -131,7 +131,7 @@ Path always returned as a win-resolume FS absolute path. Subsequent backend call
 
 `C:\ProgramData\SongPlayer\eval-cache\` is created on first run. Not committed to the repo; the manifest is the source of truth and the cache is rebuildable from yt-dlp.
 
-## 7. Backend caller (`eval/lyrics/backends/<id>.py`)
+## 7. Backend caller (`eval/lyrics/backends/<backend_id_with_hyphens_to_underscores>.py`)
 
 One Python file per backend. PR1 ships exactly one: `whisperx_replicate.py`.
 
@@ -197,7 +197,8 @@ Claude applies the prompt in `eval/lyrics/judge_prompt.md` and emits a structure
   "wall_acceptable": false,
   "reasoning": "Most lines match gold within timing tolerance; the hallucination cluster in the bridge would show on the wall as 12 wrong lines. Reject for production until prompt tuned.",
   "judged_at": "2026-05-18T14:23:00Z",
-  "judge_model": "claude-opus-4-7"
+  "judge_model": "claude-opus-4-7",
+  "judge_prompt_revision": 1
 }
 ```
 

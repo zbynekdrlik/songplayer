@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from eval.lyrics.backends import whisperx_replicate as wx
+from eval.lyrics.backends import whisperx_large_v3 as wx
 
 
 def test_parse_replicate_output_to_lines() -> None:

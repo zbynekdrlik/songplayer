@@ -75,6 +75,7 @@ Emit exactly one JSON object with these keys:
 ## Updating this prompt
 
 When this prompt changes in a way that materially affects judgments, bump the
-revision number in this file's header AND in the `judge_prompt_revision`
-default in `.claude/skills/lyrics-eval/SKILL.md`. Old reports remain valid
-under their original revision.
+revision integer in this file's header (`Revision N`). Claude reads the
+revision directly from the header and threads it through each judgment's
+`judge_prompt_revision` field. Old reports stay valid under their original
+revision.

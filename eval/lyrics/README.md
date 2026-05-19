@@ -13,7 +13,7 @@ See:
 
 | Path | Purpose |
 |------|---------|
-| `manifest.json` | Pinned fixture set (~30 songs with line-synced gold). Rebuild via `build_manifest.py`. |
+| `manifest.json` | Pinned fixture set (24 songs with line-synced gold, ~4 per category). Rebuild via `build_manifest.py`. |
 | `build_manifest.py` | One-shot helper to (re)build the manifest from the production SongPlayer HTTP API. |
 | `audio_prep.py` | yt-dlp + Mel-Roformer + anvuew dereverb on win-resolume. Shells out to `scripts/lyrics_worker.py preprocess-vocals`. |
 | `backends/` | One Python file per backend. PR1 ships `whisperx_replicate.py` (baseline). |
@@ -28,8 +28,8 @@ Out of scope for PR1; see issue [#111](https://github.com/zbynekdrlik/songplayer
 
 When the time comes:
 
-1. Drop `backends/<backend_id>.py` following the same I/O contract as
-   `whisperx_replicate.py` (`--wav`, `--out`; writes the documented JSON shape).
+1. Drop `backends/<backend_id_with_hyphens_to_underscores>.py` (e.g. `backends/whisperx_large_v3.py` emits `BACKEND_ID = "whisperx-large-v3"`) following the same I/O contract as
+   `whisperx_large_v3.py` (`--wav`, `--out`; writes the documented JSON shape).
 2. Optional unit test under `tests/test_<backend_id>_backend.py`.
 3. Run `/lyrics-eval` against the new backend on the existing manifest.
 4. Diff vs champion. If it wins decisively, propose promotion in a separate PR
@@ -42,6 +42,12 @@ When the time comes:
 win-resolume. This path is rebuildable; the cache dir is `.gitignore`d at
 the repo root (`eval/lyrics/.eval-cache/`) so any local-dev mirror does not
 pollute git.
+
+The repo-relative `eval/lyrics/.eval-cache/` `.gitignore` entry guards a
+local-dev mirror only — it does NOT guard `C:\ProgramData\SongPlayer\eval-cache\`
+on win-resolume (that path is outside the repo tree, no gitignore needed).
+If you run `audio_prep.py` locally with `--cache-dir`, use the dotted
+`eval/lyrics/.eval-cache/` path so the entry matches.
 
 ## CI
 
