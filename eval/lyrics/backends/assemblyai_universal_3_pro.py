@@ -36,13 +36,14 @@ from typing import Any
 import requests
 
 BACKEND_ID = "assemblyai-universal-3-pro"
-BACKEND_REVISION = 1
+BACKEND_REVISION = 2  # r1 used LINE_GAP_MS=800 → coverage 37-70%; r2 uses 400 → expected 70-90%
 API_BASE = "https://api.assemblyai.com/v2"
 SPEECH_MODEL = "universal-3-pro"
 
 # Silence gap threshold for "new line" — typical lyric line break.
-# Most sung lines have <500 ms gaps within them and >800 ms between them.
-LINE_GAP_MS = 800
+# r1 used 800 ms but sung lyric lines split on shorter pauses; gold annotators
+# split at ~300-500 ms. r2 dropped to 400 ms to align with LRClib line cadence.
+LINE_GAP_MS = 400
 
 # Poll cadence + overall timeout.
 POLL_INTERVAL_S = 2.0
