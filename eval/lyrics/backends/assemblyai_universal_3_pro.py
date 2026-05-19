@@ -36,7 +36,9 @@ from typing import Any
 import requests
 
 BACKEND_ID = "assemblyai-universal-3-pro"
-BACKEND_REVISION = 2  # r1 used LINE_GAP_MS=800 → coverage 37-70%; r2 uses 400 → expected 70-90%
+BACKEND_REVISION = (
+    2  # r1 used LINE_GAP_MS=800 → coverage 37-70%; r2 uses 400 → expected 70-90%
+)
 API_BASE = "https://api.assemblyai.com/v2"
 SPEECH_MODEL = "universal-3-pro"
 
