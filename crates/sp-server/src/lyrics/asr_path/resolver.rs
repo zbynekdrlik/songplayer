@@ -9,9 +9,9 @@ use sp_core::lyrics::LyricsLine;
 
 use crate::lyrics::asr_path::aai_backend::AaiTranscript;
 use crate::lyrics::asr_path::claude_merge::ClaudeMergeResult;
-use crate::lyrics::asr_path::sanitize::sanitize_lines;
 #[cfg(test)]
 use crate::lyrics::asr_path::sanitize::MIN_LINE_DURATION_MS;
+use crate::lyrics::asr_path::sanitize::sanitize_lines;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
