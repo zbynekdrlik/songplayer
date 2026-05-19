@@ -1,0 +1,97 @@
+{
+  "run_id": "2026-05-19T07:30:00Z",
+  "backend_id": "gemini-3-1-flash-lite",
+  "backend_revision": 1,
+  "judge_model": "claude-opus-4-7",
+  "judge_prompt_revision": 1,
+  "fixtures_run": 5,
+  "fixtures_passed_wall": 0,
+  "aggregate": {
+    "mean_score": 5.0,
+    "median_score": 5,
+    "scores_by_category": {
+      "dense_vocal": 6.0,
+      "reverb_heavy": 4.0,
+      "instrumental_breaks": 5.0,
+      "multi_language": 4.0,
+      "clean_pop": 6.0
+    }
+  },
+  "per_fixture": [
+    {
+      "video_id": "5JW87KKDTcU",
+      "score": 6,
+      "verdict": "partial",
+      "wer_estimate": 0.23,
+      "line_timing_assessment": "Median absolute offset 164ms (well under 400ms wall threshold), mean 209ms. Timing is clearly better than whisperx on this fixture.",
+      "hallucination_count": 1,
+      "hallucination_details": "Cluster of 'burn.' x6 between 62-65s. Likely a transient mishear of a recurring outro syllable; visible on the wall.",
+      "coverage_pct": 0.774,
+      "wall_acceptable": false,
+      "reasoning": "Gemini beats whisperx on this dense_vocal fixture: 77% coverage vs 60% whisperx, same median timing, BUT introduces a 6-line 'burn.' hallucination cluster. Still 14 gold lines missing (mostly short refrain lines like 'Holy Spirit', 'As we give You praise'). Score 6 (vs whisperx 5); not wall-acceptable yet because of the cluster.",
+      "judged_at": "2026-05-19T07:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "p74PDWAFk0A",
+      "score": 4,
+      "verdict": "partial",
+      "wer_estimate": 0.47,
+      "line_timing_assessment": "Median absolute offset 457ms (just over wall threshold), mean 523ms. Worse than whisperx (420/494ms) on this 8-min reverb-heavy track.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.526,
+      "wall_acceptable": false,
+      "reasoning": "Reverb-heavy long song. WAV had to be downsampled to 64kbps MP3 to fit OpenRouter's body limit (31MB float WAV got 502 Bad Gateway). On MP3 Gemini produced 108 lines, matched only 72 of 137 gold (53% coverage), and is generally one beat behind. Whisperx scored 4 on this fixture too — Gemini wins on hallucinations (0 vs 1 cluster) but loses on coverage (53% vs 61%). Net: tied at 4.",
+      "judged_at": "2026-05-19T07:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "s8o2YuTBYk4",
+      "score": 5,
+      "verdict": "partial",
+      "wer_estimate": 0.32,
+      "line_timing_assessment": "Median absolute offset 512ms, mean 463ms — over the 400ms wall threshold but well under whisperx's drift.",
+      "hallucination_count": 2,
+      "hallucination_details": "Two repetition clusters of 'i'm going to praise you with my hands raised high' (x8 at 122s and x4 at 181s). The song does have this line repeated in the bridge — Gemini's count is higher than gold's mention but the line is real; less clearly hallucinatory than whisperx's same-fixture cluster.",
+      "coverage_pct": 0.683,
+      "wall_acceptable": false,
+      "reasoning": "Instrumental-break category. Gemini's coverage (68%) is materially better than whisperx (51%). Timing offset over threshold but tighter than whisperx (median 512 vs 434 — both over). Two repetition clusters of a real bridge line: the song repeats it, so the clusters are softer hallucinations than whisperx's full fabrication. Score 5 (vs whisperx 3).",
+      "judged_at": "2026-05-19T07:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "tCivrrU4SSM",
+      "score": 4,
+      "verdict": "partial",
+      "wer_estimate": 0.23,
+      "line_timing_assessment": "Median absolute offset 1180ms — systematic late-bias of ~1.2 seconds across all matched lines. Mean 1159ms confirms the drift is consistent, not outlier-driven.",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.766,
+      "wall_acceptable": false,
+      "reasoning": "Multi-language category. Gemini's content matches gold beautifully (77% coverage, almost verbatim text matches like 'Greater than the perfect sunrise', 'Greater than my wildest dreams') — but every single match has a positive timing offset of ~1.2s. Likely a 'start at vocal onset' vs 'start at section onset' disagreement between Gemini and the LRClib gold annotator. WhisperX scored 3 on the same fixture; Gemini's text is materially better, but the wall-visible timing is also bad on both. Score 4 (vs whisperx 3).",
+      "judged_at": "2026-05-19T07:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    },
+    {
+      "video_id": "YbGFYaA0SbY",
+      "score": 6,
+      "verdict": "partial",
+      "wer_estimate": 0.18,
+      "line_timing_assessment": "Median absolute offset 293ms, mean 408ms — JUST OVER the 400ms wall-acceptable threshold (whisperx scored 256/354ms here, both under).",
+      "hallucination_count": 0,
+      "hallucination_details": "",
+      "coverage_pct": 0.704,
+      "wall_acceptable": false,
+      "reasoning": "Clean-pop fixture. Gemini under-segments — 39 candidate lines against 54 gold (whisperx was 56/54). Most missing gold lines are exact-repeat chorus 'God, I'm just grateful for You' (8 of the missed 16 are this single line); Gemini consolidated multiple chorus repetitions into single emissions. Mean timing offset just crosses the 400ms wall threshold, which whisperx's didn't on this fixture. Score 6 (vs whisperx 7). The only fixture where whisperx beats Gemini.",
+      "judged_at": "2026-05-19T07:30:00Z",
+      "judge_model": "claude-opus-4-7",
+      "judge_prompt_revision": 1
+    }
+  ]
+}
