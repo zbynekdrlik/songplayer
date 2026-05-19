@@ -5,6 +5,7 @@
 
 pub mod aai_backend;
 pub mod claude_merge;
+pub mod fallback;
 pub mod merge_prompt;
 pub mod resolver;
 
