@@ -3,6 +3,8 @@
 //! lrclib-untimed, etc.). See
 //! `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`.
 
+pub mod aai_backend;
+
 /// DB settings key that stores the AssemblyAI API token. Read per-song in
 /// the worker so operators can configure without a restart. Same pattern
 /// as `replicate_api_token`.
