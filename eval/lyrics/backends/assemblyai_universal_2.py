@@ -75,7 +75,8 @@ def upload_audio(audio_path: Path, token: str) -> str:
 def create_transcript(audio_url: str, token: str) -> str:
     body = {
         "audio_url": audio_url,
-        "speech_model": SPEECH_MODEL,
+        # speech_models (plural, list) replaces the deprecated singular field.
+        "speech_models": [SPEECH_MODEL],
         # Punctuation + casing on so line text reads naturally.
         "punctuate": True,
         "format_text": True,
