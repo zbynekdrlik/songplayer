@@ -27,6 +27,7 @@ pub mod timed_reference_merge;
 pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;
+pub mod worker_asr;
 pub mod youtube_subs;
 pub mod yt_subs_split;
 pub use worker::LyricsWorker;

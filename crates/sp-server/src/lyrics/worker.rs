@@ -26,33 +26,33 @@ use crate::{
 };
 
 pub struct LyricsWorker {
-    pool: SqlitePool,
-    client: Client,
-    cache_dir: PathBuf,
-    ytdlp_path: PathBuf,
-    python_path: Option<PathBuf>,
-    tools_dir: PathBuf,
-    script_path: PathBuf,
-    models_dir: PathBuf,
+    pub(crate) pool: SqlitePool,
+    pub(crate) client: Client,
+    pub(crate) cache_dir: PathBuf,
+    pub(crate) ytdlp_path: PathBuf,
+    pub(crate) python_path: Option<PathBuf>,
+    pub(crate) tools_dir: PathBuf,
+    pub(crate) script_path: PathBuf,
+    pub(crate) models_dir: PathBuf,
     /// Claude AI client for EN→SK translation (CLIProxyAPI).
     /// None if CLIProxyAPI is not configured.
-    ai_client: Option<Arc<AiClient>>,
-    venv_python: tokio::sync::RwLock<Option<PathBuf>>,
-    retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+    pub(crate) ai_client: Option<Arc<AiClient>>,
+    pub(crate) venv_python: tokio::sync::RwLock<Option<PathBuf>>,
+    pub(crate) retry_backoff: tokio::sync::Mutex<RetryBackoff>,
     /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
     /// event channel so messages reach all dashboard WS subscribers.
-    events_tx: broadcast::Sender<ServerMsg>,
+    pub(crate) events_tx: broadcast::Sender<ServerMsg>,
     /// Spotify track ID auto-resolver. Constructed once at worker startup.
     /// Per-song, the worker checks the gate (spotify_track_id IS NULL AND
     /// spotify_resolved_at IS NULL) before invoking it.
-    spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver,
+    pub(crate) spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver,
     /// Shared state read by `queue_update_loop` so the broadcast `processing`
     /// field reflects the current song being aligned.
-    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
+    pub(crate) current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
 }
 
 #[derive(Default)]
-struct RetryBackoff {
+pub(crate) struct RetryBackoff {
     silent_until: Option<Instant>,
     consecutive_failures: u32,
 }
@@ -125,7 +125,7 @@ impl LyricsWorker {
     // I/O-only: updates shared RwLock + sends on broadcast channel. Fire-and-forget; no return value to assert.
     #[cfg_attr(test, mutants::skip)]
     #[allow(clippy::too_many_arguments)]
-    async fn broadcast_stage(
+    pub(crate) async fn broadcast_stage(
         &self,
         video_id: i64,
         youtube_id: &str,
@@ -157,7 +157,7 @@ impl LyricsWorker {
 
     // Writes None to shared RwLock. Side effect verified via broadcast_stage/queue_update_loop integration.
     #[cfg_attr(test, mutants::skip)]
-    async fn clear_processing(&self) {
+    pub(crate) async fn clear_processing(&self) {
         *self.current_processing.write().await = None;
     }
 
@@ -341,7 +341,7 @@ impl LyricsWorker {
     /// for the grandmother framing that defeats the copyright classifier),
     /// NOT to fall back to Gemini.
     #[cfg_attr(test, mutants::skip)]
-    async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
+    pub(crate) async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
@@ -483,218 +483,20 @@ impl LyricsWorker {
                     candidate_sources = ?names,
                     "lyrics: no allowed text source — routing to asr_path"
                 );
-
-                let aai_key = crate::db::models::get_setting(
-                    &self.pool,
-                    crate::lyrics::asr_path::ASSEMBLYAI_API_KEY_SETTING,
-                )
-                .await
-                .ok()
-                .flatten()
-                .filter(|s| !s.trim().is_empty());
-
-                let aai_key = match aai_key {
-                    Some(k) => k,
-                    None => {
-                        warn!(
-                            youtube_id = %youtube_id,
-                            "asr_path: assemblyai_api_key not set — leaving row unprocessed"
-                        );
-                        self.clear_processing().await;
-                        return Ok(());
-                    }
-                };
-
-                let ai_client = match &self.ai_client {
-                    Some(c) => c.clone(),
-                    None => {
-                        warn!(
-                            youtube_id = %youtube_id,
-                            "asr_path: ai_client is None — CLIProxyAPI not configured, cannot run claude-merge"
-                        );
-                        self.clear_processing().await;
-                        return Ok(());
-                    }
-                };
-
-                self.broadcast_stage(
-                    video_id,
-                    &youtube_id,
-                    &song,
-                    &artist,
-                    "preprocessing",
-                    None,
-                    started_at_unix_ms,
-                )
-                .await;
-
-                // Vocal isolation — reuse existing preprocess_vocals.
-                let venv_python = self.venv_python.read().await.clone();
-                let audio_path: Option<PathBuf> = row.audio_file_path.as_ref().map(PathBuf::from);
-                let clean_vocal: Option<PathBuf> = match (&venv_python, &audio_path) {
-                    (Some(python), Some(audio)) if audio.exists() => {
-                        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-                        match crate::lyrics::aligner::preprocess_vocals(
-                            python,
-                            &self.script_path,
-                            &self.models_dir,
-                            audio,
-                            &wav_path,
-                        )
-                        .await
-                        {
-                            Ok(p) => Some(p),
-                            Err(e) => {
-                                warn!(
-                                    youtube_id = %youtube_id,
-                                    error = %e,
-                                    "asr_path: vocal isolation failed"
-                                );
-                                None
-                            }
-                        }
-                    }
-                    _ => None,
-                };
-
-                let Some(wav) = clean_vocal else {
-                    warn!(
-                        youtube_id = %youtube_id,
-                        "asr_path: no preprocessed vocal available — leaving row unprocessed"
-                    );
-                    self.clear_processing().await;
-                    return Ok(());
-                };
-
-                self.broadcast_stage(
-                    video_id,
-                    &youtube_id,
-                    &song,
-                    &artist,
-                    "aligning",
-                    None,
-                    started_at_unix_ms,
-                )
-                .await;
-
-                // Convert provider::CandidateText → tier1::CandidateText
-                // (asr_path::run consumes the tier1 form).
-                let tier1_cands: Vec<crate::lyrics::tier1::CandidateText> = ctx
-                    .candidate_texts
-                    .iter()
-                    .cloned()
-                    .map(crate::lyrics::tier1::CandidateText::from)
-                    .collect();
-
-                let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
-                let result = crate::lyrics::asr_path::run(
-                    &aai,
-                    ai_client.as_ref(),
-                    &wav,
-                    &tier1_cands,
-                    None,
-                )
-                .await;
-
-                match result {
-                    Ok(crate::lyrics::asr_path::AsrOutput::Merged { lines, source })
-                    | Ok(crate::lyrics::asr_path::AsrOutput::Fallback { lines, source }) => {
-                        let mut track = LyricsTrack {
-                            version: LYRICS_PIPELINE_VERSION,
-                            source: source.to_string(),
-                            language_source: "en".into(),
-                            language_translation: String::new(),
-                            lines,
-                        };
-
-                        self.broadcast_stage(
-                            video_id,
-                            &youtube_id,
-                            &song,
-                            &artist,
-                            "translating",
-                            None,
-                            started_at_unix_ms,
-                        )
-                        .await;
-                        self.translate_track(&mut track, &youtube_id).await;
-
-                        self.broadcast_stage(
-                            video_id,
-                            &youtube_id,
-                            &song,
-                            &artist,
-                            "persisting",
-                            None,
-                            started_at_unix_ms,
-                        )
-                        .await;
-
-                        let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
-                        let json_bytes = serde_json::to_vec(&track)?;
-                        tokio::fs::write(&json_path, &json_bytes).await?;
-
-                        if let Err(e) = crate::db::models::mark_video_lyrics_complete(
-                            &self.pool,
-                            video_id,
-                            &track.source,
-                            LYRICS_PIPELINE_VERSION,
-                            None,
-                            Some(crate::lyrics::ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1),
-                        )
-                        .await
-                        {
-                            warn!(
-                                youtube_id = %youtube_id,
-                                error = %e,
-                                "asr_path: mark_video_lyrics_complete failed"
-                            );
-                        }
-
-                        tracing::info!(
-                            youtube_id = %youtube_id,
-                            source = %track.source,
-                            version = LYRICS_PIPELINE_VERSION,
-                            "asr_path: persisted"
-                        );
-
-                        let duration_ms = start_instant.elapsed().as_millis() as u64;
-                        let _ = self.events_tx.send(ServerMsg::LyricsCompleted {
-                            video_id,
-                            youtube_id: youtube_id.clone(),
-                            source: track.source.clone(),
-                            quality_score: 0.0,
-                            provider_count: 1,
-                            duration_ms,
-                        });
-                    }
-                    Ok(crate::lyrics::asr_path::AsrOutput::Quarantine { reason }) => {
-                        warn!(
-                            youtube_id = %youtube_id,
-                            reason,
-                            "asr_path: quarantining — empty transcript or fallback"
-                        );
-                        if let Err(e) = crate::db::models::mark_unsupported_source(
-                            &self.pool,
-                            video_id,
-                            LYRICS_PIPELINE_VERSION,
-                        )
-                        .await
-                        {
-                            warn!("worker: mark_unsupported_source: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            youtube_id = %youtube_id,
-                            error = %e,
-                            "asr_path: error — leaving row unprocessed for retry"
-                        );
-                    }
-                }
-
+                let result = self
+                    .run_asr_path_branch(
+                        &ctx.candidate_texts,
+                        row.audio_file_path.as_deref(),
+                        video_id,
+                        &youtube_id,
+                        &song,
+                        &artist,
+                        started_at_unix_ms,
+                        start_instant,
+                    )
+                    .await;
                 self.clear_processing().await;
-                return Ok(());
+                return result;
             }
 
             // No candidates at all — preserved old behavior: mark unsupported.
