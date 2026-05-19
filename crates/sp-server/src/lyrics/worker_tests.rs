@@ -854,3 +854,68 @@ fn process_song_routes_through_should_resolve_spotify() {
          should_resolve_spotify so #76's guard-pinning unit tests apply"
     );
 }
+
+#[test]
+fn timed_yt_subs_skips_asr_path_entirely() {
+    // Regression guard: a song with a timed yt_subs candidate MUST go through
+    // the existing whisperx path, not the new asr_path branch added for
+    // bucket-1 (`unsupported_source`) songs.
+    //
+    // The worker decision tree (worker.rs::process_song gate block):
+    //   1. is_allowed_text_source(cands) == true  → whisperx path
+    //   2. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == true
+    //      → asr_path branch
+    //   3. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == false
+    //      → mark_unsupported_source
+    //
+    // This test asserts that a timed yt_subs candidate triggers path 1, never
+    // path 2. If `is_allowed_text_source` were ever modified to reject timed
+    // yt_subs, this assertion would catch the regression.
+
+    use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
+    use crate::lyrics::provider::CandidateText;
+
+    let timed = CandidateText {
+        source: "yt_subs".to_string(),
+        lines: vec!["hello".into(), "world".into()],
+        line_timings: Some(vec![(0, 1000), (1200, 2000)]),
+        has_timing: true,
+    };
+    let cands = vec![timed];
+
+    // Gate predicate must accept timed yt_subs → whisperx path.
+    assert!(
+        is_allowed_text_source(&cands),
+        "timed yt_subs must be accepted by the gate; if not, regression introduced"
+    );
+    // And has_any_text_candidate is also true here (proves the test exercises
+    // a candidate that would otherwise be eligible for asr_path if the gate
+    // ever falsely rejected it).
+    assert!(has_any_text_candidate(&cands));
+}
+
+#[test]
+fn untimed_genius_passes_gate_to_asr_path() {
+    // Mirror regression: a song with ONLY untimed genius MUST be rejected by
+    // the gate but accepted by `has_any_text_candidate`, putting it on path 2
+    // (asr_path). If `is_allowed_text_source` ever started accepting untimed
+    // sources, this test would catch that — and asr_path would no longer be
+    // reachable for these songs.
+
+    use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
+    use crate::lyrics::provider::CandidateText;
+
+    let untimed = CandidateText {
+        source: "genius".to_string(),
+        lines: vec!["hello".into(), "world".into()],
+        line_timings: None,
+        has_timing: false,
+    };
+    let cands = vec![untimed];
+
+    assert!(!is_allowed_text_source(&cands), "untimed genius must be gate-rejected");
+    assert!(
+        has_any_text_candidate(&cands),
+        "untimed genius must still trigger has_any_text_candidate → asr_path branch"
+    );
+}
