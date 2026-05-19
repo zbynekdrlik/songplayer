@@ -84,9 +84,7 @@ impl LyricsWorker {
         let audio_path: Option<PathBuf> = audio_file_path.map(PathBuf::from);
         let clean_vocal: Option<PathBuf> = match (&venv_python, &audio_path) {
             (Some(python), Some(audio)) if audio.exists() => {
-                let wav_path = self
-                    .cache_dir
-                    .join(format!("{youtube_id}_vocals16k.wav"));
+                let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
                 match crate::lyrics::aligner::preprocess_vocals(
                     python,
                     &self.script_path,
@@ -138,14 +136,8 @@ impl LyricsWorker {
             .collect();
 
         let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
-        let result = crate::lyrics::asr_path::run(
-            &aai,
-            ai_client.as_ref(),
-            &wav,
-            &tier1_cands,
-            None,
-        )
-        .await;
+        let result =
+            crate::lyrics::asr_path::run(&aai, ai_client.as_ref(), &wav, &tier1_cands, None).await;
 
         match result {
             Ok(crate::lyrics::asr_path::AsrOutput::Merged { lines, source })
@@ -181,9 +173,7 @@ impl LyricsWorker {
                 )
                 .await;
 
-                let json_path = self
-                    .cache_dir
-                    .join(format!("{youtube_id}_lyrics.json"));
+                let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
                 let json_bytes = serde_json::to_vec(&track)?;
                 tokio::fs::write(&json_path, &json_bytes).await?;
 
