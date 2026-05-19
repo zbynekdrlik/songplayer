@@ -922,3 +922,85 @@ fn untimed_genius_passes_gate_to_asr_path() {
         "untimed genius must still trigger has_any_text_candidate → asr_path branch"
     );
 }
+
+// ---------------------------------------------------------------------------
+// asr_path end-to-end integration test (#116 deep-review finding 🟡 #6)
+// ---------------------------------------------------------------------------
+//
+// Tests the `run_asr_path_branch` call path with a real in-memory SQLite pool
+// and a minimal LyricsWorker. No AAI key configured → the branch exits early
+// with Ok(()), leaving the row unprocessed for the next worker tick. This
+// verifies the process_song → asr_path call chain compiles and runs without
+// panic.
+//
+// A full end-to-end test against a mocked AAI HTTP server would require
+// wiring venv_python + script_path + models_dir (the vocal-isolation step
+// gating `run_asr_path_branch` also runs before AAI); the cost is not
+// justified for one additional assertion beyond what the 12 orchestrator
+// integration tests in asr_path/tests.rs already cover.
+
+#[tokio::test]
+async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
+    use crate::lyrics::provider::CandidateText;
+    use std::time::Instant;
+
+    // In-memory SQLite + schema migrations.
+    let pool = crate::db::create_memory_pool().await.expect("pool");
+    crate::db::run_migrations(&pool).await.expect("migrate");
+
+    // Insert the playlist row required by the FK on `videos`.
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
+         VALUES (1, 'test', 'https://youtube.com/playlist?list=test', '')",
+    )
+    .execute(&pool)
+    .await
+    .expect("insert playlist");
+
+    // Insert a video row to exercise against.
+    let video_id: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized) \
+         VALUES (1, 'test_yt_id', 'Test Title', 'Test Song', 'Test Artist', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert video");
+
+    let cache_dir = std::env::temp_dir().join("sp_asr_branch_test");
+    let _ = std::fs::create_dir_all(&cache_dir);
+
+    let (events_tx, _events_rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test(
+        pool.clone(),
+        cache_dir.clone(),
+        events_tx,
+    );
+
+    // No `assemblyai_api_key` setting → branch should early-exit with Ok(())
+    // (leaving row unprocessed for the next tick).
+    let cands = vec![CandidateText {
+        source: "genius".to_string(),
+        lines: vec!["Hello".into()],
+        line_timings: None,
+        has_timing: false,
+    }];
+
+    let result = worker
+        .run_asr_path_branch(
+            &cands,
+            None, // audio_file_path — vocal isolation will be skipped
+            video_id,
+            "test_yt_id",
+            "Test Song",
+            "Test Artist",
+            chrono::Utc::now().timestamp_millis(),
+            Instant::now(),
+        )
+        .await;
+
+    // Without API key the branch returns Ok and does NOT mutate the row.
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}

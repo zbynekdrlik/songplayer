@@ -175,10 +175,10 @@ async fn run_happy_path_returns_merged() {
     ]);
     let cands = vec![cand("genius", vec!["hello", "world"])];
 
-    let out = run(&aai, &chat, &audio, &cands, Some("en"))
+    let r = run(&aai, &chat, &audio, &cands, Some("en"))
         .await
         .expect("ok");
-    match out {
+    match r.output {
         AsrOutput::Merged { lines, source } => {
             assert_eq!(source, SOURCE_MERGED);
             assert_eq!(lines.len(), 1);
@@ -199,8 +199,8 @@ async fn run_falls_back_on_claude_disagreement() {
     ]);
     let cands = vec![cand("genius", vec!["different", "lyrics"])];
 
-    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    match out {
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    match r.output {
         AsrOutput::Fallback { lines, source } => {
             assert_eq!(source, SOURCE_FALLBACK);
             assert!(!lines.is_empty(), "fallback should produce lines from AAI");
@@ -220,8 +220,12 @@ async fn run_falls_back_on_claude_ms_field() {
     ]);
     let cands = vec![cand("genius", vec!["hello"])];
 
-    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    assert!(matches!(out, AsrOutput::Fallback { .. }), "got {out:?}");
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    assert!(
+        matches!(r.output, AsrOutput::Fallback { .. }),
+        "got {:?}",
+        r.output
+    );
     let _ = std::fs::remove_file(&audio);
 }
 
@@ -248,8 +252,8 @@ async fn run_falls_back_when_disagreement_true_even_with_nonempty_lines() {
     ]);
     let cands = vec![cand("genius", vec!["x"])];
 
-    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    match out {
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    match r.output {
         AsrOutput::Fallback { .. } => {}
         other => panic!("expected Fallback (disagreement overrides any lines), got {other:?}"),
     }
@@ -267,8 +271,8 @@ async fn guard_never_emits_word_timings_on_merged() {
     ]);
     let cands = vec![cand("genius", vec!["x"])];
 
-    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    if let AsrOutput::Merged { lines, .. } = out {
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    if let AsrOutput::Merged { lines, .. } = r.output {
         assert!(lines.iter().all(|l| l.words.is_none()));
     } else {
         panic!("expected Merged");
@@ -283,8 +287,8 @@ async fn guard_never_emits_word_timings_on_fallback() {
     let chat = ScriptedChat::new(vec![r#"{"disagreement": true, "notes": "", "lines": []}"#]);
     let cands = vec![cand("genius", vec!["x"])];
 
-    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    if let AsrOutput::Fallback { lines, .. } = out {
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    if let AsrOutput::Fallback { lines, .. } = r.output {
         assert!(lines.iter().all(|l| l.words.is_none()));
     } else {
         panic!("expected Fallback");
@@ -302,8 +306,8 @@ async fn guard_never_synthesizes_ms_from_thin_air() {
     ]);
     let cands = vec![cand("genius", vec!["x"])];
 
-    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    if let AsrOutput::Merged { lines, .. } = out {
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    if let AsrOutput::Merged { lines, .. } = r.output {
         // AAI words were (hello: 0..500, world: 600..1100). The merged line
         // MUST equal those exact ms values — no interpolation, no rounding.
         assert_eq!(lines[0].start_ms, 0);
@@ -311,5 +315,46 @@ async fn guard_never_synthesizes_ms_from_thin_air() {
     } else {
         panic!("expected Merged");
     }
+    let _ = std::fs::remove_file(&audio);
+}
+
+// ─── Audit-shape tests ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn run_emits_audit_for_merged_path() {
+    let (server, audio) = aai_server_with_two_words().await;
+    let aai = AaiBackend::with_base_url("test-key", server.uri());
+    let chat = ScriptedChat::new(vec![
+        r#"{"disagreement": false, "notes": "matched", "lines": [{"text": "Hello world", "start_word_idx": 0, "end_word_idx": 1}]}"#,
+    ]);
+    let cands = vec![cand("genius", vec!["hello", "world"])];
+
+    let r = run(&aai, &chat, &audio, &cands, Some("en"))
+        .await
+        .expect("ok");
+    assert_eq!(r.audit.outcome, "merged");
+    assert_eq!(r.audit.source_label, Some(SOURCE_MERGED));
+    assert_eq!(r.audit.aai_word_count, 2);
+    assert_eq!(r.audit.claude_disagreement, Some(false));
+    assert_eq!(r.audit.claude_line_count, Some(1));
+    assert!(r.audit.fallback_reason.is_none());
+    assert!(r.audit.quarantine_reason.is_none());
+    let _ = std::fs::remove_file(&audio);
+}
+
+#[tokio::test]
+async fn run_emits_audit_for_disagreement_fallback() {
+    let (server, audio) = aai_server_with_two_words().await;
+    let aai = AaiBackend::with_base_url("test-key", server.uri());
+    let chat = ScriptedChat::new(vec![
+        r#"{"disagreement": true, "notes": "wrong version", "lines": []}"#,
+    ]);
+    let cands = vec![cand("genius", vec!["different"])];
+
+    let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    assert_eq!(r.audit.outcome, "fallback");
+    assert_eq!(r.audit.source_label, Some(SOURCE_FALLBACK));
+    assert_eq!(r.audit.fallback_reason, Some("disagreement_or_empty"));
+    assert_eq!(r.audit.claude_disagreement, Some(true));
     let _ = std::fs::remove_file(&audio);
 }

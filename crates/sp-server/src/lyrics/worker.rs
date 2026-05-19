@@ -115,6 +115,34 @@ impl LyricsWorker {
         }
     }
 
+    /// Build a minimal LyricsWorker for unit tests. Fields not used by the
+    /// asr_path branch get placeholder values; tests must not exercise
+    /// downloader / tools / orchestrator paths against this instance.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        pool: SqlitePool,
+        cache_dir: std::path::PathBuf,
+        events_tx: broadcast::Sender<ServerMsg>,
+    ) -> Self {
+        use std::path::PathBuf;
+        Self {
+            pool,
+            client: Client::new(),
+            cache_dir: cache_dir.clone(),
+            ytdlp_path: PathBuf::from("yt-dlp"),
+            python_path: None,
+            tools_dir: PathBuf::from("/tmp/tools"),
+            script_path: PathBuf::from("/tmp/script"),
+            models_dir: PathBuf::from("/tmp/models"),
+            ai_client: None,
+            venv_python: tokio::sync::RwLock::new(None),
+            retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
+            events_tx,
+            spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver::new(),
+            current_processing: Arc::new(RwLock::new(None)),
+        }
+    }
+
     /// Snapshot the current processing state for use by queue_update_loop.
     // Arc clone; returning the shared handle has no behavior beyond reference-counting.
     #[cfg_attr(test, mutants::skip)]

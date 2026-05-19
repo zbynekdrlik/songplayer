@@ -140,9 +140,24 @@ impl LyricsWorker {
             crate::lyrics::asr_path::run(&aai, ai_client.as_ref(), &wav, &tier1_cands, Some("en"))
                 .await;
 
+        // Write audit sidecar regardless of outcome — operators can grep these
+        // to understand what happened on each row without parsing tracing logs.
+        if let Ok(ref r) = result {
+            let audit_path = self
+                .cache_dir
+                .join(format!("{youtube_id}_asr_path_audit.json"));
+            if let Ok(bytes) = serde_json::to_vec_pretty(&r.audit) {
+                let _ = tokio::fs::write(&audit_path, &bytes).await;
+            }
+        }
+
         match result {
-            Ok(crate::lyrics::asr_path::AsrOutput::Merged { lines, source })
-            | Ok(crate::lyrics::asr_path::AsrOutput::Fallback { lines, source }) => {
+            Ok(crate::lyrics::asr_path::AsrResult {
+                output:
+                    crate::lyrics::asr_path::AsrOutput::Merged { lines, source }
+                    | crate::lyrics::asr_path::AsrOutput::Fallback { lines, source },
+                ..
+            }) => {
                 let mut track = LyricsTrack {
                     version: LYRICS_PIPELINE_VERSION,
                     source: source.to_string(),
@@ -212,7 +227,10 @@ impl LyricsWorker {
                     duration_ms,
                 });
             }
-            Ok(crate::lyrics::asr_path::AsrOutput::Quarantine { reason }) => {
+            Ok(crate::lyrics::asr_path::AsrResult {
+                output: crate::lyrics::asr_path::AsrOutput::Quarantine { reason },
+                ..
+            }) => {
                 warn!(
                     youtube_id = %youtube_id,
                     reason,

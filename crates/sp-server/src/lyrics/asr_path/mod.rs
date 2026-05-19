@@ -28,6 +28,30 @@ pub const ASSEMBLYAI_API_KEY_SETTING: &str = "assemblyai_api_key";
 pub const SOURCE_MERGED: &str = "asr:aai-u3-pro+claude-merge";
 pub const SOURCE_FALLBACK: &str = "asr:aai-u3-pro";
 
+/// Per-song audit snapshot. Worker writes one JSON sidecar per processed song
+/// to `{cache_dir}/{youtube_id}_asr_path_audit.json`. Captures the decision
+/// trail (which path fired, whether Claude disagreed, the fallback reason)
+/// without parsing tracing logs.
+#[derive(Debug, serde::Serialize)]
+pub struct AsrAudit {
+    pub outcome: &'static str, // "merged" | "fallback" | "quarantine"
+    pub source_label: Option<&'static str>, // None for quarantine
+    pub quarantine_reason: Option<&'static str>,
+    pub aai_word_count: usize,
+    pub claude_disagreement: Option<bool>,
+    pub claude_notes: Option<String>,
+    pub claude_line_count: Option<usize>,
+    pub fallback_reason: Option<&'static str>, // "transport" | "rejected" | "disagreement_or_empty" | "resolver_error" | None
+}
+
+/// Combined return value from `run`. Carries both the processing outcome and
+/// a structured audit record that the worker writes as a JSON sidecar.
+#[derive(Debug)]
+pub struct AsrResult {
+    pub output: AsrOutput,
+    pub audit: AsrAudit,
+}
+
 #[derive(Debug)]
 pub enum AsrOutput {
     /// Claude-merge produced usable line splits referencing AAI words.
@@ -97,16 +121,29 @@ pub async fn run<C: MergeChat + ?Sized>(
     audio_path: &Path,
     candidates: &[CandidateText],
     language: Option<&str>,
-) -> Result<AsrOutput, AsrError> {
+) -> Result<AsrResult, AsrError> {
     // 1) Transcribe with AAI.
     let transcript: AaiTranscript = match aai.transcribe(audio_path).await {
         Ok(t) => t,
         Err(AaiError::QuotaExhausted) => return Err(AsrError::QuotaExhausted),
         Err(e) => return Err(AsrError::Aai(e)),
     };
+    let aai_word_count = transcript.words.len();
     if transcript.words.is_empty() {
-        return Ok(AsrOutput::Quarantine {
-            reason: "empty_transcript",
+        return Ok(AsrResult {
+            output: AsrOutput::Quarantine {
+                reason: "empty_transcript",
+            },
+            audit: AsrAudit {
+                outcome: "quarantine",
+                source_label: None,
+                quarantine_reason: Some("empty_transcript"),
+                aai_word_count: 0,
+                claude_disagreement: None,
+                claude_notes: None,
+                claude_line_count: None,
+                fallback_reason: None,
+            },
         });
     }
 
@@ -128,11 +165,25 @@ pub async fn run<C: MergeChat + ?Sized>(
         Ok(m) => m,
         Err(MergeError::Transport(e)) => {
             tracing::warn!("asr_path: claude transport failed: {e} — falling back");
-            return Ok(fallback_output(&transcript));
+            return Ok(fallback_result(
+                &transcript,
+                aai_word_count,
+                "transport",
+                None,
+                None,
+                None,
+            ));
         }
         Err(e) => {
             tracing::warn!("asr_path: claude merge rejected: {e} — falling back");
-            return Ok(fallback_output(&transcript));
+            return Ok(fallback_result(
+                &transcript,
+                aai_word_count,
+                "rejected",
+                None,
+                None,
+                None,
+            ));
         }
     };
 
@@ -142,20 +193,82 @@ pub async fn run<C: MergeChat + ?Sized>(
             notes = %merged.notes,
             "asr_path: claude declined merge — using fallback"
         );
-        return Ok(fallback_output(&transcript));
+        return Ok(fallback_result(
+            &transcript,
+            aai_word_count,
+            "disagreement_or_empty",
+            Some(merged.disagreement),
+            Some(merged.notes.clone()),
+            Some(merged.lines.len()),
+        ));
     }
 
     // 4) Resolve indices to ms.
     match resolve(&merged, &transcript) {
-        Ok(lines) => Ok(AsrOutput::Merged {
-            lines,
-            source: SOURCE_MERGED,
+        Ok(lines) => Ok(AsrResult {
+            output: AsrOutput::Merged {
+                lines,
+                source: SOURCE_MERGED,
+            },
+            audit: AsrAudit {
+                outcome: "merged",
+                source_label: Some(SOURCE_MERGED),
+                quarantine_reason: None,
+                aai_word_count,
+                claude_disagreement: Some(false),
+                claude_notes: Some(merged.notes.clone()),
+                claude_line_count: Some(merged.lines.len()),
+                fallback_reason: None,
+            },
         }),
-        Err(ResolverError::Empty) => Ok(fallback_output(&transcript)),
+        Err(ResolverError::Empty) => Ok(fallback_result(
+            &transcript,
+            aai_word_count,
+            "resolver_error",
+            Some(merged.disagreement),
+            Some(merged.notes.clone()),
+            Some(merged.lines.len()),
+        )),
         Err(e) => {
             tracing::warn!("asr_path: resolver rejected claude output: {e} — falling back");
-            Ok(fallback_output(&transcript))
+            Ok(fallback_result(
+                &transcript,
+                aai_word_count,
+                "resolver_error",
+                Some(merged.disagreement),
+                Some(merged.notes.clone()),
+                Some(merged.lines.len()),
+            ))
         }
+    }
+}
+
+fn fallback_result(
+    transcript: &AaiTranscript,
+    aai_word_count: usize,
+    fallback_reason: &'static str,
+    claude_disagreement: Option<bool>,
+    claude_notes: Option<String>,
+    claude_line_count: Option<usize>,
+) -> AsrResult {
+    let output = fallback_output(transcript);
+    let (outcome, source_label, quarantine_reason) = match &output {
+        AsrOutput::Quarantine { reason } => ("quarantine", None, Some(*reason)),
+        AsrOutput::Fallback { .. } => ("fallback", Some(SOURCE_FALLBACK), None),
+        AsrOutput::Merged { .. } => unreachable!("fallback_output never returns Merged"),
+    };
+    AsrResult {
+        output,
+        audit: AsrAudit {
+            outcome,
+            source_label,
+            quarantine_reason,
+            aai_word_count,
+            claude_disagreement,
+            claude_notes,
+            claude_line_count,
+            fallback_reason: Some(fallback_reason),
+        },
     }
 }
 
