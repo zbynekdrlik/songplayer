@@ -68,6 +68,52 @@ fn strip_json_fence(body: &str) -> &str {
     t
 }
 
+use crate::lyrics::asr_path::merge_prompt::{ClaudeMergeInput, SYSTEM_PROMPT, build_user_prompt};
+
+/// Abstraction over `AiClient::chat` so tests can inject canned responses
+/// without hitting CLIProxyAPI. Implemented for `crate::ai::client::AiClient`
+/// at the bottom of this file.
+#[async_trait::async_trait]
+pub trait MergeChat: Send + Sync {
+    async fn chat(&self, system: &str, user: &str) -> Result<String, String>;
+}
+
+/// Build prompt → call Claude → parse → return ClaudeMergeResult.
+///
+/// Single retry on `MergeError::Parse` with the prompt unchanged (CLIProxyAPI
+/// is non-deterministic on JSON formatting and sometimes recovers).
+pub async fn merge<C: MergeChat + ?Sized>(
+    chat: &C,
+    input: &ClaudeMergeInput<'_>,
+) -> Result<ClaudeMergeResult, MergeError> {
+    let user = build_user_prompt(input);
+    let first = chat
+        .chat(SYSTEM_PROMPT, &user)
+        .await
+        .map_err(MergeError::Transport)?;
+    match parse_response(&first) {
+        Ok(r) => Ok(r),
+        Err(MergeError::Parse(_)) => {
+            // Single retry; if it fails again, propagate so orchestrator falls back.
+            let second = chat
+                .chat(SYSTEM_PROMPT, &user)
+                .await
+                .map_err(MergeError::Transport)?;
+            parse_response(&second)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[async_trait::async_trait]
+impl MergeChat for crate::ai::client::AiClient {
+    async fn chat(&self, system: &str, user: &str) -> Result<String, String> {
+        crate::ai::client::AiClient::chat(self, system, user)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +171,98 @@ mod tests {
         let err = parse_response(body).expect_err("must err");
         // serde produces Parse, not HasMsFields, for non-ms unknown fields.
         assert!(matches!(err, MergeError::Parse(_)), "got {err:?}");
+    }
+
+    use crate::lyrics::asr_path::aai_backend::AaiWord;
+    use crate::lyrics::asr_path::merge_prompt::ClaudeMergeInput;
+
+    struct ScriptedChat {
+        responses: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl ScriptedChat {
+        fn new(responses: Vec<&str>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(
+                    responses.into_iter().map(String::from).collect(),
+                ),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MergeChat for ScriptedChat {
+        async fn chat(&self, _system: &str, _user: &str) -> Result<String, String> {
+            self.responses
+                .lock()
+                .unwrap()
+                .pop()
+                .ok_or_else(|| "out of scripted responses".to_string())
+        }
+    }
+
+    fn ctx() -> (Vec<AaiWord>, &'static str, &'static str) {
+        let words = vec![AaiWord {
+            text: "hi".to_string(),
+            start_ms: 0,
+            end_ms: 200,
+            confidence: 0.9,
+        }];
+        (words, "genius", "hi")
+    }
+
+    #[tokio::test]
+    async fn merge_returns_parsed_response() {
+        let (words, source, text) = ctx();
+        let input = ClaudeMergeInput {
+            aai_words: &words,
+            untimed_text: text,
+            untimed_source: source,
+            language: None,
+        };
+        let chat = ScriptedChat::new(vec![
+            r#"{"disagreement": false, "notes": "", "lines": [{"text": "Hi", "start_word_idx": 0, "end_word_idx": 0}]}"#,
+        ]);
+        let r = merge(&chat, &input).await.expect("ok");
+        assert!(!r.disagreement);
+        assert_eq!(r.lines.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn merge_retries_once_on_parse_error_then_succeeds() {
+        let (words, source, text) = ctx();
+        let input = ClaudeMergeInput {
+            aai_words: &words,
+            untimed_text: text,
+            untimed_source: source,
+            language: None,
+        };
+        // ScriptedChat::pop pops from END (Vec::pop is LIFO). We want:
+        //   1st call (popped first) → bad/malformed → triggers Parse error
+        //   2nd call (popped second / retry) → good → succeeds
+        // So push GOOD first, BAD last so BAD is popped first.
+        let chat = ScriptedChat::new(vec![
+            r#"{"disagreement": false, "notes": "", "lines": []}"#, // popped second (retry result)
+            r#"not valid json"#,                                     // popped first (initial result)
+        ]);
+        let r = merge(&chat, &input).await.expect("ok");
+        assert!(r.lines.is_empty());
+    }
+
+    #[tokio::test]
+    async fn merge_propagates_ms_field_error() {
+        let (words, source, text) = ctx();
+        let input = ClaudeMergeInput {
+            aai_words: &words,
+            untimed_text: text,
+            untimed_source: source,
+            language: None,
+        };
+        let chat = ScriptedChat::new(vec![
+            r#"{"disagreement": false, "notes": "", "lines": [{"text": "x", "start_word_idx": 0, "end_word_idx": 0, "start_ms": 0}]}"#,
+        ]);
+        let err = merge(&chat, &input).await.expect_err("must err");
+        // HasMsFields is NOT MergeError::Parse, so no retry happens.
+        assert!(matches!(err, MergeError::HasMsFields), "got {err:?}");
     }
 }
