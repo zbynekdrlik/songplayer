@@ -6,6 +6,7 @@
 pub mod aai_backend;
 pub mod claude_merge;
 pub mod merge_prompt;
+pub mod resolver;
 
 /// DB settings key that stores the AssemblyAI API token. Read per-song in
 /// the worker so operators can configure without a restart. Same pattern
