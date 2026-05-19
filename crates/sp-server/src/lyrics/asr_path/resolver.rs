@@ -9,8 +9,9 @@ use sp_core::lyrics::LyricsLine;
 
 use crate::lyrics::asr_path::aai_backend::AaiTranscript;
 use crate::lyrics::asr_path::claude_merge::ClaudeMergeResult;
-
-const MIN_LINE_DURATION_MS: u64 = 200;
+use crate::lyrics::asr_path::sanitize::sanitize_lines;
+#[cfg(test)]
+use crate::lyrics::asr_path::sanitize::MIN_LINE_DURATION_MS;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
@@ -55,24 +56,6 @@ pub fn resolve(
         });
     }
     Ok(sanitize_lines(out))
-}
-
-/// Line-level sanitizer:
-/// - monotonic `start_ms` (each line's start >= previous line's end)
-/// - no overlap (line N+1 start clamped up to line N end if necessary)
-/// - minimum 200ms duration (very short lines get clamped to start+200)
-fn sanitize_lines(mut lines: Vec<LyricsLine>) -> Vec<LyricsLine> {
-    let mut floor: u64 = 0;
-    for line in &mut lines {
-        if line.start_ms < floor {
-            line.start_ms = floor;
-        }
-        if line.end_ms < line.start_ms + MIN_LINE_DURATION_MS {
-            line.end_ms = line.start_ms + MIN_LINE_DURATION_MS;
-        }
-        floor = line.end_ms;
-    }
-    lines
 }
 
 #[cfg(test)]

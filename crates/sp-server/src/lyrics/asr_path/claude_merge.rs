@@ -126,6 +126,12 @@ pub async fn merge<C: MergeChat + ?Sized>(
 
 #[async_trait::async_trait]
 impl MergeChat for crate::ai::client::AiClient {
+    // Trait delegation to the real CLIProxyAPI client. Mutations on this
+    // body (e.g. replacing the call with `Ok(String::new())`) are unkillable
+    // in unit tests because the real path requires live HTTP to CLIProxyAPI.
+    // Behavioral coverage comes from the `ScriptedChat`-based tests above,
+    // which exercise all `merge()` paths using the trait abstraction.
+    #[cfg_attr(test, mutants::skip)]
     async fn chat(&self, system: &str, user: &str) -> Result<String, String> {
         crate::ai::client::AiClient::chat(self, system, user)
             .await

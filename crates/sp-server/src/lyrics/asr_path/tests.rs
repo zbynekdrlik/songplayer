@@ -108,6 +108,64 @@ fn pick_untimed_candidate_returns_none_on_empty_lines() {
     assert!(pick_untimed_candidate(&cands).is_none());
 }
 
+#[test]
+fn pick_untimed_candidate_full_ranking() {
+    // ── Tier distinction tests ──────────────────────────────────────────────
+    // (A) genius beats lrclib even when lrclib has MORE lines.
+    //     Kills: rank() → constant 0 or 1 (all sources tied, tiebreaker wins).
+    //     Kills: match guard "genius" → true (every source gets rank 0 →
+    //            lrclib wins the line-count tiebreaker with 5 lines).
+    let cands = vec![
+        cand("lrclib", vec!["a", "b", "c", "d", "e"]),
+        cand("genius", vec!["a", "b"]),
+    ];
+    let picked = pick_untimed_candidate(&cands).expect("must pick");
+    assert_eq!(
+        picked.source, "genius",
+        "genius must beat lrclib regardless of line count"
+    );
+
+    // (B) lrclib beats spotify/other (rank 1 vs 2) even when spotify has MORE
+    //     lines.
+    //     Kills: match guard "lrclib" → true  (spotify also gets rank 1, wins
+    //            on line-count tiebreaker with 5 vs 1 lines).
+    //     Kills: match guard "lrclib" → false (lrclib falls to rank 2, ties
+    //            with spotify; tiebreaker gives spotify the 5-line win).
+    let cands = vec![
+        cand("spotify", vec!["a", "b", "c", "d", "e"]),
+        cand("lrclib", vec!["a"]),
+    ];
+    let picked = pick_untimed_candidate(&cands).expect("must pick");
+    assert_eq!(
+        picked.source, "lrclib",
+        "lrclib must beat spotify by rank, regardless of line count"
+    );
+
+    // ── Within-tier tiebreaker: more lines wins ─────────────────────────────
+    // (C) Within the genius tier, the candidate with more lines is picked.
+    //     Source label differs ("genius_live" vs "genius") so both rank 0
+    //     because "genius_live".contains("genius") is true.
+    //     Kills rank() → constant (collapses tiers but can't win because
+    //     tier-A and tier-B above already distinguish tier ranks).
+    let cands = vec![
+        cand("genius", vec!["a", "b"]),
+        cand("genius_live", vec!["a", "b", "c", "d", "e"]),
+    ];
+    let picked = pick_untimed_candidate(&cands).expect("must pick");
+    assert_eq!(
+        picked.lines.len(),
+        5,
+        "within genius tier, the candidate with more lines must win"
+    );
+
+    // (D) All candidates have empty lines → None.
+    let cands = vec![cand("genius", vec![]), cand("lrclib", vec![])];
+    assert!(
+        pick_untimed_candidate(&cands).is_none(),
+        "all-empty candidates must yield None"
+    );
+}
+
 #[tokio::test]
 async fn run_happy_path_returns_merged() {
     let (server, audio) = aai_server_with_two_words().await;
@@ -164,6 +222,37 @@ async fn run_falls_back_on_claude_ms_field() {
 
     let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
     assert!(matches!(out, AsrOutput::Fallback { .. }), "got {out:?}");
+    let _ = std::fs::remove_file(&audio);
+}
+
+// ─── L131 guard: disagreement=true must trigger fallback even with non-empty lines ───
+
+#[tokio::test]
+async fn run_falls_back_when_disagreement_true_even_with_nonempty_lines() {
+    // Kills mod.rs L131 mutation `||` → `&&`.
+    // Under `||`: EITHER condition (disagreement=true OR lines.is_empty())
+    //             triggers fallback.
+    // Under `&&`: BOTH must be true. A response with disagreement=true but
+    //             non-empty lines would slip through to the resolver under the
+    //             mutant — the resolver would then produce Merged output instead
+    //             of Fallback, which is wrong.
+    //
+    // Production rationale: if Claude says disagreement=true we trust that
+    // signal even if it incoherently also emitted some lines. The schema does
+    // not forbid the combination, so we must defend against it.
+    let (server, audio) = aai_server_with_two_words().await;
+    let aai = AaiBackend::with_base_url("test-key", server.uri());
+    // Claude response: disagreement=true but also has a non-empty lines array.
+    let chat = ScriptedChat::new(vec![
+        r#"{"disagreement": true, "notes": "wrong song", "lines": [{"text": "stray", "start_word_idx": 0, "end_word_idx": 0}]}"#,
+    ]);
+    let cands = vec![cand("genius", vec!["x"])];
+
+    let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
+    match out {
+        AsrOutput::Fallback { .. } => {}
+        other => panic!("expected Fallback (disagreement overrides any lines), got {other:?}"),
+    }
     let _ = std::fs::remove_file(&audio);
 }
 

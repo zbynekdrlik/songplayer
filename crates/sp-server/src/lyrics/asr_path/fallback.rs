@@ -7,13 +7,12 @@
 use sp_core::lyrics::LyricsLine;
 
 use crate::lyrics::asr_path::aai_backend::AaiWord;
+use crate::lyrics::asr_path::sanitize::sanitize_lines;
 
 /// Match eval Python `LINE_GAP_MS` exactly. Changes here must update the
 /// eval Python in lockstep so eval-time and production-time outputs stay
 /// comparable when investigating regressions.
 pub const LINE_GAP_MS: u64 = 400;
-
-const MIN_LINE_DURATION_MS: u64 = 200;
 
 pub fn split_on_silence(words: &[AaiWord]) -> Vec<LyricsLine> {
     if words.is_empty() {
@@ -55,20 +54,6 @@ fn flush(words: &[&AaiWord]) -> LyricsLine {
         sk: None,
         words: None, // per feedback_line_timing_only
     }
-}
-
-fn sanitize_lines(mut lines: Vec<LyricsLine>) -> Vec<LyricsLine> {
-    let mut floor: u64 = 0;
-    for line in &mut lines {
-        if line.start_ms < floor {
-            line.start_ms = floor;
-        }
-        if line.end_ms < line.start_ms + MIN_LINE_DURATION_MS {
-            line.end_ms = line.start_ms + MIN_LINE_DURATION_MS;
-        }
-        floor = line.end_ms;
-    }
-    lines
 }
 
 #[cfg(test)]

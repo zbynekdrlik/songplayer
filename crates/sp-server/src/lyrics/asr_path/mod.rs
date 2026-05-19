@@ -8,6 +8,7 @@ pub mod claude_merge;
 pub mod fallback;
 pub mod merge_prompt;
 pub mod resolver;
+pub mod sanitize;
 
 use std::path::Path;
 
@@ -77,10 +78,17 @@ pub fn pick_untimed_candidate(candidates: &[CandidateText]) -> Option<&Candidate
             _ => 2,
         }
     }
+    // `std::cmp::Reverse` makes min_by_key pick the candidate with the MOST
+    // lines within a tier (largest line count = smallest Reverse value).
+    // Previously used `usize::MAX - len`, which is arithmetically equivalent
+    // but generates a surviving mutation for the `-` operator (both `-` and
+    // `/` are monotonic w.r.t. len, so the mutation is observationally
+    // equivalent for the tiebreaker ordering). Reverse carries no arithmetic
+    // operator and is mutation-transparent.
     candidates
         .iter()
         .filter(|c| !c.lines.is_empty())
-        .min_by_key(|c| (rank(&c.source), usize::MAX - c.lines.len()))
+        .min_by_key(|c| (rank(&c.source), std::cmp::Reverse(c.lines.len())))
 }
 
 pub async fn run<C: MergeChat + ?Sized>(
