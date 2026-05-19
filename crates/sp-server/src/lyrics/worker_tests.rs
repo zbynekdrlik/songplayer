@@ -913,7 +913,10 @@ fn untimed_genius_passes_gate_to_asr_path() {
     };
     let cands = vec![untimed];
 
-    assert!(!is_allowed_text_source(&cands), "untimed genius must be gate-rejected");
+    assert!(
+        !is_allowed_text_source(&cands),
+        "untimed genius must be gate-rejected"
+    );
     assert!(
         has_any_text_candidate(&cands),
         "untimed genius must still trigger has_any_text_candidate → asr_path branch"

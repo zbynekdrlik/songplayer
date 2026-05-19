@@ -183,9 +183,7 @@ mod tests {
     impl ScriptedChat {
         fn new(responses: Vec<&str>) -> Self {
             Self {
-                responses: std::sync::Mutex::new(
-                    responses.into_iter().map(String::from).collect(),
-                ),
+                responses: std::sync::Mutex::new(responses.into_iter().map(String::from).collect()),
             }
         }
     }
@@ -243,7 +241,7 @@ mod tests {
         // So push GOOD first, BAD last so BAD is popped first.
         let chat = ScriptedChat::new(vec![
             r#"{"disagreement": false, "notes": "", "lines": []}"#, // popped second (retry result)
-            r#"not valid json"#,                                     // popped first (initial result)
+            r#"not valid json"#,                                    // popped first (initial result)
         ]);
         let r = merge(&chat, &input).await.expect("ok");
         assert!(r.lines.is_empty());

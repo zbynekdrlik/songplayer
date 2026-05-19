@@ -29,9 +29,17 @@ pub const SOURCE_FALLBACK: &str = "asr:aai-u3-pro";
 
 #[derive(Debug)]
 pub enum AsrOutput {
-    Merged { lines: Vec<LyricsLine>, source: &'static str },
-    Fallback { lines: Vec<LyricsLine>, source: &'static str },
-    Quarantine { reason: &'static str },
+    Merged {
+        lines: Vec<LyricsLine>,
+        source: &'static str,
+    },
+    Fallback {
+        lines: Vec<LyricsLine>,
+        source: &'static str,
+    },
+    Quarantine {
+        reason: &'static str,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -48,9 +56,7 @@ pub enum AsrError {
 
 /// Pick the best untimed text candidate. Priority: genius > lrclib > others.
 /// "Best" within a priority tier means the candidate with the most lines.
-pub fn pick_untimed_candidate<'a>(
-    candidates: &'a [CandidateText],
-) -> Option<&'a CandidateText> {
+pub fn pick_untimed_candidate<'a>(candidates: &'a [CandidateText]) -> Option<&'a CandidateText> {
     fn rank(source: &str) -> u8 {
         match source {
             s if s.contains("genius") => 0,
@@ -78,7 +84,9 @@ pub async fn run<C: MergeChat + ?Sized>(
         Err(e) => return Err(AsrError::Aai(e)),
     };
     if transcript.words.is_empty() {
-        return Ok(AsrOutput::Quarantine { reason: "empty_transcript" });
+        return Ok(AsrOutput::Quarantine {
+            reason: "empty_transcript",
+        });
     }
 
     // 2) Pick untimed candidate (genius > lrclib > others).
@@ -118,7 +126,10 @@ pub async fn run<C: MergeChat + ?Sized>(
 
     // 4) Resolve indices to ms.
     match resolve(&merged, &transcript) {
-        Ok(lines) => Ok(AsrOutput::Merged { lines, source: SOURCE_MERGED }),
+        Ok(lines) => Ok(AsrOutput::Merged {
+            lines,
+            source: SOURCE_MERGED,
+        }),
         Err(ResolverError::Empty) => Ok(fallback_output(&transcript)),
         Err(e) => {
             tracing::warn!("asr_path: resolver rejected claude output: {e} — falling back");
@@ -130,9 +141,14 @@ pub async fn run<C: MergeChat + ?Sized>(
 fn fallback_output(transcript: &AaiTranscript) -> AsrOutput {
     let lines = fallback::split_on_silence(&transcript.words);
     if lines.is_empty() {
-        AsrOutput::Quarantine { reason: "empty_fallback" }
+        AsrOutput::Quarantine {
+            reason: "empty_fallback",
+        }
     } else {
-        AsrOutput::Fallback { lines, source: SOURCE_FALLBACK }
+        AsrOutput::Fallback {
+            lines,
+            source: SOURCE_FALLBACK,
+        }
     }
 }
 

@@ -135,7 +135,10 @@ mod tests {
         let t = aai(vec![("a", 0, 100), ("b", 100, 200)]);
         let m = merged(vec![("bad", 1, 0)]);
         let err = resolve(&m, &t).expect_err("must err");
-        assert!(matches!(err, ResolverError::InvertedRange { .. }), "got {err:?}");
+        assert!(
+            matches!(err, ResolverError::InvertedRange { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -143,7 +146,10 @@ mod tests {
         let t = aai(vec![("a", 0, 100)]);
         let m = merged(vec![("oops", 0, 5)]);
         let err = resolve(&m, &t).expect_err("must err");
-        assert!(matches!(err, ResolverError::OutOfRange { got: 5, len: 1 }), "got {err:?}");
+        assert!(
+            matches!(err, ResolverError::OutOfRange { got: 5, len: 1 }),
+            "got {err:?}"
+        );
     }
 
     #[test]

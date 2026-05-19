@@ -51,8 +51,7 @@ fn default_confidence() -> f32 {
 }
 
 pub fn parse_completed_response(body: &str) -> Result<AaiTranscript, AaiError> {
-    let raw: AaiTranscriptResponse =
-        serde_json::from_str(body).map_err(AaiError::Parse)?;
+    let raw: AaiTranscriptResponse = serde_json::from_str(body).map_err(AaiError::Parse)?;
     match raw.status.as_str() {
         "completed" => Ok(AaiTranscript {
             words: raw
@@ -220,8 +219,7 @@ impl AaiBackend {
                 .text()
                 .await
                 .map_err(|e| AaiError::Http(format!("poll body: {e}")))?;
-            let raw: serde_json::Value =
-                serde_json::from_str(&text).map_err(AaiError::Parse)?;
+            let raw: serde_json::Value = serde_json::from_str(&text).map_err(AaiError::Parse)?;
             let status = raw
                 .get("status")
                 .and_then(|v| v.as_str())

@@ -79,10 +79,7 @@ async fn aai_server_with_two_words() -> (MockServer, PathBuf) {
         .mount(&server)
         .await;
 
-    let tmp = std::env::temp_dir().join(format!(
-        "asr_path_orch_test_{}.wav",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("asr_path_orch_test_{}.wav", std::process::id()));
     let mut f = std::fs::File::create(&tmp).unwrap();
     f.write_all(b"\x00").unwrap();
     drop(f);
@@ -120,7 +117,9 @@ async fn run_happy_path_returns_merged() {
     ]);
     let cands = vec![cand("genius", vec!["hello", "world"])];
 
-    let out = run(&aai, &chat, &audio, &cands, Some("en")).await.expect("ok");
+    let out = run(&aai, &chat, &audio, &cands, Some("en"))
+        .await
+        .expect("ok");
     match out {
         AsrOutput::Merged { lines, source } => {
             assert_eq!(source, SOURCE_MERGED);
@@ -192,9 +191,7 @@ async fn guard_never_emits_word_timings_on_merged() {
 async fn guard_never_emits_word_timings_on_fallback() {
     let (server, audio) = aai_server_with_two_words().await;
     let aai = AaiBackend::with_base_url("test-key", server.uri());
-    let chat = ScriptedChat::new(vec![
-        r#"{"disagreement": true, "notes": "", "lines": []}"#,
-    ]);
+    let chat = ScriptedChat::new(vec![r#"{"disagreement": true, "notes": "", "lines": []}"#]);
     let cands = vec![cand("genius", vec!["x"])];
 
     let out = run(&aai, &chat, &audio, &cands, None).await.expect("ok");

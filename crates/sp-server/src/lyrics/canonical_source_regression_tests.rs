@@ -90,8 +90,14 @@ fn id_bucket1_genius_only_routes_to_asr_path() {
         has_timing: false,
     }];
 
-    assert!(!is_allowed_text_source(&cands), "untimed genius must be gate-rejected");
-    assert!(has_any_text_candidate(&cands), "untimed genius must trigger asr_path");
+    assert!(
+        !is_allowed_text_source(&cands),
+        "untimed genius must be gate-rejected"
+    );
+    assert!(
+        has_any_text_candidate(&cands),
+        "untimed genius must trigger asr_path"
+    );
 }
 
 #[test]
@@ -109,8 +115,14 @@ fn id_bucket1_lrclib_untimed_only_routes_to_asr_path() {
         has_timing: false, // untimed lrclib
     }];
 
-    assert!(!is_allowed_text_source(&cands), "untimed lrclib must be gate-rejected");
-    assert!(has_any_text_candidate(&cands), "untimed lrclib must trigger asr_path");
+    assert!(
+        !is_allowed_text_source(&cands),
+        "untimed lrclib must be gate-rejected"
+    );
+    assert!(
+        has_any_text_candidate(&cands),
+        "untimed lrclib must trigger asr_path"
+    );
 }
 
 #[test]

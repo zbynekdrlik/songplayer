@@ -530,13 +530,10 @@ impl LyricsWorker {
 
                 // Vocal isolation — reuse existing preprocess_vocals.
                 let venv_python = self.venv_python.read().await.clone();
-                let audio_path: Option<PathBuf> =
-                    row.audio_file_path.as_ref().map(PathBuf::from);
+                let audio_path: Option<PathBuf> = row.audio_file_path.as_ref().map(PathBuf::from);
                 let clean_vocal: Option<PathBuf> = match (&venv_python, &audio_path) {
                     (Some(python), Some(audio)) if audio.exists() => {
-                        let wav_path = self
-                            .cache_dir
-                            .join(format!("{youtube_id}_vocals16k.wav"));
+                        let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
                         match crate::lyrics::aligner::preprocess_vocals(
                             python,
                             &self.script_path,
@@ -633,9 +630,7 @@ impl LyricsWorker {
                         )
                         .await;
 
-                        let json_path = self
-                            .cache_dir
-                            .join(format!("{youtube_id}_lyrics.json"));
+                        let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
                         let json_bytes = serde_json::to_vec(&track)?;
                         tokio::fs::write(&json_path, &json_bytes).await?;
 

@@ -92,10 +92,7 @@ mod tests {
 
     #[test]
     fn no_silence_gap_yields_single_line() {
-        let words = vec![
-            w("hello", 0, 500),
-            w("world", 600, 1100),
-        ];
+        let words = vec![w("hello", 0, 500), w("world", 600, 1100)];
         let lines = split_on_silence(&words);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].en, "hello world");

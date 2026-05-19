@@ -99,10 +99,7 @@ mod tests {
 
     #[test]
     fn user_prompt_includes_all_words_with_timings() {
-        let words = vec![
-            word("hello", 0, 500),
-            word("world", 600, 1100),
-        ];
+        let words = vec![word("hello", 0, 500), word("world", 600, 1100)];
         let input = ClaudeMergeInput {
             aai_words: &words,
             untimed_text: "hello world",
