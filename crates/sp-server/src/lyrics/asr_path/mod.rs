@@ -56,7 +56,7 @@ pub enum AsrError {
 
 /// Pick the best untimed text candidate. Priority: genius > lrclib > others.
 /// "Best" within a priority tier means the candidate with the most lines.
-pub fn pick_untimed_candidate<'a>(candidates: &'a [CandidateText]) -> Option<&'a CandidateText> {
+pub fn pick_untimed_candidate(candidates: &[CandidateText]) -> Option<&CandidateText> {
     fn rank(source: &str) -> u8 {
         match source {
             s if s.contains("genius") => 0,
