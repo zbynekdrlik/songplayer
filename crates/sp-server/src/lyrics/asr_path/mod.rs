@@ -4,6 +4,7 @@
 //! `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`.
 
 pub mod aai_backend;
+pub mod claude_merge;
 pub mod merge_prompt;
 
 /// DB settings key that stores the AssemblyAI API token. Read per-song in
