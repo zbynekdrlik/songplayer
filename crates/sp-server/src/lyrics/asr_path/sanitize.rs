@@ -15,12 +15,12 @@ pub const MIN_LINE_DURATION_MS: u64 = 200;
 pub fn sanitize_lines(mut lines: Vec<LyricsLine>) -> Vec<LyricsLine> {
     let mut floor: u64 = 0;
     for line in &mut lines {
-        if line.start_ms < floor {
-            line.start_ms = floor;
-        }
-        if line.end_ms < line.start_ms + MIN_LINE_DURATION_MS {
-            line.end_ms = line.start_ms + MIN_LINE_DURATION_MS;
-        }
+        // `.max(floor)` clamps `start_ms` UP to `floor`. Equivalent to
+        // `if start_ms < floor { start_ms = floor; }` but with no `<`
+        // operator for cargo-mutants to mutate into the observationally
+        // equivalent `<=` form.
+        line.start_ms = line.start_ms.max(floor);
+        line.end_ms = line.end_ms.max(line.start_ms + MIN_LINE_DURATION_MS);
         floor = line.end_ms;
     }
     lines
