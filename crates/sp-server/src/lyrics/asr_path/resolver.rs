@@ -9,9 +9,7 @@ use sp_core::lyrics::LyricsLine;
 
 use crate::lyrics::asr_path::aai_backend::AaiTranscript;
 use crate::lyrics::asr_path::claude_merge::ClaudeMergeResult;
-#[cfg(test)]
-use crate::lyrics::asr_path::sanitize::MIN_LINE_DURATION_MS;
-use crate::lyrics::asr_path::sanitize::sanitize_lines;
+use crate::lyrics::asr_path::sanitize::{MIN_LINE_DURATION_MS, sanitize_lines};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolverError {
@@ -75,6 +73,20 @@ pub fn resolve(
 
         let start_ms = aai.words[effective_start].start_ms;
         let end_ms = aai.words[ml.end_word_idx].end_ms;
+        // A real span shorter than the minimum means Claude crammed a multi-word
+        // line onto one or two words (commonly at a repeated chorus or the song
+        // tail). Floor-clamping it produces a 200ms blink on the wall; drop it
+        // instead. Surviving lines keep genuine AAI durations.
+        if end_ms.saturating_sub(start_ms) < MIN_LINE_DURATION_MS {
+            dropped.push(format!(
+                "[{}..{}] '{}' ({}ms span — squashed)",
+                ml.start_word_idx,
+                ml.end_word_idx,
+                ml.text.chars().take(40).collect::<String>(),
+                end_ms.saturating_sub(start_ms)
+            ));
+            continue;
+        }
         last_end_idx = Some(ml.end_word_idx);
         out.push(LyricsLine {
             start_ms,
@@ -195,16 +207,39 @@ mod tests {
     }
 
     #[test]
-    fn sanitizer_enforces_minimum_duration() {
-        let t = aai(vec![("x", 1000, 1050)]); // 50ms — under threshold
-        let m = merged(vec![("X", 0, 0)]);
+    fn squashed_short_line_is_dropped_not_clamped() {
+        // A line whose real AAI span is under the minimum (Claude crammed it
+        // onto one short word) is DROPPED rather than floor-clamped to a 200ms
+        // blink. The long opening line survives; the 50ms tail is dropped.
+        let t = aai(vec![
+            ("hello", 0, 1500),
+            ("world", 1600, 3000),
+            ("x", 3001, 3051), // 50ms — squashed
+        ]);
+        let m = merged(vec![("hello world", 0, 1), ("squashed", 2, 2)]);
         let lines = resolve(&m, &t).expect("ok");
-        assert!(lines[0].end_ms - lines[0].start_ms >= MIN_LINE_DURATION_MS);
+        assert_eq!(lines.len(), 1, "the 50ms line must be dropped");
+        assert_eq!(lines[0].en, "hello world");
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.end_ms - l.start_ms >= MIN_LINE_DURATION_MS)
+        );
+    }
+
+    #[test]
+    fn lone_too_short_line_yields_empty() {
+        // If the only line is too short, dropping it leaves nothing → Empty;
+        // the orchestrator then falls back to the raw AAI silence-gap split.
+        let t = aai(vec![("x", 1000, 1050)]); // 50ms
+        let m = merged(vec![("X", 0, 0)]);
+        let err = resolve(&m, &t).expect_err("must err — sole line dropped");
+        assert!(matches!(err, ResolverError::Empty));
     }
 
     #[test]
     fn output_lines_always_have_words_none() {
-        let t = aai(vec![("a", 0, 100)]);
+        let t = aai(vec![("a", 0, 500)]); // >= MIN so it survives
         let m = merged(vec![("A", 0, 0)]);
         let lines = resolve(&m, &t).expect("ok");
         assert!(lines.iter().all(|l| l.words.is_none()));
