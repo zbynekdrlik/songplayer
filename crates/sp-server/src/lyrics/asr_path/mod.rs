@@ -129,6 +129,20 @@ pub async fn run<C: MergeChat + ?Sized>(
         Err(e) => return Err(AsrError::Aai(e)),
     };
     let aai_word_count = transcript.words.len();
+    // Diagnostic: dump the full AAI word stream (idx:text@start-end) so we can
+    // see EXACTLY what AAI heard and where Claude's line mapping diverged
+    // (e.g. a dropped repeated-chorus line). One bounded line; grep by ms.
+    tracing::info!(
+        word_count = aai_word_count,
+        words = %transcript
+            .words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| format!("{i}:{}@{}-{}", w.text, w.start_ms, w.end_ms))
+            .collect::<Vec<_>>()
+            .join(" "),
+        "asr_path: AAI transcript dump"
+    );
     if transcript.words.is_empty() {
         return Ok(AsrResult {
             output: AsrOutput::Quarantine {
