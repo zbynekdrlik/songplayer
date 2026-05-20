@@ -491,8 +491,8 @@ impl LyricsWorker {
         // text sources we know produce poor wall output. Allowed set is
         // yt_subs/lrclib/spotify (line-timed) and description (curated). Anything
         // else (genius, lrclib-plain-without-timing, no_source) gets routed to
-        // asr_path (AAI U3-Pro + Claude-merge) if any text candidate exists.
-        // Songs with zero candidates are marked unsupported_source.
+        // asr_path (AAI U3-Pro transcribe + silence-gap split) if any text
+        // candidate exists. Songs with zero candidates are marked unsupported_source.
         if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
             let names: Vec<&str> = ctx
                 .candidate_texts
@@ -500,10 +500,10 @@ impl LyricsWorker {
                 .map(|c| c.source.as_str())
                 .collect();
 
-            // NEW asr_path branch — only when there IS a candidate (just
-            // untimed). Whisperx gate rejected this song; asr_path uses AAI
-            // ASR + Claude-merge instead. See
-            // docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md
+            // asr_path branch — only when there IS a candidate (just untimed).
+            // Whisperx gate rejected this song; asr_path uses AAI ASR +
+            // silence-gap split (no Claude-merge). Candidate text is no longer
+            // consumed here — asr_path is audio-only.
             if crate::lyrics::orchestrator::has_any_text_candidate(&ctx.candidate_texts) {
                 tracing::info!(
                     video_id,
@@ -513,7 +513,6 @@ impl LyricsWorker {
                 );
                 let result = self
                     .run_asr_path_branch(
-                        &ctx.candidate_texts,
                         row.audio_file_path.as_deref(),
                         video_id,
                         &youtube_id,

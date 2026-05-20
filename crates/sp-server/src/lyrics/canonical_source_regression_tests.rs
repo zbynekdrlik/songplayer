@@ -72,7 +72,8 @@ fn anchor_template_placeholder() {
 // Bucket-1 = songs that have only untimed text candidates (genius, lrclib
 // without synced timestamps). The whisperx gate (`is_allowed_text_source`)
 // must reject them (no timed source), while the asr_path trigger
-// (`has_any_text_candidate`) must accept them (text exists for Claude-merge).
+// (`has_any_text_candidate`) must accept them (text exists; asr_path is
+// audio-only — candidate text is gathered but no longer consumed by asr_path).
 // Songs with zero candidates must be rejected by both gates so the worker
 // marks them `unsupported_source`.
 
@@ -103,8 +104,9 @@ fn id_bucket1_genius_only_routes_to_asr_path() {
 #[test]
 fn id_bucket1_lrclib_untimed_only_routes_to_asr_path() {
     // Bucket-1 song shape: lrclib lines exist but no per-line timing — whisperx
-    // forced-alignment can't use it precisely (gate rejects), but the text
-    // candidate is still a valid reference for Claude-merge in asr_path.
+    // forced-alignment can't use it precisely (gate rejects), and the text
+    // candidate is present (has_any_text_candidate returns true → asr_path
+    // branch runs, though asr_path is now audio-only and ignores candidate text).
     use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
     use crate::lyrics::provider::CandidateText;
 

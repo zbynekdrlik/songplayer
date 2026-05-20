@@ -1,10 +1,11 @@
 //! `LyricsWorker` extension — asr_path branch.
 //!
 //! Extracted from `worker.rs::process_song` to keep that file under the
-//! 1000-line CI limit. The branch is structurally additive (T11): it runs
-//! when whisperx's gate rejects the song but a text candidate (genius /
-//! lrclib-untimed) still exists. See
-//! `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`.
+//! 1000-line CI limit. The branch runs when whisperx's gate rejects the song
+//! but a text candidate (genius / lrclib-untimed) still exists. Uses AAI
+//! transcription + silence-gap split (no Claude-merge). See
+//! `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`
+//! (note: the Claude-merge portion of that spec is superseded).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -18,9 +19,9 @@ use super::worker::LyricsWorker;
 use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
 impl LyricsWorker {
-    /// Run the AssemblyAI Universal-3 Pro + Claude-merge alignment path for
-    /// a song the whisperx gate rejected but which has at least one text
-    /// candidate. Caller is `process_song` after the gate check.
+    /// Run the AssemblyAI Universal-3 Pro alignment path for a song the
+    /// whisperx gate rejected. AAI transcribes the vocal, then the
+    /// silence-gap splitter groups words into singable lines (no Claude-merge).
     ///
     /// Does NOT call `self.clear_processing()` — the caller does that
     /// immediately after the await so there is exactly one call site.
@@ -28,7 +29,6 @@ impl LyricsWorker {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run_asr_path_branch(
         &self,
-        candidate_texts: &[crate::lyrics::provider::CandidateText],
         audio_file_path: Option<&str>,
         video_id: i64,
         youtube_id: &str,
@@ -52,17 +52,6 @@ impl LyricsWorker {
                 warn!(
                     youtube_id = %youtube_id,
                     "asr_path: assemblyai_api_key not set — leaving row unprocessed"
-                );
-                return Ok(());
-            }
-        };
-
-        let ai_client = match &self.ai_client {
-            Some(c) => c.clone(),
-            None => {
-                warn!(
-                    youtube_id = %youtube_id,
-                    "asr_path: ai_client is None — CLIProxyAPI not configured, cannot run claude-merge"
                 );
                 return Ok(());
             }
@@ -127,18 +116,8 @@ impl LyricsWorker {
         )
         .await;
 
-        // Convert provider::CandidateText → tier1::CandidateText
-        // (asr_path::run consumes the tier1 form).
-        let tier1_cands: Vec<crate::lyrics::tier1::CandidateText> = candidate_texts
-            .iter()
-            .cloned()
-            .map(crate::lyrics::tier1::CandidateText::from)
-            .collect();
-
         let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
-        let result =
-            crate::lyrics::asr_path::run(&aai, ai_client.as_ref(), &wav, &tier1_cands, Some("en"))
-                .await;
+        let result = crate::lyrics::asr_path::run(&aai, &wav).await;
 
         // Write audit sidecar regardless of outcome — operators can grep these
         // to understand what happened on each row without parsing tracing logs.
@@ -153,9 +132,7 @@ impl LyricsWorker {
 
         match result {
             Ok(crate::lyrics::asr_path::AsrResult {
-                output:
-                    crate::lyrics::asr_path::AsrOutput::Merged { lines, source }
-                    | crate::lyrics::asr_path::AsrOutput::Fallback { lines, source },
+                output: crate::lyrics::asr_path::AsrOutput::Lines { lines, source },
                 ..
             }) => {
                 let mut track = LyricsTrack {

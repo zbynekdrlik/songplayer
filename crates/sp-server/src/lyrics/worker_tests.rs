@@ -159,17 +159,17 @@ fn align_track_to_lyrics_track_maps_fields_correctly() {
     );
 }
 
-/// Verify that new provenance literals produced by the tier chain are valid.
+/// Verify that provenance literals produced by the tier chain are valid.
 /// This is a documentation-as-test: if the source tag format changes, this
 /// test breaks, forcing a deliberate update.
 #[test]
 fn new_provenance_source_literals_are_recognizable() {
-    // These are the sources the new tier chain can produce. Asserted as
+    // These are the sources the tier chain can produce. Asserted as
     // non-empty string comparisons to make the test read as a spec.
     let tier1_sources = ["tier1:spotify", "tier1:lrclib", "tier1:yt_subs", "genius"];
     let backend_source = "whisperx-large-v3@rev1";
-    // TextOnly path: claude-merge appends "+claude-merge" to the ASR provenance.
-    let claude_merge_suffix = "+claude-merge";
+    // asr_path source — lean path, no claude-merge suffix.
+    let asr_source = "asr:aai-u3-pro";
 
     for s in &tier1_sources {
         assert!(
@@ -181,9 +181,10 @@ fn new_provenance_source_literals_are_recognizable() {
         backend_source.contains("whisperx"),
         "backend source must mention whisperx"
     );
-    // Claude-merged provenance is backend provenance + "+claude-merge"
-    let merged = format!("{backend_source}{claude_merge_suffix}");
-    assert!(merged.ends_with("+claude-merge"));
+    assert!(
+        asr_source.starts_with("asr:"),
+        "asr_path source must start with 'asr:'"
+    );
 }
 
 /// Description provider is wired as the 4th candidate source.
@@ -928,7 +929,6 @@ fn untimed_genius_passes_gate_to_asr_path() {
 // mutating the row.
 #[tokio::test]
 async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
-    use crate::lyrics::provider::CandidateText;
     use std::time::Instant;
 
     let pool = crate::db::create_memory_pool().await.expect("pool");
@@ -957,15 +957,8 @@ async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
         events_tx,
     );
 
-    let cands = vec![CandidateText {
-        source: "genius".to_string(),
-        lines: vec!["Hello".into()],
-        line_timings: None,
-        has_timing: false,
-    }];
     let result = worker
         .run_asr_path_branch(
-            &cands,
             None,
             video_id,
             "test_yt_id",
