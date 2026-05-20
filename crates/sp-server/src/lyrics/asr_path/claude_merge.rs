@@ -45,10 +45,10 @@ pub enum MergeError {
 /// `notes` field does NOT cause a false positive. Other unknown fields trigger
 /// `MergeError::Parse`.
 pub fn parse_response(body: &str) -> Result<ClaudeMergeResult, MergeError> {
-    let stripped = strip_json_fence(body);
+    let stripped = extract_json_object(body);
     // Parse to Value first so the ms-field check can walk the structure
     // precisely (lines[] only — the spec ban only applies there).
-    let value: serde_json::Value = serde_json::from_str(stripped).map_err(MergeError::Parse)?;
+    let value: serde_json::Value = serde_json::from_str(&stripped).map_err(MergeError::Parse)?;
     if let Some(lines) = value.get("lines").and_then(|v| v.as_array()) {
         for line in lines {
             if let Some(obj) = line.as_object() {
@@ -61,21 +61,16 @@ pub fn parse_response(body: &str) -> Result<ClaudeMergeResult, MergeError> {
     serde_json::from_value(value).map_err(MergeError::Parse)
 }
 
-fn strip_json_fence(body: &str) -> &str {
-    let t = body.trim();
-    if let Some(rest) = t.strip_prefix("```json") {
-        let rest = rest.trim_start_matches('\n');
-        if let Some(inner) = rest.strip_suffix("```") {
-            return inner.trim();
-        }
+/// Strip markdown fences and any surrounding prose, returning the substring
+/// from the first `{` to the last `}` (inclusive). Claude via CLIProxyAPI
+/// frequently wraps JSON in ```fences``` or prefixes a sentence of prose
+/// despite "Output JSON only"; isolating the outermost object survives both.
+fn extract_json_object(body: &str) -> String {
+    let unfenced = crate::ai::client::strip_markdown_fences(body);
+    match (unfenced.find('{'), unfenced.rfind('}')) {
+        (Some(start), Some(end)) if end > start => unfenced[start..=end].to_string(),
+        _ => unfenced,
     }
-    if let Some(rest) = t.strip_prefix("```") {
-        let rest = rest.trim_start_matches('\n');
-        if let Some(inner) = rest.strip_suffix("```") {
-            return inner.trim();
-        }
-    }
-    t
 }
 
 use crate::lyrics::asr_path::merge_prompt::{ClaudeMergeInput, SYSTEM_PROMPT, build_user_prompt};
@@ -118,7 +113,25 @@ pub async fn merge<C: MergeChat + ?Sized>(
                 .chat(SYSTEM_PROMPT, &stricter)
                 .await
                 .map_err(MergeError::Transport)?;
-            parse_response(&second)
+            match parse_response(&second) {
+                Ok(r) => Ok(r),
+                Err(e) => {
+                    // Both attempts unparseable. Log the raw second response so
+                    // an operator can see EXACTLY what Claude emitted (malformed
+                    // syntax, unescaped quote, truncation, prose, etc.) — mirrors
+                    // translator.rs diagnostic logging. Bounded at 4000 chars.
+                    let snippet: String = second.chars().take(4000).collect();
+                    let truncated = second.chars().count() > 4000;
+                    tracing::warn!(
+                        error = %e,
+                        response_len = second.chars().count(),
+                        truncated,
+                        response = %snippet,
+                        "asr_path claude_merge: both attempts unparseable — raw response logged for diagnosis"
+                    );
+                    Err(e)
+                }
+            }
         }
         Err(e) => Err(e),
     }
@@ -165,6 +178,21 @@ mod tests {
         let body = "```json\n{\"disagreement\": false, \"notes\": \"\", \"lines\": []}\n```";
         let r = parse_response(body).expect("ok");
         assert!(r.lines.is_empty());
+    }
+
+    #[test]
+    fn extracts_json_object_from_surrounding_prose() {
+        // CLIProxyAPI Claude often prefixes a sentence of prose before the
+        // JSON despite "Output JSON only". The first-`{`-to-last-`}` extraction
+        // isolates the object.
+        let body = "Here is the merged result you asked for:\n\
+                    {\"disagreement\": false, \"notes\": \"ok\", \"lines\": \
+                    [{\"text\": \"Hi\", \"start_word_idx\": 0, \"end_word_idx\": 0}]}\n\
+                    Let me know if you need anything else.";
+        let r = parse_response(body).expect("must parse despite prose");
+        assert!(!r.disagreement);
+        assert_eq!(r.lines.len(), 1);
+        assert_eq!(r.lines[0].text, "Hi");
     }
 
     #[test]
