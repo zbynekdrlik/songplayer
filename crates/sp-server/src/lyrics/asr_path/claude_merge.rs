@@ -7,8 +7,14 @@
 
 use serde::Deserialize;
 
+/// One merged line. Extra fields Claude may include (e.g. stray
+/// `start_time_ms` / `end_time_ms` it sometimes echoes) are IGNORED — there is
+/// NO `deny_unknown_fields`. The v15 lesson ("never TRUST LLM-emitted ms") is
+/// honored structurally: the resolver only ever reads the three fields below
+/// and looks ms up from the AAI words by index. Claude's ms, if present, are
+/// never read, so ignoring them is safe and far more robust than rejecting the
+/// whole song on a habitual extra field.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MergedLine {
     pub text: String,
     pub start_word_idx: usize,
@@ -16,12 +22,14 @@ pub struct MergedLine {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ClaudeMergeResult {
+    #[serde(default)]
     pub disagreement: bool,
     #[serde(default)]
     pub notes: String,
-    #[serde(default)]
+    /// Accept either `lines` (the asked-for key) or `segments` (a key cloaked
+    /// Claude sometimes substitutes). Extra top-level fields are ignored.
+    #[serde(default, alias = "segments")]
     pub lines: Vec<MergedLine>,
 }
 
@@ -29,36 +37,19 @@ pub struct ClaudeMergeResult {
 pub enum MergeError {
     #[error("Claude response parse failed: {0}")]
     Parse(serde_json::Error),
-    #[error("Claude response contained ms fields (banned per spec)")]
-    HasMsFields,
     #[error("Claude transport failed: {0}")]
     Transport(String),
 }
 
 /// Parse a raw Claude response body into a ClaudeMergeResult.
 ///
-/// Strips a leading ```json ... ``` fence if present (Claude sometimes wraps
-/// JSON output in markdown despite "Output JSON only" instructions). Then
-/// runs strict deserialization. Any `start_ms` or `end_ms` key present in a
-/// `lines[]` object triggers `MergeError::HasMsFields` — the check is
-/// intentionally narrow (lines only) so Claude mentioning "start_ms" in the
-/// `notes` field does NOT cause a false positive. Other unknown fields trigger
-/// `MergeError::Parse`.
+/// Tolerant by design (CLIProxyAPI cloaked Claude is unreliable about exact
+/// shape): strips markdown fences + surrounding prose, accepts `lines` or
+/// `segments`, and ignores any extra fields. The resolver reads only word
+/// indices, so stray ms fields are harmless.
 pub fn parse_response(body: &str) -> Result<ClaudeMergeResult, MergeError> {
     let stripped = extract_json_object(body);
-    // Parse to Value first so the ms-field check can walk the structure
-    // precisely (lines[] only — the spec ban only applies there).
-    let value: serde_json::Value = serde_json::from_str(&stripped).map_err(MergeError::Parse)?;
-    if let Some(lines) = value.get("lines").and_then(|v| v.as_array()) {
-        for line in lines {
-            if let Some(obj) = line.as_object() {
-                if obj.contains_key("start_ms") || obj.contains_key("end_ms") {
-                    return Err(MergeError::HasMsFields);
-                }
-            }
-        }
-    }
-    serde_json::from_value(value).map_err(MergeError::Parse)
+    serde_json::from_str(&stripped).map_err(MergeError::Parse)
 }
 
 /// Strip markdown fences and any surrounding prose, returning the substring
@@ -196,18 +187,38 @@ mod tests {
     }
 
     #[test]
-    fn rejects_ms_field_on_line() {
-        // The v15-prevention guard. If Claude emits ms values, parse_response
-        // returns HasMsFields, and the orchestrator falls back to raw AAI.
+    fn ignores_ms_fields_on_line() {
+        // Cloaked Claude habitually echoes ms even when not asked. The parser
+        // IGNORES them (no deny_unknown_fields); the v15 guarantee ("never use
+        // LLM ms") holds because the resolver only reads word indices and looks
+        // ms up from the AAI words. Parsing must succeed, keeping the 3 fields.
         let body = r#"{
             "disagreement": false,
             "notes": "",
             "lines": [
-                {"text": "Hello", "start_word_idx": 0, "end_word_idx": 1, "start_ms": 0, "end_ms": 500}
+                {"text": "Hello", "start_word_idx": 0, "end_word_idx": 1, "start_time_ms": 0, "end_time_ms": 500}
             ]
         }"#;
-        let err = parse_response(body).expect_err("must err");
-        assert!(matches!(err, MergeError::HasMsFields), "got {err:?}");
+        let r = parse_response(body).expect("must parse, ignoring ms fields");
+        assert_eq!(r.lines.len(), 1);
+        assert_eq!(r.lines[0].text, "Hello");
+        assert_eq!(r.lines[0].start_word_idx, 0);
+        assert_eq!(r.lines[0].end_word_idx, 1);
+    }
+
+    #[test]
+    fn accepts_segments_key_alias() {
+        // Cloaked Claude sometimes uses `segments` instead of `lines` (observed
+        // on the first production song). The alias accepts both.
+        let body = r#"{
+            "disagreement": false,
+            "segments": [
+                {"text": "Hello", "start_word_idx": 0, "end_word_idx": 1}
+            ]
+        }"#;
+        let r = parse_response(body).expect("must parse via segments alias");
+        assert_eq!(r.lines.len(), 1);
+        assert_eq!(r.lines[0].text, "Hello");
     }
 
     #[test]
@@ -219,29 +230,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_top_level_field() {
+    fn ignores_unknown_top_level_field() {
+        // Extra top-level fields (e.g. Claude's "explanation") are ignored.
         let body = r#"{"disagreement": false, "notes": "", "lines": [], "extra": "x"}"#;
-        let err = parse_response(body).expect_err("must err");
-        // serde produces Parse, not HasMsFields, for non-ms unknown fields.
-        assert!(matches!(err, MergeError::Parse(_)), "got {err:?}");
-    }
-
-    #[test]
-    fn ms_keyword_in_notes_does_not_trigger_has_ms_fields() {
-        // Claude can mention 'start_ms' in the notes field (e.g. as part of
-        // an explanation). That must NOT be confused with actual ms-valued
-        // line fields (the v15-prevention rule applies to lines[*].start_ms /
-        // end_ms only).
-        let body = r#"{
-            "disagreement": false,
-            "notes": "I ignored start_ms in input — used word indices only",
-            "lines": [
-                {"text": "Hello", "start_word_idx": 0, "end_word_idx": 0}
-            ]
-        }"#;
-        let r = parse_response(body).expect("must parse");
+        let r = parse_response(body).expect("must parse, ignoring extra field");
         assert!(!r.disagreement);
-        assert_eq!(r.lines.len(), 1);
+        assert!(r.lines.is_empty());
     }
 
     use crate::lyrics::asr_path::aai_backend::AaiWord;
@@ -319,7 +313,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn merge_propagates_ms_field_error() {
+    async fn merge_ignores_ms_fields_and_succeeds() {
+        // Claude echoes ms fields out of habit. The parser ignores them and the
+        // merge succeeds with the 3 real fields — no fallback, no retry.
         let (words, source, text) = ctx();
         let input = ClaudeMergeInput {
             aai_words: &words,
@@ -328,10 +324,11 @@ mod tests {
             language: None,
         };
         let chat = ScriptedChat::new(vec![
-            r#"{"disagreement": false, "notes": "", "lines": [{"text": "x", "start_word_idx": 0, "end_word_idx": 0, "start_ms": 0}]}"#,
+            r#"{"disagreement": false, "notes": "", "lines": [{"text": "Hi", "start_word_idx": 0, "end_word_idx": 0, "start_time_ms": 0, "end_time_ms": 200}]}"#,
         ]);
-        let err = merge(&chat, &input).await.expect_err("must err");
-        // HasMsFields is NOT MergeError::Parse, so no retry happens.
-        assert!(matches!(err, MergeError::HasMsFields), "got {err:?}");
+        let r = merge(&chat, &input).await.expect("must merge, ignoring ms");
+        assert_eq!(r.lines.len(), 1);
+        assert_eq!(r.lines[0].text, "Hi");
+        assert_eq!(r.lines[0].end_word_idx, 0);
     }
 }

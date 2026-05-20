@@ -211,21 +211,29 @@ async fn run_falls_back_on_claude_disagreement() {
 }
 
 #[tokio::test]
-async fn run_falls_back_on_claude_ms_field() {
-    // Guard: Claude emits ms fields → parser rejects → orchestrator falls back.
+async fn run_merges_ignoring_claude_ms_fields() {
+    // Guard: Claude habitually echoes ms fields. The parser IGNORES them (the
+    // resolver only reads word indices + AAI ms), so the merge SUCCEEDS rather
+    // than falling back. The v15 guarantee holds structurally — Claude's ms are
+    // never read. Output ms come from the AAI words (hello 0..500, world
+    // 600..1100).
     let (server, audio) = aai_server_with_two_words().await;
     let aai = AaiBackend::with_base_url("test-key", server.uri());
     let chat = ScriptedChat::new(vec![
-        r#"{"disagreement": false, "notes": "", "lines": [{"text": "x", "start_word_idx": 0, "end_word_idx": 1, "start_ms": 0}]}"#,
+        r#"{"disagreement": false, "notes": "", "lines": [{"text": "Hello world", "start_word_idx": 0, "end_word_idx": 1, "start_time_ms": 999999, "end_time_ms": 999999}]}"#,
     ]);
     let cands = vec![cand("genius", vec!["hello"])];
 
     let r = run(&aai, &chat, &audio, &cands, None).await.expect("ok");
-    assert!(
-        matches!(r.output, AsrOutput::Fallback { .. }),
-        "got {:?}",
-        r.output
-    );
+    match r.output {
+        AsrOutput::Merged { lines, .. } => {
+            assert_eq!(lines.len(), 1);
+            // ms come from AAI words, NOT Claude's bogus 999999.
+            assert_eq!(lines[0].start_ms, 0);
+            assert_eq!(lines[0].end_ms, 1100);
+        }
+        other => panic!("expected Merged (ms ignored), got {other:?}"),
+    }
     let _ = std::fs::remove_file(&audio);
 }
 
