@@ -32,6 +32,10 @@ pub fn resolve(
     }
     let mut out: Vec<LyricsLine> = Vec::with_capacity(merged.lines.len());
     let word_count = aai.words.len();
+    // Diagnostic: track Claude's raw index ranges so we can spot mis-mappings
+    // (overlapping or non-monotonic ranges → clamped 200ms lines on the wall).
+    let mut prev_end_idx: Option<usize> = None;
+    let mut suspicious: Vec<String> = Vec::new();
     for ml in &merged.lines {
         if ml.start_word_idx > ml.end_word_idx {
             return Err(ResolverError::InvertedRange {
@@ -45,6 +49,23 @@ pub fn resolve(
                 len: word_count,
             });
         }
+        // Flag a range that does NOT start after the previous line ended —
+        // Claude reused/overlapped indices, which collapses these lines to the
+        // 200ms sanitizer floor and makes them blink past on the wall.
+        if let Some(pe) = prev_end_idx
+            && ml.start_word_idx <= pe
+        {
+            suspicious.push(format!(
+                "[{}..{}] '{}' starts at idx {} <= prev end idx {}",
+                ml.start_word_idx,
+                ml.end_word_idx,
+                ml.text.chars().take(40).collect::<String>(),
+                ml.start_word_idx,
+                pe
+            ));
+        }
+        prev_end_idx = Some(ml.end_word_idx);
+
         let start_ms = aai.words[ml.start_word_idx].start_ms;
         let end_ms = aai.words[ml.end_word_idx].end_ms;
         out.push(LyricsLine {
@@ -54,6 +75,14 @@ pub fn resolve(
             sk: None,    // translator fills this later as Some(...)
             words: None, // per feedback_line_timing_only — line-only display
         });
+    }
+    if !suspicious.is_empty() {
+        tracing::warn!(
+            count = suspicious.len(),
+            detail = %suspicious.join(" | "),
+            "asr_path resolver: Claude assigned overlapping/non-monotonic word ranges — \
+             these lines will clamp to the 200ms floor"
+        );
     }
     Ok(sanitize_lines(out))
 }

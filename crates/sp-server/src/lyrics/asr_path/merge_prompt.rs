@@ -79,6 +79,12 @@ pub fn build_user_prompt(input: &ClaudeMergeInput) -> String {
          \"There is a name\", \"start_word_idx\": 0, \"end_word_idx\": 3}}]}}\n\n\
          RULES:\n\
          - Use ONLY indices 0 to {last_idx}.\n\
+         - Ranges MUST move strictly forward and never overlap: every line's \
+         start_word_idx must be GREATER than the previous line's end_word_idx. \
+         Each numbered word belongs to at most one line. Cover the words in order \
+         from 0 upward — do not jump backward or reuse an index.\n\
+         - The audio repeats phrases (choruses); map each reference line to the \
+         words at THAT point in the sequence, not to an earlier identical phrase.\n\
          - Each line object has exactly three fields: text, start_word_idx, \
          end_word_idx. No timestamps, no other fields.\n\
          - \"text\" is what those words say, corrected by the reference.\n\
