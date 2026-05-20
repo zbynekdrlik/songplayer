@@ -79,7 +79,17 @@ async fn aai_server_with_two_words() -> (MockServer, PathBuf) {
         .mount(&server)
         .await;
 
-    let tmp = std::env::temp_dir().join(format!("asr_path_orch_test_{}.wav", std::process::id()));
+    // Unique temp file PER CALL — these orchestrator tests are `#[tokio::test]`
+    // and run concurrently in the SAME process, so a PID-only name races
+    // (one test deletes the WAV while another is mid-`transcribe`, surfacing as
+    // a spurious AAI read error). An atomic counter guarantees uniqueness.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!(
+        "asr_path_orch_test_{}_{}.wav",
+        std::process::id(),
+        n
+    ));
     let mut f = std::fs::File::create(&tmp).unwrap();
     f.write_all(b"\x00").unwrap();
     drop(f);
