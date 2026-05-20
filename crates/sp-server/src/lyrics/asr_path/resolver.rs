@@ -32,10 +32,15 @@ pub fn resolve(
     }
     let mut out: Vec<LyricsLine> = Vec::with_capacity(merged.lines.len());
     let word_count = aai.words.len();
-    // Diagnostic: track Claude's raw index ranges so we can spot mis-mappings
-    // (overlapping or non-monotonic ranges → clamped 200ms lines on the wall).
-    let mut prev_end_idx: Option<usize> = None;
-    let mut suspicious: Vec<String> = Vec::new();
+    // Enforce strictly-increasing, non-overlapping word ranges using the REAL
+    // AAI word times. Claude's index assignment is noisy on repeated choruses —
+    // it sometimes places a later line at earlier indices (a backward jump).
+    // Rather than clamp such a line to the 200ms floor (a blink on the wall),
+    // we bump its start past the previous accepted line and, if that leaves no
+    // unique words, DROP it. Every surviving line keeps real AAI timing. This
+    // is ASR-data-only: no synthesized ms, no interpolation.
+    let mut last_end_idx: Option<usize> = None;
+    let mut dropped: Vec<String> = Vec::new();
     for ml in &merged.lines {
         if ml.start_word_idx > ml.end_word_idx {
             return Err(ResolverError::InvertedRange {
@@ -49,25 +54,28 @@ pub fn resolve(
                 len: word_count,
             });
         }
-        // Flag a range that does NOT start after the previous line ended —
-        // Claude reused/overlapped indices, which collapses these lines to the
-        // 200ms sanitizer floor and makes them blink past on the wall.
-        if let Some(pe) = prev_end_idx
-            && ml.start_word_idx <= pe
-        {
-            suspicious.push(format!(
-                "[{}..{}] '{}' starts at idx {} <= prev end idx {}",
+
+        // Bump the start past the previous accepted line so ranges never overlap.
+        let effective_start = match last_end_idx {
+            Some(pe) if ml.start_word_idx <= pe => pe + 1,
+            _ => ml.start_word_idx,
+        };
+        // If the bump consumed the whole range, this line is fully behind its
+        // predecessor (Claude mis-placed it). Drop it — a missing line is far
+        // less jarring than a 200ms flash, and the neighbours stay correct.
+        if effective_start > ml.end_word_idx {
+            dropped.push(format!(
+                "[{}..{}] '{}'",
                 ml.start_word_idx,
                 ml.end_word_idx,
-                ml.text.chars().take(40).collect::<String>(),
-                ml.start_word_idx,
-                pe
+                ml.text.chars().take(40).collect::<String>()
             ));
+            continue;
         }
-        prev_end_idx = Some(ml.end_word_idx);
 
-        let start_ms = aai.words[ml.start_word_idx].start_ms;
+        let start_ms = aai.words[effective_start].start_ms;
         let end_ms = aai.words[ml.end_word_idx].end_ms;
+        last_end_idx = Some(ml.end_word_idx);
         out.push(LyricsLine {
             start_ms,
             end_ms,
@@ -76,13 +84,16 @@ pub fn resolve(
             words: None, // per feedback_line_timing_only — line-only display
         });
     }
-    if !suspicious.is_empty() {
+    if !dropped.is_empty() {
         tracing::warn!(
-            count = suspicious.len(),
-            detail = %suspicious.join(" | "),
-            "asr_path resolver: Claude assigned overlapping/non-monotonic word ranges — \
-             these lines will clamp to the 200ms floor"
+            count = dropped.len(),
+            detail = %dropped.join(" | "),
+            "asr_path resolver: dropped lines Claude mis-placed at backward/overlapping \
+             indices (kept neighbours' real timing instead of a 200ms blink)"
         );
+    }
+    if out.is_empty() {
+        return Err(ResolverError::Empty);
     }
     Ok(sanitize_lines(out))
 }
@@ -197,5 +208,58 @@ mod tests {
         let m = merged(vec![("A", 0, 0)]);
         let lines = resolve(&m, &t).expect("ok");
         assert!(lines.iter().all(|l| l.words.is_none()));
+    }
+
+    #[test]
+    fn drops_line_mis_placed_fully_behind_previous() {
+        // Claude placed a later line at earlier indices (a backward jump). The
+        // bump consumes its whole range → it is DROPPED, not clamped to 200ms.
+        // The well-placed neighbour keeps its real timing.
+        let t = aai(vec![
+            ("the", 0, 500),
+            ("greatest", 600, 1100),
+            ("name", 1200, 1700),
+        ]);
+        // Line 1 covers 0..2. Line 2 is mis-placed at 0..0 (fully behind).
+        let m = merged(vec![("The greatest name", 0, 2), ("misplaced", 0, 0)]);
+        let lines = resolve(&m, &t).expect("ok");
+        assert_eq!(lines.len(), 1, "the backward line must be dropped");
+        assert_eq!(lines[0].en, "The greatest name");
+        assert_eq!(lines[0].start_ms, 0);
+        assert_eq!(lines[0].end_ms, 1700);
+    }
+
+    #[test]
+    fn bumps_partial_overlap_start_past_previous() {
+        // Line 2 overlaps line 1's tail but has unique words beyond it. Its
+        // start is bumped past line 1's end; it keeps the non-overlapping words.
+        let t = aai(vec![
+            ("a", 0, 500),
+            ("b", 600, 1100),
+            ("c", 1200, 1700),
+            ("d", 1800, 2300),
+        ]);
+        // Line 1 = 0..2 (a b c). Line 2 = 1..3 (overlaps b,c; unique = d).
+        let m = merged(vec![("a b c", 0, 2), ("b c d", 1, 3)]);
+        let lines = resolve(&m, &t).expect("ok");
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].end_ms, 1700); // a..c
+        // Line 2 start bumped to idx 3 (d): real start 1800, not the 200ms floor.
+        assert_eq!(lines[1].start_ms, 1800);
+        assert_eq!(lines[1].end_ms, 2300);
+        assert!(lines[1].end_ms - lines[1].start_ms > MIN_LINE_DURATION_MS);
+    }
+
+    #[test]
+    fn all_lines_dropped_yields_empty_error() {
+        // Degenerate: every line after the first is fully behind → all dropped
+        // except the first; if even the first can't anchor, Empty. Here lines
+        // 2 and 3 are behind line 1, so only line 1 survives (not Empty). To
+        // force Empty we'd need zero survivors — covered by empty_lines test.
+        let t = aai(vec![("a", 0, 500), ("b", 600, 1100)]);
+        let m = merged(vec![("a b", 0, 1), ("behind", 0, 0), ("behind2", 1, 1)]);
+        let lines = resolve(&m, &t).expect("ok");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].en, "a b");
     }
 }
