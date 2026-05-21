@@ -513,6 +513,7 @@ impl LyricsWorker {
                 );
                 let result = self
                     .run_asr_path_branch(
+                        &ctx.candidate_texts,
                         row.audio_file_path.as_deref(),
                         video_id,
                         &youtube_id,

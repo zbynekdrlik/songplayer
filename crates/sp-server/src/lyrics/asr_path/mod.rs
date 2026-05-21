@@ -65,8 +65,17 @@ pub enum AsrError {
     Aai(#[from] AaiError),
 }
 
-pub async fn run(aai: &AaiBackend, audio_path: &Path) -> Result<AsrResult, AsrError> {
-    let transcript: AaiTranscript = match aai.transcribe(audio_path).await {
+/// `keyterms` biases AAI recognition toward expected phrases (the gathered
+/// reference lyric lines — genius/lrclib). It NEVER adds or drops words; it
+/// only helps the model resolve words already in the audio. Pass `&[]` for
+/// none. This is the only role the reference text plays in the lean path —
+/// a helper input to the one model, not an authoritative line source.
+pub async fn run(
+    aai: &AaiBackend,
+    audio_path: &Path,
+    keyterms: &[String],
+) -> Result<AsrResult, AsrError> {
+    let transcript: AaiTranscript = match aai.transcribe(audio_path, keyterms).await {
         Ok(t) => t,
         Err(AaiError::QuotaExhausted) => return Err(AsrError::QuotaExhausted),
         Err(e) => return Err(AsrError::Aai(e)),

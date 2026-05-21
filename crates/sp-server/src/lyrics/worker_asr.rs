@@ -23,12 +23,18 @@ impl LyricsWorker {
     /// whisperx gate rejected. AAI transcribes the vocal, then the
     /// silence-gap splitter groups words into singable lines (no Claude-merge).
     ///
+    /// `candidate_texts` (genius / lrclib lines) are passed to AAI as
+    /// `keyterms_prompt` — biasing recognition toward the real lyrics so the
+    /// model resolves sung words correctly instead of guessing. The text is a
+    /// HELPER input only; it never adds or drops lines.
+    ///
     /// Does NOT call `self.clear_processing()` — the caller does that
     /// immediately after the await so there is exactly one call site.
     #[cfg_attr(test, mutants::skip)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run_asr_path_branch(
         &self,
+        candidate_texts: &[crate::lyrics::provider::CandidateText],
         audio_file_path: Option<&str>,
         video_id: i64,
         youtube_id: &str,
@@ -116,8 +122,20 @@ impl LyricsWorker {
         )
         .await;
 
+        // Build keyterms from every gathered reference line (genius/lrclib/…)
+        // to bias AAI recognition. Dedup, drop blanks, cap to AAI's limit.
+        let mut keyterms: Vec<String> = candidate_texts
+            .iter()
+            .flat_map(|c| c.lines.iter())
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        keyterms.sort();
+        keyterms.dedup();
+        keyterms.truncate(1000);
+
         let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
-        let result = crate::lyrics::asr_path::run(&aai, &wav).await;
+        let result = crate::lyrics::asr_path::run(&aai, &wav, &keyterms).await;
 
         // Write audit sidecar regardless of outcome — operators can grep these
         // to understand what happened on each row without parsing tracing logs.

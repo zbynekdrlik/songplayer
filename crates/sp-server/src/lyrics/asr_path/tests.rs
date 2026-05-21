@@ -58,7 +58,7 @@ async fn run_transcribes_and_splits_into_lines() {
     ]))
     .await;
     let aai = AaiBackend::with_base_url("test-key", server.uri());
-    let r = run(&aai, &audio).await.expect("ok");
+    let r = run(&aai, &audio, &[]).await.expect("ok");
     match r.output {
         AsrOutput::Lines { lines, source } => {
             assert_eq!(source, SOURCE_ASR);
@@ -82,7 +82,7 @@ async fn run_transcribes_and_splits_into_lines() {
 async fn run_quarantines_on_empty_transcript() {
     let (server, audio) = aai_server(serde_json::json!([])).await;
     let aai = AaiBackend::with_base_url("test-key", server.uri());
-    let r = run(&aai, &audio).await.expect("ok");
+    let r = run(&aai, &audio, &[]).await.expect("ok");
     assert!(matches!(
         r.output,
         AsrOutput::Quarantine {
@@ -104,7 +104,7 @@ async fn run_propagates_quota_exhausted() {
     let tmp = std::env::temp_dir().join(format!("asr_path_q_{}.wav", std::process::id()));
     std::fs::write(&tmp, b"\x00").unwrap();
     let aai = AaiBackend::with_base_url("test-key", server.uri());
-    let err = run(&aai, &tmp).await.expect_err("must err");
+    let err = run(&aai, &tmp, &[]).await.expect_err("must err");
     assert!(
         matches!(err, super::AsrError::QuotaExhausted),
         "got {err:?}"
