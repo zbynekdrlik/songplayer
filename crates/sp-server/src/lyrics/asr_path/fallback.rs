@@ -120,6 +120,39 @@ mod tests {
         assert!(split_on_silence(&[]).is_empty());
     }
 
+    // Direct group_on_silence tests — exercise the raw gap split BEFORE the
+    // coalescing pass, which would otherwise mask the gap-boundary and
+    // condition mutations.
+
+    #[test]
+    fn group_exact_gap_does_not_split() {
+        // gap == LINE_GAP_MS (400) must NOT split — only strictly greater does.
+        // Kills the `>` → `>=` mutation at the gap comparison.
+        let words = vec![w("a", 0, 500), w("b", 900, 1400)]; // gap exactly 400
+        let groups = group_on_silence(&words);
+        assert_eq!(groups.len(), 1, "exact-400ms gap must stay one group");
+    }
+
+    #[test]
+    fn group_just_over_gap_splits() {
+        // gap 401 > 400 → split. Confirms the comparison fires just past the
+        // boundary (complements the exact-gap test).
+        let words = vec![w("a", 0, 500), w("b", 901, 1400)]; // gap 401
+        let groups = group_on_silence(&words);
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn group_small_gaps_stay_one_group() {
+        // No gap exceeds 400 → exactly one group. Kills the `&&` → `||`
+        // mutation in the split condition: with `||`, the always-true
+        // `prev_end.is_some()` would force a split at every word.
+        let words = vec![w("a", 0, 300), w("b", 350, 600), w("c", 650, 900)];
+        let groups = group_on_silence(&words);
+        assert_eq!(groups.len(), 1, "small gaps must not split");
+        assert_eq!(groups[0].len(), 3);
+    }
+
     #[test]
     fn no_silence_gap_yields_single_line() {
         let words = vec![
