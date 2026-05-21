@@ -164,6 +164,83 @@ fn find_split_index(text: &str, max_chars: usize) -> Option<usize> {
     text[..limit_idx].rfind(' ').map(|i| i + 1)
 }
 
+/// Same char-width splitting as `split_track`, but for `sp_core::lyrics::
+/// LyricsLine` (line-level, `words: None`). Used by the asr_path flow so its
+/// output gets the same ≤`max_chars` LED-wall line breaks the whisperx flow
+/// has (per the user: long lines like "His name will bring complete
+/// breakthrough" must wrap at ~32 chars). Reuses `find_split_index`; timing is
+/// distributed proportional to non-whitespace char count (never uniform, per
+/// `feedback_no_even_distribution.md`). The whisperx `AlignedTrack` path is
+/// untouched.
+pub fn split_lyrics_lines(
+    lines: Vec<sp_core::lyrics::LyricsLine>,
+    cfg: SplitConfig,
+) -> Vec<sp_core::lyrics::LyricsLine> {
+    let mut out = Vec::with_capacity(lines.len());
+    for line in lines {
+        if line.en.chars().count() <= cfg.max_chars {
+            out.push(line);
+        } else {
+            out.extend(split_one_lyrics_line(line, cfg));
+        }
+    }
+    out
+}
+
+fn split_one_lyrics_line(
+    line: sp_core::lyrics::LyricsLine,
+    cfg: SplitConfig,
+) -> Vec<sp_core::lyrics::LyricsLine> {
+    let Some(split_idx) = find_split_index(&line.en, cfg.max_chars) else {
+        return vec![line];
+    };
+    let left_text = line.en[..split_idx].trim_end().to_string();
+    let right_text = line.en[split_idx..].trim_start().to_string();
+    if left_text.is_empty() || right_text.is_empty() {
+        return vec![line];
+    }
+
+    let total = line
+        .en
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .count()
+        .max(1) as u64;
+    let left_chars = left_text.chars().filter(|c| !c.is_whitespace()).count() as u64;
+    let duration = line.end_ms.saturating_sub(line.start_ms);
+    let mid_ms = (line.start_ms + duration * left_chars / total)
+        .min(line.end_ms)
+        .max(line.start_ms);
+
+    let left = sp_core::lyrics::LyricsLine {
+        start_ms: line.start_ms,
+        end_ms: mid_ms,
+        en: left_text,
+        sk: None,
+        words: None,
+    };
+    let right = sp_core::lyrics::LyricsLine {
+        start_ms: mid_ms,
+        end_ms: line.end_ms,
+        en: right_text,
+        sk: None,
+        words: None,
+    };
+
+    let mut out = Vec::new();
+    if left.en.chars().count() > cfg.max_chars {
+        out.extend(split_one_lyrics_line(left, cfg));
+    } else {
+        out.push(left);
+    }
+    if right.en.chars().count() > cfg.max_chars {
+        out.extend(split_one_lyrics_line(right, cfg));
+    } else {
+        out.push(right);
+    }
+    out
+}
+
 fn split_words_by_index(
     line: &AlignedLine,
     byte_idx: usize,
@@ -921,5 +998,63 @@ mod tests {
         assert_eq!(lv[1].text, "bb");
         assert_eq!(rv[0].text, "cc");
         assert_eq!(rv[1].text, "dd");
+    }
+
+    fn ll(start: u64, end: u64, en: &str) -> sp_core::lyrics::LyricsLine {
+        sp_core::lyrics::LyricsLine {
+            start_ms: start,
+            end_ms: end,
+            en: en.into(),
+            sk: None,
+            words: None,
+        }
+    }
+
+    #[test]
+    fn lyrics_short_line_passes_through() {
+        let out = split_lyrics_lines(vec![ll(0, 1000, "short line")], SplitConfig::default());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].en, "short line");
+    }
+
+    #[test]
+    fn lyrics_long_line_splits_to_max_chars() {
+        // "His name will bring complete breakthrough" = 41 chars > 32 → splits.
+        let out = split_lyrics_lines(
+            vec![ll(0, 4000, "His name will bring complete breakthrough")],
+            SplitConfig::default(),
+        );
+        assert!(out.len() >= 2, "long line must split");
+        assert!(
+            out.iter().all(|l| l.en.chars().count() <= 32),
+            "every output line ≤ 32 chars: {:?}",
+            out.iter().map(|l| l.en.clone()).collect::<Vec<_>>()
+        );
+        // Timing covers the original span, monotonic, no synthesis beyond the split point.
+        assert_eq!(out[0].start_ms, 0);
+        assert_eq!(out.last().unwrap().end_ms, 4000);
+        assert!(
+            out[0].end_ms > 0 && out[0].end_ms < 4000,
+            "proportional mid split"
+        );
+        assert!(out.iter().all(|l| l.words.is_none()));
+    }
+
+    #[test]
+    fn lyrics_split_timing_is_proportional_not_uniform() {
+        // Left half much longer than right → left gets proportionally more time
+        // (NOT a 50/50 uniform split). Per feedback_no_even_distribution.
+        let out = split_lyrics_lines(
+            vec![ll(0, 1000, "averylongleadingword tiny")],
+            SplitConfig { max_chars: 20 },
+        );
+        assert_eq!(out.len(), 2);
+        // left "averylongleadingword" (20 non-ws chars) vs right "tiny" (4) →
+        // mid ≈ 1000*20/24 ≈ 833, far from the uniform 500.
+        assert!(
+            out[0].end_ms > 700,
+            "left half gets most of the time, got {}",
+            out[0].end_ms
+        );
     }
 }

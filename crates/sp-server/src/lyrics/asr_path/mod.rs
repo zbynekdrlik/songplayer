@@ -148,6 +148,15 @@ pub async fn run(
         None => lines,
     };
 
+    // Enforce LED-wall line width: split any line longer than max_chars at the
+    // best sentence/comma/word boundary (same logic + default the whisperx flow
+    // uses via line_splitter::split_track). Keeps lines ≤ ~32 chars so long
+    // phrases like "His name will bring complete breakthrough" wrap cleanly.
+    let lines = crate::lyrics::line_splitter::split_lyrics_lines(
+        lines,
+        crate::lyrics::line_splitter::SplitConfig::default(),
+    );
+
     let line_count = lines.len();
     Ok(AsrResult {
         output: AsrOutput::Lines {
