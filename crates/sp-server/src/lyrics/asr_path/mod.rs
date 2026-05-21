@@ -11,6 +11,7 @@
 
 pub mod aai_backend;
 pub mod fallback;
+pub mod regroup;
 pub mod sanitize;
 
 use std::path::Path;
@@ -70,10 +71,21 @@ pub enum AsrError {
 /// only helps the model resolve words already in the audio. Pass `&[]` for
 /// none. This is the only role the reference text plays in the lean path —
 /// a helper input to the one model, not an authoritative line source.
+///
+/// `chat` is an optional Claude client for the post-split regroup pass. When
+/// `Some`, Claude merges over-split AAI lines into singable lines guided by
+/// `reference_lines` phrasing. The pass is drop-safe: if Claude's grouping
+/// fails validation, the raw split is returned unchanged. Pass `None` to skip.
+///
+/// `reference_lines` are the gathered reference lyric lines (genius/lrclib)
+/// used to guide Claude's phrasing. Reused from `keyterms` — pass the same
+/// slice for both. Ignored when `chat` is `None`.
 pub async fn run(
     aai: &AaiBackend,
+    chat: Option<&dyn crate::lyrics::asr_path::regroup::RegroupChat>,
     audio_path: &Path,
     keyterms: &[String],
+    reference_lines: &[String],
 ) -> Result<AsrResult, AsrError> {
     let transcript: AaiTranscript = match aai.transcribe(audio_path, keyterms).await {
         Ok(t) => t,
@@ -126,6 +138,15 @@ pub async fn run(
             },
         });
     }
+
+    // Optional Claude regroup pass: merges over-split lines into singable
+    // lines guided by reference phrasing. Drop-safe — falls back to raw split
+    // on any validation failure. line_count is computed AFTER regroup so the
+    // audit reflects the final output shape.
+    let lines = match chat {
+        Some(c) => crate::lyrics::asr_path::regroup::regroup(c, &lines, reference_lines).await,
+        None => lines,
+    };
 
     let line_count = lines.len();
     Ok(AsrResult {

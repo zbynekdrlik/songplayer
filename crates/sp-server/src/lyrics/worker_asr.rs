@@ -135,7 +135,13 @@ impl LyricsWorker {
         keyterms.truncate(1000);
 
         let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
-        let result = crate::lyrics::asr_path::run(&aai, &wav, &keyterms).await;
+        let ai_client = self.ai_client.clone();
+        let chat_ref: Option<&dyn crate::lyrics::asr_path::regroup::RegroupChat> =
+            match ai_client.as_ref() {
+                Some(c) => Some(c.as_ref() as &dyn crate::lyrics::asr_path::regroup::RegroupChat),
+                None => None,
+            };
+        let result = crate::lyrics::asr_path::run(&aai, chat_ref, &wav, &keyterms, &keyterms).await;
 
         // Write audit sidecar regardless of outcome — operators can grep these
         // to understand what happened on each row without parsing tracing logs.
