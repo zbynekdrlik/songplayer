@@ -67,11 +67,9 @@ pub async fn regroup(
         }
     };
     match parse(&resp) {
-        Some(groups) if is_full_cover(&groups, aai_lines.len()) => apply(&groups, aai_lines),
+        Some(groups) if !groups.lines.is_empty() => apply_greedy(&groups, aai_lines),
         _ => {
-            tracing::warn!(
-                "asr_path regroup: Claude grouping invalid/incomplete — using raw split"
-            );
+            tracing::warn!("asr_path regroup: Claude returned no usable groups — using raw split");
             aai_lines.to_vec()
         }
     }
@@ -126,29 +124,30 @@ fn parse(body: &str) -> Option<RegroupResult> {
     serde_json::from_str::<RegroupResult>(json).ok()
 }
 
-/// True iff the groups are strictly forward and cover [0, len) exactly once.
-fn is_full_cover(r: &RegroupResult, len: usize) -> bool {
-    if r.lines.is_empty() {
-        return false;
-    }
-    let mut expected = 0usize;
+/// Apply Claude's groups greedily, passing through any ASR line Claude didn't
+/// cover. DROP-SAFE: walks indices 0..n; at each index, if a VALID group starts
+/// there (in-range, non-inverted), emit it and skip to its end+1; otherwise emit
+/// the single ASR line unchanged. Every input line therefore appears exactly
+/// once — either inside a merge or as a passthrough. Tolerates Claude's
+/// imperfect coverage over many lines (the strict full-cover gate rejected too
+/// often); overlapping/late groups whose start was already consumed are ignored.
+fn apply_greedy(r: &RegroupResult, aai_lines: &[LyricsLine]) -> Vec<LyricsLine> {
+    let n = aai_lines.len();
+    // First valid group claiming each start index wins.
+    let mut by_start: std::collections::HashMap<usize, &RegroupedLine> =
+        std::collections::HashMap::new();
     for g in &r.lines {
-        if g.start_idx != expected || g.end_idx < g.start_idx || g.end_idx >= len {
-            return false;
+        if g.start_idx < n && g.end_idx < n && g.end_idx >= g.start_idx {
+            by_start.entry(g.start_idx).or_insert(g);
         }
-        expected = g.end_idx + 1;
     }
-    expected == len
-}
-
-fn apply(r: &RegroupResult, aai_lines: &[LyricsLine]) -> Vec<LyricsLine> {
-    r.lines
-        .iter()
-        .map(|g| {
+    let mut out: Vec<LyricsLine> = Vec::new();
+    let mut i = 0usize;
+    while i < n {
+        if let Some(g) = by_start.get(&i) {
+            let end = g.end_idx;
             let text = if g.text.trim().is_empty() {
-                // Defensive: if Claude emitted empty text, reconstruct from the
-                // covered ASR lines so we never show a blank line.
-                aai_lines[g.start_idx..=g.end_idx]
+                aai_lines[i..=end]
                     .iter()
                     .map(|l| l.en.as_str())
                     .collect::<Vec<_>>()
@@ -156,15 +155,27 @@ fn apply(r: &RegroupResult, aai_lines: &[LyricsLine]) -> Vec<LyricsLine> {
             } else {
                 g.text.trim().to_string()
             };
-            LyricsLine {
-                start_ms: aai_lines[g.start_idx].start_ms,
-                end_ms: aai_lines[g.end_idx].end_ms,
+            out.push(LyricsLine {
+                start_ms: aai_lines[i].start_ms,
+                end_ms: aai_lines[end].end_ms,
                 en: text,
                 sk: None,
                 words: None,
-            }
-        })
-        .collect()
+            });
+            i = end + 1;
+        } else {
+            let l = &aai_lines[i];
+            out.push(LyricsLine {
+                start_ms: l.start_ms,
+                end_ms: l.end_ms,
+                en: l.en.clone(),
+                sk: None,
+                words: None,
+            });
+            i += 1;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -222,30 +233,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn falls_back_when_gap_in_coverage() {
-        // Skips index 1 → not full cover → return raw 4 lines unchanged.
+    async fn gap_in_coverage_passes_through_uncovered_line() {
+        // Claude covers 0-0 and 2-3, skipping index 1. Greedy: line 0 (merged,
+        // here single), line 1 passes through unchanged, lines 2-3 merge. No
+        // drop — index 1 still appears.
         let chat = Canned(
             r#"{"lines":[{"text":"x","start_idx":0,"end_idx":0},{"text":"y","start_idx":2,"end_idx":3}]}"#.into(),
         );
         let out = regroup(&chat, &sample(), &[]).await;
-        assert_eq!(out.len(), 4, "incomplete coverage must fall back to raw");
-        assert_eq!(out[1].en, "Breakthrough.");
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[1].en, "Breakthrough.", "uncovered line passes through");
     }
 
     #[tokio::test]
-    async fn falls_back_when_overlap() {
+    async fn overlap_resolved_by_first_claim() {
+        // Group [0-2] claims indices 0,1,2; the later [2-3] start (2) was already
+        // consumed, so only index 3 remains → passthrough. Two lines, every index
+        // covered once.
         let chat = Canned(
             r#"{"lines":[{"text":"x","start_idx":0,"end_idx":2},{"text":"y","start_idx":2,"end_idx":3}]}"#.into(),
         );
         let out = regroup(&chat, &sample(), &[]).await;
-        assert_eq!(out.len(), 4, "overlap must fall back");
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].en, "x");
+        assert_eq!(out[0].end_ms, 2600); // spans lines 0-2
+        assert_eq!(out[1].en, "shall bow and tongue"); // index 3 passthrough
     }
 
     #[tokio::test]
-    async fn falls_back_when_out_of_range() {
+    async fn out_of_range_group_ignored_all_passthrough() {
+        // end_idx 9 is out of range → group ignored → all 4 lines pass through.
         let chat = Canned(r#"{"lines":[{"text":"x","start_idx":0,"end_idx":9}]}"#.into());
         let out = regroup(&chat, &sample(), &[]).await;
         assert_eq!(out.len(), 4);
+        assert_eq!(out[0].en, "His name will bring complete breakthrough.");
     }
 
     #[tokio::test]
