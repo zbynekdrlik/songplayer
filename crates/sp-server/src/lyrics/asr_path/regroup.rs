@@ -31,6 +31,13 @@ impl RegroupChat for crate::ai::client::AiClient {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RegroupedLine {
+    // Claude may emit `text`, but we IGNORE it — the merged line text is
+    // reconstructed from the covered AAI lines so Claude can never drop a word
+    // (it once merged "A power that can heal all pain" + "It's just one word"
+    // into a group and wrote text omitting the second phrase). Claude's only
+    // job here is the GROUPING (start_idx/end_idx); content comes from AAI.
+    #[serde(default)]
+    #[allow(dead_code)]
     text: String,
     start_idx: usize,
     end_idx: usize,
@@ -146,15 +153,11 @@ fn apply_greedy(r: &RegroupResult, aai_lines: &[LyricsLine]) -> Vec<LyricsLine> 
     while i < n {
         if let Some(g) = by_start.get(&i) {
             let end = g.end_idx;
-            let text = if g.text.trim().is_empty() {
-                aai_lines[i..=end]
-                    .iter()
-                    .map(|l| l.en.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            } else {
-                g.text.trim().to_string()
-            };
+            // Reconstruct text from the covered AAI lines — NEVER from Claude's
+            // `text` (which can silently drop words). Collapse only CONSECUTIVE
+            // duplicate words so held/repeated sung words ("breakthrough
+            // Breakthrough") dedup, while distinct words are always preserved.
+            let text = reconstruct_text(&aai_lines[i..=end]);
             out.push(LyricsLine {
                 start_ms: aai_lines[i].start_ms,
                 end_ms: aai_lines[end].end_ms,
@@ -176,6 +179,31 @@ fn apply_greedy(r: &RegroupResult, aai_lines: &[LyricsLine]) -> Vec<LyricsLine> 
         }
     }
     out
+}
+
+/// Join the covered AAI lines into one text, collapsing only CONSECUTIVE
+/// duplicate words (case-insensitive, ignoring trailing punctuation). Distinct
+/// words are always kept — this is the guarantee against word loss. Consecutive
+/// repeats (a held/echoed sung word split across lines, e.g. "breakthrough."
+/// then "Breakthrough.") collapse to one.
+fn reconstruct_text(lines: &[LyricsLine]) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for w in lines.iter().flat_map(|l| l.en.split_whitespace()) {
+        if out
+            .last()
+            .is_some_and(|prev| norm_word(prev) == norm_word(w))
+        {
+            continue;
+        }
+        out.push(w);
+    }
+    out.join(" ")
+}
+
+/// Lowercase + strip leading/trailing non-alphanumerics for duplicate compare.
+fn norm_word(w: &str) -> String {
+    w.trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase()
 }
 
 #[cfg(test)]
@@ -218,18 +246,57 @@ mod tests {
 
     #[tokio::test]
     async fn merges_when_full_cover() {
-        // Merge 0-1 ("breakthrough" + held repeat) and 2-3 ("and every knee...").
-        let chat = Canned(
-            r#"{"lines":[{"text":"His name will bring complete breakthrough","start_idx":0,"end_idx":1},{"text":"And every knee shall bow and tongue","start_idx":2,"end_idx":3}]}"#.into(),
-        );
+        // Merge 0-1 and 2-3. Text is reconstructed from the AAI lines (Claude's
+        // text is ignored): the held repeat "breakthrough." / "Breakthrough."
+        // collapses (consecutive duplicate), distinct words preserved.
+        let chat =
+            Canned(r#"{"lines":[{"start_idx":0,"end_idx":1},{"start_idx":2,"end_idx":3}]}"#.into());
         let out = regroup(&chat, &sample(), &[]).await;
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].en, "His name will bring complete breakthrough");
+        assert_eq!(out[0].en, "His name will bring complete breakthrough.");
         assert_eq!(out[0].start_ms, 0);
         assert_eq!(out[0].end_ms, 2000); // spans the held "Breakthrough."
+        assert_eq!(out[1].en, "And every knee shall bow and tongue");
         assert_eq!(out[1].start_ms, 2200);
         assert_eq!(out[1].end_ms, 3300);
         assert!(out.iter().all(|l| l.words.is_none()));
+    }
+
+    #[tokio::test]
+    async fn distinct_words_across_merged_lines_are_never_dropped() {
+        // Regression: Claude merged "A power that can heal all pain" +
+        // "It's just one word" into one group and wrote text omitting the
+        // second phrase. With reconstruction, every distinct word survives.
+        let lines = vec![
+            line(0, 2000, "A power that can heal all pain."),
+            line(2100, 3000, "It's just one word."),
+        ];
+        // Claude (wrongly) groups both and drops the second phrase in its text.
+        let chat = Canned(
+            r#"{"lines":[{"text":"A power that can heal all pain","start_idx":0,"end_idx":1}]}"#
+                .into(),
+        );
+        let out = regroup(&chat, &lines, &[]).await;
+        assert_eq!(out.len(), 1);
+        assert!(
+            out[0].en.contains("It's just one word"),
+            "must keep all words: {:?}",
+            out[0].en
+        );
+        assert!(out[0].en.contains("A power that can heal all pain"));
+    }
+
+    #[tokio::test]
+    async fn consecutive_duplicate_words_collapse() {
+        let lines = vec![
+            line(0, 500, "complete breakthrough."),
+            line(700, 2000, "Breakthrough."),
+        ];
+        let chat = Canned(r#"{"lines":[{"start_idx":0,"end_idx":1}]}"#.into());
+        let out = regroup(&chat, &lines, &[]).await;
+        assert_eq!(out.len(), 1);
+        // "breakthrough." then "Breakthrough." → one.
+        assert_eq!(out[0].en.to_lowercase().matches("breakthrough").count(), 1);
     }
 
     #[tokio::test]
@@ -255,7 +322,11 @@ mod tests {
         );
         let out = regroup(&chat, &sample(), &[]).await;
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].en, "x");
+        // out[0] reconstructed from lines 0-2 (held "Breakthrough." collapsed).
+        assert_eq!(
+            out[0].en,
+            "His name will bring complete breakthrough. And every knee"
+        );
         assert_eq!(out[0].end_ms, 2600); // spans lines 0-2
         assert_eq!(out[1].en, "shall bow and tongue"); // index 3 passthrough
     }
