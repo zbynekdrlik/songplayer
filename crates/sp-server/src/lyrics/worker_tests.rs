@@ -159,17 +159,17 @@ fn align_track_to_lyrics_track_maps_fields_correctly() {
     );
 }
 
-/// Verify that new provenance literals produced by the tier chain are valid.
+/// Verify that provenance literals produced by the tier chain are valid.
 /// This is a documentation-as-test: if the source tag format changes, this
 /// test breaks, forcing a deliberate update.
 #[test]
 fn new_provenance_source_literals_are_recognizable() {
-    // These are the sources the new tier chain can produce. Asserted as
+    // These are the sources the tier chain can produce. Asserted as
     // non-empty string comparisons to make the test read as a spec.
     let tier1_sources = ["tier1:spotify", "tier1:lrclib", "tier1:yt_subs", "genius"];
     let backend_source = "whisperx-large-v3@rev1";
-    // TextOnly path: claude-merge appends "+claude-merge" to the ASR provenance.
-    let claude_merge_suffix = "+claude-merge";
+    // asr_path source — lean path, no claude-merge suffix.
+    let asr_source = "asr:aai-u3-pro";
 
     for s in &tier1_sources {
         assert!(
@@ -181,9 +181,10 @@ fn new_provenance_source_literals_are_recognizable() {
         backend_source.contains("whisperx"),
         "backend source must mention whisperx"
     );
-    // Claude-merged provenance is backend provenance + "+claude-merge"
-    let merged = format!("{backend_source}{claude_merge_suffix}");
-    assert!(merged.ends_with("+claude-merge"));
+    assert!(
+        asr_source.starts_with("asr:"),
+        "asr_path source must start with 'asr:'"
+    );
 }
 
 /// Description provider is wired as the 4th candidate source.
@@ -853,4 +854,120 @@ fn process_song_routes_through_should_resolve_spotify() {
         "process_song must route the Spotify pre-gather decision through \
          should_resolve_spotify so #76's guard-pinning unit tests apply"
     );
+}
+
+#[test]
+fn timed_yt_subs_skips_asr_path_entirely() {
+    // Regression guard: a song with a timed yt_subs candidate MUST go through
+    // the existing whisperx path, not the new asr_path branch added for
+    // bucket-1 (`unsupported_source`) songs.
+    //
+    // The worker decision tree (worker.rs::process_song gate block):
+    //   1. is_allowed_text_source(cands) == true  → whisperx path
+    //   2. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == true
+    //      → asr_path branch
+    //   3. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == false
+    //      → mark_unsupported_source
+    //
+    // This test asserts that a timed yt_subs candidate triggers path 1, never
+    // path 2. If `is_allowed_text_source` were ever modified to reject timed
+    // yt_subs, this assertion would catch the regression.
+
+    use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
+    use crate::lyrics::provider::CandidateText;
+
+    let timed = CandidateText {
+        source: "yt_subs".to_string(),
+        lines: vec!["hello".into(), "world".into()],
+        line_timings: Some(vec![(0, 1000), (1200, 2000)]),
+        has_timing: true,
+    };
+    let cands = vec![timed];
+
+    // Gate predicate must accept timed yt_subs → whisperx path.
+    assert!(
+        is_allowed_text_source(&cands),
+        "timed yt_subs must be accepted by the gate; if not, regression introduced"
+    );
+    // And has_any_text_candidate is also true here (proves the test exercises
+    // a candidate that would otherwise be eligible for asr_path if the gate
+    // ever falsely rejected it).
+    assert!(has_any_text_candidate(&cands));
+}
+
+#[test]
+fn untimed_genius_passes_gate_to_asr_path() {
+    // Mirror regression: a song with ONLY untimed genius MUST be rejected by
+    // the gate but accepted by `has_any_text_candidate`, putting it on path 2
+    // (asr_path). If `is_allowed_text_source` ever started accepting untimed
+    // sources, this test would catch that — and asr_path would no longer be
+    // reachable for these songs.
+
+    use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
+    use crate::lyrics::provider::CandidateText;
+
+    let untimed = CandidateText {
+        source: "genius".to_string(),
+        lines: vec!["hello".into(), "world".into()],
+        line_timings: None,
+        has_timing: false,
+    };
+    let cands = vec![untimed];
+
+    assert!(
+        !is_allowed_text_source(&cands),
+        "untimed genius must be gate-rejected"
+    );
+    assert!(
+        has_any_text_candidate(&cands),
+        "untimed genius must still trigger has_any_text_candidate → asr_path branch"
+    );
+}
+
+// asr_path end-to-end integration test (#116 review 🟡 #6): real in-memory
+// SQLite + minimal LyricsWorker, no AAI key → branch exits Ok(()) without
+// mutating the row.
+#[tokio::test]
+async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
+    use std::time::Instant;
+
+    let pool = crate::db::create_memory_pool().await.expect("pool");
+    crate::db::run_migrations(&pool).await.expect("migrate");
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
+         VALUES (1, 'test', 'https://youtube.com/playlist?list=test', '')",
+    )
+    .execute(&pool)
+    .await
+    .expect("insert playlist");
+    let video_id: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized) \
+         VALUES (1, 'test_yt_id', 'Test Title', 'Test Song', 'Test Artist', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert video");
+
+    let cache_dir = std::env::temp_dir().join("sp_asr_branch_test");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test(
+        pool.clone(),
+        cache_dir.clone(),
+        events_tx,
+    );
+
+    let result = worker
+        .run_asr_path_branch(
+            None,
+            video_id,
+            "test_yt_id",
+            "Test Song",
+            "Test Artist",
+            chrono::Utc::now().timestamp_millis(),
+            Instant::now(),
+        )
+        .await;
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    let _ = std::fs::remove_dir_all(&cache_dir);
 }

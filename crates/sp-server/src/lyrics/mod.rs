@@ -1,4 +1,5 @@
 pub mod aligner;
+pub mod asr_path;
 pub mod assembly;
 pub mod audio_chunking;
 pub mod audit_ctx;
@@ -26,6 +27,7 @@ pub mod timed_reference_merge;
 pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;
+pub mod worker_asr;
 pub mod youtube_subs;
 pub mod yt_subs_split;
 pub use worker::LyricsWorker;
@@ -176,6 +178,12 @@ pub const ALIGNMENT_MODEL_TIMED_MERGE: &str = "timed-merge";
 /// Alignment-model identifier for whisperx large-v3 rev1 (current default
 /// alignment model for description + yt_subs+whisperx paths).
 pub const ALIGNMENT_MODEL_WHISPERX_V3_REV1: &str = "whisperx-large-v3@rev1";
+
+/// Alignment-model literal stamped on lyrics rows produced by the asr_path
+/// branch (AssemblyAI Universal-3 Pro ASR + Claude-merge). Revision counter
+/// bumps when the prompt or post-processing changes in a way that affects
+/// production output.
+pub const ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1: &str = "assemblyai-universal-3-pro@rev1";
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///

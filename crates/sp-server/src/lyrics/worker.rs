@@ -26,22 +26,22 @@ use crate::{
 };
 
 pub struct LyricsWorker {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
     client: Client,
-    cache_dir: PathBuf,
+    pub(crate) cache_dir: PathBuf,
     ytdlp_path: PathBuf,
     python_path: Option<PathBuf>,
     tools_dir: PathBuf,
-    script_path: PathBuf,
-    models_dir: PathBuf,
+    pub(crate) script_path: PathBuf,
+    pub(crate) models_dir: PathBuf,
     /// Claude AI client for EN→SK translation (CLIProxyAPI).
     /// None if CLIProxyAPI is not configured.
-    ai_client: Option<Arc<AiClient>>,
-    venv_python: tokio::sync::RwLock<Option<PathBuf>>,
+    pub(crate) ai_client: Option<Arc<AiClient>>,
+    pub(crate) venv_python: tokio::sync::RwLock<Option<PathBuf>>,
     retry_backoff: tokio::sync::Mutex<RetryBackoff>,
     /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
     /// event channel so messages reach all dashboard WS subscribers.
-    events_tx: broadcast::Sender<ServerMsg>,
+    pub(crate) events_tx: broadcast::Sender<ServerMsg>,
     /// Spotify track ID auto-resolver. Constructed once at worker startup.
     /// Per-song, the worker checks the gate (spotify_track_id IS NULL AND
     /// spotify_resolved_at IS NULL) before invoking it.
@@ -52,7 +52,7 @@ pub struct LyricsWorker {
 }
 
 #[derive(Default)]
-struct RetryBackoff {
+pub(crate) struct RetryBackoff {
     silent_until: Option<Instant>,
     consecutive_failures: u32,
 }
@@ -115,6 +115,34 @@ impl LyricsWorker {
         }
     }
 
+    /// Build a minimal LyricsWorker for unit tests. Fields not used by the
+    /// asr_path branch get placeholder values; tests must not exercise
+    /// downloader / tools / orchestrator paths against this instance.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        pool: SqlitePool,
+        cache_dir: std::path::PathBuf,
+        events_tx: broadcast::Sender<ServerMsg>,
+    ) -> Self {
+        use std::path::PathBuf;
+        Self {
+            pool,
+            client: Client::new(),
+            cache_dir: cache_dir.clone(),
+            ytdlp_path: PathBuf::from("yt-dlp"),
+            python_path: None,
+            tools_dir: PathBuf::from("/tmp/tools"),
+            script_path: PathBuf::from("/tmp/script"),
+            models_dir: PathBuf::from("/tmp/models"),
+            ai_client: None,
+            venv_python: tokio::sync::RwLock::new(None),
+            retry_backoff: tokio::sync::Mutex::new(RetryBackoff::default()),
+            events_tx,
+            spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver::new(),
+            current_processing: Arc::new(RwLock::new(None)),
+        }
+    }
+
     /// Snapshot the current processing state for use by queue_update_loop.
     // Arc clone; returning the shared handle has no behavior beyond reference-counting.
     #[cfg_attr(test, mutants::skip)]
@@ -125,7 +153,7 @@ impl LyricsWorker {
     // I/O-only: updates shared RwLock + sends on broadcast channel. Fire-and-forget; no return value to assert.
     #[cfg_attr(test, mutants::skip)]
     #[allow(clippy::too_many_arguments)]
-    async fn broadcast_stage(
+    pub(crate) async fn broadcast_stage(
         &self,
         video_id: i64,
         youtube_id: &str,
@@ -157,7 +185,7 @@ impl LyricsWorker {
 
     // Writes None to shared RwLock. Side effect verified via broadcast_stage/queue_update_loop integration.
     #[cfg_attr(test, mutants::skip)]
-    async fn clear_processing(&self) {
+    pub(crate) async fn clear_processing(&self) {
         *self.current_processing.write().await = None;
     }
 
@@ -341,7 +369,7 @@ impl LyricsWorker {
     /// for the grandmother framing that defeats the copyright classifier),
     /// NOT to fall back to Gemini.
     #[cfg_attr(test, mutants::skip)]
-    async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
+    pub(crate) async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
@@ -462,19 +490,48 @@ impl LyricsWorker {
         // refuse to run expensive alignment (Demucs + whisperx, ~3 min/song) on
         // text sources we know produce poor wall output. Allowed set is
         // yt_subs/lrclib/spotify (line-timed) and description (curated). Anything
-        // else (genius, lrclib-plain-without-timing, no_source) gets the
-        // `unsupported_source` sentinel and is parked until a future-model PR.
+        // else (genius, lrclib-plain-without-timing, no_source) gets routed to
+        // asr_path (AAI U3-Pro transcribe + silence-gap split) if any text
+        // candidate exists. Songs with zero candidates are marked unsupported_source.
         if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
             let names: Vec<&str> = ctx
                 .candidate_texts
                 .iter()
                 .map(|c| c.source.as_str())
                 .collect();
+
+            // asr_path branch — only when there IS a candidate (just untimed).
+            // Whisperx gate rejected this song; asr_path uses AAI ASR +
+            // silence-gap split (no Claude-merge). Candidate text is no longer
+            // consumed here — asr_path is audio-only.
+            if crate::lyrics::orchestrator::has_any_text_candidate(&ctx.candidate_texts) {
+                tracing::info!(
+                    video_id,
+                    youtube_id = %youtube_id,
+                    candidate_sources = ?names,
+                    "lyrics: no allowed text source — routing to asr_path"
+                );
+                let result = self
+                    .run_asr_path_branch(
+                        row.audio_file_path.as_deref(),
+                        video_id,
+                        &youtube_id,
+                        &song,
+                        &artist,
+                        started_at_unix_ms,
+                        start_instant,
+                    )
+                    .await;
+                self.clear_processing().await;
+                return result;
+            }
+
+            // No candidates at all — preserved old behavior: mark unsupported.
             tracing::warn!(
                 video_id,
                 youtube_id = %youtube_id,
                 candidate_sources = ?names,
-                "lyrics: no allowed text source — marking unsupported_source"
+                "lyrics: no text candidate at all — marking unsupported_source"
             );
             if let Err(e) = crate::db::models::mark_unsupported_source(
                 &self.pool,
