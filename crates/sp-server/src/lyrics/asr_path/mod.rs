@@ -1,13 +1,18 @@
 //! ASR alignment path — AssemblyAI U3-Pro transcription + deterministic
 //! silence-gap line splitting, for songs the whisperx gate rejects (no timed
-//! text source). Lean by design: NO Claude-merge, NO genius-reference mapping,
-//! NO resolver. The earlier merge layer was deleted (2026-05-20) — it dropped
-//! lines on repeated choruses. AAI is the source of truth; the splitter groups
-//! its words into singable lines; output ships `words: None` (line-level).
+//! text source). AAI is the content source of truth; reference lyrics
+//! (genius/lrclib) are HELPER-only — fed to AAI as `keyterms_prompt` to bias
+//! recognition, never to add/drop lines.
+//!
+//! Pipeline: AAI transcribe → silence-gap split → OPTIONAL drop-safe Claude
+//! regroup (`regroup.rs`: operates on line INDICES, reconstructs merged text
+//! from the covered AAI lines, falls back to the raw split on any failure —
+//! never the old word-level merge that dropped choruses) → LED-wall line-width
+//! split (`line_splitter`) → `words: None` (line-level only).
 //!
 //! See `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`
-//! (note: the Claude-merge portion of that spec is superseded by this lean
-//! version).
+//! (the original word-index Claude-merge in that spec is superseded; only the
+//! index-level regroup survives).
 
 pub mod aai_backend;
 pub mod fallback;

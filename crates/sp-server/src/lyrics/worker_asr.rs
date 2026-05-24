@@ -3,9 +3,10 @@
 //! Extracted from `worker.rs::process_song` to keep that file under the
 //! 1000-line CI limit. The branch runs when whisperx's gate rejects the song
 //! but a text candidate (genius / lrclib-untimed) still exists. Uses AAI
-//! transcription + silence-gap split (no Claude-merge). See
+//! transcription + silence-gap split + a drop-safe index-level Claude regroup
+//! (see `asr_path/mod.rs`). See
 //! `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`
-//! (note: the Claude-merge portion of that spec is superseded).
+//! (the word-index Claude-merge in that spec is superseded).
 
 use std::path::PathBuf;
 use std::time::Instant;
