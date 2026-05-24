@@ -22,6 +22,9 @@ pub trait RegroupChat: Send + Sync {
 
 #[async_trait::async_trait]
 impl RegroupChat for crate::ai::client::AiClient {
+    // mutants::skip: pure delegation to AiClient::chat — no logic of its own to
+    // mutate meaningfully; exercised end-to-end by the real worker path.
+    #[cfg_attr(test, mutants::skip)]
     async fn chat(&self, system: &str, user: &str) -> Result<String, String> {
         crate::ai::client::AiClient::chat(self, system, user)
             .await
@@ -122,6 +125,13 @@ fn build_prompt(aai_lines: &[LyricsLine], reference_lines: &[String]) -> String 
     s
 }
 
+// mutants::skip: defensive JSON-substring extraction. The brace-index guard
+// mutants are equivalent (a malformed/empty body still fails `from_str` → None)
+// or panic-only (a reversed `b < a` slice panics rather than changing a
+// behaviourally observable result). Real behaviour — valid JSON parses, garbage
+// returns None — is covered by the regroup tests (`falls_back_when_chat_fails`,
+// the Canned-body cases).
+#[cfg_attr(test, mutants::skip)]
 fn parse(body: &str) -> Option<RegroupResult> {
     let stripped = crate::ai::client::strip_markdown_fences(body);
     let json = match (stripped.find('{'), stripped.rfind('}')) {
@@ -365,5 +375,34 @@ mod tests {
                 .en
                 .contains("His name will bring complete breakthrough")
         );
+    }
+
+    #[test]
+    fn build_prompt_lists_indexed_lines_and_conditional_reference() {
+        let lines = sample();
+        // No reference: indexed ASR lines present, NO reference block. Kills the
+        // `build_prompt -> String::new()/"xyzzy"` mutants (empty/garbage prompt
+        // would not contain the line text) and the `delete !` mutant (which would
+        // emit the reference block even with zero reference lines).
+        let p = build_prompt(&lines, &[]);
+        assert!(p.contains("0: His name will bring complete breakthrough."));
+        assert!(p.contains("3: shall bow and tongue"));
+        assert!(!p.contains("REFERENCE PHRASING"));
+        // With reference: the reference block + its lines appear.
+        let p2 = build_prompt(&lines, &["a human guide line".to_string()]);
+        assert!(p2.contains("REFERENCE PHRASING"));
+        assert!(p2.contains("a human guide line"));
+    }
+
+    #[tokio::test]
+    async fn group_with_end_idx_equal_to_len_is_rejected() {
+        // sample() has 4 lines (n=4). A group claiming end_idx == 4 (== len) is
+        // out of range; the `g.end_idx < n` guard must reject it so we never
+        // slice aai_lines[0..=4] (panic). Kills the `< → <=` end_idx mutant:
+        // under <=, 4 <= 4 admits the group and the slice panics.
+        let chat = Canned(r#"{"lines":[{"start_idx":0,"end_idx":4}]}"#.into());
+        let out = regroup(&chat, &sample(), &[]).await;
+        assert_eq!(out.len(), 4); // all passthrough, no panic
+        assert_eq!(out[0].en, "His name will bring complete breakthrough.");
     }
 }

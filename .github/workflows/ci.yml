@@ -581,6 +581,22 @@ jobs:
           # text_reference_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
           #   `if clusters_dropped > 0` gates an info!() log only. Function
           #   return value is the same regardless.
+          # === asr_path additions (audit 2026-05-24, PR #121) ===
+          # line_splitter.rs:199/231/236 — split_one_lyrics_line mirrors
+          #   split_line (97/102/131/141/164 already excluded above): the empty-side
+          #   guard never fires (find_split_index returns a word boundary, both
+          #   halves non-empty) and the recursion-length `>` boundary mutant is a
+          #   no-op (a half exactly == max_chars yields find_split_index None).
+          # regroup.rs:77 match guard `!groups.lines.is_empty()` ↔ true.
+          #   Empty groups → apply_greedy with no by_start entries → every line
+          #   passes through → identical to the else branch (raw split).
+          # regroup.rs:147:24 start_idx `<` ↔ `<=` in apply_greedy.
+          #   A group with start_idx == n is never reached: the loop runs i in
+          #   0..n, so an entry keyed at n is never looked up. (end_idx == n IS
+          #   tested — group_with_end_idx_equal_to_len_is_rejected.)
+          # regroup.rs:168/178 loop-counter arithmetic (`i = end + 1`, `i += 1`).
+          #   Mutating + → */-  or += → -= makes the index stop advancing →
+          #   infinite loop → 300s TIMEOUT, not catchable by a terminating test.
           # Enumerate this shard's mutants FIRST so debugging is possible
           # even when the runner SIGTERMs mid-run (the upload-artifact step
           # gets skipped on cancellation). Survives in the live log.
@@ -604,6 +620,13 @@ jobs:
             --exclude-re 'line_splitter\.rs:131:' \
             --exclude-re 'line_splitter\.rs:141:' \
             --exclude-re 'line_splitter\.rs:164:' \
+            --exclude-re 'line_splitter\.rs:199:' \
+            --exclude-re 'line_splitter\.rs:231:' \
+            --exclude-re 'line_splitter\.rs:236:' \
+            --exclude-re 'regroup\.rs:77:' \
+            --exclude-re 'regroup\.rs:147:24:' \
+            --exclude-re 'regroup\.rs:168:' \
+            --exclude-re 'regroup\.rs:178:' \
             --exclude-re 'text_reference_merge\.rs:827:23: replace < with <= in apply_cap_and_monotonic' \
             --exclude-re 'text_reference_merge\.rs:851:20: replace > with >= in apply_cap_and_monotonic' \
             --exclude-re 'text_reference_merge_trim\.rs:26:25: replace > with >= in trim_outlier_indices' \
