@@ -100,6 +100,26 @@ const POLL_TIMEOUT_S: u64 = 1800; // 30 min, same as eval Python
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Build the `/v2/transcript` request body. Pure + testable. `keyterms_prompt`
+/// is included only when `keyterms` is non-empty — biases recognition toward
+/// those phrases without changing any other field.
+fn build_transcript_body(audio_url: &str, keyterms: &[String]) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "audio_url": audio_url,
+        "speech_models": [SPEECH_MODEL],
+        "punctuate": true,
+        "format_text": true,
+        "speaker_labels": false,
+        "language_detection": true,
+    });
+    if !keyterms.is_empty() {
+        // AssemblyAI caps the list (~1000 terms); the gathered reference lyric
+        // lines (tens of entries) are well within that.
+        body["keyterms_prompt"] = serde_json::json!(keyterms);
+    }
+    body
+}
+
 pub struct AaiBackend {
     api_base: String,
     api_key: String,
@@ -176,12 +196,22 @@ impl AaiBackend {
         Err(last_err.unwrap_or_else(|| AaiError::Http("retry budget exhausted".into())))
     }
 
-    pub async fn transcribe(&self, audio_path: &Path) -> Result<AaiTranscript, AaiError> {
+    /// Transcribe `audio_path`. `keyterms` biases recognition toward expected
+    /// words/phrases (sent as AAI `keyterms_prompt`) — e.g. the gathered
+    /// reference lyric lines — so the model resolves sung words correctly
+    /// instead of guessing (proven: "Shasbiyār" → "shakes the earth"). Pass an
+    /// empty slice for no biasing. keyterms NEVER add or drop words from the
+    /// output; they only improve recognition of words already in the audio.
+    pub async fn transcribe(
+        &self,
+        audio_path: &Path,
+        keyterms: &[String],
+    ) -> Result<AaiTranscript, AaiError> {
         let bytes = tokio::fs::read(audio_path)
             .await
             .map_err(|e| AaiError::Http(format!("read {audio_path:?}: {e}")))?;
         let upload_url = self.upload(bytes).await?;
-        let transcript_id = self.create_transcript(&upload_url).await?;
+        let transcript_id = self.create_transcript(&upload_url, keyterms).await?;
         self.poll_until_done(&transcript_id).await
     }
 
@@ -214,15 +244,12 @@ impl AaiBackend {
         .await
     }
 
-    async fn create_transcript(&self, audio_url: &str) -> Result<String, AaiError> {
-        let body = serde_json::json!({
-            "audio_url": audio_url,
-            "speech_models": [SPEECH_MODEL],
-            "punctuate": true,
-            "format_text": true,
-            "speaker_labels": false,
-            "language_detection": true,
-        });
+    async fn create_transcript(
+        &self,
+        audio_url: &str,
+        keyterms: &[String],
+    ) -> Result<String, AaiError> {
+        let body = build_transcript_body(audio_url, keyterms);
         Self::send_with_retry(|| async {
             let resp = self
                 .http
@@ -304,6 +331,32 @@ mod tests {
     use std::io::Write;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn transcript_body_omits_keyterms_when_empty() {
+        let b = build_transcript_body("u", &[]);
+        assert!(
+            b.get("keyterms_prompt").is_none(),
+            "no keyterms field when empty"
+        );
+        assert_eq!(b["audio_url"], "u");
+        assert_eq!(b["speech_models"][0], "universal-3-pro");
+    }
+
+    #[test]
+    fn transcript_body_includes_keyterms_when_present() {
+        let kt = vec![
+            "shakes the earth".to_string(),
+            "the greatest name".to_string(),
+        ];
+        let b = build_transcript_body("u", &kt);
+        let arr = b
+            .get("keyterms_prompt")
+            .and_then(|v| v.as_array())
+            .expect("keyterms_prompt array present");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], "shakes the earth");
+    }
 
     #[test]
     fn parses_completed_with_words() {
@@ -392,7 +445,10 @@ mod tests {
         drop(f);
 
         let backend = AaiBackend::with_base_url("test-key", server.uri());
-        let t = backend.transcribe(&tmp).await.expect("must transcribe");
+        let t = backend
+            .transcribe(&tmp, &[])
+            .await
+            .expect("must transcribe");
         assert_eq!(t.words.len(), 2);
         assert_eq!(t.words[0].text, "hello");
         assert_eq!(t.words[1].end_ms, 1100);
@@ -413,7 +469,7 @@ mod tests {
         std::fs::write(&tmp, b"\x00").unwrap();
 
         let backend = AaiBackend::with_base_url("test-key", server.uri());
-        let err = backend.transcribe(&tmp).await.expect_err("must err");
+        let err = backend.transcribe(&tmp, &[]).await.expect_err("must err");
         assert!(matches!(err, AaiError::QuotaExhausted), "got {err:?}");
 
         let _ = std::fs::remove_file(&tmp);

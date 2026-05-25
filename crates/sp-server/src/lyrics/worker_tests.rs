@@ -959,6 +959,7 @@ async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
 
     let result = worker
         .run_asr_path_branch(
+            &[],
             None,
             video_id,
             "test_yt_id",

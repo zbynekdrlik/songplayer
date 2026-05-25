@@ -132,7 +132,7 @@ async fn reprocess_all_stale_only_flags_stale_rows() {
 }
 
 #[tokio::test]
-async fn reprocess_clears_lyrics_source_for_no_source_failed_empty_states() {
+async fn reprocess_clears_lyrics_source_for_terminal_no_lyrics_states() {
     let (state, _temp) = test_state_with_cache_dir().await;
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
@@ -147,7 +147,8 @@ async fn reprocess_clears_lyrics_source_for_no_source_failed_empty_states() {
                     (11, 1, 'y11', 's', 'a', 1, 'failed'), \
                     (12, 1, 'y12', 's', 'a', 1, 'empty'), \
                     (13, 1, 'y13', 's', 'a', 1, 'asr_gap'), \
-                    (14, 1, 'y14', 's', 'a', 1, 'yt_subs')",
+                    (14, 1, 'y14', 's', 'a', 1, 'yt_subs'), \
+                    (15, 1, 'y15', 's', 'a', 1, 'unsupported_source')",
     )
     .execute(&state.pool)
     .await
@@ -161,13 +162,16 @@ async fn reprocess_clears_lyrics_source_for_no_source_failed_empty_states() {
         .uri("/api/v1/lyrics/reprocess")
         .method("POST")
         .header("content-type", "application/json")
-        .body(Body::from(r#"{"video_ids":[10,11,12,13,14]}"#))
+        .body(Body::from(r#"{"video_ids":[10,11,12,13,14,15]}"#))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
 
-    // After reprocess: 10/11/12 should have NULL lyrics_source; 13 (asr_gap)
-    // and 14 (yt_subs) should be untouched. ALL FIVE should have manual_priority=1.
+    // After reprocess: 10/11/12/15 are terminal "no lyrics produced" states
+    // and must be cleared to NULL so the worker's manual-priority pop guard
+    // (which excludes those sentinels at the current pipeline version) will
+    // pick them up. 13 (asr_gap, deliberate quarantine) and 14 (yt_subs, a
+    // real source) stay untouched. ALL SIX get manual_priority=1.
     let rows: Vec<(i64, Option<String>, i64)> =
         sqlx::query_as("SELECT id, lyrics_source, lyrics_manual_priority FROM videos ORDER BY id")
             .fetch_all(&state.pool)
@@ -177,8 +181,9 @@ async fn reprocess_clears_lyrics_source_for_no_source_failed_empty_states() {
         (10i64, None, 1i64),
         (11, None, 1),
         (12, None, 1),
-        (13, Some("asr_gap".into()), 1), // untouched
-        (14, Some("yt_subs".into()), 1), // untouched
+        (13, Some("asr_gap".into()), 1), // untouched (deliberate quarantine)
+        (14, Some("yt_subs".into()), 1), // untouched (real source)
+        (15, None, 1),                   // unsupported_source cleared → re-poppable
     ];
     assert_eq!(rows, expected);
 }

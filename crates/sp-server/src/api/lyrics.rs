@@ -273,7 +273,7 @@ pub async fn post_reprocess(
             let sql = format!(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
                         lyrics_source = CASE \
-                            WHEN lyrics_source IN ('failed', 'empty', 'no_source') THEN NULL \
+                            WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
                         END \
                  WHERE id IN ({})",
@@ -312,7 +312,7 @@ pub async fn post_reprocess(
             match sqlx::query(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
                         lyrics_source = CASE \
-                            WHEN lyrics_source IN ('failed', 'empty', 'no_source') THEN NULL \
+                            WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
                         END \
                  WHERE playlist_id = ?",

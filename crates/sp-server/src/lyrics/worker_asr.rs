@@ -3,9 +3,10 @@
 //! Extracted from `worker.rs::process_song` to keep that file under the
 //! 1000-line CI limit. The branch runs when whisperx's gate rejects the song
 //! but a text candidate (genius / lrclib-untimed) still exists. Uses AAI
-//! transcription + silence-gap split (no Claude-merge). See
+//! transcription + silence-gap split + a drop-safe index-level Claude regroup
+//! (see `asr_path/mod.rs`). See
 //! `docs/superpowers/specs/2026-05-19-asr-path-aai-claude-merge-design.md`
-//! (note: the Claude-merge portion of that spec is superseded).
+//! (the word-index Claude-merge in that spec is superseded).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -23,12 +24,18 @@ impl LyricsWorker {
     /// whisperx gate rejected. AAI transcribes the vocal, then the
     /// silence-gap splitter groups words into singable lines (no Claude-merge).
     ///
+    /// `candidate_texts` (genius / lrclib lines) are passed to AAI as
+    /// `keyterms_prompt` — biasing recognition toward the real lyrics so the
+    /// model resolves sung words correctly instead of guessing. The text is a
+    /// HELPER input only; it never adds or drops lines.
+    ///
     /// Does NOT call `self.clear_processing()` — the caller does that
     /// immediately after the await so there is exactly one call site.
     #[cfg_attr(test, mutants::skip)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run_asr_path_branch(
         &self,
+        candidate_texts: &[crate::lyrics::provider::CandidateText],
         audio_file_path: Option<&str>,
         video_id: i64,
         youtube_id: &str,
@@ -116,8 +123,26 @@ impl LyricsWorker {
         )
         .await;
 
+        // Build keyterms from every gathered reference line (genius/lrclib/…)
+        // to bias AAI recognition. Dedup, drop blanks, cap to AAI's limit.
+        let mut keyterms: Vec<String> = candidate_texts
+            .iter()
+            .flat_map(|c| c.lines.iter())
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        keyterms.sort();
+        keyterms.dedup();
+        keyterms.truncate(1000);
+
         let aai = crate::lyrics::asr_path::aai_backend::AaiBackend::new(aai_key);
-        let result = crate::lyrics::asr_path::run(&aai, &wav).await;
+        let ai_client = self.ai_client.clone();
+        let chat_ref: Option<&dyn crate::lyrics::asr_path::regroup::RegroupChat> =
+            match ai_client.as_ref() {
+                Some(c) => Some(c.as_ref() as &dyn crate::lyrics::asr_path::regroup::RegroupChat),
+                None => None,
+            };
+        let result = crate::lyrics::asr_path::run(&aai, chat_ref, &wav, &keyterms, &keyterms).await;
 
         // Write audit sidecar regardless of outcome — operators can grep these
         // to understand what happened on each row without parsing tracing logs.

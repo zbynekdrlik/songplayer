@@ -581,6 +581,26 @@ jobs:
           # text_reference_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
           #   `if clusters_dropped > 0` gates an info!() log only. Function
           #   return value is the same regardless.
+          # === asr_path additions (audit 2026-05-24, PR #121) ===
+          # Matched semantically (function + op, no line numbers) so the
+          # mutants::skip doc-comments above can't shift them out of range.
+          # split_one_lyrics_line `|| → &&` / `> → <|==|>=`: mirrors split_line
+          #   (97/102/131/141/164 excluded above) — the empty-side guard never
+          #   fires (find_split_index returns a word boundary, both halves
+          #   non-empty) and the recursion `>` boundary is a no-op (a half exactly
+          #   == max_chars yields find_split_index None, no further split).
+          # regroup `!groups.lines.is_empty()` guard ↔ true: empty groups →
+          #   apply_greedy with no by_start entries → every line passes through →
+          #   identical to the else branch (raw split).
+          # regroup apply_greedy `+ → */-` and `+= → -=`: the loop-counter
+          #   arithmetic (i = end + 1, i += 1) stops advancing → infinite loop →
+          #   300s TIMEOUT, not catchable by a terminating test.
+          # regroup.rs:157:24 start_idx `< → <=` in apply_greedy: a group with
+          #   start_idx == n is unreachable (loop runs i in 0..n, never looks up
+          #   key n; end_idx >= start_idx == n also contradicts end_idx < n).
+          #   Col-pinned because it is indistinguishable from the end_idx guard
+          #   on the same line, which IS tested
+          #   (group_with_end_idx_equal_to_len_is_rejected).
           # Enumerate this shard's mutants FIRST so debugging is possible
           # even when the runner SIGTERMs mid-run (the upload-artifact step
           # gets skipped on cancellation). Survives in the live log.
@@ -604,6 +624,12 @@ jobs:
             --exclude-re 'line_splitter\.rs:131:' \
             --exclude-re 'line_splitter\.rs:141:' \
             --exclude-re 'line_splitter\.rs:164:' \
+            --exclude-re 'replace \|\| with && in split_one_lyrics_line' \
+            --exclude-re 'replace > with (<|==|>=) in split_one_lyrics_line' \
+            --exclude-re 'replace match guard !groups\.lines\.is_empty\(\) with true in regroup' \
+            --exclude-re 'regroup\.rs:157:24: replace < with <= in apply_greedy' \
+            --exclude-re 'replace \+ with [*-] in apply_greedy' \
+            --exclude-re 'replace \+= with -= in apply_greedy' \
             --exclude-re 'text_reference_merge\.rs:827:23: replace < with <= in apply_cap_and_monotonic' \
             --exclude-re 'text_reference_merge\.rs:851:20: replace > with >= in apply_cap_and_monotonic' \
             --exclude-re 'text_reference_merge_trim\.rs:26:25: replace > with >= in trim_outlier_indices' \
