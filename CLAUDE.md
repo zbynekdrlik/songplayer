@@ -3,6 +3,18 @@
 
 This file provides guidance to Claude Code when working with code in this repository.
 
+## Playbook router
+
+Skills live in `.claude/skills/`; load the relevant one before starting work.
+
+| Area | Skill | Load when |
+|------|-------|-----------|
+| Lyrics pipeline | `lyrics-pipeline` | lyrics processing, alignment providers, pipeline versioning, translation, Gemini/CLIProxy, reprocess |
+| Wall verification | `lyrics-verify` | /lyrics-verify, wall-verify loop, catalog songs, sp-live setlist, quarantine |
+| Lyrics eval | `lyrics-eval` | evaluating ASR/alignment backends, /lyrics-eval command, eval harness |
+| win-resolume ops | `win-resolume-ops` | deployments, CI monitoring, Resolume diagnostics, OBS, runner health |
+| CI quality | `ci-discipline` | writing CI jobs, reviewing PRs, test design, quality gates |
+
 ## Project Overview
 
 SongPlayer is a standalone Windows desktop application that plays YouTube playlists with loudness normalization and NDI output. Built with Rust using Tauri 2 (shell), Leptos 0.7 (WASM UI), and Axum 0.8 (embedded HTTP/WebSocket server). Videos are downloaded via yt-dlp, normalized to -14 LUFS with FFmpeg, and can be output via NDI.

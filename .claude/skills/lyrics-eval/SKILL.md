@@ -12,10 +12,47 @@ invokes `/lyrics-eval`; Claude drives every step. The user observes and can
 intervene at any per-fixture step.
 
 This skill follows the design in
-`docs/superpowers/specs/2026-05-18-lyrics-eval-harness-design.md` and the
-memories under "Lyrics eval is Claude-orchestrated" and "Eval = Python, not
-Rust" in `~/.claude/projects/-home-newlevel-devel-songplayer/memory/MEMORY.md`.
-Re-read those before any structural change to this skill.
+`docs/superpowers/specs/2026-05-18-lyrics-eval-harness-design.md`. Re-read the
+spec before any structural change to this skill.
+
+## Eval methodology (read before proposing a backend)
+
+**This is Claude-orchestrated, NOT mechanical.** Each model has its own nuances,
+prompt-tuning needs, and chunking strategy. Claude is the high-level orchestrator;
+the user is the observer. Never propose a GH Actions workflow, cron job, or
+`cargo run lyrics-eval --backend X` shape. Per-backend integration = a small
+Python file Claude edits in-place per session (`eval/lyrics/backends/<backend>.py`).
+
+**Eval work stays in Python.** Every published ASR / audio-LLM ships Python
+examples. New provider integration in Python ≈ 10 lines. In Rust ≈ days. Rust
+is ONLY for the locked, optimized, tested production version AFTER a candidate
+wins the eval. Never propose a typed Rust backend registry or binary for eval.
+
+**Always audit prior work first.** Before proposing any backend:
+1. Venv probe on win-resolume: `Get-ChildItem 'C:\ProgramData\SongPlayer\cache\tools' -Directory` — any `*_venv` dir = already tried.
+2. Script probe: `Get-ChildItem 'C:\ProgramData\SongPlayer'` — `*_test.py`, `run_*.py` = prior experiments.
+3. Log probe: `*.log` files = prior outcomes.
+4. Pipeline-version history in `CLAUDE.md` — every model that ever ran production is named.
+5. Memory probe: grep `~/.claude/projects/-home-newlevel-devel-songplayer/memory/` for the model name.
+Open with the audit summary THEN propose. Never treat a session as a blank slate.
+
+**Never re-evaluate or propose known models.** WhisperX, Gemini (any variant),
+Qwen3-ForcedAligner, CrisperWhisper, Parakeet — these all have prior trace on
+this project. Filter them out BEFORE asking the user. Only propose models with
+zero prior trace on songplayer, confirmed by the audit above.
+
+**Always evaluate flagship first.** Use the Pro/flagship model tier for any new
+provider — never a budget/mini tier "to save cost". If the flagship loses, there
+is no point testing cheaper tiers. If the flagship wins, THEN test cheaper tiers
+for the cost-quality knee.
+
+**Never propose local/self-hosted models.** APIs only: Replicate, OpenRouter,
+HuggingFace Inference, vendor direct. Local GPU setup on win-resolume wastes days
+on driver/RAM/VRAM issues. Ask for API keys, not GPU access.
+
+**Timing is a hard gate.** Wall tolerance ≈ 400ms. Correct text + broken timing
+= REJECTED candidate. One prompt-tune attempt allowed; otherwise drop and move on.
+Never propose "offset constants" to patch broken timing.
 
 ## Phase 0 — Preconditions
 
