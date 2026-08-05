@@ -237,7 +237,9 @@ def align_fixture(
         )
         preprocess_sec = time.time() - t0
         logger.info(
-            "preprocess done: n_words=%d preprocess_sec=%.2f", len(words), preprocess_sec
+            "preprocess done: n_words=%d preprocess_sec=%.2f",
+            len(words),
+            preprocess_sec,
         )
 
         if words != filtered_words:
@@ -254,12 +256,24 @@ def align_fixture(
         try:
             if cuda:
                 word_align, words_out = wrapper.align(
-                    audio, words, lyrics_p, idx_word_p, idx_line_p, method=METHOD, cuda=True
+                    audio,
+                    words,
+                    lyrics_p,
+                    idx_word_p,
+                    idx_line_p,
+                    method=METHOD,
+                    cuda=True,
                 )
                 device_used = "cuda"
             else:
                 word_align, words_out = wrapper.align(
-                    audio, words, lyrics_p, idx_word_p, idx_line_p, method=METHOD, cuda=False
+                    audio,
+                    words,
+                    lyrics_p,
+                    idx_word_p,
+                    idx_line_p,
+                    method=METHOD,
+                    cuda=False,
                 )
         except torch.cuda.OutOfMemoryError:
             # This box's GPU is SHARED with a sibling agent's concurrent
@@ -281,7 +295,13 @@ def align_fixture(
             )
             torch.cuda.empty_cache()
             word_align, words_out = wrapper.align(
-                audio, words, lyrics_p, idx_word_p, idx_line_p, method=METHOD, cuda=False
+                audio,
+                words,
+                lyrics_p,
+                idx_word_p,
+                idx_line_p,
+                method=METHOD,
+                cuda=False,
             )
             device_used = "cpu"
             cuda_oom_retried = True

@@ -224,11 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--out",
         type=Path,
-        default=root
-        / "eval"
-        / "lyrics"
-        / "reports"
-        / "2026-08-05-aligner-scores.json",
+        default=root / "eval" / "lyrics" / "reports" / "2026-08-05-aligner-scores.json",
     )
     args = p.parse_args(argv)
 

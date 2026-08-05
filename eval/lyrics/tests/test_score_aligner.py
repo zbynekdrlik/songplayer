@@ -14,7 +14,9 @@ def _line(text: str, start_ms: int | None, end_ms: int | None) -> dict:
         "start_ms": start_ms,
         "end_ms": end_ms,
         "text_sk": None,
-        "words": None if start_ms is None else [{"text": text, "start_ms": start_ms, "end_ms": end_ms}],
+        "words": None
+        if start_ms is None
+        else [{"text": text, "start_ms": start_ms, "end_ms": end_ms}],
     }
 
 
