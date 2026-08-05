@@ -1,0 +1,378 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "BpyP4HR8FBQ",
+  "duration_ms": 265410,
+  "lines": [
+    {
+      "text": "In the quiet of the morning",
+      "start_ms": 15210,
+      "end_ms": 17730,
+      "text_sk": "In the quiet of the morning",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "When no one knows and no one needs to know",
+      "start_ms": 21450,
+      "end_ms": 24690,
+      "text_sk": "When no one knows and no one needs to know",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "You speak to me, You give me strength",
+      "start_ms": 28110,
+      "end_ms": 34530,
+      "text_sk": "You speak to me, You give me strength",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "There's nothing like the secret place",
+      "start_ms": 34770,
+      "end_ms": 38430,
+      "text_sk": "There's nothing like the secret place",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Underground is where I'm taken",
+      "start_ms": 42150,
+      "end_ms": 44250,
+      "text_sk": "Underground is where I'm taken",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "start_ms": 48510,
+      "end_ms": 53070,
+      "text_sk": "My heart will rejoice in the hiddenness",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Beyond the burial, there's a resurrection",
+      "start_ms": 55350,
+      "end_ms": 60750,
+      "text_sk": "Beyond the burial, there's a resurrection",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Your will be done in me",
+      "start_ms": 61110,
+      "end_ms": 64770,
+      "text_sk": "Your will be done in me",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "In the stillness all around",
+      "start_ms": 69150,
+      "end_ms": 71910,
+      "text_sk": "In the stillness all around",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You are working all the details out",
+      "start_ms": 75750,
+      "end_ms": 82110,
+      "text_sk": "You are working all the details out",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "What's in me will grow someday",
+      "start_ms": 82410,
+      "end_ms": 85050,
+      "text_sk": "What's in me will grow someday",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I trust Your timing and Your ways",
+      "start_ms": 89010,
+      "end_ms": 92730,
+      "text_sk": "I trust Your timing and Your ways",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Underground is where I'm taken",
+      "start_ms": 96270,
+      "end_ms": 98370,
+      "text_sk": "Underground is where I'm taken",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "start_ms": 102570,
+      "end_ms": 107190,
+      "text_sk": "My heart will rejoice in the hiddenness",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Beyond the burial, there's a resurrection",
+      "start_ms": 109470,
+      "end_ms": 114810,
+      "text_sk": "Beyond the burial, there's a resurrection",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Your will be done in me",
+      "start_ms": 115170,
+      "end_ms": 118830,
+      "text_sk": "Your will be done in me",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh, let my roots go deep",
+      "start_ms": 122070,
+      "end_ms": 127950,
+      "text_sk": "Oh, let my roots go deep",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And I will rise, I will rise",
+      "start_ms": 131430,
+      "end_ms": 136350,
+      "text_sk": "And I will rise, I will rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "start_ms": 138150,
+      "end_ms": 143190,
+      "text_sk": "He holds the time that I will rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I will rise, I will rise",
+      "start_ms": 145110,
+      "end_ms": 150450,
+      "text_sk": "I will rise, I will rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "start_ms": 151470,
+      "end_ms": 156750,
+      "text_sk": "He holds the time that I will rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I will rise, I will rise",
+      "start_ms": 158670,
+      "end_ms": 164070,
+      "text_sk": "I will rise, I will rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "God, through my life be lifted high",
+      "start_ms": 164910,
+      "end_ms": 171870,
+      "text_sk": "God, through my life be lifted high",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "I will rise, I will rise",
+      "start_ms": 172110,
+      "end_ms": 177630,
+      "text_sk": "I will rise, I will rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "God, through my life be lifted high",
+      "start_ms": 178470,
+      "end_ms": 184950,
+      "text_sk": "God, through my life be lifted high",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Let Jesus rise in this place",
+      "start_ms": 185370,
+      "end_ms": 188190,
+      "text_sk": "Let Jesus rise in this place",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let Jesus rise through my life",
+      "start_ms": 188730,
+      "end_ms": 194490,
+      "text_sk": "Let Jesus rise through my life",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Be glorified (sing it, sing it, sing it)",
+      "start_ms": 195510,
+      "end_ms": 198330,
+      "text_sk": "Be glorified (sing it, sing it, sing it)",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise",
+      "start_ms": 198810,
+      "end_ms": 204570,
+      "text_sk": "Let Jesus rise, Jesus rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God, through my life, be glorified!",
+      "start_ms": 205830,
+      "end_ms": 211050,
+      "text_sk": "God, through my life, be glorified!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise",
+      "start_ms": 212490,
+      "end_ms": 218250,
+      "text_sk": "Let Jesus rise, Jesus rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God, through my life, be glorified!",
+      "start_ms": 219210,
+      "end_ms": 225030,
+      "text_sk": "God, through my life, be glorified!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise",
+      "start_ms": 226050,
+      "end_ms": 231690,
+      "text_sk": "Let Jesus rise, Jesus rise",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God, through my life, be glorified!",
+      "start_ms": 232830,
+      "end_ms": 237870,
+      "text_sk": "God, through my life, be glorified!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Sing it out! Rise, rise, rise, rise, rise, rise, rise!",
+      "start_ms": 238110,
+      "end_ms": 259770,
+      "text_sk": "Sing it out! Rise, rise, rise, rise, rise, rise, rise!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Jesus, Jesus, Jesus, Jesus!",
+      "start_ms": 261390,
+      "end_ms": 265410,
+      "text_sk": "Jesus, Jesus, Jesus, Jesus!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 36,
+    "n_lines_timed": 36,
+    "n_lines_untimed": 0,
+    "n_words_total": 231,
+    "n_words_aligned": 227,
+    "word_align_rate": 0.9826839826839827,
+    "n_monotonic_violations_clamped": 0
+  }
+}

@@ -1,0 +1,1008 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_aai-u35-translate-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "aai-u35-translate",
+  "video_id": "wjJ-izYndWs",
+  "duration_ms": 292631,
+  "lines": [
+    {
+      "text": "By your grace I'm alive",
+      "start_ms": 12514,
+      "end_ms": 14992,
+      "text_sk": "Z tvojej milosti som naÅ¾ive",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm here to testify",
+      "start_ms": 16141,
+      "end_ms": 18100,
+      "text_sk": "A som tu, aby som dosvedÄil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "My God",
+      "start_ms": 18829,
+      "end_ms": 19363,
+      "text_sk": "Môj Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 20772,
+      "end_ms": 23247,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My defense day and night",
+      "start_ms": 25043,
+      "end_ms": 27859,
+      "text_sk": "Moja obrana dÅˆom i nocou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "The name of Jesus Christ",
+      "start_ms": 28480,
+      "end_ms": 31249,
+      "text_sk": "Meno JeÅ¾iÅ¡a Krista",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My God",
+      "start_ms": 31314,
+      "end_ms": 32027,
+      "text_sk": "Môj Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 33339,
+      "end_ms": 35669,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "What else can I do",
+      "start_ms": 38270,
+      "end_ms": 40032,
+      "text_sk": "Čo iné môžem robiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But praise You",
+      "start_ms": 40613,
+      "end_ms": 43073,
+      "text_sk": "Len Ťa chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 47140,
+      "end_ms": 49878,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 50699,
+      "end_ms": 52890,
+      "text_sk": "Nikto iný vedľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "El Shaddai",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "If You don't worry",
+      "start_ms": 55233,
+      "end_ms": 57457,
+      "text_sk": "Ak sa Ty netrápiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Why should I",
+      "start_ms": 57731,
+      "end_ms": 58618,
+      "text_sk": "PreÄo by som mal ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 59666,
+      "end_ms": 62373,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 63276,
+      "end_ms": 65305,
+      "text_sk": "Autor môjho života",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 65885,
+      "end_ms": 68576,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 68672,
+      "end_ms": 69059,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 69413,
+      "end_ms": 71143,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 72153,
+      "end_ms": 74417,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Corner stone solid rock",
+      "start_ms": 80894,
+      "end_ms": 82324,
+      "text_sk": "Uhelný kameň pevná skala",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Faithful even when I'm not",
+      "start_ms": 82340,
+      "end_ms": 85168,
+      "text_sk": "Verný aj keď ja nie som",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My King",
+      "start_ms": 85779,
+      "end_ms": 86791,
+      "text_sk": "Môj Kráľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 87771,
+      "end_ms": 90339,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Only one name will stand",
+      "start_ms": 92007,
+      "end_ms": 95118,
+      "text_sk": "Len jedno meno obstojí",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus the great I Am",
+      "start_ms": 95491,
+      "end_ms": 97400,
+      "text_sk": "Ježiš veľký Ja Som",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My King",
+      "start_ms": 98159,
+      "end_ms": 99724,
+      "text_sk": "Môj Kráľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 100224,
+      "end_ms": 102758,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 103306,
+      "end_ms": 105695,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 106779,
+      "end_ms": 109271,
+      "text_sk": "Nikto iný vedľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "El Shaddai",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "If You don't worry",
+      "start_ms": 111326,
+      "end_ms": 113640,
+      "text_sk": "Ak sa Ty netrápiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Why should I",
+      "start_ms": 113835,
+      "end_ms": 115356,
+      "text_sk": "PreÄo by som mal ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 115757,
+      "end_ms": 118619,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 119374,
+      "end_ms": 121175,
+      "text_sk": "Autor môjho života",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 122059,
+      "end_ms": 124568,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 124761,
+      "end_ms": 125067,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 125486,
+      "end_ms": 127307,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 128225,
+      "end_ms": 131399,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 131786,
+      "end_ms": 134251,
+      "text_sk": "Nikto iný vedľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh El Shaddai",
+      "start_ms": 134547,
+      "end_ms": 134728,
+      "text_sk": "Ã“ El Shaddai",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "If You don't worry",
+      "start_ms": 135483,
+      "end_ms": 136091,
+      "text_sk": "Ak sa Ty netrápiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Why should I",
+      "start_ms": 138759,
+      "end_ms": 139680,
+      "text_sk": "PreÄo by som mal ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 140697,
+      "end_ms": 143813,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 144329,
+      "end_ms": 146170,
+      "text_sk": "Autor môjho života",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 147026,
+      "end_ms": 149605,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 149669,
+      "end_ms": 150121,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 150411,
+      "end_ms": 152232,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Your name is",
+      "start_ms": 153240,
+      "end_ms": 155009,
+      "text_sk": "Tvoje meno je",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Prince of Peace",
+      "start_ms": 155041,
+      "end_ms": 156504,
+      "text_sk": "KnieÅ¾a pokoja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "King of Kings",
+      "start_ms": 156633,
+      "end_ms": 157903,
+      "text_sk": "Kráľ kráľov",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Lord of Lords",
+      "start_ms": 158257,
+      "end_ms": 159512,
+      "text_sk": "Pán pánov",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Alpha and Omega",
+      "start_ms": 159930,
+      "end_ms": 162462,
+      "text_sk": "Alfa a Omega",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 164062,
+      "end_ms": 165750,
+      "text_sk": "Môj Spasiteľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Oh through the storm",
+      "start_ms": 166875,
+      "end_ms": 169060,
+      "text_sk": "Ó cez búrku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It is well with my soul",
+      "start_ms": 169205,
+      "end_ms": 171744,
+      "text_sk": "Je dobre s mojou duÅ¡ou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I know You are faithful",
+      "start_ms": 172403,
+      "end_ms": 174828,
+      "text_sk": "Vieme, že si verný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 176670,
+      "end_ms": 178011,
+      "text_sk": "Môj Spasiteľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Hey and Prince of Peace",
+      "start_ms": 178948,
+      "end_ms": 181486,
+      "text_sk": "Hej a KnieÅ¾a pokoja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "King of Kings",
+      "start_ms": 181696,
+      "end_ms": 182940,
+      "text_sk": "Kráľ kráľov",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Lord of Lords",
+      "start_ms": 183247,
+      "end_ms": 185164,
+      "text_sk": "Pán pánov",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Alpha and Omega",
+      "start_ms": 185263,
+      "end_ms": 187225,
+      "text_sk": "Alfa a Omega",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 188937,
+      "end_ms": 190484,
+      "text_sk": "Môj Spasiteľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Hey through the storm",
+      "start_ms": 192476,
+      "end_ms": 194010,
+      "text_sk": "Hej cez búrku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "It is well with my soul",
+      "start_ms": 194091,
+      "end_ms": 196756,
+      "text_sk": "Je dobre s mojou duÅ¡ou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I know You are faithful",
+      "start_ms": 197370,
+      "end_ms": 200420,
+      "text_sk": "Vieme, že si verný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 201501,
+      "end_ms": 203131,
+      "text_sk": "Môj Spasiteľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Oh You are faithful",
+      "start_ms": 203905,
+      "end_ms": 205972,
+      "text_sk": "Ó Si verný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 207716,
+      "end_ms": 209186,
+      "text_sk": "Môj Spasiteľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 209315,
+      "end_ms": 212271,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 212804,
+      "end_ms": 215195,
+      "text_sk": "Nikto iný vedľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "El Shaddai",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "If You don't",
+      "start_ms": 217717,
+      "end_ms": 218557,
+      "text_sk": "Ak sa Ty",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Worry why should I",
+      "start_ms": 219107,
+      "end_ms": 220255,
+      "text_sk": "Netrápiš, prečo by som mal ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 221710,
+      "end_ms": 224538,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 225363,
+      "end_ms": 227254,
+      "text_sk": "Autor môjho života",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 228111,
+      "end_ms": 230691,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 230707,
+      "end_ms": 231285,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 231349,
+      "end_ms": 233358,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 234226,
+      "end_ms": 237007,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 237762,
+      "end_ms": 240050,
+      "text_sk": "Nikto iný vedľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "El Shaddai",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "If You don't",
+      "start_ms": 242132,
+      "end_ms": 244004,
+      "text_sk": "Ak sa Ty",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Worry why should I",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Netrápiš, prečo by som mal ja",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Oh Your name is God",
+      "start_ms": 245058,
+      "end_ms": 246217,
+      "text_sk": "Ã“ Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 246329,
+      "end_ms": 247038,
+      "text_sk": "Autor môjho života",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 247199,
+      "end_ms": 249919,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 250144,
+      "end_ms": 250498,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 250514,
+      "end_ms": 251496,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 253626,
+      "end_ms": 255538,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 255650,
+      "end_ms": 256180,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 256373,
+      "end_ms": 258076,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 259121,
+      "end_ms": 261852,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "God",
+      "start_ms": 261900,
+      "end_ms": 262366,
+      "text_sk": "BoÅ¾e",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 269310,
+      "end_ms": 270531,
+      "text_sk": "AÅ¾ do dÅˆa, keÄ zomriem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 271624,
+      "end_ms": 273502,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "There is nothing like the name of Jesus Christ",
+      "start_ms": 284472,
+      "end_ms": 289949,
+      "text_sk": "Nie je niÄ ako meno JeÅ¾iÅ¡a Krista",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 290334,
+      "end_ms": 292631,
+      "text_sk": "Tvoje meno je Boh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 99,
+    "n_lines_timed": 94,
+    "n_lines_untimed": 5,
+    "n_words_total": 373,
+    "n_words_aligned": 351,
+    "word_align_rate": 0.9410187667560321,
+    "n_monotonic_violations_clamped": 0
+  }
+}

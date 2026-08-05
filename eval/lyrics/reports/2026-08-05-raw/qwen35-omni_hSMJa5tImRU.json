@@ -1,0 +1,714 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\hSMJa5tImRU_vocal16k.wav",
+  "duration_ms": 664277,
+  "lines": [
+    {
+      "text": "You come at the right time",
+      "start_ms": 30216,
+      "end_ms": 37496,
+      "text_sk": "Prichádzaš v pravý čas",
+      "words": null
+    },
+    {
+      "text": "When I least expect it never behind",
+      "start_ms": 37496,
+      "end_ms": 45829,
+      "text_sk": "Keď to najmenej čakám, nikdy nie pozadu",
+      "words": null
+    },
+    {
+      "text": "So why would I be surprised when You deliver every time",
+      "start_ms": 45829,
+      "end_ms": 57764,
+      "text_sk": "Tak prečo by som bol prekvapený, keď ma vyslobodíš zakaždým",
+      "words": null
+    },
+    {
+      "text": "On mountain tops",
+      "start_ms": 57764,
+      "end_ms": 59753,
+      "text_sk": "Na vrcholoch hôr",
+      "words": null
+    },
+    {
+      "text": "You stay the same",
+      "start_ms": 59753,
+      "end_ms": 61343,
+      "text_sk": "Zostávaš rovnaký",
+      "words": null
+    },
+    {
+      "text": "On valleys low",
+      "start_ms": 61343,
+      "end_ms": 64727,
+      "text_sk": "V nízkych údoliach",
+      "words": null
+    },
+    {
+      "text": "You never change",
+      "start_ms": 64727,
+      "end_ms": 66204,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": null
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 66204,
+      "end_ms": 72587,
+      "text_sk": "A verím, že uvidím",
+      "words": null
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 72587,
+      "end_ms": 78970,
+      "text_sk": "Dobrotu Pána",
+      "words": null
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 78970,
+      "end_ms": 85353,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 85353,
+      "end_ms": 91736,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": null
+    },
+    {
+      "text": "You go",
+      "start_ms": 91736,
+      "end_ms": 105029,
+      "text_sk": "IdeÅ¡",
+      "words": null
+    },
+    {
+      "text": "You go before me",
+      "start_ms": 105029,
+      "end_ms": 107018,
+      "text_sk": "IdeÅ¡ predo mnou",
+      "words": null
+    },
+    {
+      "text": "To prepare the blessing",
+      "start_ms": 107018,
+      "end_ms": 110402,
+      "text_sk": "PripraviÅ¥ poÅ¾ehnanie",
+      "words": null
+    },
+    {
+      "text": "You've made a way",
+      "start_ms": 110402,
+      "end_ms": 115518,
+      "text_sk": "Pripravil si cestu",
+      "words": null
+    },
+    {
+      "text": "It's more than I could imagine",
+      "start_ms": 115518,
+      "end_ms": 120634,
+      "text_sk": "Je to viac, než si dokážem predstaviť",
+      "words": null
+    },
+    {
+      "text": "More than I can fathom",
+      "start_ms": 120634,
+      "end_ms": 123825,
+      "text_sk": "Viac, než dokážem pochopiť",
+      "words": null
+    },
+    {
+      "text": "Or comprehend",
+      "start_ms": 123825,
+      "end_ms": 128153,
+      "text_sk": "Alebo zrozumieÅ¥",
+      "words": null
+    },
+    {
+      "text": "On mountain tops",
+      "start_ms": 128153,
+      "end_ms": 130938,
+      "text_sk": "Na vrcholoch hôr",
+      "words": null
+    },
+    {
+      "text": "I'm so glad that You stay the same",
+      "start_ms": 130938,
+      "end_ms": 134129,
+      "text_sk": "Som tak rád, že zostávaš rovnaký",
+      "words": null
+    },
+    {
+      "text": "In valleys low",
+      "start_ms": 134129,
+      "end_ms": 137320,
+      "text_sk": "V nízkych údoliach",
+      "words": null
+    },
+    {
+      "text": "You never change",
+      "start_ms": 137320,
+      "end_ms": 140512,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": null
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 140512,
+      "end_ms": 146895,
+      "text_sk": "A verím, že uvidím",
+      "words": null
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 146895,
+      "end_ms": 153278,
+      "text_sk": "Dobrotu Pána",
+      "words": null
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 153278,
+      "end_ms": 159661,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 159661,
+      "end_ms": 166044,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": null
+    },
+    {
+      "text": "You never change",
+      "start_ms": 166044,
+      "end_ms": 170174,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": null
+    },
+    {
+      "text": "You never change",
+      "start_ms": 170174,
+      "end_ms": 173558,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": null
+    },
+    {
+      "text": "You never change",
+      "start_ms": 173558,
+      "end_ms": 175742,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": null
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 175742,
+      "end_ms": 200986,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 200986,
+      "end_ms": 210732,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 210732,
+      "end_ms": 217115,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 217115,
+      "end_ms": 223498,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 223498,
+      "end_ms": 229881,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 229881,
+      "end_ms": 236264,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 236264,
+      "end_ms": 242647,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 242647,
+      "end_ms": 249030,
+      "text_sk": "A verím, že uvidím",
+      "words": null
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 249030,
+      "end_ms": 255413,
+      "text_sk": "Dobrotu Pána",
+      "words": null
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 255413,
+      "end_ms": 261796,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 261796,
+      "end_ms": 268179,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": null
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 268179,
+      "end_ms": 294061,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 294061,
+      "end_ms": 300444,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 300444,
+      "end_ms": 306827,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 306827,
+      "end_ms": 313210,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 313210,
+      "end_ms": 319593,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": null
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 319593,
+      "end_ms": 325976,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "You hold it all together",
+      "start_ms": 325976,
+      "end_ms": 332359,
+      "text_sk": "Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "You hold it all together",
+      "start_ms": 332359,
+      "end_ms": 338742,
+      "text_sk": "Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "In my hands it falls apart but You hold it all",
+      "start_ms": 338742,
+      "end_ms": 345125,
+      "text_sk": "V mojich rukách sa to rozpadá, ale Ty to držíš všetko",
+      "words": null
+    },
+    {
+      "text": "In my hands I fall apart but You hold it all",
+      "start_ms": 345125,
+      "end_ms": 351508,
+      "text_sk": "V mojich rukách padám, ale Ty to držíš všetko",
+      "words": null
+    },
+    {
+      "text": "My past my present my future You hold",
+      "start_ms": 351508,
+      "end_ms": 357891,
+      "text_sk": "Moju minulosť moju prítomnosť moju budúcnosť Ty držíš",
+      "words": null
+    },
+    {
+      "text": "You hold",
+      "start_ms": 357891,
+      "end_ms": 364274,
+      "text_sk": "Ty držíš",
+      "words": null
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 364274,
+      "end_ms": 370657,
+      "text_sk": "A verím, že uvidím",
+      "words": null
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 370657,
+      "end_ms": 377040,
+      "text_sk": "Dobrotu Pána",
+      "words": null
+    },
+    {
+      "text": "Your goodness doesn't change",
+      "start_ms": 377040,
+      "end_ms": 383423,
+      "text_sk": "Tvoja dobrota sa nemení",
+      "words": null
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 383423,
+      "end_ms": 389806,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 389806,
+      "end_ms": 396189,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": null
+    },
+    {
+      "text": "Great is Thy faithfulness",
+      "start_ms": 396189,
+      "end_ms": 402572,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "Morning by morning new mercies",
+      "start_ms": 402572,
+      "end_ms": 408955,
+      "text_sk": "Ráno čo ráno nové milosrdenstvá",
+      "words": null
+    },
+    {
+      "text": "Morning by morning Your faithful",
+      "start_ms": 408955,
+      "end_ms": 415338,
+      "text_sk": "Ráno čo ráno si verný",
+      "words": null
+    },
+    {
+      "text": "All I have needed Thy hand has provided",
+      "start_ms": 415338,
+      "end_ms": 421721,
+      "text_sk": "VÅ¡etko, Äo som potreboval, Tvoja ruka poskytla",
+      "words": null
+    },
+    {
+      "text": "All I have needed Thy hand has provided",
+      "start_ms": 421721,
+      "end_ms": 428104,
+      "text_sk": "VÅ¡etko, Äo som potreboval, Tvoja ruka poskytla",
+      "words": null
+    },
+    {
+      "text": "You have provided You have provided",
+      "start_ms": 428104,
+      "end_ms": 434487,
+      "text_sk": "Poskytol si Poskytol si",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness",
+      "start_ms": 434487,
+      "end_ms": 440870,
+      "text_sk": "Tvoja vernosÅ¥",
+      "words": null
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 440870,
+      "end_ms": 447253,
+      "text_sk": "Si Alfa a si Omega",
+      "words": null
+    },
+    {
+      "text": "You're in the middle You hold it all together",
+      "start_ms": 447253,
+      "end_ms": 453636,
+      "text_sk": "Si uprostred Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 453636,
+      "end_ms": 460019,
+      "text_sk": "Si Alfa a si Omega",
+      "words": null
+    },
+    {
+      "text": "You're in the middle You hold it all together",
+      "start_ms": 460019,
+      "end_ms": 466402,
+      "text_sk": "Si uprostred Držíš to všetko pohromade",
+      "words": null
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 466402,
+      "end_ms": 472785,
+      "text_sk": "Si Alfa a si Omega",
+      "words": null
+    },
+    {
+      "text": "You're in the middle You hold it all",
+      "start_ms": 472785,
+      "end_ms": 479168,
+      "text_sk": "Si uprostred Držíš to všetko",
+      "words": null
+    },
+    {
+      "text": "You are the Alpha",
+      "start_ms": 479168,
+      "end_ms": 485551,
+      "text_sk": "Si Alfa",
+      "words": null
+    },
+    {
+      "text": "But You're not just at the beginning",
+      "start_ms": 485551,
+      "end_ms": 491934,
+      "text_sk": "Ale nie si len na zaÄiatku",
+      "words": null
+    },
+    {
+      "text": "But You're not just at the end",
+      "start_ms": 491934,
+      "end_ms": 498317,
+      "text_sk": "Ale nie si len na konci",
+      "words": null
+    },
+    {
+      "text": "You're right here in the middle",
+      "start_ms": 498317,
+      "end_ms": 504700,
+      "text_sk": "Si priamo tu uprostred",
+      "words": null
+    },
+    {
+      "text": "You're not just at the beginning",
+      "start_ms": 504700,
+      "end_ms": 511083,
+      "text_sk": "Nie si len na zaÄiatku",
+      "words": null
+    },
+    {
+      "text": "And You're not just watching from the end",
+      "start_ms": 511083,
+      "end_ms": 517466,
+      "text_sk": "A nesledujeÅ¡ len z konca",
+      "words": null
+    },
+    {
+      "text": "But You're walking with me in the middle",
+      "start_ms": 517466,
+      "end_ms": 523849,
+      "text_sk": "Ale kráčaš so mnou uprostred",
+      "words": null
+    },
+    {
+      "text": "You're walking with me in the middle",
+      "start_ms": 523849,
+      "end_ms": 530232,
+      "text_sk": "Kráčaš so mnou uprostred",
+      "words": null
+    },
+    {
+      "text": "You're the God of the middle",
+      "start_ms": 530232,
+      "end_ms": 536615,
+      "text_sk": "Si Boh uprostred",
+      "words": null
+    },
+    {
+      "text": "You're Jehovah in the middle",
+      "start_ms": 536615,
+      "end_ms": 543000,
+      "text_sk": "Si Jehova uprostred",
+      "words": null
+    },
+    {
+      "text": "You're Provider in the middle",
+      "start_ms": 543000,
+      "end_ms": 549383,
+      "text_sk": "Si PoskytovateÄ¾ uprostred",
+      "words": null
+    },
+    {
+      "text": "You are Healer in the middle",
+      "start_ms": 549383,
+      "end_ms": 555766,
+      "text_sk": "Si UzdraviteÄ¾ uprostred",
+      "words": null
+    },
+    {
+      "text": "You're our Keeper in the middle",
+      "start_ms": 555766,
+      "end_ms": 562149,
+      "text_sk": "Si náš Strážca uprostred",
+      "words": null
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 562149,
+      "end_ms": 568532,
+      "text_sk": "Si Alfa a si Omega",
+      "words": null
+    },
+    {
+      "text": "You're in the middle You hold it all",
+      "start_ms": 568532,
+      "end_ms": 574915,
+      "text_sk": "Si uprostred Držíš to všetko",
+      "words": null
+    },
+    {
+      "text": "You do",
+      "start_ms": 574915,
+      "end_ms": 581298,
+      "text_sk": "Robíš to",
+      "words": null
+    },
+    {
+      "text": "You do",
+      "start_ms": 581298,
+      "end_ms": 587681,
+      "text_sk": "Robíš to",
+      "words": null
+    },
+    {
+      "text": "In my hands I fall apart but You You hold",
+      "start_ms": 587681,
+      "end_ms": 594064,
+      "text_sk": "V mojich rukách padám, ale Ty Ty držíš",
+      "words": null
+    },
+    {
+      "text": "In my hands it falls apart but You",
+      "start_ms": 594064,
+      "end_ms": 600447,
+      "text_sk": "V mojich rukách sa to rozpadá, ale Ty",
+      "words": null
+    },
+    {
+      "text": "You've got the whole world",
+      "start_ms": 600447,
+      "end_ms": 606830,
+      "text_sk": "Máš celý svet",
+      "words": null
+    },
+    {
+      "text": "You've got the whole world",
+      "start_ms": 606830,
+      "end_ms": 613213,
+      "text_sk": "Máš celý svet",
+      "words": null
+    },
+    {
+      "text": "You hold it all",
+      "start_ms": 613213,
+      "end_ms": 619596,
+      "text_sk": "Držíš to všetko",
+      "words": null
+    },
+    {
+      "text": "This is in Your story it's in Your plans",
+      "start_ms": 619596,
+      "end_ms": 625979,
+      "text_sk": "Toto je v Tvojom príbehu je to v Tvojich plánoch",
+      "words": null
+    },
+    {
+      "text": "You hold",
+      "start_ms": 625979,
+      "end_ms": 632362,
+      "text_sk": "Držíš",
+      "words": null
+    },
+    {
+      "text": "Oh one more time",
+      "start_ms": 632362,
+      "end_ms": 638745,
+      "text_sk": "EÅ¡te raz",
+      "words": null
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 638745,
+      "end_ms": 645128,
+      "text_sk": "A verím, že uvidím",
+      "words": null
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 645128,
+      "end_ms": 651511,
+      "text_sk": "Dobrotu Pána",
+      "words": null
+    },
+    {
+      "text": "One thing I'm sure about I'm confident",
+      "start_ms": 651511,
+      "end_ms": 657894,
+      "text_sk": "Jedna vec, ktorou som si istý, som si istý",
+      "words": null
+    },
+    {
+      "text": "As seasons change Your faithfulness",
+      "start_ms": 657894,
+      "end_ms": 664277,
+      "text_sk": "Keď sa ročné obdobia menia, Tvoja vernosť",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 116.9,
+    "line_count": 99,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "transcoded_mp3",
+    "audio_raw_bytes": 42848888,
+    "audio_sent_bytes": 8035677,
+    "audio_sent_b64_chars": 10714236,
+    "audio_format_sent": "mp3"
+  }
+}

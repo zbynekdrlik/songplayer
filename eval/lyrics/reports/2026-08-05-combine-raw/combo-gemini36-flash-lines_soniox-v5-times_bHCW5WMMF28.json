@@ -1,0 +1,348 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "bHCW5WMMF28",
+  "duration_ms": 155370,
+  "lines": [
+    {
+      "text": "One, You made it all, You made it all",
+      "start_ms": 5730,
+      "end_ms": 7590,
+      "text_sk": "Jedno, Ty si stvoril všetko, Ty si stvoril všetko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "and two, I'm alive, it's all because of You",
+      "start_ms": 9510,
+      "end_ms": 13650,
+      "text_sk": "a dva, som nažive, je to všetko kvôli Tebe",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "start_ms": 17130,
+      "end_ms": 20670,
+      "text_sk": "Mám tak veľa dôvodov na chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "and three, You're Holy, You set me free",
+      "start_ms": 21630,
+      "end_ms": 25110,
+      "text_sk": "a tri, si Svätý, oslobodil si ma",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "and four, I'm not a slave to sin no more",
+      "start_ms": 25290,
+      "end_ms": 30030,
+      "text_sk": "a štyri, už nie som otrokom hriechu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "start_ms": 33510,
+      "end_ms": 37290,
+      "text_sk": "Mám tak veľa dôvodov na chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "In the morning, in the evening, every time of day",
+      "start_ms": 38430,
+      "end_ms": 41670,
+      "text_sk": "Ráno, večer, v každý čas dňa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "We got a reason to lift up Jesus, let's sing!",
+      "start_ms": 42210,
+      "end_ms": 45390,
+      "text_sk": "Máme dôvod vyvýšiť Ježiša, spievajme!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Say: We will lift You higher",
+      "start_ms": 45570,
+      "end_ms": 48750,
+      "text_sk": "Povedz: Vyvýšime Ťa vyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "You are our desire",
+      "start_ms": 50070,
+      "end_ms": 53670,
+      "text_sk": "Ty si naša túžba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, we will lift You higher",
+      "start_ms": 53970,
+      "end_ms": 56790,
+      "text_sk": "Ó, vyvýšime Ťa vyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And we won't stop, no, we won't stop, no!",
+      "start_ms": 57990,
+      "end_ms": 61770,
+      "text_sk": "A neprestaneme, nie, neprestaneme, nie!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Five, every need You will provide",
+      "start_ms": 62490,
+      "end_ms": 65970,
+      "text_sk": "Päť, každú potrebu postaráš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Six, God, You are the reason I exist",
+      "start_ms": 66510,
+      "end_ms": 70890,
+      "text_sk": "Šesť, Bože, Ty si dôvod, prečo existujem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Yeah, I've got so many reasons to praise, yeah",
+      "start_ms": 73710,
+      "end_ms": 78390,
+      "text_sk": "Jé, mám tak veľa dôvodov na chválu, jé",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "In the morning, in the evening, every time of day",
+      "start_ms": 78990,
+      "end_ms": 82350,
+      "text_sk": "Ráno, večer, v každý čas dňa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "We got a reason to lift up Jesus, let's go!",
+      "start_ms": 82890,
+      "end_ms": 86370,
+      "text_sk": "Máme dôvod vyvýšiť Ježiša, poďme!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "We will lift You higher",
+      "start_ms": 86850,
+      "end_ms": 89490,
+      "text_sk": "Vyvýšime Ťa vyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You are our desire",
+      "start_ms": 90750,
+      "end_ms": 93690,
+      "text_sk": "Ty si naša túžba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, we will lift You higher",
+      "start_ms": 94590,
+      "end_ms": 97530,
+      "text_sk": "Ó, vyvýšime Ťa vyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And we won't stop, no, we won't stop, no!",
+      "start_ms": 98550,
+      "end_ms": 102510,
+      "text_sk": "A neprestaneme, nie, neprestaneme, nie!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Gonna use all my breath to praise You on and on",
+      "start_ms": 103590,
+      "end_ms": 107310,
+      "text_sk": "Použijem všetok svoj dych, aby som Ťa chválil stále",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "start_ms": 107790,
+      "end_ms": 111330,
+      "text_sk": "Nech všetko, čo dýcha, chváli Ho",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Let all the earth rejoice and make a joyful noise",
+      "start_ms": 111810,
+      "end_ms": 115410,
+      "text_sk": "Nech sa celá zem raduje a vydáva radostný hluk",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "And give Him all the praise, yeah!",
+      "start_ms": 115890,
+      "end_ms": 118830,
+      "text_sk": "A vzdáva Mu všetku chválu, jé!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Gonna use all my breath to praise You on and on",
+      "start_ms": 119850,
+      "end_ms": 123570,
+      "text_sk": "Použijem všetok svoj dych, aby som Ťa chválil stále",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "start_ms": 124050,
+      "end_ms": 127590,
+      "text_sk": "Nech všetko, čo dýcha, chváli Ho",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Let all the earth rejoice and make a joyful noise",
+      "start_ms": 128130,
+      "end_ms": 131730,
+      "text_sk": "Nech sa celá zem raduje a vydáva radostný hluk",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "And give Him all the praise, yeah!",
+      "start_ms": 132330,
+      "end_ms": 135150,
+      "text_sk": "A vzdáva Mu všetku chválu, jé!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Say: We will lift You higher",
+      "start_ms": 139050,
+      "end_ms": 142350,
+      "text_sk": "Povedz: Vyvýšime Ťa vyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "You are our desire",
+      "start_ms": 143550,
+      "end_ms": 146730,
+      "text_sk": "Ty si naša túžba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, we will lift You higher",
+      "start_ms": 147510,
+      "end_ms": 150330,
+      "text_sk": "Ó, vyvýšime Ťa vyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh, and we won't stop, no, we won't stop, no!",
+      "start_ms": 151170,
+      "end_ms": 155370,
+      "text_sk": "Ó, a neprestaneme, nie, neprestaneme, nie!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 33,
+    "n_lines_timed": 33,
+    "n_lines_untimed": 0,
+    "n_words_total": 260,
+    "n_words_aligned": 240,
+    "word_align_rate": 0.9230769230769231,
+    "n_monotonic_violations_clamped": 0
+  }
+}

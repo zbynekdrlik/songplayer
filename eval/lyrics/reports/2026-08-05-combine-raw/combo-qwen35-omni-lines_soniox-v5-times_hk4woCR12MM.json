@@ -1,0 +1,488 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_soniox-v5-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "soniox-v5",
+  "video_id": "hk4woCR12MM",
+  "duration_ms": 187710,
+  "lines": [
+    {
+      "text": "How could I thank the one who saved my life",
+      "start_ms": 4830,
+      "end_ms": 9270,
+      "text_sk": "Ako by som mohol poďakovať tomu, kto mi zachránil život",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "When there is no words to express what you deserve",
+      "start_ms": 11550,
+      "end_ms": 17250,
+      "text_sk": "Keď neexistujú slová na vyjadrenie toho, čo si zaslúžiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "You deserve the greatest",
+      "start_ms": 19770,
+      "end_ms": 21150,
+      "text_sk": "Zaslúžiš si to najväčšie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "To be lifted up the highest",
+      "start_ms": 21390,
+      "end_ms": 23070,
+      "text_sk": "Byť vyzdvihnutý najvyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Worthy of my everything",
+      "start_ms": 23790,
+      "end_ms": 25650,
+      "text_sk": "Hodný môjho všetkého",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "This is why I praise",
+      "start_ms": 27630,
+      "end_ms": 29730,
+      "text_sk": "Preto chválim",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "'Cause you're worthy of all my praise",
+      "start_ms": 30750,
+      "end_ms": 32610,
+      "text_sk": "Pretože si hodný všetkej mojej chvály",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 35190,
+      "end_ms": 36750,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 37050,
+      "end_ms": 38670,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I give You all my praise",
+      "start_ms": 38910,
+      "end_ms": 41370,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 42210,
+      "end_ms": 47250,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 50070,
+      "end_ms": 51090,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 53850,
+      "end_ms": 54930,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I lift my voice to You I make a joyful noise",
+      "start_ms": 58830,
+      "end_ms": 63570,
+      "text_sk": "Pozdvihujem svoj hlas k Tebe, vydávam radostný zvuk",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "For You've been so good",
+      "start_ms": 65790,
+      "end_ms": 67890,
+      "text_sk": "Pretože si bol taký dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I'd give You the whole world if I could",
+      "start_ms": 68730,
+      "end_ms": 71370,
+      "text_sk": "Dal by som Ti celý svet, keby som mohol",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "You deserve the greatest",
+      "start_ms": 73950,
+      "end_ms": 75330,
+      "text_sk": "Zaslúžiš si to najväčšie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "To be lifted up the highest",
+      "start_ms": 75570,
+      "end_ms": 77250,
+      "text_sk": "Byť vyzdvihnutý najvyššie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Worthy of my everything",
+      "start_ms": 77970,
+      "end_ms": 79770,
+      "text_sk": "Hodný môjho všetkého",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "This is why",
+      "start_ms": 80850,
+      "end_ms": 81570,
+      "text_sk": "Toto je dôvod",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "'Cause you are worthy Lord",
+      "start_ms": 83550,
+      "end_ms": 85230,
+      "text_sk": "Pretože si hodný, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 89370,
+      "end_ms": 90810,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 91230,
+      "end_ms": 93210,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Give You all my praise",
+      "start_ms": 93510,
+      "end_ms": 95550,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Yeah I gotta praise",
+      "start_ms": 96030,
+      "end_ms": 97650,
+      "text_sk": "Áno, musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 100410,
+      "end_ms": 101430,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I gotta 'cause you've been good to me",
+      "start_ms": 104250,
+      "end_ms": 106890,
+      "text_sk": "Musím, pretože si bol ku mne dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 108090,
+      "end_ms": 109170,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "For setting me free",
+      "start_ms": 112590,
+      "end_ms": 114030,
+      "text_sk": "Za to, Å¾e si ma oslobodil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "For meeting my needs",
+      "start_ms": 116430,
+      "end_ms": 118110,
+      "text_sk": "Za naplnenie mojich potrieb",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "For healing me",
+      "start_ms": 120270,
+      "end_ms": 121890,
+      "text_sk": "Za uzdravenie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "For loving me",
+      "start_ms": 124290,
+      "end_ms": 125730,
+      "text_sk": "Za lásku ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "This is why",
+      "start_ms": 141690,
+      "end_ms": 142470,
+      "text_sk": "Toto je dôvod",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "This is why I praise",
+      "start_ms": 143970,
+      "end_ms": 145890,
+      "text_sk": "Preto chválim",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "'Cause you're worthy of all my praise",
+      "start_ms": 146970,
+      "end_ms": 149730,
+      "text_sk": "Pretože si hodný všetkej mojej chvály",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 151290,
+      "end_ms": 152790,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 153150,
+      "end_ms": 154830,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I give You all my praise",
+      "start_ms": 155250,
+      "end_ms": 157650,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 158550,
+      "end_ms": 159570,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 162330,
+      "end_ms": 163470,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I gotta praise yeah",
+      "start_ms": 166170,
+      "end_ms": 167670,
+      "text_sk": "Musím chváliť, áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 170070,
+      "end_ms": 171150,
+      "text_sk": "Musím chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "For setting me free",
+      "start_ms": 174510,
+      "end_ms": 176010,
+      "text_sk": "Za to, Å¾e si ma oslobodil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "For meeting my needs",
+      "start_ms": 178350,
+      "end_ms": 180090,
+      "text_sk": "Za naplnenie mojich potrieb",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh for healing me yeah",
+      "start_ms": 182310,
+      "end_ms": 183810,
+      "text_sk": "Ó, za uzdravenie, áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "For loving me",
+      "start_ms": 186210,
+      "end_ms": 187710,
+      "text_sk": "Za lásku ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 47,
+    "n_lines_timed": 46,
+    "n_lines_untimed": 1,
+    "n_words_total": 228,
+    "n_words_aligned": 217,
+    "word_align_rate": 0.9517543859649122,
+    "n_monotonic_violations_clamped": 0
+  }
+}

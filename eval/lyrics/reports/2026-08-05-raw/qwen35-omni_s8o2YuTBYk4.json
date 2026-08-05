@@ -1,0 +1,329 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\s8o2YuTBYk4_vocal16k.wav",
+  "duration_ms": 174700,
+  "lines": [
+    {
+      "text": "Got a feeling that I really need to let go",
+      "start_ms": 1560,
+      "end_ms": 20380,
+      "text_sk": "Mám pocit, že sa naozaj musím pustiť",
+      "words": null
+    },
+    {
+      "text": "Of everything that's weighing me down",
+      "start_ms": 20380,
+      "end_ms": 27140,
+      "text_sk": "Všetkého, čo ma ťaží",
+      "words": null
+    },
+    {
+      "text": "Gotta listen to the voice that I know",
+      "start_ms": 27140,
+      "end_ms": 32900,
+      "text_sk": "Musím počúvať hlas, ktorý poznám",
+      "words": null
+    },
+    {
+      "text": "You speak to me and say I'm free",
+      "start_ms": 32900,
+      "end_ms": 39020,
+      "text_sk": "Hovoríš ku mne a hovoríš, že som voľný",
+      "words": null
+    },
+    {
+      "text": "Come on hands high hands up",
+      "start_ms": 39020,
+      "end_ms": 41300,
+      "text_sk": "No tak ruky hore, ruky hore",
+      "words": null
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "start_ms": 41300,
+      "end_ms": 49980,
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "words": null
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "start_ms": 49980,
+      "end_ms": 58780,
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "words": null
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 58780,
+      "end_ms": 60140,
+      "text_sk": "Som voľný",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 60140,
+      "end_ms": 60300,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 60300,
+      "end_ms": 60460,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 60460,
+      "end_ms": 60620,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "When I think of how my life has been changed",
+      "start_ms": 60620,
+      "end_ms": 66020,
+      "text_sk": "Keď pomyslím na to, ako sa môj život zmenil",
+      "words": null
+    },
+    {
+      "text": "It all comes down to being with you",
+      "start_ms": 66020,
+      "end_ms": 69740,
+      "text_sk": "Všetko sa scvrkáva na to byť s tebou",
+      "words": null
+    },
+    {
+      "text": "And I know that you are always with me",
+      "start_ms": 69740,
+      "end_ms": 73260,
+      "text_sk": "A viem, Å¾e si vÅ¾dy so mnou",
+      "words": null
+    },
+    {
+      "text": "Lord I believe with you I'm free",
+      "start_ms": 73260,
+      "end_ms": 77500,
+      "text_sk": "Pane, verím, že s tebou som voľný",
+      "words": null
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "start_ms": 77500,
+      "end_ms": 86140,
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "words": null
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "start_ms": 86140,
+      "end_ms": 94940,
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "words": null
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 94940,
+      "end_ms": 96300,
+      "text_sk": "Som voľný",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 96300,
+      "end_ms": 96460,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 96460,
+      "end_ms": 96620,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 96620,
+      "end_ms": 96780,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 96780,
+      "end_ms": 105020,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 105020,
+      "end_ms": 109180,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 109180,
+      "end_ms": 113180,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 113180,
+      "end_ms": 116300,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "Go",
+      "start_ms": 116300,
+      "end_ms": 132140,
+      "text_sk": "ChoÄ",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 132140,
+      "end_ms": 136140,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "start_ms": 136140,
+      "end_ms": 139180,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 139180,
+      "end_ms": 143180,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 143180,
+      "end_ms": 146300,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "start_ms": 146300,
+      "end_ms": 149500,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "words": null
+    },
+    {
+      "text": "Oh yes we are",
+      "start_ms": 149500,
+      "end_ms": 154700,
+      "text_sk": "Ó áno, sme",
+      "words": null
+    },
+    {
+      "text": "Hey",
+      "start_ms": 154700,
+      "end_ms": 155100,
+      "text_sk": "Hej",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 155100,
+      "end_ms": 155300,
+      "text_sk": "Ã“",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 155300,
+      "end_ms": 159180,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "Hey",
+      "start_ms": 159180,
+      "end_ms": 159340,
+      "text_sk": "Hej",
+      "words": null
+    },
+    {
+      "text": "Yeah hey",
+      "start_ms": 159340,
+      "end_ms": 159500,
+      "text_sk": "Áno hej",
+      "words": null
+    },
+    {
+      "text": "One two",
+      "start_ms": 159500,
+      "end_ms": 159660,
+      "text_sk": "Jeden dva",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise",
+      "start_ms": 159660,
+      "end_ms": 160140,
+      "text_sk": "Budem chváliť",
+      "words": null
+    },
+    {
+      "text": "Hey hey",
+      "start_ms": 160140,
+      "end_ms": 160300,
+      "text_sk": "Hej hej",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 160300,
+      "end_ms": 164140,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 164140,
+      "end_ms": 168140,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 168140,
+      "end_ms": 172140,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null
+    },
+    {
+      "text": "Come on lift him up tonight",
+      "start_ms": 172140,
+      "end_ms": 174700,
+      "text_sk": "Poďme ho dnes večer pozdvihnúť",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 66.2,
+    "line_count": 44,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "transcoded_mp3",
+    "audio_raw_bytes": 15276212,
+    "audio_sent_bytes": 2865933,
+    "audio_sent_b64_chars": 3821244,
+    "audio_format_sent": "mp3"
+  }
+}

@@ -1,0 +1,648 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_aai-u35-translate-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "aai-u35-translate",
+  "video_id": "5JW87KKDTcU",
+  "duration_ms": 232456,
+  "lines": [
+    {
+      "text": "Nothing excites us like Jesus",
+      "start_ms": 5236,
+      "end_ms": 7475,
+      "text_sk": "Nič nás nenadchne tak ako Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "'Cause in His presence there's freedom",
+      "start_ms": 9260,
+      "end_ms": 11133,
+      "text_sk": "Lebo v Jeho prítomnosti je sloboda",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "All of our sin is forgiven",
+      "start_ms": 12860,
+      "end_ms": 14798,
+      "text_sk": "Všetky naše hriechy sú odpustené",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "So we give to Him the highest praise",
+      "start_ms": 15428,
+      "end_ms": 19656,
+      "text_sk": "Tak Mu vzdávame tú najvyššiu chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "It's the greatest feeling",
+      "start_ms": 20237,
+      "end_ms": 23772,
+      "text_sk": "Je to ten najväčší pocit",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "When You fill this place",
+      "start_ms": 24030,
+      "end_ms": 26152,
+      "text_sk": "Keď naplníš toto miesto",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "In this moment",
+      "start_ms": 27691,
+      "end_ms": 29557,
+      "text_sk": "V tejto chvíli",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You are moving as we give You praise",
+      "start_ms": 29638,
+      "end_ms": 33321,
+      "text_sk": "Sa hýbeš, keď Ti vzdávame chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Come right now Holy Spirit",
+      "start_ms": 35290,
+      "end_ms": 38402,
+      "text_sk": "Príď práve teraz Duchu Svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Release Your power",
+      "start_ms": 38564,
+      "end_ms": 40364,
+      "text_sk": "Uvoľni svoju moc",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Lord we are hungry for more of You",
+      "start_ms": 40737,
+      "end_ms": 43686,
+      "text_sk": "Pane, sme hladní po viac z Teba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Heaven's open, You're bursting through",
+      "start_ms": 44138,
+      "end_ms": 47404,
+      "text_sk": "Nebo je otvorené, prerážaš sa skrz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Fillin' this place",
+      "start_ms": 48051,
+      "end_ms": 49328,
+      "text_sk": "Napĺňaš toto miesto",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Like a rushing wind",
+      "start_ms": 49328,
+      "end_ms": 52319,
+      "text_sk": "Ako rútiaci sa vietor",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Come and move again",
+      "start_ms": 52997,
+      "end_ms": 56121,
+      "text_sk": "Príď a pohni sa znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a fire within",
+      "start_ms": 56800,
+      "end_ms": 60086,
+      "text_sk": "Ako oheň vo vnútri",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "We will burn burn burn burn burn burn burn",
+      "start_ms": 60669,
+      "end_ms": 64223,
+      "text_sk": "Budeme horieť horieť horieť horieť horieť horieť horieť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Woo!",
+      "start_ms": 64564,
+      "end_ms": 64661,
+      "text_sk": "Ú!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "We will burn for You",
+      "start_ms": 70809,
+      "end_ms": 72666,
+      "text_sk": "Budeme horieť pre Teba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "To everybody that's hurting",
+      "start_ms": 80582,
+      "end_ms": 82347,
+      "text_sk": "Pre každého, kto trpí",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Here comes the sound of rejoicing",
+      "start_ms": 83982,
+      "end_ms": 85811,
+      "text_sk": "Prichádza zvuk radosti",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Our happiness is restoring",
+      "start_ms": 88030,
+      "end_ms": 89879,
+      "text_sk": "Naše šťastie sa obnovuje",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "So we give to Him the highest praise yeah",
+      "start_ms": 90410,
+      "end_ms": 95122,
+      "text_sk": "Tak Mu vzdávame tú najvyššiu chválu áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "It's the greatest feeling",
+      "start_ms": 95218,
+      "end_ms": 98720,
+      "text_sk": "Je to ten najväčší pocit",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "When You fill this place",
+      "start_ms": 98995,
+      "end_ms": 101256,
+      "text_sk": "Keď naplníš toto miesto",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And in this moment",
+      "start_ms": 102650,
+      "end_ms": 102747,
+      "text_sk": "A v tejto chvíli",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "You are moving as we give You praise",
+      "start_ms": 104947,
+      "end_ms": 107989,
+      "text_sk": "Sa hýbeš, keď Ti vzdávame chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh come right now Holy Spirit",
+      "start_ms": 109764,
+      "end_ms": 113458,
+      "text_sk": "Ó príď práve teraz Duchu Svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Release Your power",
+      "start_ms": 113554,
+      "end_ms": 115344,
+      "text_sk": "Uvoľni svoju moc",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Lord we are hungry for more of You",
+      "start_ms": 115667,
+      "end_ms": 118612,
+      "text_sk": "Pane, sme hladní po viac z Teba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Heaven's open, You're bursting through",
+      "start_ms": 119196,
+      "end_ms": 122555,
+      "text_sk": "Nebo je otvorené, prerážaš sa skrz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Fillin' this place",
+      "start_ms": 123025,
+      "end_ms": 124307,
+      "text_sk": "Napĺňaš toto miesto",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Like a rushing wind",
+      "start_ms": 124307,
+      "end_ms": 127282,
+      "text_sk": "Ako rútiaci sa vietor",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Come and move again",
+      "start_ms": 128042,
+      "end_ms": 131147,
+      "text_sk": "Príď a pohni sa znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a fire",
+      "start_ms": 131810,
+      "end_ms": 132596,
+      "text_sk": "Ako oheň",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "We will burn",
+      "start_ms": 134201,
+      "end_ms": 135986,
+      "text_sk": "Budeme horieť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Oh oh",
+      "start_ms": 149377,
+      "end_ms": 149417,
+      "text_sk": "Ó ó",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Hey!",
+      "start_ms": 149417,
+      "end_ms": 149676,
+      "text_sk": "Hej!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "We raise our hands up",
+      "start_ms": 155256,
+      "end_ms": 157100,
+      "text_sk": "Zdvíhame ruky hore",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "We're going all out",
+      "start_ms": 157197,
+      "end_ms": 158901,
+      "text_sk": "Ideme do toho naplno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "We're lifting up the name of Jesus",
+      "start_ms": 158983,
+      "end_ms": 161497,
+      "text_sk": "Vyvyšujeme meno Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Nothing will stop us",
+      "start_ms": 162725,
+      "end_ms": 164392,
+      "text_sk": "Nič nás nezastaví",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Singing Your praises",
+      "start_ms": 164521,
+      "end_ms": 166188,
+      "text_sk": "Spievajúc Tvoje chvály",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your Holy Spirit is here",
+      "start_ms": 166544,
+      "end_ms": 169295,
+      "text_sk": "Tvoj Duch Svätý je tu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Like a rushing wind",
+      "start_ms": 169359,
+      "end_ms": 172546,
+      "text_sk": "Ako rútiaci sa vietor",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Come and move again",
+      "start_ms": 173099,
+      "end_ms": 176500,
+      "text_sk": "Príď a pohni sa znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a fire within",
+      "start_ms": 176874,
+      "end_ms": 180088,
+      "text_sk": "Ako oheň vo vnútri",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "We will burn burn burn burn",
+      "start_ms": 180572,
+      "end_ms": 182751,
+      "text_sk": "Budeme horieť horieť horieť horieť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh we raise our hands up",
+      "start_ms": 182848,
+      "end_ms": 185156,
+      "text_sk": "Ó dvíhame ruky hore",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "We raise our hands up",
+      "start_ms": 185334,
+      "end_ms": 186900,
+      "text_sk": "Dvíhame ruky hore",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "We raise our hands",
+      "start_ms": 188997,
+      "end_ms": 190181,
+      "text_sk": "Dvíhame ruky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And we give You all the glory",
+      "start_ms": 190360,
+      "end_ms": 192857,
+      "text_sk": "A vzdávame Ti všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 195240,
+      "end_ms": 195513,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "We raise our hands up",
+      "start_ms": 196477,
+      "end_ms": 201392,
+      "text_sk": "Dvíhame ruky hore",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And we give You all the praise tonight",
+      "start_ms": 201441,
+      "end_ms": 204027,
+      "text_sk": "A vzdávame Ti všetku chválu dnes večer",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "We give You all the glory",
+      "start_ms": 204332,
+      "end_ms": 205726,
+      "text_sk": "Vzdávame Ti všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Jesus",
+      "start_ms": 209370,
+      "end_ms": 209634,
+      "text_sk": "Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Come on praise Him for the overflow tonight",
+      "start_ms": 210212,
+      "end_ms": 212394,
+      "text_sk": "Poďte, chváľte Ho za prebytok dnes večer",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Woo!",
+      "start_ms": 219199,
+      "end_ms": 219219,
+      "text_sk": "Ú!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Our faith is breaking through the ceiling",
+      "start_ms": 219219,
+      "end_ms": 222026,
+      "text_sk": "Naša viera preráža strop",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "There's no doubt we are believing",
+      "start_ms": 223011,
+      "end_ms": 225576,
+      "text_sk": "Nie je pochýb, že veríme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "That in this moment we are seeing",
+      "start_ms": 226722,
+      "end_ms": 228532,
+      "text_sk": "Že v tejto chvíli vidíme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Oh everything that we've been dreaming",
+      "start_ms": 230810,
+      "end_ms": 232456,
+      "text_sk": "Ó všetko, o čom sme snívali",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 63,
+    "n_lines_timed": 63,
+    "n_lines_untimed": 0,
+    "n_words_total": 306,
+    "n_words_aligned": 299,
+    "word_align_rate": 0.9771241830065359,
+    "n_monotonic_violations_clamped": 0
+  }
+}

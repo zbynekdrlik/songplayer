@@ -1,0 +1,3968 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_aai-u35-translate-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "aai-u35-translate",
+  "video_id": "Xvm4_fWkXe8",
+  "duration_ms": 274599,
+  "lines": [
+    {
+      "text": "You know it's crazy",
+      "start_ms": 12787,
+      "end_ms": 13984,
+      "text_sk": "Vieš, že je to šialené",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I woke up this morning",
+      "start_ms": 14324,
+      "end_ms": 15973,
+      "text_sk": "Dnes ráno som sa zobudil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "To grace and mercy",
+      "start_ms": 16523,
+      "end_ms": 17784,
+      "text_sk": "K milosti a súcitu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "That just keep on flowing",
+      "start_ms": 18043,
+      "end_ms": 19805,
+      "text_sk": "Ktoré stále prúdia",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My heart is beating",
+      "start_ms": 20339,
+      "end_ms": 21665,
+      "text_sk": "Moje srdce bije",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "My eyes are wide open",
+      "start_ms": 21924,
+      "end_ms": 23767,
+      "text_sk": "Moje oči sú široko otvorené",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 24917,
+      "end_ms": 26120,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "It's so amazing",
+      "start_ms": 28101,
+      "end_ms": 29426,
+      "text_sk": "Je to také úžasné",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "That someone so perfect",
+      "start_ms": 29539,
+      "end_ms": 31364,
+      "text_sk": "Že niekto taký dokonalý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Would show me love",
+      "start_ms": 31946,
+      "end_ms": 33723,
+      "text_sk": "By mi ukázal lásku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "When I didn't deserve it",
+      "start_ms": 33723,
+      "end_ms": 35225,
+      "text_sk": "Keď som si ju nezaslúžil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You gave Your life just",
+      "start_ms": 35839,
+      "end_ms": 37180,
+      "text_sk": "Dal si svoj život len",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "To show me I'm worth it",
+      "start_ms": 37180,
+      "end_ms": 38948,
+      "text_sk": "Aby si mi ukázal, že za to stojím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 39305,
+      "end_ms": 42371,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 44092,
+      "end_ms": 45641,
+      "text_sk": "Žijem v",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "A new today",
+      "start_ms": 46114,
+      "end_ms": 46701,
+      "text_sk": "Novom dni",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 47825,
+      "end_ms": 49032,
+      "text_sk": "Staré je preč",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It's history",
+      "start_ms": 49920,
+      "end_ms": 50647,
+      "text_sk": "Je to história",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 51343,
+      "end_ms": 53268,
+      "text_sk": "Je to zázrak",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 53268,
+      "end_ms": 54336,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 54885,
+      "end_ms": 55710,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 55775,
+      "end_ms": 56438,
+      "text_sk": "Urobil si cestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I saw a mountain",
+      "start_ms": 66558,
+      "end_ms": 67994,
+      "text_sk": "Videl som horu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And I watched You move it",
+      "start_ms": 68091,
+      "end_ms": 69704,
+      "text_sk": "A videl som Ťa, ako si ju posunul",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "You took my place when",
+      "start_ms": 70285,
+      "end_ms": 71704,
+      "text_sk": "Zaujal si moje miesto, keď",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "No one else could do it",
+      "start_ms": 71736,
+      "end_ms": 73995,
+      "text_sk": "To nikto iný nedokázal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The least I can do",
+      "start_ms": 74220,
+      "end_ms": 75527,
+      "text_sk": "Najmenej, čo môžem urobiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Is sing hallelujah",
+      "start_ms": 75672,
+      "end_ms": 77124,
+      "text_sk": "Je spievať aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 78760,
+      "end_ms": 80305,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 82435,
+      "end_ms": 83688,
+      "text_sk": "Žijem v",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "A new today",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Novom dni",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 86020,
+      "end_ms": 87980,
+      "text_sk": "Staré je preč",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It's history",
+      "start_ms": 87980,
+      "end_ms": 89620,
+      "text_sk": "Je to história",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 89860,
+      "end_ms": 91540,
+      "text_sk": "Je to zázrak",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 91540,
+      "end_ms": 93350,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 93800,
+      "end_ms": 95500,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 95500,
+      "end_ms": 96940,
+      "text_sk": "Urobil si cestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 96940,
+      "end_ms": 97420,
+      "text_sk": "Žijem v",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "A new today",
+      "start_ms": 100080,
+      "end_ms": 100430,
+      "text_sk": "Novom dni",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 100620,
+      "end_ms": 101840,
+      "text_sk": "Staré je preč",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It's history",
+      "start_ms": 103400,
+      "end_ms": 104620,
+      "text_sk": "Je to história",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 104760,
+      "end_ms": 106380,
+      "text_sk": "Je to zázrak",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 106380,
+      "end_ms": 107720,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 108420,
+      "end_ms": 110840,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 110840,
+      "end_ms": 113000,
+      "text_sk": "Urobil si cestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Every single debt I owed",
+      "start_ms": 120049,
+      "end_ms": 121840,
+      "text_sk": "Každý jeden dlh, ktorý som mal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You cancelled it",
+      "start_ms": 122453,
+      "end_ms": 123501,
+      "text_sk": "Si zrušil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Every sin I ever chose",
+      "start_ms": 123985,
+      "end_ms": 125905,
+      "text_sk": "Každý hriech, ktorý som si vybral",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You covered it",
+      "start_ms": 126324,
+      "end_ms": 127534,
+      "text_sk": "Si prikryl",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "When the fight was getting close",
+      "start_ms": 127680,
+      "end_ms": 129419,
+      "text_sk": "Keď sa boj blížil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You handled it",
+      "start_ms": 130112,
+      "end_ms": 131046,
+      "text_sk": "Si to zvládol",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You stepped right in",
+      "start_ms": 131980,
+      "end_ms": 133075,
+      "text_sk": "Vkročil si priamo dnu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And finished it",
+      "start_ms": 133977,
+      "end_ms": 134960,
+      "text_sk": "A dokončil to",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Every single debt I owed",
+      "start_ms": 135508,
+      "end_ms": 137312,
+      "text_sk": "Každý jeden dlh, ktorý som mal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You cancelled it",
+      "start_ms": 137763,
+      "end_ms": 138761,
+      "text_sk": "Si zrušil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Every sin I ever chose",
+      "start_ms": 139293,
+      "end_ms": 141210,
+      "text_sk": "Každý hriech, ktorý som si vybral",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You covered it",
+      "start_ms": 141628,
+      "end_ms": 142788,
+      "text_sk": "Si prikryl",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "When the fight was getting close",
+      "start_ms": 143078,
+      "end_ms": 145188,
+      "text_sk": "Keď sa boj blížil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You handled it",
+      "start_ms": 145494,
+      "end_ms": 146320,
+      "text_sk": "Si to zvládol",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You never fail",
+      "start_ms": 147337,
+      "end_ms": 148285,
+      "text_sk": "Nikdy nezlyháš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You never will",
+      "start_ms": 149265,
+      "end_ms": 149973,
+      "text_sk": "Nikdy nebudeš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Every single word You spoke",
+      "start_ms": 150792,
+      "end_ms": 153203,
+      "text_sk": "Každé jedno slovo, ktoré si povedal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Is coming true",
+      "start_ms": 153203,
+      "end_ms": 154119,
+      "text_sk": "Sa stáva skutočnosťou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Every lie the devil told",
+      "start_ms": 154650,
+      "end_ms": 156258,
+      "text_sk": "Každá lož, ktorú povedal diabol",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Must bow to You",
+      "start_ms": 156918,
+      "end_ms": 157900,
+      "text_sk": "Sa musí pokloniť Tebe",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "To me it's impossible",
+      "start_ms": 158367,
+      "end_ms": 160154,
+      "text_sk": "Pre mňa je to nemožné",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "But not for You",
+      "start_ms": 160782,
+      "end_ms": 162199,
+      "text_sk": "Ale nie pre Teba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It's what You do",
+      "start_ms": 162569,
+      "end_ms": 163552,
+      "text_sk": "To je to, čo robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 165194,
+      "end_ms": 166097,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 168949,
+      "end_ms": 170001,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 172719,
+      "end_ms": 173900,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 175910,
+      "end_ms": 178330,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 182470,
+      "end_ms": 183870,
+      "text_sk": "Žijem v",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "A new today",
+      "start_ms": 184530,
+      "end_ms": 185250,
+      "text_sk": "Novom dni",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 186570,
+      "end_ms": 186850,
+      "text_sk": "Staré je preč",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "It's history",
+      "start_ms": 187210,
+      "end_ms": 188870,
+      "text_sk": "Je to história",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 189630,
+      "end_ms": 190830,
+      "text_sk": "Je to zázrak",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 190830,
+      "end_ms": 193480,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 193910,
+      "end_ms": 197090,
+      "text_sk": "Urobil si cestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 197090,
+      "end_ms": 198210,
+      "text_sk": "Žijem v",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "A new today",
+      "start_ms": 199050,
+      "end_ms": 199510,
+      "text_sk": "Novom dni",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Staré je preč",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "It's history",
+      "start_ms": 202590,
+      "end_ms": 203230,
+      "text_sk": "Je to história",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 204930,
+      "end_ms": 205830,
+      "text_sk": "Je to zázrak",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 209284,
+      "end_ms": 211658,
+      "text_sk": "Urobil si cestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 218662,
+      "end_ms": 219887,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 221886,
+      "end_ms": 222643,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 222692,
+      "end_ms": 223772,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 223949,
+      "end_ms": 229840,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 230499,
+      "end_ms": 237520,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 239967,
+      "end_ms": 242281,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 242667,
+      "end_ms": 243937,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 244001,
+      "end_ms": 245689,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 245834,
+      "end_ms": 246782,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 247120,
+      "end_ms": 249279,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 256378,
+      "end_ms": 257432,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 257480,
+      "end_ms": 259118,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 259183,
+      "end_ms": 261356,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 262840,
+      "end_ms": 266935,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 266983,
+      "end_ms": 267097,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "A stále to robíš",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 395,
+    "n_lines_timed": 98,
+    "n_lines_untimed": 297,
+    "n_words_total": 2185,
+    "n_words_aligned": 382,
+    "word_align_rate": 0.1748283752860412,
+    "n_monotonic_violations_clamped": 0
+  }
+}

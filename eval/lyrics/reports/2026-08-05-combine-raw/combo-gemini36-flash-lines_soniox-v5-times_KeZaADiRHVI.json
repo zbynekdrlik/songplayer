@@ -1,0 +1,578 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "KeZaADiRHVI",
+  "duration_ms": 264090,
+  "lines": [
+    {
+      "text": "When Holy Ghost",
+      "start_ms": 10530,
+      "end_ms": 11790,
+      "text_sk": "When Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "gets hold of you",
+      "start_ms": 12930,
+      "end_ms": 13950,
+      "text_sk": "gets hold of you",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It's no telling what you're liable to do",
+      "start_ms": 16050,
+      "end_ms": 17550,
+      "text_sk": "It's no telling what you're liable to do",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "No telling what you're liable to do",
+      "start_ms": 17730,
+      "end_ms": 19350,
+      "text_sk": "No telling what you're liable to do",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Might get fired up",
+      "start_ms": 19770,
+      "end_ms": 21330,
+      "text_sk": "Might get fired up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Might get free",
+      "start_ms": 22770,
+      "end_ms": 23730,
+      "text_sk": "Might get free",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "But if you broadcast what it done for you, what it done for me",
+      "start_ms": 25590,
+      "end_ms": 29070,
+      "text_sk": "But if you broadcast what it done for you, what it done for me",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 29310,
+      "end_ms": 30870,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": 31470,
+      "end_ms": 32670,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 34050,
+      "end_ms": 35610,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": 36210,
+      "end_ms": 37230,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 38910,
+      "end_ms": 40350,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": 41010,
+      "end_ms": 42270,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Holy Ghost",
+      "start_ms": 43650,
+      "end_ms": 45630,
+      "text_sk": "I got the Holy Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And I'm burning up, I'm burning up, I'm burning up",
+      "start_ms": 45870,
+      "end_ms": 49410,
+      "text_sk": "And I'm burning up, I'm burning up, I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Well it's getting wild",
+      "start_ms": 58350,
+      "end_ms": 59670,
+      "text_sk": "Well it's getting wild",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "in this upper room",
+      "start_ms": 60750,
+      "end_ms": 62010,
+      "text_sk": "in this upper room",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It ain't wine",
+      "start_ms": 63690,
+      "end_ms": 64470,
+      "text_sk": "It ain't wine",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "No it's a different juice",
+      "start_ms": 65130,
+      "end_ms": 66810,
+      "text_sk": "No it's a different juice",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "It don't run out",
+      "start_ms": 68070,
+      "end_ms": 69270,
+      "text_sk": "It don't run out",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "You can get it for free",
+      "start_ms": 70350,
+      "end_ms": 71610,
+      "text_sk": "You can get it for free",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "But I didn't get it from you, so you can't take it from me",
+      "start_ms": 73170,
+      "end_ms": 77130,
+      "text_sk": "But I didn't get it from you, so you can't take it from me",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 77310,
+      "end_ms": 78870,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": 79350,
+      "end_ms": 80790,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 82110,
+      "end_ms": 83670,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": 84210,
+      "end_ms": 85170,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 216570,
+      "end_ms": 217950,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": 218070,
+      "end_ms": 219930,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I got the Holy Holy Ghost",
+      "start_ms": 221310,
+      "end_ms": 223170,
+      "text_sk": "I got the Holy Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And I'm burning up, I'm burning up, I'm burning up, I'm burning up",
+      "start_ms": 223470,
+      "end_ms": 226890,
+      "text_sk": "And I'm burning up, I'm burning up, I'm burning up, I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Hey Moses Moses",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Hey Moses Moses",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Said, hey Moses",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Said, hey Moses",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I said Moses Moses",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "I said Moses Moses",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Take off your shoes",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Take off your shoes",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "This is holy ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "This is holy ground",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You got a job to do",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "You got a job to do",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I said Moses Moses",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "I said Moses Moses",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Yeah I'm talking to you",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Yeah I'm talking to you",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "This is holy ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "This is holy ground",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You got a job to do",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "You got a job to do",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Tell that Pharaoh, how you like those frogs?",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Tell that Pharaoh, how you like those frogs?",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 8,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You better let me go if you want them gone",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "You better let me go if you want them gone",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Tell that Pharaoh, how you like those frogs?",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Tell that Pharaoh, how you like those frogs?",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 8,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You better let me go if you want them gone",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "You better let me go if you want them gone",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Well that bush was burning but it wasn't burning up",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Well that bush was burning but it wasn't burning up",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": 227130,
+      "end_ms": 228630,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I got the Holy Ghost",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "I got the Holy Ghost",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "And I'm burning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "And I'm burning up",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I got the Holy Holy Ghost",
+      "start_ms": 228630,
+      "end_ms": 228630,
+      "text_sk": "I got the Holy Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "And I'm burning up, I'm burning up, I'm burning up, I'm burning up",
+      "start_ms": 228630,
+      "end_ms": 231750,
+      "text_sk": "And I'm burning up, I'm burning up, I'm burning up, I'm burning up",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "That's the Holy Ghost, that's the Holy Ghost",
+      "start_ms": 232530,
+      "end_ms": 238590,
+      "text_sk": "That's the Holy Ghost, that's the Holy Ghost",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I'm on fire, yeah, yeah, I'm on fire",
+      "start_ms": 247830,
+      "end_ms": 251190,
+      "text_sk": "I'm on fire, yeah, yeah, I'm on fire",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 56,
+    "n_lines_timed": 35,
+    "n_lines_untimed": 21,
+    "n_words_total": 333,
+    "n_words_aligned": 190,
+    "word_align_rate": 0.5705705705705706,
+    "n_monotonic_violations_clamped": 0
+  }
+}

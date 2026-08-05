@@ -1,0 +1,878 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "cej4vn4sWtE",
+  "duration_ms": 524730,
+  "lines": [
+    {
+      "text": "I could sing",
+      "start_ms": 18510,
+      "end_ms": 19410,
+      "text_sk": "Mohla by som spievať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your name for all my life",
+      "start_ms": 20910,
+      "end_ms": 25410,
+      "text_sk": "Tvoje meno po celý svoj život",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And still find more to love each time",
+      "start_ms": 26490,
+      "end_ms": 34410,
+      "text_sk": "A stále nachádzať viac dôvodov na lásku zakaždým",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Jesus, be the name over all my lips",
+      "start_ms": 34650,
+      "end_ms": 37830,
+      "text_sk": "Ježiš, buď meno nad všetkými mojim perami",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "It's sweeter every time that I call on it",
+      "start_ms": 41850,
+      "end_ms": 46050,
+      "text_sk": "Je to sladšie zakaždým, keď ho vzývam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 46290,
+      "end_ms": 49770,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 49950,
+      "end_ms": 52050,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 53670,
+      "end_ms": 55590,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "That makes me cry holy",
+      "start_ms": 56850,
+      "end_ms": 59790,
+      "text_sk": "Čo ma núti volať svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 61650,
+      "end_ms": 63510,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 65250,
+      "end_ms": 67110,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 69030,
+      "end_ms": 70830,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus, You're worthy",
+      "start_ms": 72330,
+      "end_ms": 74730,
+      "text_sk": "Ježiš, si hodný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "You have been the friend who never left",
+      "start_ms": 78150,
+      "end_ms": 86070,
+      "text_sk": "Bol si priateľom, ktorý nikdy neodišiel",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I won't forget Your faithfulness",
+      "start_ms": 86430,
+      "end_ms": 92910,
+      "text_sk": "Nezabudnem na Tvoju vernosť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus, be the name over all my lips",
+      "start_ms": 94530,
+      "end_ms": 97830,
+      "text_sk": "Ježiš, buď meno nad všetkými mojim perami",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "It's sweeter every time that I call on it",
+      "start_ms": 101910,
+      "end_ms": 106110,
+      "text_sk": "Je to sladšie zakaždým, keď ho vzývam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 106410,
+      "end_ms": 109770,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 109950,
+      "end_ms": 112050,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 113730,
+      "end_ms": 115590,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "That makes me cry holy",
+      "start_ms": 117030,
+      "end_ms": 119850,
+      "text_sk": "Čo ma núti volať svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 121590,
+      "end_ms": 123390,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 125310,
+      "end_ms": 127290,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 129090,
+      "end_ms": 130890,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus, You're worthy",
+      "start_ms": 132270,
+      "end_ms": 134610,
+      "text_sk": "Ježiš, si hodný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "There's just something about Your name, oh Jesus",
+      "start_ms": 136290,
+      "end_ms": 139110,
+      "text_sk": "Je niečo výnimočné na Tvojom mene, ó Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 140070,
+      "end_ms": 142410,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "There's just something about Your name",
+      "start_ms": 143730,
+      "end_ms": 145710,
+      "text_sk": "Je niečo výnimočné na Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "That makes me cry holy",
+      "start_ms": 147030,
+      "end_ms": 149910,
+      "text_sk": "Čo ma núti volať svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 151650,
+      "end_ms": 153150,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 155370,
+      "end_ms": 157590,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is no other name",
+      "start_ms": 159090,
+      "end_ms": 161070,
+      "text_sk": "Niet iného mena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus, You're worthy",
+      "start_ms": 162330,
+      "end_ms": 164730,
+      "text_sk": "Ježiš, si hodný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Jesus, Your name is like the morning light",
+      "start_ms": 196170,
+      "end_ms": 200670,
+      "text_sk": "Ježiš, Tvoje meno je ako ranné svetlo",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "The one the darkness can't deny",
+      "start_ms": 201150,
+      "end_ms": 204210,
+      "text_sk": "To, ktoré temnota nemôže poprieť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The Resurrection and the Life, Jesus",
+      "start_ms": 204750,
+      "end_ms": 209670,
+      "text_sk": "Vzkriesenie a Život, Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Jesus, Your name can save, Your name can heal, Your name can make the storm be still",
+      "start_ms": 211050,
+      "end_ms": 219390,
+      "text_sk": "Ježiš, Tvoje meno môže zachrániť, Tvoje meno môže uzdraviť, Tvoje meno môže utíšiť búrku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "You never fail, You never will, Jesus",
+      "start_ms": 219810,
+      "end_ms": 224610,
+      "text_sk": "Nikdy nezlyháš, ani nikdy nezlyháš, Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Jesus, the Bread of Life, broken for us",
+      "start_ms": 225990,
+      "end_ms": 230430,
+      "text_sk": "Ježiš, Chlieb života, zlomený pre nás",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "The wounded Word, the worthy One, First and Last, the Still to Come, Jesus",
+      "start_ms": 230610,
+      "end_ms": 239670,
+      "text_sk": "Zranené Slovo, ten Hodný, Prvý a Posledný, Ten, ktorý má prísť, Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Jesus, the King who was, who is, the Great I Am, who reigns forever",
+      "start_ms": 240990,
+      "end_ms": 248610,
+      "text_sk": "Ježiš, Kráľ, ktorý bol, ktorý je, Veľký JA SOM, ktorý kraľuje naveky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The Name above all other names, Jesus",
+      "start_ms": 249990,
+      "end_ms": 254790,
+      "text_sk": "Meno nad každé iné meno, Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 256710,
+      "end_ms": 259290,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 260550,
+      "end_ms": 263130,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 264090,
+      "end_ms": 265650,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 266790,
+      "end_ms": 270090,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 271590,
+      "end_ms": 274170,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 275490,
+      "end_ms": 277950,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 279030,
+      "end_ms": 280650,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 281730,
+      "end_ms": 284610,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Jesus, oh, Jesus be the name",
+      "start_ms": 285210,
+      "end_ms": 288990,
+      "text_sk": "Ježiš, ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 290610,
+      "end_ms": 291870,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 294210,
+      "end_ms": 295650,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 296730,
+      "end_ms": 299790,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 301590,
+      "end_ms": 304410,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 305550,
+      "end_ms": 307890,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 309090,
+      "end_ms": 310650,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 311730,
+      "end_ms": 314790,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Shout His name! Jesus!",
+      "start_ms": 327390,
+      "end_ms": 329850,
+      "text_sk": "Vykrikujte Jeho meno! Ježiš!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Shout His name! Jesus!",
+      "start_ms": 344130,
+      "end_ms": 344790,
+      "text_sk": "Vykrikujte Jeho meno! Ježiš!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 346710,
+      "end_ms": 349830,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 350610,
+      "end_ms": 351990,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 354090,
+      "end_ms": 355770,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 356970,
+      "end_ms": 359130,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Oh, Jesus be the name, be the name, be the name!",
+      "start_ms": 361590,
+      "end_ms": 365070,
+      "text_sk": "Ó, Ježiš, buď meno, buď meno, buď meno!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Oh, Jesus be the name",
+      "start_ms": 369090,
+      "end_ms": 370650,
+      "text_sk": "Ó, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 371970,
+      "end_ms": 374970,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "All the glory",
+      "start_ms": 380910,
+      "end_ms": 382170,
+      "text_sk": "Všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Give Him glory! Give Him glory!",
+      "start_ms": 389550,
+      "end_ms": 392550,
+      "text_sk": "Dajte Mu slávu! Dajte Mu slávu!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I lift it up! All the glory's Yours!",
+      "start_ms": 395910,
+      "end_ms": 401190,
+      "text_sk": "Dvíham to hore! Všetka sláva je Tvoja!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "There's healing in Your name",
+      "start_ms": 466710,
+      "end_ms": 468570,
+      "text_sk": "V Tvojom mene je uzdravenie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There's healing in Your name",
+      "start_ms": 470430,
+      "end_ms": 471990,
+      "text_sk": "V Tvojom mene je uzdravenie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There's healing in Your name",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "V Tvojom mene je uzdravenie",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "It makes me cry holy",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "To ma núti volať svätý",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "There's freedom in Your name",
+      "start_ms": 481530,
+      "end_ms": 483390,
+      "text_sk": "V Tvojom mene je sloboda",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There's freedom in Your name",
+      "start_ms": 485250,
+      "end_ms": 487110,
+      "text_sk": "V Tvojom mene je sloboda",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There's freedom in Your name",
+      "start_ms": 488970,
+      "end_ms": 490770,
+      "text_sk": "V Tvojom mene je sloboda",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "It makes me cry holy",
+      "start_ms": 491850,
+      "end_ms": 494730,
+      "text_sk": "To ma núti volať svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There's salvation in Your name",
+      "start_ms": 496350,
+      "end_ms": 498630,
+      "text_sk": "V Tvojom mene je spása",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Salvation in Your name alone",
+      "start_ms": 500370,
+      "end_ms": 502710,
+      "text_sk": "Spása v Tvojom mene samotnom",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Salvation in Your name",
+      "start_ms": 504090,
+      "end_ms": 505830,
+      "text_sk": "Spása v Tvojom mene",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It makes me cry holy",
+      "start_ms": 506910,
+      "end_ms": 509070,
+      "text_sk": "To ma núti volať svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Sing, Jesus be the name",
+      "start_ms": 511710,
+      "end_ms": 513750,
+      "text_sk": "Spievaj, Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 515550,
+      "end_ms": 516990,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Jesus be the name",
+      "start_ms": 519330,
+      "end_ms": 520830,
+      "text_sk": "Ježiš, buď meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "That gets all the glory",
+      "start_ms": 522090,
+      "end_ms": 524730,
+      "text_sk": "Ktoré dostane všetku slávu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 86,
+    "n_lines_timed": 84,
+    "n_lines_untimed": 2,
+    "n_words_total": 495,
+    "n_words_aligned": 452,
+    "word_align_rate": 0.9131313131313131,
+    "n_monotonic_violations_clamped": 0
+  }
+}

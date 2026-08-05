@@ -1,0 +1,490 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\zVpDFHJtc_U_vocal16k.wav",
+  "duration_ms": 39497,
+  "lines": [
+    {
+      "text": "I hear Your voice",
+      "start_ms": 12146,
+      "end_ms": 16709,
+      "text_sk": "PoÄujem Tvoj hlas",
+      "words": null
+    },
+    {
+      "text": "Even in the distance",
+      "start_ms": 16709,
+      "end_ms": 18653,
+      "text_sk": "Aj v diaÄ¾ke",
+      "words": null
+    },
+    {
+      "text": "Even in the silence",
+      "start_ms": 18653,
+      "end_ms": 21931,
+      "text_sk": "Aj v tichu",
+      "words": null
+    },
+    {
+      "text": "Even in the static",
+      "start_ms": 21931,
+      "end_ms": 25262,
+      "text_sk": "Aj v statike",
+      "words": null
+    },
+    {
+      "text": "I see You move",
+      "start_ms": 25262,
+      "end_ms": 29785,
+      "text_sk": "Vidím Ťa pohybovať sa",
+      "words": null
+    },
+    {
+      "text": "Even in the dark night",
+      "start_ms": 29785,
+      "end_ms": 31656,
+      "text_sk": "Aj v temnej noci",
+      "words": null
+    },
+    {
+      "text": "Even in the half light",
+      "start_ms": 31656,
+      "end_ms": 34908,
+      "text_sk": "Aj v polosvete",
+      "words": null
+    },
+    {
+      "text": "Even in the stillness",
+      "start_ms": 34908,
+      "end_ms": 38314,
+      "text_sk": "Aj v tichu",
+      "words": null
+    },
+    {
+      "text": "And after the fire",
+      "start_ms": 38314,
+      "end_ms": 39497,
+      "text_sk": "A po ohni",
+      "words": null
+    },
+    {
+      "text": "And after the wind",
+      "start_ms": 39497,
+      "end_ms": 40,
+      "text_sk": "A po vetre",
+      "words": null
+    },
+    {
+      "text": "When chaos subsides",
+      "start_ms": 40,
+      "end_ms": 41,
+      "text_sk": "Keď sa chaos utíši",
+      "words": null
+    },
+    {
+      "text": "I listen again",
+      "start_ms": 41,
+      "end_ms": 42,
+      "text_sk": "Znovu počúvam",
+      "words": null
+    },
+    {
+      "text": "And after the earth shakes",
+      "start_ms": 42,
+      "end_ms": 43,
+      "text_sk": "A keÄ sa zem trasie",
+      "words": null
+    },
+    {
+      "text": "You're calling me in",
+      "start_ms": 43,
+      "end_ms": 44,
+      "text_sk": "Voláš ma dnu",
+      "words": null
+    },
+    {
+      "text": "A voice in the quiet",
+      "start_ms": 44,
+      "end_ms": 45,
+      "text_sk": "Hlas v tichu",
+      "words": null
+    },
+    {
+      "text": "A whisper within",
+      "start_ms": 45,
+      "end_ms": 46,
+      "text_sk": "Šepot vo vnútri",
+      "words": null
+    },
+    {
+      "text": "When You speak I am still",
+      "start_ms": 46,
+      "end_ms": 47,
+      "text_sk": "Keď hovoríš, som pokojný",
+      "words": null
+    },
+    {
+      "text": "I believe You are near",
+      "start_ms": 47,
+      "end_ms": 48,
+      "text_sk": "Verím, že si blízko",
+      "words": null
+    },
+    {
+      "text": "Speak to me draw me in",
+      "start_ms": 48,
+      "end_ms": 49,
+      "text_sk": "Hovor ku mne, pritiahni ma",
+      "words": null
+    },
+    {
+      "text": "Where You are I'll remain",
+      "start_ms": 49,
+      "end_ms": 50,
+      "text_sk": "Kde si Ty, tam zostanem",
+      "words": null
+    },
+    {
+      "text": "I feel Your love",
+      "start_ms": 50,
+      "end_ms": 51,
+      "text_sk": "Cítim Tvoju lásku",
+      "words": null
+    },
+    {
+      "text": "Even in the heartache",
+      "start_ms": 51,
+      "end_ms": 52,
+      "text_sk": "Aj v bolesti srdca",
+      "words": null
+    },
+    {
+      "text": "Even though my heart breaks",
+      "start_ms": 52,
+      "end_ms": 53,
+      "text_sk": "Aj keď sa moje srdce láme",
+      "words": null
+    },
+    {
+      "text": "Even then Your word stays",
+      "start_ms": 53,
+      "end_ms": 54,
+      "text_sk": "Aj vtedy Tvoje slovo zostáva",
+      "words": null
+    },
+    {
+      "text": "I know You're here",
+      "start_ms": 54,
+      "end_ms": 55,
+      "text_sk": "Viem, Å¾e si tu",
+      "words": null
+    },
+    {
+      "text": "Even when I'm broken",
+      "start_ms": 55,
+      "end_ms": 56,
+      "text_sk": "Aj keď som zlomený",
+      "words": null
+    },
+    {
+      "text": "Even when I'm hopeless",
+      "start_ms": 56,
+      "end_ms": 57,
+      "text_sk": "Aj keď som beznádejný",
+      "words": null
+    },
+    {
+      "text": "I know where my hope is",
+      "start_ms": 57,
+      "end_ms": 58,
+      "text_sk": "Viem, kde je moja nádej",
+      "words": null
+    },
+    {
+      "text": "When You speak I am still",
+      "start_ms": 58,
+      "end_ms": 59,
+      "text_sk": "Keď hovoríš, som pokojný",
+      "words": null
+    },
+    {
+      "text": "I believe You are near",
+      "start_ms": 59,
+      "end_ms": 60,
+      "text_sk": "Verím, že si blízko",
+      "words": null
+    },
+    {
+      "text": "Speak to me Lord draw me in",
+      "start_ms": 60,
+      "end_ms": 61,
+      "text_sk": "Hovor ku mne, Pane, pritiahni ma",
+      "words": null
+    },
+    {
+      "text": "Where You are I'll remain",
+      "start_ms": 61,
+      "end_ms": 62,
+      "text_sk": "Kde si Ty, tam zostanem",
+      "words": null
+    },
+    {
+      "text": "'Cause there is joy in Your presence",
+      "start_ms": 62,
+      "end_ms": 63,
+      "text_sk": "Pretože v Tvojej prítomnosti je radosť",
+      "words": null
+    },
+    {
+      "text": "There is peace in Your presence",
+      "start_ms": 63,
+      "end_ms": 64,
+      "text_sk": "V Tvojej prítomnosti je pokoj",
+      "words": null
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 64,
+      "end_ms": 65,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": null
+    },
+    {
+      "text": "There's light in the darkest hour",
+      "start_ms": 65,
+      "end_ms": 66,
+      "text_sk": "Je svetlo v najtemnejÅ¡ej hodine",
+      "words": null
+    },
+    {
+      "text": "There's peace when I'm restless",
+      "start_ms": 66,
+      "end_ms": 67,
+      "text_sk": "Je pokoj, keď som nepokojný",
+      "words": null
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 67,
+      "end_ms": 68,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": null
+    },
+    {
+      "text": "There's grace when I'm anxious",
+      "start_ms": 68,
+      "end_ms": 69,
+      "text_sk": "Je milosť, keď som úzkostlivý",
+      "words": null
+    },
+    {
+      "text": "There's joy when I'm brokenhearted",
+      "start_ms": 69,
+      "end_ms": 70,
+      "text_sk": "Je radosť, keď mám zlomené srdce",
+      "words": null
+    },
+    {
+      "text": "There's power in Jesus",
+      "start_ms": 70,
+      "end_ms": 71,
+      "text_sk": "V JeÅ¾iÅ¡ovi je sila",
+      "words": null
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 71,
+      "end_ms": 72,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": null
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 72,
+      "end_ms": 73,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": null
+    },
+    {
+      "text": "There's light in the darkest hour",
+      "start_ms": 73,
+      "end_ms": 74,
+      "text_sk": "Je svetlo v najtemnejÅ¡ej hodine",
+      "words": null
+    },
+    {
+      "text": "There's peace when I'm restless",
+      "start_ms": 74,
+      "end_ms": 75,
+      "text_sk": "Je pokoj, keď som nepokojný",
+      "words": null
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 75,
+      "end_ms": 76,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": null
+    },
+    {
+      "text": "There's grace when I'm anxious",
+      "start_ms": 76,
+      "end_ms": 77,
+      "text_sk": "Je milosť, keď som úzkostlivý",
+      "words": null
+    },
+    {
+      "text": "There's joy when I'm brokenhearted",
+      "start_ms": 77,
+      "end_ms": 78,
+      "text_sk": "Je radosť, keď mám zlomené srdce",
+      "words": null
+    },
+    {
+      "text": "There's power in Jesus",
+      "start_ms": 78,
+      "end_ms": 79,
+      "text_sk": "V JeÅ¾iÅ¡ovi je sila",
+      "words": null
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 79,
+      "end_ms": 80,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": null
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 80,
+      "end_ms": 81,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": null
+    },
+    {
+      "text": "There's light in the darkest hour",
+      "start_ms": 81,
+      "end_ms": 82,
+      "text_sk": "Je svetlo v najtemnejÅ¡ej hodine",
+      "words": null
+    },
+    {
+      "text": "There's peace when I'm restless",
+      "start_ms": 82,
+      "end_ms": 83,
+      "text_sk": "Je pokoj, keď som nepokojný",
+      "words": null
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 83,
+      "end_ms": 84,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": null
+    },
+    {
+      "text": "There's grace when I'm anxious",
+      "start_ms": 84,
+      "end_ms": 85,
+      "text_sk": "Je milosť, keď som úzkostlivý",
+      "words": null
+    },
+    {
+      "text": "There's joy when I'm brokenhearted",
+      "start_ms": 85,
+      "end_ms": 86,
+      "text_sk": "Je radosť, keď mám zlomené srdce",
+      "words": null
+    },
+    {
+      "text": "There's power in Jesus",
+      "start_ms": 86,
+      "end_ms": 87,
+      "text_sk": "V JeÅ¾iÅ¡ovi je sila",
+      "words": null
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 87,
+      "end_ms": 88,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": null
+    },
+    {
+      "text": "It's not over",
+      "start_ms": 88,
+      "end_ms": 89,
+      "text_sk": "Nie je koniec",
+      "words": null
+    },
+    {
+      "text": "It's not over",
+      "start_ms": 89,
+      "end_ms": 90,
+      "text_sk": "Nie je koniec",
+      "words": null
+    },
+    {
+      "text": "It's not over",
+      "start_ms": 90,
+      "end_ms": 91,
+      "text_sk": "Nie je koniec",
+      "words": null
+    },
+    {
+      "text": "When You speak I am still",
+      "start_ms": 91,
+      "end_ms": 92,
+      "text_sk": "Keď hovoríš, som pokojný",
+      "words": null
+    },
+    {
+      "text": "I believe You are near",
+      "start_ms": 92,
+      "end_ms": 93,
+      "text_sk": "Verím, že si blízko",
+      "words": null
+    },
+    {
+      "text": "Speak to me draw me in",
+      "start_ms": 93,
+      "end_ms": 94,
+      "text_sk": "Hovor ku mne, pritiahni ma",
+      "words": null
+    },
+    {
+      "text": "Where You are I'll remain",
+      "start_ms": 94,
+      "end_ms": 95,
+      "text_sk": "Kde si Ty, tam zostanem",
+      "words": null
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 95,
+      "end_ms": 96,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": null
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 96,
+      "end_ms": 97,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 55.5,
+    "line_count": 67,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "transcoded_mp3",
+    "audio_raw_bytes": 25245096,
+    "audio_sent_bytes": 4735197,
+    "audio_sent_b64_chars": 6313596,
+    "audio_format_sent": "mp3"
+  }
+}

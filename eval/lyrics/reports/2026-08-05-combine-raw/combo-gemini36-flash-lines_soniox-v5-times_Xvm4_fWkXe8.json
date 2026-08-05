@@ -1,0 +1,198 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "Xvm4_fWkXe8",
+  "duration_ms": 273090,
+  "lines": [
+    {
+      "text": "Let's go! Hit me!",
+      "start_ms": 4530,
+      "end_ms": 5010,
+      "text_sk": "Poďme na to! Udri na to!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Yeah!",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Jéj!",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 1,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "You know it's crazy, I woke up this morning to grace and mercy that just keep on going. My heart is beating, my eyes are wide open. Thank You, Lord.",
+      "start_ms": 12990,
+      "end_ms": 26970,
+      "text_sk": "Vieš, je to šialené, dnes ráno som sa zobudil do milosti a zľutovania, ktoré neprestávajú. Moje srdce bije, moje oči sú dokorán otvorené. Ďakujem Ti, Pane.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 30,
+      "n_words_aligned": 30
+    },
+    {
+      "text": "It's so amazing that Someone so perfect would show me love when I didn't deserve it. You gave Your life just to show me I'm worth it. Thank You, Lord.",
+      "start_ms": 28410,
+      "end_ms": 42390,
+      "text_sk": "Je to také úžasné, že Niekto taký dokonalý mi prejavil lásku, keď som si ju nezaslúžil. Dal si svoj život, len aby si mi ukázal, že za to stojím. Ďakujem Ti, Pane.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 30,
+      "n_words_aligned": 30
+    },
+    {
+      "text": "I'm living in it, I'm living today. Beyond His grace, it's His grace, it's a miracle what You did for me. Thank You, Lord, You made a way.",
+      "start_ms": 44310,
+      "end_ms": 58590,
+      "text_sk": "Žijem v tom, žijem dnes. Nad Jeho milosť, je to Jeho milosť, je to zázrak, čo si pre mňa urobil. Ďakujem Ti, Pane, otvoril si cestu.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Let's go! Yeah!",
+      "start_ms": 59130,
+      "end_ms": 59610,
+      "text_sk": "Poďme na to! Jéj!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "It's saw a mountain and I watched You move it. You took my place when no one else could do it. The least I can do is say hallelujah. Thank You, Lord.",
+      "start_ms": 67230,
+      "end_ms": 80790,
+      "text_sk": "Videl som horu a sledoval som, ako si ňou pohol. Zaujal si moje miesto, keď to nikto iný nedokázal. Najmenej, čo môžem urobiť, je povedať aleluja. Ďakujem Ti, Pane.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 32,
+      "n_words_aligned": 30
+    },
+    {
+      "text": "I'm living in it, I'm living today. Beyond His grace, it's His grace, it's a miracle what You did for me. Thank You, Lord, You made a way.",
+      "start_ms": 81270,
+      "end_ms": 96750,
+      "text_sk": "Žijem v tom, žijem dnes. Nad Jeho milosť, je to Jeho milosť, je to zázrak, čo si pre mňa urobil. Ďakujem Ti, Pane, otvoril si cestu.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 20
+    },
+    {
+      "text": "I'm living in it, I'm living today. Beyond His grace, it's His grace, it's a miracle what You did for me. Thank You, Lord, You made a way.",
+      "start_ms": 97050,
+      "end_ms": 112170,
+      "text_sk": "Žijem v tom, žijem dnes. Nad Jeho milosť, je to Jeho milosť, je to zázrak, čo si pre mňa urobil. Ďakujem Ti, Pane, otvoril si cestu.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 22
+    },
+    {
+      "text": "And You've been a way maker, a chain breaker, I need You to praise tonight.",
+      "start_ms": 114270,
+      "end_ms": 118890,
+      "text_sk": "A bol si tvorcom cesty, trhačom reťazí, potrebujem Ťa chváliť dnes večer.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "Every single debt I owed You canceled it. Every sin I ever chose You covered it. When the fight was getting close You handled it. You stood by me, hands fitting step.",
+      "start_ms": 120450,
+      "end_ms": 134310,
+      "text_sk": "Každý jeden dlh, ktorý som dlhoval, si zrušil. Každý hriech, ktorý som si kedy vybral, si prikryl. Keď sa boj približoval, zvládol si ho. Stál si pri mne, krok za krokom.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 32,
+      "n_words_aligned": 28
+    },
+    {
+      "text": "Every single debt I owed You canceled it. Every sin I ever chose You covered it. When the fight was getting close You handled it. You never failed, You never failed.",
+      "start_ms": 135690,
+      "end_ms": 150630,
+      "text_sk": "Každý jeden dlh, ktorý som dlhoval, si zrušil. Každý hriech, ktorý som si kedy vybral, si prikryl. Keď sa boj približoval, zvládol si ho. Nikdy si nezlyhal, nikdy si nezlyhal.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 31,
+      "n_words_aligned": 31
+    },
+    {
+      "text": "Every single word You spoke is coming true. Every lie the devil told must bow to You. Seeing the impossible, now real. He's working now.",
+      "start_ms": 151050,
+      "end_ms": 162090,
+      "text_sk": "Každé jedno slovo, ktoré si povedal, sa plní. Každé klamstvo, ktoré diabol povedal, sa Ti musí pokloniť. Vidieť nemožné, teraz skutočné. On teraz koná.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 25,
+      "n_words_aligned": 15
+    },
+    {
+      "text": "And You keep on doing it! Yeah! And You keep on doing it! Woo! And You keep on doing it! Oh!",
+      "start_ms": 165090,
+      "end_ms": 174030,
+      "text_sk": "A Ty v tom pokračuješ! Jéj! A Ty v tom pokračuješ! Hú! A Ty v tom pokračuješ! Ó!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 21,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "I'm living in it, I'm living today. Beyond His grace, it's His grace, it's a miracle what You did for me. Thank You, Lord, You made a way.",
+      "start_ms": 182550,
+      "end_ms": 196770,
+      "text_sk": "Žijem v tom, žijem dnes. Nad Jeho milosť, je to Jeho milosť, je to zázrak, čo si pre mňa urobil. Ďakujem Ti, Pane, otvoril si cestu.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 20
+    },
+    {
+      "text": "I'm living in it, I'm living today. Beyond His grace, it's His grace, it's a miracle what You did for me. Thank You, Lord, You made a way.",
+      "start_ms": 197010,
+      "end_ms": 212190,
+      "text_sk": "Žijem v tom, žijem dnes. Nad Jeho milosť, je to Jeho milosť, je to zázrak, čo si pre mňa urobil. Ďakujem Ti, Pane, otvoril si cestu.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "And You keep on doing it! Keep on, keep on, keep on... And You keep on doing it!",
+      "start_ms": 234690,
+      "end_ms": 239370,
+      "text_sk": "A Ty v tom pokračuješ! Neprestávaj, neprestávaj, neprestávaj... A Ty v tom pokračuješ!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "Keep on, keep on... Thank You, You made a way. Hallelujah.",
+      "start_ms": 239670,
+      "end_ms": 269190,
+      "text_sk": "Pokračuj, pokračuj... Ďakujem Ti, otvoril si cestu. Aleluja.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 18,
+    "n_lines_timed": 17,
+    "n_lines_untimed": 1,
+    "n_words_total": 393,
+    "n_words_aligned": 327,
+    "word_align_rate": 0.8320610687022901,
+    "n_monotonic_violations_clamped": 0
+  }
+}

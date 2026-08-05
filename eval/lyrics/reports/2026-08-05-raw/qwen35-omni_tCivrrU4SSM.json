@@ -1,0 +1,294 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\tCivrrU4SSM_vocal16k.wav",
+  "duration_ms": 207980,
+  "lines": [
+    {
+      "text": "Greater than the perfect sunrise",
+      "start_ms": 2930,
+      "end_ms": 5610,
+      "text_sk": "Väčšie ako dokonalý východ slnka",
+      "words": null
+    },
+    {
+      "text": "Greater than the oceans deep",
+      "start_ms": 5610,
+      "end_ms": 9840,
+      "text_sk": "Väčšie ako hlboké oceány",
+      "words": null
+    },
+    {
+      "text": "Greater than the highest mountain",
+      "start_ms": 9840,
+      "end_ms": 13970,
+      "text_sk": "Väčšie ako najvyššia hora",
+      "words": null
+    },
+    {
+      "text": "Lord I believe",
+      "start_ms": 13970,
+      "end_ms": 15930,
+      "text_sk": "Pane, verím",
+      "words": null
+    },
+    {
+      "text": "You are greater than the world I see",
+      "start_ms": 15930,
+      "end_ms": 19950,
+      "text_sk": "Si väčší než svet, ktorý vidím",
+      "words": null
+    },
+    {
+      "text": "Yeah Jesus You're above everything",
+      "start_ms": 19950,
+      "end_ms": 22,
+      "text_sk": "Áno Ježiš, si nad všetkým",
+      "words": null
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 22,
+      "end_ms": 27390,
+      "text_sk": "A Tvoj Duch je vo mne živý",
+      "words": null
+    },
+    {
+      "text": "Yeah with You I can do anything",
+      "start_ms": 27390,
+      "end_ms": 29670,
+      "text_sk": "Áno s Tebou môžem urobiť čokoľvek",
+      "words": null
+    },
+    {
+      "text": "'Cause You're greater",
+      "start_ms": 29670,
+      "end_ms": 32830,
+      "text_sk": "Pretože si väčší",
+      "words": null
+    },
+    {
+      "text": "Greater than all expectation",
+      "start_ms": 56590,
+      "end_ms": 59030,
+      "text_sk": "Väčšie než všetky očakávania",
+      "words": null
+    },
+    {
+      "text": "Greater than my wildest dream",
+      "start_ms": 59030,
+      "end_ms": 63340,
+      "text_sk": "Väčšie než môj najdivokejší sen",
+      "words": null
+    },
+    {
+      "text": "Far beyond my comprehension",
+      "start_ms": 63340,
+      "end_ms": 66680,
+      "text_sk": "Ďaleko za hranicou môjho chápania",
+      "words": null
+    },
+    {
+      "text": "Lord I believe",
+      "start_ms": 66680,
+      "end_ms": 68610,
+      "text_sk": "Pane, verím",
+      "words": null
+    },
+    {
+      "text": "You are greater than the world I see",
+      "start_ms": 68610,
+      "end_ms": 72630,
+      "text_sk": "Si väčší než svet, ktorý vidím",
+      "words": null
+    },
+    {
+      "text": "Yeah Jesus You're above everything",
+      "start_ms": 72630,
+      "end_ms": 74650,
+      "text_sk": "Áno Ježiš, si nad všetkým",
+      "words": null
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 74650,
+      "end_ms": 79360,
+      "text_sk": "A Tvoj Duch je vo mne živý",
+      "words": null
+    },
+    {
+      "text": "Yeah with You I can do anything",
+      "start_ms": 79360,
+      "end_ms": 81640,
+      "text_sk": "Áno s Tebou môžem urobiť čokoľvek",
+      "words": null
+    },
+    {
+      "text": "'Cause You're greater",
+      "start_ms": 81640,
+      "end_ms": 84800,
+      "text_sk": "Pretože si väčší",
+      "words": null
+    },
+    {
+      "text": "There is no one like You",
+      "start_ms": 97550,
+      "end_ms": 100460,
+      "text_sk": "Nikto nie je ako Ty",
+      "words": null
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 100460,
+      "end_ms": 103300,
+      "text_sk": "Nikto sa nemôže porovnať",
+      "words": null
+    },
+    {
+      "text": "Jesus You are greater than everything",
+      "start_ms": 103300,
+      "end_ms": 111970,
+      "text_sk": "Ježiš, si väčší než všetko",
+      "words": null
+    },
+    {
+      "text": "There is no one like You",
+      "start_ms": 111970,
+      "end_ms": 115310,
+      "text_sk": "Nikto nie je ako Ty",
+      "words": null
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 115310,
+      "end_ms": 118150,
+      "text_sk": "Nikto sa nemôže porovnať",
+      "words": null
+    },
+    {
+      "text": "Jesus You are greater than everything",
+      "start_ms": 118150,
+      "end_ms": 126820,
+      "text_sk": "Ježiš, si väčší než všetko",
+      "words": null
+    },
+    {
+      "text": "Greater than the world I see",
+      "start_ms": 126820,
+      "end_ms": 131310,
+      "text_sk": "Väčšie než svet, ktorý vidím",
+      "words": null
+    },
+    {
+      "text": "Yeah Jesus You're above everything",
+      "start_ms": 131310,
+      "end_ms": 134860,
+      "text_sk": "Áno Ježiš, si nad všetkým",
+      "words": null
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 134860,
+      "end_ms": 138880,
+      "text_sk": "A Tvoj Duch je vo mne živý",
+      "words": null
+    },
+    {
+      "text": "Yeah with You I can do anything",
+      "start_ms": 138880,
+      "end_ms": 141160,
+      "text_sk": "Áno s Tebou môžem urobiť čokoľvek",
+      "words": null
+    },
+    {
+      "text": "'Cause You're greater",
+      "start_ms": 141160,
+      "end_ms": 149330,
+      "text_sk": "Pretože si väčší",
+      "words": null
+    },
+    {
+      "text": "'Cause there is no one like You",
+      "start_ms": 149330,
+      "end_ms": 159890,
+      "text_sk": "PretoÅ¾e nikto nie je ako Ty",
+      "words": null
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 159890,
+      "end_ms": 162730,
+      "text_sk": "Nikto sa nemôže porovnať",
+      "words": null
+    },
+    {
+      "text": "Jesus You are greater than everything",
+      "start_ms": 162730,
+      "end_ms": 171400,
+      "text_sk": "Ježiš, si väčší než všetko",
+      "words": null
+    },
+    {
+      "text": "Yeah no one",
+      "start_ms": 171400,
+      "end_ms": 177270,
+      "text_sk": "Áno nikto",
+      "words": null
+    },
+    {
+      "text": "'Cause Jesus You are greater than everything",
+      "start_ms": 177270,
+      "end_ms": 189940,
+      "text_sk": "Pretože Ježiš, si väčší než všetko",
+      "words": null
+    },
+    {
+      "text": "You are greater than the world I see",
+      "start_ms": 189940,
+      "end_ms": 195130,
+      "text_sk": "Si väčší než svet, ktorý vidím",
+      "words": null
+    },
+    {
+      "text": "Yeah Jesus You're above everything",
+      "start_ms": 195130,
+      "end_ms": 198680,
+      "text_sk": "Áno Ježiš, si nad všetkým",
+      "words": null
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 198680,
+      "end_ms": 202700,
+      "text_sk": "A Tvoj Duch je vo mne živý",
+      "words": null
+    },
+    {
+      "text": "Yeah with You I can do anything",
+      "start_ms": 202700,
+      "end_ms": 204980,
+      "text_sk": "Áno s Tebou môžem urobiť čokoľvek",
+      "words": null
+    },
+    {
+      "text": "'Cause You're greater",
+      "start_ms": 204980,
+      "end_ms": 207980,
+      "text_sk": "Pretože si väčší",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 48.4,
+    "line_count": 39,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "inline_wav",
+    "audio_raw_bytes": 13834720,
+    "audio_sent_bytes": 13834720,
+    "audio_sent_b64_chars": 18446296,
+    "audio_format_sent": "wav"
+  }
+}

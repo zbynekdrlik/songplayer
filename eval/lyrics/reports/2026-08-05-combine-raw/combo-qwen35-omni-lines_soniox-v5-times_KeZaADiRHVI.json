@@ -1,0 +1,548 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_soniox-v5-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "soniox-v5",
+  "video_id": "KeZaADiRHVI",
+  "duration_ms": 264090,
+  "lines": [
+    {
+      "text": "When the Holy Ghost gets a hold of you",
+      "start_ms": 10530,
+      "end_ms": 13950,
+      "text_sk": "Keď sa ťa zmocní Duch Svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "There's no telling what you're liable to do",
+      "start_ms": 15750,
+      "end_ms": 17550,
+      "text_sk": "Nedá sa povedať, čo všetko môžeš urobiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "No telling what you're liable to do",
+      "start_ms": 17730,
+      "end_ms": 19350,
+      "text_sk": "Nedá sa povedať, čo všetko môžeš urobiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Might get fired up",
+      "start_ms": 19770,
+      "end_ms": 21330,
+      "text_sk": "Možno sa rozhoríš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "You might get free",
+      "start_ms": 22590,
+      "end_ms": 23730,
+      "text_sk": "Možno sa oslobodíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "But if you bring cold water don't pour your water on me",
+      "start_ms": 25590,
+      "end_ms": 29070,
+      "text_sk": "Ale ak prinesieš studenú vodu, nevylej ju na mňa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "start_ms": 29310,
+      "end_ms": 32670,
+      "text_sk": "Mám Ducha Svätého a horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up now now now now",
+      "start_ms": 34050,
+      "end_ms": 38730,
+      "text_sk": "Mám Ducha Svätého a horím teraz teraz teraz teraz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "start_ms": 38910,
+      "end_ms": 42270,
+      "text_sk": "Mám Ducha Svätého a horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I got the Holy Holy Ghost and I'm burning up I'm burning up I'm burning up",
+      "start_ms": 43650,
+      "end_ms": 49410,
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "Well it's getting wild in this upper room",
+      "start_ms": 58350,
+      "end_ms": 62010,
+      "text_sk": "No, v tejto hornej izbe sa to divočí",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "It ain't wine no it's a different juice",
+      "start_ms": 63690,
+      "end_ms": 66810,
+      "text_sk": "Nie je to víno, nie, je to iná šťava",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Well it don't run out you can get it for free",
+      "start_ms": 68070,
+      "end_ms": 71610,
+      "text_sk": "No, neminie sa, môžeš ho mať zadarmo",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "But I didn't get it from you so you can't take it from me",
+      "start_ms": 73170,
+      "end_ms": 77130,
+      "text_sk": "Ale nedostal som ho od teba, takže mi ho nemôžeš vziať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "start_ms": 77310,
+      "end_ms": 80790,
+      "text_sk": "Mám Ducha Svätého a horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up now now now now",
+      "start_ms": 82110,
+      "end_ms": 86910,
+      "text_sk": "Mám Ducha Svätého a horím teraz teraz teraz teraz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "start_ms": 87030,
+      "end_ms": 90210,
+      "text_sk": "Mám Ducha Svätého, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I got the Holy Holy Ghost and I'm burning up I'm burning up",
+      "start_ms": 91710,
+      "end_ms": 96090,
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "I'm bbbbbburning up I'm burning up I'm burning up",
+      "start_ms": 97770,
+      "end_ms": 100890,
+      "text_sk": "Hhhhhhhorím, horím, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm bbbbbburning up I'm burning up",
+      "start_ms": 102570,
+      "end_ms": 104550,
+      "text_sk": "Hhhhhhhorím, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Burning up",
+      "start_ms": 108750,
+      "end_ms": 109470,
+      "text_sk": "Horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Burning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Horím",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Hey Moses Moses hey Moses",
+      "start_ms": 116310,
+      "end_ms": 118710,
+      "text_sk": "Hej MojÅ¾iÅ¡, MojÅ¾iÅ¡, hej MojÅ¾iÅ¡",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Said hey Moses yeah",
+      "start_ms": 121590,
+      "end_ms": 123930,
+      "text_sk": "Povedal hej Mojžiš, áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Yeah said Moses Moses take off your shoes",
+      "start_ms": 125130,
+      "end_ms": 129210,
+      "text_sk": "Áno, povedal Mojžiš, Mojžiš, vyzuj si topánky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "This is holy ground you've got a job to do",
+      "start_ms": 130470,
+      "end_ms": 135090,
+      "text_sk": "Toto je svätá zem, máš prácu, ktorú musíš urobiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I said Moses Moses yeah I'm talking to you",
+      "start_ms": 135150,
+      "end_ms": 138690,
+      "text_sk": "Povedal som Mojžiš, Mojžiš, áno, hovorím s tebou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "This is holy ground you've got a job to do",
+      "start_ms": 140130,
+      "end_ms": 145110,
+      "text_sk": "Toto je svätá zem, máš prácu, ktorú musíš urobiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Tell that Pharaoh how you like those frogs",
+      "start_ms": 145410,
+      "end_ms": 148650,
+      "text_sk": "Povedz tomu faraónovi, ako sa ti páčia tie žaby",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Better let me go if you want 'em gone",
+      "start_ms": 149850,
+      "end_ms": 153270,
+      "text_sk": "RadÅ¡ej ma pusÅ¥, ak ich chceÅ¡ preÄ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Yeah tell that Pharaoh how you like those frogs",
+      "start_ms": 154650,
+      "end_ms": 158310,
+      "text_sk": "Áno, povedz tomu faraónovi, ako sa ti páčia tie žaby",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "You better let me go if you want 'em gone",
+      "start_ms": 159270,
+      "end_ms": 164130,
+      "text_sk": "RadÅ¡ej ma pusÅ¥, ak ich chceÅ¡ preÄ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no",
+      "start_ms": 164670,
+      "end_ms": 168210,
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no no no no no",
+      "start_ms": 169350,
+      "end_ms": 173970,
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie nie nie nie nie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "That bush was burning but it wasn't burning up",
+      "start_ms": 174390,
+      "end_ms": 177210,
+      "text_sk": "Ten ker horel, ale nezhorel",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "start_ms": 178950,
+      "end_ms": 181890,
+      "text_sk": "No, ten ker horel, ale nezhorel",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no it wasn't burning",
+      "start_ms": 183810,
+      "end_ms": 188190,
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie, nehorel",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "That bush was burning but it wasn't burning up it wasn't burning up no",
+      "start_ms": 188850,
+      "end_ms": 193050,
+      "text_sk": "Ten ker horel, ale nezhorel, nezhorel, nie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no no",
+      "start_ms": 193350,
+      "end_ms": 197970,
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie nie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "start_ms": 198210,
+      "end_ms": 211470,
+      "text_sk": "No, ten ker horel, ale nezhorel",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "start_ms": 211770,
+      "end_ms": 213330,
+      "text_sk": "Mám Ducha Svätého, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up now now now now",
+      "start_ms": 213930,
+      "end_ms": 216030,
+      "text_sk": "Mám Ducha Svätého, horím teraz teraz teraz teraz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "start_ms": 216570,
+      "end_ms": 219930,
+      "text_sk": "Mám Ducha Svätého, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I got Holy Holy Ghost and I'm burning up I'm burning up I'm burning up",
+      "start_ms": 221310,
+      "end_ms": 226890,
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 15
+    },
+    {
+      "text": "I'm bbbbbburning up I'm bbbbbburning up",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Hhhhhhhorím, hhhhhhhorím",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I'm bbbb I'm burning I'm burning up I'm burning up",
+      "start_ms": 228630,
+      "end_ms": 229830,
+      "text_sk": "Som bbbb horím horím horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Yeah that's the Holy Ghost I'm burning up",
+      "start_ms": 232530,
+      "end_ms": 234090,
+      "text_sk": "Áno, to je Duch Svätý, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Yeah that's the Holy Ghost that's just the Holy Ghost",
+      "start_ms": 237810,
+      "end_ms": 243210,
+      "text_sk": "Áno, to je Duch Svätý, to je len Duch Svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "That's just the Holy Ghost I'm on fire",
+      "start_ms": 244350,
+      "end_ms": 246510,
+      "text_sk": "To je len Duch Svätý, horím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "start_ms": 247830,
+      "end_ms": 252270,
+      "text_sk": "Horím áno áno, horím áno áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "start_ms": 252630,
+      "end_ms": 257010,
+      "text_sk": "Horím áno áno, horím áno áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "start_ms": 257490,
+      "end_ms": 261810,
+      "text_sk": "Horím áno áno, horím áno áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I'm on fire yeah yeah",
+      "start_ms": 262230,
+      "end_ms": 264090,
+      "text_sk": "Horím áno áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 53,
+    "n_lines_timed": 51,
+    "n_lines_untimed": 2,
+    "n_words_total": 495,
+    "n_words_aligned": 454,
+    "word_align_rate": 0.9171717171717172,
+    "n_monotonic_violations_clamped": 0
+  }
+}

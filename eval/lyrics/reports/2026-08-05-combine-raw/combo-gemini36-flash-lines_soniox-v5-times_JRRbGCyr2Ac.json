@@ -1,0 +1,408 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "JRRbGCyr2Ac",
+  "duration_ms": 446190,
+  "lines": [
+    {
+      "text": "There is revival right here and now",
+      "start_ms": 14550,
+      "end_ms": 19170,
+      "text_sk": "Je tu prebudenie priamo tu a teraz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "There is a fresh wind and I can hear the sound",
+      "start_ms": 19410,
+      "end_ms": 24570,
+      "text_sk": "Je tu čerstvý vietor a počujem ten zvuk",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Something truly wonderful is happening",
+      "start_ms": 24750,
+      "end_ms": 28890,
+      "text_sk": "Niečo skutočne úžasné sa deje",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "There is a difference inside of me",
+      "start_ms": 29910,
+      "end_ms": 34950,
+      "text_sk": "Vo mne je zmena",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "More than a feeling, this is a prophecy",
+      "start_ms": 35070,
+      "end_ms": 40410,
+      "text_sk": "Viac než pocit, toto je proroctvo",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Something really powerful is happening",
+      "start_ms": 40530,
+      "end_ms": 44850,
+      "text_sk": "Niečo naozaj mocné sa deje",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Sing it! Darkness bound to day, mountains get out my way, breaking out of yesterday",
+      "start_ms": 49770,
+      "end_ms": 58290,
+      "text_sk": "Spievaj to! Tma ustupuje dňu, vrchy zíďte mi z cesty, vyslobodzujem sa z včerajška",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "I got a new thing coming",
+      "start_ms": 59070,
+      "end_ms": 60690,
+      "text_sk": "Prichádza mi nová vec",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "So tell this giant in my face, you're not greater than my faith, best believe me when I say",
+      "start_ms": 130230,
+      "end_ms": 137610,
+      "text_sk": "Tak povedz tomuto obrovi do tváre, nie si väčší ako moja viera, radšej mi ver, keď hovorím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "I got a new thing, I got a new thing coming",
+      "start_ms": 138090,
+      "end_ms": 140490,
+      "text_sk": "Mám novú vec, prichádza mi nová vec",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "There's an anointing to destroy the yoke",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Je tu pomazanie na zničenie jarma",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 7,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "So tell every stronghold, you gotta let me go",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Tak povedz každej pevnosti, musíš ma pustiť",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 9,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Something really powerful is happening",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Niečo naozaj mocné sa deje",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "There is a freedom that I have never known",
+      "start_ms": 141150,
+      "end_ms": 142110,
+      "text_sk": "Je tu sloboda, akú som nikdy nepoznal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Out of the shadows, into the overflow",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Zo tieňov do hojnosti",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 7,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Something really powerful is happening, oh, it's happening!",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Niečo naozaj mocné sa deje, ó, deje sa to!",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 8,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Darkness bound to day, mountains get out my way, breaking out of yesterday, I got a new thing coming",
+      "start_ms": 146070,
+      "end_ms": 147690,
+      "text_sk": "Tma ustupuje dňu, vrchy zíďte mi z cesty, vyslobodzujem sa z včerajška, prichádza mi nová vec",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "So tell this giant in my face, you're not greater than my faith, best believe me when I say, I got a new thing coming",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Tak povedz tomuto obrovi do tváre, nie si väčší ako moja viera, radšej mi ver, keď hovorím, prichádza mi nová vec",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 25,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "We prophesy, we prophesy tonight!",
+      "start_ms": 155850,
+      "end_ms": 159330,
+      "text_sk": "Prorokujeme, dnes večer prorokujeme!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I can see a cloud heavy with rain, and it looks like revival is headed our way",
+      "start_ms": 160230,
+      "end_ms": 169530,
+      "text_sk": "Vidím oblak ťažký dažďom a vyzerá to, že prebudenie smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "Oh, I can see a cloud heavy with rain, and it looks like salvation is headed our way",
+      "start_ms": 170790,
+      "end_ms": 180090,
+      "text_sk": "Ó, vidím oblak ťažký dažďom a vyzerá to, že spása smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "Oh, I can hear a sound, the abundance of rain, and it sounds like freedom is headed our way",
+      "start_ms": 181290,
+      "end_ms": 190590,
+      "text_sk": "Ó, počujem zvuk, hojnosť došťa, a znie to, že sloboda smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "Oh, I can hear a sound, the abundance of rain, and it sounds like provision is headed our way",
+      "start_ms": 191850,
+      "end_ms": 201330,
+      "text_sk": "Ó, počujem zvuk, hojnosť došťa, a znie to, že zaopatrenie smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Oh, I can see a cloud, and it's heavy with rain, and it looks like healing is headed our way",
+      "start_ms": 202410,
+      "end_ms": 211650,
+      "text_sk": "Ó, vidím oblak a je ťažký dažďom a vyzerá to, že uzdravenie smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 20,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Oh, I can see a cloud, and it's heavy with rain, and it looks like joy is headed our way",
+      "start_ms": 212910,
+      "end_ms": 222150,
+      "text_sk": "Ó, vidím oblak a je ťažký dažďom a vyzerá to, že radosť smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 20,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "Yes, it's headed our way! It's coming, it's coming! Oh, it's headed our way!",
+      "start_ms": 223410,
+      "end_ms": 236610,
+      "text_sk": "Áno, smeruje k nám! Prichádza to, prichádza to! Ó, smeruje k nám!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "So tell this giant in my face, you're not greater than my faith, best believe me when I say, I got a new thing coming",
+      "start_ms": 256890,
+      "end_ms": 265830,
+      "text_sk": "Tak povedz tomuto obrovi do tváre, nie si väčší ako moja viera, radšej mi ver, keď hovorím, prichádza mi nová vec",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 25,
+      "n_words_aligned": 20
+    },
+    {
+      "text": "Sing like I got a new mind, new heart, fresh faith, I got that new anointing, I got a new thing coming",
+      "start_ms": 266070,
+      "end_ms": 286650,
+      "text_sk": "Spievaj, akoby si mal novú myseľ, nové srdce, čerstvú vieru, mám to nové pomazanie, prichádza mi nová vec",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 22,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "I got that new mind, new heart, fresh faith, I got that new anointing, come on, step into it!",
+      "start_ms": 287010,
+      "end_ms": 296790,
+      "text_sk": "Mám tú novú myseľ, nové srdce, čerstvú vieru, mám to nové pomazanie, poď, vstúp do toho!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "I got that new mind, new heart, fresh faith, I got that new anointing, I got a new thing coming",
+      "start_ms": 297570,
+      "end_ms": 318330,
+      "text_sk": "Mám tú novú myseľ, nové srdce, čerstvú vieru, mám to nové pomazanie, prichádza mi nová vec",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 20,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Prophesy! I got a new thing coming, I got a new thing coming!",
+      "start_ms": 318750,
+      "end_ms": 321510,
+      "text_sk": "Prorokuj! Prichádza mi nová vec, prichádza mi nová vec!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "I can see a cloud, heavy with rain, and it looks like revival is headed our way",
+      "start_ms": 321630,
+      "end_ms": 348810,
+      "text_sk": "Vidím oblak ťažký dažďom a vyzerá to, že prebudenie smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "I can see a cloud, and it's heavy with rain, and it looks like salvation is headed our way",
+      "start_ms": 350430,
+      "end_ms": 359310,
+      "text_sk": "Vidím oblak a je ťažký dažďom a vyzerá to, že spása smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "I can hear a sound, the abundance of rain, and it sounds like freedom, yeah, is headed our way",
+      "start_ms": 360870,
+      "end_ms": 369930,
+      "text_sk": "Počujem zvuk, hojnosť došťa, a znie to ako sloboda, jéj, smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 15
+    },
+    {
+      "text": "I can hear a sound, the abundance of rain, and it sounds like provision is headed our way",
+      "start_ms": 371490,
+      "end_ms": 380670,
+      "text_sk": "Počujem zvuk, hojnosť došťa, a znie to ako zaopatrenie, čo smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "It's headed our way, it's headed our way!",
+      "start_ms": 381870,
+      "end_ms": 384270,
+      "text_sk": "Smeruje k nám, smeruje k nám!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Hear the sound, do you hear the sound?",
+      "start_ms": 416070,
+      "end_ms": 419250,
+      "text_sk": "Počuj ten zvuk, počuješ ten zvuk?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "'Cause I can see a cloud heavy with rain, and it looks like freedom, and it's headed our way",
+      "start_ms": 424110,
+      "end_ms": 433770,
+      "text_sk": "Lebo vidím oblak ťažký dažďom a vyzerá to ako sloboda a smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 18
+    },
+    {
+      "text": "I can see a cloud heavy with rain, and it looks like healing is headed our way",
+      "start_ms": 435390,
+      "end_ms": 446190,
+      "text_sk": "Vidím oblak ťažký dažďom a vyzerá to ako uzdravenie, čo smeruje k nám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 39,
+    "n_lines_timed": 33,
+    "n_lines_untimed": 6,
+    "n_words_total": 539,
+    "n_words_aligned": 428,
+    "word_align_rate": 0.7940630797773655,
+    "n_monotonic_violations_clamped": 0
+  }
+}

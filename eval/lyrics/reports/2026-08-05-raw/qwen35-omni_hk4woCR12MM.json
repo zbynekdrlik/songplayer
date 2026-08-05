@@ -1,0 +1,350 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\hk4woCR12MM_vocal16k.wav",
+  "duration_ms": 177600,
+  "lines": [
+    {
+      "text": "How could I thank the one who saved my life",
+      "start_ms": 6030,
+      "end_ms": 14270,
+      "text_sk": "Ako by som mohol poďakovať tomu, kto mi zachránil život",
+      "words": null
+    },
+    {
+      "text": "When there is no words to express what you deserve",
+      "start_ms": 14270,
+      "end_ms": 25490,
+      "text_sk": "Keď neexistujú slová na vyjadrenie toho, čo si zaslúžiš",
+      "words": null
+    },
+    {
+      "text": "You deserve the greatest",
+      "start_ms": 25490,
+      "end_ms": 29180,
+      "text_sk": "Zaslúžiš si to najväčšie",
+      "words": null
+    },
+    {
+      "text": "To be lifted up the highest",
+      "start_ms": 29180,
+      "end_ms": 32020,
+      "text_sk": "Byť vyzdvihnutý najvyššie",
+      "words": null
+    },
+    {
+      "text": "Worthy of my everything",
+      "start_ms": 32020,
+      "end_ms": 33530,
+      "text_sk": "Hodný môjho všetkého",
+      "words": null
+    },
+    {
+      "text": "This is why I praise",
+      "start_ms": 33530,
+      "end_ms": 35860,
+      "text_sk": "Preto chválim",
+      "words": null
+    },
+    {
+      "text": "'Cause you're worthy of all my praise",
+      "start_ms": 35860,
+      "end_ms": 39550,
+      "text_sk": "Pretože si hodný všetkej mojej chvály",
+      "words": null
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 39550,
+      "end_ms": 41420,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": null
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 41420,
+      "end_ms": 43340,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": null
+    },
+    {
+      "text": "I give You all my praise",
+      "start_ms": 43340,
+      "end_ms": 45150,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 45150,
+      "end_ms": 47530,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 47530,
+      "end_ms": 50170,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 50170,
+      "end_ms": 52780,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 52780,
+      "end_ms": 55350,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I lift my voice to You I make a joyful noise",
+      "start_ms": 59000,
+      "end_ms": 63870,
+      "text_sk": "Pozdvihujem svoj hlas k Tebe, vydávam radostný zvuk",
+      "words": null
+    },
+    {
+      "text": "For You've been so good",
+      "start_ms": 63870,
+      "end_ms": 67940,
+      "text_sk": "Pretože si bol taký dobrý",
+      "words": null
+    },
+    {
+      "text": "I'd give You the whole world if I could",
+      "start_ms": 67940,
+      "end_ms": 71310,
+      "text_sk": "Dal by som Ti celý svet, keby som mohol",
+      "words": null
+    },
+    {
+      "text": "You deserve the greatest",
+      "start_ms": 71310,
+      "end_ms": 75330,
+      "text_sk": "Zaslúžiš si to najväčšie",
+      "words": null
+    },
+    {
+      "text": "To be lifted up the highest",
+      "start_ms": 75330,
+      "end_ms": 77270,
+      "text_sk": "Byť vyzdvihnutý najvyššie",
+      "words": null
+    },
+    {
+      "text": "Worthy of my everything",
+      "start_ms": 77270,
+      "end_ms": 80540,
+      "text_sk": "Hodný môjho všetkého",
+      "words": null
+    },
+    {
+      "text": "This is why",
+      "start_ms": 80540,
+      "end_ms": 82320,
+      "text_sk": "Toto je dôvod",
+      "words": null
+    },
+    {
+      "text": "'Cause you are worthy Lord",
+      "start_ms": 82320,
+      "end_ms": 86830,
+      "text_sk": "Pretože si hodný, Pane",
+      "words": null
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 86830,
+      "end_ms": 90820,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": null
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 90820,
+      "end_ms": 92720,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": null
+    },
+    {
+      "text": "Give You all my praise",
+      "start_ms": 92720,
+      "end_ms": 95590,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": null
+    },
+    {
+      "text": "Yeah I gotta praise",
+      "start_ms": 95590,
+      "end_ms": 98330,
+      "text_sk": "Áno, musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 98330,
+      "end_ms": 102370,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta 'cause you've been good to me",
+      "start_ms": 102370,
+      "end_ms": 107380,
+      "text_sk": "Musím, pretože si bol ku mne dobrý",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 107380,
+      "end_ms": 110430,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "For setting me free",
+      "start_ms": 110430,
+      "end_ms": 115110,
+      "text_sk": "Za to, Å¾e si ma oslobodil",
+      "words": null
+    },
+    {
+      "text": "For meeting my needs",
+      "start_ms": 115110,
+      "end_ms": 118920,
+      "text_sk": "Za naplnenie mojich potrieb",
+      "words": null
+    },
+    {
+      "text": "For healing me",
+      "start_ms": 118920,
+      "end_ms": 122810,
+      "text_sk": "Za uzdravenie",
+      "words": null
+    },
+    {
+      "text": "For loving me",
+      "start_ms": 122810,
+      "end_ms": 126430,
+      "text_sk": "Za lásku ku mne",
+      "words": null
+    },
+    {
+      "text": "This is why",
+      "start_ms": 126430,
+      "end_ms": 134470,
+      "text_sk": "Toto je dôvod",
+      "words": null
+    },
+    {
+      "text": "This is why I praise",
+      "start_ms": 134470,
+      "end_ms": 136460,
+      "text_sk": "Preto chválim",
+      "words": null
+    },
+    {
+      "text": "'Cause you're worthy of all my praise",
+      "start_ms": 136460,
+      "end_ms": 140610,
+      "text_sk": "Pretože si hodný všetkej mojej chvály",
+      "words": null
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 140610,
+      "end_ms": 142830,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": null
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 142830,
+      "end_ms": 144750,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": null
+    },
+    {
+      "text": "I give You all my praise",
+      "start_ms": 144750,
+      "end_ms": 147830,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 147830,
+      "end_ms": 150760,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 150760,
+      "end_ms": 154820,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "I gotta praise yeah",
+      "start_ms": 154820,
+      "end_ms": 158700,
+      "text_sk": "Musím chváliť, áno",
+      "words": null
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 158700,
+      "end_ms": 161790,
+      "text_sk": "Musím chváliť",
+      "words": null
+    },
+    {
+      "text": "For setting me free",
+      "start_ms": 161790,
+      "end_ms": 166960,
+      "text_sk": "Za to, Å¾e si ma oslobodil",
+      "words": null
+    },
+    {
+      "text": "For meeting my needs",
+      "start_ms": 166960,
+      "end_ms": 170720,
+      "text_sk": "Za naplnenie mojich potrieb",
+      "words": null
+    },
+    {
+      "text": "Oh for healing me yeah",
+      "start_ms": 170720,
+      "end_ms": 174860,
+      "text_sk": "Ó, za uzdravenie, áno",
+      "words": null
+    },
+    {
+      "text": "For loving me",
+      "start_ms": 174860,
+      "end_ms": 177600,
+      "text_sk": "Za lásku ku mne",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 82.9,
+    "line_count": 47,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "inline_wav",
+    "audio_raw_bytes": 13023996,
+    "audio_sent_bytes": 13023996,
+    "audio_sent_b64_chars": 17365328,
+    "audio_format_sent": "wav"
+  }
+}

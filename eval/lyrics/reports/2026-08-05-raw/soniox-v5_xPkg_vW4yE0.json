@@ -1,0 +1,3091 @@
+{
+  "backend_id": "soniox-v5",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\xPkg_vW4yE0_vocal16k.wav",
+  "duration_ms": 245550,
+  "lines": [
+    {
+      "text": "When my heart is",
+      "start_ms": 8910,
+      "end_ms": 10110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 8910,
+          "end_ms": 8970,
+          "confidence": 0.999824583530426
+        },
+        {
+          "text": "my",
+          "start_ms": 9150,
+          "end_ms": 9210,
+          "confidence": 0.9999523162841797
+        },
+        {
+          "text": "heart",
+          "start_ms": 9450,
+          "end_ms": 9750,
+          "confidence": 0.999974250793457
+        },
+        {
+          "text": "is",
+          "start_ms": 10050,
+          "end_ms": 10110,
+          "confidence": 0.9999641180038452
+        }
+      ]
+    },
+    {
+      "text": "overwhelmed,",
+      "start_ms": 10890,
+      "end_ms": 11790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "overwhelmed,",
+          "start_ms": 10890,
+          "end_ms": 11790,
+          "confidence": 0.9945514053106308
+        }
+      ]
+    },
+    {
+      "text": "when I",
+      "start_ms": 14730,
+      "end_ms": 15150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "when",
+          "start_ms": 14730,
+          "end_ms": 14790,
+          "confidence": 0.9962286949157715
+        },
+        {
+          "text": "I",
+          "start_ms": 15090,
+          "end_ms": 15150,
+          "confidence": 0.9998283386230469
+        }
+      ]
+    },
+    {
+      "text": "barely",
+      "start_ms": 15690,
+      "end_ms": 15870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "barely",
+          "start_ms": 15690,
+          "end_ms": 15870,
+          "confidence": 0.9999685287475586
+        }
+      ]
+    },
+    {
+      "text": "trust myself,",
+      "start_ms": 16410,
+      "end_ms": 18090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "trust",
+          "start_ms": 16410,
+          "end_ms": 16650,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "myself,",
+          "start_ms": 16950,
+          "end_ms": 18090,
+          "confidence": 0.9915667623281479
+        }
+      ]
+    },
+    {
+      "text": "lead me to the rock.",
+      "start_ms": 18330,
+      "end_ms": 19710,
+      "text_sk": "veď ma ku skale.",
+      "words": [
+        {
+          "text": "lead",
+          "start_ms": 18330,
+          "end_ms": 18390,
+          "confidence": 0.9668684005737305
+        },
+        {
+          "text": "me",
+          "start_ms": 18510,
+          "end_ms": 18570,
+          "confidence": 0.9994356632232666
+        },
+        {
+          "text": "to",
+          "start_ms": 18690,
+          "end_ms": 18750,
+          "confidence": 0.9998251795768738
+        },
+        {
+          "text": "the",
+          "start_ms": 18930,
+          "end_ms": 18990,
+          "confidence": 0.9980385899543762
+        },
+        {
+          "text": "rock.",
+          "start_ms": 19350,
+          "end_ms": 19710,
+          "confidence": 0.7845042943954468
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 22410,
+      "end_ms": 22830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 22410,
+          "end_ms": 22650,
+          "confidence": 0.9983086585998535
+        },
+        {
+          "text": "than",
+          "start_ms": 22770,
+          "end_ms": 22830,
+          "confidence": 0.9987824559211731
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 23430,
+      "end_ms": 26430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 23430,
+          "end_ms": 26430,
+          "confidence": 0.6072815656661987
+        }
+      ]
+    },
+    {
+      "text": "When the",
+      "start_ms": 26670,
+      "end_ms": 27030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 26670,
+          "end_ms": 26730,
+          "confidence": 0.9993975162506104
+        },
+        {
+          "text": "the",
+          "start_ms": 26970,
+          "end_ms": 27030,
+          "confidence": 0.9999675750732422
+        }
+      ]
+    },
+    {
+      "text": "night is",
+      "start_ms": 27450,
+      "end_ms": 27990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "night",
+          "start_ms": 27450,
+          "end_ms": 27690,
+          "confidence": 0.9994033873081207
+        },
+        {
+          "text": "is",
+          "start_ms": 27930,
+          "end_ms": 27990,
+          "confidence": 0.9999752640724182
+        }
+      ]
+    },
+    {
+      "text": "closing",
+      "start_ms": 28530,
+      "end_ms": 29130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "closing",
+          "start_ms": 28530,
+          "end_ms": 29130,
+          "confidence": 0.9998296499252319
+        }
+      ]
+    },
+    {
+      "text": "in,",
+      "start_ms": 29610,
+      "end_ms": 32490,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in,",
+          "start_ms": 29610,
+          "end_ms": 32490,
+          "confidence": 0.9982633590698242
+        }
+      ]
+    },
+    {
+      "text": "to remind me",
+      "start_ms": 32970,
+      "end_ms": 34050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 32970,
+          "end_ms": 33030,
+          "confidence": 0.9958734512329102
+        },
+        {
+          "text": "remind",
+          "start_ms": 33330,
+          "end_ms": 33630,
+          "confidence": 0.9999933242797852
+        },
+        {
+          "text": "me",
+          "start_ms": 33990,
+          "end_ms": 34050,
+          "confidence": 0.9998818039894104
+        }
+      ]
+    },
+    {
+      "text": "of",
+      "start_ms": 34530,
+      "end_ms": 34590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "of",
+          "start_ms": 34530,
+          "end_ms": 34590,
+          "confidence": 0.9999961853027344
+        }
+      ]
+    },
+    {
+      "text": "my",
+      "start_ms": 35190,
+      "end_ms": 35250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 35190,
+          "end_ms": 35250,
+          "confidence": 0.9998894333839417
+        }
+      ]
+    },
+    {
+      "text": "sin.",
+      "start_ms": 35970,
+      "end_ms": 36210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sin.",
+          "start_ms": 35970,
+          "end_ms": 36210,
+          "confidence": 0.8761046230792999
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the",
+      "start_ms": 36330,
+      "end_ms": 37050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 36330,
+          "end_ms": 36450,
+          "confidence": 0.9974074959754944
+        },
+        {
+          "text": "me",
+          "start_ms": 36510,
+          "end_ms": 36570,
+          "confidence": 0.9999774098396301
+        },
+        {
+          "text": "to",
+          "start_ms": 36630,
+          "end_ms": 36690,
+          "confidence": 0.9999861121177673
+        },
+        {
+          "text": "the",
+          "start_ms": 36990,
+          "end_ms": 37050,
+          "confidence": 0.9999859929084778
+        }
+      ]
+    },
+    {
+      "text": "rock.",
+      "start_ms": 37650,
+      "end_ms": 37950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "rock.",
+          "start_ms": 37650,
+          "end_ms": 37950,
+          "confidence": 0.9446958303451538
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 40470,
+      "end_ms": 40890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 40470,
+          "end_ms": 40710,
+          "confidence": 0.9982560276985168
+        },
+        {
+          "text": "than",
+          "start_ms": 40830,
+          "end_ms": 40890,
+          "confidence": 0.999907910823822
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 41550,
+      "end_ms": 44130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 41550,
+          "end_ms": 44130,
+          "confidence": 0.9987036883831024
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the",
+      "start_ms": 44310,
+      "end_ms": 44970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 44310,
+          "end_ms": 44430,
+          "confidence": 0.9994198083877563
+        },
+        {
+          "text": "me",
+          "start_ms": 44490,
+          "end_ms": 44550,
+          "confidence": 0.9999870657920837
+        },
+        {
+          "text": "to",
+          "start_ms": 44610,
+          "end_ms": 44670,
+          "confidence": 0.9999878406524658
+        },
+        {
+          "text": "the",
+          "start_ms": 44910,
+          "end_ms": 44970,
+          "confidence": 0.9999901652336121
+        }
+      ]
+    },
+    {
+      "text": "rock.",
+      "start_ms": 45570,
+      "end_ms": 45870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "rock.",
+          "start_ms": 45570,
+          "end_ms": 45870,
+          "confidence": 0.9995738863945007
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 48450,
+      "end_ms": 48810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 48450,
+          "end_ms": 48630,
+          "confidence": 0.9995262920856476
+        },
+        {
+          "text": "than",
+          "start_ms": 48750,
+          "end_ms": 48810,
+          "confidence": 0.999860405921936
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 49230,
+      "end_ms": 52110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 49230,
+          "end_ms": 52110,
+          "confidence": 0.9989373981952667
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 52410,
+      "end_ms": 52830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 52410,
+          "end_ms": 52650,
+          "confidence": 0.99930739402771
+        },
+        {
+          "text": "than",
+          "start_ms": 52770,
+          "end_ms": 52830,
+          "confidence": 0.9997808933258057
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 53370,
+      "end_ms": 56190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 53370,
+          "end_ms": 56190,
+          "confidence": 0.9988783299922943
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 56490,
+      "end_ms": 56910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 56490,
+          "end_ms": 56730,
+          "confidence": 0.9994893372058868
+        },
+        {
+          "text": "than",
+          "start_ms": 56850,
+          "end_ms": 56910,
+          "confidence": 0.9996532797813416
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 57450,
+      "end_ms": 57810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 57450,
+          "end_ms": 57810,
+          "confidence": 0.9997355043888092
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 60450,
+      "end_ms": 60930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 60450,
+          "end_ms": 60750,
+          "confidence": 0.9995602667331696
+        },
+        {
+          "text": "than",
+          "start_ms": 60870,
+          "end_ms": 60930,
+          "confidence": 0.9997819066047668
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 61530,
+      "end_ms": 64170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 61530,
+          "end_ms": 64170,
+          "confidence": 0.9997076094150543
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 64470,
+      "end_ms": 64890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 64470,
+          "end_ms": 64710,
+          "confidence": 0.9992215931415558
+        },
+        {
+          "text": "than",
+          "start_ms": 64830,
+          "end_ms": 64890,
+          "confidence": 0.9998871088027954
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 65370,
+      "end_ms": 67890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 65370,
+          "end_ms": 67890,
+          "confidence": 0.9996412694454193
+        }
+      ]
+    },
+    {
+      "text": "So much stronger,",
+      "start_ms": 68310,
+      "end_ms": 69570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 68310,
+          "end_ms": 68370,
+          "confidence": 0.999046802520752
+        },
+        {
+          "text": "much",
+          "start_ms": 68670,
+          "end_ms": 68730,
+          "confidence": 0.9999333024024963
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 69030,
+          "end_ms": 69570,
+          "confidence": 0.9841094215710958
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 70230,
+      "end_ms": 70590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 70230,
+          "end_ms": 70290,
+          "confidence": 0.9148380756378174
+        },
+        {
+          "text": "much",
+          "start_ms": 70530,
+          "end_ms": 70590,
+          "confidence": 0.9999790191650391
+        }
+      ]
+    },
+    {
+      "text": "greater,",
+      "start_ms": 71250,
+      "end_ms": 71550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "greater,",
+          "start_ms": 71250,
+          "end_ms": 71550,
+          "confidence": 0.8923230767250061
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 72210,
+      "end_ms": 72570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 72210,
+          "end_ms": 72270,
+          "confidence": 0.9999353885650635
+        },
+        {
+          "text": "much",
+          "start_ms": 72510,
+          "end_ms": 72570,
+          "confidence": 0.9998916387557983
+        }
+      ]
+    },
+    {
+      "text": "wiser,",
+      "start_ms": 73170,
+      "end_ms": 73530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "wiser,",
+          "start_ms": 73170,
+          "end_ms": 73530,
+          "confidence": 0.9994382858276367
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 74250,
+      "end_ms": 74610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 74250,
+          "end_ms": 74310,
+          "confidence": 0.9999905228614807
+        },
+        {
+          "text": "much",
+          "start_ms": 74550,
+          "end_ms": 74610,
+          "confidence": 0.9999771118164062
+        }
+      ]
+    },
+    {
+      "text": "higher.",
+      "start_ms": 75210,
+      "end_ms": 75570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "higher.",
+          "start_ms": 75210,
+          "end_ms": 75570,
+          "confidence": 0.9990430772304535
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 76410,
+      "end_ms": 76950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 76410,
+          "end_ms": 76710,
+          "confidence": 0.9998257458209991
+        },
+        {
+          "text": "than",
+          "start_ms": 76890,
+          "end_ms": 76950,
+          "confidence": 0.9998345375061035
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 77550,
+      "end_ms": 80190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 77550,
+          "end_ms": 80190,
+          "confidence": 0.998221755027771
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 80430,
+      "end_ms": 80850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 80430,
+          "end_ms": 80670,
+          "confidence": 0.9989845454692841
+        },
+        {
+          "text": "than",
+          "start_ms": 80790,
+          "end_ms": 80850,
+          "confidence": 0.9998860955238342
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 81330,
+      "end_ms": 82530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 81330,
+          "end_ms": 82530,
+          "confidence": 0.9996628165245056
+        }
+      ]
+    },
+    {
+      "text": "When the doubt is",
+      "start_ms": 84750,
+      "end_ms": 86010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 84750,
+          "end_ms": 84810,
+          "confidence": 0.9968011975288391
+        },
+        {
+          "text": "the",
+          "start_ms": 85050,
+          "end_ms": 85110,
+          "confidence": 0.9997639656066895
+        },
+        {
+          "text": "doubt",
+          "start_ms": 85470,
+          "end_ms": 85710,
+          "confidence": 0.9992886185646057
+        },
+        {
+          "text": "is",
+          "start_ms": 85950,
+          "end_ms": 86010,
+          "confidence": 0.9999545812606812
+        }
+      ]
+    },
+    {
+      "text": "rising up,",
+      "start_ms": 86730,
+      "end_ms": 90450,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "rising",
+          "start_ms": 86730,
+          "end_ms": 87150,
+          "confidence": 0.9993537068367004
+        },
+        {
+          "text": "up,",
+          "start_ms": 87450,
+          "end_ms": 90450,
+          "confidence": 0.9937506318092346
+        }
+      ]
+    },
+    {
+      "text": "when it",
+      "start_ms": 90750,
+      "end_ms": 91110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "when",
+          "start_ms": 90750,
+          "end_ms": 90810,
+          "confidence": 0.9997397065162659
+        },
+        {
+          "text": "it",
+          "start_ms": 91050,
+          "end_ms": 91110,
+          "confidence": 0.9989623427391052
+        }
+      ]
+    },
+    {
+      "text": "comes in",
+      "start_ms": 91530,
+      "end_ms": 92190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "comes",
+          "start_ms": 91530,
+          "end_ms": 91770,
+          "confidence": 0.9888098835945129
+        },
+        {
+          "text": "in",
+          "start_ms": 92130,
+          "end_ms": 92190,
+          "confidence": 0.9965593814849854
+        }
+      ]
+    },
+    {
+      "text": "like a flood,",
+      "start_ms": 92850,
+      "end_ms": 93930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "like",
+          "start_ms": 92850,
+          "end_ms": 93030,
+          "confidence": 0.9973125159740448
+        },
+        {
+          "text": "a",
+          "start_ms": 93270,
+          "end_ms": 93330,
+          "confidence": 0.9997578263282776
+        },
+        {
+          "text": "flood,",
+          "start_ms": 93690,
+          "end_ms": 93930,
+          "confidence": 0.9991547614336014
+        }
+      ]
+    },
+    {
+      "text": "lead me to the",
+      "start_ms": 94350,
+      "end_ms": 94890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "lead",
+          "start_ms": 94350,
+          "end_ms": 94410,
+          "confidence": 0.9993631839752197
+        },
+        {
+          "text": "me",
+          "start_ms": 94530,
+          "end_ms": 94590,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "to",
+          "start_ms": 94710,
+          "end_ms": 94770,
+          "confidence": 0.9999924898147583
+        },
+        {
+          "text": "the",
+          "start_ms": 94830,
+          "end_ms": 94890,
+          "confidence": 0.9999927878379822
+        }
+      ]
+    },
+    {
+      "text": "rock.",
+      "start_ms": 95730,
+      "end_ms": 96030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "rock.",
+          "start_ms": 95730,
+          "end_ms": 96030,
+          "confidence": 0.9997424483299255
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 98370,
+      "end_ms": 98850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 98370,
+          "end_ms": 98670,
+          "confidence": 0.9995739161968231
+        },
+        {
+          "text": "than",
+          "start_ms": 98790,
+          "end_ms": 98850,
+          "confidence": 0.999920129776001
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 99570,
+      "end_ms": 101850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 99570,
+          "end_ms": 101850,
+          "confidence": 0.9980306029319763
+        }
+      ]
+    },
+    {
+      "text": "Yeah, lead me to the",
+      "start_ms": 102030,
+      "end_ms": 102810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 102030,
+          "end_ms": 102150,
+          "confidence": 0.9957738518714905
+        },
+        {
+          "text": "lead",
+          "start_ms": 102270,
+          "end_ms": 102330,
+          "confidence": 0.9995201230049133
+        },
+        {
+          "text": "me",
+          "start_ms": 102450,
+          "end_ms": 102510,
+          "confidence": 0.9999951124191284
+        },
+        {
+          "text": "to",
+          "start_ms": 102630,
+          "end_ms": 102690,
+          "confidence": 0.9999648332595825
+        },
+        {
+          "text": "the",
+          "start_ms": 102750,
+          "end_ms": 102810,
+          "confidence": 0.9999920725822449
+        }
+      ]
+    },
+    {
+      "text": "rock.",
+      "start_ms": 103590,
+      "end_ms": 104010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "rock.",
+          "start_ms": 103590,
+          "end_ms": 104010,
+          "confidence": 0.98703533411026
+        }
+      ]
+    },
+    {
+      "text": "To the rock.",
+      "start_ms": 104970,
+      "end_ms": 105870,
+      "text_sk": "Ku skale.",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 104970,
+          "end_ms": 105030,
+          "confidence": 0.6130598187446594
+        },
+        {
+          "text": "the",
+          "start_ms": 105330,
+          "end_ms": 105390,
+          "confidence": 0.9999352693557739
+        },
+        {
+          "text": "rock.",
+          "start_ms": 105630,
+          "end_ms": 105870,
+          "confidence": 0.9996837377548218
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 106350,
+      "end_ms": 106830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 106350,
+          "end_ms": 106590,
+          "confidence": 0.9997685551643372
+        },
+        {
+          "text": "than",
+          "start_ms": 106770,
+          "end_ms": 106830,
+          "confidence": 0.999785304069519
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 107550,
+      "end_ms": 107850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 107550,
+          "end_ms": 107850,
+          "confidence": 0.9998478591442108
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 110370,
+      "end_ms": 110850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 110370,
+          "end_ms": 110610,
+          "confidence": 0.9997981190681458
+        },
+        {
+          "text": "than",
+          "start_ms": 110790,
+          "end_ms": 110850,
+          "confidence": 0.9997734427452087
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 111450,
+      "end_ms": 111990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 111450,
+          "end_ms": 111990,
+          "confidence": 0.999876469373703
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 114330,
+      "end_ms": 114810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 114330,
+          "end_ms": 114630,
+          "confidence": 0.988548219203949
+        },
+        {
+          "text": "than",
+          "start_ms": 114750,
+          "end_ms": 114810,
+          "confidence": 0.9996187686920166
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 115410,
+      "end_ms": 115770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 115410,
+          "end_ms": 115770,
+          "confidence": 0.999448150396347
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 118410,
+      "end_ms": 118830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 118410,
+          "end_ms": 118650,
+          "confidence": 0.9997415840625763
+        },
+        {
+          "text": "than",
+          "start_ms": 118770,
+          "end_ms": 118830,
+          "confidence": 0.9997923374176025
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 119430,
+      "end_ms": 119910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 119430,
+          "end_ms": 119910,
+          "confidence": 0.999638706445694
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 122370,
+      "end_ms": 122790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 122370,
+          "end_ms": 122610,
+          "confidence": 0.9993501007556915
+        },
+        {
+          "text": "than",
+          "start_ms": 122730,
+          "end_ms": 122790,
+          "confidence": 0.999853253364563
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 123390,
+      "end_ms": 123750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 123390,
+          "end_ms": 123750,
+          "confidence": 0.9998404085636139
+        }
+      ]
+    },
+    {
+      "text": "So much stronger,",
+      "start_ms": 126330,
+      "end_ms": 127530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 126330,
+          "end_ms": 126390,
+          "confidence": 0.9754278659820557
+        },
+        {
+          "text": "much",
+          "start_ms": 126630,
+          "end_ms": 126690,
+          "confidence": 0.9999643564224243
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 126990,
+          "end_ms": 127530,
+          "confidence": 0.9999371767044067
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 128250,
+      "end_ms": 128550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 128250,
+          "end_ms": 128310,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "much",
+          "start_ms": 128490,
+          "end_ms": 128550,
+          "confidence": 0.9999885559082031
+        }
+      ]
+    },
+    {
+      "text": "greater,",
+      "start_ms": 129210,
+      "end_ms": 129510,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "greater,",
+          "start_ms": 129210,
+          "end_ms": 129510,
+          "confidence": 0.9997826218605042
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 130170,
+      "end_ms": 130530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 130170,
+          "end_ms": 130230,
+          "confidence": 0.9999828934669495
+        },
+        {
+          "text": "much",
+          "start_ms": 130470,
+          "end_ms": 130530,
+          "confidence": 0.999969482421875
+        }
+      ]
+    },
+    {
+      "text": "wiser,",
+      "start_ms": 131190,
+      "end_ms": 131550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "wiser,",
+          "start_ms": 131190,
+          "end_ms": 131550,
+          "confidence": 0.9998767375946045
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 132210,
+      "end_ms": 132570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 132210,
+          "end_ms": 132270,
+          "confidence": 0.99627685546875
+        },
+        {
+          "text": "much",
+          "start_ms": 132510,
+          "end_ms": 132570,
+          "confidence": 0.9997885823249817
+        }
+      ]
+    },
+    {
+      "text": "higher.",
+      "start_ms": 133350,
+      "end_ms": 133590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "higher.",
+          "start_ms": 133350,
+          "end_ms": 133590,
+          "confidence": 0.9993789494037628
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 134370,
+      "end_ms": 134790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 134370,
+          "end_ms": 134610,
+          "confidence": 0.9998436868190765
+        },
+        {
+          "text": "than",
+          "start_ms": 134730,
+          "end_ms": 134790,
+          "confidence": 0.9998447895050049
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 135450,
+      "end_ms": 135930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 135450,
+          "end_ms": 135930,
+          "confidence": 0.9997654259204865
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 138330,
+      "end_ms": 138810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 138330,
+          "end_ms": 138630,
+          "confidence": 0.9969984889030457
+        },
+        {
+          "text": "than",
+          "start_ms": 138750,
+          "end_ms": 138810,
+          "confidence": 0.9997973442077637
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 139350,
+      "end_ms": 139710,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 139350,
+          "end_ms": 139710,
+          "confidence": 0.990676611661911
+        }
+      ]
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 142410,
+      "end_ms": 143910,
+      "text_sk": "Kam inam by som šiel?",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 142410,
+          "end_ms": 142590,
+          "confidence": 0.7628991305828094
+        },
+        {
+          "text": "else",
+          "start_ms": 142650,
+          "end_ms": 142770,
+          "confidence": 0.9999809265136719
+        },
+        {
+          "text": "would",
+          "start_ms": 142890,
+          "end_ms": 142950,
+          "confidence": 0.9996395707130432
+        },
+        {
+          "text": "I",
+          "start_ms": 143130,
+          "end_ms": 143190,
+          "confidence": 0.9999809861183167
+        },
+        {
+          "text": "go?",
+          "start_ms": 143490,
+          "end_ms": 143910,
+          "confidence": 0.9859717190265656
+        }
+      ]
+    },
+    {
+      "text": "Who else would I",
+      "start_ms": 146130,
+      "end_ms": 147030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 146130,
+          "end_ms": 146250,
+          "confidence": 0.9997387826442719
+        },
+        {
+          "text": "else",
+          "start_ms": 146370,
+          "end_ms": 146550,
+          "confidence": 0.9999856948852539
+        },
+        {
+          "text": "would",
+          "start_ms": 146670,
+          "end_ms": 146730,
+          "confidence": 0.9997521042823792
+        },
+        {
+          "text": "I",
+          "start_ms": 146970,
+          "end_ms": 147030,
+          "confidence": 0.9997616410255432
+        }
+      ]
+    },
+    {
+      "text": "run",
+      "start_ms": 147930,
+      "end_ms": 147990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "run",
+          "start_ms": 147930,
+          "end_ms": 147990,
+          "confidence": 0.9983667731285095
+        }
+      ]
+    },
+    {
+      "text": "to?",
+      "start_ms": 148530,
+      "end_ms": 149790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to?",
+          "start_ms": 148530,
+          "end_ms": 149790,
+          "confidence": 0.9999722838401794
+        }
+      ]
+    },
+    {
+      "text": "Where else would I",
+      "start_ms": 150150,
+      "end_ms": 150870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 150150,
+          "end_ms": 150330,
+          "confidence": 0.9999276399612427
+        },
+        {
+          "text": "else",
+          "start_ms": 150390,
+          "end_ms": 150570,
+          "confidence": 0.9999933540821075
+        },
+        {
+          "text": "would",
+          "start_ms": 150630,
+          "end_ms": 150690,
+          "confidence": 0.9999428987503052
+        },
+        {
+          "text": "I",
+          "start_ms": 150810,
+          "end_ms": 150870,
+          "confidence": 0.9999853372573853
+        }
+      ]
+    },
+    {
+      "text": "go?",
+      "start_ms": 151290,
+      "end_ms": 151710,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "go?",
+          "start_ms": 151290,
+          "end_ms": 151710,
+          "confidence": 0.9998983442783356
+        }
+      ]
+    },
+    {
+      "text": "Who else would I",
+      "start_ms": 153990,
+      "end_ms": 155010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 153990,
+          "end_ms": 154170,
+          "confidence": 0.9998476803302765
+        },
+        {
+          "text": "else",
+          "start_ms": 154350,
+          "end_ms": 154530,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "would",
+          "start_ms": 154650,
+          "end_ms": 154710,
+          "confidence": 0.9999621510505676
+        },
+        {
+          "text": "I",
+          "start_ms": 154950,
+          "end_ms": 155010,
+          "confidence": 0.9999510049819946
+        }
+      ]
+    },
+    {
+      "text": "run",
+      "start_ms": 155730,
+      "end_ms": 155790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "run",
+          "start_ms": 155730,
+          "end_ms": 155790,
+          "confidence": 0.9999819397926331
+        }
+      ]
+    },
+    {
+      "text": "to?",
+      "start_ms": 156330,
+      "end_ms": 157830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to?",
+          "start_ms": 156330,
+          "end_ms": 157830,
+          "confidence": 0.9999299049377441
+        }
+      ]
+    },
+    {
+      "text": "Where else would I",
+      "start_ms": 158190,
+      "end_ms": 158970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 158190,
+          "end_ms": 158310,
+          "confidence": 0.9999637603759766
+        },
+        {
+          "text": "else",
+          "start_ms": 158430,
+          "end_ms": 158550,
+          "confidence": 0.9999819397926331
+        },
+        {
+          "text": "would",
+          "start_ms": 158670,
+          "end_ms": 158730,
+          "confidence": 0.9999544024467468
+        },
+        {
+          "text": "I",
+          "start_ms": 158910,
+          "end_ms": 158970,
+          "confidence": 0.9984716773033142
+        }
+      ]
+    },
+    {
+      "text": "go?",
+      "start_ms": 159450,
+      "end_ms": 159870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "go?",
+          "start_ms": 159450,
+          "end_ms": 159870,
+          "confidence": 0.9998801052570343
+        }
+      ]
+    },
+    {
+      "text": "Who else would I",
+      "start_ms": 162030,
+      "end_ms": 163050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 162030,
+          "end_ms": 162210,
+          "confidence": 0.9998378455638885
+        },
+        {
+          "text": "else",
+          "start_ms": 162390,
+          "end_ms": 162570,
+          "confidence": 0.9999953210353851
+        },
+        {
+          "text": "would",
+          "start_ms": 162690,
+          "end_ms": 162750,
+          "confidence": 0.9999693632125854
+        },
+        {
+          "text": "I",
+          "start_ms": 162990,
+          "end_ms": 163050,
+          "confidence": 0.9999210238456726
+        }
+      ]
+    },
+    {
+      "text": "run",
+      "start_ms": 163770,
+      "end_ms": 163830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "run",
+          "start_ms": 163770,
+          "end_ms": 163830,
+          "confidence": 0.9999927878379822
+        }
+      ]
+    },
+    {
+      "text": "to?",
+      "start_ms": 164310,
+      "end_ms": 165810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to?",
+          "start_ms": 164310,
+          "end_ms": 165810,
+          "confidence": 0.999981015920639
+        }
+      ]
+    },
+    {
+      "text": "Where else would I",
+      "start_ms": 166290,
+      "end_ms": 167010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 166290,
+          "end_ms": 166410,
+          "confidence": 0.9998829066753387
+        },
+        {
+          "text": "else",
+          "start_ms": 166470,
+          "end_ms": 166590,
+          "confidence": 0.9999906122684479
+        },
+        {
+          "text": "would",
+          "start_ms": 166710,
+          "end_ms": 166770,
+          "confidence": 0.9999298453330994
+        },
+        {
+          "text": "I",
+          "start_ms": 166950,
+          "end_ms": 167010,
+          "confidence": 0.9999836087226868
+        }
+      ]
+    },
+    {
+      "text": "go?",
+      "start_ms": 167490,
+      "end_ms": 169890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "go?",
+          "start_ms": 167490,
+          "end_ms": 169890,
+          "confidence": 0.9999745190143585
+        }
+      ]
+    },
+    {
+      "text": "Who else would I",
+      "start_ms": 170070,
+      "end_ms": 171150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 170070,
+          "end_ms": 170250,
+          "confidence": 0.9999801218509674
+        },
+        {
+          "text": "else",
+          "start_ms": 170430,
+          "end_ms": 170610,
+          "confidence": 0.9999915361404419
+        },
+        {
+          "text": "would",
+          "start_ms": 170730,
+          "end_ms": 170790,
+          "confidence": 0.999933660030365
+        },
+        {
+          "text": "I",
+          "start_ms": 171090,
+          "end_ms": 171150,
+          "confidence": 0.9998648166656494
+        }
+      ]
+    },
+    {
+      "text": "run",
+      "start_ms": 171810,
+      "end_ms": 171870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "run",
+          "start_ms": 171810,
+          "end_ms": 171870,
+          "confidence": 0.9999852180480957
+        }
+      ]
+    },
+    {
+      "text": "to?",
+      "start_ms": 172470,
+      "end_ms": 174630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to?",
+          "start_ms": 172470,
+          "end_ms": 174630,
+          "confidence": 0.9999121129512787
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the",
+      "start_ms": 184410,
+      "end_ms": 185010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 184410,
+          "end_ms": 184590,
+          "confidence": 0.9979535639286041
+        },
+        {
+          "text": "me",
+          "start_ms": 184650,
+          "end_ms": 184710,
+          "confidence": 0.9999802708625793
+        },
+        {
+          "text": "to",
+          "start_ms": 184830,
+          "end_ms": 184890,
+          "confidence": 0.9999641180038452
+        },
+        {
+          "text": "the",
+          "start_ms": 184950,
+          "end_ms": 185010,
+          "confidence": 0.9999682307243347
+        }
+      ]
+    },
+    {
+      "text": "rock.",
+      "start_ms": 185610,
+      "end_ms": 185910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "rock.",
+          "start_ms": 185610,
+          "end_ms": 185910,
+          "confidence": 0.9962184727191925
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 188550,
+      "end_ms": 188970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 188550,
+          "end_ms": 188790,
+          "confidence": 0.9997798800468445
+        },
+        {
+          "text": "than",
+          "start_ms": 188910,
+          "end_ms": 188970,
+          "confidence": 0.9998282194137573
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 189510,
+      "end_ms": 191130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 189510,
+          "end_ms": 191130,
+          "confidence": 0.9994613230228424
+        }
+      ]
+    },
+    {
+      "text": "Hey,",
+      "start_ms": 191430,
+      "end_ms": 191670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Hey,",
+          "start_ms": 191430,
+          "end_ms": 191670,
+          "confidence": 0.8354026973247528
+        }
+      ]
+    },
+    {
+      "text": "higher than",
+      "start_ms": 192450,
+      "end_ms": 192870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "higher",
+          "start_ms": 192450,
+          "end_ms": 192690,
+          "confidence": 0.9992578029632568
+        },
+        {
+          "text": "than",
+          "start_ms": 192810,
+          "end_ms": 192870,
+          "confidence": 0.9998825788497925
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 193590,
+      "end_ms": 196170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 193590,
+          "end_ms": 196170,
+          "confidence": 0.9995823204517365
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 196410,
+      "end_ms": 196830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 196410,
+          "end_ms": 196650,
+          "confidence": 0.9997657835483551
+        },
+        {
+          "text": "than",
+          "start_ms": 196770,
+          "end_ms": 196830,
+          "confidence": 0.999825119972229
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 197490,
+      "end_ms": 198930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 197490,
+          "end_ms": 198930,
+          "confidence": 0.9996825158596039
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 200370,
+      "end_ms": 200910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 200370,
+          "end_ms": 200670,
+          "confidence": 0.9997840523719788
+        },
+        {
+          "text": "than",
+          "start_ms": 200850,
+          "end_ms": 200910,
+          "confidence": 0.9997784495353699
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 201510,
+      "end_ms": 204150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 201510,
+          "end_ms": 204150,
+          "confidence": 0.9997900426387787
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 204390,
+      "end_ms": 204870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 204390,
+          "end_ms": 204690,
+          "confidence": 0.999618262052536
+        },
+        {
+          "text": "than",
+          "start_ms": 204810,
+          "end_ms": 204870,
+          "confidence": 0.9998378753662109
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 205530,
+      "end_ms": 207930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 205530,
+          "end_ms": 207930,
+          "confidence": 0.9998131990432739
+        }
+      ]
+    },
+    {
+      "text": "So much stronger,",
+      "start_ms": 208470,
+      "end_ms": 209610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 208470,
+          "end_ms": 208530,
+          "confidence": 0.9984792470932007
+        },
+        {
+          "text": "much",
+          "start_ms": 208830,
+          "end_ms": 208890,
+          "confidence": 0.9999638795852661
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 209190,
+          "end_ms": 209610,
+          "confidence": 0.9999021093050638
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 210270,
+      "end_ms": 210630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 210270,
+          "end_ms": 210330,
+          "confidence": 0.9958926439285278
+        },
+        {
+          "text": "much",
+          "start_ms": 210570,
+          "end_ms": 210630,
+          "confidence": 0.999983012676239
+        }
+      ]
+    },
+    {
+      "text": "greater,",
+      "start_ms": 211230,
+      "end_ms": 211590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "greater,",
+          "start_ms": 211230,
+          "end_ms": 211590,
+          "confidence": 0.999508281548818
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 212250,
+      "end_ms": 212550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 212250,
+          "end_ms": 212310,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "much",
+          "start_ms": 212490,
+          "end_ms": 212550,
+          "confidence": 0.9999904632568359
+        }
+      ]
+    },
+    {
+      "text": "wiser,",
+      "start_ms": 213210,
+      "end_ms": 213570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "wiser,",
+          "start_ms": 213210,
+          "end_ms": 213570,
+          "confidence": 0.999655564626058
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 214290,
+      "end_ms": 214650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 214290,
+          "end_ms": 214350,
+          "confidence": 0.9986051321029663
+        },
+        {
+          "text": "much",
+          "start_ms": 214590,
+          "end_ms": 214650,
+          "confidence": 0.9999771118164062
+        }
+      ]
+    },
+    {
+      "text": "higher.",
+      "start_ms": 215370,
+      "end_ms": 215610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "higher.",
+          "start_ms": 215370,
+          "end_ms": 215610,
+          "confidence": 0.9997377395629883
+        }
+      ]
+    },
+    {
+      "text": "So much stronger,",
+      "start_ms": 216330,
+      "end_ms": 217470,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 216330,
+          "end_ms": 216390,
+          "confidence": 0.9996668696403503
+        },
+        {
+          "text": "much",
+          "start_ms": 216630,
+          "end_ms": 216690,
+          "confidence": 0.9999645948410034
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 217050,
+          "end_ms": 217470,
+          "confidence": 0.999760647614797
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 218250,
+      "end_ms": 218610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 218250,
+          "end_ms": 218310,
+          "confidence": 0.9999863505363464
+        },
+        {
+          "text": "much",
+          "start_ms": 218550,
+          "end_ms": 218610,
+          "confidence": 0.9999923706054688
+        }
+      ]
+    },
+    {
+      "text": "greater,",
+      "start_ms": 219150,
+      "end_ms": 219510,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "greater,",
+          "start_ms": 219150,
+          "end_ms": 219510,
+          "confidence": 0.9993806878725687
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 220230,
+      "end_ms": 220530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 220230,
+          "end_ms": 220290,
+          "confidence": 0.9999716281890869
+        },
+        {
+          "text": "much",
+          "start_ms": 220470,
+          "end_ms": 220530,
+          "confidence": 0.9999562501907349
+        }
+      ]
+    },
+    {
+      "text": "wiser,",
+      "start_ms": 221130,
+      "end_ms": 221490,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "wiser,",
+          "start_ms": 221130,
+          "end_ms": 221490,
+          "confidence": 0.9996654987335205
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 222270,
+      "end_ms": 222630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 222270,
+          "end_ms": 222330,
+          "confidence": 0.9995338916778564
+        },
+        {
+          "text": "much",
+          "start_ms": 222570,
+          "end_ms": 222630,
+          "confidence": 0.9999315738677979
+        }
+      ]
+    },
+    {
+      "text": "higher.",
+      "start_ms": 223290,
+      "end_ms": 223530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "higher.",
+          "start_ms": 223290,
+          "end_ms": 223530,
+          "confidence": 0.9994714260101318
+        }
+      ]
+    },
+    {
+      "text": "So much",
+      "start_ms": 224310,
+      "end_ms": 224610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 224310,
+          "end_ms": 224370,
+          "confidence": 0.9998494982719421
+        },
+        {
+          "text": "much",
+          "start_ms": 224550,
+          "end_ms": 224610,
+          "confidence": 0.9999486207962036
+        }
+      ]
+    },
+    {
+      "text": "stronger,",
+      "start_ms": 225090,
+      "end_ms": 225450,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "stronger,",
+          "start_ms": 225090,
+          "end_ms": 225450,
+          "confidence": 0.9998449285825094
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 226230,
+      "end_ms": 226590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 226230,
+          "end_ms": 226290,
+          "confidence": 0.999605655670166
+        },
+        {
+          "text": "much",
+          "start_ms": 226530,
+          "end_ms": 226590,
+          "confidence": 0.9999696016311646
+        }
+      ]
+    },
+    {
+      "text": "greater,",
+      "start_ms": 227190,
+      "end_ms": 227490,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "greater,",
+          "start_ms": 227190,
+          "end_ms": 227490,
+          "confidence": 0.9998457829157511
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 228210,
+      "end_ms": 228570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 228210,
+          "end_ms": 228270,
+          "confidence": 0.9999626874923706
+        },
+        {
+          "text": "much",
+          "start_ms": 228510,
+          "end_ms": 228570,
+          "confidence": 0.999963641166687
+        }
+      ]
+    },
+    {
+      "text": "wiser,",
+      "start_ms": 229170,
+      "end_ms": 229530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "wiser,",
+          "start_ms": 229170,
+          "end_ms": 229530,
+          "confidence": 0.999863346417745
+        }
+      ]
+    },
+    {
+      "text": "so much",
+      "start_ms": 230250,
+      "end_ms": 230670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 230250,
+          "end_ms": 230310,
+          "confidence": 0.9999911189079285
+        },
+        {
+          "text": "much",
+          "start_ms": 230610,
+          "end_ms": 230670,
+          "confidence": 0.9999771118164062
+        }
+      ]
+    },
+    {
+      "text": "higher.",
+      "start_ms": 231330,
+      "end_ms": 231570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "higher.",
+          "start_ms": 231330,
+          "end_ms": 231570,
+          "confidence": 0.9998840093612671
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 232470,
+      "end_ms": 233010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 232470,
+          "end_ms": 232710,
+          "confidence": 0.9997507333755493
+        },
+        {
+          "text": "than",
+          "start_ms": 232950,
+          "end_ms": 233010,
+          "confidence": 0.9998792409896851
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 233610,
+      "end_ms": 235230,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 233610,
+          "end_ms": 235230,
+          "confidence": 0.9994548261165619
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 236430,
+      "end_ms": 236910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 236430,
+          "end_ms": 236670,
+          "confidence": 0.9996794164180756
+        },
+        {
+          "text": "than",
+          "start_ms": 236850,
+          "end_ms": 236910,
+          "confidence": 0.9998651742935181
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 237390,
+      "end_ms": 237690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 237390,
+          "end_ms": 237690,
+          "confidence": 0.999659538269043
+        }
+      ]
+    },
+    {
+      "text": "Higher than",
+      "start_ms": 240390,
+      "end_ms": 240930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 240390,
+          "end_ms": 240630,
+          "confidence": 0.9983241558074951
+        },
+        {
+          "text": "than",
+          "start_ms": 240870,
+          "end_ms": 240930,
+          "confidence": 0.9997590184211731
+        }
+      ]
+    },
+    {
+      "text": "high.",
+      "start_ms": 241350,
+      "end_ms": 244170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "high.",
+          "start_ms": 241350,
+          "end_ms": 244170,
+          "confidence": 0.9992283880710602
+        }
+      ]
+    },
+    {
+      "text": "Higher than high.",
+      "start_ms": 244470,
+      "end_ms": 245550,
+      "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 244470,
+          "end_ms": 244710,
+          "confidence": 0.9997098445892334
+        },
+        {
+          "text": "than",
+          "start_ms": 244890,
+          "end_ms": 244950,
+          "confidence": 0.99983811378479
+        },
+        {
+          "text": "high.",
+          "start_ms": 245250,
+          "end_ms": 245550,
+          "confidence": 0.9994474351406097
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9908854106912637,
+  "metadata": {
+    "model": "stt-async-v5",
+    "transcription_id": "f98fb68f-3dcc-422a-b248-4e45c309c5bc",
+    "elapsed_s": 39.9,
+    "token_count": 1217,
+    "source_token_count": 399,
+    "line_count": 137,
+    "target_language": "sk",
+    "languages_seen": [
+      "en",
+      "sk"
+    ],
+    "line_gap_ms": 400,
+    "translation_alignment": {
+      "n_runs": 114,
+      "n_translation_runs": 57,
+      "n_lines_aligned_1to1": 4,
+      "n_segments_unaligned_multi_line": 53,
+      "n_orphan_translation_segments": 0,
+      "unaligned_translation_segments": [
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            0,
+            1
+          ],
+          "text_sk": "Keď je moje srdce zahltené,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            2,
+            3,
+            4
+          ],
+          "text_sk": "keď si sotva verím,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            6,
+            7
+          ],
+          "text_sk": "Vyššie než najvyššie."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            8,
+            9,
+            10,
+            11
+          ],
+          "text_sk": "Keď sa noc približuje,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            12,
+            13,
+            14,
+            15
+          ],
+          "text_sk": "aby mi pripomenula môj hriech."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            16,
+            17
+          ],
+          "text_sk": "Veď ma ku skale."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            18,
+            19
+          ],
+          "text_sk": "Vyššie než najvyššie."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            20,
+            21
+          ],
+          "text_sk": "Veď ma ku skale."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            22,
+            23
+          ],
+          "text_sk": "Vyššie než najvyššie."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            24,
+            25
+          ],
+          "text_sk": "Vyššie než najvyššie."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            26,
+            27
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            28,
+            29
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            30,
+            31
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            32,
+            33,
+            34
+          ],
+          "text_sk": "O to silnejší, o to väčší,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            35,
+            36,
+            37,
+            38
+          ],
+          "text_sk": "o to múdrejší, o to vyšší."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            39,
+            40
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            41,
+            42
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            43,
+            44
+          ],
+          "text_sk": "Keď sa vznáša pochybnosť,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            45,
+            46,
+            47
+          ],
+          "text_sk": "keď sa valí ako povodeň,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            48,
+            49
+          ],
+          "text_sk": "veď ma ku skale."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            50,
+            51
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            52,
+            53
+          ],
+          "text_sk": "Áno, veď ma ku skale."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            55,
+            56
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            57,
+            58
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            59,
+            60
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            61,
+            62
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            63,
+            64
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            65,
+            66,
+            67
+          ],
+          "text_sk": "O to silnejší, o to väčší,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            68,
+            69,
+            70,
+            71
+          ],
+          "text_sk": "o to múdrejší, o to vyšší."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            72,
+            73
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            74,
+            75
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            77,
+            78,
+            79
+          ],
+          "text_sk": "K komu inému by som sa utiekol?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            80,
+            81
+          ],
+          "text_sk": "Kam inam by som šiel?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            82,
+            83,
+            84
+          ],
+          "text_sk": "K komu inému by som sa utiekol?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            85,
+            86
+          ],
+          "text_sk": "Kam inam by som šiel?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            87,
+            88,
+            89
+          ],
+          "text_sk": "K komu inému by som sa utiekol?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            90,
+            91
+          ],
+          "text_sk": "Kam inam by som šiel?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            92,
+            93,
+            94
+          ],
+          "text_sk": "K komu inému by som sa utiekol?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            95,
+            96
+          ],
+          "text_sk": "Veď ma ku skale."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            97,
+            98
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            99,
+            100,
+            101
+          ],
+          "text_sk": "Hej, vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            102,
+            103
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            104,
+            105
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            106,
+            107
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            108,
+            109,
+            110
+          ],
+          "text_sk": "O to silnejší, o to väčší,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            111,
+            112,
+            113,
+            114
+          ],
+          "text_sk": "o to múdrejší, o to vyšší."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            115,
+            116,
+            117
+          ],
+          "text_sk": "O to silnejší, o to väčší,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            118,
+            119,
+            120,
+            121
+          ],
+          "text_sk": "o to múdrejší, o to vyšší."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            122,
+            123,
+            124,
+            125
+          ],
+          "text_sk": "O to silnejší, o to väčší,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            126,
+            127,
+            128,
+            129
+          ],
+          "text_sk": "o to múdrejší, o to vyšší."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            130,
+            131
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            132,
+            133
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            134,
+            135
+          ],
+          "text_sk": "Vyššie než najvyššie. (Vyššie než najvyššie.)"
+        }
+      ]
+    }
+  }
+}

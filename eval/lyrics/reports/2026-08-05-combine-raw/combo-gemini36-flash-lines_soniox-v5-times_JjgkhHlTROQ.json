@@ -1,0 +1,558 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "JjgkhHlTROQ",
+  "duration_ms": 231150,
+  "lines": [
+    {
+      "text": "I've been washed in the water, washed in the blood, I'm as good as new",
+      "start_ms": 570,
+      "end_ms": 4650,
+      "text_sk": "Bolo mi obmyté vo vode, obmyté v krvi, som ako nový",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood of the King",
+      "start_ms": 6510,
+      "end_ms": 10350,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi Kráľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "I am clean",
+      "start_ms": 21210,
+      "end_ms": 21510,
+      "text_sk": "Som čistý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Sin was stained on me",
+      "start_ms": 22890,
+      "end_ms": 24690,
+      "text_sk": "Hriech ma poškvrnil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And shame was running deep",
+      "start_ms": 25830,
+      "end_ms": 28410,
+      "text_sk": "A hanba siahala hlboko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But love was spilled on Calvary",
+      "start_ms": 29550,
+      "end_ms": 32310,
+      "text_sk": "No láska sa vyliala na Kalvárii",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh Hallelujah, I am clean",
+      "start_ms": 33390,
+      "end_ms": 35250,
+      "text_sk": "Ó Aleluja, som čistý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "God untied my feet",
+      "start_ms": 36690,
+      "end_ms": 36930,
+      "text_sk": "Boh mi rozviazal nohy",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "I'm ransomed and redeemed",
+      "start_ms": 39690,
+      "end_ms": 42090,
+      "text_sk": "Som vykúpený a zachránený",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And standing in Your victory",
+      "start_ms": 43110,
+      "end_ms": 46050,
+      "text_sk": "A stojím vo Tvojom víťazstve",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood, I'm as good as new",
+      "start_ms": 47070,
+      "end_ms": 52650,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi, som ako nový",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood of the King",
+      "start_ms": 54030,
+      "end_ms": 58590,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi Kráľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Oh Hallelujah, I am clean",
+      "start_ms": 60870,
+      "end_ms": 62970,
+      "text_sk": "Ó Aleluja, som čistý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "It's not what I have done",
+      "start_ms": 64050,
+      "end_ms": 66210,
+      "text_sk": "Nie je to tým, čo som urobil ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "But what You've done for me",
+      "start_ms": 67410,
+      "end_ms": 69690,
+      "text_sk": "Ale tým, čo si Ty urobil pre mňa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "You paid it all upon that tree",
+      "start_ms": 71010,
+      "end_ms": 73950,
+      "text_sk": "Zaplatil si všetko tam na kríži",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh Hallelujah, I am clean",
+      "start_ms": 74790,
+      "end_ms": 77010,
+      "text_sk": "Ó Aleluja, som čistý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Your love has overcome",
+      "start_ms": 77910,
+      "end_ms": 80130,
+      "text_sk": "Tvoja láska zvíťazila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And Your mercy is supreme",
+      "start_ms": 81090,
+      "end_ms": 83490,
+      "text_sk": "A Tvoje milosrdenstvo je zvrchované",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I'm dancing in Your victory",
+      "start_ms": 84750,
+      "end_ms": 87570,
+      "text_sk": "Tancujem vo Tvojom víťazstve",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood, I'm as good as new",
+      "start_ms": 88590,
+      "end_ms": 94170,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi, som ako nový",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood of the King",
+      "start_ms": 95490,
+      "end_ms": 99990,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi Kráľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Sing it again, I've been washed in the water, washed in the blood, I'm as good as new",
+      "start_ms": 102510,
+      "end_ms": 107910,
+      "text_sk": "Spievaj to znova, bol som obmytý vo vode, obmytý v krvi, som ako nový",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood of the King",
+      "start_ms": 109290,
+      "end_ms": 113910,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi Kráľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Oh Hallelujah",
+      "start_ms": 116250,
+      "end_ms": 117270,
+      "text_sk": "Ó Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "'Cause You took away my shame",
+      "start_ms": 119850,
+      "end_ms": 122130,
+      "text_sk": "Lebo Si odo mňa vzal moju hanbu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You nailed it to the cross",
+      "start_ms": 123510,
+      "end_ms": 125610,
+      "text_sk": "A pribil si ju na kríž",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "You got me running out the grave",
+      "start_ms": 126510,
+      "end_ms": 129210,
+      "text_sk": "Spôsobil Si, že bežím z hrobu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Oh Hallelujah, here I come",
+      "start_ms": 130170,
+      "end_ms": 132570,
+      "text_sk": "Ó Aleluja, tu prichádzam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "'Cause You took away my shame",
+      "start_ms": 133530,
+      "end_ms": 135870,
+      "text_sk": "Lebo Si odo mňa vzal moju hanbu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And You nailed it to the cross",
+      "start_ms": 137310,
+      "end_ms": 139770,
+      "text_sk": "A pribil si ju na kríž",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "You got me running out the grave",
+      "start_ms": 140430,
+      "end_ms": 143370,
+      "text_sk": "Spôsobil Si, že bežím z hrobu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Hallelujah, oh You took it away!",
+      "start_ms": 144270,
+      "end_ms": 146970,
+      "text_sk": "Aleluja, ó vzal Si to preč!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "'Cause You took away my shame",
+      "start_ms": 147870,
+      "end_ms": 149430,
+      "text_sk": "Lebo Si odo mňa vzal moju hanbu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And You nailed it to the old rugged cross",
+      "start_ms": 150990,
+      "end_ms": 153690,
+      "text_sk": "A pribil si ju na ten starý drsný kríž",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Got me running out",
+      "start_ms": 154530,
+      "end_ms": 155550,
+      "text_sk": "Spôsobil Si, že bežím von",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh Hallelujah, here I come",
+      "start_ms": 157830,
+      "end_ms": 159570,
+      "text_sk": "Ó Aleluja, tu prichádzam",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "'Cause You took away my shame",
+      "start_ms": 159690,
+      "end_ms": 161370,
+      "text_sk": "Lebo Si odo mňa vzal moju hanbu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And You nailed it to the cross",
+      "start_ms": 161670,
+      "end_ms": 164670,
+      "text_sk": "A pribil si ju na kríž",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Got me running out",
+      "start_ms": 167550,
+      "end_ms": 167970,
+      "text_sk": "Spôsobil Si, že bežím von",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Hallelujah, here I come!",
+      "start_ms": 170130,
+      "end_ms": 171570,
+      "text_sk": "Aleluja, tu prichádzam!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Sing Hallelujah, here I come!",
+      "start_ms": 173250,
+      "end_ms": 175050,
+      "text_sk": "Spievaj Aleluja, tu prichádzam!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Hallelujah, here I come!",
+      "start_ms": 175410,
+      "end_ms": 178470,
+      "text_sk": "Aleluja, tu prichádzam!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "I'm not depressed anymore",
+      "start_ms": 180210,
+      "end_ms": 181710,
+      "text_sk": "Už niesom v depresii",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "My anxiety left",
+      "start_ms": 183810,
+      "end_ms": 185190,
+      "text_sk": "Moja úzkosť odišla",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "If you've been cleaned, everybody jump, jump, jump!",
+      "start_ms": 187590,
+      "end_ms": 190650,
+      "text_sk": "Ak si bol očistený, všetci skáčte, skáčte, skáčte!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Halle, Halle, Hallelujah",
+      "start_ms": 196530,
+      "end_ms": 198390,
+      "text_sk": "Halle, Halle, Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Halle, Halle, Hallelujah",
+      "start_ms": 203370,
+      "end_ms": 205170,
+      "text_sk": "Halle, Halle, Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Halle, Halle, Hallelujah",
+      "start_ms": 206790,
+      "end_ms": 208650,
+      "text_sk": "Halle, Halle, Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Thank You, Jesus!",
+      "start_ms": 210630,
+      "end_ms": 211710,
+      "text_sk": "Ďakujem Ti, Ježiš!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Come on, what'd you say?",
+      "start_ms": 215130,
+      "end_ms": 215610,
+      "text_sk": "Poďme, čo poviete?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "'Cause I've been washed in the water, washed in the blood, I'm as good as new",
+      "start_ms": 217230,
+      "end_ms": 221970,
+      "text_sk": "Lebo som bol obmytý vo vode, obmytý v krvi, som ako nový",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 15
+    },
+    {
+      "text": "Oh Hallelujah, I've been washed in the water, washed in the blood of the King",
+      "start_ms": 223350,
+      "end_ms": 227730,
+      "text_sk": "Ó Aleluja, bol som obmytý vo vode, obmytý v krvi Kráľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Oh Hallelujah",
+      "start_ms": 230190,
+      "end_ms": 231150,
+      "text_sk": "Ó Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 54,
+    "n_lines_timed": 54,
+    "n_lines_untimed": 0,
+    "n_words_total": 379,
+    "n_words_aligned": 330,
+    "word_align_rate": 0.8707124010554089,
+    "n_monotonic_violations_clamped": 0
+  }
+}
