@@ -1,0 +1,1773 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\bHCW5WMMF28_vocal16k.wav",
+  "duration_ms": 157803,
+  "lines": [
+    {
+      "text": "One You made it all You're God of all",
+      "start_ms": 5060,
+      "end_ms": 8720,
+      "text_sk": "Jeden Stvoril si všetko Si Bohom všetkého",
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 5060,
+          "end_ms": 5540
+        },
+        {
+          "text": "You",
+          "start_ms": 6700,
+          "end_ms": 6780
+        },
+        {
+          "text": "made",
+          "start_ms": 6960,
+          "end_ms": 7260
+        },
+        {
+          "text": "it",
+          "start_ms": 7300,
+          "end_ms": 7380
+        },
+        {
+          "text": "all",
+          "start_ms": 7500,
+          "end_ms": 7700
+        },
+        {
+          "text": "You're",
+          "start_ms": 7780,
+          "end_ms": 7980
+        },
+        {
+          "text": "God",
+          "start_ms": 8000,
+          "end_ms": 8300
+        },
+        {
+          "text": "of",
+          "start_ms": 8340,
+          "end_ms": 8420
+        },
+        {
+          "text": "all",
+          "start_ms": 8520,
+          "end_ms": 8720
+        }
+      ]
+    },
+    {
+      "text": "And two I'm alive It's all because of You",
+      "start_ms": 8820,
+      "end_ms": 13320,
+      "text_sk": "A dva Som nažive Je to všetko kvôli Tebe",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 8820,
+          "end_ms": 8920
+        },
+        {
+          "text": "two",
+          "start_ms": 9020,
+          "end_ms": 9160
+        },
+        {
+          "text": "I'm",
+          "start_ms": 11080,
+          "end_ms": 11280
+        },
+        {
+          "text": "alive",
+          "start_ms": 11320,
+          "end_ms": 11840
+        },
+        {
+          "text": "It's",
+          "start_ms": 11860,
+          "end_ms": 12060
+        },
+        {
+          "text": "all",
+          "start_ms": 12160,
+          "end_ms": 12280
+        },
+        {
+          "text": "because",
+          "start_ms": 12320,
+          "end_ms": 12940
+        },
+        {
+          "text": "of",
+          "start_ms": 13040,
+          "end_ms": 13100
+        },
+        {
+          "text": "You",
+          "start_ms": 13140,
+          "end_ms": 13320
+        }
+      ]
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "start_ms": 13480,
+      "end_ms": 20480,
+      "text_sk": "Mám toľko dôvodov chváliť",
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 13480,
+          "end_ms": 16960
+        },
+        {
+          "text": "got",
+          "start_ms": 17160,
+          "end_ms": 17540
+        },
+        {
+          "text": "so",
+          "start_ms": 17640,
+          "end_ms": 17800
+        },
+        {
+          "text": "many",
+          "start_ms": 18160,
+          "end_ms": 18820
+        },
+        {
+          "text": "reasons",
+          "start_ms": 19200,
+          "end_ms": 19660
+        },
+        {
+          "text": "to",
+          "start_ms": 19700,
+          "end_ms": 19760
+        },
+        {
+          "text": "praise",
+          "start_ms": 19920,
+          "end_ms": 20480
+        }
+      ]
+    },
+    {
+      "text": "Then there's three You're holding me",
+      "start_ms": 20720,
+      "end_ms": 23740,
+      "text_sk": "Potom sú tu traja Držíš ma",
+      "words": [
+        {
+          "text": "Then",
+          "start_ms": 20720,
+          "end_ms": 20980
+        },
+        {
+          "text": "there's",
+          "start_ms": 21000,
+          "end_ms": 21180
+        },
+        {
+          "text": "three",
+          "start_ms": 21240,
+          "end_ms": 21540
+        },
+        {
+          "text": "You're",
+          "start_ms": 23000,
+          "end_ms": 23240
+        },
+        {
+          "text": "holding",
+          "start_ms": 23280,
+          "end_ms": 23640
+        },
+        {
+          "text": "me",
+          "start_ms": 23660,
+          "end_ms": 23740
+        }
+      ]
+    },
+    {
+      "text": "You set me free",
+      "start_ms": 24020,
+      "end_ms": 24920,
+      "text_sk": "Oslobodil si ma",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 24020,
+          "end_ms": 24120
+        },
+        {
+          "text": "set",
+          "start_ms": 24240,
+          "end_ms": 24480
+        },
+        {
+          "text": "me",
+          "start_ms": 24500,
+          "end_ms": 24560
+        },
+        {
+          "text": "free",
+          "start_ms": 24640,
+          "end_ms": 24920
+        }
+      ]
+    },
+    {
+      "text": "And four I am not a slave to sin no more",
+      "start_ms": 25080,
+      "end_ms": 33220,
+      "text_sk": "A štyria Už nie som otrokom hriechu",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 25080,
+          "end_ms": 25200
+        },
+        {
+          "text": "four",
+          "start_ms": 25260,
+          "end_ms": 25700
+        },
+        {
+          "text": "I",
+          "start_ms": 27540,
+          "end_ms": 27560
+        },
+        {
+          "text": "am",
+          "start_ms": 27580,
+          "end_ms": 27640
+        },
+        {
+          "text": "not",
+          "start_ms": 27700,
+          "end_ms": 28100
+        },
+        {
+          "text": "a",
+          "start_ms": 28140,
+          "end_ms": 28160
+        },
+        {
+          "text": "slave",
+          "start_ms": 28320,
+          "end_ms": 28560
+        },
+        {
+          "text": "to",
+          "start_ms": 28580,
+          "end_ms": 28660
+        },
+        {
+          "text": "sin",
+          "start_ms": 28740,
+          "end_ms": 29020
+        },
+        {
+          "text": "no",
+          "start_ms": 29100,
+          "end_ms": 29200
+        },
+        {
+          "text": "more",
+          "start_ms": 29360,
+          "end_ms": 33220
+        }
+      ]
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "start_ms": 33280,
+      "end_ms": 37320,
+      "text_sk": "Mám toľko dôvodov chváliť",
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 33280,
+          "end_ms": 33360
+        },
+        {
+          "text": "got",
+          "start_ms": 33420,
+          "end_ms": 33840
+        },
+        {
+          "text": "so",
+          "start_ms": 33940,
+          "end_ms": 34080
+        },
+        {
+          "text": "many",
+          "start_ms": 34420,
+          "end_ms": 35040
+        },
+        {
+          "text": "reasons",
+          "start_ms": 35480,
+          "end_ms": 35940
+        },
+        {
+          "text": "to",
+          "start_ms": 35960,
+          "end_ms": 36040
+        },
+        {
+          "text": "praise",
+          "start_ms": 36180,
+          "end_ms": 37320
+        }
+      ]
+    },
+    {
+      "text": "In the morning in the evening",
+      "start_ms": 38280,
+      "end_ms": 40060,
+      "text_sk": "Ráno aj večer",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 38280,
+          "end_ms": 38360
+        },
+        {
+          "text": "the",
+          "start_ms": 38380,
+          "end_ms": 38440
+        },
+        {
+          "text": "morning",
+          "start_ms": 38520,
+          "end_ms": 39000
+        },
+        {
+          "text": "in",
+          "start_ms": 39300,
+          "end_ms": 39360
+        },
+        {
+          "text": "the",
+          "start_ms": 39380,
+          "end_ms": 39600
+        },
+        {
+          "text": "evening",
+          "start_ms": 39740,
+          "end_ms": 40060
+        }
+      ]
+    },
+    {
+      "text": "Every time of day",
+      "start_ms": 40320,
+      "end_ms": 41400,
+      "text_sk": "V každom čase dňa",
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 40320,
+          "end_ms": 40500
+        },
+        {
+          "text": "time",
+          "start_ms": 40540,
+          "end_ms": 40820
+        },
+        {
+          "text": "of",
+          "start_ms": 40840,
+          "end_ms": 40900
+        },
+        {
+          "text": "day",
+          "start_ms": 40960,
+          "end_ms": 41400
+        }
+      ]
+    },
+    {
+      "text": "We got a reason to lift up Jesus' name",
+      "start_ms": 42160,
+      "end_ms": 44800,
+      "text_sk": "Máme dôvod vyvyšovať Ježišovo meno",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 42160,
+          "end_ms": 42240
+        },
+        {
+          "text": "got",
+          "start_ms": 42300,
+          "end_ms": 42420
+        },
+        {
+          "text": "a",
+          "start_ms": 42480,
+          "end_ms": 42500
+        },
+        {
+          "text": "reason",
+          "start_ms": 42560,
+          "end_ms": 43020
+        },
+        {
+          "text": "to",
+          "start_ms": 43340,
+          "end_ms": 43440
+        },
+        {
+          "text": "lift",
+          "start_ms": 43620,
+          "end_ms": 43860
+        },
+        {
+          "text": "up",
+          "start_ms": 44000,
+          "end_ms": 44060
+        },
+        {
+          "text": "Jesus'",
+          "start_ms": 44120,
+          "end_ms": 44560
+        },
+        {
+          "text": "name",
+          "start_ms": 44600,
+          "end_ms": 44800
+        }
+      ]
+    },
+    {
+      "text": "Sing say",
+      "start_ms": 44840,
+      "end_ms": 45480,
+      "text_sk": "Spievaj povedz",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 44840,
+          "end_ms": 45100
+        },
+        {
+          "text": "say",
+          "start_ms": 45340,
+          "end_ms": 45480
+        }
+      ]
+    },
+    {
+      "text": "We will lift You higher",
+      "start_ms": 45660,
+      "end_ms": 48580,
+      "text_sk": "Pozdvihneme Ťa vyššie",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 45660,
+          "end_ms": 45760
+        },
+        {
+          "text": "will",
+          "start_ms": 46200,
+          "end_ms": 46580
+        },
+        {
+          "text": "lift",
+          "start_ms": 46680,
+          "end_ms": 47140
+        },
+        {
+          "text": "You",
+          "start_ms": 47200,
+          "end_ms": 47400
+        },
+        {
+          "text": "higher",
+          "start_ms": 47700,
+          "end_ms": 48580
+        }
+      ]
+    },
+    {
+      "text": "'Cause You are our desire",
+      "start_ms": 49580,
+      "end_ms": 52580,
+      "text_sk": "Lebo Ty si našou túžbou",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 49580,
+          "end_ms": 49920
+        },
+        {
+          "text": "You",
+          "start_ms": 49960,
+          "end_ms": 50640
+        },
+        {
+          "text": "are",
+          "start_ms": 50660,
+          "end_ms": 50780
+        },
+        {
+          "text": "our",
+          "start_ms": 50840,
+          "end_ms": 51140
+        },
+        {
+          "text": "desire",
+          "start_ms": 51220,
+          "end_ms": 52580
+        }
+      ]
+    },
+    {
+      "text": "Oh we will lift You higher",
+      "start_ms": 53540,
+      "end_ms": 56700,
+      "text_sk": "Ó pozdvihneme Ťa vyššie",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 53540,
+          "end_ms": 53740
+        },
+        {
+          "text": "we",
+          "start_ms": 53760,
+          "end_ms": 53900
+        },
+        {
+          "text": "will",
+          "start_ms": 54320,
+          "end_ms": 54740
+        },
+        {
+          "text": "lift",
+          "start_ms": 54840,
+          "end_ms": 55320
+        },
+        {
+          "text": "You",
+          "start_ms": 55360,
+          "end_ms": 55540
+        },
+        {
+          "text": "higher",
+          "start_ms": 55820,
+          "end_ms": 56700
+        }
+      ]
+    },
+    {
+      "text": "And we won't stop at no",
+      "start_ms": 57720,
+      "end_ms": 59460,
+      "text_sk": "A nezastavíme sa pred ničím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 57720,
+          "end_ms": 57820
+        },
+        {
+          "text": "we",
+          "start_ms": 57860,
+          "end_ms": 57960
+        },
+        {
+          "text": "won't",
+          "start_ms": 58220,
+          "end_ms": 58480
+        },
+        {
+          "text": "stop",
+          "start_ms": 58540,
+          "end_ms": 58900
+        },
+        {
+          "text": "at",
+          "start_ms": 59080,
+          "end_ms": 59240
+        },
+        {
+          "text": "no",
+          "start_ms": 59340,
+          "end_ms": 59460
+        }
+      ]
+    },
+    {
+      "text": "We won't stop at no",
+      "start_ms": 59880,
+      "end_ms": 61480,
+      "text_sk": "Nezastavíme sa pred ničím",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 59880,
+          "end_ms": 59980
+        },
+        {
+          "text": "won't",
+          "start_ms": 60260,
+          "end_ms": 60540
+        },
+        {
+          "text": "stop",
+          "start_ms": 60560,
+          "end_ms": 61020
+        },
+        {
+          "text": "at",
+          "start_ms": 61120,
+          "end_ms": 61280
+        },
+        {
+          "text": "no",
+          "start_ms": 61380,
+          "end_ms": 61480
+        }
+      ]
+    },
+    {
+      "text": "Five every need You will provide",
+      "start_ms": 61900,
+      "end_ms": 65800,
+      "text_sk": "Päť každú potrebu poskytneš",
+      "words": [
+        {
+          "text": "Five",
+          "start_ms": 61900,
+          "end_ms": 62560
+        },
+        {
+          "text": "every",
+          "start_ms": 63940,
+          "end_ms": 64260
+        },
+        {
+          "text": "need",
+          "start_ms": 64340,
+          "end_ms": 64700
+        },
+        {
+          "text": "You",
+          "start_ms": 64720,
+          "end_ms": 64820
+        },
+        {
+          "text": "will",
+          "start_ms": 64960,
+          "end_ms": 65160
+        },
+        {
+          "text": "provide",
+          "start_ms": 65220,
+          "end_ms": 65800
+        }
+      ]
+    },
+    {
+      "text": "Six God You are the reason I exist",
+      "start_ms": 65960,
+      "end_ms": 70940,
+      "text_sk": "Šesť Bože Ty si dôvodom mojej existencie",
+      "words": [
+        {
+          "text": "Six",
+          "start_ms": 65960,
+          "end_ms": 66480
+        },
+        {
+          "text": "God",
+          "start_ms": 67980,
+          "end_ms": 68240
+        },
+        {
+          "text": "You",
+          "start_ms": 68300,
+          "end_ms": 68420
+        },
+        {
+          "text": "are",
+          "start_ms": 68500,
+          "end_ms": 68740
+        },
+        {
+          "text": "the",
+          "start_ms": 68760,
+          "end_ms": 68860
+        },
+        {
+          "text": "reason",
+          "start_ms": 69060,
+          "end_ms": 69420
+        },
+        {
+          "text": "I",
+          "start_ms": 69860,
+          "end_ms": 69880
+        },
+        {
+          "text": "exist",
+          "start_ms": 69920,
+          "end_ms": 70940
+        }
+      ]
+    },
+    {
+      "text": "Yeah I've got so many reasons to praise",
+      "start_ms": 73340,
+      "end_ms": 77540,
+      "text_sk": "Áno mám toľko dôvodov chváliť",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 73340,
+          "end_ms": 73620
+        },
+        {
+          "text": "I've",
+          "start_ms": 73920,
+          "end_ms": 74060
+        },
+        {
+          "text": "got",
+          "start_ms": 74100,
+          "end_ms": 74400
+        },
+        {
+          "text": "so",
+          "start_ms": 74580,
+          "end_ms": 74740
+        },
+        {
+          "text": "many",
+          "start_ms": 75100,
+          "end_ms": 75760
+        },
+        {
+          "text": "reasons",
+          "start_ms": 76160,
+          "end_ms": 76600
+        },
+        {
+          "text": "to",
+          "start_ms": 76640,
+          "end_ms": 76740
+        },
+        {
+          "text": "praise",
+          "start_ms": 76880,
+          "end_ms": 77540
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 77660,
+      "end_ms": 78080,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 77660,
+          "end_ms": 78080
+        }
+      ]
+    },
+    {
+      "text": "In the morning in the evening",
+      "start_ms": 78960,
+      "end_ms": 80740,
+      "text_sk": "Ráno aj večer",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 78960,
+          "end_ms": 79040
+        },
+        {
+          "text": "the",
+          "start_ms": 79060,
+          "end_ms": 79140
+        },
+        {
+          "text": "morning",
+          "start_ms": 79200,
+          "end_ms": 79700
+        },
+        {
+          "text": "in",
+          "start_ms": 80000,
+          "end_ms": 80080
+        },
+        {
+          "text": "the",
+          "start_ms": 80100,
+          "end_ms": 80320
+        },
+        {
+          "text": "evening",
+          "start_ms": 80460,
+          "end_ms": 80740
+        }
+      ]
+    },
+    {
+      "text": "Every time of day",
+      "start_ms": 81000,
+      "end_ms": 82160,
+      "text_sk": "V každom čase dňa",
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 81000,
+          "end_ms": 81160
+        },
+        {
+          "text": "time",
+          "start_ms": 81220,
+          "end_ms": 81500
+        },
+        {
+          "text": "of",
+          "start_ms": 81520,
+          "end_ms": 81580
+        },
+        {
+          "text": "day",
+          "start_ms": 81640,
+          "end_ms": 82160
+        }
+      ]
+    },
+    {
+      "text": "We got a reason to lift up Jesus' name",
+      "start_ms": 82880,
+      "end_ms": 85560,
+      "text_sk": "Máme dôvod vyvyšovať Ježišovo meno",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 82880,
+          "end_ms": 82940
+        },
+        {
+          "text": "got",
+          "start_ms": 83000,
+          "end_ms": 83140
+        },
+        {
+          "text": "a",
+          "start_ms": 83180,
+          "end_ms": 83200
+        },
+        {
+          "text": "reason",
+          "start_ms": 83280,
+          "end_ms": 83720
+        },
+        {
+          "text": "to",
+          "start_ms": 84020,
+          "end_ms": 84100
+        },
+        {
+          "text": "lift",
+          "start_ms": 84260,
+          "end_ms": 84520
+        },
+        {
+          "text": "up",
+          "start_ms": 84580,
+          "end_ms": 84700
+        },
+        {
+          "text": "Jesus'",
+          "start_ms": 84740,
+          "end_ms": 85240
+        },
+        {
+          "text": "name",
+          "start_ms": 85320,
+          "end_ms": 85560
+        }
+      ]
+    },
+    {
+      "text": "Let's go",
+      "start_ms": 85580,
+      "end_ms": 85920,
+      "text_sk": "Poďme",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 85580,
+          "end_ms": 85780
+        },
+        {
+          "text": "go",
+          "start_ms": 85820,
+          "end_ms": 85920
+        }
+      ]
+    },
+    {
+      "text": "We will lift You higher",
+      "start_ms": 86380,
+      "end_ms": 88520,
+      "text_sk": "Pozdvihneme Ťa vyššie",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 86380,
+          "end_ms": 86480
+        },
+        {
+          "text": "will",
+          "start_ms": 86880,
+          "end_ms": 87240
+        },
+        {
+          "text": "lift",
+          "start_ms": 87380,
+          "end_ms": 87840
+        },
+        {
+          "text": "You",
+          "start_ms": 87860,
+          "end_ms": 88080
+        },
+        {
+          "text": "higher",
+          "start_ms": 88320,
+          "end_ms": 88520
+        }
+      ]
+    },
+    {
+      "text": "'Cause You are our desire",
+      "start_ms": 88820,
+      "end_ms": 93260,
+      "text_sk": "Lebo Ty si našou túžbou",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 88820,
+          "end_ms": 89120
+        },
+        {
+          "text": "You",
+          "start_ms": 89140,
+          "end_ms": 89360
+        },
+        {
+          "text": "are",
+          "start_ms": 90160,
+          "end_ms": 90480
+        },
+        {
+          "text": "our",
+          "start_ms": 90580,
+          "end_ms": 91540
+        },
+        {
+          "text": "desire",
+          "start_ms": 91880,
+          "end_ms": 93260
+        }
+      ]
+    },
+    {
+      "text": "Oh we will lift You higher",
+      "start_ms": 94240,
+      "end_ms": 97560,
+      "text_sk": "Ó pozdvihneme Ťa vyššie",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 94240,
+          "end_ms": 94460
+        },
+        {
+          "text": "we",
+          "start_ms": 94480,
+          "end_ms": 94600
+        },
+        {
+          "text": "will",
+          "start_ms": 94960,
+          "end_ms": 95300
+        },
+        {
+          "text": "lift",
+          "start_ms": 95460,
+          "end_ms": 95940
+        },
+        {
+          "text": "You",
+          "start_ms": 95980,
+          "end_ms": 96080
+        },
+        {
+          "text": "higher",
+          "start_ms": 96440,
+          "end_ms": 97560
+        }
+      ]
+    },
+    {
+      "text": "And we won't stop at no",
+      "start_ms": 98420,
+      "end_ms": 100140,
+      "text_sk": "A nezastavíme sa pred ničím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 98420,
+          "end_ms": 98520
+        },
+        {
+          "text": "we",
+          "start_ms": 98560,
+          "end_ms": 98660
+        },
+        {
+          "text": "won't",
+          "start_ms": 98860,
+          "end_ms": 99140
+        },
+        {
+          "text": "stop",
+          "start_ms": 99180,
+          "end_ms": 99540
+        },
+        {
+          "text": "at",
+          "start_ms": 99720,
+          "end_ms": 99880
+        },
+        {
+          "text": "no",
+          "start_ms": 100040,
+          "end_ms": 100140
+        }
+      ]
+    },
+    {
+      "text": "We won't stop at no",
+      "start_ms": 100560,
+      "end_ms": 102160,
+      "text_sk": "Nezastavíme sa pred ničím",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 100560,
+          "end_ms": 100680
+        },
+        {
+          "text": "won't",
+          "start_ms": 100920,
+          "end_ms": 101200
+        },
+        {
+          "text": "stop",
+          "start_ms": 101220,
+          "end_ms": 101560
+        },
+        {
+          "text": "at",
+          "start_ms": 101880,
+          "end_ms": 101920
+        },
+        {
+          "text": "no",
+          "start_ms": 102060,
+          "end_ms": 102160
+        }
+      ]
+    },
+    {
+      "text": "Gonna use all that we got",
+      "start_ms": 103340,
+      "end_ms": 104920,
+      "text_sk": "Využijeme všetko čo máme",
+      "words": [
+        {
+          "text": "Gonna",
+          "start_ms": 103340,
+          "end_ms": 103540
+        },
+        {
+          "text": "use",
+          "start_ms": 103700,
+          "end_ms": 103900
+        },
+        {
+          "text": "all",
+          "start_ms": 103960,
+          "end_ms": 104100
+        },
+        {
+          "text": "that",
+          "start_ms": 104260,
+          "end_ms": 104340
+        },
+        {
+          "text": "we",
+          "start_ms": 104400,
+          "end_ms": 104500
+        },
+        {
+          "text": "got",
+          "start_ms": 104620,
+          "end_ms": 104920
+        }
+      ]
+    },
+    {
+      "text": "To praise You on and on",
+      "start_ms": 105360,
+      "end_ms": 107000,
+      "text_sk": "Chváliť Ťa stále dokola",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 105360,
+          "end_ms": 105480
+        },
+        {
+          "text": "praise",
+          "start_ms": 105620,
+          "end_ms": 105940
+        },
+        {
+          "text": "You",
+          "start_ms": 105960,
+          "end_ms": 106120
+        },
+        {
+          "text": "on",
+          "start_ms": 106260,
+          "end_ms": 106400
+        },
+        {
+          "text": "and",
+          "start_ms": 106500,
+          "end_ms": 106720
+        },
+        {
+          "text": "on",
+          "start_ms": 106760,
+          "end_ms": 107000
+        }
+      ]
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "start_ms": 107500,
+      "end_ms": 111200,
+      "text_sk": "Nech všetko čo má dych vzdáva Mu chválu",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 107500,
+          "end_ms": 107680
+        },
+        {
+          "text": "everything",
+          "start_ms": 107820,
+          "end_ms": 108420
+        },
+        {
+          "text": "that",
+          "start_ms": 108460,
+          "end_ms": 108660
+        },
+        {
+          "text": "has",
+          "start_ms": 108720,
+          "end_ms": 109120
+        },
+        {
+          "text": "breath",
+          "start_ms": 109180,
+          "end_ms": 109620
+        },
+        {
+          "text": "give",
+          "start_ms": 109720,
+          "end_ms": 110200
+        },
+        {
+          "text": "Him",
+          "start_ms": 110260,
+          "end_ms": 110580
+        },
+        {
+          "text": "praise",
+          "start_ms": 110700,
+          "end_ms": 111200
+        }
+      ]
+    },
+    {
+      "text": "Let all the earth rejoice",
+      "start_ms": 111480,
+      "end_ms": 113240,
+      "text_sk": "Nech sa celá zem raduje",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 111480,
+          "end_ms": 111760
+        },
+        {
+          "text": "all",
+          "start_ms": 111840,
+          "end_ms": 111960
+        },
+        {
+          "text": "the",
+          "start_ms": 112000,
+          "end_ms": 112100
+        },
+        {
+          "text": "earth",
+          "start_ms": 112140,
+          "end_ms": 112500
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 112540,
+          "end_ms": 113240
+        }
+      ]
+    },
+    {
+      "text": "And make a joyful noise",
+      "start_ms": 113540,
+      "end_ms": 115320,
+      "text_sk": "A vydáva radostný zvuk",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 113540,
+          "end_ms": 113660
+        },
+        {
+          "text": "make",
+          "start_ms": 113760,
+          "end_ms": 114020
+        },
+        {
+          "text": "a",
+          "start_ms": 114100,
+          "end_ms": 114120
+        },
+        {
+          "text": "joyful",
+          "start_ms": 114240,
+          "end_ms": 114700
+        },
+        {
+          "text": "noise",
+          "start_ms": 114800,
+          "end_ms": 115320
+        }
+      ]
+    },
+    {
+      "text": "And give Him all the praise oh yeah",
+      "start_ms": 115680,
+      "end_ms": 119580,
+      "text_sk": "A vzdávať Mu všetku chválu ó áno",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 115680,
+          "end_ms": 115760
+        },
+        {
+          "text": "give",
+          "start_ms": 115820,
+          "end_ms": 116120
+        },
+        {
+          "text": "Him",
+          "start_ms": 116160,
+          "end_ms": 116320
+        },
+        {
+          "text": "all",
+          "start_ms": 116400,
+          "end_ms": 116560
+        },
+        {
+          "text": "the",
+          "start_ms": 116580,
+          "end_ms": 116660
+        },
+        {
+          "text": "praise",
+          "start_ms": 116820,
+          "end_ms": 118080
+        },
+        {
+          "text": "oh",
+          "start_ms": 118160,
+          "end_ms": 118300
+        },
+        {
+          "text": "yeah",
+          "start_ms": 118320,
+          "end_ms": 119580
+        }
+      ]
+    },
+    {
+      "text": "Gonna use all that we got",
+      "start_ms": 119600,
+      "end_ms": 120900,
+      "text_sk": "Využijeme všetko čo máme",
+      "words": [
+        {
+          "text": "Gonna",
+          "start_ms": 119600,
+          "end_ms": 119800
+        },
+        {
+          "text": "use",
+          "start_ms": 119940,
+          "end_ms": 120220
+        },
+        {
+          "text": "all",
+          "start_ms": 120360,
+          "end_ms": 120440
+        },
+        {
+          "text": "that",
+          "start_ms": 120500,
+          "end_ms": 120580
+        },
+        {
+          "text": "we",
+          "start_ms": 120620,
+          "end_ms": 120760
+        },
+        {
+          "text": "got",
+          "start_ms": 120780,
+          "end_ms": 120900
+        }
+      ]
+    },
+    {
+      "text": "To praise You on and on",
+      "start_ms": 121620,
+      "end_ms": 123100,
+      "text_sk": "Chváliť Ťa stále dokola",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 121620,
+          "end_ms": 121720
+        },
+        {
+          "text": "praise",
+          "start_ms": 121880,
+          "end_ms": 122220
+        },
+        {
+          "text": "You",
+          "start_ms": 122240,
+          "end_ms": 122320
+        },
+        {
+          "text": "on",
+          "start_ms": 122480,
+          "end_ms": 122700
+        },
+        {
+          "text": "and",
+          "start_ms": 122760,
+          "end_ms": 122960
+        },
+        {
+          "text": "on",
+          "start_ms": 123020,
+          "end_ms": 123100
+        }
+      ]
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "start_ms": 123680,
+      "end_ms": 127480,
+      "text_sk": "Nech všetko čo má dych vzdáva Mu chválu",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 123680,
+          "end_ms": 123960
+        },
+        {
+          "text": "everything",
+          "start_ms": 124060,
+          "end_ms": 124640
+        },
+        {
+          "text": "that",
+          "start_ms": 124720,
+          "end_ms": 124980
+        },
+        {
+          "text": "has",
+          "start_ms": 125020,
+          "end_ms": 125380
+        },
+        {
+          "text": "breath",
+          "start_ms": 125480,
+          "end_ms": 125960
+        },
+        {
+          "text": "give",
+          "start_ms": 126000,
+          "end_ms": 126500
+        },
+        {
+          "text": "Him",
+          "start_ms": 126540,
+          "end_ms": 126880
+        },
+        {
+          "text": "praise",
+          "start_ms": 126980,
+          "end_ms": 127480
+        }
+      ]
+    },
+    {
+      "text": "Let all the earth rejoice",
+      "start_ms": 127760,
+      "end_ms": 129500,
+      "text_sk": "Nech sa celá zem raduje",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 127760,
+          "end_ms": 128040
+        },
+        {
+          "text": "all",
+          "start_ms": 128120,
+          "end_ms": 128220
+        },
+        {
+          "text": "the",
+          "start_ms": 128260,
+          "end_ms": 128360
+        },
+        {
+          "text": "earth",
+          "start_ms": 128500,
+          "end_ms": 128780
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 128800,
+          "end_ms": 129500
+        }
+      ]
+    },
+    {
+      "text": "And make a joyful noise",
+      "start_ms": 129820,
+      "end_ms": 131640,
+      "text_sk": "A vydáva radostný zvuk",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 129820,
+          "end_ms": 130000
+        },
+        {
+          "text": "make",
+          "start_ms": 130040,
+          "end_ms": 130300
+        },
+        {
+          "text": "a",
+          "start_ms": 130360,
+          "end_ms": 130380
+        },
+        {
+          "text": "joyful",
+          "start_ms": 130500,
+          "end_ms": 130960
+        },
+        {
+          "text": "noise",
+          "start_ms": 131040,
+          "end_ms": 131640
+        }
+      ]
+    },
+    {
+      "text": "And give Him all the praise yes",
+      "start_ms": 131840,
+      "end_ms": 135080,
+      "text_sk": "A vzdávať Mu všetku chválu áno",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 131840,
+          "end_ms": 132000
+        },
+        {
+          "text": "give",
+          "start_ms": 132080,
+          "end_ms": 132400
+        },
+        {
+          "text": "Him",
+          "start_ms": 132420,
+          "end_ms": 132600
+        },
+        {
+          "text": "all",
+          "start_ms": 132660,
+          "end_ms": 132840
+        },
+        {
+          "text": "the",
+          "start_ms": 132860,
+          "end_ms": 132920
+        },
+        {
+          "text": "praise",
+          "start_ms": 133080,
+          "end_ms": 134000
+        },
+        {
+          "text": "yes",
+          "start_ms": 134640,
+          "end_ms": 135080
+        }
+      ]
+    },
+    {
+      "text": "Say",
+      "start_ms": 138640,
+      "end_ms": 138900,
+      "text_sk": "Povedz",
+      "words": [
+        {
+          "text": "Say",
+          "start_ms": 138640,
+          "end_ms": 138900
+        }
+      ]
+    },
+    {
+      "text": "We will lift You higher",
+      "start_ms": 139240,
+      "end_ms": 142020,
+      "text_sk": "Pozdvihneme Ťa vyššie",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 139240,
+          "end_ms": 139340
+        },
+        {
+          "text": "will",
+          "start_ms": 139720,
+          "end_ms": 140020
+        },
+        {
+          "text": "lift",
+          "start_ms": 140240,
+          "end_ms": 140720
+        },
+        {
+          "text": "You",
+          "start_ms": 140780,
+          "end_ms": 140940
+        },
+        {
+          "text": "higher",
+          "start_ms": 141260,
+          "end_ms": 142020
+        }
+      ]
+    },
+    {
+      "text": "'Cause You are our desire",
+      "start_ms": 142040,
+      "end_ms": 146180,
+      "text_sk": "Lebo Ty si našou túžbou",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 142040,
+          "end_ms": 142600
+        },
+        {
+          "text": "You",
+          "start_ms": 143220,
+          "end_ms": 143360
+        },
+        {
+          "text": "are",
+          "start_ms": 143820,
+          "end_ms": 144160
+        },
+        {
+          "text": "our",
+          "start_ms": 144380,
+          "end_ms": 144680
+        },
+        {
+          "text": "desire",
+          "start_ms": 144760,
+          "end_ms": 146180
+        }
+      ]
+    },
+    {
+      "text": "Oh we will lift You higher",
+      "start_ms": 147100,
+      "end_ms": 150240,
+      "text_sk": "Ó pozdvihneme Ťa vyššie",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 147100,
+          "end_ms": 147320
+        },
+        {
+          "text": "we",
+          "start_ms": 147340,
+          "end_ms": 147460
+        },
+        {
+          "text": "will",
+          "start_ms": 147860,
+          "end_ms": 148120
+        },
+        {
+          "text": "lift",
+          "start_ms": 148400,
+          "end_ms": 148860
+        },
+        {
+          "text": "You",
+          "start_ms": 148920,
+          "end_ms": 149040
+        },
+        {
+          "text": "higher",
+          "start_ms": 149380,
+          "end_ms": 150240
+        }
+      ]
+    },
+    {
+      "text": "Oh and we won't stop at no",
+      "start_ms": 151180,
+      "end_ms": 153020,
+      "text_sk": "Ó a nezastavíme sa pred ničím",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 151180,
+          "end_ms": 151320
+        },
+        {
+          "text": "and",
+          "start_ms": 151340,
+          "end_ms": 151440
+        },
+        {
+          "text": "we",
+          "start_ms": 151480,
+          "end_ms": 151560
+        },
+        {
+          "text": "won't",
+          "start_ms": 151740,
+          "end_ms": 152020
+        },
+        {
+          "text": "stop",
+          "start_ms": 152040,
+          "end_ms": 152540
+        },
+        {
+          "text": "at",
+          "start_ms": 152640,
+          "end_ms": 152860
+        },
+        {
+          "text": "no",
+          "start_ms": 152900,
+          "end_ms": 153020
+        }
+      ]
+    },
+    {
+      "text": "We won't stop at no",
+      "start_ms": 153460,
+      "end_ms": 157820,
+      "text_sk": "Nezastavíme sa pred ničím",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 153460,
+          "end_ms": 153580
+        },
+        {
+          "text": "won't",
+          "start_ms": 153780,
+          "end_ms": 154080
+        },
+        {
+          "text": "stop",
+          "start_ms": 154100,
+          "end_ms": 154580
+        },
+        {
+          "text": "at",
+          "start_ms": 154660,
+          "end_ms": 154840
+        },
+        {
+          "text": "no",
+          "start_ms": 154900,
+          "end_ms": 157820
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 0.67,
+    "model_load_sec": null,
+    "error": null
+  }
+}

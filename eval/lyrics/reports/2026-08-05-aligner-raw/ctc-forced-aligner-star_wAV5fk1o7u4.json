@@ -1,0 +1,1826 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wAV5fk1o7u4_vocal16k.wav",
+  "duration_ms": 228484,
+  "lines": [
+    {
+      "text": "In our darkest days",
+      "start_ms": 17500,
+      "end_ms": 19840,
+      "text_sk": "V našich najtemnejších dňoch",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 17500,
+          "end_ms": 17860
+        },
+        {
+          "text": "our",
+          "start_ms": 17900,
+          "end_ms": 18000
+        },
+        {
+          "text": "darkest",
+          "start_ms": 18080,
+          "end_ms": 18940
+        },
+        {
+          "text": "days",
+          "start_ms": 19020,
+          "end_ms": 19840
+        }
+      ]
+    },
+    {
+      "text": "Through the fear and pain",
+      "start_ms": 20460,
+      "end_ms": 22640,
+      "text_sk": "Cez strach a bolesť",
+      "words": [
+        {
+          "text": "Through",
+          "start_ms": 20460,
+          "end_ms": 20980
+        },
+        {
+          "text": "the",
+          "start_ms": 21100,
+          "end_ms": 21200
+        },
+        {
+          "text": "fear",
+          "start_ms": 21340,
+          "end_ms": 21940
+        },
+        {
+          "text": "and",
+          "start_ms": 22000,
+          "end_ms": 22100
+        },
+        {
+          "text": "pain",
+          "start_ms": 22180,
+          "end_ms": 22640
+        }
+      ]
+    },
+    {
+      "text": "You were always there with us",
+      "start_ms": 24160,
+      "end_ms": 26820,
+      "text_sk": "Vždy si bol s nami",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 24160,
+          "end_ms": 24320
+        },
+        {
+          "text": "were",
+          "start_ms": 24420,
+          "end_ms": 24700
+        },
+        {
+          "text": "always",
+          "start_ms": 24800,
+          "end_ms": 25460
+        },
+        {
+          "text": "there",
+          "start_ms": 25520,
+          "end_ms": 25840
+        },
+        {
+          "text": "with",
+          "start_ms": 26040,
+          "end_ms": 26680
+        },
+        {
+          "text": "us",
+          "start_ms": 26760,
+          "end_ms": 26820
+        }
+      ]
+    },
+    {
+      "text": "It's only by Your grace",
+      "start_ms": 30200,
+      "end_ms": 32980,
+      "text_sk": "Je to len vďaka Tvojej milosti",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 30200,
+          "end_ms": 30380
+        },
+        {
+          "text": "only",
+          "start_ms": 30500,
+          "end_ms": 31100
+        },
+        {
+          "text": "by",
+          "start_ms": 31240,
+          "end_ms": 31380
+        },
+        {
+          "text": "Your",
+          "start_ms": 31860,
+          "end_ms": 32000
+        },
+        {
+          "text": "grace",
+          "start_ms": 32040,
+          "end_ms": 32980
+        }
+      ]
+    },
+    {
+      "text": "That we are here today",
+      "start_ms": 33440,
+      "end_ms": 35700,
+      "text_sk": "Že sme tu dnes",
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 33440,
+          "end_ms": 33580
+        },
+        {
+          "text": "we",
+          "start_ms": 33680,
+          "end_ms": 33840
+        },
+        {
+          "text": "are",
+          "start_ms": 34380,
+          "end_ms": 34500
+        },
+        {
+          "text": "here",
+          "start_ms": 34540,
+          "end_ms": 35040
+        },
+        {
+          "text": "today",
+          "start_ms": 35100,
+          "end_ms": 35700
+        }
+      ]
+    },
+    {
+      "text": "We're the evidence of love",
+      "start_ms": 37320,
+      "end_ms": 40740,
+      "text_sk": "Sme dôkazom lásky",
+      "words": [
+        {
+          "text": "We're",
+          "start_ms": 37320,
+          "end_ms": 37560
+        },
+        {
+          "text": "the",
+          "start_ms": 37580,
+          "end_ms": 37700
+        },
+        {
+          "text": "evidence",
+          "start_ms": 37900,
+          "end_ms": 39020
+        },
+        {
+          "text": "of",
+          "start_ms": 39120,
+          "end_ms": 39780
+        },
+        {
+          "text": "love",
+          "start_ms": 39860,
+          "end_ms": 40740
+        }
+      ]
+    },
+    {
+      "text": "Over and over You have proved",
+      "start_ms": 43480,
+      "end_ms": 46360,
+      "text_sk": "Znovu a znovu si dokázal",
+      "words": [
+        {
+          "text": "Over",
+          "start_ms": 43480,
+          "end_ms": 44000
+        },
+        {
+          "text": "and",
+          "start_ms": 44060,
+          "end_ms": 44220
+        },
+        {
+          "text": "over",
+          "start_ms": 44500,
+          "end_ms": 44720
+        },
+        {
+          "text": "You",
+          "start_ms": 45020,
+          "end_ms": 45200
+        },
+        {
+          "text": "have",
+          "start_ms": 45380,
+          "end_ms": 45720
+        },
+        {
+          "text": "proved",
+          "start_ms": 45800,
+          "end_ms": 46360
+        }
+      ]
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "start_ms": 46600,
+      "end_ms": 49520,
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 46600,
+          "end_ms": 46800
+        },
+        {
+          "text": "You",
+          "start_ms": 46840,
+          "end_ms": 46960
+        },
+        {
+          "text": "are",
+          "start_ms": 47120,
+          "end_ms": 47220
+        },
+        {
+          "text": "the",
+          "start_ms": 47240,
+          "end_ms": 47340
+        },
+        {
+          "text": "rock",
+          "start_ms": 47460,
+          "end_ms": 47960
+        },
+        {
+          "text": "that'll",
+          "start_ms": 48080,
+          "end_ms": 48400
+        },
+        {
+          "text": "never",
+          "start_ms": 48460,
+          "end_ms": 48800
+        },
+        {
+          "text": "move",
+          "start_ms": 48880,
+          "end_ms": 49520
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 50100,
+      "end_ms": 52760,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 50100,
+          "end_ms": 50260
+        },
+        {
+          "text": "are",
+          "start_ms": 50400,
+          "end_ms": 50520
+        },
+        {
+          "text": "the",
+          "start_ms": 50540,
+          "end_ms": 50620
+        },
+        {
+          "text": "rock",
+          "start_ms": 50760,
+          "end_ms": 51220
+        },
+        {
+          "text": "that'll",
+          "start_ms": 51320,
+          "end_ms": 51700
+        },
+        {
+          "text": "never",
+          "start_ms": 51760,
+          "end_ms": 52100
+        },
+        {
+          "text": "move",
+          "start_ms": 52200,
+          "end_ms": 52760
+        }
+      ]
+    },
+    {
+      "text": "Again and again You come through",
+      "start_ms": 56560,
+      "end_ms": 59280,
+      "text_sk": "Znovu a znovu prichádzaš",
+      "words": [
+        {
+          "text": "Again",
+          "start_ms": 56560,
+          "end_ms": 56920
+        },
+        {
+          "text": "and",
+          "start_ms": 56980,
+          "end_ms": 57140
+        },
+        {
+          "text": "again",
+          "start_ms": 57160,
+          "end_ms": 57900
+        },
+        {
+          "text": "You",
+          "start_ms": 58180,
+          "end_ms": 58300
+        },
+        {
+          "text": "come",
+          "start_ms": 58520,
+          "end_ms": 58900
+        },
+        {
+          "text": "through",
+          "start_ms": 58960,
+          "end_ms": 59280
+        }
+      ]
+    },
+    {
+      "text": "Always faithful forever true",
+      "start_ms": 60080,
+      "end_ms": 62420,
+      "text_sk": "Vždy verný, navždy pravdivý",
+      "words": [
+        {
+          "text": "Always",
+          "start_ms": 60080,
+          "end_ms": 60500
+        },
+        {
+          "text": "faithful",
+          "start_ms": 60620,
+          "end_ms": 61300
+        },
+        {
+          "text": "forever",
+          "start_ms": 61420,
+          "end_ms": 61960
+        },
+        {
+          "text": "true",
+          "start_ms": 62060,
+          "end_ms": 62420
+        }
+      ]
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "start_ms": 62540,
+      "end_ms": 65880,
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 62540,
+          "end_ms": 63220
+        },
+        {
+          "text": "You",
+          "start_ms": 63260,
+          "end_ms": 63380
+        },
+        {
+          "text": "are",
+          "start_ms": 63560,
+          "end_ms": 63660
+        },
+        {
+          "text": "the",
+          "start_ms": 63680,
+          "end_ms": 63760
+        },
+        {
+          "text": "rock",
+          "start_ms": 63900,
+          "end_ms": 64400
+        },
+        {
+          "text": "that'll",
+          "start_ms": 64500,
+          "end_ms": 64840
+        },
+        {
+          "text": "never",
+          "start_ms": 64920,
+          "end_ms": 65240
+        },
+        {
+          "text": "move",
+          "start_ms": 65340,
+          "end_ms": 65880
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 66580,
+      "end_ms": 69180,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 66580,
+          "end_ms": 66680
+        },
+        {
+          "text": "are",
+          "start_ms": 66860,
+          "end_ms": 66980
+        },
+        {
+          "text": "the",
+          "start_ms": 67000,
+          "end_ms": 67100
+        },
+        {
+          "text": "rock",
+          "start_ms": 67220,
+          "end_ms": 67620
+        },
+        {
+          "text": "that'll",
+          "start_ms": 67760,
+          "end_ms": 68120
+        },
+        {
+          "text": "never",
+          "start_ms": 68220,
+          "end_ms": 68560
+        },
+        {
+          "text": "move",
+          "start_ms": 68640,
+          "end_ms": 69180
+        }
+      ]
+    },
+    {
+      "text": "Whatever we will face",
+      "start_ms": 69640,
+      "end_ms": 73220,
+      "text_sk": "Čokoľvek budeme čeliť",
+      "words": [
+        {
+          "text": "Whatever",
+          "start_ms": 69640,
+          "end_ms": 70620
+        },
+        {
+          "text": "we",
+          "start_ms": 70720,
+          "end_ms": 70860
+        },
+        {
+          "text": "will",
+          "start_ms": 71280,
+          "end_ms": 71420
+        },
+        {
+          "text": "face",
+          "start_ms": 71520,
+          "end_ms": 73220
+        }
+      ]
+    },
+    {
+      "text": "In the coming days",
+      "start_ms": 73500,
+      "end_ms": 75580,
+      "text_sk": "V nadchádzajúcich dňoch",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 73500,
+          "end_ms": 73720
+        },
+        {
+          "text": "the",
+          "start_ms": 73760,
+          "end_ms": 73860
+        },
+        {
+          "text": "coming",
+          "start_ms": 73960,
+          "end_ms": 74740
+        },
+        {
+          "text": "days",
+          "start_ms": 74800,
+          "end_ms": 75580
+        }
+      ]
+    },
+    {
+      "text": "We will never walk alone",
+      "start_ms": 76840,
+      "end_ms": 79780,
+      "text_sk": "Nikdy nebudeme kráčať sami",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 76840,
+          "end_ms": 76960
+        },
+        {
+          "text": "will",
+          "start_ms": 77060,
+          "end_ms": 77220
+        },
+        {
+          "text": "never",
+          "start_ms": 77340,
+          "end_ms": 77960
+        },
+        {
+          "text": "walk",
+          "start_ms": 78100,
+          "end_ms": 78500
+        },
+        {
+          "text": "alone",
+          "start_ms": 78600,
+          "end_ms": 79780
+        }
+      ]
+    },
+    {
+      "text": "And through it all we praise",
+      "start_ms": 82760,
+      "end_ms": 85560,
+      "text_sk": "A cez to všetko chválime",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 82760,
+          "end_ms": 82860
+        },
+        {
+          "text": "through",
+          "start_ms": 82980,
+          "end_ms": 83540
+        },
+        {
+          "text": "it",
+          "start_ms": 83680,
+          "end_ms": 83900
+        },
+        {
+          "text": "all",
+          "start_ms": 83980,
+          "end_ms": 84360
+        },
+        {
+          "text": "we",
+          "start_ms": 84420,
+          "end_ms": 84520
+        },
+        {
+          "text": "praise",
+          "start_ms": 84660,
+          "end_ms": 85560
+        }
+      ]
+    },
+    {
+      "text": "Our hope will never change",
+      "start_ms": 86160,
+      "end_ms": 88860,
+      "text_sk": "Naša nádej sa nikdy nezmení",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 86160,
+          "end_ms": 86280
+        },
+        {
+          "text": "hope",
+          "start_ms": 86360,
+          "end_ms": 86900
+        },
+        {
+          "text": "will",
+          "start_ms": 86940,
+          "end_ms": 87100
+        },
+        {
+          "text": "never",
+          "start_ms": 87220,
+          "end_ms": 87840
+        },
+        {
+          "text": "change",
+          "start_ms": 88020,
+          "end_ms": 88860
+        }
+      ]
+    },
+    {
+      "text": "Where Your presence is we're home",
+      "start_ms": 89980,
+      "end_ms": 95100,
+      "text_sk": "Kde je Tvoja prítomnosť, tam sme doma",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 89980,
+          "end_ms": 90180
+        },
+        {
+          "text": "Your",
+          "start_ms": 90240,
+          "end_ms": 90400
+        },
+        {
+          "text": "presence",
+          "start_ms": 90500,
+          "end_ms": 91340
+        },
+        {
+          "text": "is",
+          "start_ms": 91420,
+          "end_ms": 91600
+        },
+        {
+          "text": "we're",
+          "start_ms": 91700,
+          "end_ms": 91960
+        },
+        {
+          "text": "home",
+          "start_ms": 92500,
+          "end_ms": 95100
+        }
+      ]
+    },
+    {
+      "text": "Over and over You have proved",
+      "start_ms": 96240,
+      "end_ms": 98840,
+      "text_sk": "Znovu a znovu si dokázal",
+      "words": [
+        {
+          "text": "Over",
+          "start_ms": 96240,
+          "end_ms": 96600
+        },
+        {
+          "text": "and",
+          "start_ms": 96660,
+          "end_ms": 96820
+        },
+        {
+          "text": "over",
+          "start_ms": 97140,
+          "end_ms": 97480
+        },
+        {
+          "text": "You",
+          "start_ms": 97620,
+          "end_ms": 97780
+        },
+        {
+          "text": "have",
+          "start_ms": 98040,
+          "end_ms": 98360
+        },
+        {
+          "text": "proved",
+          "start_ms": 98420,
+          "end_ms": 98840
+        }
+      ]
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "start_ms": 99180,
+      "end_ms": 102060,
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 99180,
+          "end_ms": 99340
+        },
+        {
+          "text": "You",
+          "start_ms": 99420,
+          "end_ms": 99540
+        },
+        {
+          "text": "are",
+          "start_ms": 99680,
+          "end_ms": 99800
+        },
+        {
+          "text": "the",
+          "start_ms": 99820,
+          "end_ms": 99900
+        },
+        {
+          "text": "rock",
+          "start_ms": 100080,
+          "end_ms": 100580
+        },
+        {
+          "text": "that'll",
+          "start_ms": 100660,
+          "end_ms": 101000
+        },
+        {
+          "text": "never",
+          "start_ms": 101100,
+          "end_ms": 101420
+        },
+        {
+          "text": "move",
+          "start_ms": 101520,
+          "end_ms": 102060
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 102740,
+      "end_ms": 105440,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 102740,
+          "end_ms": 102860
+        },
+        {
+          "text": "are",
+          "start_ms": 103040,
+          "end_ms": 103140
+        },
+        {
+          "text": "the",
+          "start_ms": 103160,
+          "end_ms": 103240
+        },
+        {
+          "text": "rock",
+          "start_ms": 103380,
+          "end_ms": 103860
+        },
+        {
+          "text": "that'll",
+          "start_ms": 104120,
+          "end_ms": 104320
+        },
+        {
+          "text": "never",
+          "start_ms": 104380,
+          "end_ms": 104680
+        },
+        {
+          "text": "move",
+          "start_ms": 104800,
+          "end_ms": 105440
+        }
+      ]
+    },
+    {
+      "text": "Again and again You come through",
+      "start_ms": 109120,
+      "end_ms": 112480,
+      "text_sk": "Znovu a znovu prichádzaš",
+      "words": [
+        {
+          "text": "Again",
+          "start_ms": 109120,
+          "end_ms": 109540
+        },
+        {
+          "text": "and",
+          "start_ms": 109620,
+          "end_ms": 109760
+        },
+        {
+          "text": "again",
+          "start_ms": 109800,
+          "end_ms": 110480
+        },
+        {
+          "text": "You",
+          "start_ms": 110760,
+          "end_ms": 110900
+        },
+        {
+          "text": "come",
+          "start_ms": 111100,
+          "end_ms": 111540
+        },
+        {
+          "text": "through",
+          "start_ms": 111560,
+          "end_ms": 112480
+        }
+      ]
+    },
+    {
+      "text": "Always faithful forever true",
+      "start_ms": 112640,
+      "end_ms": 115000,
+      "text_sk": "Vždy verný, navždy pravdivý",
+      "words": [
+        {
+          "text": "Always",
+          "start_ms": 112640,
+          "end_ms": 113100
+        },
+        {
+          "text": "faithful",
+          "start_ms": 113200,
+          "end_ms": 113880
+        },
+        {
+          "text": "forever",
+          "start_ms": 114000,
+          "end_ms": 114540
+        },
+        {
+          "text": "true",
+          "start_ms": 114620,
+          "end_ms": 115000
+        }
+      ]
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "start_ms": 115400,
+      "end_ms": 118380,
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 115400,
+          "end_ms": 115840
+        },
+        {
+          "text": "You",
+          "start_ms": 115880,
+          "end_ms": 116000
+        },
+        {
+          "text": "are",
+          "start_ms": 116140,
+          "end_ms": 116260
+        },
+        {
+          "text": "the",
+          "start_ms": 116280,
+          "end_ms": 116380
+        },
+        {
+          "text": "rock",
+          "start_ms": 116520,
+          "end_ms": 117040
+        },
+        {
+          "text": "that'll",
+          "start_ms": 117140,
+          "end_ms": 117460
+        },
+        {
+          "text": "never",
+          "start_ms": 117540,
+          "end_ms": 117840
+        },
+        {
+          "text": "move",
+          "start_ms": 117940,
+          "end_ms": 118380
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 119160,
+      "end_ms": 121360,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 119160,
+          "end_ms": 119280
+        },
+        {
+          "text": "are",
+          "start_ms": 119480,
+          "end_ms": 119580
+        },
+        {
+          "text": "the",
+          "start_ms": 119600,
+          "end_ms": 119680
+        },
+        {
+          "text": "rock",
+          "start_ms": 119820,
+          "end_ms": 120280
+        },
+        {
+          "text": "that'll",
+          "start_ms": 120360,
+          "end_ms": 120700
+        },
+        {
+          "text": "never",
+          "start_ms": 120800,
+          "end_ms": 121140
+        },
+        {
+          "text": "move",
+          "start_ms": 121180,
+          "end_ms": 121360
+        }
+      ]
+    },
+    {
+      "text": "There's no one like You God yeah",
+      "start_ms": 127800,
+      "end_ms": 135680,
+      "text_sk": "Nikto nie je ako Ty, Bože, áno",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 127800,
+          "end_ms": 127980
+        },
+        {
+          "text": "no",
+          "start_ms": 128080,
+          "end_ms": 128180
+        },
+        {
+          "text": "one",
+          "start_ms": 128580,
+          "end_ms": 128780
+        },
+        {
+          "text": "like",
+          "start_ms": 128840,
+          "end_ms": 129220
+        },
+        {
+          "text": "You",
+          "start_ms": 129260,
+          "end_ms": 129360
+        },
+        {
+          "text": "God",
+          "start_ms": 129600,
+          "end_ms": 130220
+        },
+        {
+          "text": "yeah",
+          "start_ms": 135600,
+          "end_ms": 135680
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 135700,
+      "end_ms": 137780,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 135700,
+          "end_ms": 135980
+        },
+        {
+          "text": "gonna",
+          "start_ms": 136020,
+          "end_ms": 136300
+        },
+        {
+          "text": "shake",
+          "start_ms": 136400,
+          "end_ms": 136760
+        },
+        {
+          "text": "our",
+          "start_ms": 136940,
+          "end_ms": 137100
+        },
+        {
+          "text": "faith",
+          "start_ms": 137220,
+          "end_ms": 137780
+        }
+      ]
+    },
+    {
+      "text": "No matter what the world may say",
+      "start_ms": 138460,
+      "end_ms": 140820,
+      "text_sk": "Bez ohľadu na to, čo svet hovorí",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 138460,
+          "end_ms": 138560
+        },
+        {
+          "text": "matter",
+          "start_ms": 138680,
+          "end_ms": 139220
+        },
+        {
+          "text": "what",
+          "start_ms": 139300,
+          "end_ms": 139480
+        },
+        {
+          "text": "the",
+          "start_ms": 139520,
+          "end_ms": 139600
+        },
+        {
+          "text": "world",
+          "start_ms": 139720,
+          "end_ms": 140100
+        },
+        {
+          "text": "may",
+          "start_ms": 140160,
+          "end_ms": 140360
+        },
+        {
+          "text": "say",
+          "start_ms": 140520,
+          "end_ms": 140820
+        }
+      ]
+    },
+    {
+      "text": "We know Your word will never change",
+      "start_ms": 141760,
+      "end_ms": 144120,
+      "text_sk": "Vieme, že Tvoje slovo sa nikdy nezmení",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 141760,
+          "end_ms": 141840
+        },
+        {
+          "text": "know",
+          "start_ms": 141960,
+          "end_ms": 142280
+        },
+        {
+          "text": "Your",
+          "start_ms": 142380,
+          "end_ms": 142540
+        },
+        {
+          "text": "word",
+          "start_ms": 142600,
+          "end_ms": 142800
+        },
+        {
+          "text": "will",
+          "start_ms": 142820,
+          "end_ms": 142960
+        },
+        {
+          "text": "never",
+          "start_ms": 143000,
+          "end_ms": 143600
+        },
+        {
+          "text": "change",
+          "start_ms": 143780,
+          "end_ms": 144120
+        }
+      ]
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 144420,
+      "end_ms": 147940,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 144420,
+          "end_ms": 144500
+        },
+        {
+          "text": "stand",
+          "start_ms": 144600,
+          "end_ms": 145260
+        },
+        {
+          "text": "on",
+          "start_ms": 145320,
+          "end_ms": 145440
+        },
+        {
+          "text": "better",
+          "start_ms": 145520,
+          "end_ms": 146260
+        },
+        {
+          "text": "promises",
+          "start_ms": 146320,
+          "end_ms": 147940
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 148540,
+      "end_ms": 150920,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 148540,
+          "end_ms": 149160
+        },
+        {
+          "text": "gonna",
+          "start_ms": 149180,
+          "end_ms": 149460
+        },
+        {
+          "text": "shake",
+          "start_ms": 149580,
+          "end_ms": 149920
+        },
+        {
+          "text": "our",
+          "start_ms": 150080,
+          "end_ms": 150260
+        },
+        {
+          "text": "faith",
+          "start_ms": 150380,
+          "end_ms": 150920
+        }
+      ]
+    },
+    {
+      "text": "No matter what the world may say",
+      "start_ms": 151620,
+      "end_ms": 154020,
+      "text_sk": "Bez ohľadu na to, čo svet hovorí",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 151620,
+          "end_ms": 151700
+        },
+        {
+          "text": "matter",
+          "start_ms": 151840,
+          "end_ms": 152360
+        },
+        {
+          "text": "what",
+          "start_ms": 152440,
+          "end_ms": 152600
+        },
+        {
+          "text": "the",
+          "start_ms": 152660,
+          "end_ms": 152740
+        },
+        {
+          "text": "world",
+          "start_ms": 152860,
+          "end_ms": 153180
+        },
+        {
+          "text": "may",
+          "start_ms": 153280,
+          "end_ms": 153480
+        },
+        {
+          "text": "say",
+          "start_ms": 153660,
+          "end_ms": 154020
+        }
+      ]
+    },
+    {
+      "text": "We know Your word will never change",
+      "start_ms": 154880,
+      "end_ms": 157340,
+      "text_sk": "Vieme, že Tvoje slovo sa nikdy nezmení",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 154880,
+          "end_ms": 154980
+        },
+        {
+          "text": "know",
+          "start_ms": 155060,
+          "end_ms": 155440
+        },
+        {
+          "text": "Your",
+          "start_ms": 155540,
+          "end_ms": 155660
+        },
+        {
+          "text": "word",
+          "start_ms": 155720,
+          "end_ms": 155920
+        },
+        {
+          "text": "will",
+          "start_ms": 155940,
+          "end_ms": 156080
+        },
+        {
+          "text": "never",
+          "start_ms": 156160,
+          "end_ms": 156680
+        },
+        {
+          "text": "change",
+          "start_ms": 156920,
+          "end_ms": 157340
+        }
+      ]
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 157560,
+      "end_ms": 160540,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 157560,
+          "end_ms": 157640
+        },
+        {
+          "text": "stand",
+          "start_ms": 157760,
+          "end_ms": 158440
+        },
+        {
+          "text": "on",
+          "start_ms": 158500,
+          "end_ms": 158620
+        },
+        {
+          "text": "better",
+          "start_ms": 158660,
+          "end_ms": 159360
+        },
+        {
+          "text": "promises",
+          "start_ms": 159440,
+          "end_ms": 160540
+        }
+      ]
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 160840,
+      "end_ms": 163860,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 160840,
+          "end_ms": 160920
+        },
+        {
+          "text": "stand",
+          "start_ms": 161020,
+          "end_ms": 161720
+        },
+        {
+          "text": "on",
+          "start_ms": 161780,
+          "end_ms": 161900
+        },
+        {
+          "text": "better",
+          "start_ms": 161980,
+          "end_ms": 162640
+        },
+        {
+          "text": "promises",
+          "start_ms": 162760,
+          "end_ms": 163860
+        }
+      ]
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 164160,
+      "end_ms": 167060,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 164160,
+          "end_ms": 164240
+        },
+        {
+          "text": "stand",
+          "start_ms": 164340,
+          "end_ms": 165020
+        },
+        {
+          "text": "on",
+          "start_ms": 165080,
+          "end_ms": 165200
+        },
+        {
+          "text": "better",
+          "start_ms": 165280,
+          "end_ms": 165920
+        },
+        {
+          "text": "promises",
+          "start_ms": 166040,
+          "end_ms": 167060
+        }
+      ]
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 167400,
+      "end_ms": 174160,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 167400,
+          "end_ms": 167520
+        },
+        {
+          "text": "stand",
+          "start_ms": 167700,
+          "end_ms": 168300
+        },
+        {
+          "text": "on",
+          "start_ms": 168360,
+          "end_ms": 168480
+        },
+        {
+          "text": "better",
+          "start_ms": 168560,
+          "end_ms": 169200
+        },
+        {
+          "text": "promises",
+          "start_ms": 169320,
+          "end_ms": 174160
+        }
+      ]
+    },
+    {
+      "text": "Over and over You have proved",
+      "start_ms": 175120,
+      "end_ms": 177900,
+      "text_sk": "Znovu a znovu si dokázal",
+      "words": [
+        {
+          "text": "Over",
+          "start_ms": 175120,
+          "end_ms": 175500
+        },
+        {
+          "text": "and",
+          "start_ms": 175560,
+          "end_ms": 175720
+        },
+        {
+          "text": "over",
+          "start_ms": 175980,
+          "end_ms": 176260
+        },
+        {
+          "text": "You",
+          "start_ms": 176540,
+          "end_ms": 176660
+        },
+        {
+          "text": "have",
+          "start_ms": 177000,
+          "end_ms": 177300
+        },
+        {
+          "text": "proved",
+          "start_ms": 177400,
+          "end_ms": 177900
+        }
+      ]
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "start_ms": 178140,
+      "end_ms": 180800,
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 178140,
+          "end_ms": 178280
+        },
+        {
+          "text": "You",
+          "start_ms": 178340,
+          "end_ms": 178460
+        },
+        {
+          "text": "are",
+          "start_ms": 178640,
+          "end_ms": 178740
+        },
+        {
+          "text": "the",
+          "start_ms": 178760,
+          "end_ms": 178860
+        },
+        {
+          "text": "rock",
+          "start_ms": 178980,
+          "end_ms": 179440
+        },
+        {
+          "text": "that'll",
+          "start_ms": 179540,
+          "end_ms": 179900
+        },
+        {
+          "text": "never",
+          "start_ms": 179980,
+          "end_ms": 180300
+        },
+        {
+          "text": "move",
+          "start_ms": 180400,
+          "end_ms": 180800
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 181600,
+      "end_ms": 184120,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 181600,
+          "end_ms": 181720
+        },
+        {
+          "text": "are",
+          "start_ms": 181940,
+          "end_ms": 182040
+        },
+        {
+          "text": "the",
+          "start_ms": 182060,
+          "end_ms": 182140
+        },
+        {
+          "text": "rock",
+          "start_ms": 182280,
+          "end_ms": 182740
+        },
+        {
+          "text": "that'll",
+          "start_ms": 182840,
+          "end_ms": 183220
+        },
+        {
+          "text": "never",
+          "start_ms": 183280,
+          "end_ms": 183600
+        },
+        {
+          "text": "move",
+          "start_ms": 183700,
+          "end_ms": 184120
+        }
+      ]
+    },
+    {
+      "text": "Again and again You come through",
+      "start_ms": 188060,
+      "end_ms": 190880,
+      "text_sk": "Znovu a znovu prichádzaš",
+      "words": [
+        {
+          "text": "Again",
+          "start_ms": 188060,
+          "end_ms": 188440
+        },
+        {
+          "text": "and",
+          "start_ms": 188520,
+          "end_ms": 188680
+        },
+        {
+          "text": "again",
+          "start_ms": 188700,
+          "end_ms": 189440
+        },
+        {
+          "text": "You",
+          "start_ms": 189700,
+          "end_ms": 189820
+        },
+        {
+          "text": "come",
+          "start_ms": 190020,
+          "end_ms": 190460
+        },
+        {
+          "text": "through",
+          "start_ms": 190500,
+          "end_ms": 190880
+        }
+      ]
+    },
+    {
+      "text": "You're always faithful forever true",
+      "start_ms": 191340,
+      "end_ms": 193920,
+      "text_sk": "Si vždy verný, navždy pravdivý",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 191340,
+          "end_ms": 191540
+        },
+        {
+          "text": "always",
+          "start_ms": 191600,
+          "end_ms": 192000
+        },
+        {
+          "text": "faithful",
+          "start_ms": 192120,
+          "end_ms": 192800
+        },
+        {
+          "text": "forever",
+          "start_ms": 192900,
+          "end_ms": 193460
+        },
+        {
+          "text": "true",
+          "start_ms": 193540,
+          "end_ms": 193920
+        }
+      ]
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "start_ms": 194540,
+      "end_ms": 197460,
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 194540,
+          "end_ms": 194740
+        },
+        {
+          "text": "You",
+          "start_ms": 194800,
+          "end_ms": 194900
+        },
+        {
+          "text": "are",
+          "start_ms": 195060,
+          "end_ms": 195160
+        },
+        {
+          "text": "the",
+          "start_ms": 195200,
+          "end_ms": 195280
+        },
+        {
+          "text": "rock",
+          "start_ms": 195420,
+          "end_ms": 195840
+        },
+        {
+          "text": "that'll",
+          "start_ms": 195960,
+          "end_ms": 196380
+        },
+        {
+          "text": "never",
+          "start_ms": 196440,
+          "end_ms": 196760
+        },
+        {
+          "text": "move",
+          "start_ms": 196880,
+          "end_ms": 197460
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 198080,
+      "end_ms": 200620,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 198080,
+          "end_ms": 198200
+        },
+        {
+          "text": "are",
+          "start_ms": 198360,
+          "end_ms": 198460
+        },
+        {
+          "text": "the",
+          "start_ms": 198480,
+          "end_ms": 198560
+        },
+        {
+          "text": "rock",
+          "start_ms": 198700,
+          "end_ms": 199200
+        },
+        {
+          "text": "that'll",
+          "start_ms": 199280,
+          "end_ms": 199660
+        },
+        {
+          "text": "never",
+          "start_ms": 199700,
+          "end_ms": 200020
+        },
+        {
+          "text": "move",
+          "start_ms": 200140,
+          "end_ms": 200620
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 201140,
+      "end_ms": 203540,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 201140,
+          "end_ms": 201760
+        },
+        {
+          "text": "gonna",
+          "start_ms": 201780,
+          "end_ms": 202060
+        },
+        {
+          "text": "shake",
+          "start_ms": 202180,
+          "end_ms": 202520
+        },
+        {
+          "text": "our",
+          "start_ms": 202720,
+          "end_ms": 202840
+        },
+        {
+          "text": "faith",
+          "start_ms": 202880,
+          "end_ms": 203540
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 204420,
+      "end_ms": 206840,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 204420,
+          "end_ms": 205040
+        },
+        {
+          "text": "gonna",
+          "start_ms": 205060,
+          "end_ms": 205340
+        },
+        {
+          "text": "shake",
+          "start_ms": 205460,
+          "end_ms": 205820
+        },
+        {
+          "text": "our",
+          "start_ms": 205980,
+          "end_ms": 206140
+        },
+        {
+          "text": "faith",
+          "start_ms": 206160,
+          "end_ms": 206840
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith yeah",
+      "start_ms": 207720,
+      "end_ms": 228500,
+      "text_sk": "Nič neotrasie našou vierou, áno",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 207720,
+          "end_ms": 208320
+        },
+        {
+          "text": "gonna",
+          "start_ms": 208340,
+          "end_ms": 208620
+        },
+        {
+          "text": "shake",
+          "start_ms": 208760,
+          "end_ms": 209100
+        },
+        {
+          "text": "our",
+          "start_ms": 209260,
+          "end_ms": 209420
+        },
+        {
+          "text": "faith",
+          "start_ms": 209460,
+          "end_ms": 210200
+        },
+        {
+          "text": "yeah",
+          "start_ms": 228420,
+          "end_ms": 228500
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 0.89,
+    "model_load_sec": null,
+    "error": null
+  }
+}

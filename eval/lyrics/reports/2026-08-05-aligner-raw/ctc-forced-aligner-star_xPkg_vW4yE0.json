@@ -1,0 +1,506 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\xPkg_vW4yE0_vocal16k.wav",
+  "duration_ms": 258043,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed",
+      "start_ms": 8500,
+      "end_ms": 11700,
+      "text_sk": "Keď je moje srdce preťažené",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 8500,
+          "end_ms": 8680
+        },
+        {
+          "text": "my",
+          "start_ms": 8760,
+          "end_ms": 8960
+        },
+        {
+          "text": "heart",
+          "start_ms": 9060,
+          "end_ms": 9840
+        },
+        {
+          "text": "is",
+          "start_ms": 9920,
+          "end_ms": 10060
+        },
+        {
+          "text": "overwhelmed",
+          "start_ms": 10220,
+          "end_ms": 11700
+        }
+      ]
+    },
+    {
+      "text": "When I barely trust myself lead me to the rock",
+      "start_ms": 14520,
+      "end_ms": 19320,
+      "text_sk": "Keď si sotva verím, veď ma ku skale",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 14520,
+          "end_ms": 14780
+        },
+        {
+          "text": "I",
+          "start_ms": 14860,
+          "end_ms": 14880
+        },
+        {
+          "text": "barely",
+          "start_ms": 15040,
+          "end_ms": 15880
+        },
+        {
+          "text": "trust",
+          "start_ms": 15960,
+          "end_ms": 16660
+        },
+        {
+          "text": "myself",
+          "start_ms": 16760,
+          "end_ms": 18040
+        },
+        {
+          "text": "lead",
+          "start_ms": 18060,
+          "end_ms": 18240
+        },
+        {
+          "text": "me",
+          "start_ms": 18280,
+          "end_ms": 18360
+        },
+        {
+          "text": "to",
+          "start_ms": 18480,
+          "end_ms": 18620
+        },
+        {
+          "text": "the",
+          "start_ms": 18760,
+          "end_ms": 18860
+        },
+        {
+          "text": "rock",
+          "start_ms": 19020,
+          "end_ms": 19320
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 19340,
+      "end_ms": 23560,
+      "text_sk": "Vyššie než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 19340,
+          "end_ms": 22300
+        },
+        {
+          "text": "than",
+          "start_ms": 22560,
+          "end_ms": 22760
+        },
+        {
+          "text": "I",
+          "start_ms": 23540,
+          "end_ms": 23560
+        }
+      ]
+    },
+    {
+      "text": "When the night is closing in",
+      "start_ms": 26520,
+      "end_ms": 29500,
+      "text_sk": "Keď sa noc blíži",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 26520,
+          "end_ms": 26680
+        },
+        {
+          "text": "the",
+          "start_ms": 26760,
+          "end_ms": 26840
+        },
+        {
+          "text": "night",
+          "start_ms": 27000,
+          "end_ms": 27780
+        },
+        {
+          "text": "is",
+          "start_ms": 27840,
+          "end_ms": 27940
+        },
+        {
+          "text": "closing",
+          "start_ms": 28000,
+          "end_ms": 29060
+        },
+        {
+          "text": "in",
+          "start_ms": 29120,
+          "end_ms": 29500
+        }
+      ]
+    },
+    {
+      "text": "To remind me of my sin lead me to the rock",
+      "start_ms": 32460,
+      "end_ms": 70740,
+      "text_sk": "Aby mi pripomenula môj hriech, veď ma ku skale",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 32460,
+          "end_ms": 32640
+        },
+        {
+          "text": "remind",
+          "start_ms": 32820,
+          "end_ms": 33540
+        },
+        {
+          "text": "me",
+          "start_ms": 33780,
+          "end_ms": 33920
+        },
+        {
+          "text": "of",
+          "start_ms": 34160,
+          "end_ms": 34700
+        },
+        {
+          "text": "my",
+          "start_ms": 34760,
+          "end_ms": 34820
+        },
+        {
+          "text": "sin",
+          "start_ms": 35180,
+          "end_ms": 36240
+        },
+        {
+          "text": "lead",
+          "start_ms": 44040,
+          "end_ms": 44240
+        },
+        {
+          "text": "me",
+          "start_ms": 44280,
+          "end_ms": 44380
+        },
+        {
+          "text": "to",
+          "start_ms": 44520,
+          "end_ms": 44640
+        },
+        {
+          "text": "the",
+          "start_ms": 52520,
+          "end_ms": 52620
+        },
+        {
+          "text": "rock",
+          "start_ms": 69380,
+          "end_ms": 70740
+        }
+      ]
+    },
+    {
+      "text": "Higher than I lead me to the rock",
+      "start_ms": 85700,
+      "end_ms": 103600,
+      "text_sk": "Vyššie než ja, veď ma ku skale",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 85700,
+          "end_ms": 86100
+        },
+        {
+          "text": "than",
+          "start_ms": 91680,
+          "end_ms": 91980
+        },
+        {
+          "text": "I",
+          "start_ms": 92580,
+          "end_ms": 92600
+        },
+        {
+          "text": "lead",
+          "start_ms": 101960,
+          "end_ms": 102160
+        },
+        {
+          "text": "me",
+          "start_ms": 102180,
+          "end_ms": 102280
+        },
+        {
+          "text": "to",
+          "start_ms": 102440,
+          "end_ms": 102560
+        },
+        {
+          "text": "the",
+          "start_ms": 102700,
+          "end_ms": 102780
+        },
+        {
+          "text": "rock",
+          "start_ms": 102960,
+          "end_ms": 103600
+        }
+      ]
+    },
+    {
+      "text": "Higher than I higher than I",
+      "start_ms": 104920,
+      "end_ms": 155900,
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 104920,
+          "end_ms": 105220
+        },
+        {
+          "text": "than",
+          "start_ms": 117960,
+          "end_ms": 118140
+        },
+        {
+          "text": "I",
+          "start_ms": 118400,
+          "end_ms": 118420
+        },
+        {
+          "text": "higher",
+          "start_ms": 128600,
+          "end_ms": 128800
+        },
+        {
+          "text": "than",
+          "start_ms": 132640,
+          "end_ms": 132820
+        },
+        {
+          "text": "I",
+          "start_ms": 155880,
+          "end_ms": 155900
+        }
+      ]
+    },
+    {
+      "text": "Higher than I higher than I",
+      "start_ms": 161760,
+      "end_ms": 192420,
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 161760,
+          "end_ms": 162780
+        },
+        {
+          "text": "than",
+          "start_ms": 163660,
+          "end_ms": 163940
+        },
+        {
+          "text": "I",
+          "start_ms": 184340,
+          "end_ms": 184360
+        },
+        {
+          "text": "higher",
+          "start_ms": 186500,
+          "end_ms": 186940
+        },
+        {
+          "text": "than",
+          "start_ms": 188520,
+          "end_ms": 188800
+        },
+        {
+          "text": "I",
+          "start_ms": 192400,
+          "end_ms": 192420
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 196000,
+      "end_ms": 204600,
+      "text_sk": "Vyššie než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 196000,
+          "end_ms": 196800
+        },
+        {
+          "text": "than",
+          "start_ms": 200520,
+          "end_ms": 200820
+        },
+        {
+          "text": "I",
+          "start_ms": 204580,
+          "end_ms": 204600
+        }
+      ]
+    },
+    {
+      "text": "So much stronger so much greater",
+      "start_ms": 207680,
+      "end_ms": 219400,
+      "text_sk": "Oveľa silnejší, oveľa väčší",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 207680,
+          "end_ms": 207820
+        },
+        {
+          "text": "much",
+          "start_ms": 208240,
+          "end_ms": 208660
+        },
+        {
+          "text": "stronger",
+          "start_ms": 208680,
+          "end_ms": 209480
+        },
+        {
+          "text": "so",
+          "start_ms": 209740,
+          "end_ms": 209860
+        },
+        {
+          "text": "much",
+          "start_ms": 218240,
+          "end_ms": 218600
+        },
+        {
+          "text": "greater",
+          "start_ms": 218680,
+          "end_ms": 219400
+        }
+      ]
+    },
+    {
+      "text": "So much wiser so much higher",
+      "start_ms": 219760,
+      "end_ms": 229420,
+      "text_sk": "Oveľa múdrejší, oveľa vyšší",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 219760,
+          "end_ms": 219880
+        },
+        {
+          "text": "much",
+          "start_ms": 220260,
+          "end_ms": 220600
+        },
+        {
+          "text": "wiser",
+          "start_ms": 226760,
+          "end_ms": 227380
+        },
+        {
+          "text": "so",
+          "start_ms": 227740,
+          "end_ms": 227880
+        },
+        {
+          "text": "much",
+          "start_ms": 228240,
+          "end_ms": 228620
+        },
+        {
+          "text": "higher",
+          "start_ms": 229100,
+          "end_ms": 229420
+        }
+      ]
+    },
+    {
+      "text": "Higher than I higher than I",
+      "start_ms": 239940,
+      "end_ms": 245260,
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 239940,
+          "end_ms": 240400
+        },
+        {
+          "text": "than",
+          "start_ms": 243960,
+          "end_ms": 244080
+        },
+        {
+          "text": "I",
+          "start_ms": 244160,
+          "end_ms": 244180
+        },
+        {
+          "text": "higher",
+          "start_ms": 244200,
+          "end_ms": 244380
+        },
+        {
+          "text": "than",
+          "start_ms": 244800,
+          "end_ms": 244920
+        },
+        {
+          "text": "I",
+          "start_ms": 245240,
+          "end_ms": 245260
+        }
+      ]
+    },
+    {
+      "text": "[Instrumental]",
+      "start_ms": 257820,
+      "end_ms": 258060,
+      "text_sk": "[Inštrumentálna časť]",
+      "words": [
+        {
+          "text": "[Instrumental]",
+          "start_ms": 257820,
+          "end_ms": 258060
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 0.88,
+    "model_load_sec": null,
+    "error": null
+  }
+}

@@ -1,0 +1,2510 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\YbGFYaA0SbY_vocal16k.wav",
+  "duration_ms": 298086,
+  "lines": [
+    {
+      "text": "There was no way until You made one",
+      "start_ms": 8900,
+      "end_ms": 13400,
+      "text_sk": "Nebola žiadna cesta, kým si ju nevytvoril",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 8900,
+          "end_ms": 9220
+        },
+        {
+          "text": "was",
+          "start_ms": 9360,
+          "end_ms": 9500
+        },
+        {
+          "text": "no",
+          "start_ms": 9580,
+          "end_ms": 9700
+        },
+        {
+          "text": "way",
+          "start_ms": 9980,
+          "end_ms": 10460
+        },
+        {
+          "text": "until",
+          "start_ms": 11280,
+          "end_ms": 11560
+        },
+        {
+          "text": "You",
+          "start_ms": 11700,
+          "end_ms": 11780
+        },
+        {
+          "text": "made",
+          "start_ms": 11860,
+          "end_ms": 12240
+        },
+        {
+          "text": "one",
+          "start_ms": 12480,
+          "end_ms": 13400
+        }
+      ]
+    },
+    {
+      "text": "Grace upon grace hallelujah",
+      "start_ms": 15540,
+      "end_ms": 19760,
+      "text_sk": "Milosť na milosť, aleluja",
+      "words": [
+        {
+          "text": "Grace",
+          "start_ms": 15540,
+          "end_ms": 16040
+        },
+        {
+          "text": "upon",
+          "start_ms": 16080,
+          "end_ms": 16560
+        },
+        {
+          "text": "grace",
+          "start_ms": 16660,
+          "end_ms": 17520
+        },
+        {
+          "text": "hallelujah",
+          "start_ms": 18060,
+          "end_ms": 19760
+        }
+      ]
+    },
+    {
+      "text": "Even though I don't deserve it You did it",
+      "start_ms": 21480,
+      "end_ms": 25200,
+      "text_sk": "Hoci si to nezaslúžim, urobil si to",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 21480,
+          "end_ms": 21720
+        },
+        {
+          "text": "though",
+          "start_ms": 21800,
+          "end_ms": 22060
+        },
+        {
+          "text": "I",
+          "start_ms": 22080,
+          "end_ms": 22100
+        },
+        {
+          "text": "don't",
+          "start_ms": 22240,
+          "end_ms": 22800
+        },
+        {
+          "text": "deserve",
+          "start_ms": 22880,
+          "end_ms": 23660
+        },
+        {
+          "text": "it",
+          "start_ms": 23820,
+          "end_ms": 23860
+        },
+        {
+          "text": "You",
+          "start_ms": 24540,
+          "end_ms": 24640
+        },
+        {
+          "text": "did",
+          "start_ms": 24740,
+          "end_ms": 25020
+        },
+        {
+          "text": "it",
+          "start_ms": 25040,
+          "end_ms": 25200
+        }
+      ]
+    },
+    {
+      "text": "Even though I couldn't earn it You give it",
+      "start_ms": 28140,
+      "end_ms": 35400,
+      "text_sk": "Hoci som si to nemohol zaslúžiť, dávaš mi to",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 28140,
+          "end_ms": 28380
+        },
+        {
+          "text": "though",
+          "start_ms": 28460,
+          "end_ms": 28740
+        },
+        {
+          "text": "I",
+          "start_ms": 28760,
+          "end_ms": 28780
+        },
+        {
+          "text": "couldn't",
+          "start_ms": 28920,
+          "end_ms": 29820
+        },
+        {
+          "text": "earn",
+          "start_ms": 29860,
+          "end_ms": 30220
+        },
+        {
+          "text": "it",
+          "start_ms": 30300,
+          "end_ms": 30440
+        },
+        {
+          "text": "You",
+          "start_ms": 31200,
+          "end_ms": 31280
+        },
+        {
+          "text": "give",
+          "start_ms": 31400,
+          "end_ms": 32000
+        },
+        {
+          "text": "it",
+          "start_ms": 35360,
+          "end_ms": 35400
+        }
+      ]
+    },
+    {
+      "text": "Who am I that You keep me on Your mind",
+      "start_ms": 35600,
+      "end_ms": 40840,
+      "text_sk": "Kto som ja, že na mňa myslíš",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 35600,
+          "end_ms": 35720
+        },
+        {
+          "text": "am",
+          "start_ms": 36540,
+          "end_ms": 37280
+        },
+        {
+          "text": "I",
+          "start_ms": 37980,
+          "end_ms": 38000
+        },
+        {
+          "text": "that",
+          "start_ms": 38100,
+          "end_ms": 38500
+        },
+        {
+          "text": "You",
+          "start_ms": 38520,
+          "end_ms": 38800
+        },
+        {
+          "text": "keep",
+          "start_ms": 38920,
+          "end_ms": 39280
+        },
+        {
+          "text": "me",
+          "start_ms": 39340,
+          "end_ms": 39460
+        },
+        {
+          "text": "on",
+          "start_ms": 39840,
+          "end_ms": 40000
+        },
+        {
+          "text": "Your",
+          "start_ms": 40160,
+          "end_ms": 40460
+        },
+        {
+          "text": "mind",
+          "start_ms": 40560,
+          "end_ms": 40840
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 41000,
+      "end_ms": 43820,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 41000,
+          "end_ms": 41440
+        },
+        {
+          "text": "I'm",
+          "start_ms": 41460,
+          "end_ms": 41660
+        },
+        {
+          "text": "just",
+          "start_ms": 41800,
+          "end_ms": 42140
+        },
+        {
+          "text": "grateful",
+          "start_ms": 42220,
+          "end_ms": 42900
+        },
+        {
+          "text": "for",
+          "start_ms": 43060,
+          "end_ms": 43360
+        },
+        {
+          "text": "You",
+          "start_ms": 43500,
+          "end_ms": 43820
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 44740,
+      "end_ms": 46960,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 44740,
+          "end_ms": 45000
+        },
+        {
+          "text": "I'm",
+          "start_ms": 45020,
+          "end_ms": 45120
+        },
+        {
+          "text": "just",
+          "start_ms": 45180,
+          "end_ms": 45480
+        },
+        {
+          "text": "grateful",
+          "start_ms": 45520,
+          "end_ms": 46260
+        },
+        {
+          "text": "for",
+          "start_ms": 46380,
+          "end_ms": 46620
+        },
+        {
+          "text": "You",
+          "start_ms": 46800,
+          "end_ms": 46960
+        }
+      ]
+    },
+    {
+      "text": "All my life You've been right here by my side",
+      "start_ms": 49020,
+      "end_ms": 53600,
+      "text_sk": "Celý môj život si bol tu po mojom boku",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 49020,
+          "end_ms": 49340
+        },
+        {
+          "text": "my",
+          "start_ms": 49740,
+          "end_ms": 49800
+        },
+        {
+          "text": "life",
+          "start_ms": 50520,
+          "end_ms": 51500
+        },
+        {
+          "text": "You've",
+          "start_ms": 51600,
+          "end_ms": 51800
+        },
+        {
+          "text": "been",
+          "start_ms": 51820,
+          "end_ms": 52080
+        },
+        {
+          "text": "right",
+          "start_ms": 52220,
+          "end_ms": 52520
+        },
+        {
+          "text": "here",
+          "start_ms": 52660,
+          "end_ms": 52800
+        },
+        {
+          "text": "by",
+          "start_ms": 52880,
+          "end_ms": 52920
+        },
+        {
+          "text": "my",
+          "start_ms": 53080,
+          "end_ms": 53340
+        },
+        {
+          "text": "side",
+          "start_ms": 53380,
+          "end_ms": 53600
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 54320,
+      "end_ms": 56900,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 54320,
+          "end_ms": 54760
+        },
+        {
+          "text": "I'm",
+          "start_ms": 54840,
+          "end_ms": 55000
+        },
+        {
+          "text": "just",
+          "start_ms": 55100,
+          "end_ms": 55440
+        },
+        {
+          "text": "grateful",
+          "start_ms": 55500,
+          "end_ms": 56180
+        },
+        {
+          "text": "for",
+          "start_ms": 56320,
+          "end_ms": 56580
+        },
+        {
+          "text": "You",
+          "start_ms": 56780,
+          "end_ms": 56900
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 58060,
+      "end_ms": 60500,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 58060,
+          "end_ms": 58340
+        },
+        {
+          "text": "I'm",
+          "start_ms": 58380,
+          "end_ms": 58460
+        },
+        {
+          "text": "just",
+          "start_ms": 58500,
+          "end_ms": 58820
+        },
+        {
+          "text": "grateful",
+          "start_ms": 58860,
+          "end_ms": 59600
+        },
+        {
+          "text": "for",
+          "start_ms": 59720,
+          "end_ms": 59960
+        },
+        {
+          "text": "You",
+          "start_ms": 60140,
+          "end_ms": 60500
+        }
+      ]
+    },
+    {
+      "text": "Holy holy there's only One",
+      "start_ms": 63900,
+      "end_ms": 67680,
+      "text_sk": "Svätý, svätý, je len jeden",
+      "words": [
+        {
+          "text": "Holy",
+          "start_ms": 63900,
+          "end_ms": 64460
+        },
+        {
+          "text": "holy",
+          "start_ms": 64560,
+          "end_ms": 65000
+        },
+        {
+          "text": "there's",
+          "start_ms": 66440,
+          "end_ms": 66700
+        },
+        {
+          "text": "only",
+          "start_ms": 66760,
+          "end_ms": 67540
+        },
+        {
+          "text": "One",
+          "start_ms": 67600,
+          "end_ms": 67680
+        }
+      ]
+    },
+    {
+      "text": "I give You glory for all that You've done",
+      "start_ms": 68160,
+      "end_ms": 76520,
+      "text_sk": "Vzdávam Ti slávu za všetko, čo si urobil",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 68160,
+          "end_ms": 68180
+        },
+        {
+          "text": "give",
+          "start_ms": 70620,
+          "end_ms": 71120
+        },
+        {
+          "text": "You",
+          "start_ms": 71140,
+          "end_ms": 71200
+        },
+        {
+          "text": "glory",
+          "start_ms": 71220,
+          "end_ms": 71740
+        },
+        {
+          "text": "for",
+          "start_ms": 72900,
+          "end_ms": 73000
+        },
+        {
+          "text": "all",
+          "start_ms": 73160,
+          "end_ms": 73280
+        },
+        {
+          "text": "that",
+          "start_ms": 73360,
+          "end_ms": 73580
+        },
+        {
+          "text": "You've",
+          "start_ms": 73820,
+          "end_ms": 74040
+        },
+        {
+          "text": "done",
+          "start_ms": 74380,
+          "end_ms": 76520
+        }
+      ]
+    },
+    {
+      "text": "Even though I don't deserve it You did it oohooh",
+      "start_ms": 76580,
+      "end_ms": 82880,
+      "text_sk": "Hoci si to nezaslúžim, urobil si to, óó",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 76580,
+          "end_ms": 76860
+        },
+        {
+          "text": "though",
+          "start_ms": 77280,
+          "end_ms": 77640
+        },
+        {
+          "text": "I",
+          "start_ms": 77720,
+          "end_ms": 77740
+        },
+        {
+          "text": "don't",
+          "start_ms": 77760,
+          "end_ms": 77880
+        },
+        {
+          "text": "deserve",
+          "start_ms": 77900,
+          "end_ms": 78200
+        },
+        {
+          "text": "it",
+          "start_ms": 78260,
+          "end_ms": 78300
+        },
+        {
+          "text": "You",
+          "start_ms": 78380,
+          "end_ms": 78460
+        },
+        {
+          "text": "did",
+          "start_ms": 78520,
+          "end_ms": 78740
+        },
+        {
+          "text": "it",
+          "start_ms": 79580,
+          "end_ms": 79760
+        },
+        {
+          "text": "oohooh",
+          "start_ms": 80020,
+          "end_ms": 82880
+        }
+      ]
+    },
+    {
+      "text": "Even though I couldn't earn it You give it",
+      "start_ms": 83200,
+      "end_ms": 86880,
+      "text_sk": "Hoci som si to nemohol zaslúžiť, dávaš mi to",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 83200,
+          "end_ms": 83440
+        },
+        {
+          "text": "though",
+          "start_ms": 83520,
+          "end_ms": 83800
+        },
+        {
+          "text": "I",
+          "start_ms": 83820,
+          "end_ms": 83840
+        },
+        {
+          "text": "couldn't",
+          "start_ms": 83940,
+          "end_ms": 84800
+        },
+        {
+          "text": "earn",
+          "start_ms": 84840,
+          "end_ms": 85020
+        },
+        {
+          "text": "it",
+          "start_ms": 85060,
+          "end_ms": 85200
+        },
+        {
+          "text": "You",
+          "start_ms": 86240,
+          "end_ms": 86300
+        },
+        {
+          "text": "give",
+          "start_ms": 86420,
+          "end_ms": 86700
+        },
+        {
+          "text": "it",
+          "start_ms": 86820,
+          "end_ms": 86880
+        }
+      ]
+    },
+    {
+      "text": "Who am I that You keep me on Your mind",
+      "start_ms": 90580,
+      "end_ms": 95820,
+      "text_sk": "Kto som ja, že na mňa myslíš",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 90580,
+          "end_ms": 90680
+        },
+        {
+          "text": "am",
+          "start_ms": 91440,
+          "end_ms": 92260
+        },
+        {
+          "text": "I",
+          "start_ms": 92980,
+          "end_ms": 93000
+        },
+        {
+          "text": "that",
+          "start_ms": 93100,
+          "end_ms": 93460
+        },
+        {
+          "text": "You",
+          "start_ms": 93540,
+          "end_ms": 93740
+        },
+        {
+          "text": "keep",
+          "start_ms": 93900,
+          "end_ms": 94160
+        },
+        {
+          "text": "me",
+          "start_ms": 94300,
+          "end_ms": 94420
+        },
+        {
+          "text": "on",
+          "start_ms": 94780,
+          "end_ms": 94960
+        },
+        {
+          "text": "Your",
+          "start_ms": 95140,
+          "end_ms": 95460
+        },
+        {
+          "text": "mind",
+          "start_ms": 95520,
+          "end_ms": 95820
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 95960,
+      "end_ms": 98620,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 95960,
+          "end_ms": 96400
+        },
+        {
+          "text": "I'm",
+          "start_ms": 96420,
+          "end_ms": 96480
+        },
+        {
+          "text": "just",
+          "start_ms": 96800,
+          "end_ms": 97220
+        },
+        {
+          "text": "grateful",
+          "start_ms": 97240,
+          "end_ms": 97860
+        },
+        {
+          "text": "for",
+          "start_ms": 98040,
+          "end_ms": 98320
+        },
+        {
+          "text": "You",
+          "start_ms": 98440,
+          "end_ms": 98620
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 99760,
+      "end_ms": 102000,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 99760,
+          "end_ms": 99960
+        },
+        {
+          "text": "I'm",
+          "start_ms": 99980,
+          "end_ms": 100100
+        },
+        {
+          "text": "just",
+          "start_ms": 100180,
+          "end_ms": 100480
+        },
+        {
+          "text": "grateful",
+          "start_ms": 100540,
+          "end_ms": 101220
+        },
+        {
+          "text": "for",
+          "start_ms": 101380,
+          "end_ms": 101740
+        },
+        {
+          "text": "You",
+          "start_ms": 101820,
+          "end_ms": 102000
+        }
+      ]
+    },
+    {
+      "text": "All my life You've been right here by my side",
+      "start_ms": 104000,
+      "end_ms": 109460,
+      "text_sk": "Celý môj život si bol tu po mojom boku",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 104000,
+          "end_ms": 104240
+        },
+        {
+          "text": "my",
+          "start_ms": 104760,
+          "end_ms": 104820
+        },
+        {
+          "text": "life",
+          "start_ms": 105580,
+          "end_ms": 105700
+        },
+        {
+          "text": "You've",
+          "start_ms": 106420,
+          "end_ms": 106700
+        },
+        {
+          "text": "been",
+          "start_ms": 106820,
+          "end_ms": 107060
+        },
+        {
+          "text": "right",
+          "start_ms": 107440,
+          "end_ms": 107680
+        },
+        {
+          "text": "here",
+          "start_ms": 107700,
+          "end_ms": 107940
+        },
+        {
+          "text": "by",
+          "start_ms": 108080,
+          "end_ms": 108340
+        },
+        {
+          "text": "my",
+          "start_ms": 108460,
+          "end_ms": 108520
+        },
+        {
+          "text": "side",
+          "start_ms": 108860,
+          "end_ms": 109460
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 109700,
+      "end_ms": 111960,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 109700,
+          "end_ms": 109780
+        },
+        {
+          "text": "I'm",
+          "start_ms": 109860,
+          "end_ms": 110080
+        },
+        {
+          "text": "just",
+          "start_ms": 110160,
+          "end_ms": 110460
+        },
+        {
+          "text": "grateful",
+          "start_ms": 110540,
+          "end_ms": 111240
+        },
+        {
+          "text": "for",
+          "start_ms": 111380,
+          "end_ms": 111680
+        },
+        {
+          "text": "You",
+          "start_ms": 111800,
+          "end_ms": 111960
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 113080,
+      "end_ms": 115280,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 113080,
+          "end_ms": 113300
+        },
+        {
+          "text": "I'm",
+          "start_ms": 113320,
+          "end_ms": 113400
+        },
+        {
+          "text": "just",
+          "start_ms": 113500,
+          "end_ms": 113820
+        },
+        {
+          "text": "grateful",
+          "start_ms": 113880,
+          "end_ms": 114580
+        },
+        {
+          "text": "for",
+          "start_ms": 114720,
+          "end_ms": 115060
+        },
+        {
+          "text": "You",
+          "start_ms": 115140,
+          "end_ms": 115280
+        }
+      ]
+    },
+    {
+      "text": "Who am I Who am I that You keep me on Your mind",
+      "start_ms": 115620,
+      "end_ms": 122580,
+      "text_sk": "Kto som ja, kto som ja, že na mňa myslíš",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 115620,
+          "end_ms": 115720
+        },
+        {
+          "text": "am",
+          "start_ms": 116140,
+          "end_ms": 116440
+        },
+        {
+          "text": "I",
+          "start_ms": 116500,
+          "end_ms": 116520
+        },
+        {
+          "text": "Who",
+          "start_ms": 117260,
+          "end_ms": 117340
+        },
+        {
+          "text": "am",
+          "start_ms": 118260,
+          "end_ms": 118360
+        },
+        {
+          "text": "I",
+          "start_ms": 118740,
+          "end_ms": 118760
+        },
+        {
+          "text": "that",
+          "start_ms": 118920,
+          "end_ms": 119240
+        },
+        {
+          "text": "You",
+          "start_ms": 120200,
+          "end_ms": 120400
+        },
+        {
+          "text": "keep",
+          "start_ms": 120540,
+          "end_ms": 120840
+        },
+        {
+          "text": "me",
+          "start_ms": 120980,
+          "end_ms": 121080
+        },
+        {
+          "text": "on",
+          "start_ms": 121500,
+          "end_ms": 121800
+        },
+        {
+          "text": "Your",
+          "start_ms": 121820,
+          "end_ms": 122100
+        },
+        {
+          "text": "mind",
+          "start_ms": 122240,
+          "end_ms": 122580
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 122660,
+      "end_ms": 125360,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 122660,
+          "end_ms": 123100
+        },
+        {
+          "text": "I'm",
+          "start_ms": 123180,
+          "end_ms": 123400
+        },
+        {
+          "text": "just",
+          "start_ms": 123480,
+          "end_ms": 123780
+        },
+        {
+          "text": "grateful",
+          "start_ms": 123860,
+          "end_ms": 124580
+        },
+        {
+          "text": "for",
+          "start_ms": 124720,
+          "end_ms": 125000
+        },
+        {
+          "text": "You",
+          "start_ms": 125140,
+          "end_ms": 125360
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 126380,
+      "end_ms": 128680,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 126380,
+          "end_ms": 126680
+        },
+        {
+          "text": "I'm",
+          "start_ms": 126720,
+          "end_ms": 126780
+        },
+        {
+          "text": "just",
+          "start_ms": 126840,
+          "end_ms": 127160
+        },
+        {
+          "text": "grateful",
+          "start_ms": 127220,
+          "end_ms": 127920
+        },
+        {
+          "text": "for",
+          "start_ms": 128040,
+          "end_ms": 128300
+        },
+        {
+          "text": "You",
+          "start_ms": 128500,
+          "end_ms": 128680
+        }
+      ]
+    },
+    {
+      "text": "All my life You've been right here by my side",
+      "start_ms": 130700,
+      "end_ms": 136140,
+      "text_sk": "Celý môj život si bol tu po mojom boku",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 130700,
+          "end_ms": 131040
+        },
+        {
+          "text": "my",
+          "start_ms": 131420,
+          "end_ms": 131460
+        },
+        {
+          "text": "life",
+          "start_ms": 132860,
+          "end_ms": 133140
+        },
+        {
+          "text": "You've",
+          "start_ms": 133160,
+          "end_ms": 133460
+        },
+        {
+          "text": "been",
+          "start_ms": 133500,
+          "end_ms": 133800
+        },
+        {
+          "text": "right",
+          "start_ms": 133920,
+          "end_ms": 134360
+        },
+        {
+          "text": "here",
+          "start_ms": 134380,
+          "end_ms": 134600
+        },
+        {
+          "text": "by",
+          "start_ms": 134760,
+          "end_ms": 135000
+        },
+        {
+          "text": "my",
+          "start_ms": 135140,
+          "end_ms": 135180
+        },
+        {
+          "text": "side",
+          "start_ms": 135560,
+          "end_ms": 136140
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 136240,
+      "end_ms": 138680,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 136240,
+          "end_ms": 136440
+        },
+        {
+          "text": "I'm",
+          "start_ms": 136520,
+          "end_ms": 136760
+        },
+        {
+          "text": "just",
+          "start_ms": 136840,
+          "end_ms": 137160
+        },
+        {
+          "text": "grateful",
+          "start_ms": 137240,
+          "end_ms": 137920
+        },
+        {
+          "text": "for",
+          "start_ms": 138080,
+          "end_ms": 138360
+        },
+        {
+          "text": "You",
+          "start_ms": 138500,
+          "end_ms": 138680
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 139700,
+      "end_ms": 142120,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 139700,
+          "end_ms": 139980
+        },
+        {
+          "text": "I'm",
+          "start_ms": 140000,
+          "end_ms": 140080
+        },
+        {
+          "text": "just",
+          "start_ms": 140160,
+          "end_ms": 140460
+        },
+        {
+          "text": "grateful",
+          "start_ms": 140540,
+          "end_ms": 141260
+        },
+        {
+          "text": "for",
+          "start_ms": 141400,
+          "end_ms": 141680
+        },
+        {
+          "text": "You",
+          "start_ms": 141820,
+          "end_ms": 142120
+        }
+      ]
+    },
+    {
+      "text": "Yeah woah",
+      "start_ms": 143060,
+      "end_ms": 146740,
+      "text_sk": "Áno, ó",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 143060,
+          "end_ms": 143400
+        },
+        {
+          "text": "woah",
+          "start_ms": 146460,
+          "end_ms": 146740
+        }
+      ]
+    },
+    {
+      "text": "You kept me all my life",
+      "start_ms": 149020,
+      "end_ms": 150600,
+      "text_sk": "Držal si ma celý môj život",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 149020,
+          "end_ms": 149140
+        },
+        {
+          "text": "kept",
+          "start_ms": 149240,
+          "end_ms": 149500
+        },
+        {
+          "text": "me",
+          "start_ms": 149540,
+          "end_ms": 149640
+        },
+        {
+          "text": "all",
+          "start_ms": 149880,
+          "end_ms": 149980
+        },
+        {
+          "text": "my",
+          "start_ms": 150040,
+          "end_ms": 150280
+        },
+        {
+          "text": "life",
+          "start_ms": 150340,
+          "end_ms": 150600
+        }
+      ]
+    },
+    {
+      "text": "Been here with me all this time",
+      "start_ms": 152240,
+      "end_ms": 154220,
+      "text_sk": "Bol si tu so mnou celý ten čas",
+      "words": [
+        {
+          "text": "Been",
+          "start_ms": 152240,
+          "end_ms": 152520
+        },
+        {
+          "text": "here",
+          "start_ms": 152560,
+          "end_ms": 152720
+        },
+        {
+          "text": "with",
+          "start_ms": 152820,
+          "end_ms": 153020
+        },
+        {
+          "text": "me",
+          "start_ms": 153060,
+          "end_ms": 153160
+        },
+        {
+          "text": "all",
+          "start_ms": 153420,
+          "end_ms": 153560
+        },
+        {
+          "text": "this",
+          "start_ms": 153620,
+          "end_ms": 153800
+        },
+        {
+          "text": "time",
+          "start_ms": 153860,
+          "end_ms": 154220
+        }
+      ]
+    },
+    {
+      "text": "And IIIII'm lifting both of my hands",
+      "start_ms": 157020,
+      "end_ms": 164500,
+      "text_sk": "A ja dvíham obe svoje ruky",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 157020,
+          "end_ms": 157200
+        },
+        {
+          "text": "IIIII'm",
+          "start_ms": 157260,
+          "end_ms": 162480
+        },
+        {
+          "text": "lifting",
+          "start_ms": 162560,
+          "end_ms": 163020
+        },
+        {
+          "text": "both",
+          "start_ms": 163080,
+          "end_ms": 163400
+        },
+        {
+          "text": "of",
+          "start_ms": 163460,
+          "end_ms": 163560
+        },
+        {
+          "text": "my",
+          "start_ms": 163640,
+          "end_ms": 163700
+        },
+        {
+          "text": "hands",
+          "start_ms": 163900,
+          "end_ms": 164500
+        }
+      ]
+    },
+    {
+      "text": "You gave me chance after chance after chance",
+      "start_ms": 165620,
+      "end_ms": 169400,
+      "text_sk": "Dal si mi šancu za šancou za šancou",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 165620,
+          "end_ms": 165740
+        },
+        {
+          "text": "gave",
+          "start_ms": 165880,
+          "end_ms": 166080
+        },
+        {
+          "text": "me",
+          "start_ms": 166180,
+          "end_ms": 166260
+        },
+        {
+          "text": "chance",
+          "start_ms": 166400,
+          "end_ms": 166780
+        },
+        {
+          "text": "after",
+          "start_ms": 166860,
+          "end_ms": 167120
+        },
+        {
+          "text": "chance",
+          "start_ms": 167240,
+          "end_ms": 167960
+        },
+        {
+          "text": "after",
+          "start_ms": 168420,
+          "end_ms": 168760
+        },
+        {
+          "text": "chance",
+          "start_ms": 168860,
+          "end_ms": 169400
+        }
+      ]
+    },
+    {
+      "text": "And IIIII'm giving all that I am",
+      "start_ms": 170220,
+      "end_ms": 177500,
+      "text_sk": "A ja dávam všetko, čím som",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 170220,
+          "end_ms": 170460
+        },
+        {
+          "text": "IIIII'm",
+          "start_ms": 170520,
+          "end_ms": 175820
+        },
+        {
+          "text": "giving",
+          "start_ms": 175900,
+          "end_ms": 176740
+        },
+        {
+          "text": "all",
+          "start_ms": 176800,
+          "end_ms": 177000
+        },
+        {
+          "text": "that",
+          "start_ms": 177020,
+          "end_ms": 177180
+        },
+        {
+          "text": "I",
+          "start_ms": 177280,
+          "end_ms": 177300
+        },
+        {
+          "text": "am",
+          "start_ms": 177380,
+          "end_ms": 177500
+        }
+      ]
+    },
+    {
+      "text": "'Cause You gave me chance after chance after chance",
+      "start_ms": 177520,
+      "end_ms": 182640,
+      "text_sk": "Lebo Ty si mi dal šancu za šancou za šancou",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 177520,
+          "end_ms": 178940
+        },
+        {
+          "text": "You",
+          "start_ms": 178960,
+          "end_ms": 179120
+        },
+        {
+          "text": "gave",
+          "start_ms": 179220,
+          "end_ms": 179400
+        },
+        {
+          "text": "me",
+          "start_ms": 179520,
+          "end_ms": 179600
+        },
+        {
+          "text": "chance",
+          "start_ms": 179740,
+          "end_ms": 180120
+        },
+        {
+          "text": "after",
+          "start_ms": 180180,
+          "end_ms": 180480
+        },
+        {
+          "text": "chance",
+          "start_ms": 180560,
+          "end_ms": 181300
+        },
+        {
+          "text": "after",
+          "start_ms": 181760,
+          "end_ms": 182100
+        },
+        {
+          "text": "chance",
+          "start_ms": 182220,
+          "end_ms": 182640
+        }
+      ]
+    },
+    {
+      "text": "C'mon",
+      "start_ms": 182860,
+      "end_ms": 183120,
+      "text_sk": "Poď",
+      "words": [
+        {
+          "text": "C'mon",
+          "start_ms": 182860,
+          "end_ms": 183120
+        }
+      ]
+    },
+    {
+      "text": "And IIIII'm lifting both of my hands",
+      "start_ms": 183240,
+      "end_ms": 191280,
+      "text_sk": "A ja dvíham obe svoje ruky",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 183240,
+          "end_ms": 183940
+        },
+        {
+          "text": "IIIII'm",
+          "start_ms": 186760,
+          "end_ms": 188960
+        },
+        {
+          "text": "lifting",
+          "start_ms": 189200,
+          "end_ms": 189760
+        },
+        {
+          "text": "both",
+          "start_ms": 189820,
+          "end_ms": 190080
+        },
+        {
+          "text": "of",
+          "start_ms": 190120,
+          "end_ms": 190220
+        },
+        {
+          "text": "my",
+          "start_ms": 190280,
+          "end_ms": 190340
+        },
+        {
+          "text": "hands",
+          "start_ms": 190600,
+          "end_ms": 191280
+        }
+      ]
+    },
+    {
+      "text": "You gave me chance after chance after chance",
+      "start_ms": 192280,
+      "end_ms": 196480,
+      "text_sk": "Dal si mi šancu za šancou za šancou",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 192280,
+          "end_ms": 192380
+        },
+        {
+          "text": "gave",
+          "start_ms": 192540,
+          "end_ms": 192760
+        },
+        {
+          "text": "me",
+          "start_ms": 192840,
+          "end_ms": 192940
+        },
+        {
+          "text": "chance",
+          "start_ms": 193080,
+          "end_ms": 193460
+        },
+        {
+          "text": "after",
+          "start_ms": 193540,
+          "end_ms": 193820
+        },
+        {
+          "text": "chance",
+          "start_ms": 193900,
+          "end_ms": 194660
+        },
+        {
+          "text": "after",
+          "start_ms": 195080,
+          "end_ms": 195460
+        },
+        {
+          "text": "chance",
+          "start_ms": 195540,
+          "end_ms": 196480
+        }
+      ]
+    },
+    {
+      "text": "And IIIII'm giving all that I am",
+      "start_ms": 196920,
+      "end_ms": 203800,
+      "text_sk": "A ja dávam všetko, čím som",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 196920,
+          "end_ms": 197280
+        },
+        {
+          "text": "IIIII'm",
+          "start_ms": 200120,
+          "end_ms": 201820
+        },
+        {
+          "text": "giving",
+          "start_ms": 202300,
+          "end_ms": 202800
+        },
+        {
+          "text": "all",
+          "start_ms": 202900,
+          "end_ms": 203220
+        },
+        {
+          "text": "that",
+          "start_ms": 203400,
+          "end_ms": 203680
+        },
+        {
+          "text": "I",
+          "start_ms": 203700,
+          "end_ms": 203720
+        },
+        {
+          "text": "am",
+          "start_ms": 203760,
+          "end_ms": 203800
+        }
+      ]
+    },
+    {
+      "text": "'Cause You gave me chance after chance after chance",
+      "start_ms": 203980,
+      "end_ms": 209300,
+      "text_sk": "Lebo Ty si mi dal šancu za šancou za šancou",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 203980,
+          "end_ms": 204120
+        },
+        {
+          "text": "You",
+          "start_ms": 205580,
+          "end_ms": 205700
+        },
+        {
+          "text": "gave",
+          "start_ms": 205860,
+          "end_ms": 206060
+        },
+        {
+          "text": "me",
+          "start_ms": 206140,
+          "end_ms": 206240
+        },
+        {
+          "text": "chance",
+          "start_ms": 206400,
+          "end_ms": 206780
+        },
+        {
+          "text": "after",
+          "start_ms": 206840,
+          "end_ms": 207120
+        },
+        {
+          "text": "chance",
+          "start_ms": 207220,
+          "end_ms": 207920
+        },
+        {
+          "text": "after",
+          "start_ms": 208400,
+          "end_ms": 208780
+        },
+        {
+          "text": "chance",
+          "start_ms": 208880,
+          "end_ms": 209300
+        }
+      ]
+    },
+    {
+      "text": "Who am I that You keep me on Your mind",
+      "start_ms": 210560,
+      "end_ms": 216000,
+      "text_sk": "Kto som ja, že na mňa myslíš",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 210560,
+          "end_ms": 210680
+        },
+        {
+          "text": "am",
+          "start_ms": 211540,
+          "end_ms": 212260
+        },
+        {
+          "text": "I",
+          "start_ms": 213020,
+          "end_ms": 213040
+        },
+        {
+          "text": "that",
+          "start_ms": 213100,
+          "end_ms": 213480
+        },
+        {
+          "text": "You",
+          "start_ms": 213540,
+          "end_ms": 213780
+        },
+        {
+          "text": "keep",
+          "start_ms": 213900,
+          "end_ms": 214340
+        },
+        {
+          "text": "me",
+          "start_ms": 214560,
+          "end_ms": 214620
+        },
+        {
+          "text": "on",
+          "start_ms": 214840,
+          "end_ms": 215000
+        },
+        {
+          "text": "Your",
+          "start_ms": 215160,
+          "end_ms": 215440
+        },
+        {
+          "text": "mind",
+          "start_ms": 215480,
+          "end_ms": 216000
+        }
+      ]
+    },
+    {
+      "text": "God I'm just hey",
+      "start_ms": 216240,
+      "end_ms": 219080,
+      "text_sk": "Bože, som len, hej",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 216240,
+          "end_ms": 216440
+        },
+        {
+          "text": "I'm",
+          "start_ms": 216660,
+          "end_ms": 216740
+        },
+        {
+          "text": "just",
+          "start_ms": 216820,
+          "end_ms": 218540
+        },
+        {
+          "text": "hey",
+          "start_ms": 218560,
+          "end_ms": 219080
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 219760,
+      "end_ms": 224040,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 219760,
+          "end_ms": 219980
+        },
+        {
+          "text": "I'm",
+          "start_ms": 220000,
+          "end_ms": 220060
+        },
+        {
+          "text": "just",
+          "start_ms": 220160,
+          "end_ms": 220560
+        },
+        {
+          "text": "grateful",
+          "start_ms": 220760,
+          "end_ms": 221220
+        },
+        {
+          "text": "for",
+          "start_ms": 221400,
+          "end_ms": 221620
+        },
+        {
+          "text": "You",
+          "start_ms": 221820,
+          "end_ms": 224040
+        }
+      ]
+    },
+    {
+      "text": "All my life You've been right here by my side",
+      "start_ms": 224440,
+      "end_ms": 229460,
+      "text_sk": "Celý môj život si bol tu po mojom boku",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 224440,
+          "end_ms": 224660
+        },
+        {
+          "text": "my",
+          "start_ms": 224760,
+          "end_ms": 224820
+        },
+        {
+          "text": "life",
+          "start_ms": 225440,
+          "end_ms": 225680
+        },
+        {
+          "text": "You've",
+          "start_ms": 226420,
+          "end_ms": 226700
+        },
+        {
+          "text": "been",
+          "start_ms": 226820,
+          "end_ms": 227160
+        },
+        {
+          "text": "right",
+          "start_ms": 227260,
+          "end_ms": 227520
+        },
+        {
+          "text": "here",
+          "start_ms": 227680,
+          "end_ms": 227940
+        },
+        {
+          "text": "by",
+          "start_ms": 228060,
+          "end_ms": 228120
+        },
+        {
+          "text": "my",
+          "start_ms": 228460,
+          "end_ms": 228500
+        },
+        {
+          "text": "side",
+          "start_ms": 228860,
+          "end_ms": 229460
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 229680,
+      "end_ms": 231980,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 229680,
+          "end_ms": 229760
+        },
+        {
+          "text": "I'm",
+          "start_ms": 229840,
+          "end_ms": 230080
+        },
+        {
+          "text": "just",
+          "start_ms": 230160,
+          "end_ms": 230580
+        },
+        {
+          "text": "grateful",
+          "start_ms": 230600,
+          "end_ms": 231220
+        },
+        {
+          "text": "for",
+          "start_ms": 231400,
+          "end_ms": 231720
+        },
+        {
+          "text": "You",
+          "start_ms": 231840,
+          "end_ms": 231980
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 233100,
+      "end_ms": 235900,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 233100,
+          "end_ms": 233320
+        },
+        {
+          "text": "I'm",
+          "start_ms": 233340,
+          "end_ms": 233440
+        },
+        {
+          "text": "just",
+          "start_ms": 233500,
+          "end_ms": 233900
+        },
+        {
+          "text": "grateful",
+          "start_ms": 233920,
+          "end_ms": 234580
+        },
+        {
+          "text": "for",
+          "start_ms": 234720,
+          "end_ms": 235020
+        },
+        {
+          "text": "You",
+          "start_ms": 235660,
+          "end_ms": 235900
+        }
+      ]
+    },
+    {
+      "text": "Who am I Who am I that You keep me on Your mind",
+      "start_ms": 236020,
+      "end_ms": 242700,
+      "text_sk": "Kto som ja, kto som ja, že na mňa myslíš",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 236020,
+          "end_ms": 236140
+        },
+        {
+          "text": "am",
+          "start_ms": 236280,
+          "end_ms": 236440
+        },
+        {
+          "text": "I",
+          "start_ms": 236520,
+          "end_ms": 236540
+        },
+        {
+          "text": "Who",
+          "start_ms": 237300,
+          "end_ms": 237420
+        },
+        {
+          "text": "am",
+          "start_ms": 237840,
+          "end_ms": 238100
+        },
+        {
+          "text": "I",
+          "start_ms": 238160,
+          "end_ms": 238180
+        },
+        {
+          "text": "that",
+          "start_ms": 238880,
+          "end_ms": 239120
+        },
+        {
+          "text": "You",
+          "start_ms": 239740,
+          "end_ms": 240240
+        },
+        {
+          "text": "keep",
+          "start_ms": 240500,
+          "end_ms": 240960
+        },
+        {
+          "text": "me",
+          "start_ms": 241020,
+          "end_ms": 241120
+        },
+        {
+          "text": "on",
+          "start_ms": 241520,
+          "end_ms": 241700
+        },
+        {
+          "text": "Your",
+          "start_ms": 241820,
+          "end_ms": 242100
+        },
+        {
+          "text": "mind",
+          "start_ms": 242160,
+          "end_ms": 242700
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 242740,
+      "end_ms": 245300,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 242740,
+          "end_ms": 243120
+        },
+        {
+          "text": "I'm",
+          "start_ms": 243320,
+          "end_ms": 243420
+        },
+        {
+          "text": "just",
+          "start_ms": 243500,
+          "end_ms": 243800
+        },
+        {
+          "text": "grateful",
+          "start_ms": 243880,
+          "end_ms": 244600
+        },
+        {
+          "text": "for",
+          "start_ms": 244760,
+          "end_ms": 245060
+        },
+        {
+          "text": "You",
+          "start_ms": 245180,
+          "end_ms": 245300
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 246420,
+      "end_ms": 248320,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 246420,
+          "end_ms": 246660
+        },
+        {
+          "text": "I'm",
+          "start_ms": 246700,
+          "end_ms": 246780
+        },
+        {
+          "text": "just",
+          "start_ms": 246840,
+          "end_ms": 247140
+        },
+        {
+          "text": "grateful",
+          "start_ms": 247200,
+          "end_ms": 247560
+        },
+        {
+          "text": "for",
+          "start_ms": 247680,
+          "end_ms": 247860
+        },
+        {
+          "text": "You",
+          "start_ms": 248120,
+          "end_ms": 248320
+        }
+      ]
+    },
+    {
+      "text": "All my life You've been right here by my side",
+      "start_ms": 250680,
+      "end_ms": 256160,
+      "text_sk": "Celý môj život si bol tu po mojom boku",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 250680,
+          "end_ms": 251020
+        },
+        {
+          "text": "my",
+          "start_ms": 251400,
+          "end_ms": 251440
+        },
+        {
+          "text": "life",
+          "start_ms": 252240,
+          "end_ms": 252820
+        },
+        {
+          "text": "You've",
+          "start_ms": 253080,
+          "end_ms": 253600
+        },
+        {
+          "text": "been",
+          "start_ms": 253920,
+          "end_ms": 254160
+        },
+        {
+          "text": "right",
+          "start_ms": 254180,
+          "end_ms": 254420
+        },
+        {
+          "text": "here",
+          "start_ms": 254440,
+          "end_ms": 254660
+        },
+        {
+          "text": "by",
+          "start_ms": 254740,
+          "end_ms": 255020
+        },
+        {
+          "text": "my",
+          "start_ms": 255140,
+          "end_ms": 255180
+        },
+        {
+          "text": "side",
+          "start_ms": 255540,
+          "end_ms": 256160
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 256300,
+      "end_ms": 258620,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 256300,
+          "end_ms": 256440
+        },
+        {
+          "text": "I'm",
+          "start_ms": 256460,
+          "end_ms": 256520
+        },
+        {
+          "text": "just",
+          "start_ms": 256820,
+          "end_ms": 257120
+        },
+        {
+          "text": "grateful",
+          "start_ms": 257240,
+          "end_ms": 257940
+        },
+        {
+          "text": "for",
+          "start_ms": 258100,
+          "end_ms": 258340
+        },
+        {
+          "text": "You",
+          "start_ms": 258480,
+          "end_ms": 258620
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 259760,
+      "end_ms": 261860,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 259760,
+          "end_ms": 259980
+        },
+        {
+          "text": "I'm",
+          "start_ms": 260000,
+          "end_ms": 260120
+        },
+        {
+          "text": "just",
+          "start_ms": 260160,
+          "end_ms": 260500
+        },
+        {
+          "text": "grateful",
+          "start_ms": 260600,
+          "end_ms": 261280
+        },
+        {
+          "text": "for",
+          "start_ms": 261400,
+          "end_ms": 261640
+        },
+        {
+          "text": "You",
+          "start_ms": 261760,
+          "end_ms": 261860
+        }
+      ]
+    },
+    {
+      "text": "I survived I survived and I'm here to testify",
+      "start_ms": 262500,
+      "end_ms": 269220,
+      "text_sk": "Prežil som, prežil som a som tu, aby som vydal svedectvo",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 262500,
+          "end_ms": 262520
+        },
+        {
+          "text": "survived",
+          "start_ms": 262640,
+          "end_ms": 263920
+        },
+        {
+          "text": "I",
+          "start_ms": 264220,
+          "end_ms": 264240
+        },
+        {
+          "text": "survived",
+          "start_ms": 264720,
+          "end_ms": 266420
+        },
+        {
+          "text": "and",
+          "start_ms": 266480,
+          "end_ms": 266840
+        },
+        {
+          "text": "I'm",
+          "start_ms": 266920,
+          "end_ms": 267180
+        },
+        {
+          "text": "here",
+          "start_ms": 267280,
+          "end_ms": 267540
+        },
+        {
+          "text": "to",
+          "start_ms": 267680,
+          "end_ms": 267780
+        },
+        {
+          "text": "testify",
+          "start_ms": 268020,
+          "end_ms": 269220
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 269240,
+      "end_ms": 271540,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 269240,
+          "end_ms": 269320
+        },
+        {
+          "text": "I'm",
+          "start_ms": 269340,
+          "end_ms": 269400
+        },
+        {
+          "text": "just",
+          "start_ms": 269780,
+          "end_ms": 270560
+        },
+        {
+          "text": "grateful",
+          "start_ms": 270580,
+          "end_ms": 271260
+        },
+        {
+          "text": "for",
+          "start_ms": 271380,
+          "end_ms": 271460
+        },
+        {
+          "text": "You",
+          "start_ms": 271480,
+          "end_ms": 271540
+        }
+      ]
+    },
+    {
+      "text": "Yeah God I'm just grateful for You",
+      "start_ms": 271680,
+      "end_ms": 275280,
+      "text_sk": "Áno, Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 271680,
+          "end_ms": 271860
+        },
+        {
+          "text": "God",
+          "start_ms": 271880,
+          "end_ms": 273100
+        },
+        {
+          "text": "I'm",
+          "start_ms": 273280,
+          "end_ms": 273460
+        },
+        {
+          "text": "just",
+          "start_ms": 273520,
+          "end_ms": 273880
+        },
+        {
+          "text": "grateful",
+          "start_ms": 273900,
+          "end_ms": 274540
+        },
+        {
+          "text": "for",
+          "start_ms": 274680,
+          "end_ms": 275040
+        },
+        {
+          "text": "You",
+          "start_ms": 275060,
+          "end_ms": 275280
+        }
+      ]
+    },
+    {
+      "text": "Yeah I'm alright if they say I'm outta my mind",
+      "start_ms": 277260,
+      "end_ms": 282580,
+      "text_sk": "Áno, som v poriadku, aj keď hovoria, že som sa zbláznil",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 277260,
+          "end_ms": 277540
+        },
+        {
+          "text": "I'm",
+          "start_ms": 277980,
+          "end_ms": 278120
+        },
+        {
+          "text": "alright",
+          "start_ms": 278200,
+          "end_ms": 278940
+        },
+        {
+          "text": "if",
+          "start_ms": 279820,
+          "end_ms": 280160
+        },
+        {
+          "text": "they",
+          "start_ms": 280180,
+          "end_ms": 280460
+        },
+        {
+          "text": "say",
+          "start_ms": 280560,
+          "end_ms": 280900
+        },
+        {
+          "text": "I'm",
+          "start_ms": 281020,
+          "end_ms": 281100
+        },
+        {
+          "text": "outta",
+          "start_ms": 281120,
+          "end_ms": 281520
+        },
+        {
+          "text": "my",
+          "start_ms": 281820,
+          "end_ms": 281920
+        },
+        {
+          "text": "mind",
+          "start_ms": 282220,
+          "end_ms": 282580
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 282680,
+      "end_ms": 285280,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 282680,
+          "end_ms": 283120
+        },
+        {
+          "text": "I'm",
+          "start_ms": 283200,
+          "end_ms": 283360
+        },
+        {
+          "text": "just",
+          "start_ms": 283480,
+          "end_ms": 283800
+        },
+        {
+          "text": "grateful",
+          "start_ms": 283900,
+          "end_ms": 284600
+        },
+        {
+          "text": "for",
+          "start_ms": 284740,
+          "end_ms": 285060
+        },
+        {
+          "text": "You",
+          "start_ms": 285140,
+          "end_ms": 285280
+        }
+      ]
+    },
+    {
+      "text": "God I'm just grateful for You",
+      "start_ms": 286380,
+      "end_ms": 298100,
+      "text_sk": "Bože, som Ti len vďačný",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 286380,
+          "end_ms": 286660
+        },
+        {
+          "text": "I'm",
+          "start_ms": 286700,
+          "end_ms": 286780
+        },
+        {
+          "text": "just",
+          "start_ms": 286840,
+          "end_ms": 287120
+        },
+        {
+          "text": "grateful",
+          "start_ms": 287220,
+          "end_ms": 287900
+        },
+        {
+          "text": "for",
+          "start_ms": 288040,
+          "end_ms": 288380
+        },
+        {
+          "text": "You",
+          "start_ms": 288460,
+          "end_ms": 298100
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.09,
+    "model_load_sec": null,
+    "error": null
+  }
+}
