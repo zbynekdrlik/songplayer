@@ -30,14 +30,20 @@ experiment reproduces from the repo alone.
 `qwen35-omni_*.json` files went through a Windows PowerShell text-concat
 step that corrupted their `text_sk` field into double-encoded mojibake
 (`"NiÄ\x8d nÃ¡s..."` instead of `"Nič nás..."`) — the English `text` field
-(what alignment actually reads) was never affected. Verified the corruption
-was a deterministic byte-reinterpretation (cp1252-as-UTF-8, with a raw
-Latin-1 passthrough fallback for a handful of undefined cp1252 code points)
-and reversed it losslessly in place; final state is 0/22 files with any
-mojibake and every repaired `text_sk` reads as normal diacritic Slovak
-(spot-checked across 5 fixtures). This only affects `sk_ok_pct` numbers
-below — all timing/alignment numbers were computed from the (always-clean)
-English text and are unaffected.
+(what alignment actually reads) was never affected. A first repair pass
+(cp1252-as-UTF-8 reversal, Latin-1 passthrough for undefined cp1252 code
+points) fixed the corruption my detection regex caught, but that regex
+only keyed on `Ã`/`Â` lead bytes and missed a second, `Å`/`Ä`-led mojibake
+pattern present in some of the same strings ("mÅˆa" instead of "mňa",
+"veÄ¾a" instead of "veľa") — a dispatched corrective fetch independently
+caught and fixed these 227 residual fields across 20 files using a
+broader check. Both passes only ever touched `text_sk` (verified
+field-by-field against git history: 0 changes to `text`, `start_ms`,
+`end_ms`, line counts, or `duration_ms` across every file) — all
+timing/alignment numbers in this report were computed from the
+(always-clean) English text and are unaffected by either pass. Final
+state, independently re-verified: 0/22 files with any mojibake by either
+detection pattern, every `text_sk` reads as normal diacritic Slovak.
 
 ## Method — word-sequence alignment
 
@@ -146,18 +152,18 @@ the fully-pooled figure (1142 ms conservative) does not.
 
 | Category | Combo | n | Coverage % | Median Δ (ms) | Within 400ms % | sk_ok % |
 |---|---|---:|---:|---:|---:|---:|
-| chant_repetition | qwen×soniox | 4 | 75.5 | 920 | 16.0 | 78.6 |
-| clean_pop | qwen×soniox | 3 | 86.2 | 522.5 | 40.0 | 89.0 |
-| dense_vocal | qwen×soniox | 4 | 71.2 | 510 | 47.2 | 78.9 |
-| instrumental_breaks | qwen×soniox | 4 | 70.7 | 730 | 23.3 | 61.4 |
-| multi_language | qwen×soniox | 4 | 58.7 | 980 | 29.8 | 85.8 |
-| reverb_heavy | qwen×soniox | 3 | 74.6 | 940 | 22.2 | 85.2 |
-| chant_repetition | qwen×aai | 4 | 75.5 | 758 | 34.8 | 79.0 |
-| clean_pop | qwen×aai | 3 | 77.6 | **364** | 51.9 | 89.0 |
-| dense_vocal | qwen×aai | 4 | 71.2 | **352** | 50.6 | 78.3 |
-| instrumental_breaks | qwen×aai | 4 | 70.3 | **352** | 60.0 | 62.9 |
-| multi_language | qwen×aai | 4 | 58.0 | 1268 | 32.4 | 86.5 |
-| reverb_heavy | qwen×aai | 3 | 73.8 | 910 | 25.1 | 85.7 |
+| chant_repetition | qwen×soniox | 4 | 75.5 | 920 | 16.0 | 85.5 |
+| clean_pop | qwen×soniox | 3 | 86.2 | 522.5 | 40.0 | 92.9 |
+| dense_vocal | qwen×soniox | 4 | 71.2 | 510 | 47.2 | 81.7 |
+| instrumental_breaks | qwen×soniox | 4 | 70.7 | 730 | 23.3 | 79.2 |
+| multi_language | qwen×soniox | 4 | 58.7 | 980 | 29.8 | 91.7 |
+| reverb_heavy | qwen×soniox | 3 | 74.6 | 940 | 22.2 | 92.0 |
+| chant_repetition | qwen×aai | 4 | 75.5 | 758 | 34.8 | 85.9 |
+| clean_pop | qwen×aai | 3 | 77.6 | **364** | 51.9 | 92.3 |
+| dense_vocal | qwen×aai | 4 | 71.2 | **352** | 50.6 | 81.0 |
+| instrumental_breaks | qwen×aai | 4 | 70.3 | **352** | 60.0 | 78.9 |
+| multi_language | qwen×aai | 4 | 58.0 | 1268 | 32.4 | 91.7 |
+| reverb_heavy | qwen×aai | 3 | 73.8 | 910 | 25.1 | 91.8 |
 | chant_repetition | gemini×soniox | 4 | 40.7 | 1045 | 13.9 | 64.6 |
 | clean_pop | gemini×soniox | 3 | 23.0 | 495 | 40.0 | 100.0 |
 | dense_vocal | gemini×soniox | 4 | 46.1 | 570 | 38.8 | 96.0 |

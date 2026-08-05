@@ -29,7 +29,7 @@
       "text": "And I can hear the sound",
       "start_ms": 22360,
       "end_ms": 25120,
-      "text_sk": "A poÄujem ten zvuk",
+      "text_sk": "A počujem ten zvuk",
       "words": null
     },
     {
@@ -57,7 +57,7 @@
       "text": "More than a feeling",
       "start_ms": 34440,
       "end_ms": 36960,
-      "text_sk": "Viac neÅ¾ len pocit",
+      "text_sk": "Viac než len pocit",
       "words": null
     },
     {
@@ -78,7 +78,7 @@
       "text": "Darkness bow down to the day",
       "start_ms": 43760,
       "end_ms": 46280,
-      "text_sk": "Temnota, pokloÅˆ sa dÅˆu",
+      "text_sk": "Temnota, pokloň sa dňu",
       "words": null
     },
     {
@@ -92,7 +92,7 @@
       "text": "Breaking out of yesterday",
       "start_ms": 48800,
       "end_ms": 51320,
-      "text_sk": "Vymanenie sa zo vÄerajÅ¡ka",
+      "text_sk": "Vymanenie sa zo včerajška",
       "words": null
     },
     {
@@ -162,14 +162,14 @@
       "text": "To destroy the yoke",
       "start_ms": 74000,
       "end_ms": 76520,
-      "text_sk": "Na zniÄenie jarma",
+      "text_sk": "Na zničenie jarma",
       "words": null
     },
     {
       "text": "So tell every stronghold",
       "start_ms": 76520,
       "end_ms": 79040,
-      "text_sk": "Tak povedz kaÅ¾dej pevnosti",
+      "text_sk": "Tak povedz každej pevnosti",
       "words": null
     },
     {
@@ -204,7 +204,7 @@
       "text": "Out of the shadows",
       "start_ms": 90880,
       "end_ms": 93400,
-      "text_sk": "Von z tieÅˆov",
+      "text_sk": "Von z tieňov",
       "words": null
     },
     {
@@ -225,14 +225,14 @@
       "text": "Oh it's happening",
       "start_ms": 100200,
       "end_ms": 102720,
-      "text_sk": "Ã“, deje sa to",
+      "text_sk": "Ó, deje sa to",
       "words": null
     },
     {
       "text": "Darkness bow down to the day",
       "start_ms": 102720,
       "end_ms": 105240,
-      "text_sk": "Temnota, pokloÅˆ sa dÅˆu",
+      "text_sk": "Temnota, pokloň sa dňu",
       "words": null
     },
     {
@@ -246,7 +246,7 @@
       "text": "Breaking out of yesterday",
       "start_ms": 107760,
       "end_ms": 110280,
-      "text_sk": "Vymanenie sa zo vÄerajÅ¡ka",
+      "text_sk": "Vymanenie sa zo včerajška",
       "words": null
     },
     {
@@ -323,7 +323,7 @@
       "text": "We prophesy tonight",
       "start_ms": 135480,
       "end_ms": 138000,
-      "text_sk": "Dnes veÄer prorokujeme",
+      "text_sk": "Dnes večer prorokujeme",
       "words": null
     },
     {
@@ -386,14 +386,14 @@
       "text": "Oh I can hear a sound",
       "start_ms": 158160,
       "end_ms": 160680,
-      "text_sk": "Ã“, poÄujem zvuk",
+      "text_sk": "Ó, počujem zvuk",
       "words": null
     },
     {
       "text": "The abundance of rain",
       "start_ms": 160680,
       "end_ms": 163200,
-      "text_sk": "HojnosÅ¥ daÅ¾Äa",
+      "text_sk": "Hojnosť dažďa",
       "words": null
     },
     {
@@ -414,14 +414,14 @@
       "text": "Oh I can hear a sound",
       "start_ms": 168240,
       "end_ms": 170760,
-      "text_sk": "Ã“, poÄujem zvuk",
+      "text_sk": "Ó, počujem zvuk",
       "words": null
     },
     {
       "text": "The abundance of rain",
       "start_ms": 170760,
       "end_ms": 173280,
-      "text_sk": "HojnosÅ¥ daÅ¾Äa",
+      "text_sk": "Hojnosť dažďa",
       "words": null
     },
     {
@@ -554,7 +554,7 @@
       "text": "So darkness bow down to the day",
       "start_ms": 218640,
       "end_ms": 221160,
-      "text_sk": "Tak temnota, pokloÅˆ sa dÅˆu",
+      "text_sk": "Tak temnota, pokloň sa dňu",
       "words": null
     },
     {
@@ -687,7 +687,7 @@
       "text": "Come on and step into it",
       "start_ms": 266520,
       "end_ms": 269040,
-      "text_sk": "PoÄ a vkroÄ do toho",
+      "text_sk": "Poď a vkroč do toho",
       "words": null
     },
     {
@@ -883,14 +883,14 @@
       "text": "I can hear a sound",
       "start_ms": 337080,
       "end_ms": 339600,
-      "text_sk": "PoÄujem zvuk",
+      "text_sk": "Počujem zvuk",
       "words": null
     },
     {
       "text": "The abundance of rain",
       "start_ms": 339600,
       "end_ms": 342120,
-      "text_sk": "HojnosÅ¥ daÅ¾Äa",
+      "text_sk": "Hojnosť dažďa",
       "words": null
     },
     {
@@ -918,14 +918,14 @@
       "text": "I can hear a sound",
       "start_ms": 349680,
       "end_ms": 352200,
-      "text_sk": "PoÄujem zvuk",
+      "text_sk": "Počujem zvuk",
       "words": null
     },
     {
       "text": "The abundance of rain",
       "start_ms": 352200,
       "end_ms": 354720,
-      "text_sk": "HojnosÅ¥ daÅ¾Äa",
+      "text_sk": "Hojnosť dažďa",
       "words": null
     },
     {
@@ -1044,14 +1044,14 @@
       "text": "Do you hear the sound",
       "start_ms": 395040,
       "end_ms": 397560,
-      "text_sk": "PoÄujeÅ¡ ten zvuk",
+      "text_sk": "Počuješ ten zvuk",
       "words": null
     },
     {
       "text": "Do you hear the sound",
       "start_ms": 397560,
       "end_ms": 400080,
-      "text_sk": "PoÄujeÅ¡ ten zvuk",
+      "text_sk": "Počuješ ten zvuk",
       "words": null
     },
     {
