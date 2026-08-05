@@ -5,7 +5,10 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Playbook router
 
-Skills live in `.claude/skills/`; load the relevant one before starting work.
+Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
+`.claude/skills/` load on demand.
+
+- lyrics-eval backends → `.claude/rules/lyrics-eval-backends.md` (auto-loads on `eval/lyrics/**`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|

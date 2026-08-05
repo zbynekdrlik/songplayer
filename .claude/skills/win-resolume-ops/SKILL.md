@@ -28,6 +28,34 @@ triggers:
 - **SongPlayer data:** `C:\ProgramData\SongPlayer\`
 - **SongPlayer install:** `C:\Program Files\SongPlayer\`
 
+## MCP tool traps (cost two agents hours on 2026-08-05)
+
+- **`mcp__win-resolume__FileWrite` SILENTLY TRUNCATES `content` over ~20,000
+  characters.** It raises no error — it writes less than you passed and reports
+  the smaller count, so the file looks written and then fails at runtime in a
+  confusing way. Write large files in `append: true` chunks and VERIFY the remote
+  size/line count afterwards.
+- **PowerShell mangles inline python.** `python -c "..."` breaks on `$`, quotes
+  and backticks (a SQL `length(value)` became *"The term 'value' is not
+  recognized as the name of a cmdlet"*). ALWAYS `FileWrite` a `.py` file, then
+  run it with `Shell`.
+- MCP is the ONLY sanctioned channel here — never ssh/scp to this box. If an MCP
+  call fails with a connection/timeout error, STOP and tell the user.
+
+## This box IS the local-model machine (not dev2)
+
+Local ML models run HERE, not on any other box. Established venvs under
+`C:\ProgramData\SongPlayer\cache\tools\`: `whisperx_venv`, `crisper_venv`,
+`parakeet_venv`, `vibevoice_venv`, `lyrics_venv`, plus an `hf_models` HuggingFace
+cache. When a task needs a local model, inspect those first and mirror a proven
+torch/CUDA build rather than starting from zero — and never propose moving this
+project's model work to another machine.
+
+Also here: system python `C:\Program Files\Python312\python.exe` (3.12.10),
+eval fixtures at `C:\ProgramData\SongPlayer\eval-cache\`, eval scaffolding at
+`C:\ProgramData\SongPlayer\eval-run\`, API keys in the `settings` table of
+`C:\ProgramData\SongPlayer\songplayer.db`.
+
 ## Subprocess priority — never saturate the machine
 
 The Windows machine running OBS + Resolume + SongPlayer is the LIVE event PC.

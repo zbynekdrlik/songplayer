@@ -36,19 +36,39 @@ wins the eval. Never propose a typed Rust backend registry or binary for eval.
 5. Memory probe: grep `~/.claude/projects/-home-newlevel-devel-songplayer/memory/` for the model name.
 Open with the audit summary THEN propose. Never treat a session as a blank slate.
 
-**Never re-evaluate or propose known models.** WhisperX, Gemini (any variant),
-Qwen3-ForcedAligner, CrisperWhisper, Parakeet — these all have prior trace on
-this project. Filter them out BEFORE asking the user. Only propose models with
-zero prior trace on songplayer, confirmed by the audit above.
+**Prior trace bans a MODEL GENERATION, not a vendor forever.** WhisperX,
+Qwen3-ForcedAligner and the whole Qwen ASR lineage, CrisperWhisper,
+Parakeet-as-ASR, YouTube autosub — banned outright, they failed here. But a
+vendor's NEW generation is a NEW candidate: Gemini 3 Pro chunked (v11-v14)
+failing does not ban Gemini 3.6 Flash, and the Qwen ASR ban does not cover the
+Qwen Omni chat line. Audit per exact model id, not per vendor name.
+(2026-08-05: this rule read "Gemini (any variant)" and would have excluded the
+generation the user explicitly asked to evaluate.)
 
-**Always evaluate flagship first.** Use the Pro/flagship model tier for any new
-provider — never a budget/mini tier "to save cost". If the flagship loses, there
-is no point testing cheaper tiers. If the flagship wins, THEN test cheaper tiers
-for the cost-quality knee.
+**Always evaluate THE NEWEST flagship, verified as of TODAY.** Re-check the
+vendor's current generation by web search before every recommendation — a
+shortlist older than ~2 weeks is stale in this field. Flagship tier only, never
+budget/mini/flash-lite, and **never a previous generation "as a comparison
+baseline" or "quality ceiling"** — that is not a valid reason to spend a call.
+If the newest model is announced but not publicly reachable, say so explicitly
+rather than silently substituting an older one.
 
-**Never propose local/self-hosted models.** APIs only: Replicate, OpenRouter,
-HuggingFace Inference, vendor direct. Local GPU setup on win-resolume wastes days
-on driver/RAM/VRAM issues. Ask for API keys, not GPU access.
+**Select on QUALITY, not on price or setup convenience.** The wall bar is the
+criterion; cost and install effort are tiebreakers between candidates that both
+clear it, never a reason to lead with the cheaper option. The user's standing
+directive: *"Hladame najlepsiu !!! nechcem to kazdy tyzden prerabat"* — a
+durable best-quality choice beats a cheap one that needs re-litigating.
+
+**Local/self-hosted is ALLOWED on win-resolume, which already runs local models.**
+Existing venvs at `C:\ProgramData\SongPlayer\cache\tools\`: `whisperx_venv`,
+`crisper_venv`, `parakeet_venv`, `vibevoice_venv`, `lyrics_venv`, plus an
+`hf_models` HuggingFace cache. Reuse a proven torch/CUDA stack from there rather
+than building one from scratch, and never propose a different box (dev2) for
+this project's model work. The real constraint is not "no local models" — it is
+**don't burn days on GPU/driver setup**: prefer a `pip install`-grade tool or a
+repo with committed checkpoints, and abandon anything that turns into a
+dependency-hell project. API candidates still need only a key, which is cheaper
+to try first when both are plausible.
 
 **Timing is a hard gate.** Wall tolerance ≈ 400ms. Correct text + broken timing
 = REJECTED candidate. One prompt-tune attempt allowed; otherwise drop and move on.
