@@ -58,9 +58,14 @@ import requests
 logger = logging.getLogger("lyrics_eval.aai_u35_translate")
 
 BACKEND_ID = "aai-u35-translate"
-BACKEND_REVISION = 1
+BACKEND_REVISION = 2
 API_BASE = "https://api.assemblyai.com/v2"
-SPEECH_MODEL = "universal-3.5-pro"
+# Verified against the live API 2026-08-05: POSTing "universal-3.5-pro"
+# returns HTTP 400 `"speech_models" must be a non-empty list containing one
+# or more of: "universal-3-pro", "universal-2", "universal-3-5-pro"` — the
+# dotted slug from the spec does not exist; AssemblyAI's real enum value
+# uses a dash (universal-3-5-pro).
+SPEECH_MODEL = "universal-3-5-pro"
 TARGET_LANGUAGE = "sk"
 
 # Poll cadence + overall timeout — mirrors assemblyai_universal_3_pro.py and
@@ -107,19 +112,34 @@ def create_transcript(audio_url: str, token: str) -> str:
         # Punctuation + casing on so line text reads naturally.
         "punctuate": True,
         "format_text": True,
-        # Don't bother with diarization for solo singers.
-        "speaker_labels": False,
+        # Speaker labels REQUIRED — verified against the live API 2026-08-05:
+        # AssemblyAI's docs (speech-understanding/translation) state
+        # `match_original_utterance` "requires speaker_labels". The original
+        # spike coded `speaker_labels: False` ("solo singer, no diarization
+        # needed") which is wrong: match_original_utterance is what anchors
+        # translated text to utterance timing, and that feature depends on
+        # speaker-labelled utterances existing at all, regardless of how
+        # many distinct speakers/singers there are.
+        "speaker_labels": True,
         # Language detection on — multi-language fixture needs it.
         "language_detection": True,
-        # Speech Understanding same-call translation to Slovak.
+        # Speech Understanding same-call translation to Slovak. Verified
+        # against the live API + current docs 2026-08-05: the translation
+        # config must be nested under `speech_understanding.request`, NOT a
+        # bare top-level `translation` key (the original spike's shape was
+        # written from a stale/incorrect spec).
         # `match_original_utterance=True` keeps translated text aligned 1:1
         # with the ORIGINAL-language utterance boundaries (so the translated
         # text can borrow that utterance's start/end) rather than AAI
         # re-segmenting the translation independently.
-        "translation": {
-            "target_languages": [TARGET_LANGUAGE],
-            "formal": True,
-            "match_original_utterance": True,
+        "speech_understanding": {
+            "request": {
+                "translation": {
+                    "target_languages": [TARGET_LANGUAGE],
+                    "formal": True,
+                    "match_original_utterance": True,
+                }
+            }
         },
     }
     logger.info(
@@ -207,10 +227,15 @@ def _assign_words_to_range(
 
 def utterances_to_lines(
     utterances: list[dict[str, Any]],
-    translated_by_index: dict[int, str],
     words: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Map AAI `utterances[]` + per-index translated text into eval lines.
+    """Map AAI `utterances[]` into eval lines.
+
+    Verified against the live API + current docs 2026-08-05: each
+    utterance carries its OWN `translated_texts` dict keyed by target
+    language code (`utterance["translated_texts"]["sk"]`) — NOT a
+    separate positionally-aligned `transcript["translation"]["sk"]["utterances"]`
+    list as the original (unverified) spike assumed.
 
     Each emitted line: {text, start_ms, end_ms, text_sk, words}. `words` is
     the flat word stream sliced to this utterance's time range (original
@@ -219,7 +244,7 @@ def utterances_to_lines(
     """
     lines: list[dict[str, Any]] = []
     missing_translation = 0
-    for idx, utt in enumerate(utterances):
+    for utt in utterances:
         text = (utt.get("text") or "").strip()
         if not text:
             continue
@@ -230,7 +255,8 @@ def utterances_to_lines(
         start_ms = int(start)
         end_ms = int(end)
 
-        text_sk = translated_by_index.get(idx)
+        translated_texts = utt.get("translated_texts") or {}
+        text_sk = translated_texts.get(TARGET_LANGUAGE)
         if text_sk is None:
             missing_translation += 1
         else:
@@ -270,48 +296,42 @@ def utterances_to_lines(
     return lines
 
 
-def extract_translated_by_index(transcript: dict[str, Any]) -> dict[int, str]:
-    """Pull the per-utterance Slovak translation, keyed by utterance index.
+def verify_translation_feature_applied(transcript: dict[str, Any]) -> None:
+    """Loudly fail if AAI never actually ran the requested translation.
 
-    Expected response shape (Speech Understanding translation, keyed by
-    target language code): `transcript["translation"]["sk"]["utterances"]`,
-    a list positionally aligned with `transcript["utterances"]` because
-    `match_original_utterance=True` was requested. Raises if the
-    `translation` block is entirely absent — a silently-empty text_sk on
-    every line would hide a real API/config failure (the whole point of
-    this backend is capturing text_sk), so this is a loud failure, not a
-    silent fallback, per script-failure-policy.
+    Verified against the live API + current docs 2026-08-05: a successful
+    same-call translation surfaces at the FULL-TRANSCRIPT level as
+    `transcript["translated_texts"][TARGET_LANGUAGE]` (whole-transcript
+    translated text) and `transcript["speech_understanding"]["response"]
+    ["translation"]["status"]`. If neither is present, the
+    `speech_understanding.request.translation` block was requested but
+    silently ignored (feature not enabled account-side, bad language code,
+    etc.) — a silently-empty text_sk on every line would hide that real
+    config failure (the whole point of this backend is capturing text_sk),
+    so this is a loud failure, not a silent fallback, per
+    script-failure-policy.
     """
-    translation_block = transcript.get("translation")
-    if not translation_block:
-        raise RuntimeError(
-            "assemblyai response missing 'translation' block entirely — "
-            "translation.target_languages=['sk'] was requested but the API "
-            "did not return it; check account Speech Understanding access"
-        )
-    lang_block = translation_block.get(TARGET_LANGUAGE)
-    if not lang_block:
-        raise RuntimeError(
-            f"assemblyai translation block missing target language {TARGET_LANGUAGE!r}: "
-            f"{json.dumps(translation_block)[:300]}"
-        )
-    translated_utterances = lang_block.get("utterances")
-    if not isinstance(translated_utterances, list):
-        raise RuntimeError(
-            f"assemblyai translation.{TARGET_LANGUAGE} missing 'utterances' list: "
-            f"{json.dumps(lang_block)[:300]}"
-        )
-    by_index: dict[int, str] = {}
-    for idx, item in enumerate(translated_utterances):
-        text = (item.get("text") or "").strip() if isinstance(item, dict) else ""
-        if text:
-            by_index[idx] = text
-    logger.debug(
-        "aai translation extracted: translated_utterances=%d non_empty=%d",
-        len(translated_utterances),
-        len(by_index),
+    translated_texts = transcript.get("translated_texts") or {}
+    su_status = (
+        (transcript.get("speech_understanding") or {})
+        .get("response", {})
+        .get("translation", {})
+        .get("status")
     )
-    return by_index
+    logger.debug(
+        "aai translation feature check: translated_texts_langs=%s su_status=%s",
+        sorted(translated_texts.keys()),
+        su_status,
+    )
+    if TARGET_LANGUAGE not in translated_texts and su_status != "success":
+        raise RuntimeError(
+            "assemblyai response shows no evidence translation ran — "
+            f"transcript['translated_texts'] missing {TARGET_LANGUAGE!r} AND "
+            f"speech_understanding.response.translation.status={su_status!r} "
+            "(expected 'success'); "
+            "translation.target_languages=['sk'] was requested but the API "
+            "did not apply it; check account Speech Understanding access"
+        )
 
 
 def emit_result(
@@ -388,8 +408,8 @@ def main(argv: list[str] | None = None) -> int:
             f"transcript_id={tid}"
         )
     words = transcript.get("words") or []
-    translated_by_index = extract_translated_by_index(transcript)
-    lines = utterances_to_lines(utterances, translated_by_index, words)
+    verify_translation_feature_applied(transcript)
+    lines = utterances_to_lines(utterances, words)
 
     emit_result(
         out_path=args.out,
