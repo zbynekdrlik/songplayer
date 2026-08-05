@@ -39,6 +39,10 @@ triggers:
   and backticks (a SQL `length(value)` became *"The term 'value' is not
   recognized as the name of a cmdlet"*). ALWAYS `FileWrite` a `.py` file, then
   run it with `Shell`.
+- **`mcp__win-resolume__FileRead` truncates around ~100,000 characters** (also
+  undocumented) and per-file MCP round trips are slow. To pull a BATCH of files
+  back, start a temporary `python -m http.server` on the box, `curl` them from
+  the dev side, then stop it.
 - MCP is the ONLY sanctioned channel here — never ssh/scp to this box. If an MCP
   call fails with a connection/timeout error, STOP and tell the user.
 

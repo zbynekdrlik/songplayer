@@ -19,6 +19,11 @@ if a call starts failing.
 - **PowerShell mangles inline python.** `python -c "..."` breaks on `$`, quotes
   and backticks (`select key, length(value)` → *"The term 'value' is not
   recognized"*). ALWAYS `FileWrite` a `.py` file, then run it via `Shell`.
+- **`FileRead` truncates around ~100,000 characters** (undocumented), and pulling
+  a batch of result files one-by-one over MCP is punishingly slow. To retrieve
+  many/large outputs, start a temporary `python -m http.server` on win-resolume,
+  `curl` the files from the dev side, then stop the server. Two independent
+  agents converged on this on 2026-08-05.
 - Venv with `requests`: `C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe`.
   Fixture audio: `C:\ProgramData\SongPlayer\eval-cache\<video_id>_vocal16k.wav`.
 - API keys live in SQLite `C:\ProgramData\SongPlayer\songplayer.db`, table
