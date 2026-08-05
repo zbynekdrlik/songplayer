@@ -118,7 +118,7 @@ impl ToolsManager {
             return false;
         }
         if cfg!(windows) {
-            buf == [b'M', b'Z'] // PE header
+            buf == *b"MZ" // PE header
         } else {
             buf == [0x7F, b'E'] // ELF header
         }
