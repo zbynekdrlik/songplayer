@@ -1,0 +1,329 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\s8o2YuTBYk4_vocal16k.wav",
+  "duration_ms": 229540,
+  "lines": [
+    {
+      "text": "Got a feeling that I really need to let go",
+      "text_sk": "Mám pocit, že sa naozaj musím pustiť",
+      "start_ms": 2620,
+      "end_ms": 5660,
+      "mean_word_loss": 0.6537345454806374
+    },
+    {
+      "text": "Of everything that's weighing me down",
+      "text_sk": "Všetkého, čo ma ťaží",
+      "start_ms": 6380,
+      "end_ms": 9910,
+      "mean_word_loss": 0.5906221654680041
+    },
+    {
+      "text": "Gotta listen to the voice that I know",
+      "text_sk": "Musím počúvať hlas, ktorý poznám",
+      "start_ms": 10140,
+      "end_ms": 13300,
+      "mean_word_loss": 0.1660691777865092
+    },
+    {
+      "text": "You speak to me and say I'm free",
+      "text_sk": "Hovoríš ku mne a hovoríš, že som voľný",
+      "start_ms": 13840,
+      "end_ms": 17760,
+      "mean_word_loss": 0.11869306564331056
+    },
+    {
+      "text": "Come on hands high hands up",
+      "text_sk": "No tak ruky hore, ruky hore",
+      "start_ms": 18300,
+      "end_ms": 19470,
+      "mean_word_loss": 0.9014485677083334
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "start_ms": 21120,
+      "end_ms": 25780,
+      "mean_word_loss": 0.2408121984242361
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "start_ms": 28620,
+      "end_ms": 36420,
+      "mean_word_loss": 0.3035995430416531
+    },
+    {
+      "text": "I'm free",
+      "text_sk": "Som voľný",
+      "start_ms": 39020,
+      "end_ms": 41280,
+      "mean_word_loss": 0.8265355428059896
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 50460,
+      "end_ms": 50720,
+      "mean_word_loss": 2.0162353515625
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 50730,
+      "end_ms": 50731,
+      "mean_word_loss": 1.419464111328125
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 51240,
+      "end_ms": 54460,
+      "mean_word_loss": 1.177764892578125
+    },
+    {
+      "text": "When I think of how my life has been changed",
+      "text_sk": "Keď pomyslím na to, ako sa môj život zmenil",
+      "start_ms": 62600,
+      "end_ms": 65960,
+      "mean_word_loss": 0.4295940371922084
+    },
+    {
+      "text": "It all comes down to being with you",
+      "text_sk": "Všetko sa scvrkáva na to byť s tebou",
+      "start_ms": 66420,
+      "end_ms": 69800,
+      "mean_word_loss": 0.3341873486836751
+    },
+    {
+      "text": "And I know that you are always with me",
+      "text_sk": "A viem, že si vždy so mnou",
+      "start_ms": 70120,
+      "end_ms": 73120,
+      "mean_word_loss": 0.1397615185490361
+    },
+    {
+      "text": "Lord I believe with you I'm free",
+      "text_sk": "Pane, verím, že s tebou som voľný",
+      "start_ms": 73840,
+      "end_ms": 77380,
+      "mean_word_loss": 0.6437289536404772
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "start_ms": 81120,
+      "end_ms": 85220,
+      "mean_word_loss": 0.23504646350811056
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "start_ms": 88320,
+      "end_ms": 93340,
+      "mean_word_loss": 0.3279558817545573
+    },
+    {
+      "text": "I'm free",
+      "text_sk": "Som voľný",
+      "start_ms": 99000,
+      "end_ms": 101320,
+      "mean_word_loss": 0.8410619099934896
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 110400,
+      "end_ms": 114400,
+      "mean_word_loss": 1.785888671875
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 114410,
+      "end_ms": 114411,
+      "mean_word_loss": 1.264434814453125
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 114410,
+      "end_ms": 114411,
+      "mean_word_loss": 1.0662841796875
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 115060,
+      "end_ms": 125060,
+      "mean_word_loss": 0.21660736578482168
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 125940,
+      "end_ms": 129100,
+      "mean_word_loss": 0.09506327046288383
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 129660,
+      "end_ms": 132580,
+      "mean_word_loss": 0.09655243379098398
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 133420,
+      "end_ms": 133990,
+      "mean_word_loss": 0.09359839404070819
+    },
+    {
+      "text": "Go",
+      "text_sk": "Choď",
+      "start_ms": 133989,
+      "end_ms": 133990,
+      "mean_word_loss": 3.66796875
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 133989,
+      "end_ms": 134371,
+      "mean_word_loss": 0.17427051685474537
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "start_ms": 134370,
+      "end_ms": 134371,
+      "mean_word_loss": 0.10444475412368774
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 134370,
+      "end_ms": 134371,
+      "mean_word_loss": 0.23992153097082067
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 134370,
+      "end_ms": 134591,
+      "mean_word_loss": 0.09484570379610414
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "start_ms": 134590,
+      "end_ms": 135910,
+      "mean_word_loss": 0.10474419196446737
+    },
+    {
+      "text": "Oh yes we are",
+      "text_sk": "Ó áno, sme",
+      "start_ms": 136020,
+      "end_ms": 136830,
+      "mean_word_loss": 2.8561197916666665
+    },
+    {
+      "text": "Hey",
+      "text_sk": "Hej",
+      "start_ms": 136829,
+      "end_ms": 136830,
+      "mean_word_loss": 3.0260416666666665
+    },
+    {
+      "text": "Oh",
+      "text_sk": "Ó",
+      "start_ms": 136880,
+      "end_ms": 136890,
+      "mean_word_loss": 2.984375
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 144460,
+      "end_ms": 166260,
+      "mean_word_loss": 0.1819563415315416
+    },
+    {
+      "text": "Hey",
+      "text_sk": "Hej",
+      "start_ms": 166840,
+      "end_ms": 166860,
+      "mean_word_loss": 2.4830729166666665
+    },
+    {
+      "text": "Yeah hey",
+      "text_sk": "Áno hej",
+      "start_ms": 166870,
+      "end_ms": 167131,
+      "mean_word_loss": 1.6249135335286458
+    },
+    {
+      "text": "One two",
+      "text_sk": "Jeden dva",
+      "start_ms": 167130,
+      "end_ms": 167131,
+      "mean_word_loss": 2.3639322916666665
+    },
+    {
+      "text": "I'm gonna praise",
+      "text_sk": "Budem chváliť",
+      "start_ms": 167220,
+      "end_ms": 168100,
+      "mean_word_loss": 0.6744601779513889
+    },
+    {
+      "text": "Hey hey",
+      "text_sk": "Hej hej",
+      "start_ms": 168120,
+      "end_ms": 168131,
+      "mean_word_loss": 2.399739583333333
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 168130,
+      "end_ms": 170470,
+      "mean_word_loss": 0.2347410767166703
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 173640,
+      "end_ms": 191460,
+      "mean_word_loss": 0.10809231864081488
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "start_ms": 194960,
+      "end_ms": 213020,
+      "mean_word_loss": 0.10616252775545473
+    },
+    {
+      "text": "Come on lift him up tonight",
+      "text_sk": "Poďme ho dnes večer pozdvihnúť",
+      "start_ms": 213300,
+      "end_ms": 229540,
+      "mean_word_loss": 2.0900026351686507
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.3533045738958168,
+  "metadata": {
+    "n_tokens_sent": 266,
+    "n_words_returned_raw": 531,
+    "n_words_returned_content": 266,
+    "n_characters_returned": 1313,
+    "runtime_sec": 4.4,
+    "n_lines": 44,
+    "n_lines_timed": 44,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

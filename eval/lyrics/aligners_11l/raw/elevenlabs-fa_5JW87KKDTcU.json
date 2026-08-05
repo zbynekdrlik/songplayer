@@ -1,0 +1,462 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\5JW87KKDTcU_vocal16k.wav",
+  "duration_ms": 233020,
+  "lines": [
+    {
+      "text": "Nothing excites us like Jesus",
+      "text_sk": "Nič nás nenadchne tak ako Ježiš",
+      "start_ms": 5220,
+      "end_ms": 7500,
+      "mean_word_loss": 0.7398841450895582
+    },
+    {
+      "text": "'Cause in His presence there's freedom",
+      "text_sk": "Lebo v Jeho prítomnosti je sloboda",
+      "start_ms": 8900,
+      "end_ms": 11200,
+      "mean_word_loss": 0.5591720550779312
+    },
+    {
+      "text": "All of our sin is forgiven",
+      "text_sk": "Všetky naše hriechy sú odpustené",
+      "start_ms": 12780,
+      "end_ms": 15240,
+      "mean_word_loss": 1.033721923828125
+    },
+    {
+      "text": "So we give to Him the highest praise",
+      "text_sk": "Tak Mu vzdávame tú najvyššiu chválu",
+      "start_ms": 15320,
+      "end_ms": 19680,
+      "mean_word_loss": 0.7315051669166202
+    },
+    {
+      "text": "It's the greatest feeling",
+      "text_sk": "Je to ten najväčší pocit",
+      "start_ms": 20220,
+      "end_ms": 23680,
+      "mean_word_loss": 0.4536020017805554
+    },
+    {
+      "text": "When You fill this place",
+      "text_sk": "Keď naplníš toto miesto",
+      "start_ms": 24020,
+      "end_ms": 26280,
+      "mean_word_loss": 0.634071299235026
+    },
+    {
+      "text": "In this moment",
+      "text_sk": "V tejto chvíli",
+      "start_ms": 27760,
+      "end_ms": 29120,
+      "mean_word_loss": 0.6152869330512153
+    },
+    {
+      "text": "You are moving as we give You praise",
+      "text_sk": "Sa hýbeš, keď Ti vzdávame chválu",
+      "start_ms": 29600,
+      "end_ms": 34080,
+      "mean_word_loss": 0.7363618214925131
+    },
+    {
+      "text": "Come right now Holy Spirit",
+      "text_sk": "Príď práve teraz Duchu Svätý",
+      "start_ms": 34980,
+      "end_ms": 38360,
+      "mean_word_loss": 0.42303685506184896
+    },
+    {
+      "text": "Release Your power",
+      "text_sk": "Uvoľni svoju moc",
+      "start_ms": 38580,
+      "end_ms": 40400,
+      "mean_word_loss": 0.8383614676339285
+    },
+    {
+      "text": "Lord we are hungry for more of You",
+      "text_sk": "Pane, sme hladní po viac z Teba",
+      "start_ms": 40660,
+      "end_ms": 43840,
+      "mean_word_loss": 0.7920753161112467
+    },
+    {
+      "text": "Heaven's open, You're bursting through",
+      "text_sk": "Nebo je otvorené, prerážaš sa skrz",
+      "start_ms": 44180,
+      "end_ms": 47680,
+      "mean_word_loss": 0.806181629725865
+    },
+    {
+      "text": "Fillin' this place",
+      "text_sk": "Napĺňaš toto miesto",
+      "start_ms": 48040,
+      "end_ms": 49260,
+      "mean_word_loss": 1.2437715076264881
+    },
+    {
+      "text": "Like a rushing wind",
+      "text_sk": "Ako rútiaci sa vietor",
+      "start_ms": 49360,
+      "end_ms": 52260,
+      "mean_word_loss": 1.195641108921596
+    },
+    {
+      "text": "Come and move again",
+      "text_sk": "Príď a pohni sa znova",
+      "start_ms": 53060,
+      "end_ms": 56180,
+      "mean_word_loss": 0.15288000106811522
+    },
+    {
+      "text": "Like a fire within",
+      "text_sk": "Ako oheň vo vnútri",
+      "start_ms": 56800,
+      "end_ms": 59880,
+      "mean_word_loss": 0.6148192087809244
+    },
+    {
+      "text": "We will burn burn burn burn burn burn burn",
+      "text_sk": "Budeme horieť horieť horieť horieť horieť horieť horieť",
+      "start_ms": 60460,
+      "end_ms": 62820,
+      "mean_word_loss": 0.3700122833251953
+    },
+    {
+      "text": "Woo!",
+      "text_sk": "Ú!",
+      "start_ms": 64540,
+      "end_ms": 64920,
+      "mean_word_loss": 3.51171875
+    },
+    {
+      "text": "We will burn for You",
+      "text_sk": "Budeme horieť pre Teba",
+      "start_ms": 68420,
+      "end_ms": 74140,
+      "mean_word_loss": 0.902400016784668
+    },
+    {
+      "text": "To everybody that's hurting",
+      "text_sk": "Pre každého, kto trpí",
+      "start_ms": 74150,
+      "end_ms": 82440,
+      "mean_word_loss": 1.2026964672028073
+    },
+    {
+      "text": "Here comes the sound of rejoicing",
+      "text_sk": "Prichádza zvuk radosti",
+      "start_ms": 83980,
+      "end_ms": 86240,
+      "mean_word_loss": 0.3833175729822229
+    },
+    {
+      "text": "Our happiness is restoring",
+      "text_sk": "Naše šťastie sa obnovuje",
+      "start_ms": 87760,
+      "end_ms": 89940,
+      "mean_word_loss": 1.2284971872965496
+    },
+    {
+      "text": "So we give to Him the highest praise yeah",
+      "text_sk": "Tak Mu vzdávame tú najvyššiu chválu áno",
+      "start_ms": 90560,
+      "end_ms": 95020,
+      "mean_word_loss": 0.9147201871115064
+    },
+    {
+      "text": "It's the greatest feeling",
+      "text_sk": "Je to ten najväčší pocit",
+      "start_ms": 95280,
+      "end_ms": 98420,
+      "mean_word_loss": 0.5347072765940711
+    },
+    {
+      "text": "When You fill this place",
+      "text_sk": "Keď naplníš toto miesto",
+      "start_ms": 99000,
+      "end_ms": 101340,
+      "mean_word_loss": 0.5427706909179688
+    },
+    {
+      "text": "And in this moment",
+      "text_sk": "A v tejto chvíli",
+      "start_ms": 102660,
+      "end_ms": 104540,
+      "mean_word_loss": 0.4095644950866699
+    },
+    {
+      "text": "You are moving as we give You praise",
+      "text_sk": "Sa hýbeš, keď Ti vzdávame chválu",
+      "start_ms": 104600,
+      "end_ms": 109120,
+      "mean_word_loss": 0.7193110783894857
+    },
+    {
+      "text": "Oh come right now Holy Spirit",
+      "text_sk": "Ó príď práve teraz Duchu Svätý",
+      "start_ms": 109800,
+      "end_ms": 113320,
+      "mean_word_loss": 0.7536995304955377
+    },
+    {
+      "text": "Release Your power",
+      "text_sk": "Uvoľni svoju moc",
+      "start_ms": 113560,
+      "end_ms": 115520,
+      "mean_word_loss": 0.7622751871744792
+    },
+    {
+      "text": "Lord we are hungry for more of You",
+      "text_sk": "Pane, sme hladní po viac z Teba",
+      "start_ms": 115660,
+      "end_ms": 118860,
+      "mean_word_loss": 0.757633368174235
+    },
+    {
+      "text": "Heaven's open, You're bursting through",
+      "text_sk": "Nebo je otvorené, prerážaš sa skrz",
+      "start_ms": 119180,
+      "end_ms": 122720,
+      "mean_word_loss": 0.7598731994628907
+    },
+    {
+      "text": "Fillin' this place",
+      "text_sk": "Napĺňaš toto miesto",
+      "start_ms": 123020,
+      "end_ms": 124200,
+      "mean_word_loss": 1.2312494550432478
+    },
+    {
+      "text": "Like a rushing wind",
+      "text_sk": "Ako rútiaci sa vietor",
+      "start_ms": 124280,
+      "end_ms": 127340,
+      "mean_word_loss": 1.1742161342075892
+    },
+    {
+      "text": "Come and move again",
+      "text_sk": "Príď a pohni sa znova",
+      "start_ms": 128060,
+      "end_ms": 131100,
+      "mean_word_loss": 0.15434468587239583
+    },
+    {
+      "text": "Like a fire",
+      "text_sk": "Ako oheň",
+      "start_ms": 131580,
+      "end_ms": 133380,
+      "mean_word_loss": 0.6312433878580729
+    },
+    {
+      "text": "We will burn",
+      "text_sk": "Budeme horieť",
+      "start_ms": 134200,
+      "end_ms": 135940,
+      "mean_word_loss": 0.37401596705118817
+    },
+    {
+      "text": "Oh oh",
+      "text_sk": "Ó ó",
+      "start_ms": 138140,
+      "end_ms": 139470,
+      "mean_word_loss": 2.91015625
+    },
+    {
+      "text": "Hey!",
+      "text_sk": "Hej!",
+      "start_ms": 139480,
+      "end_ms": 148200,
+      "mean_word_loss": 4.76171875
+    },
+    {
+      "text": "We raise our hands up",
+      "text_sk": "Zdvíhame ruky hore",
+      "start_ms": 155240,
+      "end_ms": 157040,
+      "mean_word_loss": 0.8306778971354166
+    },
+    {
+      "text": "We're going all out",
+      "text_sk": "Ideme do toho naplno",
+      "start_ms": 157120,
+      "end_ms": 158960,
+      "mean_word_loss": 0.9135823567708333
+    },
+    {
+      "text": "We're lifting up the name of Jesus",
+      "text_sk": "Vyvyšujeme meno Ježiš",
+      "start_ms": 158980,
+      "end_ms": 161460,
+      "mean_word_loss": 1.4410417725439786
+    },
+    {
+      "text": "Nothing will stop us",
+      "text_sk": "Nič nás nezastaví",
+      "start_ms": 162740,
+      "end_ms": 164320,
+      "mean_word_loss": 1.0460968017578125
+    },
+    {
+      "text": "Singing Your praises",
+      "text_sk": "Spievajúc Tvoje chvály",
+      "start_ms": 164620,
+      "end_ms": 166260,
+      "mean_word_loss": 1.121124267578125
+    },
+    {
+      "text": "Your Holy Spirit is here",
+      "text_sk": "Tvoj Duch Svätý je tu",
+      "start_ms": 166520,
+      "end_ms": 169040,
+      "mean_word_loss": 0.06426021258036295
+    },
+    {
+      "text": "Like a rushing wind",
+      "text_sk": "Ako rútiaci sa vietor",
+      "start_ms": 169320,
+      "end_ms": 172480,
+      "mean_word_loss": 0.9702987670898438
+    },
+    {
+      "text": "Come and move again",
+      "text_sk": "Príď a pohni sa znova",
+      "start_ms": 173100,
+      "end_ms": 176400,
+      "mean_word_loss": 0.1490327835083008
+    },
+    {
+      "text": "Like a fire within",
+      "text_sk": "Ako oheň vo vnútri",
+      "start_ms": 176820,
+      "end_ms": 179420,
+      "mean_word_loss": 0.6076014836629232
+    },
+    {
+      "text": "We will burn burn burn burn",
+      "text_sk": "Budeme horieť horieť horieť horieť",
+      "start_ms": 180600,
+      "end_ms": 182680,
+      "mean_word_loss": 0.3556481997172038
+    },
+    {
+      "text": "Oh we raise our hands up",
+      "text_sk": "Ó dvíhame ruky hore",
+      "start_ms": 183000,
+      "end_ms": 185080,
+      "mean_word_loss": 0.9639468722873263
+    },
+    {
+      "text": "We raise our hands up",
+      "text_sk": "Dvíhame ruky hore",
+      "start_ms": 185280,
+      "end_ms": 186840,
+      "mean_word_loss": 0.5424833170572916
+    },
+    {
+      "text": "We raise our hands",
+      "text_sk": "Dvíhame ruky",
+      "start_ms": 189000,
+      "end_ms": 190180,
+      "mean_word_loss": 0.8730669657389323
+    },
+    {
+      "text": "And we give You all the glory",
+      "text_sk": "A vzdávame Ti všetku slávu",
+      "start_ms": 190340,
+      "end_ms": 193120,
+      "mean_word_loss": 0.7730042957124256
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 194780,
+      "end_ms": 195640,
+      "mean_word_loss": 1.938720703125
+    },
+    {
+      "text": "We raise our hands up",
+      "text_sk": "Dvíhame ruky hore",
+      "start_ms": 196440,
+      "end_ms": 198120,
+      "mean_word_loss": 1.1930628458658854
+    },
+    {
+      "text": "And we give You all the praise tonight",
+      "text_sk": "A vzdávame Ti všetku chválu dnes večer",
+      "start_ms": 201520,
+      "end_ms": 204220,
+      "mean_word_loss": 0.7947480224427722
+    },
+    {
+      "text": "We give You all the glory",
+      "text_sk": "Vzdávame Ti všetku slávu",
+      "start_ms": 204300,
+      "end_ms": 206120,
+      "mean_word_loss": 0.757241439819336
+    },
+    {
+      "text": "Jesus",
+      "text_sk": "Ježiš",
+      "start_ms": 206900,
+      "end_ms": 208200,
+      "mean_word_loss": 1.0528289794921875
+    },
+    {
+      "text": "Come on praise Him for the overflow tonight",
+      "text_sk": "Poďte, chváľte Ho za prebytok dnes večer",
+      "start_ms": 210200,
+      "end_ms": 212660,
+      "mean_word_loss": 0.498022544951666
+    },
+    {
+      "text": "Woo!",
+      "text_sk": "Ú!",
+      "start_ms": 214260,
+      "end_ms": 214720,
+      "mean_word_loss": 2.51171875
+    },
+    {
+      "text": "Our faith is breaking through the ceiling",
+      "text_sk": "Naša viera preráža strop",
+      "start_ms": 219140,
+      "end_ms": 222040,
+      "mean_word_loss": 0.5114722024826777
+    },
+    {
+      "text": "There's no doubt we are believing",
+      "text_sk": "Nie je pochýb, že veríme",
+      "start_ms": 223180,
+      "end_ms": 225680,
+      "mean_word_loss": 0.9663379654051766
+    },
+    {
+      "text": "That in this moment we are seeing",
+      "text_sk": "Že v tejto chvíli vidíme",
+      "start_ms": 226680,
+      "end_ms": 229520,
+      "mean_word_loss": 0.19143236251104448
+    },
+    {
+      "text": "Oh everything that we've been dreaming",
+      "text_sk": "Ó všetko, o čom sme snívali",
+      "start_ms": 230460,
+      "end_ms": 233020,
+      "mean_word_loss": 0.5396756490071615
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.6059391550592499,
+  "metadata": {
+    "n_tokens_sent": 306,
+    "n_words_returned_raw": 611,
+    "n_words_returned_content": 306,
+    "n_characters_returned": 1581,
+    "runtime_sec": 7.7,
+    "n_lines": 63,
+    "n_lines_timed": 63,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

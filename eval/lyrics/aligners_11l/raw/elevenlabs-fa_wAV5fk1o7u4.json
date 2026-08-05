@@ -1,0 +1,357 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wAV5fk1o7u4_vocal16k.wav",
+  "duration_ms": 212360,
+  "lines": [
+    {
+      "text": "In our darkest days",
+      "text_sk": "V našich najtemnejších dňoch",
+      "start_ms": 17340,
+      "end_ms": 19940,
+      "mean_word_loss": 0.31082307724725633
+    },
+    {
+      "text": "Through the fear and pain",
+      "text_sk": "Cez strach a bolesť",
+      "start_ms": 20460,
+      "end_ms": 22860,
+      "mean_word_loss": 0.12231124696277437
+    },
+    {
+      "text": "You were always there with us",
+      "text_sk": "Vždy si bol s nami",
+      "start_ms": 24220,
+      "end_ms": 27380,
+      "mean_word_loss": 0.1353788415590922
+    },
+    {
+      "text": "It's only by Your grace",
+      "text_sk": "Je to len vďaka Tvojej milosti",
+      "start_ms": 30100,
+      "end_ms": 33040,
+      "mean_word_loss": 0.47566820144653316
+    },
+    {
+      "text": "That we are here today",
+      "text_sk": "Že sme tu dnes",
+      "start_ms": 33440,
+      "end_ms": 35840,
+      "mean_word_loss": 0.17464481989542643
+    },
+    {
+      "text": "We're the evidence of love",
+      "text_sk": "Sme dôkazom lásky",
+      "start_ms": 37380,
+      "end_ms": 40780,
+      "mean_word_loss": 0.29210095723470053
+    },
+    {
+      "text": "Over and over You have proved",
+      "text_sk": "Znovu a znovu si dokázal",
+      "start_ms": 43600,
+      "end_ms": 46360,
+      "mean_word_loss": 0.3431376881069607
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "start_ms": 46600,
+      "end_ms": 49560,
+      "mean_word_loss": 0.15157707021349953
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "start_ms": 50160,
+      "end_ms": 53000,
+      "mean_word_loss": 0.07210441803445622
+    },
+    {
+      "text": "Again and again You come through",
+      "text_sk": "Znovu a znovu prichádzaš",
+      "start_ms": 56540,
+      "end_ms": 59360,
+      "mean_word_loss": 0.30008999998607333
+    },
+    {
+      "text": "Always faithful forever true",
+      "text_sk": "Vždy verný, navždy pravdivý",
+      "start_ms": 60000,
+      "end_ms": 62620,
+      "mean_word_loss": 0.21072546534595035
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "start_ms": 63020,
+      "end_ms": 65980,
+      "mean_word_loss": 0.1399288929644085
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "start_ms": 66620,
+      "end_ms": 69160,
+      "mean_word_loss": 0.07525066713086602
+    },
+    {
+      "text": "Whatever we will face",
+      "text_sk": "Čokoľvek budeme čeliť",
+      "start_ms": 69500,
+      "end_ms": 72400,
+      "mean_word_loss": 0.2723538875579834
+    },
+    {
+      "text": "In the coming days",
+      "text_sk": "V nadchádzajúcich dňoch",
+      "start_ms": 73280,
+      "end_ms": 75820,
+      "mean_word_loss": 0.4156842033068339
+    },
+    {
+      "text": "We will never walk alone",
+      "text_sk": "Nikdy nebudeme kráčať sami",
+      "start_ms": 76640,
+      "end_ms": 79720,
+      "mean_word_loss": 0.3813727569580078
+    },
+    {
+      "text": "And through it all we praise",
+      "text_sk": "A cez to všetko chválime",
+      "start_ms": 82760,
+      "end_ms": 85600,
+      "mean_word_loss": 0.16215870304713173
+    },
+    {
+      "text": "Our hope will never change",
+      "text_sk": "Naša nádej sa nikdy nezmení",
+      "start_ms": 86180,
+      "end_ms": 88880,
+      "mean_word_loss": 0.3554329172770182
+    },
+    {
+      "text": "Where Your presence is we're home",
+      "text_sk": "Kde je Tvoja prítomnosť, tam sme doma",
+      "start_ms": 90000,
+      "end_ms": 95140,
+      "mean_word_loss": 0.2403236707051595
+    },
+    {
+      "text": "Over and over You have proved",
+      "text_sk": "Znovu a znovu si dokázal",
+      "start_ms": 96000,
+      "end_ms": 99200,
+      "mean_word_loss": 0.5461763805813259
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "start_ms": 99220,
+      "end_ms": 102060,
+      "mean_word_loss": 0.1065943025407337
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "start_ms": 102760,
+      "end_ms": 105520,
+      "mean_word_loss": 0.0524132034405559
+    },
+    {
+      "text": "Again and again You come through",
+      "text_sk": "Znovu a znovu prichádzaš",
+      "start_ms": 109140,
+      "end_ms": 112440,
+      "mean_word_loss": 0.2525070584009564
+    },
+    {
+      "text": "Always faithful forever true",
+      "text_sk": "Vždy verný, navždy pravdivý",
+      "start_ms": 112620,
+      "end_ms": 115120,
+      "mean_word_loss": 0.2725990968091147
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "start_ms": 115640,
+      "end_ms": 118600,
+      "mean_word_loss": 0.13416927144640967
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "start_ms": 119240,
+      "end_ms": 123460,
+      "mean_word_loss": 0.06008045170582882
+    },
+    {
+      "text": "There's no one like You God yeah",
+      "text_sk": "Nikto nie je ako Ty, Bože, áno",
+      "start_ms": 127640,
+      "end_ms": 133180,
+      "mean_word_loss": 0.8463285034205638
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "text_sk": "Nič neotrasie našou vierou",
+      "start_ms": 134680,
+      "end_ms": 137860,
+      "mean_word_loss": 0.2856305779351128
+    },
+    {
+      "text": "No matter what the world may say",
+      "text_sk": "Bez ohľadu na to, čo svet hovorí",
+      "start_ms": 138500,
+      "end_ms": 140960,
+      "mean_word_loss": 0.23354116053808302
+    },
+    {
+      "text": "We know Your word will never change",
+      "text_sk": "Vieme, že Tvoje slovo sa nikdy nezmení",
+      "start_ms": 141760,
+      "end_ms": 144320,
+      "mean_word_loss": 0.16124728520711265
+    },
+    {
+      "text": "We stand on better promises",
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "start_ms": 144460,
+      "end_ms": 147980,
+      "mean_word_loss": 0.15013031641642252
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "text_sk": "Nič neotrasie našou vierou",
+      "start_ms": 148600,
+      "end_ms": 151000,
+      "mean_word_loss": 0.37294842190212674
+    },
+    {
+      "text": "No matter what the world may say",
+      "text_sk": "Bez ohľadu na to, čo svet hovorí",
+      "start_ms": 151640,
+      "end_ms": 154240,
+      "mean_word_loss": 0.09178270328612555
+    },
+    {
+      "text": "We know Your word will never change",
+      "text_sk": "Vieme, že Tvoje slovo sa nikdy nezmení",
+      "start_ms": 154780,
+      "end_ms": 157360,
+      "mean_word_loss": 0.1537180741628011
+    },
+    {
+      "text": "We stand on better promises",
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "start_ms": 157600,
+      "end_ms": 160560,
+      "mean_word_loss": 0.1358538858095805
+    },
+    {
+      "text": "We stand on better promises",
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "start_ms": 160860,
+      "end_ms": 163900,
+      "mean_word_loss": 0.26187034050623575
+    },
+    {
+      "text": "We stand on better promises",
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "start_ms": 164180,
+      "end_ms": 167080,
+      "mean_word_loss": 0.28717963298161825
+    },
+    {
+      "text": "We stand on better promises",
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "start_ms": 167420,
+      "end_ms": 170200,
+      "mean_word_loss": 0.27014506101608277
+    },
+    {
+      "text": "Over and over You have proved",
+      "text_sk": "Znovu a znovu si dokázal",
+      "start_ms": 175120,
+      "end_ms": 177920,
+      "mean_word_loss": 0.5865468316608006
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "start_ms": 178160,
+      "end_ms": 180760,
+      "mean_word_loss": 0.12845491227649508
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "start_ms": 181640,
+      "end_ms": 184360,
+      "mean_word_loss": 0.04304267857350459
+    },
+    {
+      "text": "Again and again You come through",
+      "text_sk": "Znovu a znovu prichádzaš",
+      "start_ms": 188080,
+      "end_ms": 190960,
+      "mean_word_loss": 0.2576318759766836
+    },
+    {
+      "text": "You're always faithful forever true",
+      "text_sk": "Si vždy verný, navždy pravdivý",
+      "start_ms": 191360,
+      "end_ms": 194040,
+      "mean_word_loss": 0.19931486248970032
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "start_ms": 194520,
+      "end_ms": 197460,
+      "mean_word_loss": 0.1311660247189658
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "start_ms": 198120,
+      "end_ms": 201040,
+      "mean_word_loss": 0.05498951178829686
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "text_sk": "Nič neotrasie našou vierou",
+      "start_ms": 201160,
+      "end_ms": 203560,
+      "mean_word_loss": 0.2479620912339952
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "text_sk": "Nič neotrasie našou vierou",
+      "start_ms": 204460,
+      "end_ms": 206750,
+      "mean_word_loss": 0.16411227756076388
+    },
+    {
+      "text": "Nothing's gonna shake our faith yeah",
+      "text_sk": "Nič neotrasie našou vierou, áno",
+      "start_ms": 207760,
+      "end_ms": 212360,
+      "mean_word_loss": 0.18869397110409206
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.19697255907731018,
+  "metadata": {
+    "n_tokens_sent": 285,
+    "n_words_returned_raw": 569,
+    "n_words_returned_content": 285,
+    "n_characters_returned": 1532,
+    "runtime_sec": 4.8,
+    "n_lines": 48,
+    "n_lines_timed": 48,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

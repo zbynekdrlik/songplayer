@@ -1,0 +1,714 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wjJ-izYndWs_vocal16k.wav",
+  "duration_ms": 301220,
+  "lines": [
+    {
+      "text": "By your grace I'm alive",
+      "text_sk": "Z tvojej milosti som nažive",
+      "start_ms": 11120,
+      "end_ms": 15260,
+      "mean_word_loss": 0.712530008951823
+    },
+    {
+      "text": "And I'm here to testify",
+      "text_sk": "A som tu, aby som dosvedčil",
+      "start_ms": 15900,
+      "end_ms": 18640,
+      "mean_word_loss": 0.26119955153692337
+    },
+    {
+      "text": "My God",
+      "text_sk": "Môj Boh",
+      "start_ms": 18780,
+      "end_ms": 19520,
+      "mean_word_loss": 1.0092315673828125
+    },
+    {
+      "text": "I live to praise You",
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "start_ms": 20800,
+      "end_ms": 23600,
+      "mean_word_loss": 0.09504043261210124
+    },
+    {
+      "text": "My defense day and night",
+      "text_sk": "Moja obrana dňom i nocou",
+      "start_ms": 25000,
+      "end_ms": 27860,
+      "mean_word_loss": 0.3957132030668713
+    },
+    {
+      "text": "The name of Jesus Christ",
+      "text_sk": "Meno Ježiša Krista",
+      "start_ms": 28460,
+      "end_ms": 31240,
+      "mean_word_loss": 0.18168191274007162
+    },
+    {
+      "text": "My God",
+      "text_sk": "Môj Boh",
+      "start_ms": 31280,
+      "end_ms": 32480,
+      "mean_word_loss": 0.379180908203125
+    },
+    {
+      "text": "I live to praise You",
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "start_ms": 33340,
+      "end_ms": 36320,
+      "mean_word_loss": 0.061627610524495446
+    },
+    {
+      "text": "What else can I do",
+      "text_sk": "Čo iné môžem robiť",
+      "start_ms": 38260,
+      "end_ms": 40380,
+      "mean_word_loss": 0.37256863911946614
+    },
+    {
+      "text": "But praise You",
+      "text_sk": "Len Ťa chváliť",
+      "start_ms": 40560,
+      "end_ms": 44220,
+      "mean_word_loss": 0.7941371070014105
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 45020,
+      "end_ms": 49840,
+      "mean_word_loss": 0.30235592524210614
+    },
+    {
+      "text": "No one else beside",
+      "text_sk": "Nikto iný vedľa",
+      "start_ms": 50740,
+      "end_ms": 52800,
+      "mean_word_loss": 0.5194017688433329
+    },
+    {
+      "text": "El Shaddai",
+      "text_sk": "El Shaddai",
+      "start_ms": 53840,
+      "end_ms": 55020,
+      "mean_word_loss": 2.285993303571429
+    },
+    {
+      "text": "If You don't worry",
+      "text_sk": "Ak sa Ty netrápiš",
+      "start_ms": 55220,
+      "end_ms": 57640,
+      "mean_word_loss": 0.6840279420216878
+    },
+    {
+      "text": "Why should I",
+      "text_sk": "Prečo by som mal ja",
+      "start_ms": 57720,
+      "end_ms": 58880,
+      "mean_word_loss": 0.4079466660817464
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 59680,
+      "end_ms": 62360,
+      "mean_word_loss": 0.07511647542317708
+    },
+    {
+      "text": "Author of my life",
+      "text_sk": "Autor môjho života",
+      "start_ms": 63200,
+      "end_ms": 65360,
+      "mean_word_loss": 0.1442180673281352
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 65960,
+      "end_ms": 68540,
+      "mean_word_loss": 0.12112905184427898
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 68660,
+      "end_ms": 69020,
+      "mean_word_loss": 0.0654296875
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 69340,
+      "end_ms": 71640,
+      "mean_word_loss": 0.27261454264322915
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 72120,
+      "end_ms": 74840,
+      "mean_word_loss": 0.10817519823710124
+    },
+    {
+      "text": "Corner stone solid rock",
+      "text_sk": "Uhelný kameň pevná skala",
+      "start_ms": 79380,
+      "end_ms": 82360,
+      "mean_word_loss": 1.3585983276367188
+    },
+    {
+      "text": "Faithful even when I'm not",
+      "text_sk": "Verný aj keď ja nie som",
+      "start_ms": 82620,
+      "end_ms": 85740,
+      "mean_word_loss": 0.23433074951171876
+    },
+    {
+      "text": "My King",
+      "text_sk": "Môj Kráľ",
+      "start_ms": 85780,
+      "end_ms": 87640,
+      "mean_word_loss": 1.89013671875
+    },
+    {
+      "text": "I live to praise You",
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "start_ms": 87840,
+      "end_ms": 90760,
+      "mean_word_loss": 0.27514330546061194
+    },
+    {
+      "text": "Only one name will stand",
+      "text_sk": "Len jedno meno obstojí",
+      "start_ms": 92020,
+      "end_ms": 95020,
+      "mean_word_loss": 0.2094733301798503
+    },
+    {
+      "text": "Jesus the great I Am",
+      "text_sk": "Ježiš veľký Ja Som",
+      "start_ms": 95520,
+      "end_ms": 98260,
+      "mean_word_loss": 0.6300081380208333
+    },
+    {
+      "text": "My King",
+      "text_sk": "Môj Kráľ",
+      "start_ms": 98300,
+      "end_ms": 99660,
+      "mean_word_loss": 1.7508544921875
+    },
+    {
+      "text": "I live to praise You",
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "start_ms": 100280,
+      "end_ms": 102940,
+      "mean_word_loss": 0.18706750869750977
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 103300,
+      "end_ms": 106160,
+      "mean_word_loss": 0.2768243948618571
+    },
+    {
+      "text": "No one else beside",
+      "text_sk": "Nikto iný vedľa",
+      "start_ms": 106820,
+      "end_ms": 109220,
+      "mean_word_loss": 0.5874019761880239
+    },
+    {
+      "text": "El Shaddai",
+      "text_sk": "El Shaddai",
+      "start_ms": 109940,
+      "end_ms": 111160,
+      "mean_word_loss": 2.2308872767857144
+    },
+    {
+      "text": "If You don't worry",
+      "text_sk": "Ak sa Ty netrápiš",
+      "start_ms": 111240,
+      "end_ms": 113660,
+      "mean_word_loss": 0.6309059143066407
+    },
+    {
+      "text": "Why should I",
+      "text_sk": "Prečo by som mal ja",
+      "start_ms": 113820,
+      "end_ms": 115280,
+      "mean_word_loss": 0.41348350048065186
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 115740,
+      "end_ms": 118260,
+      "mean_word_loss": 0.07350587844848633
+    },
+    {
+      "text": "Author of my life",
+      "text_sk": "Autor môjho života",
+      "start_ms": 119320,
+      "end_ms": 121440,
+      "mean_word_loss": 0.13952382405598956
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 122100,
+      "end_ms": 124640,
+      "mean_word_loss": 0.11411062876383464
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 124740,
+      "end_ms": 125140,
+      "mean_word_loss": 0.057535807291666664
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 125480,
+      "end_ms": 127800,
+      "mean_word_loss": 0.2610827128092448
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 128259,
+      "end_ms": 131299,
+      "mean_word_loss": 0.10526712735493977
+    },
+    {
+      "text": "No one else beside",
+      "text_sk": "Nikto iný vedľa",
+      "start_ms": 131780,
+      "end_ms": 134180,
+      "mean_word_loss": 0.4693805476029714
+    },
+    {
+      "text": "Oh El Shaddai",
+      "text_sk": "Ó El Shaddai",
+      "start_ms": 134560,
+      "end_ms": 136120,
+      "mean_word_loss": 2.7769717261904763
+    },
+    {
+      "text": "If You don't worry",
+      "text_sk": "Ak sa Ty netrápiš",
+      "start_ms": 136300,
+      "end_ms": 138720,
+      "mean_word_loss": 0.620481793085734
+    },
+    {
+      "text": "Why should I",
+      "text_sk": "Prečo by som mal ja",
+      "start_ms": 138780,
+      "end_ms": 140180,
+      "mean_word_loss": 0.386211289299859
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 140720,
+      "end_ms": 143800,
+      "mean_word_loss": 0.06869252522786458
+    },
+    {
+      "text": "Author of my life",
+      "text_sk": "Autor môjho života",
+      "start_ms": 144260,
+      "end_ms": 146620,
+      "mean_word_loss": 0.13199377059936523
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 146980,
+      "end_ms": 149620,
+      "mean_word_loss": 0.11245646476745605
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 149700,
+      "end_ms": 150100,
+      "mean_word_loss": 0.054524739583333336
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 150380,
+      "end_ms": 152700,
+      "mean_word_loss": 0.25077311197916663
+    },
+    {
+      "text": "Your name is",
+      "text_sk": "Tvoje meno je",
+      "start_ms": 153160,
+      "end_ms": 154720,
+      "mean_word_loss": 0.12340927124023438
+    },
+    {
+      "text": "Prince of Peace",
+      "text_sk": "Knieža pokoja",
+      "start_ms": 155080,
+      "end_ms": 156540,
+      "mean_word_loss": 0.5937708112928602
+    },
+    {
+      "text": "King of Kings",
+      "text_sk": "Kráľ kráľov",
+      "start_ms": 156660,
+      "end_ms": 157900,
+      "mean_word_loss": 0.10228373209635416
+    },
+    {
+      "text": "Lord of Lords",
+      "text_sk": "Pán pánov",
+      "start_ms": 158260,
+      "end_ms": 159560,
+      "mean_word_loss": 0.28909308115641275
+    },
+    {
+      "text": "Alpha and Omega",
+      "text_sk": "Alfa a Omega",
+      "start_ms": 159860,
+      "end_ms": 162740,
+      "mean_word_loss": 1.4654106987847222
+    },
+    {
+      "text": "My Savior",
+      "text_sk": "Môj Spasiteľ",
+      "start_ms": 164100,
+      "end_ms": 166320,
+      "mean_word_loss": 0.4953498840332031
+    },
+    {
+      "text": "Oh through the storm",
+      "text_sk": "Ó cez búrku",
+      "start_ms": 166920,
+      "end_ms": 169080,
+      "mean_word_loss": 0.447585323878697
+    },
+    {
+      "text": "It is well with my soul",
+      "text_sk": "Je dobre s mojou dušou",
+      "start_ms": 169180,
+      "end_ms": 172160,
+      "mean_word_loss": 0.6033223470052084
+    },
+    {
+      "text": "I know You are faithful",
+      "text_sk": "Vieme, že si verný",
+      "start_ms": 172440,
+      "end_ms": 175480,
+      "mean_word_loss": 0.13935048182805382
+    },
+    {
+      "text": "My Savior",
+      "text_sk": "Môj Spasiteľ",
+      "start_ms": 176580,
+      "end_ms": 178620,
+      "mean_word_loss": 0.2824261983235677
+    },
+    {
+      "text": "Hey and Prince of Peace",
+      "text_sk": "Hej a Knieža pokoja",
+      "start_ms": 178960,
+      "end_ms": 181480,
+      "mean_word_loss": 0.4516190592447916
+    },
+    {
+      "text": "King of Kings",
+      "text_sk": "Kráľ kráľov",
+      "start_ms": 181660,
+      "end_ms": 182900,
+      "mean_word_loss": 0.06818459828694662
+    },
+    {
+      "text": "Lord of Lords",
+      "text_sk": "Pán pánov",
+      "start_ms": 183220,
+      "end_ms": 184720,
+      "mean_word_loss": 0.3313088099161784
+    },
+    {
+      "text": "Alpha and Omega",
+      "text_sk": "Alfa a Omega",
+      "start_ms": 184780,
+      "end_ms": 186780,
+      "mean_word_loss": 1.425566948784722
+    },
+    {
+      "text": "My Savior",
+      "text_sk": "Môj Spasiteľ",
+      "start_ms": 189060,
+      "end_ms": 190660,
+      "mean_word_loss": 0.47657203674316406
+    },
+    {
+      "text": "Hey through the storm",
+      "text_sk": "Hej cez búrku",
+      "start_ms": 191700,
+      "end_ms": 194000,
+      "mean_word_loss": 0.6690218743823824
+    },
+    {
+      "text": "It is well with my soul",
+      "text_sk": "Je dobre s mojou dušou",
+      "start_ms": 194080,
+      "end_ms": 196940,
+      "mean_word_loss": 0.6316744486490885
+    },
+    {
+      "text": "I know You are faithful",
+      "text_sk": "Vieme, že si verný",
+      "start_ms": 197360,
+      "end_ms": 200120,
+      "mean_word_loss": 0.1460017204284668
+    },
+    {
+      "text": "My Savior",
+      "text_sk": "Môj Spasiteľ",
+      "start_ms": 201520,
+      "end_ms": 203240,
+      "mean_word_loss": 0.24934069315592447
+    },
+    {
+      "text": "Oh You are faithful",
+      "text_sk": "Ó Si verný",
+      "start_ms": 203800,
+      "end_ms": 207040,
+      "mean_word_loss": 0.7921539098024368
+    },
+    {
+      "text": "My Savior",
+      "text_sk": "Môj Spasiteľ",
+      "start_ms": 207700,
+      "end_ms": 209180,
+      "mean_word_loss": 0.2654031117757161
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 209300,
+      "end_ms": 212200,
+      "mean_word_loss": 0.3291085561116536
+    },
+    {
+      "text": "No one else beside",
+      "text_sk": "Nikto iný vedľa",
+      "start_ms": 212740,
+      "end_ms": 215160,
+      "mean_word_loss": 0.48723262548446655
+    },
+    {
+      "text": "El Shaddai",
+      "text_sk": "El Shaddai",
+      "start_ms": 215920,
+      "end_ms": 216829,
+      "mean_word_loss": 2.1732700892857144
+    },
+    {
+      "text": "If You don't",
+      "text_sk": "Ak sa Ty",
+      "start_ms": 217040,
+      "end_ms": 218400,
+      "mean_word_loss": 0.8955340915256076
+    },
+    {
+      "text": "Worry why should I",
+      "text_sk": "Netrápiš, prečo by som mal ja",
+      "start_ms": 219020,
+      "end_ms": 221400,
+      "mean_word_loss": 0.1980759541193644
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 221760,
+      "end_ms": 224580,
+      "mean_word_loss": 0.07441377639770508
+    },
+    {
+      "text": "Author of my life",
+      "text_sk": "Autor môjho života",
+      "start_ms": 225260,
+      "end_ms": 226820,
+      "mean_word_loss": 0.15535863240559894
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 228080,
+      "end_ms": 230680,
+      "mean_word_loss": 0.1128918170928955
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 230760,
+      "end_ms": 231120,
+      "mean_word_loss": 0.06988525390625
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 231420,
+      "end_ms": 234080,
+      "mean_word_loss": 0.26889877319335936
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 234240,
+      "end_ms": 237020,
+      "mean_word_loss": 0.11383461952209473
+    },
+    {
+      "text": "No one else beside",
+      "text_sk": "Nikto iný vedľa",
+      "start_ms": 237760,
+      "end_ms": 240160,
+      "mean_word_loss": 0.4889221390088399
+    },
+    {
+      "text": "El Shaddai",
+      "text_sk": "El Shaddai",
+      "start_ms": 240860,
+      "end_ms": 242020,
+      "mean_word_loss": 2.240234375
+    },
+    {
+      "text": "If You don't",
+      "text_sk": "Ak sa Ty",
+      "start_ms": 242200,
+      "end_ms": 243820,
+      "mean_word_loss": 0.9008490244547526
+    },
+    {
+      "text": "Worry why should I",
+      "text_sk": "Netrápiš, prečo by som mal ja",
+      "start_ms": 246100,
+      "end_ms": 246731,
+      "mean_word_loss": 0.19294000466664632
+    },
+    {
+      "text": "Oh Your name is God",
+      "text_sk": "Ó Tvoje meno je Boh",
+      "start_ms": 246730,
+      "end_ms": 249720,
+      "mean_word_loss": 1.2148406982421875
+    },
+    {
+      "text": "Author of my life",
+      "text_sk": "Autor môjho života",
+      "start_ms": 250080,
+      "end_ms": 252500,
+      "mean_word_loss": 0.1451047658920288
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 253000,
+      "end_ms": 255520,
+      "mean_word_loss": 0.11282765070597331
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 255680,
+      "end_ms": 255960,
+      "mean_word_loss": 0.06736246744791667
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 256340,
+      "end_ms": 258680,
+      "mean_word_loss": 0.259423573811849
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 259120,
+      "end_ms": 261820,
+      "mean_word_loss": 0.29386045138041184
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 261920,
+      "end_ms": 262260,
+      "mean_word_loss": 0.3602294921875
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 262600,
+      "end_ms": 264900,
+      "mean_word_loss": 0.3036376953125
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "text_sk": "Dôverujem v Tvoje meno",
+      "start_ms": 265460,
+      "end_ms": 267980,
+      "mean_word_loss": 0.26198666890462236
+    },
+    {
+      "text": "God",
+      "text_sk": "Bože",
+      "start_ms": 268120,
+      "end_ms": 268420,
+      "mean_word_loss": 0.4208170572916667
+    },
+    {
+      "text": "'Til the day I die",
+      "text_sk": "Až do dňa, keď zomriem",
+      "start_ms": 268820,
+      "end_ms": 270780,
+      "mean_word_loss": 0.30633646647135415
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 271620,
+      "end_ms": 274940,
+      "mean_word_loss": 0.09275595347086589
+    },
+    {
+      "text": "There is nothing like the name of Jesus Christ",
+      "text_sk": "Nie je nič ako meno Ježiša Krista",
+      "start_ms": 275120,
+      "end_ms": 289900,
+      "mean_word_loss": 0.568704580882239
+    },
+    {
+      "text": "Your name is God",
+      "text_sk": "Tvoje meno je Boh",
+      "start_ms": 290280,
+      "end_ms": 301220,
+      "mean_word_loss": 0.2514203389485677
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.3832616983902531,
+  "metadata": {
+    "n_tokens_sent": 373,
+    "n_words_returned_raw": 745,
+    "n_words_returned_content": 373,
+    "n_characters_returned": 1709,
+    "runtime_sec": 5.5,
+    "n_lines": 99,
+    "n_lines_timed": 99,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}
