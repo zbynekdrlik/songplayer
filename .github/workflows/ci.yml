@@ -137,7 +137,11 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Install trunk
-        run: cargo install trunk
+        # --locked pins trunk's OWN Cargo.lock. Without it, cargo resolves
+        # trunk's deps fresh on every run, so an unrelated upstream release
+        # breaks our CI: cssparser 0.37.0 broke lightningcss 1.0.0-alpha.65
+        # on 2026-08-05 and took build-wasm red with no change on our side.
+        run: cargo install trunk --version 0.21.14 --locked
       - name: Build WASM frontend
         run: cd sp-ui && trunk build --release
       - name: Upload dist artifact
