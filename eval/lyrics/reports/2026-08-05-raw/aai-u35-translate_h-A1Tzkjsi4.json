@@ -1,0 +1,2392 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\h-A1Tzkjsi4_vocal16k.wav",
+  "duration_ms": 370174,
+  "lines": [
+    {
+      "text": "There's no one like you, no one beside you.",
+      "start_ms": 15927,
+      "end_ms": 19488,
+      "text_sk": "Nie je nikto ako ty, nikto po tvojom boku.",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 15927,
+          "end_ms": 16594,
+          "confidence": 0.94756675
+        },
+        {
+          "text": "no",
+          "start_ms": 16594,
+          "end_ms": 16903,
+          "confidence": 0.99681926
+        },
+        {
+          "text": "one",
+          "start_ms": 16903,
+          "end_ms": 16968,
+          "confidence": 0.92363477
+        },
+        {
+          "text": "like",
+          "start_ms": 17000,
+          "end_ms": 17813,
+          "confidence": 0.89718866
+        },
+        {
+          "text": "you,",
+          "start_ms": 17813,
+          "end_ms": 17895,
+          "confidence": 0.5990475
+        },
+        {
+          "text": "no",
+          "start_ms": 17976,
+          "end_ms": 18122,
+          "confidence": 0.6672516
+        },
+        {
+          "text": "one",
+          "start_ms": 18122,
+          "end_ms": 18187,
+          "confidence": 0.9627537
+        },
+        {
+          "text": "beside",
+          "start_ms": 18220,
+          "end_ms": 19456,
+          "confidence": 0.9576596
+        },
+        {
+          "text": "you.",
+          "start_ms": 19456,
+          "end_ms": 19488,
+          "confidence": 0.97271156
+        }
+      ]
+    },
+    {
+      "text": "Our Father in heaven, holy is your name. Your kingdom is coming. Let your will be done.",
+      "start_ms": 19488,
+      "end_ms": 50399,
+      "text_sk": "Otče náš, ktorý si na nebesiach, posvätené buď tvoje meno. Príď tvoje kráľovstvo. Buď tvoja vôľa.",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 27485,
+          "end_ms": 27598,
+          "confidence": 0.9692524
+        },
+        {
+          "text": "Father",
+          "start_ms": 28131,
+          "end_ms": 29375,
+          "confidence": 0.9996333
+        },
+        {
+          "text": "in",
+          "start_ms": 30959,
+          "end_ms": 31508,
+          "confidence": 0.90824556
+        },
+        {
+          "text": "heaven,",
+          "start_ms": 31670,
+          "end_ms": 33534,
+          "confidence": 0.93179727
+        },
+        {
+          "text": "holy",
+          "start_ms": 35172,
+          "end_ms": 36079,
+          "confidence": 0.89425653
+        },
+        {
+          "text": "is",
+          "start_ms": 36079,
+          "end_ms": 37344,
+          "confidence": 0.998985
+        },
+        {
+          "text": "your",
+          "start_ms": 37750,
+          "end_ms": 37976,
+          "confidence": 0.9550576
+        },
+        {
+          "text": "name.",
+          "start_ms": 38041,
+          "end_ms": 38865,
+          "confidence": 0.9886373
+        },
+        {
+          "text": "Your",
+          "start_ms": 41162,
+          "end_ms": 41291,
+          "confidence": 0.6356958
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 41890,
+          "end_ms": 43733,
+          "confidence": 0.99726886
+        },
+        {
+          "text": "is",
+          "start_ms": 44720,
+          "end_ms": 45270,
+          "confidence": 0.9896964
+        },
+        {
+          "text": "coming.",
+          "start_ms": 45302,
+          "end_ms": 47061,
+          "confidence": 0.8095955
+        },
+        {
+          "text": "Let",
+          "start_ms": 47989,
+          "end_ms": 48315,
+          "confidence": 0.8136902
+        },
+        {
+          "text": "your",
+          "start_ms": 48315,
+          "end_ms": 48657,
+          "confidence": 0.999303
+        },
+        {
+          "text": "will",
+          "start_ms": 48869,
+          "end_ms": 49422,
+          "confidence": 0.99934226
+        },
+        {
+          "text": "be",
+          "start_ms": 49764,
+          "end_ms": 49960,
+          "confidence": 0.99938786
+        },
+        {
+          "text": "done.",
+          "start_ms": 50188,
+          "end_ms": 50399,
+          "confidence": 0.87385505
+        }
+      ]
+    },
+    {
+      "text": "Today.",
+      "start_ms": 51950,
+      "end_ms": 52645,
+      "text_sk": "Dnes.",
+      "words": [
+        {
+          "text": "Today.",
+          "start_ms": 51950,
+          "end_ms": 52645,
+          "confidence": 0.52285916
+        }
+      ]
+    },
+    {
+      "text": "Providing, protecting, and forgiving us our sins.",
+      "start_ms": 52645,
+      "end_ms": 66885,
+      "text_sk": "Poskytujúc nám, chrániac nás a odpúšťajúc nám naše hriechy.",
+      "words": [
+        {
+          "text": "Providing,",
+          "start_ms": 54796,
+          "end_ms": 57481,
+          "confidence": 0.9750066
+        },
+        {
+          "text": "protecting,",
+          "start_ms": 58420,
+          "end_ms": 60758,
+          "confidence": 0.98935175
+        },
+        {
+          "text": "and",
+          "start_ms": 61823,
+          "end_ms": 61888,
+          "confidence": 0.96411216
+        },
+        {
+          "text": "forgiving",
+          "start_ms": 62017,
+          "end_ms": 63743,
+          "confidence": 0.9957183
+        },
+        {
+          "text": "us",
+          "start_ms": 63936,
+          "end_ms": 64614,
+          "confidence": 0.96506894
+        },
+        {
+          "text": "our",
+          "start_ms": 64807,
+          "end_ms": 65840,
+          "confidence": 0.9751076
+        },
+        {
+          "text": "sins.",
+          "start_ms": 65840,
+          "end_ms": 66885,
+          "confidence": 0.6139515
+        }
+      ]
+    },
+    {
+      "text": "As we humbly come before you, as we worship you and sing.",
+      "start_ms": 66885,
+      "end_ms": 80358,
+      "text_sk": "Keď k vám s pokorou prichádzame, keď vás uctievame a spievame.",
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 68670,
+          "end_ms": 68976,
+          "confidence": 0.99833494
+        },
+        {
+          "text": "we",
+          "start_ms": 69089,
+          "end_ms": 69282,
+          "confidence": 0.998887
+        },
+        {
+          "text": "humbly",
+          "start_ms": 69394,
+          "end_ms": 70504,
+          "confidence": 0.99968064
+        },
+        {
+          "text": "come",
+          "start_ms": 72048,
+          "end_ms": 72289,
+          "confidence": 0.9476775
+        },
+        {
+          "text": "before",
+          "start_ms": 72466,
+          "end_ms": 73528,
+          "confidence": 0.9978263
+        },
+        {
+          "text": "you,",
+          "start_ms": 73593,
+          "end_ms": 74046,
+          "confidence": 0.8176707
+        },
+        {
+          "text": "as",
+          "start_ms": 75519,
+          "end_ms": 75745,
+          "confidence": 0.8874825
+        },
+        {
+          "text": "we",
+          "start_ms": 75939,
+          "end_ms": 76134,
+          "confidence": 0.9977799
+        },
+        {
+          "text": "worship",
+          "start_ms": 76247,
+          "end_ms": 77412,
+          "confidence": 0.999037
+        },
+        {
+          "text": "you",
+          "start_ms": 77477,
+          "end_ms": 77606,
+          "confidence": 0.995494
+        },
+        {
+          "text": "and",
+          "start_ms": 78513,
+          "end_ms": 79144,
+          "confidence": 0.9612796
+        },
+        {
+          "text": "sing.",
+          "start_ms": 79176,
+          "end_ms": 80358,
+          "confidence": 0.9294144
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom. Yours is the power. Yours is the glory forever.",
+      "start_ms": 81186,
+      "end_ms": 92958,
+      "text_sk": "Tvoje je kráľovstvo. Tvoja je moc. Tvoja je sláva naveky.",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 81186,
+          "end_ms": 81880,
+          "confidence": 0.98752254
+        },
+        {
+          "text": "is",
+          "start_ms": 81977,
+          "end_ms": 82203,
+          "confidence": 0.9998838
+        },
+        {
+          "text": "the",
+          "start_ms": 82316,
+          "end_ms": 82558,
+          "confidence": 0.9999093
+        },
+        {
+          "text": "kingdom.",
+          "start_ms": 82703,
+          "end_ms": 83737,
+          "confidence": 0.7739687
+        },
+        {
+          "text": "Yours",
+          "start_ms": 84737,
+          "end_ms": 85270,
+          "confidence": 0.9247885
+        },
+        {
+          "text": "is",
+          "start_ms": 85448,
+          "end_ms": 85593,
+          "confidence": 0.9999504
+        },
+        {
+          "text": "the",
+          "start_ms": 85706,
+          "end_ms": 85964,
+          "confidence": 0.9999716
+        },
+        {
+          "text": "power.",
+          "start_ms": 86094,
+          "end_ms": 86691,
+          "confidence": 0.9990024
+        },
+        {
+          "text": "Yours",
+          "start_ms": 88490,
+          "end_ms": 88652,
+          "confidence": 0.9921359
+        },
+        {
+          "text": "is",
+          "start_ms": 88831,
+          "end_ms": 88977,
+          "confidence": 0.9999404
+        },
+        {
+          "text": "the",
+          "start_ms": 89156,
+          "end_ms": 89351,
+          "confidence": 0.9999114
+        },
+        {
+          "text": "glory",
+          "start_ms": 89416,
+          "end_ms": 90602,
+          "confidence": 0.99994993
+        },
+        {
+          "text": "forever.",
+          "start_ms": 92438,
+          "end_ms": 92958,
+          "confidence": 0.69061506
+        }
+      ]
+    },
+    {
+      "text": "Come Holy Spirit, pour out your fire.",
+      "start_ms": 92958,
+      "end_ms": 100239,
+      "text_sk": "Prídi Duchu Svätý, vylej svoj oheň.",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 95250,
+          "end_ms": 95428,
+          "confidence": 0.9995316
+        },
+        {
+          "text": "Holy",
+          "start_ms": 95590,
+          "end_ms": 96059,
+          "confidence": 0.60629463
+        },
+        {
+          "text": "Spirit,",
+          "start_ms": 96254,
+          "end_ms": 97631,
+          "confidence": 0.90709376
+        },
+        {
+          "text": "pour",
+          "start_ms": 98603,
+          "end_ms": 98878,
+          "confidence": 0.99739766
+        },
+        {
+          "text": "out",
+          "start_ms": 99089,
+          "end_ms": 99332,
+          "confidence": 0.9997391
+        },
+        {
+          "text": "your",
+          "start_ms": 99332,
+          "end_ms": 99753,
+          "confidence": 0.88987756
+        },
+        {
+          "text": "fire.",
+          "start_ms": 99753,
+          "end_ms": 100239,
+          "confidence": 0.995045
+        }
+      ]
+    },
+    {
+      "text": "This is revival. This is revival.",
+      "start_ms": 102030,
+      "end_ms": 107708,
+      "text_sk": "Toto je obnova. Toto je obnova.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 102030,
+          "end_ms": 102257,
+          "confidence": 0.9370589
+        },
+        {
+          "text": "is",
+          "start_ms": 102468,
+          "end_ms": 102679,
+          "confidence": 0.9999728
+        },
+        {
+          "text": "revival.",
+          "start_ms": 102857,
+          "end_ms": 104301,
+          "confidence": 0.97160745
+        },
+        {
+          "text": "This",
+          "start_ms": 105453,
+          "end_ms": 105729,
+          "confidence": 0.99020654
+        },
+        {
+          "text": "is",
+          "start_ms": 105940,
+          "end_ms": 106167,
+          "confidence": 0.9999739
+        },
+        {
+          "text": "revival.",
+          "start_ms": 106264,
+          "end_ms": 107708,
+          "confidence": 0.9929508
+        }
+      ]
+    },
+    {
+      "text": "Come and pour out your spirit, Lord.",
+      "start_ms": 112876,
+      "end_ms": 115540,
+      "text_sk": "Príď a vylej svojho ducha, Pane.",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 112876,
+          "end_ms": 113054,
+          "confidence": 0.58058935
+        },
+        {
+          "text": "and",
+          "start_ms": 113119,
+          "end_ms": 113298,
+          "confidence": 0.8098104
+        },
+        {
+          "text": "pour",
+          "start_ms": 113298,
+          "end_ms": 113477,
+          "confidence": 0.99982077
+        },
+        {
+          "text": "out",
+          "start_ms": 113542,
+          "end_ms": 113785,
+          "confidence": 0.99978215
+        },
+        {
+          "text": "your",
+          "start_ms": 113785,
+          "end_ms": 113964,
+          "confidence": 0.8377712
+        },
+        {
+          "text": "spirit,",
+          "start_ms": 113964,
+          "end_ms": 115312,
+          "confidence": 0.844724
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 115410,
+          "end_ms": 115540,
+          "confidence": 0.92808825
+        }
+      ]
+    },
+    {
+      "text": "Oh, we worship, we worship.",
+      "start_ms": 116872,
+      "end_ms": 119243,
+      "text_sk": "Ó, my uctievame, my uctievame.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 116872,
+          "end_ms": 117018,
+          "confidence": 0.9771796
+        },
+        {
+          "text": "we",
+          "start_ms": 117034,
+          "end_ms": 117115,
+          "confidence": 0.99982625
+        },
+        {
+          "text": "worship,",
+          "start_ms": 117197,
+          "end_ms": 117992,
+          "confidence": 0.8785244
+        },
+        {
+          "text": "we",
+          "start_ms": 118009,
+          "end_ms": 118090,
+          "confidence": 0.9994311
+        },
+        {
+          "text": "worship.",
+          "start_ms": 118171,
+          "end_ms": 119243,
+          "confidence": 0.9531216
+        }
+      ]
+    },
+    {
+      "text": "Come on, reach out for him tonight.",
+      "start_ms": 124272,
+      "end_ms": 125868,
+      "text_sk": "Poďte, siahnite po ňom dnes večer.",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 124272,
+          "end_ms": 124407,
+          "confidence": 0.9994796
+        },
+        {
+          "text": "on,",
+          "start_ms": 124457,
+          "end_ms": 124592,
+          "confidence": 0.97560906
+        },
+        {
+          "text": "reach",
+          "start_ms": 124625,
+          "end_ms": 124827,
+          "confidence": 0.99979264
+        },
+        {
+          "text": "out",
+          "start_ms": 125028,
+          "end_ms": 125163,
+          "confidence": 0.9999863
+        },
+        {
+          "text": "for",
+          "start_ms": 125163,
+          "end_ms": 125297,
+          "confidence": 0.99702066
+        },
+        {
+          "text": "him",
+          "start_ms": 125297,
+          "end_ms": 125532,
+          "confidence": 0.60909086
+        },
+        {
+          "text": "tonight.",
+          "start_ms": 125532,
+          "end_ms": 125868,
+          "confidence": 0.9937576
+        }
+      ]
+    },
+    {
+      "text": "Our hearts cry out for you, Jesus.",
+      "start_ms": 127306,
+      "end_ms": 129715,
+      "text_sk": "Naše srdcia túžia po tebe, Ježišu.",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 127306,
+          "end_ms": 127484,
+          "confidence": 0.9998971
+        },
+        {
+          "text": "hearts",
+          "start_ms": 127484,
+          "end_ms": 127775,
+          "confidence": 0.9999677
+        },
+        {
+          "text": "cry",
+          "start_ms": 127872,
+          "end_ms": 128131,
+          "confidence": 0.99985504
+        },
+        {
+          "text": "out",
+          "start_ms": 128131,
+          "end_ms": 128373,
+          "confidence": 0.99975055
+        },
+        {
+          "text": "for",
+          "start_ms": 128373,
+          "end_ms": 128599,
+          "confidence": 0.77640545
+        },
+        {
+          "text": "you,",
+          "start_ms": 128599,
+          "end_ms": 128696,
+          "confidence": 0.9199724
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 128777,
+          "end_ms": 129715,
+          "confidence": 0.99717015
+        }
+      ]
+    },
+    {
+      "text": "Yeah, yeah, yeah.",
+      "start_ms": 130701,
+      "end_ms": 132592,
+      "text_sk": "Áno, áno, áno.",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 130701,
+          "end_ms": 131509,
+          "confidence": 0.96828735
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 131525,
+          "end_ms": 132268,
+          "confidence": 0.9967905
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 132414,
+          "end_ms": 132592,
+          "confidence": 0.9784183
+        }
+      ]
+    },
+    {
+      "text": "Our Father in heaven, holy is your name. Your kingdom is coming. Let your will be done today.",
+      "start_ms": 137186,
+      "end_ms": 161776,
+      "text_sk": "Otče náš, ktorý si na nebesiach, posvätené buď tvoje meno. Príď tvoje kráľovstvo. Buď vôľa tvoja, ako v nebi, tak i na zemi.",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 137186,
+          "end_ms": 137882,
+          "confidence": 0.91612506
+        },
+        {
+          "text": "Father",
+          "start_ms": 138012,
+          "end_ms": 139032,
+          "confidence": 0.999466
+        },
+        {
+          "text": "in",
+          "start_ms": 140539,
+          "end_ms": 141138,
+          "confidence": 0.89863265
+        },
+        {
+          "text": "heaven,",
+          "start_ms": 141235,
+          "end_ms": 143164,
+          "confidence": 0.9025929
+        },
+        {
+          "text": "holy",
+          "start_ms": 144818,
+          "end_ms": 145839,
+          "confidence": 0.65239835
+        },
+        {
+          "text": "is",
+          "start_ms": 146276,
+          "end_ms": 147054,
+          "confidence": 0.99927396
+        },
+        {
+          "text": "your",
+          "start_ms": 147815,
+          "end_ms": 148155,
+          "confidence": 0.94565666
+        },
+        {
+          "text": "name.",
+          "start_ms": 148284,
+          "end_ms": 148543,
+          "confidence": 0.98721814
+        },
+        {
+          "text": "Your",
+          "start_ms": 150645,
+          "end_ms": 151470,
+          "confidence": 0.69603914
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 151858,
+          "end_ms": 154446,
+          "confidence": 0.9946662
+        },
+        {
+          "text": "is",
+          "start_ms": 154446,
+          "end_ms": 154980,
+          "confidence": 0.978555
+        },
+        {
+          "text": "coming.",
+          "start_ms": 155012,
+          "end_ms": 156760,
+          "confidence": 0.8936636
+        },
+        {
+          "text": "Let",
+          "start_ms": 157682,
+          "end_ms": 158103,
+          "confidence": 0.9041184
+        },
+        {
+          "text": "your",
+          "start_ms": 158151,
+          "end_ms": 158281,
+          "confidence": 0.99925596
+        },
+        {
+          "text": "will",
+          "start_ms": 158637,
+          "end_ms": 159106,
+          "confidence": 0.99955684
+        },
+        {
+          "text": "be",
+          "start_ms": 159446,
+          "end_ms": 159656,
+          "confidence": 0.99971277
+        },
+        {
+          "text": "done",
+          "start_ms": 159786,
+          "end_ms": 160158,
+          "confidence": 0.99916446
+        },
+        {
+          "text": "today.",
+          "start_ms": 161145,
+          "end_ms": 161776,
+          "confidence": 0.94003755
+        }
+      ]
+    },
+    {
+      "text": "Providing, protecting, and forgiving us our sin. As we humbly, as we humbly come before you, as we worship you and sing.",
+      "start_ms": 165830,
+      "end_ms": 190489,
+      "text_sk": "Poskytujúc nám odpustenie našich hriechov, chrániac nás a odpúšťajúc nám. Keď k tebe pokorne, keď k tebe pokorne prichádzame, keď ťa uctievame a spievame.",
+      "words": [
+        {
+          "text": "Providing,",
+          "start_ms": 165830,
+          "end_ms": 167200,
+          "confidence": 0.9685542
+        },
+        {
+          "text": "protecting,",
+          "start_ms": 167942,
+          "end_ms": 170588,
+          "confidence": 0.9930286
+        },
+        {
+          "text": "and",
+          "start_ms": 171491,
+          "end_ms": 171636,
+          "confidence": 0.98548394
+        },
+        {
+          "text": "forgiving",
+          "start_ms": 171749,
+          "end_ms": 173330,
+          "confidence": 0.9993274
+        },
+        {
+          "text": "us",
+          "start_ms": 173588,
+          "end_ms": 174364,
+          "confidence": 0.9806989
+        },
+        {
+          "text": "our",
+          "start_ms": 174477,
+          "end_ms": 175076,
+          "confidence": 0.976218
+        },
+        {
+          "text": "sin.",
+          "start_ms": 175076,
+          "end_ms": 176563,
+          "confidence": 0.79953367
+        },
+        {
+          "text": "As",
+          "start_ms": 176741,
+          "end_ms": 177000,
+          "confidence": 0.99924517
+        },
+        {
+          "text": "we",
+          "start_ms": 177000,
+          "end_ms": 177242,
+          "confidence": 0.99976844
+        },
+        {
+          "text": "humbly,",
+          "start_ms": 177242,
+          "end_ms": 178115,
+          "confidence": 0.92384845
+        },
+        {
+          "text": "as",
+          "start_ms": 178358,
+          "end_ms": 178633,
+          "confidence": 0.8849567
+        },
+        {
+          "text": "we",
+          "start_ms": 178762,
+          "end_ms": 178956,
+          "confidence": 0.9999502
+        },
+        {
+          "text": "humbly",
+          "start_ms": 179166,
+          "end_ms": 180201,
+          "confidence": 0.9999814
+        },
+        {
+          "text": "come",
+          "start_ms": 181604,
+          "end_ms": 181974,
+          "confidence": 0.96342236
+        },
+        {
+          "text": "before",
+          "start_ms": 182086,
+          "end_ms": 182825,
+          "confidence": 0.9999678
+        },
+        {
+          "text": "you,",
+          "start_ms": 183275,
+          "end_ms": 183420,
+          "confidence": 0.8009216
+        },
+        {
+          "text": "as",
+          "start_ms": 185203,
+          "end_ms": 185428,
+          "confidence": 0.99197066
+        },
+        {
+          "text": "we",
+          "start_ms": 185540,
+          "end_ms": 185781,
+          "confidence": 0.99993134
+        },
+        {
+          "text": "worship",
+          "start_ms": 186006,
+          "end_ms": 187147,
+          "confidence": 0.9999573
+        },
+        {
+          "text": "you",
+          "start_ms": 187147,
+          "end_ms": 187276,
+          "confidence": 0.99951196
+        },
+        {
+          "text": "and",
+          "start_ms": 188175,
+          "end_ms": 188834,
+          "confidence": 0.99491054
+        },
+        {
+          "text": "sing.",
+          "start_ms": 188834,
+          "end_ms": 190489,
+          "confidence": 0.96167403
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom. Yours is the power. Yours is the glory.",
+      "start_ms": 191006,
+      "end_ms": 200287,
+      "text_sk": "Tvoje je kráľovstvo. Tvoja je moc. Tvoja je sláva.",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 191006,
+          "end_ms": 191551,
+          "confidence": 0.99366623
+        },
+        {
+          "text": "is",
+          "start_ms": 191647,
+          "end_ms": 191871,
+          "confidence": 0.999936
+        },
+        {
+          "text": "the",
+          "start_ms": 191984,
+          "end_ms": 192224,
+          "confidence": 0.999724
+        },
+        {
+          "text": "kingdom.",
+          "start_ms": 192368,
+          "end_ms": 193603,
+          "confidence": 0.76321393
+        },
+        {
+          "text": "Yours",
+          "start_ms": 194452,
+          "end_ms": 194997,
+          "confidence": 0.9928631
+        },
+        {
+          "text": "is",
+          "start_ms": 195093,
+          "end_ms": 195318,
+          "confidence": 0.99998546
+        },
+        {
+          "text": "the",
+          "start_ms": 195414,
+          "end_ms": 195670,
+          "confidence": 0.999985
+        },
+        {
+          "text": "power.",
+          "start_ms": 195734,
+          "end_ms": 196840,
+          "confidence": 0.9991852
+        },
+        {
+          "text": "Yours",
+          "start_ms": 197834,
+          "end_ms": 198443,
+          "confidence": 0.99944884
+        },
+        {
+          "text": "is",
+          "start_ms": 198539,
+          "end_ms": 198764,
+          "confidence": 0.999969
+        },
+        {
+          "text": "the",
+          "start_ms": 198876,
+          "end_ms": 199197,
+          "confidence": 0.9999472
+        },
+        {
+          "text": "glory.",
+          "start_ms": 199197,
+          "end_ms": 200287,
+          "confidence": 0.91570026
+        }
+      ]
+    },
+    {
+      "text": "Forever. Forever.",
+      "start_ms": 200287,
+      "end_ms": 203733,
+      "text_sk": "Navždy. Navždy.",
+      "words": [
+        {
+          "text": "Forever.",
+          "start_ms": 200559,
+          "end_ms": 201986,
+          "confidence": 0.7279514
+        },
+        {
+          "text": "Forever.",
+          "start_ms": 202242,
+          "end_ms": 203733,
+          "confidence": 0.74522763
+        }
+      ]
+    },
+    {
+      "text": "Come, Holy Spirit. Pour out your fire. This is revival. This is revival.",
+      "start_ms": 204823,
+      "end_ms": 217406,
+      "text_sk": "Príď, Duchu Svätý. Vylej svoj oheň. Toto je obnova. Toto je obnova.",
+      "words": [
+        {
+          "text": "Come,",
+          "start_ms": 204823,
+          "end_ms": 205224,
+          "confidence": 0.82089597
+        },
+        {
+          "text": "Holy",
+          "start_ms": 205288,
+          "end_ms": 205817,
+          "confidence": 0.99993694
+        },
+        {
+          "text": "Spirit.",
+          "start_ms": 205945,
+          "end_ms": 207259,
+          "confidence": 0.8463847
+        },
+        {
+          "text": "Pour",
+          "start_ms": 208237,
+          "end_ms": 208526,
+          "confidence": 0.9840061
+        },
+        {
+          "text": "out",
+          "start_ms": 208734,
+          "end_ms": 209119,
+          "confidence": 0.9999702
+        },
+        {
+          "text": "your",
+          "start_ms": 209119,
+          "end_ms": 209391,
+          "confidence": 0.7928826
+        },
+        {
+          "text": "fire.",
+          "start_ms": 209455,
+          "end_ms": 210593,
+          "confidence": 0.99926984
+        },
+        {
+          "text": "This",
+          "start_ms": 211699,
+          "end_ms": 212036,
+          "confidence": 0.9565483
+        },
+        {
+          "text": "is",
+          "start_ms": 212180,
+          "end_ms": 212389,
+          "confidence": 0.9999707
+        },
+        {
+          "text": "revival.",
+          "start_ms": 212581,
+          "end_ms": 214120,
+          "confidence": 0.9889289
+        },
+        {
+          "text": "This",
+          "start_ms": 215146,
+          "end_ms": 215418,
+          "confidence": 0.9951448
+        },
+        {
+          "text": "is",
+          "start_ms": 215626,
+          "end_ms": 215915,
+          "confidence": 0.99997544
+        },
+        {
+          "text": "revival.",
+          "start_ms": 216027,
+          "end_ms": 217406,
+          "confidence": 0.9971582
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom. Yours is the power.",
+      "start_ms": 218496,
+      "end_ms": 224404,
+      "text_sk": "Tvoje je kráľovstvo. Tvoja je moc.",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 218496,
+          "end_ms": 218963,
+          "confidence": 0.9926804
+        },
+        {
+          "text": "is",
+          "start_ms": 219060,
+          "end_ms": 219285,
+          "confidence": 0.9998996
+        },
+        {
+          "text": "the",
+          "start_ms": 219398,
+          "end_ms": 219639,
+          "confidence": 0.9998623
+        },
+        {
+          "text": "kingdom.",
+          "start_ms": 219784,
+          "end_ms": 220975,
+          "confidence": 0.80664223
+        },
+        {
+          "text": "Yours",
+          "start_ms": 221796,
+          "end_ms": 222424,
+          "confidence": 0.9181416
+        },
+        {
+          "text": "is",
+          "start_ms": 222520,
+          "end_ms": 222746,
+          "confidence": 0.99993455
+        },
+        {
+          "text": "the",
+          "start_ms": 222859,
+          "end_ms": 223100,
+          "confidence": 0.9999635
+        },
+        {
+          "text": "power.",
+          "start_ms": 223245,
+          "end_ms": 224404,
+          "confidence": 0.99918664
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory forever. Come, Holy Spirit. Pour out your fire.",
+      "start_ms": 225600,
+      "end_ms": 237188,
+      "text_sk": "Tvoja je sláva naveky. Príď, Duch Svätý. Vylej svoj oheň.",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 225600,
+          "end_ms": 225827,
+          "confidence": 0.99667585
+        },
+        {
+          "text": "is",
+          "start_ms": 225940,
+          "end_ms": 226168,
+          "confidence": 0.99993706
+        },
+        {
+          "text": "the",
+          "start_ms": 226265,
+          "end_ms": 226525,
+          "confidence": 0.99990845
+        },
+        {
+          "text": "glory",
+          "start_ms": 226606,
+          "end_ms": 227629,
+          "confidence": 0.99997425
+        },
+        {
+          "text": "forever.",
+          "start_ms": 229626,
+          "end_ms": 230162,
+          "confidence": 0.7084909
+        },
+        {
+          "text": "Come,",
+          "start_ms": 232420,
+          "end_ms": 232677,
+          "confidence": 0.8607401
+        },
+        {
+          "text": "Holy",
+          "start_ms": 232693,
+          "end_ms": 233305,
+          "confidence": 0.99993503
+        },
+        {
+          "text": "Spirit.",
+          "start_ms": 233418,
+          "end_ms": 235689,
+          "confidence": 0.7797009
+        },
+        {
+          "text": "Pour",
+          "start_ms": 235754,
+          "end_ms": 235867,
+          "confidence": 0.9631287
+        },
+        {
+          "text": "out",
+          "start_ms": 236157,
+          "end_ms": 236575,
+          "confidence": 0.99993837
+        },
+        {
+          "text": "your",
+          "start_ms": 236624,
+          "end_ms": 236881,
+          "confidence": 0.81788605
+        },
+        {
+          "text": "fire.",
+          "start_ms": 236881,
+          "end_ms": 237188,
+          "confidence": 0.9986727
+        }
+      ]
+    },
+    {
+      "text": "This is revival. This is revival.",
+      "start_ms": 239180,
+      "end_ms": 244919,
+      "text_sk": "Toto je obnova. Toto je obnova.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 239180,
+          "end_ms": 239471,
+          "confidence": 0.9075168
+        },
+        {
+          "text": "is",
+          "start_ms": 239600,
+          "end_ms": 239826,
+          "confidence": 0.999956
+        },
+        {
+          "text": "revival.",
+          "start_ms": 239939,
+          "end_ms": 241637,
+          "confidence": 0.98344827
+        },
+        {
+          "text": "This",
+          "start_ms": 242591,
+          "end_ms": 242882,
+          "confidence": 0.990944
+        },
+        {
+          "text": "is",
+          "start_ms": 243076,
+          "end_ms": 243302,
+          "confidence": 0.9999765
+        },
+        {
+          "text": "revival.",
+          "start_ms": 243415,
+          "end_ms": 244919,
+          "confidence": 0.9944123
+        }
+      ]
+    },
+    {
+      "text": "Yeah, yeah, yeah, yeah. Come and pour it out on us.",
+      "start_ms": 246366,
+      "end_ms": 258951,
+      "text_sk": "Áno, áno, áno, áno. Poďte a vylejte to na nás.",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 246366,
+          "end_ms": 246527,
+          "confidence": 0.93730676
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 247092,
+          "end_ms": 248800,
+          "confidence": 0.9708001
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 248816,
+          "end_ms": 250638,
+          "confidence": 0.9828335
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 250654,
+          "end_ms": 250831,
+          "confidence": 0.87160695
+        },
+        {
+          "text": "Come",
+          "start_ms": 253314,
+          "end_ms": 253556,
+          "confidence": 0.52530116
+        },
+        {
+          "text": "and",
+          "start_ms": 253556,
+          "end_ms": 253781,
+          "confidence": 0.94149166
+        },
+        {
+          "text": "pour",
+          "start_ms": 253781,
+          "end_ms": 254362,
+          "confidence": 0.9677632
+        },
+        {
+          "text": "it",
+          "start_ms": 254362,
+          "end_ms": 254443,
+          "confidence": 0.969928
+        },
+        {
+          "text": "out",
+          "start_ms": 254443,
+          "end_ms": 256859,
+          "confidence": 0.99650866
+        },
+        {
+          "text": "on",
+          "start_ms": 256859,
+          "end_ms": 257573,
+          "confidence": 0.9943482
+        },
+        {
+          "text": "us.",
+          "start_ms": 257670,
+          "end_ms": 258951,
+          "confidence": 0.97820777
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing, blowing, blowing. I can feel the ground shaking, shaking, shaking. I can see a fire falling, falling, falling.",
+      "start_ms": 260206,
+      "end_ms": 279758,
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať. Cítim, ako sa zem triasť, triasť, triasť. Vidím padať oheň, padať, padať.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 260206,
+          "end_ms": 260222,
+          "confidence": 0.69297785
+        },
+        {
+          "text": "can",
+          "start_ms": 260303,
+          "end_ms": 260545,
+          "confidence": 0.9999232
+        },
+        {
+          "text": "hear",
+          "start_ms": 260545,
+          "end_ms": 260722,
+          "confidence": 0.9998159
+        },
+        {
+          "text": "the",
+          "start_ms": 260786,
+          "end_ms": 260931,
+          "confidence": 0.99971443
+        },
+        {
+          "text": "wind",
+          "start_ms": 260931,
+          "end_ms": 261350,
+          "confidence": 0.9972005
+        },
+        {
+          "text": "blowing,",
+          "start_ms": 261350,
+          "end_ms": 262366,
+          "confidence": 0.9741619
+        },
+        {
+          "text": "blowing,",
+          "start_ms": 262962,
+          "end_ms": 264138,
+          "confidence": 0.9971961
+        },
+        {
+          "text": "blowing.",
+          "start_ms": 264315,
+          "end_ms": 265186,
+          "confidence": 0.9987716
+        },
+        {
+          "text": "I",
+          "start_ms": 267029,
+          "end_ms": 267110,
+          "confidence": 0.987578
+        },
+        {
+          "text": "can",
+          "start_ms": 267110,
+          "end_ms": 267256,
+          "confidence": 0.99992967
+        },
+        {
+          "text": "feel",
+          "start_ms": 267288,
+          "end_ms": 267612,
+          "confidence": 0.9997079
+        },
+        {
+          "text": "the",
+          "start_ms": 267612,
+          "end_ms": 267758,
+          "confidence": 0.99989855
+        },
+        {
+          "text": "ground",
+          "start_ms": 267758,
+          "end_ms": 268178,
+          "confidence": 0.99990773
+        },
+        {
+          "text": "shaking,",
+          "start_ms": 268178,
+          "end_ms": 269360,
+          "confidence": 0.9960827
+        },
+        {
+          "text": "shaking,",
+          "start_ms": 270023,
+          "end_ms": 271059,
+          "confidence": 0.99774617
+        },
+        {
+          "text": "shaking.",
+          "start_ms": 271576,
+          "end_ms": 271949,
+          "confidence": 0.9929039
+        },
+        {
+          "text": "I",
+          "start_ms": 273877,
+          "end_ms": 273893,
+          "confidence": 0.9952655
+        },
+        {
+          "text": "can",
+          "start_ms": 273893,
+          "end_ms": 274101,
+          "confidence": 0.99987805
+        },
+        {
+          "text": "see",
+          "start_ms": 274149,
+          "end_ms": 274454,
+          "confidence": 0.99895084
+        },
+        {
+          "text": "a",
+          "start_ms": 274454,
+          "end_ms": 274598,
+          "confidence": 0.7412747
+        },
+        {
+          "text": "fire",
+          "start_ms": 274598,
+          "end_ms": 274950,
+          "confidence": 0.96458524
+        },
+        {
+          "text": "falling,",
+          "start_ms": 275015,
+          "end_ms": 276104,
+          "confidence": 0.9583905
+        },
+        {
+          "text": "falling,",
+          "start_ms": 276633,
+          "end_ms": 277947,
+          "confidence": 0.99827904
+        },
+        {
+          "text": "falling.",
+          "start_ms": 278396,
+          "end_ms": 279758,
+          "confidence": 0.9865486
+        }
+      ]
+    },
+    {
+      "text": "So let Your Kingdom come. Let Your will be done.",
+      "start_ms": 280527,
+      "end_ms": 287546,
+      "text_sk": "Nech Tvoje kráľovstvo príde. Nech sa stane Tvoja vôľa.",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 280527,
+          "end_ms": 280864,
+          "confidence": 0.98624855
+        },
+        {
+          "text": "let",
+          "start_ms": 280864,
+          "end_ms": 281521,
+          "confidence": 0.9902676
+        },
+        {
+          "text": "Your",
+          "start_ms": 281569,
+          "end_ms": 281761,
+          "confidence": 0.6888295
+        },
+        {
+          "text": "Kingdom",
+          "start_ms": 281825,
+          "end_ms": 283604,
+          "confidence": 0.6957802
+        },
+        {
+          "text": "come.",
+          "start_ms": 283652,
+          "end_ms": 284229,
+          "confidence": 0.78863055
+        },
+        {
+          "text": "Let",
+          "start_ms": 284613,
+          "end_ms": 284950,
+          "confidence": 0.9989004
+        },
+        {
+          "text": "Your",
+          "start_ms": 284950,
+          "end_ms": 285286,
+          "confidence": 0.9998691
+        },
+        {
+          "text": "will",
+          "start_ms": 285431,
+          "end_ms": 286040,
+          "confidence": 0.9695191
+        },
+        {
+          "text": "be",
+          "start_ms": 286296,
+          "end_ms": 286488,
+          "confidence": 0.99997604
+        },
+        {
+          "text": "done.",
+          "start_ms": 287033,
+          "end_ms": 287546,
+          "confidence": 0.9984064
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing, blowing, blowing.",
+      "start_ms": 287594,
+      "end_ms": 293379,
+      "text_sk": "Počujem vietor, ako fúka, fúka, fúka.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 287594,
+          "end_ms": 287674,
+          "confidence": 0.9942111
+        },
+        {
+          "text": "can",
+          "start_ms": 287674,
+          "end_ms": 287882,
+          "confidence": 0.99995565
+        },
+        {
+          "text": "hear",
+          "start_ms": 287915,
+          "end_ms": 288219,
+          "confidence": 0.99863344
+        },
+        {
+          "text": "the",
+          "start_ms": 288219,
+          "end_ms": 288395,
+          "confidence": 0.9998704
+        },
+        {
+          "text": "wind",
+          "start_ms": 288395,
+          "end_ms": 288684,
+          "confidence": 0.9994742
+        },
+        {
+          "text": "blowing,",
+          "start_ms": 288796,
+          "end_ms": 289886,
+          "confidence": 0.9977317
+        },
+        {
+          "text": "blowing,",
+          "start_ms": 290382,
+          "end_ms": 291568,
+          "confidence": 0.9992845
+        },
+        {
+          "text": "blowing.",
+          "start_ms": 292081,
+          "end_ms": 293379,
+          "confidence": 0.99372655
+        }
+      ]
+    },
+    {
+      "text": "Come on, sing it out!",
+      "start_ms": 293379,
+      "end_ms": 294389,
+      "text_sk": "Poď, zaspievaj to!",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 293427,
+          "end_ms": 293587,
+          "confidence": 0.9722582
+        },
+        {
+          "text": "on,",
+          "start_ms": 293587,
+          "end_ms": 293635,
+          "confidence": 0.9702892
+        },
+        {
+          "text": "sing",
+          "start_ms": 293683,
+          "end_ms": 293892,
+          "confidence": 0.99990034
+        },
+        {
+          "text": "it",
+          "start_ms": 293988,
+          "end_ms": 294036,
+          "confidence": 0.9999273
+        },
+        {
+          "text": "out!",
+          "start_ms": 294308,
+          "end_ms": 294389,
+          "confidence": 0.86447746
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking, shaking, Shaking. I can see a fire falling, falling, falling.",
+      "start_ms": 294389,
+      "end_ms": 306459,
+      "text_sk": "Cítim, ako sa zem triasť, triasť, triasť. Vidím padať oheň, padať, padať.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 294485,
+          "end_ms": 294565,
+          "confidence": 0.99944335
+        },
+        {
+          "text": "can",
+          "start_ms": 294565,
+          "end_ms": 294725,
+          "confidence": 0.9999074
+        },
+        {
+          "text": "feel",
+          "start_ms": 294725,
+          "end_ms": 295046,
+          "confidence": 0.9986657
+        },
+        {
+          "text": "the",
+          "start_ms": 295046,
+          "end_ms": 295206,
+          "confidence": 0.9999318
+        },
+        {
+          "text": "ground",
+          "start_ms": 295270,
+          "end_ms": 295494,
+          "confidence": 0.9999355
+        },
+        {
+          "text": "shaking,",
+          "start_ms": 295590,
+          "end_ms": 296776,
+          "confidence": 0.9970842
+        },
+        {
+          "text": "shaking,",
+          "start_ms": 297289,
+          "end_ms": 298539,
+          "confidence": 0.733394
+        },
+        {
+          "text": "Shaking.",
+          "start_ms": 300290,
+          "end_ms": 300939,
+          "confidence": 0.72152036
+        },
+        {
+          "text": "I",
+          "start_ms": 301280,
+          "end_ms": 301377,
+          "confidence": 0.9812727
+        },
+        {
+          "text": "can",
+          "start_ms": 301377,
+          "end_ms": 301588,
+          "confidence": 0.9998703
+        },
+        {
+          "text": "see",
+          "start_ms": 301621,
+          "end_ms": 301946,
+          "confidence": 0.9982856
+        },
+        {
+          "text": "a",
+          "start_ms": 301962,
+          "end_ms": 301978,
+          "confidence": 0.7931446
+        },
+        {
+          "text": "fire",
+          "start_ms": 302027,
+          "end_ms": 302368,
+          "confidence": 0.94495624
+        },
+        {
+          "text": "falling,",
+          "start_ms": 302498,
+          "end_ms": 303537,
+          "confidence": 0.94844407
+        },
+        {
+          "text": "falling,",
+          "start_ms": 304202,
+          "end_ms": 305322,
+          "confidence": 0.99708945
+        },
+        {
+          "text": "falling.",
+          "start_ms": 306004,
+          "end_ms": 306459,
+          "confidence": 0.9939484
+        }
+      ]
+    },
+    {
+      "text": "So let Your Kingdom come. Let Your will be done.",
+      "start_ms": 308220,
+      "end_ms": 315007,
+      "text_sk": "Nech príde Tvoje kráľovstvo. Nech sa stane Tvoja vôľa.",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 308220,
+          "end_ms": 308430,
+          "confidence": 0.9925484
+        },
+        {
+          "text": "let",
+          "start_ms": 308430,
+          "end_ms": 308995,
+          "confidence": 0.99054396
+        },
+        {
+          "text": "Your",
+          "start_ms": 309044,
+          "end_ms": 309318,
+          "confidence": 0.71099865
+        },
+        {
+          "text": "Kingdom",
+          "start_ms": 309383,
+          "end_ms": 311080,
+          "confidence": 0.739986
+        },
+        {
+          "text": "come.",
+          "start_ms": 311080,
+          "end_ms": 311274,
+          "confidence": 0.8346659
+        },
+        {
+          "text": "Let",
+          "start_ms": 311953,
+          "end_ms": 312260,
+          "confidence": 0.9990146
+        },
+        {
+          "text": "Your",
+          "start_ms": 312292,
+          "end_ms": 312793,
+          "confidence": 0.9999231
+        },
+        {
+          "text": "will",
+          "start_ms": 312858,
+          "end_ms": 313456,
+          "confidence": 0.9820754
+        },
+        {
+          "text": "be",
+          "start_ms": 313747,
+          "end_ms": 313941,
+          "confidence": 0.9999589
+        },
+        {
+          "text": "done.",
+          "start_ms": 314620,
+          "end_ms": 315007,
+          "confidence": 0.9993044
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing, blowing, blowing.",
+      "start_ms": 315104,
+      "end_ms": 319997,
+      "text_sk": "Počujem vietor, ako fúka, fúka, fúka.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 315104,
+          "end_ms": 315201,
+          "confidence": 0.996061
+        },
+        {
+          "text": "can",
+          "start_ms": 315201,
+          "end_ms": 315444,
+          "confidence": 0.9998362
+        },
+        {
+          "text": "hear",
+          "start_ms": 315508,
+          "end_ms": 315686,
+          "confidence": 0.99848807
+        },
+        {
+          "text": "the",
+          "start_ms": 315686,
+          "end_ms": 315929,
+          "confidence": 0.9996536
+        },
+        {
+          "text": "wind",
+          "start_ms": 315929,
+          "end_ms": 316220,
+          "confidence": 0.99969923
+        },
+        {
+          "text": "blowing,",
+          "start_ms": 316220,
+          "end_ms": 317354,
+          "confidence": 0.99571717
+        },
+        {
+          "text": "blowing,",
+          "start_ms": 317792,
+          "end_ms": 319219,
+          "confidence": 0.99774903
+        },
+        {
+          "text": "blowing.",
+          "start_ms": 319559,
+          "end_ms": 319997,
+          "confidence": 0.9946767
+        }
+      ]
+    },
+    {
+      "text": "Yes, Lord!",
+      "start_ms": 319997,
+      "end_ms": 321327,
+      "text_sk": "Áno, Pane!",
+      "words": [
+        {
+          "text": "Yes,",
+          "start_ms": 320046,
+          "end_ms": 321083,
+          "confidence": 0.94357646
+        },
+        {
+          "text": "Lord!",
+          "start_ms": 321116,
+          "end_ms": 321327,
+          "confidence": 0.8828998
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking.",
+      "start_ms": 321327,
+      "end_ms": 323596,
+      "text_sk": "Cítim, ako sa zem triasne.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 322089,
+          "end_ms": 322153,
+          "confidence": 0.99417096
+        },
+        {
+          "text": "can",
+          "start_ms": 322153,
+          "end_ms": 322234,
+          "confidence": 0.9998536
+        },
+        {
+          "text": "feel",
+          "start_ms": 322251,
+          "end_ms": 322575,
+          "confidence": 0.9997371
+        },
+        {
+          "text": "the",
+          "start_ms": 322575,
+          "end_ms": 322607,
+          "confidence": 0.99921143
+        },
+        {
+          "text": "ground",
+          "start_ms": 322737,
+          "end_ms": 323094,
+          "confidence": 0.9998323
+        },
+        {
+          "text": "shaking.",
+          "start_ms": 323126,
+          "end_ms": 323596,
+          "confidence": 0.94766575
+        }
+      ]
+    },
+    {
+      "text": "Shaken, shaken. I can see a fire falling, falling, falling.",
+      "start_ms": 324692,
+      "end_ms": 334755,
+      "text_sk": "Trasie sa, trasie sa. Vidím padať oheň, padať, padať.",
+      "words": [
+        {
+          "text": "Shaken,",
+          "start_ms": 324692,
+          "end_ms": 325942,
+          "confidence": 0.96229094
+        },
+        {
+          "text": "shaken.",
+          "start_ms": 326374,
+          "end_ms": 327784,
+          "confidence": 0.703912
+        },
+        {
+          "text": "I",
+          "start_ms": 328762,
+          "end_ms": 328858,
+          "confidence": 0.91521287
+        },
+        {
+          "text": "can",
+          "start_ms": 328858,
+          "end_ms": 328986,
+          "confidence": 0.9880471
+        },
+        {
+          "text": "see",
+          "start_ms": 329018,
+          "end_ms": 329355,
+          "confidence": 0.9751178
+        },
+        {
+          "text": "a",
+          "start_ms": 329419,
+          "end_ms": 329483,
+          "confidence": 0.6136533
+        },
+        {
+          "text": "fire",
+          "start_ms": 329483,
+          "end_ms": 329755,
+          "confidence": 0.94530964
+        },
+        {
+          "text": "falling,",
+          "start_ms": 329900,
+          "end_ms": 331070,
+          "confidence": 0.8555406
+        },
+        {
+          "text": "falling,",
+          "start_ms": 331582,
+          "end_ms": 332832,
+          "confidence": 0.9962906
+        },
+        {
+          "text": "falling.",
+          "start_ms": 333281,
+          "end_ms": 334755,
+          "confidence": 0.99268657
+        }
+      ]
+    },
+    {
+      "text": "So let Your Kingdom come.",
+      "start_ms": 335364,
+      "end_ms": 339114,
+      "text_sk": "Nech príde Tvoje Kráľovstvo.",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 335364,
+          "end_ms": 335669,
+          "confidence": 0.9709782
+        },
+        {
+          "text": "let",
+          "start_ms": 335669,
+          "end_ms": 336390,
+          "confidence": 0.9851724
+        },
+        {
+          "text": "Your",
+          "start_ms": 336390,
+          "end_ms": 336710,
+          "confidence": 0.7978944
+        },
+        {
+          "text": "Kingdom",
+          "start_ms": 336710,
+          "end_ms": 338473,
+          "confidence": 0.5388593
+        },
+        {
+          "text": "come.",
+          "start_ms": 338473,
+          "end_ms": 339114,
+          "confidence": 0.7585744
+        }
+      ]
+    },
+    {
+      "text": "Let Your will be done.",
+      "start_ms": 339435,
+      "end_ms": 343072,
+      "text_sk": "Nech sa stane Tvoja vôľa.",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 339435,
+          "end_ms": 339643,
+          "confidence": 0.99861336
+        },
+        {
+          "text": "Your",
+          "start_ms": 339835,
+          "end_ms": 340108,
+          "confidence": 0.9998841
+        },
+        {
+          "text": "will",
+          "start_ms": 340300,
+          "end_ms": 340925,
+          "confidence": 0.97470164
+        },
+        {
+          "text": "be",
+          "start_ms": 341117,
+          "end_ms": 341294,
+          "confidence": 0.9999795
+        },
+        {
+          "text": "done.",
+          "start_ms": 341919,
+          "end_ms": 343072,
+          "confidence": 0.99777067
+        }
+      ]
+    },
+    {
+      "text": "Yours is the Kingdom.",
+      "start_ms": 343072,
+      "end_ms": 346181,
+      "text_sk": "Tvoje je Kráľovstvo.",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 343665,
+          "end_ms": 344146,
+          "confidence": 0.9984962
+        },
+        {
+          "text": "is",
+          "start_ms": 344226,
+          "end_ms": 344450,
+          "confidence": 0.9998847
+        },
+        {
+          "text": "the",
+          "start_ms": 344563,
+          "end_ms": 344803,
+          "confidence": 0.99989593
+        },
+        {
+          "text": "Kingdom.",
+          "start_ms": 344867,
+          "end_ms": 346181,
+          "confidence": 0.89986384
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power. Yours is the glory.",
+      "start_ms": 346966,
+      "end_ms": 352767,
+      "text_sk": "Tvoja je moc. Tvoja je sláva.",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 346966,
+          "end_ms": 347575,
+          "confidence": 0.9875256
+        },
+        {
+          "text": "is",
+          "start_ms": 347672,
+          "end_ms": 347880,
+          "confidence": 0.999984
+        },
+        {
+          "text": "the",
+          "start_ms": 347992,
+          "end_ms": 348248,
+          "confidence": 0.99995816
+        },
+        {
+          "text": "power.",
+          "start_ms": 348248,
+          "end_ms": 349498,
+          "confidence": 0.94843894
+        },
+        {
+          "text": "Yours",
+          "start_ms": 350494,
+          "end_ms": 350945,
+          "confidence": 0.97602135
+        },
+        {
+          "text": "is",
+          "start_ms": 351058,
+          "end_ms": 351267,
+          "confidence": 0.9998349
+        },
+        {
+          "text": "the",
+          "start_ms": 351380,
+          "end_ms": 351461,
+          "confidence": 0.99986935
+        },
+        {
+          "text": "glory.",
+          "start_ms": 351703,
+          "end_ms": 352767,
+          "confidence": 0.8576946
+        }
+      ]
+    },
+    {
+      "text": "Forever, forever.",
+      "start_ms": 352767,
+      "end_ms": 356217,
+      "text_sk": "Navždy, navždy.",
+      "words": [
+        {
+          "text": "Forever,",
+          "start_ms": 352847,
+          "end_ms": 353815,
+          "confidence": 0.6719787
+        },
+        {
+          "text": "forever.",
+          "start_ms": 354847,
+          "end_ms": 356217,
+          "confidence": 0.96563363
+        }
+      ]
+    },
+    {
+      "text": "Come, Holy Spirit, pour out your fire.",
+      "start_ms": 357362,
+      "end_ms": 362530,
+      "text_sk": "Príď, Duchu Svätý, vylej svoj oheň.",
+      "words": [
+        {
+          "text": "Come,",
+          "start_ms": 357362,
+          "end_ms": 357797,
+          "confidence": 0.66933453
+        },
+        {
+          "text": "Holy",
+          "start_ms": 358120,
+          "end_ms": 358378,
+          "confidence": 0.9999465
+        },
+        {
+          "text": "Spirit,",
+          "start_ms": 358491,
+          "end_ms": 359929,
+          "confidence": 0.8587487
+        },
+        {
+          "text": "pour",
+          "start_ms": 360882,
+          "end_ms": 361156,
+          "confidence": 0.99891424
+        },
+        {
+          "text": "out",
+          "start_ms": 361383,
+          "end_ms": 361722,
+          "confidence": 0.99973696
+        },
+        {
+          "text": "your",
+          "start_ms": 361835,
+          "end_ms": 361964,
+          "confidence": 0.59784746
+        },
+        {
+          "text": "fire.",
+          "start_ms": 362045,
+          "end_ms": 362530,
+          "confidence": 0.9787825
+        }
+      ]
+    },
+    {
+      "text": "Oh, this is revival.",
+      "start_ms": 364120,
+      "end_ms": 366606,
+      "text_sk": "Ach, toto je obnova.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 364120,
+          "end_ms": 364136,
+          "confidence": 0.93085605
+        },
+        {
+          "text": "this",
+          "start_ms": 364233,
+          "end_ms": 364572,
+          "confidence": 0.9997918
+        },
+        {
+          "text": "is",
+          "start_ms": 364701,
+          "end_ms": 364927,
+          "confidence": 0.99993193
+        },
+        {
+          "text": "revival.",
+          "start_ms": 365104,
+          "end_ms": 366606,
+          "confidence": 0.93070596
+        }
+      ]
+    },
+    {
+      "text": "This is revival.",
+      "start_ms": 367768,
+      "end_ms": 370174,
+      "text_sk": "Toto je obnova.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 367768,
+          "end_ms": 368043,
+          "confidence": 0.9774075
+        },
+        {
+          "text": "is",
+          "start_ms": 368253,
+          "end_ms": 368479,
+          "confidence": 0.999967
+        },
+        {
+          "text": "revival.",
+          "start_ms": 368608,
+          "end_ms": 370174,
+          "confidence": 0.97126424
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9405591,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "0dcf4852-ac45-4097-a14b-3a87acb50147",
+    "elapsed_s": 20.1,
+    "word_count": 342,
+    "utterance_count": 40,
+    "line_count": 40,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 387
+  }
+}

@@ -1,0 +1,5070 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\p74PDWAFk0A_vocal16k.wav",
+  "duration_ms": 502043,
+  "lines": [
+    {
+      "text": "The enemy may take some things, but he can't take my worship. Can't take my worship. Oh, the enemy may take some things, but he can't take my worship. Can't take my worship. Oh, the enemy may take some things, but he can't take my worship. Can't take my worship. Oh, the enemy may take some things, But it can't take, can't take my worship.",
+      "start_ms": 272,
+      "end_ms": 33248,
+      "text_sk": "Nepriateľ si môže vziať niektoré veci, ale nemôže si vziať moju chválu. Nemôže si vziať moju chválu. Ach, nepriateľ si môže vziať niektoré veci, ale nemôže si vziať moju chválu. Nemôže si vziať moju chválu. Ach, nepriateľ si môže vziať niektoré veci, ale nemôže si vziať moju chválu. Nemôže si vziať moju chválu. Ach, nepriateľ si môže vziať niektoré veci, ale nemôže si vziať, nemôže si vziať moju chválu.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 272,
+          "end_ms": 416,
+          "confidence": 0.9252705
+        },
+        {
+          "text": "enemy",
+          "start_ms": 416,
+          "end_ms": 753,
+          "confidence": 0.99959475
+        },
+        {
+          "text": "may",
+          "start_ms": 1153,
+          "end_ms": 1265,
+          "confidence": 0.9974656
+        },
+        {
+          "text": "take",
+          "start_ms": 1409,
+          "end_ms": 1778,
+          "confidence": 0.9980763
+        },
+        {
+          "text": "some",
+          "start_ms": 1794,
+          "end_ms": 2195,
+          "confidence": 0.98465306
+        },
+        {
+          "text": "things,",
+          "start_ms": 2259,
+          "end_ms": 2803,
+          "confidence": 0.9933992
+        },
+        {
+          "text": "but",
+          "start_ms": 3316,
+          "end_ms": 3460,
+          "confidence": 0.9964185
+        },
+        {
+          "text": "he",
+          "start_ms": 3460,
+          "end_ms": 3621,
+          "confidence": 0.9942158
+        },
+        {
+          "text": "can't",
+          "start_ms": 3621,
+          "end_ms": 3877,
+          "confidence": 0.9978302
+        },
+        {
+          "text": "take",
+          "start_ms": 3877,
+          "end_ms": 4181,
+          "confidence": 0.9999726
+        },
+        {
+          "text": "my",
+          "start_ms": 4181,
+          "end_ms": 4310,
+          "confidence": 0.9997944
+        },
+        {
+          "text": "worship.",
+          "start_ms": 4438,
+          "end_ms": 5143,
+          "confidence": 0.73419034
+        },
+        {
+          "text": "Can't",
+          "start_ms": 5719,
+          "end_ms": 6072,
+          "confidence": 0.98723024
+        },
+        {
+          "text": "take",
+          "start_ms": 6072,
+          "end_ms": 6264,
+          "confidence": 0.99998987
+        },
+        {
+          "text": "my",
+          "start_ms": 6280,
+          "end_ms": 6376,
+          "confidence": 0.99998593
+        },
+        {
+          "text": "worship.",
+          "start_ms": 6585,
+          "end_ms": 7434,
+          "confidence": 0.981051
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 7947,
+          "end_ms": 8123,
+          "confidence": 0.815331
+        },
+        {
+          "text": "the",
+          "start_ms": 8844,
+          "end_ms": 9004,
+          "confidence": 0.99775153
+        },
+        {
+          "text": "enemy",
+          "start_ms": 9004,
+          "end_ms": 9341,
+          "confidence": 0.99993825
+        },
+        {
+          "text": "may",
+          "start_ms": 9805,
+          "end_ms": 9965,
+          "confidence": 0.99806064
+        },
+        {
+          "text": "take",
+          "start_ms": 9965,
+          "end_ms": 10350,
+          "confidence": 0.99980766
+        },
+        {
+          "text": "some",
+          "start_ms": 10350,
+          "end_ms": 10783,
+          "confidence": 0.99923885
+        },
+        {
+          "text": "things,",
+          "start_ms": 10847,
+          "end_ms": 11455,
+          "confidence": 0.9956654
+        },
+        {
+          "text": "but",
+          "start_ms": 11952,
+          "end_ms": 12032,
+          "confidence": 0.9981077
+        },
+        {
+          "text": "he",
+          "start_ms": 12032,
+          "end_ms": 12128,
+          "confidence": 0.9998311
+        },
+        {
+          "text": "can't",
+          "start_ms": 12128,
+          "end_ms": 12433,
+          "confidence": 0.99976224
+        },
+        {
+          "text": "take",
+          "start_ms": 12449,
+          "end_ms": 12753,
+          "confidence": 0.99999094
+        },
+        {
+          "text": "my",
+          "start_ms": 12769,
+          "end_ms": 12962,
+          "confidence": 0.9999709
+        },
+        {
+          "text": "worship.",
+          "start_ms": 13074,
+          "end_ms": 13635,
+          "confidence": 0.99838746
+        },
+        {
+          "text": "Can't",
+          "start_ms": 14275,
+          "end_ms": 14596,
+          "confidence": 0.993631
+        },
+        {
+          "text": "take",
+          "start_ms": 14596,
+          "end_ms": 14836,
+          "confidence": 0.99999654
+        },
+        {
+          "text": "my",
+          "start_ms": 14836,
+          "end_ms": 14948,
+          "confidence": 0.99998343
+        },
+        {
+          "text": "worship.",
+          "start_ms": 15109,
+          "end_ms": 16214,
+          "confidence": 0.99825925
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 16519,
+          "end_ms": 16695,
+          "confidence": 0.9847058
+        },
+        {
+          "text": "the",
+          "start_ms": 17416,
+          "end_ms": 17576,
+          "confidence": 0.99837637
+        },
+        {
+          "text": "enemy",
+          "start_ms": 17576,
+          "end_ms": 17864,
+          "confidence": 0.9999771
+        },
+        {
+          "text": "may",
+          "start_ms": 18297,
+          "end_ms": 18521,
+          "confidence": 0.9994956
+        },
+        {
+          "text": "take",
+          "start_ms": 18521,
+          "end_ms": 18874,
+          "confidence": 0.99997723
+        },
+        {
+          "text": "some",
+          "start_ms": 18938,
+          "end_ms": 19354,
+          "confidence": 0.99880934
+        },
+        {
+          "text": "things,",
+          "start_ms": 19419,
+          "end_ms": 19979,
+          "confidence": 0.998872
+        },
+        {
+          "text": "but",
+          "start_ms": 20460,
+          "end_ms": 20556,
+          "confidence": 0.9988758
+        },
+        {
+          "text": "he",
+          "start_ms": 20556,
+          "end_ms": 20620,
+          "confidence": 0.99900913
+        },
+        {
+          "text": "can't",
+          "start_ms": 20700,
+          "end_ms": 21005,
+          "confidence": 0.99976134
+        },
+        {
+          "text": "take",
+          "start_ms": 21005,
+          "end_ms": 21245,
+          "confidence": 0.9999933
+        },
+        {
+          "text": "my",
+          "start_ms": 21325,
+          "end_ms": 21453,
+          "confidence": 0.99997187
+        },
+        {
+          "text": "worship.",
+          "start_ms": 21566,
+          "end_ms": 22239,
+          "confidence": 0.9987901
+        },
+        {
+          "text": "Can't",
+          "start_ms": 22847,
+          "end_ms": 23216,
+          "confidence": 0.99836254
+        },
+        {
+          "text": "take",
+          "start_ms": 23216,
+          "end_ms": 23424,
+          "confidence": 0.99999475
+        },
+        {
+          "text": "my",
+          "start_ms": 23424,
+          "end_ms": 23504,
+          "confidence": 0.9999671
+        },
+        {
+          "text": "worship.",
+          "start_ms": 23729,
+          "end_ms": 24786,
+          "confidence": 0.99950904
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 25090,
+          "end_ms": 25267,
+          "confidence": 0.9276633
+        },
+        {
+          "text": "the",
+          "start_ms": 25972,
+          "end_ms": 26148,
+          "confidence": 0.9992274
+        },
+        {
+          "text": "enemy",
+          "start_ms": 26148,
+          "end_ms": 26404,
+          "confidence": 0.9998772
+        },
+        {
+          "text": "may",
+          "start_ms": 26869,
+          "end_ms": 26949,
+          "confidence": 0.999121
+        },
+        {
+          "text": "take",
+          "start_ms": 27125,
+          "end_ms": 27446,
+          "confidence": 0.9998029
+        },
+        {
+          "text": "some",
+          "start_ms": 27446,
+          "end_ms": 27991,
+          "confidence": 0.9980792
+        },
+        {
+          "text": "things,",
+          "start_ms": 27991,
+          "end_ms": 28599,
+          "confidence": 0.92846245
+        },
+        {
+          "text": "But",
+          "start_ms": 29020,
+          "end_ms": 29133,
+          "confidence": 0.902393
+        },
+        {
+          "text": "it",
+          "start_ms": 29133,
+          "end_ms": 29279,
+          "confidence": 0.51615584
+        },
+        {
+          "text": "can't",
+          "start_ms": 29279,
+          "end_ms": 29587,
+          "confidence": 0.9574096
+        },
+        {
+          "text": "take,",
+          "start_ms": 29587,
+          "end_ms": 29943,
+          "confidence": 0.7602527
+        },
+        {
+          "text": "can't",
+          "start_ms": 31466,
+          "end_ms": 31709,
+          "confidence": 0.98973465
+        },
+        {
+          "text": "take",
+          "start_ms": 31709,
+          "end_ms": 32049,
+          "confidence": 0.9999298
+        },
+        {
+          "text": "my",
+          "start_ms": 32049,
+          "end_ms": 32195,
+          "confidence": 0.9922563
+        },
+        {
+          "text": "worship.",
+          "start_ms": 32341,
+          "end_ms": 33248,
+          "confidence": 0.8875596
+        }
+      ]
+    },
+    {
+      "text": "So lungs breathe, mouth sing, and hands reach.",
+      "start_ms": 35540,
+      "end_ms": 46950,
+      "text_sk": "Pľúca dýchajú, ústa spievajú a ruky siahajú.",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 35540,
+          "end_ms": 35701,
+          "confidence": 0.82561153
+        },
+        {
+          "text": "lungs",
+          "start_ms": 35718,
+          "end_ms": 36511,
+          "confidence": 0.58738667
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 37821,
+          "end_ms": 38566,
+          "confidence": 0.7935088
+        },
+        {
+          "text": "mouth",
+          "start_ms": 40006,
+          "end_ms": 40929,
+          "confidence": 0.6609848
+        },
+        {
+          "text": "sing,",
+          "start_ms": 42029,
+          "end_ms": 42579,
+          "confidence": 0.9172281
+        },
+        {
+          "text": "and",
+          "start_ms": 44133,
+          "end_ms": 44198,
+          "confidence": 0.9937594
+        },
+        {
+          "text": "hands",
+          "start_ms": 44360,
+          "end_ms": 45056,
+          "confidence": 0.9997509
+        },
+        {
+          "text": "reach.",
+          "start_ms": 46480,
+          "end_ms": 46950,
+          "confidence": 0.9900705
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory.",
+      "start_ms": 47468,
+      "end_ms": 50916,
+      "text_sk": "Toto je moja cesta k víťazstvu.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 47468,
+          "end_ms": 47727,
+          "confidence": 0.62675047
+        },
+        {
+          "text": "is",
+          "start_ms": 47937,
+          "end_ms": 48083,
+          "confidence": 0.99875987
+        },
+        {
+          "text": "my",
+          "start_ms": 48180,
+          "end_ms": 48439,
+          "confidence": 0.9977703
+        },
+        {
+          "text": "way",
+          "start_ms": 48585,
+          "end_ms": 48779,
+          "confidence": 0.99836975
+        },
+        {
+          "text": "to",
+          "start_ms": 49006,
+          "end_ms": 49362,
+          "confidence": 0.99612373
+        },
+        {
+          "text": "victory.",
+          "start_ms": 49718,
+          "end_ms": 50916,
+          "confidence": 0.9799937
+        }
+      ]
+    },
+    {
+      "text": "Lungs Breathe, mouth, sing, and hands reach.",
+      "start_ms": 50916,
+      "end_ms": 64053,
+      "text_sk": "Pľúca dýchajú, ústa spievajú a ruky siahajú.",
+      "words": [
+        {
+          "text": "Lungs",
+          "start_ms": 53345,
+          "end_ms": 53680,
+          "confidence": 0.9211531
+        },
+        {
+          "text": "Breathe,",
+          "start_ms": 55000,
+          "end_ms": 55728,
+          "confidence": 0.88965625
+        },
+        {
+          "text": "mouth,",
+          "start_ms": 57054,
+          "end_ms": 57265,
+          "confidence": 0.94103473
+        },
+        {
+          "text": "sing,",
+          "start_ms": 59142,
+          "end_ms": 59692,
+          "confidence": 0.92703134
+        },
+        {
+          "text": "and",
+          "start_ms": 61261,
+          "end_ms": 61326,
+          "confidence": 0.9928558
+        },
+        {
+          "text": "hands",
+          "start_ms": 61488,
+          "end_ms": 62329,
+          "confidence": 0.98986965
+        },
+        {
+          "text": "reach.",
+          "start_ms": 63596,
+          "end_ms": 64053,
+          "confidence": 0.7823083
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory. Whoa!",
+      "start_ms": 64656,
+      "end_ms": 69490,
+      "text_sk": "Toto je moja cesta k víťazstvu. Whoa!",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 64656,
+          "end_ms": 64934,
+          "confidence": 0.97998893
+        },
+        {
+          "text": "is",
+          "start_ms": 65065,
+          "end_ms": 65293,
+          "confidence": 0.9996402
+        },
+        {
+          "text": "my",
+          "start_ms": 65391,
+          "end_ms": 65652,
+          "confidence": 0.9997559
+        },
+        {
+          "text": "way",
+          "start_ms": 65734,
+          "end_ms": 66011,
+          "confidence": 0.99948466
+        },
+        {
+          "text": "to",
+          "start_ms": 66223,
+          "end_ms": 66403,
+          "confidence": 0.9998549
+        },
+        {
+          "text": "victory.",
+          "start_ms": 66942,
+          "end_ms": 67986,
+          "confidence": 0.8684477
+        },
+        {
+          "text": "Whoa!",
+          "start_ms": 69410,
+          "end_ms": 69490,
+          "confidence": 0.80650586
+        }
+      ]
+    },
+    {
+      "text": "Lungs, breathe, mouth sing.",
+      "start_ms": 70005,
+      "end_ms": 73838,
+      "text_sk": "Pľúca, dýchajte, ústa spievajte.",
+      "words": [
+        {
+          "text": "Lungs,",
+          "start_ms": 70005,
+          "end_ms": 70746,
+          "confidence": 0.8885638
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 72099,
+          "end_ms": 72453,
+          "confidence": 0.81483364
+        },
+        {
+          "text": "mouth",
+          "start_ms": 73291,
+          "end_ms": 73436,
+          "confidence": 0.97440636
+        },
+        {
+          "text": "sing.",
+          "start_ms": 73532,
+          "end_ms": 73838,
+          "confidence": 0.5735687
+        }
+      ]
+    },
+    {
+      "text": "Mouth sing.",
+      "start_ms": 74273,
+      "end_ms": 76824,
+      "text_sk": "Ústa spievajú.",
+      "words": [
+        {
+          "text": "Mouth",
+          "start_ms": 74273,
+          "end_ms": 74805,
+          "confidence": 0.5335293
+        },
+        {
+          "text": "sing.",
+          "start_ms": 76193,
+          "end_ms": 76824,
+          "confidence": 0.8889579
+        }
+      ]
+    },
+    {
+      "text": "Oh, hands reach. This is my way to victory.",
+      "start_ms": 77245,
+      "end_ms": 84109,
+      "text_sk": "Ach, ruky siahajú. Toto je moja cesta k víťazstvu.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 77245,
+          "end_ms": 77262,
+          "confidence": 0.7550344
+        },
+        {
+          "text": "hands",
+          "start_ms": 77504,
+          "end_ms": 79414,
+          "confidence": 0.97918516
+        },
+        {
+          "text": "reach.",
+          "start_ms": 79673,
+          "end_ms": 80272,
+          "confidence": 0.9101812
+        },
+        {
+          "text": "This",
+          "start_ms": 80742,
+          "end_ms": 81082,
+          "confidence": 0.8051284
+        },
+        {
+          "text": "is",
+          "start_ms": 81130,
+          "end_ms": 82587,
+          "confidence": 0.99660504
+        },
+        {
+          "text": "my",
+          "start_ms": 82587,
+          "end_ms": 82781,
+          "confidence": 0.67075044
+        },
+        {
+          "text": "way",
+          "start_ms": 82992,
+          "end_ms": 83251,
+          "confidence": 0.99827445
+        },
+        {
+          "text": "to",
+          "start_ms": 83413,
+          "end_ms": 83655,
+          "confidence": 0.9899949
+        },
+        {
+          "text": "victory.",
+          "start_ms": 83655,
+          "end_ms": 84109,
+          "confidence": 0.9451673
+        }
+      ]
+    },
+    {
+      "text": "Because the enemy may take something, but he can't take my worship. Can't take my worship. Oh, the enemy may take something, but he can't take my worship.",
+      "start_ms": 85245,
+      "end_ms": 98867,
+      "text_sk": "Nepriateľ si možno niečo vezme, ale nemôže mi vziať moje uctievanie. Nemôže mi vziať moje uctievanie. Ach, nepriateľ si možno niečo vezme, ale nemôže mi vziať moje uctievanie.",
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 85245,
+          "end_ms": 85778,
+          "confidence": 0.8756445
+        },
+        {
+          "text": "the",
+          "start_ms": 85810,
+          "end_ms": 86052,
+          "confidence": 0.9997998
+        },
+        {
+          "text": "enemy",
+          "start_ms": 86133,
+          "end_ms": 86424,
+          "confidence": 0.9997565
+        },
+        {
+          "text": "may",
+          "start_ms": 86843,
+          "end_ms": 86940,
+          "confidence": 0.998676
+        },
+        {
+          "text": "take",
+          "start_ms": 87102,
+          "end_ms": 87424,
+          "confidence": 0.99998856
+        },
+        {
+          "text": "something,",
+          "start_ms": 87424,
+          "end_ms": 88118,
+          "confidence": 0.97215223
+        },
+        {
+          "text": "but",
+          "start_ms": 89039,
+          "end_ms": 89135,
+          "confidence": 0.9999745
+        },
+        {
+          "text": "he",
+          "start_ms": 89135,
+          "end_ms": 89200,
+          "confidence": 0.9580355
+        },
+        {
+          "text": "can't",
+          "start_ms": 89265,
+          "end_ms": 89523,
+          "confidence": 0.99859
+        },
+        {
+          "text": "take",
+          "start_ms": 89523,
+          "end_ms": 89781,
+          "confidence": 0.9999896
+        },
+        {
+          "text": "my",
+          "start_ms": 89829,
+          "end_ms": 89959,
+          "confidence": 0.99966586
+        },
+        {
+          "text": "worship.",
+          "start_ms": 90088,
+          "end_ms": 90637,
+          "confidence": 0.8722803
+        },
+        {
+          "text": "Can't",
+          "start_ms": 91460,
+          "end_ms": 91702,
+          "confidence": 0.99924845
+        },
+        {
+          "text": "take",
+          "start_ms": 91702,
+          "end_ms": 92009,
+          "confidence": 0.9999864
+        },
+        {
+          "text": "my",
+          "start_ms": 92009,
+          "end_ms": 92218,
+          "confidence": 0.9999858
+        },
+        {
+          "text": "worship.",
+          "start_ms": 92267,
+          "end_ms": 92735,
+          "confidence": 0.95153177
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 93617,
+          "end_ms": 93633,
+          "confidence": 0.8194947
+        },
+        {
+          "text": "the",
+          "start_ms": 94506,
+          "end_ms": 94683,
+          "confidence": 0.9981773
+        },
+        {
+          "text": "enemy",
+          "start_ms": 94683,
+          "end_ms": 95055,
+          "confidence": 0.9998142
+        },
+        {
+          "text": "may",
+          "start_ms": 95475,
+          "end_ms": 95669,
+          "confidence": 0.9990159
+        },
+        {
+          "text": "take",
+          "start_ms": 95669,
+          "end_ms": 95992,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "something,",
+          "start_ms": 95992,
+          "end_ms": 96670,
+          "confidence": 0.88573796
+        },
+        {
+          "text": "but",
+          "start_ms": 97591,
+          "end_ms": 97656,
+          "confidence": 0.9749885
+        },
+        {
+          "text": "he",
+          "start_ms": 97656,
+          "end_ms": 97850,
+          "confidence": 0.992576
+        },
+        {
+          "text": "can't",
+          "start_ms": 97898,
+          "end_ms": 98221,
+          "confidence": 0.9994076
+        },
+        {
+          "text": "take",
+          "start_ms": 98221,
+          "end_ms": 98399,
+          "confidence": 0.9996358
+        },
+        {
+          "text": "my",
+          "start_ms": 98399,
+          "end_ms": 98544,
+          "confidence": 0.95104116
+        },
+        {
+          "text": "worship.",
+          "start_ms": 98544,
+          "end_ms": 98867,
+          "confidence": 0.92676246
+        }
+      ]
+    },
+    {
+      "text": "Done so much for me, I cannot tell it all.",
+      "start_ms": 98964,
+      "end_ms": 102426,
+      "text_sk": "Urobil pre mňa toľko, že to nedokážem všetko povedať.",
+      "words": [
+        {
+          "text": "Done",
+          "start_ms": 98964,
+          "end_ms": 99158,
+          "confidence": 0.63688135
+        },
+        {
+          "text": "so",
+          "start_ms": 99206,
+          "end_ms": 99513,
+          "confidence": 0.99926144
+        },
+        {
+          "text": "much",
+          "start_ms": 99513,
+          "end_ms": 99740,
+          "confidence": 0.99998283
+        },
+        {
+          "text": "for",
+          "start_ms": 99772,
+          "end_ms": 99933,
+          "confidence": 0.99969864
+        },
+        {
+          "text": "me,",
+          "start_ms": 99933,
+          "end_ms": 100176,
+          "confidence": 0.86983246
+        },
+        {
+          "text": "I",
+          "start_ms": 100967,
+          "end_ms": 101064,
+          "confidence": 0.9864596
+        },
+        {
+          "text": "cannot",
+          "start_ms": 101064,
+          "end_ms": 101613,
+          "confidence": 0.99888784
+        },
+        {
+          "text": "tell",
+          "start_ms": 101613,
+          "end_ms": 101872,
+          "confidence": 0.99978787
+        },
+        {
+          "text": "it",
+          "start_ms": 101872,
+          "end_ms": 102019,
+          "confidence": 0.9991474
+        },
+        {
+          "text": "all.",
+          "start_ms": 102019,
+          "end_ms": 102426,
+          "confidence": 0.99900687
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take something, but he can't take my worship.",
+      "start_ms": 102752,
+      "end_ms": 107739,
+      "text_sk": "Nepriateľ si možno niečo vezme, ale nemôže mi vziať moje uctievanie.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 102752,
+          "end_ms": 102768,
+          "confidence": 0.9989028
+        },
+        {
+          "text": "the",
+          "start_ms": 103111,
+          "end_ms": 103160,
+          "confidence": 0.9999578
+        },
+        {
+          "text": "enemy",
+          "start_ms": 103176,
+          "end_ms": 103632,
+          "confidence": 0.99998856
+        },
+        {
+          "text": "may",
+          "start_ms": 103974,
+          "end_ms": 104235,
+          "confidence": 0.9996978
+        },
+        {
+          "text": "take",
+          "start_ms": 104235,
+          "end_ms": 104561,
+          "confidence": 0.9995826
+        },
+        {
+          "text": "something,",
+          "start_ms": 104561,
+          "end_ms": 105343,
+          "confidence": 0.98870385
+        },
+        {
+          "text": "but",
+          "start_ms": 106191,
+          "end_ms": 106338,
+          "confidence": 0.9985909
+        },
+        {
+          "text": "he",
+          "start_ms": 106338,
+          "end_ms": 106370,
+          "confidence": 0.9995535
+        },
+        {
+          "text": "can't",
+          "start_ms": 106370,
+          "end_ms": 106843,
+          "confidence": 0.9997399
+        },
+        {
+          "text": "take",
+          "start_ms": 106843,
+          "end_ms": 106941,
+          "confidence": 0.99997544
+        },
+        {
+          "text": "my",
+          "start_ms": 107071,
+          "end_ms": 107267,
+          "confidence": 0.9999199
+        },
+        {
+          "text": "worship.",
+          "start_ms": 107315,
+          "end_ms": 107739,
+          "confidence": 0.9995308
+        }
+      ]
+    },
+    {
+      "text": "You sound good.",
+      "start_ms": 110160,
+      "end_ms": 110725,
+      "text_sk": "Znieš dobre.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 110160,
+          "end_ms": 110208,
+          "confidence": 0.46433884
+        },
+        {
+          "text": "sound",
+          "start_ms": 110208,
+          "end_ms": 110515,
+          "confidence": 0.99343264
+        },
+        {
+          "text": "good.",
+          "start_ms": 110580,
+          "end_ms": 110725,
+          "confidence": 0.88732135
+        }
+      ]
+    },
+    {
+      "text": "Sing it out, the enemy may take something. Can't take my worship. Can't take my worship. So we say lungs, lungs, breathe, breathe, walk mouth, mouth, sing, sing, and hands, hands, reach. I command my soul, my soul to reach. So we say lungs, lungs, breathe, And mouth. Mouth.",
+      "start_ms": 111065,
+      "end_ms": 143150,
+      "text_sk": "Spievajte, nepriateľ si môže niečo vziať. Nemôže vziať moju chválu. Nemôže vziať moju chválu. Takže hovoríme pľúca, pľúca, dýchajte, dýchajte, choďte ústa, ústa, spievajte, spievajte, a ruky, ruky, siahnite. Prikazujem svojej duši, svojej duši, aby siahla. Takže hovoríme pľúca, pľúca, dýchajte, a ústa. Ústa.",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 111065,
+          "end_ms": 111178,
+          "confidence": 0.99768305
+        },
+        {
+          "text": "it",
+          "start_ms": 111178,
+          "end_ms": 111307,
+          "confidence": 0.99397767
+        },
+        {
+          "text": "out,",
+          "start_ms": 111307,
+          "end_ms": 111534,
+          "confidence": 0.678222
+        },
+        {
+          "text": "the",
+          "start_ms": 111550,
+          "end_ms": 111614,
+          "confidence": 0.9924234
+        },
+        {
+          "text": "enemy",
+          "start_ms": 111631,
+          "end_ms": 112180,
+          "confidence": 0.99990976
+        },
+        {
+          "text": "may",
+          "start_ms": 112601,
+          "end_ms": 112779,
+          "confidence": 0.6116775
+        },
+        {
+          "text": "take",
+          "start_ms": 112779,
+          "end_ms": 112972,
+          "confidence": 0.9998109
+        },
+        {
+          "text": "something.",
+          "start_ms": 113118,
+          "end_ms": 113797,
+          "confidence": 0.92182124
+        },
+        {
+          "text": "Can't",
+          "start_ms": 114767,
+          "end_ms": 115089,
+          "confidence": 0.6948042
+        },
+        {
+          "text": "take",
+          "start_ms": 115089,
+          "end_ms": 115492,
+          "confidence": 0.9909614
+        },
+        {
+          "text": "my",
+          "start_ms": 115492,
+          "end_ms": 115734,
+          "confidence": 0.9975344
+        },
+        {
+          "text": "worship.",
+          "start_ms": 115734,
+          "end_ms": 116476,
+          "confidence": 0.69231826
+        },
+        {
+          "text": "Can't",
+          "start_ms": 117169,
+          "end_ms": 117314,
+          "confidence": 0.9928918
+        },
+        {
+          "text": "take",
+          "start_ms": 117346,
+          "end_ms": 117653,
+          "confidence": 0.9997522
+        },
+        {
+          "text": "my",
+          "start_ms": 117669,
+          "end_ms": 117895,
+          "confidence": 0.9998847
+        },
+        {
+          "text": "worship.",
+          "start_ms": 117911,
+          "end_ms": 118878,
+          "confidence": 0.9937658
+        },
+        {
+          "text": "So",
+          "start_ms": 119690,
+          "end_ms": 119770,
+          "confidence": 0.9993525
+        },
+        {
+          "text": "we",
+          "start_ms": 119867,
+          "end_ms": 120029,
+          "confidence": 0.99314594
+        },
+        {
+          "text": "say",
+          "start_ms": 120029,
+          "end_ms": 120368,
+          "confidence": 0.93205553
+        },
+        {
+          "text": "lungs,",
+          "start_ms": 120772,
+          "end_ms": 121143,
+          "confidence": 0.7186274
+        },
+        {
+          "text": "lungs,",
+          "start_ms": 121402,
+          "end_ms": 121951,
+          "confidence": 0.8003474
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 122452,
+          "end_ms": 123276,
+          "confidence": 0.99487704
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 123583,
+          "end_ms": 124132,
+          "confidence": 0.91245556
+        },
+        {
+          "text": "walk",
+          "start_ms": 124245,
+          "end_ms": 124649,
+          "confidence": 0.95753974
+        },
+        {
+          "text": "mouth,",
+          "start_ms": 124714,
+          "end_ms": 124859,
+          "confidence": 0.75381196
+        },
+        {
+          "text": "mouth,",
+          "start_ms": 125699,
+          "end_ms": 125845,
+          "confidence": 0.99011934
+        },
+        {
+          "text": "sing,",
+          "start_ms": 126523,
+          "end_ms": 127363,
+          "confidence": 0.9983765
+        },
+        {
+          "text": "sing,",
+          "start_ms": 128010,
+          "end_ms": 128284,
+          "confidence": 0.9386568
+        },
+        {
+          "text": "and",
+          "start_ms": 128590,
+          "end_ms": 128832,
+          "confidence": 0.99563944
+        },
+        {
+          "text": "hands,",
+          "start_ms": 128832,
+          "end_ms": 129848,
+          "confidence": 0.72233737
+        },
+        {
+          "text": "hands,",
+          "start_ms": 129961,
+          "end_ms": 130670,
+          "confidence": 0.8875431
+        },
+        {
+          "text": "reach.",
+          "start_ms": 131009,
+          "end_ms": 131557,
+          "confidence": 0.9624334
+        },
+        {
+          "text": "I",
+          "start_ms": 131977,
+          "end_ms": 132074,
+          "confidence": 0.99821967
+        },
+        {
+          "text": "command",
+          "start_ms": 132074,
+          "end_ms": 132638,
+          "confidence": 0.96948975
+        },
+        {
+          "text": "my",
+          "start_ms": 132799,
+          "end_ms": 133090,
+          "confidence": 0.9794724
+        },
+        {
+          "text": "soul,",
+          "start_ms": 133090,
+          "end_ms": 133819,
+          "confidence": 0.82459354
+        },
+        {
+          "text": "my",
+          "start_ms": 134322,
+          "end_ms": 134354,
+          "confidence": 0.8356081
+        },
+        {
+          "text": "soul",
+          "start_ms": 134354,
+          "end_ms": 134744,
+          "confidence": 0.46547565
+        },
+        {
+          "text": "to",
+          "start_ms": 134744,
+          "end_ms": 135003,
+          "confidence": 0.49120775
+        },
+        {
+          "text": "reach.",
+          "start_ms": 135392,
+          "end_ms": 135814,
+          "confidence": 0.7300009
+        },
+        {
+          "text": "So",
+          "start_ms": 136138,
+          "end_ms": 136268,
+          "confidence": 0.82588655
+        },
+        {
+          "text": "we",
+          "start_ms": 136268,
+          "end_ms": 136365,
+          "confidence": 0.6556869
+        },
+        {
+          "text": "say",
+          "start_ms": 136365,
+          "end_ms": 136463,
+          "confidence": 0.9466656
+        },
+        {
+          "text": "lungs,",
+          "start_ms": 136463,
+          "end_ms": 136998,
+          "confidence": 0.99299604
+        },
+        {
+          "text": "lungs,",
+          "start_ms": 138636,
+          "end_ms": 139301,
+          "confidence": 0.9932244
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 139593,
+          "end_ms": 140501,
+          "confidence": 0.7232426
+        },
+        {
+          "text": "And",
+          "start_ms": 141560,
+          "end_ms": 141817,
+          "confidence": 0.548881
+        },
+        {
+          "text": "mouth.",
+          "start_ms": 141881,
+          "end_ms": 142427,
+          "confidence": 0.60644525
+        },
+        {
+          "text": "Mouth.",
+          "start_ms": 142845,
+          "end_ms": 143150,
+          "confidence": 0.96805274
+        }
+      ]
+    },
+    {
+      "text": "You will sing.",
+      "start_ms": 143150,
+      "end_ms": 144435,
+      "text_sk": "Budete spievať.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 143343,
+          "end_ms": 143471,
+          "confidence": 0.9967636
+        },
+        {
+          "text": "will",
+          "start_ms": 143648,
+          "end_ms": 143793,
+          "confidence": 0.99882823
+        },
+        {
+          "text": "sing.",
+          "start_ms": 143905,
+          "end_ms": 144435,
+          "confidence": 0.9940951
+        }
+      ]
+    },
+    {
+      "text": "Sing. And hey.",
+      "start_ms": 144435,
+      "end_ms": 146026,
+      "text_sk": "Spievajte. A ahojte.",
+      "words": [
+        {
+          "text": "Sing.",
+          "start_ms": 144789,
+          "end_ms": 145544,
+          "confidence": 0.9971692
+        },
+        {
+          "text": "And",
+          "start_ms": 145817,
+          "end_ms": 145994,
+          "confidence": 0.99637944
+        },
+        {
+          "text": "hey.",
+          "start_ms": 145994,
+          "end_ms": 146026,
+          "confidence": 0.79480284
+        }
+      ]
+    },
+    {
+      "text": "Hey.",
+      "start_ms": 146026,
+      "end_ms": 146315,
+      "text_sk": "Dobrý deň.",
+      "words": [
+        {
+          "text": "Hey.",
+          "start_ms": 146074,
+          "end_ms": 146315,
+          "confidence": 0.9759255
+        }
+      ]
+    },
+    {
+      "text": "Reach.",
+      "start_ms": 146315,
+      "end_ms": 148821,
+      "text_sk": "Dosiahnuť.",
+      "words": [
+        {
+          "text": "Reach.",
+          "start_ms": 148548,
+          "end_ms": 148821,
+          "confidence": 0.72956353
+        }
+      ]
+    },
+    {
+      "text": "Reach.",
+      "start_ms": 148821,
+      "end_ms": 149496,
+      "text_sk": "Dosah.",
+      "words": [
+        {
+          "text": "Reach.",
+          "start_ms": 149223,
+          "end_ms": 149496,
+          "confidence": 0.9671078
+        }
+      ]
+    },
+    {
+      "text": "This is.",
+      "start_ms": 149496,
+      "end_ms": 150622,
+      "text_sk": "Toto je.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 149608,
+          "end_ms": 150493,
+          "confidence": 0.9902726
+        },
+        {
+          "text": "is.",
+          "start_ms": 150493,
+          "end_ms": 150622,
+          "confidence": 0.9782543
+        }
+      ]
+    },
+    {
+      "text": "This is.",
+      "start_ms": 150622,
+      "end_ms": 152079,
+      "text_sk": "Toto je.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 150978,
+          "end_ms": 152030,
+          "confidence": 0.99746203
+        },
+        {
+          "text": "is.",
+          "start_ms": 152030,
+          "end_ms": 152079,
+          "confidence": 0.74096614
+        }
+      ]
+    },
+    {
+      "text": "My way to victory.",
+      "start_ms": 152079,
+      "end_ms": 153503,
+      "text_sk": "Moja cesta k víťazstvu.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 152516,
+          "end_ms": 152548,
+          "confidence": 0.9320105
+        },
+        {
+          "text": "way",
+          "start_ms": 152661,
+          "end_ms": 152758,
+          "confidence": 0.99834526
+        },
+        {
+          "text": "to",
+          "start_ms": 152758,
+          "end_ms": 152904,
+          "confidence": 0.9792367
+        },
+        {
+          "text": "victory.",
+          "start_ms": 152904,
+          "end_ms": 153503,
+          "confidence": 0.8972805
+        }
+      ]
+    },
+    {
+      "text": "Somebody praise him now! One more time. Tell your lungs to breathe.",
+      "start_ms": 153503,
+      "end_ms": 171052,
+      "text_sk": "Nech ho teraz niekto pochváli! Ešte raz. Povedzte svojim pľúcam, aby dýchali.",
+      "words": [
+        {
+          "text": "Somebody",
+          "start_ms": 153567,
+          "end_ms": 154069,
+          "confidence": 0.6579623
+        },
+        {
+          "text": "praise",
+          "start_ms": 154069,
+          "end_ms": 154943,
+          "confidence": 0.98970795
+        },
+        {
+          "text": "him",
+          "start_ms": 154991,
+          "end_ms": 155186,
+          "confidence": 0.78216684
+        },
+        {
+          "text": "now!",
+          "start_ms": 155202,
+          "end_ms": 155283,
+          "confidence": 0.7471381
+        },
+        {
+          "text": "One",
+          "start_ms": 168332,
+          "end_ms": 168494,
+          "confidence": 0.88731
+        },
+        {
+          "text": "more",
+          "start_ms": 168494,
+          "end_ms": 168591,
+          "confidence": 0.99995077
+        },
+        {
+          "text": "time.",
+          "start_ms": 168591,
+          "end_ms": 169077,
+          "confidence": 0.92586756
+        },
+        {
+          "text": "Tell",
+          "start_ms": 169870,
+          "end_ms": 170113,
+          "confidence": 0.99991
+        },
+        {
+          "text": "your",
+          "start_ms": 170113,
+          "end_ms": 170339,
+          "confidence": 0.99809617
+        },
+        {
+          "text": "lungs",
+          "start_ms": 170339,
+          "end_ms": 170566,
+          "confidence": 0.8286052
+        },
+        {
+          "text": "to",
+          "start_ms": 170598,
+          "end_ms": 170695,
+          "confidence": 0.99975973
+        },
+        {
+          "text": "breathe.",
+          "start_ms": 170760,
+          "end_ms": 171052,
+          "confidence": 0.95002115
+        }
+      ]
+    },
+    {
+      "text": "Hold on, lungs. Breathe, breathe. And my eyes, see, see. And hey, let's read. This is, this is my way to thee.",
+      "start_ms": 171246,
+      "end_ms": 186994,
+      "text_sk": "Vydržte, pľúca. Dýchajte, dýchajte. A moje oči, vidia, vidia. A hej, poďme čítať. Toto je, toto je moja cesta k tebe.",
+      "words": [
+        {
+          "text": "Hold",
+          "start_ms": 171246,
+          "end_ms": 171456,
+          "confidence": 0.66947764
+        },
+        {
+          "text": "on,",
+          "start_ms": 171489,
+          "end_ms": 172266,
+          "confidence": 0.59528196
+        },
+        {
+          "text": "lungs.",
+          "start_ms": 172848,
+          "end_ms": 173480,
+          "confidence": 0.69733757
+        },
+        {
+          "text": "Breathe,",
+          "start_ms": 173981,
+          "end_ms": 174257,
+          "confidence": 0.949212
+        },
+        {
+          "text": "breathe.",
+          "start_ms": 175034,
+          "end_ms": 175422,
+          "confidence": 0.8949761
+        },
+        {
+          "text": "And",
+          "start_ms": 176167,
+          "end_ms": 177428,
+          "confidence": 0.96558714
+        },
+        {
+          "text": "my",
+          "start_ms": 177428,
+          "end_ms": 177638,
+          "confidence": 0.95552766
+        },
+        {
+          "text": "eyes,",
+          "start_ms": 177638,
+          "end_ms": 177768,
+          "confidence": 0.40159374
+        },
+        {
+          "text": "see,",
+          "start_ms": 178140,
+          "end_ms": 178285,
+          "confidence": 0.9289401
+        },
+        {
+          "text": "see.",
+          "start_ms": 179094,
+          "end_ms": 179579,
+          "confidence": 0.98607284
+        },
+        {
+          "text": "And",
+          "start_ms": 180210,
+          "end_ms": 180533,
+          "confidence": 0.99955803
+        },
+        {
+          "text": "hey,",
+          "start_ms": 180533,
+          "end_ms": 180792,
+          "confidence": 0.86019737
+        },
+        {
+          "text": "let's",
+          "start_ms": 181503,
+          "end_ms": 182490,
+          "confidence": 0.73004085
+        },
+        {
+          "text": "read.",
+          "start_ms": 182555,
+          "end_ms": 183153,
+          "confidence": 0.6732889
+        },
+        {
+          "text": "This",
+          "start_ms": 183622,
+          "end_ms": 183832,
+          "confidence": 0.84599155
+        },
+        {
+          "text": "is,",
+          "start_ms": 183865,
+          "end_ms": 184010,
+          "confidence": 0.94622964
+        },
+        {
+          "text": "this",
+          "start_ms": 184738,
+          "end_ms": 185029,
+          "confidence": 0.9996705
+        },
+        {
+          "text": "is",
+          "start_ms": 185223,
+          "end_ms": 185369,
+          "confidence": 0.9999392
+        },
+        {
+          "text": "my",
+          "start_ms": 185450,
+          "end_ms": 185659,
+          "confidence": 0.99916136
+        },
+        {
+          "text": "way",
+          "start_ms": 185723,
+          "end_ms": 185803,
+          "confidence": 0.9839453
+        },
+        {
+          "text": "to",
+          "start_ms": 186125,
+          "end_ms": 186415,
+          "confidence": 0.9603258
+        },
+        {
+          "text": "thee.",
+          "start_ms": 186769,
+          "end_ms": 186994,
+          "confidence": 0.663976
+        }
+      ]
+    },
+    {
+      "text": "Oh, the Bible says I will bless the Lord at all times. And his praise will continually be in my mouth. Sometimes you got to encourage yourself.",
+      "start_ms": 187235,
+      "end_ms": 199710,
+      "text_sk": "Ach, Biblia hovorí, že budem velebiť Pána za každých okolností. A jeho chvála bude stále v mojich ústach. Niekedy sa musíte povzbudiť.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 187235,
+          "end_ms": 187412,
+          "confidence": 0.8613771
+        },
+        {
+          "text": "the",
+          "start_ms": 190067,
+          "end_ms": 190228,
+          "confidence": 0.9984699
+        },
+        {
+          "text": "Bible",
+          "start_ms": 190228,
+          "end_ms": 190550,
+          "confidence": 0.999951
+        },
+        {
+          "text": "says",
+          "start_ms": 190550,
+          "end_ms": 190920,
+          "confidence": 0.9767188
+        },
+        {
+          "text": "I",
+          "start_ms": 190936,
+          "end_ms": 191016,
+          "confidence": 0.77846247
+        },
+        {
+          "text": "will",
+          "start_ms": 191016,
+          "end_ms": 191193,
+          "confidence": 0.9997807
+        },
+        {
+          "text": "bless",
+          "start_ms": 191193,
+          "end_ms": 191499,
+          "confidence": 0.9999919
+        },
+        {
+          "text": "the",
+          "start_ms": 191499,
+          "end_ms": 191660,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "Lord",
+          "start_ms": 191660,
+          "end_ms": 191917,
+          "confidence": 0.99947256
+        },
+        {
+          "text": "at",
+          "start_ms": 191917,
+          "end_ms": 192062,
+          "confidence": 0.99997735
+        },
+        {
+          "text": "all",
+          "start_ms": 192062,
+          "end_ms": 192110,
+          "confidence": 0.99997747
+        },
+        {
+          "text": "times.",
+          "start_ms": 192239,
+          "end_ms": 192529,
+          "confidence": 0.99058294
+        },
+        {
+          "text": "And",
+          "start_ms": 194522,
+          "end_ms": 194619,
+          "confidence": 0.73420846
+        },
+        {
+          "text": "his",
+          "start_ms": 194619,
+          "end_ms": 194830,
+          "confidence": 0.63437897
+        },
+        {
+          "text": "praise",
+          "start_ms": 194927,
+          "end_ms": 195203,
+          "confidence": 0.9997867
+        },
+        {
+          "text": "will",
+          "start_ms": 195252,
+          "end_ms": 195430,
+          "confidence": 0.9985312
+        },
+        {
+          "text": "continually",
+          "start_ms": 195430,
+          "end_ms": 196127,
+          "confidence": 0.9994147
+        },
+        {
+          "text": "be",
+          "start_ms": 196305,
+          "end_ms": 196484,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "in",
+          "start_ms": 196484,
+          "end_ms": 196646,
+          "confidence": 0.99998605
+        },
+        {
+          "text": "my",
+          "start_ms": 196646,
+          "end_ms": 196727,
+          "confidence": 0.9999391
+        },
+        {
+          "text": "mouth.",
+          "start_ms": 196808,
+          "end_ms": 197213,
+          "confidence": 0.99967253
+        },
+        {
+          "text": "Sometimes",
+          "start_ms": 197878,
+          "end_ms": 198397,
+          "confidence": 0.99987304
+        },
+        {
+          "text": "you",
+          "start_ms": 198413,
+          "end_ms": 198510,
+          "confidence": 0.9963786
+        },
+        {
+          "text": "got",
+          "start_ms": 198510,
+          "end_ms": 198624,
+          "confidence": 0.75826114
+        },
+        {
+          "text": "to",
+          "start_ms": 198624,
+          "end_ms": 198721,
+          "confidence": 0.99997354
+        },
+        {
+          "text": "encourage",
+          "start_ms": 198737,
+          "end_ms": 199256,
+          "confidence": 0.9999949
+        },
+        {
+          "text": "yourself.",
+          "start_ms": 199256,
+          "end_ms": 199710,
+          "confidence": 0.9991128
+        }
+      ]
+    },
+    {
+      "text": "Can I prophesy?",
+      "start_ms": 200196,
+      "end_ms": 200845,
+      "text_sk": "Môžem prorokovať?",
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 200196,
+          "end_ms": 200358,
+          "confidence": 0.9999527
+        },
+        {
+          "text": "I",
+          "start_ms": 200358,
+          "end_ms": 200375,
+          "confidence": 0.9999422
+        },
+        {
+          "text": "prophesy?",
+          "start_ms": 200375,
+          "end_ms": 200845,
+          "confidence": 0.9901921
+        }
+      ]
+    },
+    {
+      "text": "Some of you walked in weak, but you about to walk out strong. You, you walked in depressed, but you about to walk out with the joy of the Lord flowing through your heart. So we about to have a good old-fashioned Atlanta praise right now. Is that all right?",
+      "start_ms": 201360,
+      "end_ms": 215095,
+      "text_sk": "Niektorí z vás sem prišli slabí, ale teraz odídete silní. Vy ste sem prišli so skleslou náladou, ale teraz odídete s radosťou Pána prúdiacou vo vašich srdciach. Takže sa teraz chystáme na staromódnu oslavu v Atlante. Je to v poriadku?",
+      "words": [
+        {
+          "text": "Some",
+          "start_ms": 201360,
+          "end_ms": 201456,
+          "confidence": 0.9999604
+        },
+        {
+          "text": "of",
+          "start_ms": 201456,
+          "end_ms": 201553,
+          "confidence": 0.9999889
+        },
+        {
+          "text": "you",
+          "start_ms": 201553,
+          "end_ms": 201666,
+          "confidence": 0.9999813
+        },
+        {
+          "text": "walked",
+          "start_ms": 201715,
+          "end_ms": 202102,
+          "confidence": 0.99651945
+        },
+        {
+          "text": "in",
+          "start_ms": 202102,
+          "end_ms": 202183,
+          "confidence": 0.9994425
+        },
+        {
+          "text": "weak,",
+          "start_ms": 202263,
+          "end_ms": 202441,
+          "confidence": 0.99751174
+        },
+        {
+          "text": "but",
+          "start_ms": 202522,
+          "end_ms": 202635,
+          "confidence": 0.9999975
+        },
+        {
+          "text": "you",
+          "start_ms": 202683,
+          "end_ms": 202780,
+          "confidence": 0.99993765
+        },
+        {
+          "text": "about",
+          "start_ms": 202780,
+          "end_ms": 202957,
+          "confidence": 0.83315897
+        },
+        {
+          "text": "to",
+          "start_ms": 202957,
+          "end_ms": 203070,
+          "confidence": 0.9995554
+        },
+        {
+          "text": "walk",
+          "start_ms": 203070,
+          "end_ms": 203442,
+          "confidence": 0.99999547
+        },
+        {
+          "text": "out",
+          "start_ms": 203474,
+          "end_ms": 203651,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "strong.",
+          "start_ms": 203958,
+          "end_ms": 204426,
+          "confidence": 0.9993
+        },
+        {
+          "text": "You,",
+          "start_ms": 204523,
+          "end_ms": 204571,
+          "confidence": 0.707988
+        },
+        {
+          "text": "you",
+          "start_ms": 205249,
+          "end_ms": 205378,
+          "confidence": 0.9999473
+        },
+        {
+          "text": "walked",
+          "start_ms": 205411,
+          "end_ms": 205734,
+          "confidence": 0.9998846
+        },
+        {
+          "text": "in",
+          "start_ms": 205734,
+          "end_ms": 205847,
+          "confidence": 0.99996316
+        },
+        {
+          "text": "depressed,",
+          "start_ms": 205895,
+          "end_ms": 206395,
+          "confidence": 0.99967426
+        },
+        {
+          "text": "but",
+          "start_ms": 206460,
+          "end_ms": 206573,
+          "confidence": 0.99999535
+        },
+        {
+          "text": "you",
+          "start_ms": 206573,
+          "end_ms": 206654,
+          "confidence": 0.99990594
+        },
+        {
+          "text": "about",
+          "start_ms": 206654,
+          "end_ms": 206831,
+          "confidence": 0.94030344
+        },
+        {
+          "text": "to",
+          "start_ms": 206831,
+          "end_ms": 206960,
+          "confidence": 0.99998057
+        },
+        {
+          "text": "walk",
+          "start_ms": 206960,
+          "end_ms": 207267,
+          "confidence": 0.9999932
+        },
+        {
+          "text": "out",
+          "start_ms": 207267,
+          "end_ms": 207444,
+          "confidence": 0.9999943
+        },
+        {
+          "text": "with",
+          "start_ms": 207444,
+          "end_ms": 207606,
+          "confidence": 0.99997187
+        },
+        {
+          "text": "the",
+          "start_ms": 207606,
+          "end_ms": 207687,
+          "confidence": 0.9999815
+        },
+        {
+          "text": "joy",
+          "start_ms": 207767,
+          "end_ms": 207945,
+          "confidence": 0.9998894
+        },
+        {
+          "text": "of",
+          "start_ms": 208090,
+          "end_ms": 208138,
+          "confidence": 0.9999913
+        },
+        {
+          "text": "the",
+          "start_ms": 208171,
+          "end_ms": 208316,
+          "confidence": 0.999982
+        },
+        {
+          "text": "Lord",
+          "start_ms": 208332,
+          "end_ms": 208736,
+          "confidence": 0.9990896
+        },
+        {
+          "text": "flowing",
+          "start_ms": 209704,
+          "end_ms": 210075,
+          "confidence": 0.9959273
+        },
+        {
+          "text": "through",
+          "start_ms": 210108,
+          "end_ms": 210269,
+          "confidence": 0.9999908
+        },
+        {
+          "text": "your",
+          "start_ms": 210334,
+          "end_ms": 210560,
+          "confidence": 0.99999106
+        },
+        {
+          "text": "heart.",
+          "start_ms": 210560,
+          "end_ms": 210688,
+          "confidence": 0.9997907
+        },
+        {
+          "text": "So",
+          "start_ms": 211235,
+          "end_ms": 211380,
+          "confidence": 0.99989724
+        },
+        {
+          "text": "we",
+          "start_ms": 211380,
+          "end_ms": 211460,
+          "confidence": 0.9948049
+        },
+        {
+          "text": "about",
+          "start_ms": 211460,
+          "end_ms": 211621,
+          "confidence": 0.9823605
+        },
+        {
+          "text": "to",
+          "start_ms": 211621,
+          "end_ms": 211685,
+          "confidence": 0.9999752
+        },
+        {
+          "text": "have",
+          "start_ms": 211685,
+          "end_ms": 211943,
+          "confidence": 0.99999297
+        },
+        {
+          "text": "a",
+          "start_ms": 211943,
+          "end_ms": 211959,
+          "confidence": 0.9999434
+        },
+        {
+          "text": "good",
+          "start_ms": 212039,
+          "end_ms": 212232,
+          "confidence": 0.999949
+        },
+        {
+          "text": "old-fashioned",
+          "start_ms": 212264,
+          "end_ms": 212924,
+          "confidence": 0.98773926
+        },
+        {
+          "text": "Atlanta",
+          "start_ms": 212924,
+          "end_ms": 213326,
+          "confidence": 0.9985336
+        },
+        {
+          "text": "praise",
+          "start_ms": 213326,
+          "end_ms": 213744,
+          "confidence": 0.9867265
+        },
+        {
+          "text": "right",
+          "start_ms": 213792,
+          "end_ms": 213985,
+          "confidence": 0.4973469
+        },
+        {
+          "text": "now.",
+          "start_ms": 214049,
+          "end_ms": 214130,
+          "confidence": 0.979458
+        },
+        {
+          "text": "Is",
+          "start_ms": 214355,
+          "end_ms": 214419,
+          "confidence": 0.924508
+        },
+        {
+          "text": "that",
+          "start_ms": 214516,
+          "end_ms": 214693,
+          "confidence": 0.99994934
+        },
+        {
+          "text": "all",
+          "start_ms": 214693,
+          "end_ms": 214789,
+          "confidence": 0.96576214
+        },
+        {
+          "text": "right?",
+          "start_ms": 214789,
+          "end_ms": 215095,
+          "confidence": 0.99876446
+        }
+      ]
+    },
+    {
+      "text": "All right, let's do it again.",
+      "start_ms": 215432,
+      "end_ms": 218199,
+      "text_sk": "Dobre, urobme to znova.",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 215432,
+          "end_ms": 215497,
+          "confidence": 0.91530365
+        },
+        {
+          "text": "right,",
+          "start_ms": 215497,
+          "end_ms": 215642,
+          "confidence": 0.9704495
+        },
+        {
+          "text": "let's",
+          "start_ms": 217652,
+          "end_ms": 217829,
+          "confidence": 0.9984371
+        },
+        {
+          "text": "do",
+          "start_ms": 217829,
+          "end_ms": 217925,
+          "confidence": 0.9998105
+        },
+        {
+          "text": "it",
+          "start_ms": 217925,
+          "end_ms": 218006,
+          "confidence": 0.99989355
+        },
+        {
+          "text": "again.",
+          "start_ms": 218006,
+          "end_ms": 218199,
+          "confidence": 0.9985218
+        }
+      ]
+    },
+    {
+      "text": "The enemy may take some things.",
+      "start_ms": 218670,
+      "end_ms": 219970,
+      "text_sk": "Nepriateľ si môže niečo vziať.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 218670,
+          "end_ms": 219170,
+          "confidence": 0.9014813
+        },
+        {
+          "text": "enemy",
+          "start_ms": 219170,
+          "end_ms": 219170,
+          "confidence": 0.9997223
+        },
+        {
+          "text": "may",
+          "start_ms": 219170,
+          "end_ms": 219370,
+          "confidence": 0.9988537
+        },
+        {
+          "text": "take",
+          "start_ms": 219370,
+          "end_ms": 219570,
+          "confidence": 0.9999653
+        },
+        {
+          "text": "some",
+          "start_ms": 219570,
+          "end_ms": 219810,
+          "confidence": 0.9955712
+        },
+        {
+          "text": "things.",
+          "start_ms": 219810,
+          "end_ms": 219970,
+          "confidence": 0.9691237
+        }
+      ]
+    },
+    {
+      "text": "You ready? One, two, three.",
+      "start_ms": 219970,
+      "end_ms": 222350,
+      "text_sk": "Ste pripravení? Jeden, dva, tri.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 219970,
+          "end_ms": 220170,
+          "confidence": 0.9988207
+        },
+        {
+          "text": "ready?",
+          "start_ms": 220170,
+          "end_ms": 221550,
+          "confidence": 0.9862297
+        },
+        {
+          "text": "One,",
+          "start_ms": 221550,
+          "end_ms": 221550,
+          "confidence": 0.9602144
+        },
+        {
+          "text": "two,",
+          "start_ms": 221550,
+          "end_ms": 221850,
+          "confidence": 0.9998032
+        },
+        {
+          "text": "three.",
+          "start_ms": 221850,
+          "end_ms": 222350,
+          "confidence": 0.7736001
+        }
+      ]
+    },
+    {
+      "text": "Let's go.",
+      "start_ms": 222350,
+      "end_ms": 223070,
+      "text_sk": "Poďme.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 222350,
+          "end_ms": 222550,
+          "confidence": 0.9999681
+        },
+        {
+          "text": "go.",
+          "start_ms": 222550,
+          "end_ms": 223070,
+          "confidence": 0.74794847
+        }
+      ]
+    },
+    {
+      "text": "The enemy may take some things, but he can't take my worship.",
+      "start_ms": 223070,
+      "end_ms": 228410,
+      "text_sk": "Nepriateľ si môže vziať niektoré veci, ale nemôže mi vziať moje uctievanie.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 223070,
+          "end_ms": 223250,
+          "confidence": 0.9938624
+        },
+        {
+          "text": "enemy",
+          "start_ms": 223250,
+          "end_ms": 223750,
+          "confidence": 0.9999603
+        },
+        {
+          "text": "may",
+          "start_ms": 223750,
+          "end_ms": 224170,
+          "confidence": 0.9931439
+        },
+        {
+          "text": "take",
+          "start_ms": 224170,
+          "end_ms": 224490,
+          "confidence": 0.99993646
+        },
+        {
+          "text": "some",
+          "start_ms": 224490,
+          "end_ms": 225110,
+          "confidence": 0.9860524
+        },
+        {
+          "text": "things,",
+          "start_ms": 225110,
+          "end_ms": 225570,
+          "confidence": 0.99371815
+        },
+        {
+          "text": "but",
+          "start_ms": 225570,
+          "end_ms": 226270,
+          "confidence": 0.9994338
+        },
+        {
+          "text": "he",
+          "start_ms": 226270,
+          "end_ms": 226390,
+          "confidence": 0.88489664
+        },
+        {
+          "text": "can't",
+          "start_ms": 226390,
+          "end_ms": 226750,
+          "confidence": 0.9987877
+        },
+        {
+          "text": "take",
+          "start_ms": 226750,
+          "end_ms": 226930,
+          "confidence": 0.99996936
+        },
+        {
+          "text": "my",
+          "start_ms": 226930,
+          "end_ms": 227730,
+          "confidence": 0.9998191
+        },
+        {
+          "text": "worship.",
+          "start_ms": 227730,
+          "end_ms": 228410,
+          "confidence": 0.93528736
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship.",
+      "start_ms": 228410,
+      "end_ms": 230550,
+      "text_sk": "Nemôžem prijať moju úctu.",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 228410,
+          "end_ms": 228930,
+          "confidence": 0.99001724
+        },
+        {
+          "text": "take",
+          "start_ms": 228930,
+          "end_ms": 229150,
+          "confidence": 0.9994429
+        },
+        {
+          "text": "my",
+          "start_ms": 229150,
+          "end_ms": 229450,
+          "confidence": 0.9996526
+        },
+        {
+          "text": "worship.",
+          "start_ms": 229450,
+          "end_ms": 230550,
+          "confidence": 0.9909028
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things, but he can't take my worship.",
+      "start_ms": 230550,
+      "end_ms": 236830,
+      "text_sk": "Nepriateľ si možno vezme niektoré veci, ale nemôže mi vziať moje uctievanie.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 230550,
+          "end_ms": 231410,
+          "confidence": 0.7969996
+        },
+        {
+          "text": "the",
+          "start_ms": 231410,
+          "end_ms": 231930,
+          "confidence": 0.84134793
+        },
+        {
+          "text": "enemy",
+          "start_ms": 231930,
+          "end_ms": 232510,
+          "confidence": 0.9988506
+        },
+        {
+          "text": "may",
+          "start_ms": 232510,
+          "end_ms": 232930,
+          "confidence": 0.992562
+        },
+        {
+          "text": "take",
+          "start_ms": 232930,
+          "end_ms": 233190,
+          "confidence": 0.99988556
+        },
+        {
+          "text": "some",
+          "start_ms": 233190,
+          "end_ms": 233690,
+          "confidence": 0.94321096
+        },
+        {
+          "text": "things,",
+          "start_ms": 233690,
+          "end_ms": 234510,
+          "confidence": 0.8578496
+        },
+        {
+          "text": "but",
+          "start_ms": 234510,
+          "end_ms": 235110,
+          "confidence": 0.89130217
+        },
+        {
+          "text": "he",
+          "start_ms": 235110,
+          "end_ms": 235110,
+          "confidence": 0.8639488
+        },
+        {
+          "text": "can't",
+          "start_ms": 235110,
+          "end_ms": 235370,
+          "confidence": 0.9993575
+        },
+        {
+          "text": "take",
+          "start_ms": 235370,
+          "end_ms": 235530,
+          "confidence": 0.9999466
+        },
+        {
+          "text": "my",
+          "start_ms": 235530,
+          "end_ms": 235910,
+          "confidence": 0.99770373
+        },
+        {
+          "text": "worship.",
+          "start_ms": 235910,
+          "end_ms": 236830,
+          "confidence": 0.9980314
+        }
+      ]
+    },
+    {
+      "text": "Let's take it up just a little more.",
+      "start_ms": 236830,
+      "end_ms": 238480,
+      "text_sk": "Poďme to ešte trochu posunúť.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 236830,
+          "end_ms": 237150,
+          "confidence": 0.9993297
+        },
+        {
+          "text": "take",
+          "start_ms": 237150,
+          "end_ms": 237330,
+          "confidence": 0.98695797
+        },
+        {
+          "text": "it",
+          "start_ms": 237330,
+          "end_ms": 237410,
+          "confidence": 0.9997501
+        },
+        {
+          "text": "up",
+          "start_ms": 237410,
+          "end_ms": 237570,
+          "confidence": 0.914795
+        },
+        {
+          "text": "just",
+          "start_ms": 237570,
+          "end_ms": 237710,
+          "confidence": 0.9988636
+        },
+        {
+          "text": "a",
+          "start_ms": 237710,
+          "end_ms": 237910,
+          "confidence": 0.99999535
+        },
+        {
+          "text": "little",
+          "start_ms": 237910,
+          "end_ms": 238030,
+          "confidence": 0.99999154
+        },
+        {
+          "text": "more.",
+          "start_ms": 238030,
+          "end_ms": 238480,
+          "confidence": 0.9992412
+        }
+      ]
+    },
+    {
+      "text": "The enemy may take, may take something.",
+      "start_ms": 239070,
+      "end_ms": 242490,
+      "text_sk": "Nepriateľ si môže niečo vziať.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 239070,
+          "end_ms": 239370,
+          "confidence": 0.9642209
+        },
+        {
+          "text": "enemy",
+          "start_ms": 239370,
+          "end_ms": 239770,
+          "confidence": 0.99998534
+        },
+        {
+          "text": "may",
+          "start_ms": 239770,
+          "end_ms": 240350,
+          "confidence": 0.9981775
+        },
+        {
+          "text": "take,",
+          "start_ms": 240350,
+          "end_ms": 241170,
+          "confidence": 0.7095234
+        },
+        {
+          "text": "may",
+          "start_ms": 241170,
+          "end_ms": 241330,
+          "confidence": 0.861926
+        },
+        {
+          "text": "take",
+          "start_ms": 241330,
+          "end_ms": 241710,
+          "confidence": 0.99998283
+        },
+        {
+          "text": "something.",
+          "start_ms": 241710,
+          "end_ms": 242490,
+          "confidence": 0.4461397
+        }
+      ]
+    },
+    {
+      "text": "Can't take my word.",
+      "start_ms": 242490,
+      "end_ms": 243570,
+      "text_sk": "Nemôžem ti to zaručiť.",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 242490,
+          "end_ms": 242830,
+          "confidence": 0.9954833
+        },
+        {
+          "text": "take",
+          "start_ms": 242830,
+          "end_ms": 243130,
+          "confidence": 0.9999882
+        },
+        {
+          "text": "my",
+          "start_ms": 243130,
+          "end_ms": 243390,
+          "confidence": 0.99916697
+        },
+        {
+          "text": "word.",
+          "start_ms": 243390,
+          "end_ms": 243570,
+          "confidence": 0.6869756
+        }
+      ]
+    },
+    {
+      "text": "Can't take my word.",
+      "start_ms": 243570,
+      "end_ms": 244670,
+      "text_sk": "Nemôžem vám to zaručiť.",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 243570,
+          "end_ms": 243850,
+          "confidence": 0.99814206
+        },
+        {
+          "text": "take",
+          "start_ms": 243850,
+          "end_ms": 244150,
+          "confidence": 0.99996066
+        },
+        {
+          "text": "my",
+          "start_ms": 244150,
+          "end_ms": 244470,
+          "confidence": 0.9997055
+        },
+        {
+          "text": "word.",
+          "start_ms": 244470,
+          "end_ms": 244670,
+          "confidence": 0.99794275
+        }
+      ]
+    },
+    {
+      "text": "Can't take my word. Shantay, I made up my mind. The enemy may take some You can't take my word. 1, 2, everybody turn up louder. I need to hear you turn it up right now.",
+      "start_ms": 244670,
+      "end_ms": 265199,
+      "text_sk": "Nemôžem ti dať svoje slovo. Shantay, rozhodla som sa. Nepriateľ si môže vziať nejaké. Nemôžem ti dať svoje slovo. 1, 2, všetci zosilnite. Potrebujem vás počuť, zosilnite to hneď teraz.",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 244670,
+          "end_ms": 244870,
+          "confidence": 0.96689045
+        },
+        {
+          "text": "take",
+          "start_ms": 244870,
+          "end_ms": 245210,
+          "confidence": 0.9998043
+        },
+        {
+          "text": "my",
+          "start_ms": 245210,
+          "end_ms": 246450,
+          "confidence": 0.99935263
+        },
+        {
+          "text": "word.",
+          "start_ms": 246450,
+          "end_ms": 246990,
+          "confidence": 0.9948018
+        },
+        {
+          "text": "Shantay,",
+          "start_ms": 246990,
+          "end_ms": 247590,
+          "confidence": 0.5228122
+        },
+        {
+          "text": "I",
+          "start_ms": 247590,
+          "end_ms": 247710,
+          "confidence": 0.94373965
+        },
+        {
+          "text": "made",
+          "start_ms": 247710,
+          "end_ms": 247830,
+          "confidence": 0.8012133
+        },
+        {
+          "text": "up",
+          "start_ms": 247830,
+          "end_ms": 248070,
+          "confidence": 0.9987507
+        },
+        {
+          "text": "my",
+          "start_ms": 248070,
+          "end_ms": 248370,
+          "confidence": 0.99922657
+        },
+        {
+          "text": "mind.",
+          "start_ms": 248370,
+          "end_ms": 248610,
+          "confidence": 0.9972481
+        },
+        {
+          "text": "The",
+          "start_ms": 248610,
+          "end_ms": 248650,
+          "confidence": 0.9857814
+        },
+        {
+          "text": "enemy",
+          "start_ms": 248650,
+          "end_ms": 248670,
+          "confidence": 0.99988663
+        },
+        {
+          "text": "may",
+          "start_ms": 248670,
+          "end_ms": 248690,
+          "confidence": 0.99770314
+        },
+        {
+          "text": "take",
+          "start_ms": 248690,
+          "end_ms": 248710,
+          "confidence": 0.9995994
+        },
+        {
+          "text": "some",
+          "start_ms": 248710,
+          "end_ms": 248730,
+          "confidence": 0.8375231
+        },
+        {
+          "text": "You",
+          "start_ms": 250828,
+          "end_ms": 250926,
+          "confidence": 0.13485391
+        },
+        {
+          "text": "can't",
+          "start_ms": 251087,
+          "end_ms": 252382,
+          "confidence": 0.95638883
+        },
+        {
+          "text": "take",
+          "start_ms": 252382,
+          "end_ms": 252560,
+          "confidence": 0.98751974
+        },
+        {
+          "text": "my",
+          "start_ms": 252690,
+          "end_ms": 253207,
+          "confidence": 0.91892177
+        },
+        {
+          "text": "word.",
+          "start_ms": 253256,
+          "end_ms": 253774,
+          "confidence": 0.42497656
+        },
+        {
+          "text": "1,",
+          "start_ms": 254308,
+          "end_ms": 254858,
+          "confidence": 0.9826664
+        },
+        {
+          "text": "2,",
+          "start_ms": 254955,
+          "end_ms": 255149,
+          "confidence": 0.8610889
+        },
+        {
+          "text": "everybody",
+          "start_ms": 255522,
+          "end_ms": 256347,
+          "confidence": 0.9532519
+        },
+        {
+          "text": "turn",
+          "start_ms": 256493,
+          "end_ms": 256816,
+          "confidence": 0.93426836
+        },
+        {
+          "text": "up",
+          "start_ms": 256816,
+          "end_ms": 257011,
+          "confidence": 0.96718293
+        },
+        {
+          "text": "louder.",
+          "start_ms": 257059,
+          "end_ms": 257399,
+          "confidence": 0.4779749
+        },
+        {
+          "text": "I",
+          "start_ms": 263446,
+          "end_ms": 263529,
+          "confidence": 0.9648371
+        },
+        {
+          "text": "need",
+          "start_ms": 263545,
+          "end_ms": 263810,
+          "confidence": 0.78503335
+        },
+        {
+          "text": "to",
+          "start_ms": 263859,
+          "end_ms": 263959,
+          "confidence": 0.6528556
+        },
+        {
+          "text": "hear",
+          "start_ms": 263959,
+          "end_ms": 264174,
+          "confidence": 0.8764521
+        },
+        {
+          "text": "you",
+          "start_ms": 264190,
+          "end_ms": 264306,
+          "confidence": 0.99600357
+        },
+        {
+          "text": "turn",
+          "start_ms": 264372,
+          "end_ms": 264537,
+          "confidence": 0.86241436
+        },
+        {
+          "text": "it",
+          "start_ms": 264537,
+          "end_ms": 264703,
+          "confidence": 0.98780733
+        },
+        {
+          "text": "up",
+          "start_ms": 264769,
+          "end_ms": 264884,
+          "confidence": 0.9992418
+        },
+        {
+          "text": "right",
+          "start_ms": 264884,
+          "end_ms": 265066,
+          "confidence": 0.93764853
+        },
+        {
+          "text": "now.",
+          "start_ms": 265066,
+          "end_ms": 265199,
+          "confidence": 0.5491128
+        }
+      ]
+    },
+    {
+      "text": "The left ear. The enemy may take that.",
+      "start_ms": 265529,
+      "end_ms": 274259,
+      "text_sk": "Ľavé ucho. Nepriateľ si to môže vziať.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 265529,
+          "end_ms": 265612,
+          "confidence": 0.22708501
+        },
+        {
+          "text": "left",
+          "start_ms": 265628,
+          "end_ms": 265744,
+          "confidence": 0.16408566
+        },
+        {
+          "text": "ear.",
+          "start_ms": 265744,
+          "end_ms": 265777,
+          "confidence": 0.6012675
+        },
+        {
+          "text": "The",
+          "start_ms": 270810,
+          "end_ms": 271411,
+          "confidence": 0.54221416
+        },
+        {
+          "text": "enemy",
+          "start_ms": 272615,
+          "end_ms": 272876,
+          "confidence": 0.9975975
+        },
+        {
+          "text": "may",
+          "start_ms": 273201,
+          "end_ms": 273527,
+          "confidence": 0.9408946
+        },
+        {
+          "text": "take",
+          "start_ms": 273527,
+          "end_ms": 273998,
+          "confidence": 0.88925254
+        },
+        {
+          "text": "that.",
+          "start_ms": 273998,
+          "end_ms": 274259,
+          "confidence": 0.42467302
+        }
+      ]
+    },
+    {
+      "text": "The enemy may take something.",
+      "start_ms": 274584,
+      "end_ms": 276748,
+      "text_sk": "Nepriateľ si môže niečo vziať.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 274584,
+          "end_ms": 274747,
+          "confidence": 0.9532626
+        },
+        {
+          "text": "enemy",
+          "start_ms": 274812,
+          "end_ms": 275072,
+          "confidence": 0.99977773
+        },
+        {
+          "text": "may",
+          "start_ms": 275398,
+          "end_ms": 275723,
+          "confidence": 0.9922112
+        },
+        {
+          "text": "take",
+          "start_ms": 275723,
+          "end_ms": 276048,
+          "confidence": 0.9977857
+        },
+        {
+          "text": "something.",
+          "start_ms": 276048,
+          "end_ms": 276748,
+          "confidence": 0.75956255
+        }
+      ]
+    },
+    {
+      "text": "But he can't take my worship. Oh, the enemy may take something, but he can't take my worship.",
+      "start_ms": 277557,
+      "end_ms": 287913,
+      "text_sk": "Ale moje uctievanie si vziať nemôže. Ach, nepriateľ si možno niečo vezme, ale moje uctievanie si vziať nemôže.",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 277557,
+          "end_ms": 277654,
+          "confidence": 0.8422107
+        },
+        {
+          "text": "he",
+          "start_ms": 277654,
+          "end_ms": 277814,
+          "confidence": 0.8113773
+        },
+        {
+          "text": "can't",
+          "start_ms": 277814,
+          "end_ms": 278039,
+          "confidence": 0.9906128
+        },
+        {
+          "text": "take",
+          "start_ms": 278055,
+          "end_ms": 278296,
+          "confidence": 0.86814624
+        },
+        {
+          "text": "my",
+          "start_ms": 278377,
+          "end_ms": 278602,
+          "confidence": 0.99924135
+        },
+        {
+          "text": "worship.",
+          "start_ms": 278602,
+          "end_ms": 280144,
+          "confidence": 0.9518714
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 280305,
+          "end_ms": 280481,
+          "confidence": 0.6294884
+        },
+        {
+          "text": "the",
+          "start_ms": 280546,
+          "end_ms": 280979,
+          "confidence": 0.92904454
+        },
+        {
+          "text": "enemy",
+          "start_ms": 281012,
+          "end_ms": 281478,
+          "confidence": 0.9968464
+        },
+        {
+          "text": "may",
+          "start_ms": 283116,
+          "end_ms": 283357,
+          "confidence": 0.9669002
+        },
+        {
+          "text": "take",
+          "start_ms": 283357,
+          "end_ms": 283679,
+          "confidence": 0.9969663
+        },
+        {
+          "text": "something,",
+          "start_ms": 284257,
+          "end_ms": 285012,
+          "confidence": 0.8900047
+        },
+        {
+          "text": "but",
+          "start_ms": 285109,
+          "end_ms": 285382,
+          "confidence": 0.9981968
+        },
+        {
+          "text": "he",
+          "start_ms": 286169,
+          "end_ms": 286362,
+          "confidence": 0.44742423
+        },
+        {
+          "text": "can't",
+          "start_ms": 286410,
+          "end_ms": 286812,
+          "confidence": 0.99499893
+        },
+        {
+          "text": "take",
+          "start_ms": 286963,
+          "end_ms": 287230,
+          "confidence": 0.9997212
+        },
+        {
+          "text": "my",
+          "start_ms": 287230,
+          "end_ms": 287313,
+          "confidence": 0.9953673
+        },
+        {
+          "text": "worship.",
+          "start_ms": 287546,
+          "end_ms": 287913,
+          "confidence": 0.9935406
+        }
+      ]
+    },
+    {
+      "text": "We're gonna turn up our praise just a little bit more.",
+      "start_ms": 292216,
+      "end_ms": 293989,
+      "text_sk": "Ešte o niečo viac zvýšime našu chválu.",
+      "words": [
+        {
+          "text": "We're",
+          "start_ms": 292216,
+          "end_ms": 292297,
+          "confidence": 0.9304153
+        },
+        {
+          "text": "gonna",
+          "start_ms": 292297,
+          "end_ms": 292476,
+          "confidence": 0.81364775
+        },
+        {
+          "text": "turn",
+          "start_ms": 292476,
+          "end_ms": 292704,
+          "confidence": 0.99994123
+        },
+        {
+          "text": "up",
+          "start_ms": 292704,
+          "end_ms": 292802,
+          "confidence": 0.9996908
+        },
+        {
+          "text": "our",
+          "start_ms": 292802,
+          "end_ms": 292867,
+          "confidence": 0.99904245
+        },
+        {
+          "text": "praise",
+          "start_ms": 292948,
+          "end_ms": 293160,
+          "confidence": 0.99801254
+        },
+        {
+          "text": "just",
+          "start_ms": 293257,
+          "end_ms": 293436,
+          "confidence": 0.9997459
+        },
+        {
+          "text": "a",
+          "start_ms": 293436,
+          "end_ms": 293452,
+          "confidence": 0.9999933
+        },
+        {
+          "text": "little",
+          "start_ms": 293501,
+          "end_ms": 293680,
+          "confidence": 0.999982
+        },
+        {
+          "text": "bit",
+          "start_ms": 293680,
+          "end_ms": 293843,
+          "confidence": 0.9999813
+        },
+        {
+          "text": "more.",
+          "start_ms": 293843,
+          "end_ms": 293989,
+          "confidence": 0.99538976
+        }
+      ]
+    },
+    {
+      "text": "That's cool, Terrence.",
+      "start_ms": 294071,
+      "end_ms": 294819,
+      "text_sk": "To je skvelé, Terrence.",
+      "words": [
+        {
+          "text": "That's",
+          "start_ms": 294071,
+          "end_ms": 294250,
+          "confidence": 0.99910116
+        },
+        {
+          "text": "cool,",
+          "start_ms": 294250,
+          "end_ms": 294396,
+          "confidence": 0.9965845
+        },
+        {
+          "text": "Terrence.",
+          "start_ms": 294412,
+          "end_ms": 294819,
+          "confidence": 0.7313842
+        }
+      ]
+    },
+    {
+      "text": "I think Atlanta got a little bit more. You got a little bit more?",
+      "start_ms": 295779,
+      "end_ms": 298268,
+      "text_sk": "Myslím, že Atlanta má o niečo viac. Máte o niečo viac?",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 295779,
+          "end_ms": 295860,
+          "confidence": 0.99993503
+        },
+        {
+          "text": "think",
+          "start_ms": 295860,
+          "end_ms": 296023,
+          "confidence": 0.9999672
+        },
+        {
+          "text": "Atlanta",
+          "start_ms": 296023,
+          "end_ms": 296364,
+          "confidence": 0.99892753
+        },
+        {
+          "text": "got",
+          "start_ms": 296364,
+          "end_ms": 296592,
+          "confidence": 0.9997497
+        },
+        {
+          "text": "a",
+          "start_ms": 296592,
+          "end_ms": 296674,
+          "confidence": 0.9999919
+        },
+        {
+          "text": "little",
+          "start_ms": 296674,
+          "end_ms": 296853,
+          "confidence": 0.99999094
+        },
+        {
+          "text": "bit",
+          "start_ms": 296853,
+          "end_ms": 297015,
+          "confidence": 0.99998903
+        },
+        {
+          "text": "more.",
+          "start_ms": 297015,
+          "end_ms": 297210,
+          "confidence": 0.99951655
+        },
+        {
+          "text": "You",
+          "start_ms": 297341,
+          "end_ms": 297438,
+          "confidence": 0.9999304
+        },
+        {
+          "text": "got",
+          "start_ms": 297438,
+          "end_ms": 297650,
+          "confidence": 0.99994195
+        },
+        {
+          "text": "a",
+          "start_ms": 297650,
+          "end_ms": 297666,
+          "confidence": 0.9999933
+        },
+        {
+          "text": "little",
+          "start_ms": 297666,
+          "end_ms": 297894,
+          "confidence": 0.9999939
+        },
+        {
+          "text": "bit",
+          "start_ms": 297894,
+          "end_ms": 298073,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "more?",
+          "start_ms": 298073,
+          "end_ms": 298268,
+          "confidence": 0.96909624
+        }
+      ]
+    },
+    {
+      "text": "Tell your neighbor, give me a little room, give me a little room, give me a little room, give me a little room.",
+      "start_ms": 300076,
+      "end_ms": 303968,
+      "text_sk": "Povedzte svojmu susedovi, dajte mi trochu miesta, dajte mi trochu miesta, dajte mi trochu miesta, dajte mi trochu miesta.",
+      "words": [
+        {
+          "text": "Tell",
+          "start_ms": 300076,
+          "end_ms": 300239,
+          "confidence": 0.99984086
+        },
+        {
+          "text": "your",
+          "start_ms": 300239,
+          "end_ms": 300386,
+          "confidence": 0.99993396
+        },
+        {
+          "text": "neighbor,",
+          "start_ms": 300403,
+          "end_ms": 300713,
+          "confidence": 0.99768764
+        },
+        {
+          "text": "give",
+          "start_ms": 300730,
+          "end_ms": 300893,
+          "confidence": 0.97932714
+        },
+        {
+          "text": "me",
+          "start_ms": 300893,
+          "end_ms": 301041,
+          "confidence": 0.999956
+        },
+        {
+          "text": "a",
+          "start_ms": 301041,
+          "end_ms": 301057,
+          "confidence": 0.9999722
+        },
+        {
+          "text": "little",
+          "start_ms": 301057,
+          "end_ms": 301319,
+          "confidence": 0.9999784
+        },
+        {
+          "text": "room,",
+          "start_ms": 301319,
+          "end_ms": 301613,
+          "confidence": 0.8987716
+        },
+        {
+          "text": "give",
+          "start_ms": 301629,
+          "end_ms": 301760,
+          "confidence": 0.99970347
+        },
+        {
+          "text": "me",
+          "start_ms": 301760,
+          "end_ms": 301875,
+          "confidence": 0.9999447
+        },
+        {
+          "text": "a",
+          "start_ms": 301875,
+          "end_ms": 301891,
+          "confidence": 0.9999608
+        },
+        {
+          "text": "little",
+          "start_ms": 301891,
+          "end_ms": 302202,
+          "confidence": 0.9999815
+        },
+        {
+          "text": "room,",
+          "start_ms": 302202,
+          "end_ms": 302414,
+          "confidence": 0.9989238
+        },
+        {
+          "text": "give",
+          "start_ms": 302447,
+          "end_ms": 302594,
+          "confidence": 0.9998362
+        },
+        {
+          "text": "me",
+          "start_ms": 302594,
+          "end_ms": 302692,
+          "confidence": 0.9999403
+        },
+        {
+          "text": "a",
+          "start_ms": 302692,
+          "end_ms": 302758,
+          "confidence": 0.9999417
+        },
+        {
+          "text": "little",
+          "start_ms": 302758,
+          "end_ms": 303019,
+          "confidence": 0.99996877
+        },
+        {
+          "text": "room,",
+          "start_ms": 303019,
+          "end_ms": 303248,
+          "confidence": 0.99936783
+        },
+        {
+          "text": "give",
+          "start_ms": 303265,
+          "end_ms": 303428,
+          "confidence": 0.99965775
+        },
+        {
+          "text": "me",
+          "start_ms": 303428,
+          "end_ms": 303510,
+          "confidence": 0.9993636
+        },
+        {
+          "text": "a",
+          "start_ms": 303510,
+          "end_ms": 303575,
+          "confidence": 0.9995377
+        },
+        {
+          "text": "little",
+          "start_ms": 303575,
+          "end_ms": 303837,
+          "confidence": 0.999634
+        },
+        {
+          "text": "room.",
+          "start_ms": 303837,
+          "end_ms": 303968,
+          "confidence": 0.99697924
+        }
+      ]
+    },
+    {
+      "text": "So we say lungs, lungs, breathe, breathe, mouth, mouth, sing, sing, and hands, hands, reach, reach.",
+      "start_ms": 308073,
+      "end_ms": 321243,
+      "text_sk": "Takže hovoríme pľúca, pľúca, dýchať, dýchať, ústa, ústa, spievať, spievať, a ruky, ruky, siahať, siahať.",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 308073,
+          "end_ms": 308345,
+          "confidence": 0.7379503
+        },
+        {
+          "text": "we",
+          "start_ms": 308441,
+          "end_ms": 308537,
+          "confidence": 0.9922144
+        },
+        {
+          "text": "say",
+          "start_ms": 308602,
+          "end_ms": 308938,
+          "confidence": 0.9956644
+        },
+        {
+          "text": "lungs,",
+          "start_ms": 309002,
+          "end_ms": 309547,
+          "confidence": 0.77126586
+        },
+        {
+          "text": "lungs,",
+          "start_ms": 310044,
+          "end_ms": 310668,
+          "confidence": 0.87512076
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 311021,
+          "end_ms": 312126,
+          "confidence": 0.9985683
+        },
+        {
+          "text": "breathe,",
+          "start_ms": 312142,
+          "end_ms": 312799,
+          "confidence": 0.9927837
+        },
+        {
+          "text": "mouth,",
+          "start_ms": 313184,
+          "end_ms": 313392,
+          "confidence": 0.98395944
+        },
+        {
+          "text": "mouth,",
+          "start_ms": 314289,
+          "end_ms": 314754,
+          "confidence": 0.997828
+        },
+        {
+          "text": "sing,",
+          "start_ms": 315171,
+          "end_ms": 315635,
+          "confidence": 0.99707514
+        },
+        {
+          "text": "sing,",
+          "start_ms": 316228,
+          "end_ms": 317077,
+          "confidence": 0.9804581
+        },
+        {
+          "text": "and",
+          "start_ms": 317334,
+          "end_ms": 317510,
+          "confidence": 0.9995795
+        },
+        {
+          "text": "hands,",
+          "start_ms": 317510,
+          "end_ms": 318599,
+          "confidence": 0.9572467
+        },
+        {
+          "text": "hands,",
+          "start_ms": 318615,
+          "end_ms": 319320,
+          "confidence": 0.8808862
+        },
+        {
+          "text": "reach,",
+          "start_ms": 319657,
+          "end_ms": 320250,
+          "confidence": 0.9418521
+        },
+        {
+          "text": "reach.",
+          "start_ms": 320714,
+          "end_ms": 321243,
+          "confidence": 0.99704075
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory.",
+      "start_ms": 321756,
+      "end_ms": 325088,
+      "text_sk": "Toto je moja cesta k víťazstvu.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 321756,
+          "end_ms": 322012,
+          "confidence": 0.9996164
+        },
+        {
+          "text": "is",
+          "start_ms": 322220,
+          "end_ms": 322413,
+          "confidence": 0.99993396
+        },
+        {
+          "text": "my",
+          "start_ms": 322461,
+          "end_ms": 322557,
+          "confidence": 0.99994373
+        },
+        {
+          "text": "way",
+          "start_ms": 322797,
+          "end_ms": 323053,
+          "confidence": 0.99978703
+        },
+        {
+          "text": "to",
+          "start_ms": 323278,
+          "end_ms": 323454,
+          "confidence": 0.99994874
+        },
+        {
+          "text": "victory.",
+          "start_ms": 323983,
+          "end_ms": 325088,
+          "confidence": 0.9921491
+        }
+      ]
+    },
+    {
+      "text": "Hope.",
+      "start_ms": 325280,
+      "end_ms": 325537,
+      "text_sk": "Nádej.",
+      "words": [
+        {
+          "text": "Hope.",
+          "start_ms": 325280,
+          "end_ms": 325537,
+          "confidence": 0.76607424
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory. This is my way to victory. Oh, this is my way to victory.",
+      "start_ms": 326082,
+      "end_ms": 338080,
+      "text_sk": "Toto je moja cesta k víťazstvu. Toto je moja cesta k víťazstvu. Ó, toto je moja cesta k víťazstvu.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 326082,
+          "end_ms": 326386,
+          "confidence": 0.99987936
+        },
+        {
+          "text": "is",
+          "start_ms": 326466,
+          "end_ms": 326690,
+          "confidence": 0.9999682
+        },
+        {
+          "text": "my",
+          "start_ms": 326787,
+          "end_ms": 327043,
+          "confidence": 0.99999
+        },
+        {
+          "text": "way",
+          "start_ms": 327123,
+          "end_ms": 327203,
+          "confidence": 0.99998784
+        },
+        {
+          "text": "to",
+          "start_ms": 327668,
+          "end_ms": 327876,
+          "confidence": 0.99996746
+        },
+        {
+          "text": "victory.",
+          "start_ms": 328245,
+          "end_ms": 329414,
+          "confidence": 0.99962354
+        },
+        {
+          "text": "This",
+          "start_ms": 330407,
+          "end_ms": 330664,
+          "confidence": 0.99888307
+        },
+        {
+          "text": "is",
+          "start_ms": 330792,
+          "end_ms": 331064,
+          "confidence": 0.99991727
+        },
+        {
+          "text": "my",
+          "start_ms": 331112,
+          "end_ms": 331144,
+          "confidence": 0.9999378
+        },
+        {
+          "text": "way",
+          "start_ms": 331433,
+          "end_ms": 331689,
+          "confidence": 0.9999213
+        },
+        {
+          "text": "to",
+          "start_ms": 331946,
+          "end_ms": 332106,
+          "confidence": 0.9996613
+        },
+        {
+          "text": "victory.",
+          "start_ms": 332490,
+          "end_ms": 332779,
+          "confidence": 0.9960751
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 334481,
+          "end_ms": 334625,
+          "confidence": 0.8572091
+        },
+        {
+          "text": "this",
+          "start_ms": 334722,
+          "end_ms": 334931,
+          "confidence": 0.9999192
+        },
+        {
+          "text": "is",
+          "start_ms": 335123,
+          "end_ms": 335268,
+          "confidence": 0.99995065
+        },
+        {
+          "text": "my",
+          "start_ms": 335380,
+          "end_ms": 335461,
+          "confidence": 0.99993515
+        },
+        {
+          "text": "way",
+          "start_ms": 335702,
+          "end_ms": 335798,
+          "confidence": 0.9997255
+        },
+        {
+          "text": "to",
+          "start_ms": 336200,
+          "end_ms": 336522,
+          "confidence": 0.997398
+        },
+        {
+          "text": "victory.",
+          "start_ms": 336730,
+          "end_ms": 338080,
+          "confidence": 0.95766306
+        }
+      ]
+    },
+    {
+      "text": "One more time, everybody turn up!",
+      "start_ms": 339221,
+      "end_ms": 341568,
+      "text_sk": "Ešte raz, všetci sa bavte!",
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 339221,
+          "end_ms": 339366,
+          "confidence": 0.9976011
+        },
+        {
+          "text": "more",
+          "start_ms": 339382,
+          "end_ms": 339479,
+          "confidence": 0.99867743
+        },
+        {
+          "text": "time,",
+          "start_ms": 339479,
+          "end_ms": 339880,
+          "confidence": 0.91745764
+        },
+        {
+          "text": "everybody",
+          "start_ms": 340105,
+          "end_ms": 340925,
+          "confidence": 0.99984074
+        },
+        {
+          "text": "turn",
+          "start_ms": 341150,
+          "end_ms": 341487,
+          "confidence": 0.5200178
+        },
+        {
+          "text": "up!",
+          "start_ms": 341487,
+          "end_ms": 341568,
+          "confidence": 0.82413715
+        }
+      ]
+    },
+    {
+      "text": "Let's go, let's go, let's go! Joy of the Lord is my strength.",
+      "start_ms": 341648,
+      "end_ms": 352129,
+      "text_sk": "Poďme, poďme, poďme! Radosť Pánova je moja sila.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 341648,
+          "end_ms": 341953,
+          "confidence": 0.99990225
+        },
+        {
+          "text": "go,",
+          "start_ms": 341953,
+          "end_ms": 342195,
+          "confidence": 0.9528053
+        },
+        {
+          "text": "let's",
+          "start_ms": 342211,
+          "end_ms": 342420,
+          "confidence": 0.9999874
+        },
+        {
+          "text": "go,",
+          "start_ms": 342420,
+          "end_ms": 342694,
+          "confidence": 0.76541936
+        },
+        {
+          "text": "let's",
+          "start_ms": 343002,
+          "end_ms": 346706,
+          "confidence": 0.9952647
+        },
+        {
+          "text": "go!",
+          "start_ms": 347385,
+          "end_ms": 347644,
+          "confidence": 0.92442614
+        },
+        {
+          "text": "Joy",
+          "start_ms": 349796,
+          "end_ms": 349844,
+          "confidence": 0.7306069
+        },
+        {
+          "text": "of",
+          "start_ms": 350038,
+          "end_ms": 350265,
+          "confidence": 0.6685424
+        },
+        {
+          "text": "the",
+          "start_ms": 350540,
+          "end_ms": 350734,
+          "confidence": 0.99931455
+        },
+        {
+          "text": "Lord",
+          "start_ms": 350782,
+          "end_ms": 351284,
+          "confidence": 0.99867153
+        },
+        {
+          "text": "is",
+          "start_ms": 351284,
+          "end_ms": 351559,
+          "confidence": 0.9677845
+        },
+        {
+          "text": "my",
+          "start_ms": 351640,
+          "end_ms": 351705,
+          "confidence": 0.9830239
+        },
+        {
+          "text": "strength.",
+          "start_ms": 351705,
+          "end_ms": 352129,
+          "confidence": 0.8164177
+        }
+      ]
+    },
+    {
+      "text": "You can count on my words.",
+      "start_ms": 352635,
+      "end_ms": 354382,
+      "text_sk": "Môžete sa spoľahnúť na moje slová.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 352635,
+          "end_ms": 352733,
+          "confidence": 0.9992518
+        },
+        {
+          "text": "can",
+          "start_ms": 352733,
+          "end_ms": 352896,
+          "confidence": 0.99887234
+        },
+        {
+          "text": "count",
+          "start_ms": 352896,
+          "end_ms": 353288,
+          "confidence": 0.9988268
+        },
+        {
+          "text": "on",
+          "start_ms": 353288,
+          "end_ms": 353435,
+          "confidence": 0.99972206
+        },
+        {
+          "text": "my",
+          "start_ms": 353468,
+          "end_ms": 353582,
+          "confidence": 0.9989943
+        },
+        {
+          "text": "words.",
+          "start_ms": 353778,
+          "end_ms": 354382,
+          "confidence": 0.712116
+        }
+      ]
+    },
+    {
+      "text": "Joy of the Lord is my strength.",
+      "start_ms": 358146,
+      "end_ms": 360023,
+      "text_sk": "Radosť z Pána je moja sila.",
+      "words": [
+        {
+          "text": "Joy",
+          "start_ms": 358146,
+          "end_ms": 358375,
+          "confidence": 0.47837946
+        },
+        {
+          "text": "of",
+          "start_ms": 358456,
+          "end_ms": 359240,
+          "confidence": 0.99857867
+        },
+        {
+          "text": "the",
+          "start_ms": 359272,
+          "end_ms": 359387,
+          "confidence": 0.99978954
+        },
+        {
+          "text": "Lord",
+          "start_ms": 359387,
+          "end_ms": 359566,
+          "confidence": 0.99990594
+        },
+        {
+          "text": "is",
+          "start_ms": 359664,
+          "end_ms": 359729,
+          "confidence": 0.9872551
+        },
+        {
+          "text": "my",
+          "start_ms": 359762,
+          "end_ms": 359795,
+          "confidence": 0.9940996
+        },
+        {
+          "text": "strength.",
+          "start_ms": 359795,
+          "end_ms": 360023,
+          "confidence": 0.99251795
+        }
+      ]
+    },
+    {
+      "text": "The enemy may take some things, but he can't take my He can't.",
+      "start_ms": 360170,
+      "end_ms": 366061,
+      "text_sk": "Nepriateľ si môže vziať niektoré veci, ale nemôže si vziať moje. Nemôže.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 360170,
+          "end_ms": 360219,
+          "confidence": 0.6446757
+        },
+        {
+          "text": "enemy",
+          "start_ms": 360219,
+          "end_ms": 360447,
+          "confidence": 0.9991335
+        },
+        {
+          "text": "may",
+          "start_ms": 360447,
+          "end_ms": 360496,
+          "confidence": 0.99894744
+        },
+        {
+          "text": "take",
+          "start_ms": 360496,
+          "end_ms": 360611,
+          "confidence": 0.99988425
+        },
+        {
+          "text": "some",
+          "start_ms": 360611,
+          "end_ms": 360660,
+          "confidence": 0.9583131
+        },
+        {
+          "text": "things,",
+          "start_ms": 360725,
+          "end_ms": 360953,
+          "confidence": 0.9974619
+        },
+        {
+          "text": "but",
+          "start_ms": 361231,
+          "end_ms": 361475,
+          "confidence": 0.9971739
+        },
+        {
+          "text": "he",
+          "start_ms": 361475,
+          "end_ms": 361786,
+          "confidence": 0.99869496
+        },
+        {
+          "text": "can't",
+          "start_ms": 361786,
+          "end_ms": 362275,
+          "confidence": 0.999664
+        },
+        {
+          "text": "take",
+          "start_ms": 362291,
+          "end_ms": 362781,
+          "confidence": 0.9998679
+        },
+        {
+          "text": "my",
+          "start_ms": 362797,
+          "end_ms": 362879,
+          "confidence": 0.99690706
+        },
+        {
+          "text": "He",
+          "start_ms": 364850,
+          "end_ms": 365011,
+          "confidence": 0.72311497
+        },
+        {
+          "text": "can't.",
+          "start_ms": 365140,
+          "end_ms": 366061,
+          "confidence": 0.7705374
+        }
+      ]
+    },
+    {
+      "text": "He won't.",
+      "start_ms": 367095,
+      "end_ms": 368339,
+      "text_sk": "Nebude.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 367095,
+          "end_ms": 367192,
+          "confidence": 0.7312477
+        },
+        {
+          "text": "won't.",
+          "start_ms": 367402,
+          "end_ms": 368339,
+          "confidence": 0.9319906
+        }
+      ]
+    },
+    {
+      "text": "The joy that I have, the world didn't give it. The world can't take it away.",
+      "start_ms": 370003,
+      "end_ms": 373477,
+      "text_sk": "Radosť, ktorú mám, mi svet nedal. Svet mi ju nemôže vziať.",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 370003,
+          "end_ms": 370084,
+          "confidence": 0.99757993
+        },
+        {
+          "text": "joy",
+          "start_ms": 370165,
+          "end_ms": 370359,
+          "confidence": 0.9998698
+        },
+        {
+          "text": "that",
+          "start_ms": 370488,
+          "end_ms": 370634,
+          "confidence": 0.99990916
+        },
+        {
+          "text": "I",
+          "start_ms": 370714,
+          "end_ms": 370795,
+          "confidence": 0.9998648
+        },
+        {
+          "text": "have,",
+          "start_ms": 370795,
+          "end_ms": 370941,
+          "confidence": 0.9759501
+        },
+        {
+          "text": "the",
+          "start_ms": 371054,
+          "end_ms": 371199,
+          "confidence": 0.99995065
+        },
+        {
+          "text": "world",
+          "start_ms": 371199,
+          "end_ms": 371425,
+          "confidence": 0.9998865
+        },
+        {
+          "text": "didn't",
+          "start_ms": 371474,
+          "end_ms": 371764,
+          "confidence": 0.99934083
+        },
+        {
+          "text": "give",
+          "start_ms": 371764,
+          "end_ms": 372007,
+          "confidence": 0.99968076
+        },
+        {
+          "text": "it.",
+          "start_ms": 372007,
+          "end_ms": 372039,
+          "confidence": 0.7335182
+        },
+        {
+          "text": "The",
+          "start_ms": 372104,
+          "end_ms": 372185,
+          "confidence": 0.9999567
+        },
+        {
+          "text": "world",
+          "start_ms": 372185,
+          "end_ms": 372588,
+          "confidence": 0.99998355
+        },
+        {
+          "text": "can't",
+          "start_ms": 372588,
+          "end_ms": 372831,
+          "confidence": 0.99979484
+        },
+        {
+          "text": "take",
+          "start_ms": 372831,
+          "end_ms": 373073,
+          "confidence": 0.9999926
+        },
+        {
+          "text": "it",
+          "start_ms": 373073,
+          "end_ms": 373154,
+          "confidence": 0.9999702
+        },
+        {
+          "text": "away.",
+          "start_ms": 373154,
+          "end_ms": 373477,
+          "confidence": 0.9996104
+        }
+      ]
+    },
+    {
+      "text": "Hold the music one time.",
+      "start_ms": 375020,
+      "end_ms": 375970,
+      "text_sk": "Držte hudbu raz.",
+      "words": [
+        {
+          "text": "Hold",
+          "start_ms": 375020,
+          "end_ms": 375136,
+          "confidence": 0.9364268
+        },
+        {
+          "text": "the",
+          "start_ms": 375136,
+          "end_ms": 375303,
+          "confidence": 0.95065045
+        },
+        {
+          "text": "music",
+          "start_ms": 375303,
+          "end_ms": 375470,
+          "confidence": 0.9997389
+        },
+        {
+          "text": "one",
+          "start_ms": 375470,
+          "end_ms": 375703,
+          "confidence": 0.98583335
+        },
+        {
+          "text": "time.",
+          "start_ms": 375703,
+          "end_ms": 375970,
+          "confidence": 0.98828536
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take.",
+      "start_ms": 377480,
+      "end_ms": 378988,
+      "text_sk": "Nepriateľ si môže vziať.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 377480,
+          "end_ms": 377496,
+          "confidence": 0.82612956
+        },
+        {
+          "text": "the",
+          "start_ms": 377513,
+          "end_ms": 377678,
+          "confidence": 0.9973483
+        },
+        {
+          "text": "enemy",
+          "start_ms": 377678,
+          "end_ms": 378026,
+          "confidence": 0.9966191
+        },
+        {
+          "text": "may",
+          "start_ms": 378424,
+          "end_ms": 378540,
+          "confidence": 0.9857292
+        },
+        {
+          "text": "take.",
+          "start_ms": 378673,
+          "end_ms": 378988,
+          "confidence": 0.91529125
+        }
+      ]
+    },
+    {
+      "text": "See, you're not gonna have Maverick City in your bedroom. Sing it out, the enemy. This feels good, Norman. Sing it out loud, enemy. One more time, the enemy. That's how you feel, Elijah. Anybody may take. We gotta move, but you got 20 more seconds. You ready? Turn up, turn up, turn up!",
+      "start_ms": 390646,
+      "end_ms": 428593,
+      "text_sk": "Vidíte, Maverick City vo vašej spálni nebudete mať. Zaspievajte to, nepriateľ. Toto je dobrý pocit, Norman. Zaspievajte to nahlas, nepriateľ. Ešte raz, nepriateľ. Takto sa cítiš, Elijah. Ktokoľvek môže vziať. Musíme sa pohnúť, ale máte ešte 20 sekúnd. Ste pripravení? Zosilnite, zosilnite, zosilnite!",
+      "words": [
+        {
+          "text": "See,",
+          "start_ms": 390646,
+          "end_ms": 390791,
+          "confidence": 0.85227054
+        },
+        {
+          "text": "you're",
+          "start_ms": 390807,
+          "end_ms": 390904,
+          "confidence": 0.9997101
+        },
+        {
+          "text": "not",
+          "start_ms": 390904,
+          "end_ms": 391017,
+          "confidence": 0.99998736
+        },
+        {
+          "text": "gonna",
+          "start_ms": 391049,
+          "end_ms": 391275,
+          "confidence": 0.73366183
+        },
+        {
+          "text": "have",
+          "start_ms": 391275,
+          "end_ms": 391340,
+          "confidence": 0.9999492
+        },
+        {
+          "text": "Maverick",
+          "start_ms": 391533,
+          "end_ms": 391775,
+          "confidence": 0.87703776
+        },
+        {
+          "text": "City",
+          "start_ms": 391775,
+          "end_ms": 392146,
+          "confidence": 0.94976074
+        },
+        {
+          "text": "in",
+          "start_ms": 392179,
+          "end_ms": 392259,
+          "confidence": 0.9998023
+        },
+        {
+          "text": "your",
+          "start_ms": 392259,
+          "end_ms": 392421,
+          "confidence": 0.999985
+        },
+        {
+          "text": "bedroom.",
+          "start_ms": 392421,
+          "end_ms": 393034,
+          "confidence": 0.9715967
+        },
+        {
+          "text": "Sing",
+          "start_ms": 393873,
+          "end_ms": 394083,
+          "confidence": 0.7861546
+        },
+        {
+          "text": "it",
+          "start_ms": 394115,
+          "end_ms": 394260,
+          "confidence": 0.872699
+        },
+        {
+          "text": "out,",
+          "start_ms": 394260,
+          "end_ms": 394389,
+          "confidence": 0.9753879
+        },
+        {
+          "text": "the",
+          "start_ms": 394438,
+          "end_ms": 394486,
+          "confidence": 0.9214991
+        },
+        {
+          "text": "enemy.",
+          "start_ms": 394502,
+          "end_ms": 394809,
+          "confidence": 0.8772593
+        },
+        {
+          "text": "This",
+          "start_ms": 400129,
+          "end_ms": 400309,
+          "confidence": 0.8563645
+        },
+        {
+          "text": "feels",
+          "start_ms": 400309,
+          "end_ms": 400521,
+          "confidence": 0.9985563
+        },
+        {
+          "text": "good,",
+          "start_ms": 400554,
+          "end_ms": 400783,
+          "confidence": 0.99748105
+        },
+        {
+          "text": "Norman.",
+          "start_ms": 400799,
+          "end_ms": 401175,
+          "confidence": 0.9879259
+        },
+        {
+          "text": "Sing",
+          "start_ms": 401763,
+          "end_ms": 401991,
+          "confidence": 0.9974074
+        },
+        {
+          "text": "it",
+          "start_ms": 402089,
+          "end_ms": 402155,
+          "confidence": 0.997891
+        },
+        {
+          "text": "out",
+          "start_ms": 402187,
+          "end_ms": 402236,
+          "confidence": 0.99274933
+        },
+        {
+          "text": "loud,",
+          "start_ms": 402514,
+          "end_ms": 402808,
+          "confidence": 0.7769568
+        },
+        {
+          "text": "enemy.",
+          "start_ms": 403004,
+          "end_ms": 403412,
+          "confidence": 0.9314279
+        },
+        {
+          "text": "One",
+          "start_ms": 410374,
+          "end_ms": 410572,
+          "confidence": 0.99743575
+        },
+        {
+          "text": "more",
+          "start_ms": 410572,
+          "end_ms": 410803,
+          "confidence": 0.99991226
+        },
+        {
+          "text": "time,",
+          "start_ms": 410803,
+          "end_ms": 411149,
+          "confidence": 0.9965664
+        },
+        {
+          "text": "the",
+          "start_ms": 411364,
+          "end_ms": 411430,
+          "confidence": 0.992945
+        },
+        {
+          "text": "enemy.",
+          "start_ms": 411446,
+          "end_ms": 411793,
+          "confidence": 0.99847287
+        },
+        {
+          "text": "That's",
+          "start_ms": 417516,
+          "end_ms": 418095,
+          "confidence": 0.82792145
+        },
+        {
+          "text": "how",
+          "start_ms": 418095,
+          "end_ms": 418144,
+          "confidence": 0.99852294
+        },
+        {
+          "text": "you",
+          "start_ms": 418160,
+          "end_ms": 418240,
+          "confidence": 0.99981815
+        },
+        {
+          "text": "feel,",
+          "start_ms": 418240,
+          "end_ms": 418465,
+          "confidence": 0.9495428
+        },
+        {
+          "text": "Elijah.",
+          "start_ms": 418498,
+          "end_ms": 418980,
+          "confidence": 0.778601
+        },
+        {
+          "text": "Anybody",
+          "start_ms": 420090,
+          "end_ms": 420798,
+          "confidence": 0.27224073
+        },
+        {
+          "text": "may",
+          "start_ms": 420831,
+          "end_ms": 421072,
+          "confidence": 0.5731533
+        },
+        {
+          "text": "take.",
+          "start_ms": 421072,
+          "end_ms": 421313,
+          "confidence": 0.83834296
+        },
+        {
+          "text": "We",
+          "start_ms": 422842,
+          "end_ms": 422987,
+          "confidence": 0.9998492
+        },
+        {
+          "text": "gotta",
+          "start_ms": 422987,
+          "end_ms": 423244,
+          "confidence": 0.7798857
+        },
+        {
+          "text": "move,",
+          "start_ms": 423244,
+          "end_ms": 423373,
+          "confidence": 0.9805387
+        },
+        {
+          "text": "but",
+          "start_ms": 423485,
+          "end_ms": 423614,
+          "confidence": 0.9999349
+        },
+        {
+          "text": "you",
+          "start_ms": 423646,
+          "end_ms": 423775,
+          "confidence": 0.9999672
+        },
+        {
+          "text": "got",
+          "start_ms": 423791,
+          "end_ms": 424032,
+          "confidence": 0.99870265
+        },
+        {
+          "text": "20",
+          "start_ms": 424032,
+          "end_ms": 424290,
+          "confidence": 0.9998229
+        },
+        {
+          "text": "more",
+          "start_ms": 424290,
+          "end_ms": 424580,
+          "confidence": 0.9999751
+        },
+        {
+          "text": "seconds.",
+          "start_ms": 424580,
+          "end_ms": 424887,
+          "confidence": 0.99885315
+        },
+        {
+          "text": "You",
+          "start_ms": 424936,
+          "end_ms": 425081,
+          "confidence": 0.99899155
+        },
+        {
+          "text": "ready?",
+          "start_ms": 425097,
+          "end_ms": 425324,
+          "confidence": 0.99888575
+        },
+        {
+          "text": "Turn",
+          "start_ms": 426247,
+          "end_ms": 426619,
+          "confidence": 0.99923646
+        },
+        {
+          "text": "up,",
+          "start_ms": 426619,
+          "end_ms": 426797,
+          "confidence": 0.9026087
+        },
+        {
+          "text": "turn",
+          "start_ms": 426878,
+          "end_ms": 427120,
+          "confidence": 0.9999864
+        },
+        {
+          "text": "up,",
+          "start_ms": 427120,
+          "end_ms": 427347,
+          "confidence": 0.9988917
+        },
+        {
+          "text": "turn",
+          "start_ms": 427363,
+          "end_ms": 427671,
+          "confidence": 0.99991226
+        },
+        {
+          "text": "up!",
+          "start_ms": 427671,
+          "end_ms": 428593,
+          "confidence": 0.78525484
+        }
+      ]
+    },
+    {
+      "text": "Because he's been so good to me. He's been so good to me.",
+      "start_ms": 430902,
+      "end_ms": 439697,
+      "text_sk": "Pretože bol ku mne taký dobrý. Bol ku mne taký dobrý.",
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 430902,
+          "end_ms": 435718,
+          "confidence": 0.46936992
+        },
+        {
+          "text": "he's",
+          "start_ms": 435750,
+          "end_ms": 435976,
+          "confidence": 0.812116
+        },
+        {
+          "text": "been",
+          "start_ms": 435976,
+          "end_ms": 436153,
+          "confidence": 0.9999697
+        },
+        {
+          "text": "so",
+          "start_ms": 436153,
+          "end_ms": 436475,
+          "confidence": 0.99995553
+        },
+        {
+          "text": "good",
+          "start_ms": 436475,
+          "end_ms": 436652,
+          "confidence": 0.9999627
+        },
+        {
+          "text": "to",
+          "start_ms": 436652,
+          "end_ms": 436813,
+          "confidence": 0.99997187
+        },
+        {
+          "text": "me.",
+          "start_ms": 436894,
+          "end_ms": 437135,
+          "confidence": 0.9467478
+        },
+        {
+          "text": "He's",
+          "start_ms": 437586,
+          "end_ms": 437989,
+          "confidence": 0.9996727
+        },
+        {
+          "text": "been",
+          "start_ms": 438005,
+          "end_ms": 438246,
+          "confidence": 0.99999297
+        },
+        {
+          "text": "so",
+          "start_ms": 438246,
+          "end_ms": 438488,
+          "confidence": 0.9999757
+        },
+        {
+          "text": "good",
+          "start_ms": 438488,
+          "end_ms": 438778,
+          "confidence": 0.9998981
+        },
+        {
+          "text": "to",
+          "start_ms": 438810,
+          "end_ms": 438955,
+          "confidence": 0.9999745
+        },
+        {
+          "text": "me.",
+          "start_ms": 439614,
+          "end_ms": 439697,
+          "confidence": 0.9998165
+        }
+      ]
+    },
+    {
+      "text": "He's been so good to me.",
+      "start_ms": 439862,
+      "end_ms": 441199,
+      "text_sk": "Bol ku mne taký dobrý.",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 439862,
+          "end_ms": 440109,
+          "confidence": 0.9997575
+        },
+        {
+          "text": "been",
+          "start_ms": 440109,
+          "end_ms": 440258,
+          "confidence": 0.99996245
+        },
+        {
+          "text": "so",
+          "start_ms": 440291,
+          "end_ms": 440638,
+          "confidence": 0.99985206
+        },
+        {
+          "text": "good",
+          "start_ms": 440638,
+          "end_ms": 440836,
+          "confidence": 0.99990094
+        },
+        {
+          "text": "to",
+          "start_ms": 440885,
+          "end_ms": 441117,
+          "confidence": 0.9997805
+        },
+        {
+          "text": "me.",
+          "start_ms": 441117,
+          "end_ms": 441199,
+          "confidence": 0.9964979
+        }
+      ]
+    },
+    {
+      "text": "Oh!",
+      "start_ms": 441596,
+      "end_ms": 441777,
+      "text_sk": "Ach!",
+      "words": [
+        {
+          "text": "Oh!",
+          "start_ms": 441596,
+          "end_ms": 441777,
+          "confidence": 0.57365733
+        }
+      ]
+    },
+    {
+      "text": "Ah da da da da.",
+      "start_ms": 443677,
+      "end_ms": 445226,
+      "text_sk": "Ach áno áno áno áno.",
+      "words": [
+        {
+          "text": "Ah",
+          "start_ms": 443677,
+          "end_ms": 443725,
+          "confidence": 0.23957875
+        },
+        {
+          "text": "da",
+          "start_ms": 444016,
+          "end_ms": 444210,
+          "confidence": 0.659239
+        },
+        {
+          "text": "da",
+          "start_ms": 444339,
+          "end_ms": 444500,
+          "confidence": 0.9953447
+        },
+        {
+          "text": "da",
+          "start_ms": 444742,
+          "end_ms": 444936,
+          "confidence": 0.99743336
+        },
+        {
+          "text": "da.",
+          "start_ms": 445065,
+          "end_ms": 445226,
+          "confidence": 0.8033845
+        }
+      ]
+    },
+    {
+      "text": "What?",
+      "start_ms": 449422,
+      "end_ms": 450793,
+      "text_sk": "Čo?",
+      "words": [
+        {
+          "text": "What?",
+          "start_ms": 449422,
+          "end_ms": 450793,
+          "confidence": 0.89536583
+        }
+      ]
+    },
+    {
+      "text": "Joy of the Lord is my strength.",
+      "start_ms": 452940,
+      "end_ms": 455202,
+      "text_sk": "Radosť Pánova je moja sila.",
+      "words": [
+        {
+          "text": "Joy",
+          "start_ms": 452940,
+          "end_ms": 452988,
+          "confidence": 0.99879766
+        },
+        {
+          "text": "of",
+          "start_ms": 453133,
+          "end_ms": 453247,
+          "confidence": 0.9884496
+        },
+        {
+          "text": "the",
+          "start_ms": 453618,
+          "end_ms": 453683,
+          "confidence": 0.9994248
+        },
+        {
+          "text": "Lord",
+          "start_ms": 453683,
+          "end_ms": 454265,
+          "confidence": 0.9912475
+        },
+        {
+          "text": "is",
+          "start_ms": 454329,
+          "end_ms": 454394,
+          "confidence": 0.9886042
+        },
+        {
+          "text": "my",
+          "start_ms": 454572,
+          "end_ms": 454782,
+          "confidence": 0.9960848
+        },
+        {
+          "text": "strength.",
+          "start_ms": 454782,
+          "end_ms": 455202,
+          "confidence": 0.9001321
+        }
+      ]
+    },
+    {
+      "text": "Joy of the Lord is my strength.",
+      "start_ms": 455493,
+      "end_ms": 458595,
+      "text_sk": "Radosť Hospodinova je moja sila.",
+      "words": [
+        {
+          "text": "Joy",
+          "start_ms": 455493,
+          "end_ms": 455719,
+          "confidence": 0.88525116
+        },
+        {
+          "text": "of",
+          "start_ms": 456188,
+          "end_ms": 456285,
+          "confidence": 0.99645776
+        },
+        {
+          "text": "the",
+          "start_ms": 456285,
+          "end_ms": 456527,
+          "confidence": 0.99992347
+        },
+        {
+          "text": "Lord",
+          "start_ms": 456689,
+          "end_ms": 457173,
+          "confidence": 0.99969316
+        },
+        {
+          "text": "is",
+          "start_ms": 457173,
+          "end_ms": 457222,
+          "confidence": 0.99826896
+        },
+        {
+          "text": "my",
+          "start_ms": 457416,
+          "end_ms": 457658,
+          "confidence": 0.9676092
+        },
+        {
+          "text": "strength.",
+          "start_ms": 457723,
+          "end_ms": 458595,
+          "confidence": 0.9995667
+        }
+      ]
+    },
+    {
+      "text": "Last time, the enemy, the enemy.",
+      "start_ms": 459960,
+      "end_ms": 462647,
+      "text_sk": "Minulý krát, nepriateľ, nepriateľ.",
+      "words": [
+        {
+          "text": "Last",
+          "start_ms": 459960,
+          "end_ms": 460155,
+          "confidence": 0.99909496
+        },
+        {
+          "text": "time,",
+          "start_ms": 460187,
+          "end_ms": 460481,
+          "confidence": 0.75480473
+        },
+        {
+          "text": "the",
+          "start_ms": 461034,
+          "end_ms": 461197,
+          "confidence": 0.99896395
+        },
+        {
+          "text": "enemy,",
+          "start_ms": 461214,
+          "end_ms": 461588,
+          "confidence": 0.8278978
+        },
+        {
+          "text": "the",
+          "start_ms": 462256,
+          "end_ms": 462337,
+          "confidence": 0.9313967
+        },
+        {
+          "text": "enemy.",
+          "start_ms": 462337,
+          "end_ms": 462647,
+          "confidence": 0.6876674
+        }
+      ]
+    },
+    {
+      "text": "I made up my mind, man.",
+      "start_ms": 501302,
+      "end_ms": 502043,
+      "text_sk": "Rozhodol som sa, pán.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 501302,
+          "end_ms": 501320,
+          "confidence": 0.78672254
+        },
+        {
+          "text": "made",
+          "start_ms": 501320,
+          "end_ms": 501426,
+          "confidence": 0.99498063
+        },
+        {
+          "text": "up",
+          "start_ms": 501479,
+          "end_ms": 501567,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "my",
+          "start_ms": 501585,
+          "end_ms": 501673,
+          "confidence": 0.9999875
+        },
+        {
+          "text": "mind,",
+          "start_ms": 501673,
+          "end_ms": 501867,
+          "confidence": 0.9991889
+        },
+        {
+          "text": "man.",
+          "start_ms": 501937,
+          "end_ms": 502043,
+          "confidence": 0.99812686
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.93218046,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "4d0001e9-dab3-4639-aa52-56ac4675be9d",
+    "elapsed_s": 32.2,
+    "word_count": 751,
+    "utterance_count": 68,
+    "line_count": 68,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 504
+  }
+}

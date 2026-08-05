@@ -1,0 +1,1570 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\tCivrrU4SSM_vocal16k.wav",
+  "duration_ms": 330200,
+  "lines": [
+    {
+      "text": "Greater than the perfect sunrise",
+      "start_ms": 1120,
+      "end_ms": 4180,
+      "text_sk": "Väčší ako dokonalý východ slnka",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 1120,
+          "end_ms": 1780,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 1780,
+          "end_ms": 2040,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 2040,
+          "end_ms": 2220,
+          "confidence": 0.9
+        },
+        {
+          "text": "perfect",
+          "start_ms": 2220,
+          "end_ms": 2980,
+          "confidence": 0.9
+        },
+        {
+          "text": "sunrise",
+          "start_ms": 2980,
+          "end_ms": 4180,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Greater than the ocean's deep",
+      "start_ms": 4390,
+      "end_ms": 7760,
+      "text_sk": "Väčší ako hlbina oceánu",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 4390,
+          "end_ms": 5060,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 5060,
+          "end_ms": 5360,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 5360,
+          "end_ms": 5540,
+          "confidence": 0.9
+        },
+        {
+          "text": "ocean's",
+          "start_ms": 5540,
+          "end_ms": 6460,
+          "confidence": 0.9
+        },
+        {
+          "text": "deep",
+          "start_ms": 6460,
+          "end_ms": 7760,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Greater than the highest mountain",
+      "start_ms": 7820,
+      "end_ms": 11130,
+      "text_sk": "Väčší ako najvyšší vrch",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 7820,
+          "end_ms": 8460,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 8460,
+          "end_ms": 8760,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 8760,
+          "end_ms": 8940,
+          "confidence": 0.9
+        },
+        {
+          "text": "highest",
+          "start_ms": 8940,
+          "end_ms": 9680,
+          "confidence": 0.9
+        },
+        {
+          "text": "mountain",
+          "start_ms": 9680,
+          "end_ms": 11130,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lord, I believe You are greater than the world I see",
+      "start_ms": 11400,
+      "end_ms": 18270,
+      "text_sk": "Pane, verím, že si väčší než svet, ktorý vidím",
+      "words": [
+        {
+          "text": "Lord,",
+          "start_ms": 11400,
+          "end_ms": 12040,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 12040,
+          "end_ms": 12220,
+          "confidence": 0.9
+        },
+        {
+          "text": "believe",
+          "start_ms": 12220,
+          "end_ms": 12900,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 13320,
+          "end_ms": 13800,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 13800,
+          "end_ms": 14060,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 14060,
+          "end_ms": 14640,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 14640,
+          "end_ms": 14940,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 14940,
+          "end_ms": 15060,
+          "confidence": 0.9
+        },
+        {
+          "text": "world",
+          "start_ms": 15060,
+          "end_ms": 15640,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 15640,
+          "end_ms": 16000,
+          "confidence": 0.9
+        },
+        {
+          "text": "see",
+          "start_ms": 16000,
+          "end_ms": 18270,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, Jesus, You're above everything",
+      "start_ms": 18580,
+      "end_ms": 23090,
+      "text_sk": "Áno, Ježiš, si nad všetkým",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 18580,
+          "end_ms": 19040,
+          "confidence": 0.9
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 19040,
+          "end_ms": 19740,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 19740,
+          "end_ms": 20120,
+          "confidence": 0.9
+        },
+        {
+          "text": "above",
+          "start_ms": 20120,
+          "end_ms": 20740,
+          "confidence": 0.9
+        },
+        {
+          "text": "everything",
+          "start_ms": 20740,
+          "end_ms": 23090,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 23380,
+      "end_ms": 27070,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 23380,
+          "end_ms": 23680,
+          "confidence": 0.9
+        },
+        {
+          "text": "Your",
+          "start_ms": 23680,
+          "end_ms": 23980,
+          "confidence": 0.9
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 23980,
+          "end_ms": 24680,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 24680,
+          "end_ms": 24960,
+          "confidence": 0.9
+        },
+        {
+          "text": "alive",
+          "start_ms": 24960,
+          "end_ms": 25520,
+          "confidence": 0.9
+        },
+        {
+          "text": "in",
+          "start_ms": 25520,
+          "end_ms": 26040,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 26040,
+          "end_ms": 27070,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 27240,
+      "end_ms": 32370,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 27240,
+          "end_ms": 27480,
+          "confidence": 0.9
+        },
+        {
+          "text": "with",
+          "start_ms": 27480,
+          "end_ms": 27800,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 27800,
+          "end_ms": 28140,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 28140,
+          "end_ms": 28380,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 28380,
+          "end_ms": 28620,
+          "confidence": 0.9
+        },
+        {
+          "text": "do",
+          "start_ms": 28620,
+          "end_ms": 28880,
+          "confidence": 0.9
+        },
+        {
+          "text": "anything",
+          "start_ms": 28880,
+          "end_ms": 29840,
+          "confidence": 0.9
+        },
+        {
+          "text": "'cause",
+          "start_ms": 29840,
+          "end_ms": 30220,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 30220,
+          "end_ms": 30440,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 30440,
+          "end_ms": 32370,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Greater than all expectation",
+      "start_ms": 50660,
+      "end_ms": 53780,
+      "text_sk": "Väčší než všetky očakávania",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 50660,
+          "end_ms": 51300,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 51300,
+          "end_ms": 51580,
+          "confidence": 0.9
+        },
+        {
+          "text": "all",
+          "start_ms": 51580,
+          "end_ms": 52180,
+          "confidence": 0.9
+        },
+        {
+          "text": "expectation",
+          "start_ms": 52180,
+          "end_ms": 53780,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Greater than my wildest dreams",
+      "start_ms": 53960,
+      "end_ms": 57320,
+      "text_sk": "Väčší než moje najdivokejšie sny",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 53960,
+          "end_ms": 54620,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 54620,
+          "end_ms": 54920,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 54920,
+          "end_ms": 55180,
+          "confidence": 0.9
+        },
+        {
+          "text": "wildest",
+          "start_ms": 55180,
+          "end_ms": 56040,
+          "confidence": 0.9
+        },
+        {
+          "text": "dreams",
+          "start_ms": 56040,
+          "end_ms": 57320,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Far beyond my comprehension",
+      "start_ms": 57420,
+      "end_ms": 60670,
+      "text_sk": "Ďaleko za mojim chápaním",
+      "words": [
+        {
+          "text": "Far",
+          "start_ms": 57420,
+          "end_ms": 57860,
+          "confidence": 0.9
+        },
+        {
+          "text": "beyond",
+          "start_ms": 57860,
+          "end_ms": 58360,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 58360,
+          "end_ms": 58540,
+          "confidence": 0.9
+        },
+        {
+          "text": "comprehension",
+          "start_ms": 58540,
+          "end_ms": 60670,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lord, I believe You are greater than the world (Oh yeah)",
+      "start_ms": 60980,
+      "end_ms": 67860,
+      "text_sk": "Pane, verím, že si väčší než svet (Ó áno)",
+      "words": [
+        {
+          "text": "Lord,",
+          "start_ms": 60980,
+          "end_ms": 61600,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 61600,
+          "end_ms": 61760,
+          "confidence": 0.9
+        },
+        {
+          "text": "believe",
+          "start_ms": 61760,
+          "end_ms": 62480,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 62860,
+          "end_ms": 63320,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 63320,
+          "end_ms": 63600,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 63600,
+          "end_ms": 64180,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 64180,
+          "end_ms": 64480,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 64480,
+          "end_ms": 64620,
+          "confidence": 0.9
+        },
+        {
+          "text": "world",
+          "start_ms": 64620,
+          "end_ms": 65120,
+          "confidence": 0.9
+        },
+        {
+          "text": "(Oh",
+          "start_ms": 65540,
+          "end_ms": 66200,
+          "confidence": 0.9
+        },
+        {
+          "text": "yeah)",
+          "start_ms": 66200,
+          "end_ms": 67860,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Jesus, You're above everything",
+      "start_ms": 68140,
+      "end_ms": 72740,
+      "text_sk": "Ježiš, si nad všetkým",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 68140,
+          "end_ms": 69320,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 69320,
+          "end_ms": 69680,
+          "confidence": 0.9
+        },
+        {
+          "text": "above",
+          "start_ms": 69680,
+          "end_ms": 70320,
+          "confidence": 0.9
+        },
+        {
+          "text": "everything",
+          "start_ms": 70320,
+          "end_ms": 72740,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 72960,
+      "end_ms": 76740,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 72960,
+          "end_ms": 73260,
+          "confidence": 0.9
+        },
+        {
+          "text": "Your",
+          "start_ms": 73260,
+          "end_ms": 73560,
+          "confidence": 0.9
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 73560,
+          "end_ms": 74220,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 74220,
+          "end_ms": 74540,
+          "confidence": 0.9
+        },
+        {
+          "text": "alive",
+          "start_ms": 74540,
+          "end_ms": 75100,
+          "confidence": 0.9
+        },
+        {
+          "text": "in",
+          "start_ms": 75100,
+          "end_ms": 75640,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 75640,
+          "end_ms": 76740,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 76860,
+      "end_ms": 82060,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 76860,
+          "end_ms": 77100,
+          "confidence": 0.9
+        },
+        {
+          "text": "with",
+          "start_ms": 77100,
+          "end_ms": 77400,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 77400,
+          "end_ms": 77720,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 77720,
+          "end_ms": 77940,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 77940,
+          "end_ms": 78200,
+          "confidence": 0.9
+        },
+        {
+          "text": "do",
+          "start_ms": 78200,
+          "end_ms": 78480,
+          "confidence": 0.9
+        },
+        {
+          "text": "anything",
+          "start_ms": 78480,
+          "end_ms": 79420,
+          "confidence": 0.9
+        },
+        {
+          "text": "'cause",
+          "start_ms": 79420,
+          "end_ms": 79840,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 79840,
+          "end_ms": 80040,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 80040,
+          "end_ms": 82060,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "There is no one like You",
+      "start_ms": 137300,
+      "end_ms": 140440,
+      "text_sk": "Nikoho nie je ako Ty",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 137300,
+          "end_ms": 138380,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 138380,
+          "end_ms": 138760,
+          "confidence": 0.9
+        },
+        {
+          "text": "no",
+          "start_ms": 138760,
+          "end_ms": 139100,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 139100,
+          "end_ms": 139460,
+          "confidence": 0.9
+        },
+        {
+          "text": "like",
+          "start_ms": 139460,
+          "end_ms": 139780,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 139780,
+          "end_ms": 140440,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 140680,
+      "end_ms": 144500,
+      "text_sk": "Nikto sa Ti nevyrovná",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 140680,
+          "end_ms": 141720,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 141720,
+          "end_ms": 142100,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 142100,
+          "end_ms": 142420,
+          "confidence": 0.9
+        },
+        {
+          "text": "compare",
+          "start_ms": 142420,
+          "end_ms": 143240,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 143240,
+          "end_ms": 144500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Jesus, You are greater, everyone say",
+      "start_ms": 144700,
+      "end_ms": 152140,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 144700,
+          "end_ms": 145520,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 145520,
+          "end_ms": 145880,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 145880,
+          "end_ms": 146180,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 146180,
+          "end_ms": 148120,
+          "confidence": 0.9
+        },
+        {
+          "text": "everyone",
+          "start_ms": 148120,
+          "end_ms": 149580,
+          "confidence": 0.9
+        },
+        {
+          "text": "say",
+          "start_ms": 149580,
+          "end_ms": 152140,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "There is no one like You",
+      "start_ms": 152340,
+      "end_ms": 155520,
+      "text_sk": "Nikoho nie je ako Ty",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 152340,
+          "end_ms": 153400,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 153400,
+          "end_ms": 153780,
+          "confidence": 0.9
+        },
+        {
+          "text": "no",
+          "start_ms": 153780,
+          "end_ms": 154100,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 154100,
+          "end_ms": 154480,
+          "confidence": 0.9
+        },
+        {
+          "text": "like",
+          "start_ms": 154480,
+          "end_ms": 154800,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 154800,
+          "end_ms": 155520,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 155700,
+      "end_ms": 159500,
+      "text_sk": "Nikto sa Ti nevyrovná",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 155700,
+          "end_ms": 156760,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 156760,
+          "end_ms": 157120,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 157120,
+          "end_ms": 157460,
+          "confidence": 0.9
+        },
+        {
+          "text": "compare",
+          "start_ms": 157460,
+          "end_ms": 158260,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 158260,
+          "end_ms": 159500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Jesus, You are greater, everyone say",
+      "start_ms": 159640,
+      "end_ms": 167380,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 159640,
+          "end_ms": 160480,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 160480,
+          "end_ms": 160860,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 160860,
+          "end_ms": 161160,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 161160,
+          "end_ms": 163060,
+          "confidence": 0.9
+        },
+        {
+          "text": "everyone",
+          "start_ms": 163060,
+          "end_ms": 164500,
+          "confidence": 0.9
+        },
+        {
+          "text": "say",
+          "start_ms": 164500,
+          "end_ms": 167380,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Greater than the world I see",
+      "start_ms": 208580,
+      "end_ms": 213160,
+      "text_sk": "Väčší než svet, ktorý vidím",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 208580,
+          "end_ms": 209260,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 209260,
+          "end_ms": 209560,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 209560,
+          "end_ms": 209700,
+          "confidence": 0.9
+        },
+        {
+          "text": "world",
+          "start_ms": 209700,
+          "end_ms": 210280,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 210280,
+          "end_ms": 210740,
+          "confidence": 0.9
+        },
+        {
+          "text": "see",
+          "start_ms": 210740,
+          "end_ms": 213160,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, Jesus, You're above everything",
+      "start_ms": 213460,
+      "end_ms": 217980,
+      "text_sk": "Áno, Ježiš, si nad všetkým",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 213460,
+          "end_ms": 213940,
+          "confidence": 0.9
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 213940,
+          "end_ms": 214640,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 214640,
+          "end_ms": 215020,
+          "confidence": 0.9
+        },
+        {
+          "text": "above",
+          "start_ms": 215020,
+          "end_ms": 215640,
+          "confidence": 0.9
+        },
+        {
+          "text": "everything",
+          "start_ms": 215640,
+          "end_ms": 217980,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 218220,
+      "end_ms": 221940,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 218220,
+          "end_ms": 218520,
+          "confidence": 0.9
+        },
+        {
+          "text": "Your",
+          "start_ms": 218520,
+          "end_ms": 218820,
+          "confidence": 0.9
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 218820,
+          "end_ms": 219500,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 219500,
+          "end_ms": 219800,
+          "confidence": 0.9
+        },
+        {
+          "text": "alive",
+          "start_ms": 219800,
+          "end_ms": 220360,
+          "confidence": 0.9
+        },
+        {
+          "text": "in",
+          "start_ms": 220360,
+          "end_ms": 220860,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 220860,
+          "end_ms": 221940,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 222140,
+      "end_ms": 227180,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 222140,
+          "end_ms": 222400,
+          "confidence": 0.9
+        },
+        {
+          "text": "with",
+          "start_ms": 222400,
+          "end_ms": 222680,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 222680,
+          "end_ms": 22300,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 22300,
+          "end_ms": 223240,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 223240,
+          "end_ms": 223500,
+          "confidence": 0.9
+        },
+        {
+          "text": "do",
+          "start_ms": 223500,
+          "end_ms": 223760,
+          "confidence": 0.9
+        },
+        {
+          "text": "anything",
+          "start_ms": 223760,
+          "end_ms": 224680,
+          "confidence": 0.9
+        },
+        {
+          "text": "'cause",
+          "start_ms": 224680,
+          "end_ms": 225080,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 225080,
+          "end_ms": 225300,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 225300,
+          "end_ms": 227180,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "'Cause there is no one like You",
+      "start_ms": 241500,
+      "end_ms": 245240,
+      "text_sk": "Lebo nikoho nie je ako Ty",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 241500,
+          "end_ms": 242000,
+          "confidence": 0.9
+        },
+        {
+          "text": "there",
+          "start_ms": 242000,
+          "end_ms": 243160,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 243160,
+          "end_ms": 243540,
+          "confidence": 0.9
+        },
+        {
+          "text": "no",
+          "start_ms": 243540,
+          "end_ms": 243880,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 243880,
+          "end_ms": 244240,
+          "confidence": 0.9
+        },
+        {
+          "text": "like",
+          "start_ms": 244240,
+          "end_ms": 244560,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 244560,
+          "end_ms": 245240,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 245480,
+      "end_ms": 249240,
+      "text_sk": "Nikto sa Ti nevyrovná",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 245480,
+          "end_ms": 246520,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 246520,
+          "end_ms": 246900,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 246900,
+          "end_ms": 247220,
+          "confidence": 0.9
+        },
+        {
+          "text": "compare",
+          "start_ms": 247220,
+          "end_ms": 248040,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 248040,
+          "end_ms": 249240,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Jesus, You are greater, everyone say, yeah!",
+      "start_ms": 249440,
+      "end_ms": 257760,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie, jéj!",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 249440,
+          "end_ms": 250260,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 250260,
+          "end_ms": 250620,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 250620,
+          "end_ms": 250920,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 250920,
+          "end_ms": 252860,
+          "confidence": 0.9
+        },
+        {
+          "text": "everyone",
+          "start_ms": 252860,
+          "end_ms": 254300,
+          "confidence": 0.9
+        },
+        {
+          "text": "say,",
+          "start_ms": 254300,
+          "end_ms": 256100,
+          "confidence": 0.9
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 256100,
+          "end_ms": 257760,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "No one",
+      "start_ms": 258060,
+      "end_ms": 260380,
+      "text_sk": "Nikto",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 258060,
+          "end_ms": 259500,
+          "confidence": 0.9
+        },
+        {
+          "text": "one",
+          "start_ms": 259500,
+          "end_ms": 260380,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Jesus, You are greater, everyone say",
+      "start_ms": 304200,
+      "end_ms": 312060,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 304200,
+          "end_ms": 305140,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 305140,
+          "end_ms": 305520,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 305520,
+          "end_ms": 305820,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 305820,
+          "end_ms": 307760,
+          "confidence": 0.9
+        },
+        {
+          "text": "everyone",
+          "start_ms": 307760,
+          "end_ms": 309200,
+          "confidence": 0.9
+        },
+        {
+          "text": "say",
+          "start_ms": 309200,
+          "end_ms": 312060,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "You are greater than the world I see",
+      "start_ms": 312520,
+      "end_ms": 316340,
+      "text_sk": "Si väčší než svet, ktorý vidím",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 312520,
+          "end_ms": 312940,
+          "confidence": 0.9
+        },
+        {
+          "text": "are",
+          "start_ms": 312940,
+          "end_ms": 313160,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 313160,
+          "end_ms": 313760,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 313760,
+          "end_ms": 314060,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 314060,
+          "end_ms": 314200,
+          "confidence": 0.9
+        },
+        {
+          "text": "world",
+          "start_ms": 314200,
+          "end_ms": 314780,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 314780,
+          "end_ms": 315140,
+          "confidence": 0.9
+        },
+        {
+          "text": "see",
+          "start_ms": 315140,
+          "end_ms": 316340,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, Jesus, You're above everything",
+      "start_ms": 316580,
+      "end_ms": 321140,
+      "text_sk": "Áno, Ježiš, si nad všetkým",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 316580,
+          "end_ms": 317060,
+          "confidence": 0.9
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 317060,
+          "end_ms": 317780,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 317780,
+          "end_ms": 318160,
+          "confidence": 0.9
+        },
+        {
+          "text": "above",
+          "start_ms": 318160,
+          "end_ms": 318780,
+          "confidence": 0.9
+        },
+        {
+          "text": "everything",
+          "start_ms": 318780,
+          "end_ms": 321140,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 321400,
+      "end_ms": 325140,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 321400,
+          "end_ms": 321700,
+          "confidence": 0.9
+        },
+        {
+          "text": "Your",
+          "start_ms": 321700,
+          "end_ms": 322000,
+          "confidence": 0.9
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 322000,
+          "end_ms": 322680,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 322680,
+          "end_ms": 323000,
+          "confidence": 0.9
+        },
+        {
+          "text": "alive",
+          "start_ms": 323000,
+          "end_ms": 323560,
+          "confidence": 0.9
+        },
+        {
+          "text": "in",
+          "start_ms": 323560,
+          "end_ms": 324080,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 324080,
+          "end_ms": 325140,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 325320,
+      "end_ms": 330200,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 325320,
+          "end_ms": 325580,
+          "confidence": 0.9
+        },
+        {
+          "text": "with",
+          "start_ms": 325580,
+          "end_ms": 325880,
+          "confidence": 0.9
+        },
+        {
+          "text": "You",
+          "start_ms": 325880,
+          "end_ms": 326200,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 326200,
+          "end_ms": 326440,
+          "confidence": 0.9
+        },
+        {
+          "text": "can",
+          "start_ms": 326440,
+          "end_ms": 326700,
+          "confidence": 0.9
+        },
+        {
+          "text": "do",
+          "start_ms": 326700,
+          "end_ms": 326960,
+          "confidence": 0.9
+        },
+        {
+          "text": "anything",
+          "start_ms": 326960,
+          "end_ms": 327880,
+          "confidence": 0.9
+        },
+        {
+          "text": "'cause",
+          "start_ms": 327880,
+          "end_ms": 328280,
+          "confidence": 0.9
+        },
+        {
+          "text": "You're",
+          "start_ms": 328280,
+          "end_ms": 328480,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater",
+          "start_ms": 328480,
+          "end_ms": 330200,
+          "confidence": 0.9
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 61.1,
+    "line_count": 33,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 5430,
+      "candidatesTokenCount": 9640,
+      "totalTokenCount": 16017,
+      "promptTokensDetails": [
+        {
+          "modality": "AUDIO",
+          "tokenCount": 5405
+        },
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        }
+      ],
+      "thoughtsTokenCount": 947,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 13834720
+  }
+}

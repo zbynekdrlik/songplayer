@@ -1,0 +1,1780 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\xPkg_vW4yE0_vocal16k.wav",
+  "duration_ms": 407000,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed",
+      "start_ms": 8630,
+      "end_ms": 13780,
+      "text_sk": "Keď je moje srdce preplnené",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 8630,
+          "end_ms": 9400,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 9400,
+          "end_ms": 9800,
+          "confidence": 0.9
+        },
+        {
+          "text": "heart",
+          "start_ms": 9800,
+          "end_ms": 10840,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 10840,
+          "end_ms": 11300,
+          "confidence": 0.9
+        },
+        {
+          "text": "overwhelmed",
+          "start_ms": 11300,
+          "end_ms": 13780,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "When I barely trust myself",
+      "start_ms": 13780,
+      "end_ms": 18450,
+      "text_sk": "Keď si sotva verím",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 13780,
+          "end_ms": 14700,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 14700,
+          "end_ms": 15000,
+          "confidence": 0.9
+        },
+        {
+          "text": "barely",
+          "start_ms": 15000,
+          "end_ms": 16000,
+          "confidence": 0.9
+        },
+        {
+          "text": "trust",
+          "start_ms": 16000,
+          "end_ms": 16800,
+          "confidence": 0.9
+        },
+        {
+          "text": "myself",
+          "start_ms": 16800,
+          "end_ms": 18450,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 18450,
+      "end_ms": 21710,
+      "text_sk": "Priveď ma k skale",
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 18450,
+          "end_ms": 19400,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 19400,
+          "end_ms": 19800,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 19800,
+          "end_ms": 20200,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 20200,
+          "end_ms": 20500,
+          "confidence": 0.9
+        },
+        {
+          "text": "rock",
+          "start_ms": 20500,
+          "end_ms": 21710,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 21710,
+      "end_ms": 26030,
+      "text_sk": "Vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 21710,
+          "end_ms": 23400,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 23400,
+          "end_ms": 24200,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 24200,
+          "end_ms": 26030,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "When the night is closing in",
+      "start_ms": 26030,
+      "end_ms": 32250,
+      "text_sk": "Keď sa noc blíži",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 26030,
+          "end_ms": 27200,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 27200,
+          "end_ms": 27700,
+          "confidence": 0.9
+        },
+        {
+          "text": "night",
+          "start_ms": 27700,
+          "end_ms": 28600,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 28600,
+          "end_ms": 29000,
+          "confidence": 0.9
+        },
+        {
+          "text": "closing",
+          "start_ms": 29000,
+          "end_ms": 30200,
+          "confidence": 0.9
+        },
+        {
+          "text": "in",
+          "start_ms": 30200,
+          "end_ms": 32250,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "To remind me of my sin",
+      "start_ms": 32250,
+      "end_ms": 36120,
+      "text_sk": "Aby mi pripomenula môj hriech",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 32250,
+          "end_ms": 32900,
+          "confidence": 0.9
+        },
+        {
+          "text": "remind",
+          "start_ms": 32900,
+          "end_ms": 33700,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 33700,
+          "end_ms": 34100,
+          "confidence": 0.9
+        },
+        {
+          "text": "of",
+          "start_ms": 34100,
+          "end_ms": 34500,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 34500,
+          "end_ms": 35000,
+          "confidence": 0.9
+        },
+        {
+          "text": "sin",
+          "start_ms": 35000,
+          "end_ms": 36120,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 36120,
+      "end_ms": 39570,
+      "text_sk": "Priveď ma k skale",
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 36120,
+          "end_ms": 37200,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 37200,
+          "end_ms": 37600,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 37600,
+          "end_ms": 38000,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 38000,
+          "end_ms": 38300,
+          "confidence": 0.9
+        },
+        {
+          "text": "rock",
+          "start_ms": 38300,
+          "end_ms": 39570,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 39570,
+      "end_ms": 43810,
+      "text_sk": "Vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 39570,
+          "end_ms": 41200,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 41200,
+          "end_ms": 42000,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 42000,
+          "end_ms": 43810,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 43810,
+      "end_ms": 47710,
+      "text_sk": "Priveď ma k skale",
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 43810,
+          "end_ms": 45100,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 45100,
+          "end_ms": 45500,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 45500,
+          "end_ms": 46000,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 46000,
+          "end_ms": 46300,
+          "confidence": 0.9
+        },
+        {
+          "text": "rock",
+          "start_ms": 46300,
+          "end_ms": 47710,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 47710,
+      "end_ms": 52180,
+      "text_sk": "Vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 47710,
+          "end_ms": 49400,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 49400,
+          "end_ms": 50300,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 50300,
+          "end_ms": 52180,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I",
+      "start_ms": 52180,
+      "end_ms": 107450,
+      "text_sk": "Vyššej než ja, vyššej než ja, vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 52180,
+          "end_ms": 54200,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 54200,
+          "end_ms": 54700,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 54700,
+          "end_ms": 56000,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 56000,
+          "end_ms": 57800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 57800,
+          "end_ms": 58300,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 58300,
+          "end_ms": 59800,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 59800,
+          "end_ms": 61500,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 61500,
+          "end_ms": 62200,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 62200,
+          "end_ms": 63700,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 63700,
+          "end_ms": 65200,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 65200,
+          "end_ms": 65900,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 65900,
+          "end_ms": 107450,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "So much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I",
+      "start_ms": 107450,
+      "end_ms": 124500,
+      "text_sk": "Okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 107450,
+          "end_ms": 108100,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 108100,
+          "end_ms": 108500,
+          "confidence": 0.9
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 108500,
+          "end_ms": 109800,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 109800,
+          "end_ms": 110200,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 110200,
+          "end_ms": 110600,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 110600,
+          "end_ms": 111800,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 111800,
+          "end_ms": 112200,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 112200,
+          "end_ms": 112600,
+          "confidence": 0.9
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 112600,
+          "end_ms": 113800,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 113800,
+          "end_ms": 114200,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 114200,
+          "end_ms": 114600,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher,",
+          "start_ms": 114600,
+          "end_ms": 115900,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 115900,
+          "end_ms": 117200,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 117200,
+          "end_ms": 117800,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 117800,
+          "end_ms": 119500,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 119500,
+          "end_ms": 121000,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 121000,
+          "end_ms": 121600,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 121600,
+          "end_ms": 124500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "When the doubt is rising up",
+      "start_ms": 124500,
+      "end_ms": 129200,
+      "text_sk": "Keď sa pochybnosť dvíha",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 124500,
+          "end_ms": 125600,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 125600,
+          "end_ms": 126000,
+          "confidence": 0.9
+        },
+        {
+          "text": "doubt",
+          "start_ms": 126000,
+          "end_ms": 126900,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 126900,
+          "end_ms": 127300,
+          "confidence": 0.9
+        },
+        {
+          "text": "rising",
+          "start_ms": 127300,
+          "end_ms": 128200,
+          "confidence": 0.9
+        },
+        {
+          "text": "up",
+          "start_ms": 128200,
+          "end_ms": 129200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "When it comes and floods my love",
+      "start_ms": 129200,
+      "end_ms": 135100,
+      "text_sk": "Keď prichádza a zaplavuje moju lásku",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 129200,
+          "end_ms": 130000,
+          "confidence": 0.9
+        },
+        {
+          "text": "it",
+          "start_ms": 130000,
+          "end_ms": 130300,
+          "confidence": 0.9
+        },
+        {
+          "text": "comes",
+          "start_ms": 130300,
+          "end_ms": 131200,
+          "confidence": 0.9
+        },
+        {
+          "text": "and",
+          "start_ms": 131200,
+          "end_ms": 131800,
+          "confidence": 0.9
+        },
+        {
+          "text": "floods",
+          "start_ms": 131800,
+          "end_ms": 133200,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 133200,
+          "end_ms": 133800,
+          "confidence": 0.9
+        },
+        {
+          "text": "love",
+          "start_ms": 133800,
+          "end_ms": 135100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 135100,
+      "end_ms": 138300,
+      "text_sk": "Priveď ma k skale",
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 135100,
+          "end_ms": 136100,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 136100,
+          "end_ms": 136500,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 136500,
+          "end_ms": 136900,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 136900,
+          "end_ms": 137200,
+          "confidence": 0.9
+        },
+        {
+          "text": "rock",
+          "start_ms": 137200,
+          "end_ms": 138300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 138300,
+      "end_ms": 142100,
+      "text_sk": "Vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 138300,
+          "end_ms": 139800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 139800,
+          "end_ms": 140400,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 140400,
+          "end_ms": 142100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 142100,
+      "end_ms": 146100,
+      "text_sk": "Priveď ma k skale",
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 142100,
+          "end_ms": 143500,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 143500,
+          "end_ms": 143900,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 143900,
+          "end_ms": 144300,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 144300,
+          "end_ms": 144600,
+          "confidence": 0.9
+        },
+        {
+          "text": "rock",
+          "start_ms": 144600,
+          "end_ms": 146100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 146100,
+      "end_ms": 149800,
+      "text_sk": "Vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 146100,
+          "end_ms": 147800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 147800,
+          "end_ms": 148500,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 148500,
+          "end_ms": 149800,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I",
+      "start_ms": 149800,
+      "end_ms": 205600,
+      "text_sk": "Vyššej než ja, vyššej než ja, vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 149800,
+          "end_ms": 151900,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 151900,
+          "end_ms": 152500,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 152500,
+          "end_ms": 153900,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 153900,
+          "end_ms": 155700,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 155700,
+          "end_ms": 156300,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 156300,
+          "end_ms": 157600,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 157600,
+          "end_ms": 159500,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 159500,
+          "end_ms": 160100,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 160100,
+          "end_ms": 161500,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 161500,
+          "end_ms": 163200,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 163200,
+          "end_ms": 163800,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 163800,
+          "end_ms": 205600,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "So much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I",
+      "start_ms": 205600,
+      "end_ms": 222300,
+      "text_sk": "Okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 205600,
+          "end_ms": 206100,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 206100,
+          "end_ms": 206600,
+          "confidence": 0.9
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 206600,
+          "end_ms": 207700,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 207700,
+          "end_ms": 208100,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 208100,
+          "end_ms": 208600,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 208600,
+          "end_ms": 209700,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 209700,
+          "end_ms": 210100,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 210100,
+          "end_ms": 210600,
+          "confidence": 0.9
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 210600,
+          "end_ms": 211700,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 211700,
+          "end_ms": 212100,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 212100,
+          "end_ms": 212600,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher,",
+          "start_ms": 212600,
+          "end_ms": 213800,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 213800,
+          "end_ms": 215300,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 215300,
+          "end_ms": 215900,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 215900,
+          "end_ms": 217600,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 217600,
+          "end_ms": 219100,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 219100,
+          "end_ms": 219700,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 219700,
+          "end_ms": 222300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 222300,
+      "end_ms": 225200,
+      "text_sk": "Kam inam by som šiel?",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 222300,
+          "end_ms": 222900,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 222900,
+          "end_ms": 223500,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 223500,
+          "end_ms": 224000,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 224000,
+          "end_ms": 224300,
+          "confidence": 0.9
+        },
+        {
+          "text": "go?",
+          "start_ms": 224300,
+          "end_ms": 225200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 225200,
+      "end_ms": 229200,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 225200,
+          "end_ms": 226000,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 226000,
+          "end_ms": 226600,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 226600,
+          "end_ms": 227100,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 227100,
+          "end_ms": 227400,
+          "confidence": 0.9
+        },
+        {
+          "text": "run",
+          "start_ms": 227400,
+          "end_ms": 228400,
+          "confidence": 0.9
+        },
+        {
+          "text": "to?",
+          "start_ms": 228400,
+          "end_ms": 229200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 229200,
+      "end_ms": 233300,
+      "text_sk": "Kam inam by som šiel?",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 229200,
+          "end_ms": 230100,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 230100,
+          "end_ms": 230700,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 230700,
+          "end_ms": 231200,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 231200,
+          "end_ms": 231600,
+          "confidence": 0.9
+        },
+        {
+          "text": "go?",
+          "start_ms": 231600,
+          "end_ms": 233300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 233300,
+      "end_ms": 237200,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 233300,
+          "end_ms": 234100,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 234100,
+          "end_ms": 234700,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 234700,
+          "end_ms": 235100,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 235100,
+          "end_ms": 235500,
+          "confidence": 0.9
+        },
+        {
+          "text": "run",
+          "start_ms": 235500,
+          "end_ms": 236400,
+          "confidence": 0.9
+        },
+        {
+          "text": "to?",
+          "start_ms": 236400,
+          "end_ms": 237200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 237200,
+      "end_ms": 241200,
+      "text_sk": "Kam inam by som šiel?",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 237200,
+          "end_ms": 238100,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 238100,
+          "end_ms": 238700,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 238700,
+          "end_ms": 239100,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 239100,
+          "end_ms": 239500,
+          "confidence": 0.9
+        },
+        {
+          "text": "go?",
+          "start_ms": 239500,
+          "end_ms": 241200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 241200,
+      "end_ms": 245200,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 241200,
+          "end_ms": 242000,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 242000,
+          "end_ms": 242600,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 242600,
+          "end_ms": 243000,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 243000,
+          "end_ms": 243400,
+          "confidence": 0.9
+        },
+        {
+          "text": "run",
+          "start_ms": 243400,
+          "end_ms": 244400,
+          "confidence": 0.9
+        },
+        {
+          "text": "to?",
+          "start_ms": 244400,
+          "end_ms": 245200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 245200,
+      "end_ms": 249200,
+      "text_sk": "Kam inam by som šiel?",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 245200,
+          "end_ms": 246100,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 246100,
+          "end_ms": 246700,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 246700,
+          "end_ms": 247100,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 247100,
+          "end_ms": 247500,
+          "confidence": 0.9
+        },
+        {
+          "text": "go?",
+          "start_ms": 247500,
+          "end_ms": 249200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 249200,
+      "end_ms": 255100,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 249200,
+          "end_ms": 250000,
+          "confidence": 0.9
+        },
+        {
+          "text": "else",
+          "start_ms": 250000,
+          "end_ms": 250600,
+          "confidence": 0.9
+        },
+        {
+          "text": "would",
+          "start_ms": 250600,
+          "end_ms": 251000,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 251000,
+          "end_ms": 251400,
+          "confidence": 0.9
+        },
+        {
+          "text": "run",
+          "start_ms": 251400,
+          "end_ms": 252400,
+          "confidence": 0.9
+        },
+        {
+          "text": "to?",
+          "start_ms": 252400,
+          "end_ms": 255100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 304500,
+      "end_ms": 308100,
+      "text_sk": "Priveď ma k skale",
+      "words": [
+        {
+          "text": "Lead",
+          "start_ms": 304500,
+          "end_ms": 305800,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 305800,
+          "end_ms": 306200,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 306200,
+          "end_ms": 306600,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 306600,
+          "end_ms": 306900,
+          "confidence": 0.9
+        },
+        {
+          "text": "rock",
+          "start_ms": 306900,
+          "end_ms": 308100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 308100,
+      "end_ms": 312100,
+      "text_sk": "Vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 308100,
+          "end_ms": 309800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 309800,
+          "end_ms": 310500,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 310500,
+          "end_ms": 312100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I",
+      "start_ms": 312100,
+      "end_ms": 327100,
+      "text_sk": "Vyššej než ja, vyššej než ja, vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 312100,
+          "end_ms": 313800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 313800,
+          "end_ms": 314400,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 314400,
+          "end_ms": 315800,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 315800,
+          "end_ms": 317600,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 317600,
+          "end_ms": 318200,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 318200,
+          "end_ms": 319600,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 319600,
+          "end_ms": 321300,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 321300,
+          "end_ms": 321900,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 321900,
+          "end_ms": 323300,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 323300,
+          "end_ms": 325100,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 325100,
+          "end_ms": 325700,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 325700,
+          "end_ms": 327100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "So much stronger, so much greater, so much wiser, so much higher, so much stronger, so much greater, so much wiser, so much higher, so much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I",
+      "start_ms": 327100,
+      "end_ms": 358500,
+      "text_sk": "Okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 327100,
+          "end_ms": 327600,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 327600,
+          "end_ms": 328000,
+          "confidence": 0.9
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 328000,
+          "end_ms": 329200,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 329200,
+          "end_ms": 329600,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 329600,
+          "end_ms": 330000,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 330000,
+          "end_ms": 331100,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 331100,
+          "end_ms": 331500,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 331500,
+          "end_ms": 331900,
+          "confidence": 0.9
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 331900,
+          "end_ms": 333000,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 333000,
+          "end_ms": 333400,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 333400,
+          "end_ms": 333800,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher,",
+          "start_ms": 333800,
+          "end_ms": 335000,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 335000,
+          "end_ms": 335400,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 335400,
+          "end_ms": 335800,
+          "confidence": 0.9
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 335800,
+          "end_ms": 337000,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 337000,
+          "end_ms": 337400,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 337400,
+          "end_ms": 337800,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 337800,
+          "end_ms": 338900,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 338900,
+          "end_ms": 339300,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 339300,
+          "end_ms": 339700,
+          "confidence": 0.9
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 339700,
+          "end_ms": 340900,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 340900,
+          "end_ms": 341300,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 341300,
+          "end_ms": 341700,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher,",
+          "start_ms": 341700,
+          "end_ms": 342900,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 342900,
+          "end_ms": 343300,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 343300,
+          "end_ms": 343700,
+          "confidence": 0.9
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 343700,
+          "end_ms": 344900,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 344900,
+          "end_ms": 345300,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 345300,
+          "end_ms": 345700,
+          "confidence": 0.9
+        },
+        {
+          "text": "greater,",
+          "start_ms": 345700,
+          "end_ms": 346800,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 346800,
+          "end_ms": 347200,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 347200,
+          "end_ms": 347600,
+          "confidence": 0.9
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 347600,
+          "end_ms": 348800,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 348800,
+          "end_ms": 349200,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 349200,
+          "end_ms": 349600,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher,",
+          "start_ms": 349600,
+          "end_ms": 351100,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 351100,
+          "end_ms": 352800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 352800,
+          "end_ms": 353400,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 353400,
+          "end_ms": 355000,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 355000,
+          "end_ms": 356700,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 356700,
+          "end_ms": 357300,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 357300,
+          "end_ms": 358500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Higher than I, higher than I",
+      "start_ms": 399500,
+      "end_ms": 407000,
+      "text_sk": "Vyššej než ja, vyššej než ja",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 399500,
+          "end_ms": 401000,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 401000,
+          "end_ms": 401600,
+          "confidence": 0.9
+        },
+        {
+          "text": "I,",
+          "start_ms": 401600,
+          "end_ms": 403200,
+          "confidence": 0.9
+        },
+        {
+          "text": "higher",
+          "start_ms": 403200,
+          "end_ms": 404800,
+          "confidence": 0.9
+        },
+        {
+          "text": "than",
+          "start_ms": 404800,
+          "end_ms": 405400,
+          "confidence": 0.9
+        },
+        {
+          "text": "I",
+          "start_ms": 405400,
+          "end_ms": 407000,
+          "confidence": 0.9
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 64.8,
+    "line_count": 33,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 6477,
+      "candidatesTokenCount": 11019,
+      "totalTokenCount": 18655,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        },
+        {
+          "modality": "AUDIO",
+          "tokenCount": 6452
+        }
+      ],
+      "thoughtsTokenCount": 1159,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 16514860
+  }
+}

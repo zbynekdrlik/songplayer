@@ -1,0 +1,286 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\BpyP4HR8FBQ_vocal16k.wav",
+  "duration_ms": 430000,
+  "lines": [
+    {
+      "text": "In the quiet of the morning",
+      "start_ms": 14300,
+      "end_ms": 20000,
+      "text_sk": "In the quiet of the morning",
+      "words": null
+    },
+    {
+      "text": "When no one knows and no one needs to know",
+      "start_ms": 20000,
+      "end_ms": 27200,
+      "text_sk": "When no one knows and no one needs to know",
+      "words": null
+    },
+    {
+      "text": "You speak to me, You give me strength",
+      "start_ms": 27200,
+      "end_ms": 34000,
+      "text_sk": "You speak to me, You give me strength",
+      "words": null
+    },
+    {
+      "text": "There's nothing like the secret place",
+      "start_ms": 34000,
+      "end_ms": 40800,
+      "text_sk": "There's nothing like the secret place",
+      "words": null
+    },
+    {
+      "text": "Underground is where I'm taken",
+      "start_ms": 40800,
+      "end_ms": 47500,
+      "text_sk": "Underground is where I'm taken",
+      "words": null
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "start_ms": 47500,
+      "end_ms": 54500,
+      "text_sk": "My heart will rejoice in the hiddenness",
+      "words": null
+    },
+    {
+      "text": "Beyond the burial, there's a resurrection",
+      "start_ms": 54500,
+      "end_ms": 101200,
+      "text_sk": "Beyond the burial, there's a resurrection",
+      "words": null
+    },
+    {
+      "text": "Your will be done in me",
+      "start_ms": 101200,
+      "end_ms": 107500,
+      "text_sk": "Your will be done in me",
+      "words": null
+    },
+    {
+      "text": "In the stillness all around",
+      "start_ms": 108000,
+      "end_ms": 114800,
+      "text_sk": "In the stillness all around",
+      "words": null
+    },
+    {
+      "text": "You are working all the details out",
+      "start_ms": 114800,
+      "end_ms": 121500,
+      "text_sk": "You are working all the details out",
+      "words": null
+    },
+    {
+      "text": "What's in me will grow someday",
+      "start_ms": 121500,
+      "end_ms": 128000,
+      "text_sk": "What's in me will grow someday",
+      "words": null
+    },
+    {
+      "text": "I trust Your timing and Your ways",
+      "start_ms": 128000,
+      "end_ms": 134800,
+      "text_sk": "I trust Your timing and Your ways",
+      "words": null
+    },
+    {
+      "text": "Underground is where I'm taken",
+      "start_ms": 134800,
+      "end_ms": 141800,
+      "text_sk": "Underground is where I'm taken",
+      "words": null
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "start_ms": 141800,
+      "end_ms": 148500,
+      "text_sk": "My heart will rejoice in the hiddenness",
+      "words": null
+    },
+    {
+      "text": "Beyond the burial, there's a resurrection",
+      "start_ms": 148500,
+      "end_ms": 155000,
+      "text_sk": "Beyond the burial, there's a resurrection",
+      "words": null
+    },
+    {
+      "text": "Your will be done in me",
+      "start_ms": 155000,
+      "end_ms": 200500,
+      "text_sk": "Your will be done in me",
+      "words": null
+    },
+    {
+      "text": "Oh, let my roots go deep",
+      "start_ms": 200500,
+      "end_ms": 208000,
+      "text_sk": "Oh, let my roots go deep",
+      "words": null
+    },
+    {
+      "text": "And I will rise, I will rise",
+      "start_ms": 211000,
+      "end_ms": 217800,
+      "text_sk": "And I will rise, I will rise",
+      "words": null
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "start_ms": 217800,
+      "end_ms": 224800,
+      "text_sk": "He holds the time that I will rise",
+      "words": null
+    },
+    {
+      "text": "I will rise, I will rise",
+      "start_ms": 224800,
+      "end_ms": 231800,
+      "text_sk": "I will rise, I will rise",
+      "words": null
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "start_ms": 231800,
+      "end_ms": 238800,
+      "text_sk": "He holds the time that I will rise",
+      "words": null
+    },
+    {
+      "text": "I will rise, I will rise",
+      "start_ms": 238800,
+      "end_ms": 245800,
+      "text_sk": "I will rise, I will rise",
+      "words": null
+    },
+    {
+      "text": "God, through my life be lifted high",
+      "start_ms": 245800,
+      "end_ms": 252500,
+      "text_sk": "God, through my life be lifted high",
+      "words": null
+    },
+    {
+      "text": "I will rise, I will rise",
+      "start_ms": 252500,
+      "end_ms": 259500,
+      "text_sk": "I will rise, I will rise",
+      "words": null
+    },
+    {
+      "text": "God, through my life be lifted high",
+      "start_ms": 259500,
+      "end_ms": 305500,
+      "text_sk": "God, through my life be lifted high",
+      "words": null
+    },
+    {
+      "text": "Let Jesus rise in this place",
+      "start_ms": 305500,
+      "end_ms": 308800,
+      "text_sk": "Let Jesus rise in this place",
+      "words": null
+    },
+    {
+      "text": "Let Jesus rise through my life",
+      "start_ms": 308800,
+      "end_ms": 315500,
+      "text_sk": "Let Jesus rise through my life",
+      "words": null
+    },
+    {
+      "text": "Be glorified (sing it, sing it, sing it)",
+      "start_ms": 315500,
+      "end_ms": 318500,
+      "text_sk": "Be glorified (sing it, sing it, sing it)",
+      "words": null
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise",
+      "start_ms": 318500,
+      "end_ms": 325500,
+      "text_sk": "Let Jesus rise, Jesus rise",
+      "words": null
+    },
+    {
+      "text": "God, through my life, be glorified!",
+      "start_ms": 325500,
+      "end_ms": 332000,
+      "text_sk": "God, through my life, be glorified!",
+      "words": null
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise",
+      "start_ms": 332000,
+      "end_ms": 339000,
+      "text_sk": "Let Jesus rise, Jesus rise",
+      "words": null
+    },
+    {
+      "text": "God, through my life, be glorified!",
+      "start_ms": 339000,
+      "end_ms": 345500,
+      "text_sk": "God, through my life, be glorified!",
+      "words": null
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise",
+      "start_ms": 345500,
+      "end_ms": 352000,
+      "text_sk": "Let Jesus rise, Jesus rise",
+      "words": null
+    },
+    {
+      "text": "God, through my life, be glorified!",
+      "start_ms": 352000,
+      "end_ms": 358200,
+      "text_sk": "God, through my life, be glorified!",
+      "words": null
+    },
+    {
+      "text": "Sing it out! Rise, rise, rise, rise, rise, rise, rise!",
+      "start_ms": 358200,
+      "end_ms": 421000,
+      "text_sk": "Sing it out! Rise, rise, rise, rise, rise, rise, rise!",
+      "words": null
+    },
+    {
+      "text": "Jesus, Jesus, Jesus, Jesus!",
+      "start_ms": 421000,
+      "end_ms": 430000,
+      "text_sk": "Jesus, Jesus, Jesus, Jesus!",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 22.1,
+    "line_count": 36,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 6839,
+      "candidatesTokenCount": 2429,
+      "totalTokenCount": 11212,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        },
+        {
+          "modality": "AUDIO",
+          "tokenCount": 6814
+        }
+      ],
+      "thoughtsTokenCount": 1944,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 17442216
+  }
+}

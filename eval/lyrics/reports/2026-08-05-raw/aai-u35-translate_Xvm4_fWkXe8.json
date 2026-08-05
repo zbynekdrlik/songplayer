@@ -1,0 +1,3160 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\Xvm4_fWkXe8_vocal16k.wav",
+  "duration_ms": 274599,
+  "lines": [
+    {
+      "text": "Hey! Let's go! Hey! Yeah! You know what's crazy? I woke up this morning to grace and mercy. They just keep on going. My heart is beating, my eyes are wide open. Thank you, Lord. It's so amazing that someone so perfect would show me love when I didn't deserve it. You gave your life just to show me I'm worth it. Thank you, Lord. I'm living it. I know today the old is gone. It's history. It's a miracle what you did for me. Thank you, Lord. You made a way. Let's go! Yeah, thank you. I saw a mountain and I watched you move it. You took my place when no one else could do it. The least I can do is sing hallelujah. Thank you, Lord. Y'all go! I'm taking it. I'm using it. The old is gone, it's history. It's a miracle, what you did for me. Thank you, Lord, you made a way. I'm living it, I'm living it. I knew today, I knew today. The old is gone, the old is gone. It's history, it's history. It's a miracle, what you did for me. Thank you, Lord, you made a way. If he's been a waymaker, a chain breaker, I need you to Praise tonight. Every single debt I owe, you canceled it. Every sin I ever chose, you covered it. When the mark was getting close, you handled it. You stepped right in and finished it. Every single debt I owe, you canceled it. Every sin I ever chose, you covered it. When the mark was getting close, you handled it. You never fail, you never wear. Every single word you spoke is coming true. Every line the devil told must bow to you. To me it's impossible, but not for you. It's what you do. Let's go! When you keep on doing it, when you keep on doing it, hey, when you keep on doing it. Can you keep on doing it? Oh, sing it out! I'm living it. I do today. See all this blood. It's history made. It's a miracle what you did for me. You made a way. I'm living it. I'm living it. I do today. I do today. See all this glory. See all this blood. It's history made. It's history made. I'm a miracle. It's a miracle. You made a way. And you keep on doing it. Yeah, so to keep on doing it. And you keep on doing it. Keep on doing it. And you keep on doing it. Yeah, keep on doing it. And you keep on doing it. Keep on doing it. Keep on doing it. Keep on doing it. Keep on doing it. Keep on, keep on, keep on. Keep on doing it. Keep on, keep on, keep on. Keep on doing it. Keep on, keep on, keep on. Keep on, keep on, keep on. Keep on, keep on, keep on. Keep on, keep on, keep on. Keep on doing it. Keep on, keep on, keep on. Keep on doing it. Keep on, keep on, keep on. You made your way. Hallelujah. Hallelujah! Yeah!",
+      "start_ms": 3260,
+      "end_ms": 274599,
+      "text_sk": "Choďme! Áno! Viete, čo je šialené? Dnes ráno som sa zobudil na milosť a zľutovanie. Stále pokračujú. Moje srdce bije, moje oči sú doširoka otvorené. Ďakujem, Pane. Je neuveriteľné, že niekto tak dokonalý by mi preukázal lásku, keď som si ju nezaslúžil. Dal si svoj život, len aby si mi ukázal, že za to stojím. Ďakujem, Pane. Žijem to. Viem, že dnes staré je preč. Je to história. Je to zázrak, čo si pre mňa urobil. Ďakujem, Pane. Vytvoril si cestu. Choďme! Áno, ďakujem. Videl som horu a videl som, ako si ju pohol. Zobral si moje miesto, keď to nikto iný nedokázal. Najmenej, čo môžem urobiť, je spievať aleluja. Ďakujem, Pane. Všetci choďte! Beriem si to. Používam to. Staré je preč, je to história. Je to zázrak, čo si pre mňa urobil. Ďakujem, Pane, vytvoril si cestu. Žijem to, žijem to. Vedel som dnes, vedel som dnes. Staré je preč, staré je preč. Je to história, je to história. Je to zázrak, čo si pre mňa urobil. Ďakujem, Pane, vytvoril si cestu. Ak si bol ten, kto vytvára cesty, kto láme reťaze, potrebujem, aby ste dnes večer chválili. Každý dlh, ktorý som mal, si zrušil. Každý hriech, ktorý som si kedy vybral, si pokryl. Keď sa značka blížila, zvládol si to. Vstúpil si priamo a dokončil si to. Každý dlh, ktorý som mal, si zrušil. Každý hriech, ktorý som si kedy vybral, si pokryl. Keď sa značka blížila, zvládol si to. Nikdy nesklameš, nikdy sa neunavíš. Každé slovo, ktoré si povedal, sa napĺňa. Každá lož, ktorú diabol povedal, sa musí pred tebou skloniť. Pre mňa je to nemožné, ale nie pre teba. To je to, čo robíš. Choďme! Keď to stále robíš, keď to stále robíš, hej, keď to stále robíš. Môžeš to stále robiť? Ó, spievajte to! Žijem to. Dnes to robím. Vidíte všetku tú krv. Je to história. Je to zázrak, čo si pre mňa urobil. Vytvoril si cestu. Žijem to. Žijem to. Dnes to robím. Dnes to robím. Vidíte všetku tú slávu. Vidíte všetku tú krv. Je to história. Je to história. Som zázrak. Je to zázrak. Vytvoril si cestu. A ty to stále robíš. Áno, takže to stále robíš. A ty to stále robíš. Stále to robíš. A ty to stále robíš. Áno, stále to robíš. A ty to stále robíš. Stále to robíš. Stále to robíš. Stále to robíš. Stále to robíš. Stále, stále, stále. Stále to robíš. Stále, stále, stále. Stále to robíš. Stále, stále, stále. Stále, stále, stále. Stále, stále, stále. Stále, stále, stále. Stále to robíš. Stále, stále, stále. Stále to robíš. Stále, stále, stále. Vytvoril si svoju cestu. Aleluja. Aleluja! Áno!",
+      "words": [
+        {
+          "text": "Hey!",
+          "start_ms": 3260,
+          "end_ms": 3308,
+          "confidence": 0.64608526
+        },
+        {
+          "text": "Let's",
+          "start_ms": 3695,
+          "end_ms": 4324,
+          "confidence": 0.9737329
+        },
+        {
+          "text": "go!",
+          "start_ms": 4324,
+          "end_ms": 4647,
+          "confidence": 0.9786864
+        },
+        {
+          "text": "Hey!",
+          "start_ms": 6017,
+          "end_ms": 6339,
+          "confidence": 0.61704546
+        },
+        {
+          "text": "Yeah!",
+          "start_ms": 7952,
+          "end_ms": 10766,
+          "confidence": 0.5930559
+        },
+        {
+          "text": "You",
+          "start_ms": 12787,
+          "end_ms": 12884,
+          "confidence": 0.46865952
+        },
+        {
+          "text": "know",
+          "start_ms": 12884,
+          "end_ms": 13272,
+          "confidence": 0.9995623
+        },
+        {
+          "text": "what's",
+          "start_ms": 13272,
+          "end_ms": 13450,
+          "confidence": 0.9920264
+        },
+        {
+          "text": "crazy?",
+          "start_ms": 13450,
+          "end_ms": 13984,
+          "confidence": 0.991884
+        },
+        {
+          "text": "I",
+          "start_ms": 14324,
+          "end_ms": 14372,
+          "confidence": 0.99926573
+        },
+        {
+          "text": "woke",
+          "start_ms": 14485,
+          "end_ms": 14890,
+          "confidence": 0.9999523
+        },
+        {
+          "text": "up",
+          "start_ms": 14890,
+          "end_ms": 15148,
+          "confidence": 0.9999509
+        },
+        {
+          "text": "this",
+          "start_ms": 15148,
+          "end_ms": 15440,
+          "confidence": 0.9999771
+        },
+        {
+          "text": "morning",
+          "start_ms": 15440,
+          "end_ms": 15973,
+          "confidence": 0.9982849
+        },
+        {
+          "text": "to",
+          "start_ms": 16523,
+          "end_ms": 16765,
+          "confidence": 0.96128273
+        },
+        {
+          "text": "grace",
+          "start_ms": 16765,
+          "end_ms": 17186,
+          "confidence": 0.9978631
+        },
+        {
+          "text": "and",
+          "start_ms": 17234,
+          "end_ms": 17315,
+          "confidence": 0.9998425
+        },
+        {
+          "text": "mercy.",
+          "start_ms": 17315,
+          "end_ms": 17784,
+          "confidence": 0.8795012
+        },
+        {
+          "text": "They",
+          "start_ms": 18043,
+          "end_ms": 18221,
+          "confidence": 0.99629337
+        },
+        {
+          "text": "just",
+          "start_ms": 18221,
+          "end_ms": 18625,
+          "confidence": 0.9998832
+        },
+        {
+          "text": "keep",
+          "start_ms": 18625,
+          "end_ms": 18964,
+          "confidence": 0.99972063
+        },
+        {
+          "text": "on",
+          "start_ms": 19013,
+          "end_ms": 19256,
+          "confidence": 0.9996099
+        },
+        {
+          "text": "going.",
+          "start_ms": 19256,
+          "end_ms": 19805,
+          "confidence": 0.9790865
+        },
+        {
+          "text": "My",
+          "start_ms": 20339,
+          "end_ms": 20630,
+          "confidence": 0.99919814
+        },
+        {
+          "text": "heart",
+          "start_ms": 20646,
+          "end_ms": 20873,
+          "confidence": 0.99996173
+        },
+        {
+          "text": "is",
+          "start_ms": 21034,
+          "end_ms": 21099,
+          "confidence": 0.9989305
+        },
+        {
+          "text": "beating,",
+          "start_ms": 21277,
+          "end_ms": 21665,
+          "confidence": 0.9338858
+        },
+        {
+          "text": "my",
+          "start_ms": 21924,
+          "end_ms": 22166,
+          "confidence": 0.99860376
+        },
+        {
+          "text": "eyes",
+          "start_ms": 22247,
+          "end_ms": 22312,
+          "confidence": 0.99889
+        },
+        {
+          "text": "are",
+          "start_ms": 22570,
+          "end_ms": 22845,
+          "confidence": 0.99527067
+        },
+        {
+          "text": "wide",
+          "start_ms": 22894,
+          "end_ms": 23104,
+          "confidence": 0.99984574
+        },
+        {
+          "text": "open.",
+          "start_ms": 23152,
+          "end_ms": 23767,
+          "confidence": 0.99840236
+        },
+        {
+          "text": "Thank",
+          "start_ms": 24917,
+          "end_ms": 25000,
+          "confidence": 0.99217904
+        },
+        {
+          "text": "you,",
+          "start_ms": 25000,
+          "end_ms": 25247,
+          "confidence": 0.98520535
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 25906,
+          "end_ms": 26120,
+          "confidence": 0.93108875
+        },
+        {
+          "text": "It's",
+          "start_ms": 28101,
+          "end_ms": 28198,
+          "confidence": 0.7191897
+        },
+        {
+          "text": "so",
+          "start_ms": 28246,
+          "end_ms": 28569,
+          "confidence": 0.9999478
+        },
+        {
+          "text": "amazing",
+          "start_ms": 28731,
+          "end_ms": 29426,
+          "confidence": 0.9999387
+        },
+        {
+          "text": "that",
+          "start_ms": 29539,
+          "end_ms": 29716,
+          "confidence": 0.98750186
+        },
+        {
+          "text": "someone",
+          "start_ms": 29716,
+          "end_ms": 30314,
+          "confidence": 0.9997111
+        },
+        {
+          "text": "so",
+          "start_ms": 30346,
+          "end_ms": 30750,
+          "confidence": 0.9884409
+        },
+        {
+          "text": "perfect",
+          "start_ms": 30750,
+          "end_ms": 31364,
+          "confidence": 0.99998987
+        },
+        {
+          "text": "would",
+          "start_ms": 31946,
+          "end_ms": 32091,
+          "confidence": 0.92999834
+        },
+        {
+          "text": "show",
+          "start_ms": 32107,
+          "end_ms": 32446,
+          "confidence": 0.9997999
+        },
+        {
+          "text": "me",
+          "start_ms": 32608,
+          "end_ms": 33254,
+          "confidence": 0.99968374
+        },
+        {
+          "text": "love",
+          "start_ms": 33416,
+          "end_ms": 33723,
+          "confidence": 0.9999019
+        },
+        {
+          "text": "when",
+          "start_ms": 33723,
+          "end_ms": 33868,
+          "confidence": 0.9998752
+        },
+        {
+          "text": "I",
+          "start_ms": 33900,
+          "end_ms": 33916,
+          "confidence": 0.9999188
+        },
+        {
+          "text": "didn't",
+          "start_ms": 33916,
+          "end_ms": 34449,
+          "confidence": 0.9996994
+        },
+        {
+          "text": "deserve",
+          "start_ms": 34449,
+          "end_ms": 34740,
+          "confidence": 0.999572
+        },
+        {
+          "text": "it.",
+          "start_ms": 35031,
+          "end_ms": 35225,
+          "confidence": 0.9993393
+        },
+        {
+          "text": "You",
+          "start_ms": 35839,
+          "end_ms": 36000,
+          "confidence": 0.99990416
+        },
+        {
+          "text": "gave",
+          "start_ms": 36000,
+          "end_ms": 36372,
+          "confidence": 0.99825686
+        },
+        {
+          "text": "your",
+          "start_ms": 36372,
+          "end_ms": 36485,
+          "confidence": 0.97547066
+        },
+        {
+          "text": "life",
+          "start_ms": 36485,
+          "end_ms": 36889,
+          "confidence": 0.9991084
+        },
+        {
+          "text": "just",
+          "start_ms": 36889,
+          "end_ms": 37180,
+          "confidence": 0.9997559
+        },
+        {
+          "text": "to",
+          "start_ms": 37180,
+          "end_ms": 37228,
+          "confidence": 0.9999746
+        },
+        {
+          "text": "show",
+          "start_ms": 37277,
+          "end_ms": 37634,
+          "confidence": 0.9999939
+        },
+        {
+          "text": "me",
+          "start_ms": 37780,
+          "end_ms": 38202,
+          "confidence": 0.9999894
+        },
+        {
+          "text": "I'm",
+          "start_ms": 38493,
+          "end_ms": 38753,
+          "confidence": 0.9985975
+        },
+        {
+          "text": "worth",
+          "start_ms": 38753,
+          "end_ms": 38899,
+          "confidence": 0.9984036
+        },
+        {
+          "text": "it.",
+          "start_ms": 38899,
+          "end_ms": 38948,
+          "confidence": 0.99884915
+        },
+        {
+          "text": "Thank",
+          "start_ms": 39305,
+          "end_ms": 40359,
+          "confidence": 0.9995796
+        },
+        {
+          "text": "you,",
+          "start_ms": 40359,
+          "end_ms": 40521,
+          "confidence": 0.98818505
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 41673,
+          "end_ms": 42371,
+          "confidence": 0.9483823
+        },
+        {
+          "text": "I'm",
+          "start_ms": 44092,
+          "end_ms": 44646,
+          "confidence": 0.9953154
+        },
+        {
+          "text": "living",
+          "start_ms": 44663,
+          "end_ms": 45282,
+          "confidence": 0.9928877
+        },
+        {
+          "text": "it.",
+          "start_ms": 45315,
+          "end_ms": 45641,
+          "confidence": 0.8364499
+        },
+        {
+          "text": "I",
+          "start_ms": 45951,
+          "end_ms": 46114,
+          "confidence": 0.972516
+        },
+        {
+          "text": "know",
+          "start_ms": 46114,
+          "end_ms": 46293,
+          "confidence": 0.7575033
+        },
+        {
+          "text": "today",
+          "start_ms": 46293,
+          "end_ms": 46701,
+          "confidence": 0.9994288
+        },
+        {
+          "text": "the",
+          "start_ms": 47825,
+          "end_ms": 48021,
+          "confidence": 0.49978578
+        },
+        {
+          "text": "old",
+          "start_ms": 48086,
+          "end_ms": 48331,
+          "confidence": 0.6602649
+        },
+        {
+          "text": "is",
+          "start_ms": 48331,
+          "end_ms": 48543,
+          "confidence": 0.99736303
+        },
+        {
+          "text": "gone.",
+          "start_ms": 48559,
+          "end_ms": 49032,
+          "confidence": 0.8986184
+        },
+        {
+          "text": "It's",
+          "start_ms": 49920,
+          "end_ms": 50000,
+          "confidence": 0.81860805
+        },
+        {
+          "text": "history.",
+          "start_ms": 50000,
+          "end_ms": 50647,
+          "confidence": 0.9116043
+        },
+        {
+          "text": "It's",
+          "start_ms": 51343,
+          "end_ms": 51650,
+          "confidence": 0.999592
+        },
+        {
+          "text": "a",
+          "start_ms": 51650,
+          "end_ms": 51666,
+          "confidence": 0.9985947
+        },
+        {
+          "text": "miracle",
+          "start_ms": 51666,
+          "end_ms": 53268,
+          "confidence": 0.99998224
+        },
+        {
+          "text": "what",
+          "start_ms": 53268,
+          "end_ms": 53575,
+          "confidence": 0.9948519
+        },
+        {
+          "text": "you",
+          "start_ms": 53575,
+          "end_ms": 53672,
+          "confidence": 0.99434847
+        },
+        {
+          "text": "did",
+          "start_ms": 53672,
+          "end_ms": 53963,
+          "confidence": 0.9997012
+        },
+        {
+          "text": "for",
+          "start_ms": 53996,
+          "end_ms": 54255,
+          "confidence": 0.9987594
+        },
+        {
+          "text": "me.",
+          "start_ms": 54255,
+          "end_ms": 54336,
+          "confidence": 0.99965346
+        },
+        {
+          "text": "Thank",
+          "start_ms": 54885,
+          "end_ms": 55355,
+          "confidence": 0.99904007
+        },
+        {
+          "text": "you,",
+          "start_ms": 55355,
+          "end_ms": 55419,
+          "confidence": 0.9969385
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 55452,
+          "end_ms": 55710,
+          "confidence": 0.9980581
+        },
+        {
+          "text": "You",
+          "start_ms": 55775,
+          "end_ms": 55969,
+          "confidence": 0.99818975
+        },
+        {
+          "text": "made",
+          "start_ms": 55969,
+          "end_ms": 56099,
+          "confidence": 0.99826545
+        },
+        {
+          "text": "a",
+          "start_ms": 56099,
+          "end_ms": 56147,
+          "confidence": 0.9982169
+        },
+        {
+          "text": "way.",
+          "start_ms": 56147,
+          "end_ms": 56438,
+          "confidence": 0.9975634
+        },
+        {
+          "text": "Let's",
+          "start_ms": 56778,
+          "end_ms": 56972,
+          "confidence": 0.96758693
+        },
+        {
+          "text": "go!",
+          "start_ms": 56972,
+          "end_ms": 57134,
+          "confidence": 0.8463224
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 59360,
+          "end_ms": 60215,
+          "confidence": 0.35932398
+        },
+        {
+          "text": "thank",
+          "start_ms": 60538,
+          "end_ms": 61199,
+          "confidence": 0.89363587
+        },
+        {
+          "text": "you.",
+          "start_ms": 61958,
+          "end_ms": 65121,
+          "confidence": 0.8492825
+        },
+        {
+          "text": "I",
+          "start_ms": 66558,
+          "end_ms": 66606,
+          "confidence": 0.8615114
+        },
+        {
+          "text": "saw",
+          "start_ms": 66654,
+          "end_ms": 66929,
+          "confidence": 0.99802446
+        },
+        {
+          "text": "a",
+          "start_ms": 67058,
+          "end_ms": 67219,
+          "confidence": 0.847581
+        },
+        {
+          "text": "mountain",
+          "start_ms": 67219,
+          "end_ms": 67994,
+          "confidence": 0.99991345
+        },
+        {
+          "text": "and",
+          "start_ms": 68091,
+          "end_ms": 68333,
+          "confidence": 0.9760631
+        },
+        {
+          "text": "I",
+          "start_ms": 68333,
+          "end_ms": 68575,
+          "confidence": 0.9996363
+        },
+        {
+          "text": "watched",
+          "start_ms": 68640,
+          "end_ms": 68881,
+          "confidence": 0.9997278
+        },
+        {
+          "text": "you",
+          "start_ms": 68898,
+          "end_ms": 69043,
+          "confidence": 0.9854124
+        },
+        {
+          "text": "move",
+          "start_ms": 69140,
+          "end_ms": 69640,
+          "confidence": 0.99746907
+        },
+        {
+          "text": "it.",
+          "start_ms": 69640,
+          "end_ms": 69704,
+          "confidence": 0.9967363
+        },
+        {
+          "text": "You",
+          "start_ms": 70285,
+          "end_ms": 70511,
+          "confidence": 0.99154925
+        },
+        {
+          "text": "took",
+          "start_ms": 70511,
+          "end_ms": 70736,
+          "confidence": 0.9999546
+        },
+        {
+          "text": "my",
+          "start_ms": 70946,
+          "end_ms": 71027,
+          "confidence": 0.99995005
+        },
+        {
+          "text": "place",
+          "start_ms": 71027,
+          "end_ms": 71398,
+          "confidence": 0.99972695
+        },
+        {
+          "text": "when",
+          "start_ms": 71398,
+          "end_ms": 71704,
+          "confidence": 0.9618373
+        },
+        {
+          "text": "no",
+          "start_ms": 71736,
+          "end_ms": 71994,
+          "confidence": 0.9998197
+        },
+        {
+          "text": "one",
+          "start_ms": 72043,
+          "end_ms": 72107,
+          "confidence": 0.9999691
+        },
+        {
+          "text": "else",
+          "start_ms": 72365,
+          "end_ms": 72640,
+          "confidence": 0.99983966
+        },
+        {
+          "text": "could",
+          "start_ms": 72640,
+          "end_ms": 72833,
+          "confidence": 0.99901044
+        },
+        {
+          "text": "do",
+          "start_ms": 73011,
+          "end_ms": 73075,
+          "confidence": 0.99986696
+        },
+        {
+          "text": "it.",
+          "start_ms": 73091,
+          "end_ms": 73995,
+          "confidence": 0.9986265
+        },
+        {
+          "text": "The",
+          "start_ms": 74220,
+          "end_ms": 74317,
+          "confidence": 0.9866121
+        },
+        {
+          "text": "least",
+          "start_ms": 74317,
+          "end_ms": 74785,
+          "confidence": 0.9995333
+        },
+        {
+          "text": "I",
+          "start_ms": 74785,
+          "end_ms": 74801,
+          "confidence": 0.99152255
+        },
+        {
+          "text": "can",
+          "start_ms": 74801,
+          "end_ms": 75269,
+          "confidence": 0.9985085
+        },
+        {
+          "text": "do",
+          "start_ms": 75269,
+          "end_ms": 75527,
+          "confidence": 0.9995906
+        },
+        {
+          "text": "is",
+          "start_ms": 75672,
+          "end_ms": 75704,
+          "confidence": 0.99926585
+        },
+        {
+          "text": "sing",
+          "start_ms": 75704,
+          "end_ms": 76059,
+          "confidence": 0.8717425
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 76156,
+          "end_ms": 77124,
+          "confidence": 0.9957104
+        },
+        {
+          "text": "Thank",
+          "start_ms": 78760,
+          "end_ms": 79166,
+          "confidence": 0.9651245
+        },
+        {
+          "text": "you,",
+          "start_ms": 79182,
+          "end_ms": 79378,
+          "confidence": 0.9782889
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 79768,
+          "end_ms": 80305,
+          "confidence": 0.9855161
+        },
+        {
+          "text": "Y'all",
+          "start_ms": 80890,
+          "end_ms": 81329,
+          "confidence": 0.6860126
+        },
+        {
+          "text": "go!",
+          "start_ms": 81329,
+          "end_ms": 81655,
+          "confidence": 0.8191551
+        },
+        {
+          "text": "I'm",
+          "start_ms": 82435,
+          "end_ms": 82614,
+          "confidence": 0.857781
+        },
+        {
+          "text": "taking",
+          "start_ms": 82614,
+          "end_ms": 83151,
+          "confidence": 0.38854784
+        },
+        {
+          "text": "it.",
+          "start_ms": 83167,
+          "end_ms": 83688,
+          "confidence": 0.49425313
+        },
+        {
+          "text": "I'm",
+          "start_ms": 84387,
+          "end_ms": 84615,
+          "confidence": 0.49442583
+        },
+        {
+          "text": "using",
+          "start_ms": 84615,
+          "end_ms": 85022,
+          "confidence": 0.6630262
+        },
+        {
+          "text": "it.",
+          "start_ms": 85119,
+          "end_ms": 85200,
+          "confidence": 0.98589796
+        },
+        {
+          "text": "The",
+          "start_ms": 86020,
+          "end_ms": 86500,
+          "confidence": 0.82762057
+        },
+        {
+          "text": "old",
+          "start_ms": 86500,
+          "end_ms": 86700,
+          "confidence": 0.99509287
+        },
+        {
+          "text": "is",
+          "start_ms": 86700,
+          "end_ms": 87080,
+          "confidence": 0.9988943
+        },
+        {
+          "text": "gone,",
+          "start_ms": 87080,
+          "end_ms": 87980,
+          "confidence": 0.76749545
+        },
+        {
+          "text": "it's",
+          "start_ms": 87980,
+          "end_ms": 88420,
+          "confidence": 0.75616175
+        },
+        {
+          "text": "history.",
+          "start_ms": 88420,
+          "end_ms": 89620,
+          "confidence": 0.98723173
+        },
+        {
+          "text": "It's",
+          "start_ms": 89860,
+          "end_ms": 90120,
+          "confidence": 0.9759904
+        },
+        {
+          "text": "a",
+          "start_ms": 90120,
+          "end_ms": 90260,
+          "confidence": 0.9983334
+        },
+        {
+          "text": "miracle,",
+          "start_ms": 90260,
+          "end_ms": 91540,
+          "confidence": 0.89555776
+        },
+        {
+          "text": "what",
+          "start_ms": 91540,
+          "end_ms": 92020,
+          "confidence": 0.89431846
+        },
+        {
+          "text": "you",
+          "start_ms": 92020,
+          "end_ms": 92200,
+          "confidence": 0.98861885
+        },
+        {
+          "text": "did",
+          "start_ms": 92200,
+          "end_ms": 92460,
+          "confidence": 0.85091555
+        },
+        {
+          "text": "for",
+          "start_ms": 92460,
+          "end_ms": 92700,
+          "confidence": 0.98257625
+        },
+        {
+          "text": "me.",
+          "start_ms": 92700,
+          "end_ms": 93350,
+          "confidence": 0.99581736
+        },
+        {
+          "text": "Thank",
+          "start_ms": 93800,
+          "end_ms": 94240,
+          "confidence": 0.9777468
+        },
+        {
+          "text": "you,",
+          "start_ms": 94240,
+          "end_ms": 95080,
+          "confidence": 0.99652374
+        },
+        {
+          "text": "Lord,",
+          "start_ms": 95080,
+          "end_ms": 95500,
+          "confidence": 0.9825418
+        },
+        {
+          "text": "you",
+          "start_ms": 95500,
+          "end_ms": 95740,
+          "confidence": 0.9867071
+        },
+        {
+          "text": "made",
+          "start_ms": 95740,
+          "end_ms": 96020,
+          "confidence": 0.9977099
+        },
+        {
+          "text": "a",
+          "start_ms": 96020,
+          "end_ms": 96360,
+          "confidence": 0.9976464
+        },
+        {
+          "text": "way.",
+          "start_ms": 96360,
+          "end_ms": 96940,
+          "confidence": 0.9988643
+        },
+        {
+          "text": "I'm",
+          "start_ms": 96940,
+          "end_ms": 97120,
+          "confidence": 0.97888887
+        },
+        {
+          "text": "living",
+          "start_ms": 97120,
+          "end_ms": 97420,
+          "confidence": 0.9537253
+        },
+        {
+          "text": "it,",
+          "start_ms": 97420,
+          "end_ms": 97800,
+          "confidence": 0.9711549
+        },
+        {
+          "text": "I'm",
+          "start_ms": 97800,
+          "end_ms": 98000,
+          "confidence": 0.9995616
+        },
+        {
+          "text": "living",
+          "start_ms": 98000,
+          "end_ms": 98380,
+          "confidence": 0.9998965
+        },
+        {
+          "text": "it.",
+          "start_ms": 98380,
+          "end_ms": 99330,
+          "confidence": 0.93868595
+        },
+        {
+          "text": "I",
+          "start_ms": 99700,
+          "end_ms": 99840,
+          "confidence": 0.7726553
+        },
+        {
+          "text": "knew",
+          "start_ms": 99840,
+          "end_ms": 99840,
+          "confidence": 0.5380049
+        },
+        {
+          "text": "today,",
+          "start_ms": 99840,
+          "end_ms": 99840,
+          "confidence": 0.9736244
+        },
+        {
+          "text": "I",
+          "start_ms": 99840,
+          "end_ms": 99840,
+          "confidence": 0.9945135
+        },
+        {
+          "text": "knew",
+          "start_ms": 99840,
+          "end_ms": 100080,
+          "confidence": 0.9996923
+        },
+        {
+          "text": "today.",
+          "start_ms": 100080,
+          "end_ms": 100430,
+          "confidence": 0.9837898
+        },
+        {
+          "text": "The",
+          "start_ms": 100620,
+          "end_ms": 100940,
+          "confidence": 0.99658537
+        },
+        {
+          "text": "old",
+          "start_ms": 100940,
+          "end_ms": 101100,
+          "confidence": 0.9999596
+        },
+        {
+          "text": "is",
+          "start_ms": 101100,
+          "end_ms": 101420,
+          "confidence": 0.9999665
+        },
+        {
+          "text": "gone,",
+          "start_ms": 101420,
+          "end_ms": 101840,
+          "confidence": 0.99891317
+        },
+        {
+          "text": "the",
+          "start_ms": 101840,
+          "end_ms": 101840,
+          "confidence": 0.9740441
+        },
+        {
+          "text": "old",
+          "start_ms": 101840,
+          "end_ms": 102020,
+          "confidence": 0.9999782
+        },
+        {
+          "text": "is",
+          "start_ms": 102020,
+          "end_ms": 102360,
+          "confidence": 0.99998593
+        },
+        {
+          "text": "gone.",
+          "start_ms": 102360,
+          "end_ms": 102500,
+          "confidence": 0.76160157
+        },
+        {
+          "text": "It's",
+          "start_ms": 102500,
+          "end_ms": 102880,
+          "confidence": 0.9953016
+        },
+        {
+          "text": "history,",
+          "start_ms": 102880,
+          "end_ms": 103400,
+          "confidence": 0.9935267
+        },
+        {
+          "text": "it's",
+          "start_ms": 103400,
+          "end_ms": 103840,
+          "confidence": 0.9995502
+        },
+        {
+          "text": "history.",
+          "start_ms": 103840,
+          "end_ms": 104620,
+          "confidence": 0.9005892
+        },
+        {
+          "text": "It's",
+          "start_ms": 104760,
+          "end_ms": 105460,
+          "confidence": 0.94230103
+        },
+        {
+          "text": "a",
+          "start_ms": 105460,
+          "end_ms": 105480,
+          "confidence": 0.98523766
+        },
+        {
+          "text": "miracle,",
+          "start_ms": 105480,
+          "end_ms": 106380,
+          "confidence": 0.9901244
+        },
+        {
+          "text": "what",
+          "start_ms": 106380,
+          "end_ms": 106380,
+          "confidence": 0.9514136
+        },
+        {
+          "text": "you",
+          "start_ms": 106380,
+          "end_ms": 106600,
+          "confidence": 0.99995625
+        },
+        {
+          "text": "did",
+          "start_ms": 106600,
+          "end_ms": 106880,
+          "confidence": 0.99993026
+        },
+        {
+          "text": "for",
+          "start_ms": 106880,
+          "end_ms": 107020,
+          "confidence": 0.9988844
+        },
+        {
+          "text": "me.",
+          "start_ms": 107020,
+          "end_ms": 107720,
+          "confidence": 0.9998149
+        },
+        {
+          "text": "Thank",
+          "start_ms": 108420,
+          "end_ms": 108900,
+          "confidence": 0.99360585
+        },
+        {
+          "text": "you,",
+          "start_ms": 108900,
+          "end_ms": 110000,
+          "confidence": 0.9998307
+        },
+        {
+          "text": "Lord,",
+          "start_ms": 110000,
+          "end_ms": 110840,
+          "confidence": 0.9990256
+        },
+        {
+          "text": "you",
+          "start_ms": 110840,
+          "end_ms": 111080,
+          "confidence": 0.99977463
+        },
+        {
+          "text": "made",
+          "start_ms": 111080,
+          "end_ms": 111380,
+          "confidence": 0.99986815
+        },
+        {
+          "text": "a",
+          "start_ms": 111380,
+          "end_ms": 111800,
+          "confidence": 0.9999026
+        },
+        {
+          "text": "way.",
+          "start_ms": 111800,
+          "end_ms": 113000,
+          "confidence": 0.9997775
+        },
+        {
+          "text": "If",
+          "start_ms": 113960,
+          "end_ms": 114260,
+          "confidence": 0.9974444
+        },
+        {
+          "text": "he's",
+          "start_ms": 114260,
+          "end_ms": 114440,
+          "confidence": 0.9731324
+        },
+        {
+          "text": "been",
+          "start_ms": 114440,
+          "end_ms": 114660,
+          "confidence": 0.999845
+        },
+        {
+          "text": "a",
+          "start_ms": 114660,
+          "end_ms": 114860,
+          "confidence": 0.99933475
+        },
+        {
+          "text": "waymaker,",
+          "start_ms": 114860,
+          "end_ms": 115410,
+          "confidence": 0.90401495
+        },
+        {
+          "text": "a",
+          "start_ms": 115880,
+          "end_ms": 116000,
+          "confidence": 0.99958426
+        },
+        {
+          "text": "chain",
+          "start_ms": 116000,
+          "end_ms": 116020,
+          "confidence": 0.9993523
+        },
+        {
+          "text": "breaker,",
+          "start_ms": 116020,
+          "end_ms": 116040,
+          "confidence": 0.9804721
+        },
+        {
+          "text": "I",
+          "start_ms": 116040,
+          "end_ms": 116060,
+          "confidence": 0.99332136
+        },
+        {
+          "text": "need",
+          "start_ms": 116060,
+          "end_ms": 116080,
+          "confidence": 0.9600129
+        },
+        {
+          "text": "you",
+          "start_ms": 116080,
+          "end_ms": 116100,
+          "confidence": 0.90206516
+        },
+        {
+          "text": "to",
+          "start_ms": 116100,
+          "end_ms": 116120,
+          "confidence": 0.99154294
+        },
+        {
+          "text": "Praise",
+          "start_ms": 117920,
+          "end_ms": 118210,
+          "confidence": 0.71059006
+        },
+        {
+          "text": "tonight.",
+          "start_ms": 118210,
+          "end_ms": 118694,
+          "confidence": 0.6536902
+        },
+        {
+          "text": "Every",
+          "start_ms": 120049,
+          "end_ms": 120436,
+          "confidence": 0.99786526
+        },
+        {
+          "text": "single",
+          "start_ms": 120436,
+          "end_ms": 120968,
+          "confidence": 0.9986349
+        },
+        {
+          "text": "debt",
+          "start_ms": 121098,
+          "end_ms": 121501,
+          "confidence": 0.9923165
+        },
+        {
+          "text": "I",
+          "start_ms": 121501,
+          "end_ms": 121662,
+          "confidence": 0.9976497
+        },
+        {
+          "text": "owe,",
+          "start_ms": 121662,
+          "end_ms": 121840,
+          "confidence": 0.91842836
+        },
+        {
+          "text": "you",
+          "start_ms": 122453,
+          "end_ms": 122630,
+          "confidence": 0.9310376
+        },
+        {
+          "text": "canceled",
+          "start_ms": 122630,
+          "end_ms": 123195,
+          "confidence": 0.7060165
+        },
+        {
+          "text": "it.",
+          "start_ms": 123195,
+          "end_ms": 123501,
+          "confidence": 0.99788034
+        },
+        {
+          "text": "Every",
+          "start_ms": 123985,
+          "end_ms": 124243,
+          "confidence": 0.996917
+        },
+        {
+          "text": "sin",
+          "start_ms": 124243,
+          "end_ms": 124614,
+          "confidence": 0.99938166
+        },
+        {
+          "text": "I",
+          "start_ms": 124647,
+          "end_ms": 124711,
+          "confidence": 0.9998204
+        },
+        {
+          "text": "ever",
+          "start_ms": 124792,
+          "end_ms": 125211,
+          "confidence": 0.99850744
+        },
+        {
+          "text": "chose,",
+          "start_ms": 125211,
+          "end_ms": 125905,
+          "confidence": 0.99883866
+        },
+        {
+          "text": "you",
+          "start_ms": 126324,
+          "end_ms": 126502,
+          "confidence": 0.9986986
+        },
+        {
+          "text": "covered",
+          "start_ms": 126502,
+          "end_ms": 127357,
+          "confidence": 0.95955116
+        },
+        {
+          "text": "it.",
+          "start_ms": 127470,
+          "end_ms": 127534,
+          "confidence": 0.99909323
+        },
+        {
+          "text": "When",
+          "start_ms": 127680,
+          "end_ms": 127937,
+          "confidence": 0.99991095
+        },
+        {
+          "text": "the",
+          "start_ms": 127937,
+          "end_ms": 128114,
+          "confidence": 0.99911445
+        },
+        {
+          "text": "mark",
+          "start_ms": 128114,
+          "end_ms": 128420,
+          "confidence": 0.6559927
+        },
+        {
+          "text": "was",
+          "start_ms": 128420,
+          "end_ms": 128565,
+          "confidence": 0.9999713
+        },
+        {
+          "text": "getting",
+          "start_ms": 128598,
+          "end_ms": 129049,
+          "confidence": 0.9998909
+        },
+        {
+          "text": "close,",
+          "start_ms": 129081,
+          "end_ms": 129419,
+          "confidence": 0.9985854
+        },
+        {
+          "text": "you",
+          "start_ms": 130112,
+          "end_ms": 130289,
+          "confidence": 0.99913424
+        },
+        {
+          "text": "handled",
+          "start_ms": 130289,
+          "end_ms": 130740,
+          "confidence": 0.9985191
+        },
+        {
+          "text": "it.",
+          "start_ms": 130853,
+          "end_ms": 131046,
+          "confidence": 0.99806905
+        },
+        {
+          "text": "You",
+          "start_ms": 131980,
+          "end_ms": 132141,
+          "confidence": 0.9996799
+        },
+        {
+          "text": "stepped",
+          "start_ms": 132141,
+          "end_ms": 132528,
+          "confidence": 0.3149037
+        },
+        {
+          "text": "right",
+          "start_ms": 132528,
+          "end_ms": 132866,
+          "confidence": 0.70783705
+        },
+        {
+          "text": "in",
+          "start_ms": 132866,
+          "end_ms": 133075,
+          "confidence": 0.99966395
+        },
+        {
+          "text": "and",
+          "start_ms": 133977,
+          "end_ms": 134122,
+          "confidence": 0.9707072
+        },
+        {
+          "text": "finished",
+          "start_ms": 134138,
+          "end_ms": 134783,
+          "confidence": 0.99985564
+        },
+        {
+          "text": "it.",
+          "start_ms": 134783,
+          "end_ms": 134960,
+          "confidence": 0.9997643
+        },
+        {
+          "text": "Every",
+          "start_ms": 135508,
+          "end_ms": 135765,
+          "confidence": 0.9998435
+        },
+        {
+          "text": "single",
+          "start_ms": 135765,
+          "end_ms": 136393,
+          "confidence": 0.99997425
+        },
+        {
+          "text": "debt",
+          "start_ms": 136393,
+          "end_ms": 136796,
+          "confidence": 0.99994314
+        },
+        {
+          "text": "I",
+          "start_ms": 136796,
+          "end_ms": 136925,
+          "confidence": 0.9998934
+        },
+        {
+          "text": "owe,",
+          "start_ms": 137134,
+          "end_ms": 137312,
+          "confidence": 0.9996633
+        },
+        {
+          "text": "you",
+          "start_ms": 137763,
+          "end_ms": 137859,
+          "confidence": 0.999795
+        },
+        {
+          "text": "canceled",
+          "start_ms": 137940,
+          "end_ms": 138568,
+          "confidence": 0.99969065
+        },
+        {
+          "text": "it.",
+          "start_ms": 138568,
+          "end_ms": 138761,
+          "confidence": 0.99994004
+        },
+        {
+          "text": "Every",
+          "start_ms": 139293,
+          "end_ms": 139567,
+          "confidence": 0.99991035
+        },
+        {
+          "text": "sin",
+          "start_ms": 139567,
+          "end_ms": 140001,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "I",
+          "start_ms": 140034,
+          "end_ms": 140211,
+          "confidence": 0.9999064
+        },
+        {
+          "text": "ever",
+          "start_ms": 140259,
+          "end_ms": 140581,
+          "confidence": 0.99987304
+        },
+        {
+          "text": "chose,",
+          "start_ms": 140581,
+          "end_ms": 141210,
+          "confidence": 0.9998778
+        },
+        {
+          "text": "you",
+          "start_ms": 141628,
+          "end_ms": 141805,
+          "confidence": 0.9998871
+        },
+        {
+          "text": "covered",
+          "start_ms": 141805,
+          "end_ms": 142434,
+          "confidence": 0.9999366
+        },
+        {
+          "text": "it.",
+          "start_ms": 142434,
+          "end_ms": 142788,
+          "confidence": 0.9998985
+        },
+        {
+          "text": "When",
+          "start_ms": 143078,
+          "end_ms": 143320,
+          "confidence": 0.9998252
+        },
+        {
+          "text": "the",
+          "start_ms": 143336,
+          "end_ms": 143497,
+          "confidence": 0.99990964
+        },
+        {
+          "text": "mark",
+          "start_ms": 143497,
+          "end_ms": 143803,
+          "confidence": 0.99995375
+        },
+        {
+          "text": "was",
+          "start_ms": 143803,
+          "end_ms": 144044,
+          "confidence": 0.99988794
+        },
+        {
+          "text": "getting",
+          "start_ms": 144044,
+          "end_ms": 144431,
+          "confidence": 0.9998192
+        },
+        {
+          "text": "close,",
+          "start_ms": 144463,
+          "end_ms": 145188,
+          "confidence": 0.99985665
+        },
+        {
+          "text": "you",
+          "start_ms": 145494,
+          "end_ms": 145897,
+          "confidence": 0.9993437
+        },
+        {
+          "text": "handled",
+          "start_ms": 145986,
+          "end_ms": 146253,
+          "confidence": 0.9998357
+        },
+        {
+          "text": "it.",
+          "start_ms": 146253,
+          "end_ms": 146320,
+          "confidence": 0.99500436
+        },
+        {
+          "text": "You",
+          "start_ms": 147337,
+          "end_ms": 147530,
+          "confidence": 0.53486973
+        },
+        {
+          "text": "never",
+          "start_ms": 147530,
+          "end_ms": 147996,
+          "confidence": 0.9970902
+        },
+        {
+          "text": "fail,",
+          "start_ms": 147996,
+          "end_ms": 148285,
+          "confidence": 0.5573389
+        },
+        {
+          "text": "you",
+          "start_ms": 149265,
+          "end_ms": 149523,
+          "confidence": 0.99910635
+        },
+        {
+          "text": "never",
+          "start_ms": 149523,
+          "end_ms": 149973,
+          "confidence": 0.9910884
+        },
+        {
+          "text": "wear.",
+          "start_ms": 150069,
+          "end_ms": 150262,
+          "confidence": 0.93472844
+        },
+        {
+          "text": "Every",
+          "start_ms": 150792,
+          "end_ms": 151130,
+          "confidence": 0.99939406
+        },
+        {
+          "text": "single",
+          "start_ms": 151130,
+          "end_ms": 151516,
+          "confidence": 0.99940825
+        },
+        {
+          "text": "word",
+          "start_ms": 151516,
+          "end_ms": 151725,
+          "confidence": 0.97456217
+        },
+        {
+          "text": "you",
+          "start_ms": 151757,
+          "end_ms": 152046,
+          "confidence": 0.9910487
+        },
+        {
+          "text": "spoke",
+          "start_ms": 152046,
+          "end_ms": 153203,
+          "confidence": 0.9913016
+        },
+        {
+          "text": "is",
+          "start_ms": 153203,
+          "end_ms": 153348,
+          "confidence": 0.9308653
+        },
+        {
+          "text": "coming",
+          "start_ms": 153380,
+          "end_ms": 153814,
+          "confidence": 0.6187228
+        },
+        {
+          "text": "true.",
+          "start_ms": 153814,
+          "end_ms": 154119,
+          "confidence": 0.9877628
+        },
+        {
+          "text": "Every",
+          "start_ms": 154650,
+          "end_ms": 154907,
+          "confidence": 0.99925774
+        },
+        {
+          "text": "line",
+          "start_ms": 155003,
+          "end_ms": 155357,
+          "confidence": 0.6231251
+        },
+        {
+          "text": "the",
+          "start_ms": 155534,
+          "end_ms": 155662,
+          "confidence": 0.9171096
+        },
+        {
+          "text": "devil",
+          "start_ms": 155662,
+          "end_ms": 155952,
+          "confidence": 0.9967572
+        },
+        {
+          "text": "told",
+          "start_ms": 155952,
+          "end_ms": 156258,
+          "confidence": 0.8602199
+        },
+        {
+          "text": "must",
+          "start_ms": 156918,
+          "end_ms": 157224,
+          "confidence": 0.6063998
+        },
+        {
+          "text": "bow",
+          "start_ms": 157224,
+          "end_ms": 157481,
+          "confidence": 0.5883678
+        },
+        {
+          "text": "to",
+          "start_ms": 157481,
+          "end_ms": 157707,
+          "confidence": 0.9903196
+        },
+        {
+          "text": "you.",
+          "start_ms": 157707,
+          "end_ms": 157900,
+          "confidence": 0.99858224
+        },
+        {
+          "text": "To",
+          "start_ms": 158367,
+          "end_ms": 158528,
+          "confidence": 0.977109
+        },
+        {
+          "text": "me",
+          "start_ms": 158528,
+          "end_ms": 158850,
+          "confidence": 0.99941635
+        },
+        {
+          "text": "it's",
+          "start_ms": 158850,
+          "end_ms": 159188,
+          "confidence": 0.91585165
+        },
+        {
+          "text": "impossible,",
+          "start_ms": 159236,
+          "end_ms": 160154,
+          "confidence": 0.99775535
+        },
+        {
+          "text": "but",
+          "start_ms": 160782,
+          "end_ms": 161040,
+          "confidence": 0.99587005
+        },
+        {
+          "text": "not",
+          "start_ms": 161040,
+          "end_ms": 161893,
+          "confidence": 0.9785967
+        },
+        {
+          "text": "for",
+          "start_ms": 161893,
+          "end_ms": 162054,
+          "confidence": 0.9942272
+        },
+        {
+          "text": "you.",
+          "start_ms": 162054,
+          "end_ms": 162199,
+          "confidence": 0.99735963
+        },
+        {
+          "text": "It's",
+          "start_ms": 162569,
+          "end_ms": 163020,
+          "confidence": 0.98967206
+        },
+        {
+          "text": "what",
+          "start_ms": 163020,
+          "end_ms": 163214,
+          "confidence": 0.997718
+        },
+        {
+          "text": "you",
+          "start_ms": 163214,
+          "end_ms": 163503,
+          "confidence": 0.99954623
+        },
+        {
+          "text": "do.",
+          "start_ms": 163503,
+          "end_ms": 163552,
+          "confidence": 0.9744136
+        },
+        {
+          "text": "Let's",
+          "start_ms": 164325,
+          "end_ms": 164647,
+          "confidence": 0.9687914
+        },
+        {
+          "text": "go!",
+          "start_ms": 164647,
+          "end_ms": 164872,
+          "confidence": 0.9516505
+        },
+        {
+          "text": "When",
+          "start_ms": 164953,
+          "end_ms": 165178,
+          "confidence": 0.6058842
+        },
+        {
+          "text": "you",
+          "start_ms": 165194,
+          "end_ms": 165291,
+          "confidence": 0.9999107
+        },
+        {
+          "text": "keep",
+          "start_ms": 165291,
+          "end_ms": 165453,
+          "confidence": 0.99997807
+        },
+        {
+          "text": "on",
+          "start_ms": 165453,
+          "end_ms": 165589,
+          "confidence": 0.9999547
+        },
+        {
+          "text": "doing",
+          "start_ms": 165623,
+          "end_ms": 165758,
+          "confidence": 0.9955063
+        },
+        {
+          "text": "it,",
+          "start_ms": 165877,
+          "end_ms": 166097,
+          "confidence": 0.9571946
+        },
+        {
+          "text": "when",
+          "start_ms": 168820,
+          "end_ms": 168949,
+          "confidence": 0.86298966
+        },
+        {
+          "text": "you",
+          "start_ms": 168949,
+          "end_ms": 169046,
+          "confidence": 0.9999647
+        },
+        {
+          "text": "keep",
+          "start_ms": 169046,
+          "end_ms": 169192,
+          "confidence": 0.99998796
+        },
+        {
+          "text": "on",
+          "start_ms": 169256,
+          "end_ms": 169386,
+          "confidence": 0.9999515
+        },
+        {
+          "text": "doing",
+          "start_ms": 169418,
+          "end_ms": 169628,
+          "confidence": 0.9998247
+        },
+        {
+          "text": "it,",
+          "start_ms": 169661,
+          "end_ms": 170001,
+          "confidence": 0.9877417
+        },
+        {
+          "text": "hey,",
+          "start_ms": 170712,
+          "end_ms": 171198,
+          "confidence": 0.75620115
+        },
+        {
+          "text": "when",
+          "start_ms": 172557,
+          "end_ms": 172719,
+          "confidence": 0.9201549
+        },
+        {
+          "text": "you",
+          "start_ms": 172719,
+          "end_ms": 172816,
+          "confidence": 0.99997914
+        },
+        {
+          "text": "keep",
+          "start_ms": 172816,
+          "end_ms": 173123,
+          "confidence": 0.99997675
+        },
+        {
+          "text": "on",
+          "start_ms": 173123,
+          "end_ms": 173382,
+          "confidence": 0.99985254
+        },
+        {
+          "text": "doing",
+          "start_ms": 173382,
+          "end_ms": 173673,
+          "confidence": 0.9994874
+        },
+        {
+          "text": "it.",
+          "start_ms": 173770,
+          "end_ms": 173900,
+          "confidence": 0.87090695
+        },
+        {
+          "text": "Can",
+          "start_ms": 175910,
+          "end_ms": 176230,
+          "confidence": 0.75764835
+        },
+        {
+          "text": "you",
+          "start_ms": 176230,
+          "end_ms": 176710,
+          "confidence": 0.9986051
+        },
+        {
+          "text": "keep",
+          "start_ms": 176710,
+          "end_ms": 176970,
+          "confidence": 0.9988997
+        },
+        {
+          "text": "on",
+          "start_ms": 176970,
+          "end_ms": 177210,
+          "confidence": 0.9991048
+        },
+        {
+          "text": "doing",
+          "start_ms": 177210,
+          "end_ms": 177530,
+          "confidence": 0.9965552
+        },
+        {
+          "text": "it?",
+          "start_ms": 177530,
+          "end_ms": 178330,
+          "confidence": 0.93124473
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 179410,
+          "end_ms": 179650,
+          "confidence": 0.90240747
+        },
+        {
+          "text": "sing",
+          "start_ms": 179650,
+          "end_ms": 180450,
+          "confidence": 0.9798599
+        },
+        {
+          "text": "it",
+          "start_ms": 180450,
+          "end_ms": 180850,
+          "confidence": 0.9992956
+        },
+        {
+          "text": "out!",
+          "start_ms": 180850,
+          "end_ms": 182470,
+          "confidence": 0.83922714
+        },
+        {
+          "text": "I'm",
+          "start_ms": 182470,
+          "end_ms": 182490,
+          "confidence": 0.99771273
+        },
+        {
+          "text": "living",
+          "start_ms": 182490,
+          "end_ms": 182870,
+          "confidence": 0.99325514
+        },
+        {
+          "text": "it.",
+          "start_ms": 182870,
+          "end_ms": 183870,
+          "confidence": 0.7055415
+        },
+        {
+          "text": "I",
+          "start_ms": 184029,
+          "end_ms": 184430,
+          "confidence": 0.6861619
+        },
+        {
+          "text": "do",
+          "start_ms": 184430,
+          "end_ms": 184530,
+          "confidence": 0.83019245
+        },
+        {
+          "text": "today.",
+          "start_ms": 184530,
+          "end_ms": 185250,
+          "confidence": 0.9624074
+        },
+        {
+          "text": "See",
+          "start_ms": 185410,
+          "end_ms": 186310,
+          "confidence": 0.32506832
+        },
+        {
+          "text": "all",
+          "start_ms": 186310,
+          "end_ms": 186570,
+          "confidence": 0.9452268
+        },
+        {
+          "text": "this",
+          "start_ms": 186570,
+          "end_ms": 186850,
+          "confidence": 0.95693547
+        },
+        {
+          "text": "blood.",
+          "start_ms": 186850,
+          "end_ms": 187210,
+          "confidence": 0.6365588
+        },
+        {
+          "text": "It's",
+          "start_ms": 187210,
+          "end_ms": 188270,
+          "confidence": 0.9313145
+        },
+        {
+          "text": "history",
+          "start_ms": 188270,
+          "end_ms": 188870,
+          "confidence": 0.9523659
+        },
+        {
+          "text": "made.",
+          "start_ms": 188870,
+          "end_ms": 189630,
+          "confidence": 0.92764693
+        },
+        {
+          "text": "It's",
+          "start_ms": 189630,
+          "end_ms": 189930,
+          "confidence": 0.9995943
+        },
+        {
+          "text": "a",
+          "start_ms": 189930,
+          "end_ms": 190090,
+          "confidence": 0.99799
+        },
+        {
+          "text": "miracle",
+          "start_ms": 190090,
+          "end_ms": 190830,
+          "confidence": 0.99999154
+        },
+        {
+          "text": "what",
+          "start_ms": 190830,
+          "end_ms": 191730,
+          "confidence": 0.7955046
+        },
+        {
+          "text": "you",
+          "start_ms": 191730,
+          "end_ms": 192070,
+          "confidence": 0.98416406
+        },
+        {
+          "text": "did",
+          "start_ms": 192070,
+          "end_ms": 192310,
+          "confidence": 0.9993112
+        },
+        {
+          "text": "for",
+          "start_ms": 192310,
+          "end_ms": 192630,
+          "confidence": 0.8573042
+        },
+        {
+          "text": "me.",
+          "start_ms": 192630,
+          "end_ms": 193480,
+          "confidence": 0.978739
+        },
+        {
+          "text": "You",
+          "start_ms": 193910,
+          "end_ms": 194590,
+          "confidence": 0.5380567
+        },
+        {
+          "text": "made",
+          "start_ms": 194590,
+          "end_ms": 195890,
+          "confidence": 0.7986914
+        },
+        {
+          "text": "a",
+          "start_ms": 195890,
+          "end_ms": 196490,
+          "confidence": 0.58918405
+        },
+        {
+          "text": "way.",
+          "start_ms": 196490,
+          "end_ms": 197090,
+          "confidence": 0.876142
+        },
+        {
+          "text": "I'm",
+          "start_ms": 197090,
+          "end_ms": 197090,
+          "confidence": 0.9953447
+        },
+        {
+          "text": "living",
+          "start_ms": 197090,
+          "end_ms": 198210,
+          "confidence": 0.9998047
+        },
+        {
+          "text": "it.",
+          "start_ms": 198210,
+          "end_ms": 198570,
+          "confidence": 0.99831206
+        },
+        {
+          "text": "I'm",
+          "start_ms": 198570,
+          "end_ms": 198670,
+          "confidence": 0.94444335
+        },
+        {
+          "text": "living",
+          "start_ms": 198670,
+          "end_ms": 198670,
+          "confidence": 0.99869746
+        },
+        {
+          "text": "it.",
+          "start_ms": 198670,
+          "end_ms": 198670,
+          "confidence": 0.99890995
+        },
+        {
+          "text": "I",
+          "start_ms": 198670,
+          "end_ms": 198910,
+          "confidence": 0.9919703
+        },
+        {
+          "text": "do",
+          "start_ms": 198910,
+          "end_ms": 199050,
+          "confidence": 0.99859494
+        },
+        {
+          "text": "today.",
+          "start_ms": 199050,
+          "end_ms": 199510,
+          "confidence": 0.99835044
+        },
+        {
+          "text": "I",
+          "start_ms": 199510,
+          "end_ms": 199630,
+          "confidence": 0.9893798
+        },
+        {
+          "text": "do",
+          "start_ms": 199630,
+          "end_ms": 199910,
+          "confidence": 0.9998086
+        },
+        {
+          "text": "today.",
+          "start_ms": 199910,
+          "end_ms": 200610,
+          "confidence": 0.99964935
+        },
+        {
+          "text": "See",
+          "start_ms": 200610,
+          "end_ms": 200910,
+          "confidence": 0.9806691
+        },
+        {
+          "text": "all",
+          "start_ms": 200910,
+          "end_ms": 201070,
+          "confidence": 0.99922156
+        },
+        {
+          "text": "this",
+          "start_ms": 201070,
+          "end_ms": 201290,
+          "confidence": 0.999164
+        },
+        {
+          "text": "glory.",
+          "start_ms": 201290,
+          "end_ms": 201390,
+          "confidence": 0.71400523
+        },
+        {
+          "text": "See",
+          "start_ms": 201390,
+          "end_ms": 201830,
+          "confidence": 0.9904253
+        },
+        {
+          "text": "all",
+          "start_ms": 201830,
+          "end_ms": 201950,
+          "confidence": 0.99997675
+        },
+        {
+          "text": "this",
+          "start_ms": 201950,
+          "end_ms": 202150,
+          "confidence": 0.99993706
+        },
+        {
+          "text": "blood.",
+          "start_ms": 202150,
+          "end_ms": 202590,
+          "confidence": 0.9988479
+        },
+        {
+          "text": "It's",
+          "start_ms": 202590,
+          "end_ms": 202850,
+          "confidence": 0.9997766
+        },
+        {
+          "text": "history",
+          "start_ms": 202850,
+          "end_ms": 203230,
+          "confidence": 0.9998722
+        },
+        {
+          "text": "made.",
+          "start_ms": 203230,
+          "end_ms": 203470,
+          "confidence": 0.99368924
+        },
+        {
+          "text": "It's",
+          "start_ms": 203470,
+          "end_ms": 203750,
+          "confidence": 0.99429154
+        },
+        {
+          "text": "history",
+          "start_ms": 203750,
+          "end_ms": 203930,
+          "confidence": 0.9895616
+        },
+        {
+          "text": "made.",
+          "start_ms": 203930,
+          "end_ms": 204370,
+          "confidence": 0.99267185
+        },
+        {
+          "text": "I'm",
+          "start_ms": 204370,
+          "end_ms": 204550,
+          "confidence": 0.7421867
+        },
+        {
+          "text": "a",
+          "start_ms": 204550,
+          "end_ms": 204630,
+          "confidence": 0.9953414
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 204630,
+          "end_ms": 204930,
+          "confidence": 0.99905264
+        },
+        {
+          "text": "It's",
+          "start_ms": 204930,
+          "end_ms": 205450,
+          "confidence": 0.9227235
+        },
+        {
+          "text": "a",
+          "start_ms": 205450,
+          "end_ms": 205450,
+          "confidence": 0.99984956
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 205450,
+          "end_ms": 205830,
+          "confidence": 0.96433055
+        },
+        {
+          "text": "You",
+          "start_ms": 209284,
+          "end_ms": 209542,
+          "confidence": 0.49845165
+        },
+        {
+          "text": "made",
+          "start_ms": 209930,
+          "end_ms": 211060,
+          "confidence": 0.26956493
+        },
+        {
+          "text": "a",
+          "start_ms": 211060,
+          "end_ms": 211238,
+          "confidence": 0.94687593
+        },
+        {
+          "text": "way.",
+          "start_ms": 211464,
+          "end_ms": 211658,
+          "confidence": 0.83989054
+        },
+        {
+          "text": "And",
+          "start_ms": 218662,
+          "end_ms": 218743,
+          "confidence": 0.516248
+        },
+        {
+          "text": "you",
+          "start_ms": 218743,
+          "end_ms": 218823,
+          "confidence": 0.97471625
+        },
+        {
+          "text": "keep",
+          "start_ms": 218823,
+          "end_ms": 219146,
+          "confidence": 0.9993376
+        },
+        {
+          "text": "on",
+          "start_ms": 219146,
+          "end_ms": 219323,
+          "confidence": 0.9989505
+        },
+        {
+          "text": "doing",
+          "start_ms": 219323,
+          "end_ms": 219613,
+          "confidence": 0.9939388
+        },
+        {
+          "text": "it.",
+          "start_ms": 219645,
+          "end_ms": 219887,
+          "confidence": 0.91513765
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 220113,
+          "end_ms": 220935,
+          "confidence": 0.45192882
+        },
+        {
+          "text": "so",
+          "start_ms": 221499,
+          "end_ms": 221725,
+          "confidence": 0.26462102
+        },
+        {
+          "text": "to",
+          "start_ms": 221725,
+          "end_ms": 221757,
+          "confidence": 0.43299294
+        },
+        {
+          "text": "keep",
+          "start_ms": 221886,
+          "end_ms": 222112,
+          "confidence": 0.8719441
+        },
+        {
+          "text": "on",
+          "start_ms": 222128,
+          "end_ms": 222160,
+          "confidence": 0.9653347
+        },
+        {
+          "text": "doing",
+          "start_ms": 222160,
+          "end_ms": 222547,
+          "confidence": 0.9708016
+        },
+        {
+          "text": "it.",
+          "start_ms": 222547,
+          "end_ms": 222643,
+          "confidence": 0.9216255
+        },
+        {
+          "text": "And",
+          "start_ms": 222692,
+          "end_ms": 222772,
+          "confidence": 0.25525504
+        },
+        {
+          "text": "you",
+          "start_ms": 222772,
+          "end_ms": 222837,
+          "confidence": 0.9972535
+        },
+        {
+          "text": "keep",
+          "start_ms": 222837,
+          "end_ms": 223030,
+          "confidence": 0.99994564
+        },
+        {
+          "text": "on",
+          "start_ms": 223095,
+          "end_ms": 223256,
+          "confidence": 0.9997415
+        },
+        {
+          "text": "doing",
+          "start_ms": 223256,
+          "end_ms": 223482,
+          "confidence": 0.9997768
+        },
+        {
+          "text": "it.",
+          "start_ms": 223514,
+          "end_ms": 223772,
+          "confidence": 0.99481016
+        },
+        {
+          "text": "Keep",
+          "start_ms": 223949,
+          "end_ms": 224417,
+          "confidence": 0.93342465
+        },
+        {
+          "text": "on",
+          "start_ms": 224465,
+          "end_ms": 224529,
+          "confidence": 0.99776924
+        },
+        {
+          "text": "doing",
+          "start_ms": 224578,
+          "end_ms": 225496,
+          "confidence": 0.94925326
+        },
+        {
+          "text": "it.",
+          "start_ms": 225529,
+          "end_ms": 225674,
+          "confidence": 0.9926823
+        },
+        {
+          "text": "And",
+          "start_ms": 225916,
+          "end_ms": 226641,
+          "confidence": 0.8288562
+        },
+        {
+          "text": "you",
+          "start_ms": 226641,
+          "end_ms": 226689,
+          "confidence": 0.9996131
+        },
+        {
+          "text": "keep",
+          "start_ms": 226689,
+          "end_ms": 227141,
+          "confidence": 0.999969
+        },
+        {
+          "text": "on",
+          "start_ms": 227205,
+          "end_ms": 227253,
+          "confidence": 0.9997167
+        },
+        {
+          "text": "doing",
+          "start_ms": 227270,
+          "end_ms": 227751,
+          "confidence": 0.999445
+        },
+        {
+          "text": "it.",
+          "start_ms": 227928,
+          "end_ms": 228041,
+          "confidence": 0.9991672
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 228105,
+          "end_ms": 229101,
+          "confidence": 0.9602818
+        },
+        {
+          "text": "keep",
+          "start_ms": 229470,
+          "end_ms": 229728,
+          "confidence": 0.97554624
+        },
+        {
+          "text": "on",
+          "start_ms": 229776,
+          "end_ms": 229840,
+          "confidence": 0.99798274
+        },
+        {
+          "text": "doing",
+          "start_ms": 229952,
+          "end_ms": 230242,
+          "confidence": 0.9950682
+        },
+        {
+          "text": "it.",
+          "start_ms": 230258,
+          "end_ms": 230370,
+          "confidence": 0.99868935
+        },
+        {
+          "text": "And",
+          "start_ms": 230499,
+          "end_ms": 230965,
+          "confidence": 0.9254939
+        },
+        {
+          "text": "you",
+          "start_ms": 230965,
+          "end_ms": 231157,
+          "confidence": 0.99891055
+        },
+        {
+          "text": "keep",
+          "start_ms": 231398,
+          "end_ms": 231800,
+          "confidence": 0.9999168
+        },
+        {
+          "text": "on",
+          "start_ms": 231800,
+          "end_ms": 231848,
+          "confidence": 0.9997378
+        },
+        {
+          "text": "doing",
+          "start_ms": 231977,
+          "end_ms": 233535,
+          "confidence": 0.9993474
+        },
+        {
+          "text": "it.",
+          "start_ms": 233712,
+          "end_ms": 233872,
+          "confidence": 0.9983068
+        },
+        {
+          "text": "Keep",
+          "start_ms": 234274,
+          "end_ms": 234467,
+          "confidence": 0.36504957
+        },
+        {
+          "text": "on",
+          "start_ms": 234595,
+          "end_ms": 234660,
+          "confidence": 0.99779093
+        },
+        {
+          "text": "doing",
+          "start_ms": 235093,
+          "end_ms": 235543,
+          "confidence": 0.49815202
+        },
+        {
+          "text": "it.",
+          "start_ms": 235559,
+          "end_ms": 235672,
+          "confidence": 0.99603873
+        },
+        {
+          "text": "Keep",
+          "start_ms": 235768,
+          "end_ms": 236282,
+          "confidence": 0.7979813
+        },
+        {
+          "text": "on",
+          "start_ms": 236282,
+          "end_ms": 236347,
+          "confidence": 0.998544
+        },
+        {
+          "text": "doing",
+          "start_ms": 236395,
+          "end_ms": 236668,
+          "confidence": 0.51307154
+        },
+        {
+          "text": "it.",
+          "start_ms": 236700,
+          "end_ms": 236748,
+          "confidence": 0.99666995
+        },
+        {
+          "text": "Keep",
+          "start_ms": 236861,
+          "end_ms": 236989,
+          "confidence": 0.78430545
+        },
+        {
+          "text": "on",
+          "start_ms": 237005,
+          "end_ms": 237070,
+          "confidence": 0.9969042
+        },
+        {
+          "text": "doing",
+          "start_ms": 237070,
+          "end_ms": 237160,
+          "confidence": 0.9248785
+        },
+        {
+          "text": "it.",
+          "start_ms": 237196,
+          "end_ms": 237250,
+          "confidence": 0.9980004
+        },
+        {
+          "text": "Keep",
+          "start_ms": 237322,
+          "end_ms": 237376,
+          "confidence": 0.6301889
+        },
+        {
+          "text": "on",
+          "start_ms": 237376,
+          "end_ms": 237412,
+          "confidence": 0.9938976
+        },
+        {
+          "text": "doing",
+          "start_ms": 237412,
+          "end_ms": 237484,
+          "confidence": 0.9648644
+        },
+        {
+          "text": "it.",
+          "start_ms": 237484,
+          "end_ms": 237520,
+          "confidence": 0.9985121
+        },
+        {
+          "text": "Keep",
+          "start_ms": 239967,
+          "end_ms": 240288,
+          "confidence": 0.20195517
+        },
+        {
+          "text": "on,",
+          "start_ms": 240288,
+          "end_ms": 240995,
+          "confidence": 0.6572056
+        },
+        {
+          "text": "keep",
+          "start_ms": 241028,
+          "end_ms": 241510,
+          "confidence": 0.9962316
+        },
+        {
+          "text": "on,",
+          "start_ms": 241510,
+          "end_ms": 241638,
+          "confidence": 0.8663402
+        },
+        {
+          "text": "keep",
+          "start_ms": 241831,
+          "end_ms": 242169,
+          "confidence": 0.9873356
+        },
+        {
+          "text": "on.",
+          "start_ms": 242217,
+          "end_ms": 242281,
+          "confidence": 0.6930766
+        },
+        {
+          "text": "Keep",
+          "start_ms": 242667,
+          "end_ms": 242973,
+          "confidence": 0.7565851
+        },
+        {
+          "text": "on",
+          "start_ms": 243182,
+          "end_ms": 243294,
+          "confidence": 0.80400926
+        },
+        {
+          "text": "doing",
+          "start_ms": 243294,
+          "end_ms": 243808,
+          "confidence": 0.14560862
+        },
+        {
+          "text": "it.",
+          "start_ms": 243905,
+          "end_ms": 243937,
+          "confidence": 0.9158764
+        },
+        {
+          "text": "Keep",
+          "start_ms": 244001,
+          "end_ms": 244098,
+          "confidence": 0.9947089
+        },
+        {
+          "text": "on,",
+          "start_ms": 244146,
+          "end_ms": 244210,
+          "confidence": 0.9658775
+        },
+        {
+          "text": "keep",
+          "start_ms": 244484,
+          "end_ms": 244869,
+          "confidence": 0.99983394
+        },
+        {
+          "text": "on,",
+          "start_ms": 244869,
+          "end_ms": 244934,
+          "confidence": 0.9838777
+        },
+        {
+          "text": "keep",
+          "start_ms": 245368,
+          "end_ms": 245528,
+          "confidence": 0.9999063
+        },
+        {
+          "text": "on.",
+          "start_ms": 245528,
+          "end_ms": 245689,
+          "confidence": 0.94439745
+        },
+        {
+          "text": "Keep",
+          "start_ms": 245834,
+          "end_ms": 246075,
+          "confidence": 0.97967154
+        },
+        {
+          "text": "on",
+          "start_ms": 246075,
+          "end_ms": 246139,
+          "confidence": 0.98159
+        },
+        {
+          "text": "doing",
+          "start_ms": 246187,
+          "end_ms": 246541,
+          "confidence": 0.84519
+        },
+        {
+          "text": "it.",
+          "start_ms": 246589,
+          "end_ms": 246782,
+          "confidence": 0.9952348
+        },
+        {
+          "text": "Keep",
+          "start_ms": 247120,
+          "end_ms": 247329,
+          "confidence": 0.987849
+        },
+        {
+          "text": "on,",
+          "start_ms": 248100,
+          "end_ms": 248148,
+          "confidence": 0.84913623
+        },
+        {
+          "text": "keep",
+          "start_ms": 248261,
+          "end_ms": 248422,
+          "confidence": 0.9978532
+        },
+        {
+          "text": "on,",
+          "start_ms": 248891,
+          "end_ms": 249133,
+          "confidence": 0.9806414
+        },
+        {
+          "text": "keep",
+          "start_ms": 249149,
+          "end_ms": 249230,
+          "confidence": 0.99936193
+        },
+        {
+          "text": "on.",
+          "start_ms": 249230,
+          "end_ms": 249279,
+          "confidence": 0.9707551
+        },
+        {
+          "text": "Keep",
+          "start_ms": 249424,
+          "end_ms": 249699,
+          "confidence": 0.9898122
+        },
+        {
+          "text": "on,",
+          "start_ms": 249699,
+          "end_ms": 249845,
+          "confidence": 0.8060281
+        },
+        {
+          "text": "keep",
+          "start_ms": 249861,
+          "end_ms": 250184,
+          "confidence": 0.99934703
+        },
+        {
+          "text": "on,",
+          "start_ms": 250184,
+          "end_ms": 250491,
+          "confidence": 0.9898521
+        },
+        {
+          "text": "keep",
+          "start_ms": 250605,
+          "end_ms": 251106,
+          "confidence": 0.99983084
+        },
+        {
+          "text": "on.",
+          "start_ms": 251154,
+          "end_ms": 251219,
+          "confidence": 0.9571915
+        },
+        {
+          "text": "Keep",
+          "start_ms": 251559,
+          "end_ms": 251817,
+          "confidence": 0.9786952
+        },
+        {
+          "text": "on,",
+          "start_ms": 251882,
+          "end_ms": 252205,
+          "confidence": 0.8609733
+        },
+        {
+          "text": "keep",
+          "start_ms": 252335,
+          "end_ms": 252561,
+          "confidence": 0.99958867
+        },
+        {
+          "text": "on,",
+          "start_ms": 253095,
+          "end_ms": 253321,
+          "confidence": 0.9893734
+        },
+        {
+          "text": "keep",
+          "start_ms": 253547,
+          "end_ms": 253822,
+          "confidence": 0.9998838
+        },
+        {
+          "text": "on.",
+          "start_ms": 253822,
+          "end_ms": 254032,
+          "confidence": 0.9573253
+        },
+        {
+          "text": "Keep",
+          "start_ms": 254356,
+          "end_ms": 254663,
+          "confidence": 0.9722091
+        },
+        {
+          "text": "on,",
+          "start_ms": 254728,
+          "end_ms": 254792,
+          "confidence": 0.88922745
+        },
+        {
+          "text": "keep",
+          "start_ms": 254889,
+          "end_ms": 255358,
+          "confidence": 0.99967015
+        },
+        {
+          "text": "on,",
+          "start_ms": 255455,
+          "end_ms": 255584,
+          "confidence": 0.9880604
+        },
+        {
+          "text": "keep",
+          "start_ms": 255649,
+          "end_ms": 256102,
+          "confidence": 0.999897
+        },
+        {
+          "text": "on.",
+          "start_ms": 256102,
+          "end_ms": 256232,
+          "confidence": 0.9502027
+        },
+        {
+          "text": "Keep",
+          "start_ms": 256378,
+          "end_ms": 257010,
+          "confidence": 0.92607266
+        },
+        {
+          "text": "on",
+          "start_ms": 257075,
+          "end_ms": 257237,
+          "confidence": 0.9817275
+        },
+        {
+          "text": "doing",
+          "start_ms": 257237,
+          "end_ms": 257367,
+          "confidence": 0.22011083
+        },
+        {
+          "text": "it.",
+          "start_ms": 257383,
+          "end_ms": 257432,
+          "confidence": 0.9890325
+        },
+        {
+          "text": "Keep",
+          "start_ms": 257480,
+          "end_ms": 257724,
+          "confidence": 0.8794344
+        },
+        {
+          "text": "on,",
+          "start_ms": 257724,
+          "end_ms": 257870,
+          "confidence": 0.91812533
+        },
+        {
+          "text": "keep",
+          "start_ms": 258032,
+          "end_ms": 258129,
+          "confidence": 0.99903417
+        },
+        {
+          "text": "on,",
+          "start_ms": 258129,
+          "end_ms": 258259,
+          "confidence": 0.9863599
+        },
+        {
+          "text": "keep",
+          "start_ms": 258453,
+          "end_ms": 258778,
+          "confidence": 0.9998729
+        },
+        {
+          "text": "on.",
+          "start_ms": 258842,
+          "end_ms": 259118,
+          "confidence": 0.94394827
+        },
+        {
+          "text": "Keep",
+          "start_ms": 259183,
+          "end_ms": 259572,
+          "confidence": 0.7089129
+        },
+        {
+          "text": "on",
+          "start_ms": 259572,
+          "end_ms": 260221,
+          "confidence": 0.9699498
+        },
+        {
+          "text": "doing",
+          "start_ms": 260221,
+          "end_ms": 260853,
+          "confidence": 0.5900881
+        },
+        {
+          "text": "it.",
+          "start_ms": 261145,
+          "end_ms": 261356,
+          "confidence": 0.99594384
+        },
+        {
+          "text": "Keep",
+          "start_ms": 262840,
+          "end_ms": 263293,
+          "confidence": 0.86644584
+        },
+        {
+          "text": "on,",
+          "start_ms": 264555,
+          "end_ms": 264717,
+          "confidence": 0.9726478
+        },
+        {
+          "text": "keep",
+          "start_ms": 264879,
+          "end_ms": 265284,
+          "confidence": 0.9994199
+        },
+        {
+          "text": "on,",
+          "start_ms": 265381,
+          "end_ms": 265510,
+          "confidence": 0.9917798
+        },
+        {
+          "text": "keep",
+          "start_ms": 265721,
+          "end_ms": 265980,
+          "confidence": 0.99991536
+        },
+        {
+          "text": "on.",
+          "start_ms": 266190,
+          "end_ms": 266935,
+          "confidence": 0.9740246
+        },
+        {
+          "text": "You",
+          "start_ms": 266983,
+          "end_ms": 267097,
+          "confidence": 0.123472564
+        },
+        {
+          "text": "made",
+          "start_ms": 267097,
+          "end_ms": 267210,
+          "confidence": 0.22669013
+        },
+        {
+          "text": "your",
+          "start_ms": 267226,
+          "end_ms": 267339,
+          "confidence": 0.16980389
+        },
+        {
+          "text": "way.",
+          "start_ms": 267631,
+          "end_ms": 267825,
+          "confidence": 0.9631334
+        },
+        {
+          "text": "Hallelujah.",
+          "start_ms": 268133,
+          "end_ms": 268618,
+          "confidence": 0.80946726
+        },
+        {
+          "text": "Hallelujah!",
+          "start_ms": 271117,
+          "end_ms": 273390,
+          "confidence": 0.8044491
+        },
+        {
+          "text": "Yeah!",
+          "start_ms": 273938,
+          "end_ms": 274599,
+          "confidence": 0.9223098
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9224809,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "83ccb626-28ce-41b7-b09f-17dbf37db333",
+    "elapsed_s": 43.6,
+    "word_count": 522,
+    "utterance_count": 1,
+    "line_count": 1,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 281
+  }
+}

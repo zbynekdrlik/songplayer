@@ -1,0 +1,1620 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\BpyP4HR8FBQ_vocal16k.wav",
+  "duration_ms": 265604,
+  "lines": [
+    {
+      "text": "In the quiet of the morning, when no one knows and no one needs to know. You speak to me, you give me strength. There's nothing like the secret place.",
+      "start_ms": 14573,
+      "end_ms": 38665,
+      "text_sk": "V tichu rána, keď to nikto nevie a nikto to ani vedieť nemusí. Ty ku mne prehovoríš, dávaš mi silu. Niet nad tajné miesto.",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 14573,
+          "end_ms": 14865,
+          "confidence": 0.814153
+        },
+        {
+          "text": "the",
+          "start_ms": 14995,
+          "end_ms": 15141,
+          "confidence": 0.99911505
+        },
+        {
+          "text": "quiet",
+          "start_ms": 15141,
+          "end_ms": 16114,
+          "confidence": 0.9995072
+        },
+        {
+          "text": "of",
+          "start_ms": 16114,
+          "end_ms": 16471,
+          "confidence": 0.9983064
+        },
+        {
+          "text": "the",
+          "start_ms": 16682,
+          "end_ms": 16796,
+          "confidence": 0.903597
+        },
+        {
+          "text": "morning,",
+          "start_ms": 16796,
+          "end_ms": 17543,
+          "confidence": 0.72321314
+        },
+        {
+          "text": "when",
+          "start_ms": 21240,
+          "end_ms": 21304,
+          "confidence": 0.5890064
+        },
+        {
+          "text": "no",
+          "start_ms": 21304,
+          "end_ms": 21401,
+          "confidence": 0.9894665
+        },
+        {
+          "text": "one",
+          "start_ms": 21595,
+          "end_ms": 21903,
+          "confidence": 0.99973315
+        },
+        {
+          "text": "knows",
+          "start_ms": 22000,
+          "end_ms": 22615,
+          "confidence": 0.9994886
+        },
+        {
+          "text": "and",
+          "start_ms": 22647,
+          "end_ms": 22760,
+          "confidence": 0.9371931
+        },
+        {
+          "text": "no",
+          "start_ms": 22809,
+          "end_ms": 22922,
+          "confidence": 0.9982608
+        },
+        {
+          "text": "one",
+          "start_ms": 23294,
+          "end_ms": 23504,
+          "confidence": 0.9998116
+        },
+        {
+          "text": "needs",
+          "start_ms": 23699,
+          "end_ms": 24071,
+          "confidence": 0.9985795
+        },
+        {
+          "text": "to",
+          "start_ms": 24168,
+          "end_ms": 24200,
+          "confidence": 0.9971631
+        },
+        {
+          "text": "know.",
+          "start_ms": 24200,
+          "end_ms": 24475,
+          "confidence": 0.7652653
+        },
+        {
+          "text": "You",
+          "start_ms": 27869,
+          "end_ms": 27902,
+          "confidence": 0.7862007
+        },
+        {
+          "text": "speak",
+          "start_ms": 27951,
+          "end_ms": 28488,
+          "confidence": 0.9891895
+        },
+        {
+          "text": "to",
+          "start_ms": 28504,
+          "end_ms": 28716,
+          "confidence": 0.999728
+        },
+        {
+          "text": "me,",
+          "start_ms": 28765,
+          "end_ms": 28960,
+          "confidence": 0.94484806
+        },
+        {
+          "text": "you",
+          "start_ms": 29335,
+          "end_ms": 29595,
+          "confidence": 0.94963187
+        },
+        {
+          "text": "give",
+          "start_ms": 29644,
+          "end_ms": 29872,
+          "confidence": 0.9997733
+        },
+        {
+          "text": "me",
+          "start_ms": 30068,
+          "end_ms": 30231,
+          "confidence": 0.9998185
+        },
+        {
+          "text": "strength.",
+          "start_ms": 30231,
+          "end_ms": 31306,
+          "confidence": 0.99827653
+        },
+        {
+          "text": "There's",
+          "start_ms": 34690,
+          "end_ms": 34819,
+          "confidence": 0.98264664
+        },
+        {
+          "text": "nothing",
+          "start_ms": 34819,
+          "end_ms": 35533,
+          "confidence": 0.9750152
+        },
+        {
+          "text": "like",
+          "start_ms": 35533,
+          "end_ms": 36247,
+          "confidence": 0.99895406
+        },
+        {
+          "text": "the",
+          "start_ms": 36247,
+          "end_ms": 36328,
+          "confidence": 0.9808445
+        },
+        {
+          "text": "secret",
+          "start_ms": 36328,
+          "end_ms": 37740,
+          "confidence": 0.9989446
+        },
+        {
+          "text": "place.",
+          "start_ms": 37740,
+          "end_ms": 38665,
+          "confidence": 0.99584407
+        }
+      ]
+    },
+    {
+      "text": "Underground is where life begins. My heart will rejoice in the hiddenness.",
+      "start_ms": 41682,
+      "end_ms": 52001,
+      "text_sk": "Podzemie je miestom, kde život začína. Moje srdce sa bude tešiť z ukrytosti.",
+      "words": [
+        {
+          "text": "Underground",
+          "start_ms": 41682,
+          "end_ms": 43195,
+          "confidence": 0.8782189
+        },
+        {
+          "text": "is",
+          "start_ms": 43374,
+          "end_ms": 43520,
+          "confidence": 0.99681383
+        },
+        {
+          "text": "where",
+          "start_ms": 43716,
+          "end_ms": 44041,
+          "confidence": 0.9997482
+        },
+        {
+          "text": "life",
+          "start_ms": 44041,
+          "end_ms": 44545,
+          "confidence": 0.99895287
+        },
+        {
+          "text": "begins.",
+          "start_ms": 44610,
+          "end_ms": 45635,
+          "confidence": 0.99575114
+        },
+        {
+          "text": "My",
+          "start_ms": 47908,
+          "end_ms": 48252,
+          "confidence": 0.9326992
+        },
+        {
+          "text": "heart",
+          "start_ms": 48399,
+          "end_ms": 48726,
+          "confidence": 0.99990475
+        },
+        {
+          "text": "will",
+          "start_ms": 49234,
+          "end_ms": 49643,
+          "confidence": 0.9994562
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 49643,
+          "end_ms": 50560,
+          "confidence": 0.9996973
+        },
+        {
+          "text": "in",
+          "start_ms": 50626,
+          "end_ms": 50675,
+          "confidence": 0.9946905
+        },
+        {
+          "text": "the",
+          "start_ms": 50707,
+          "end_ms": 50969,
+          "confidence": 0.90818334
+        },
+        {
+          "text": "hiddenness.",
+          "start_ms": 51264,
+          "end_ms": 52001,
+          "confidence": 0.9168203
+        }
+      ]
+    },
+    {
+      "text": "Beyond burial, there's a resurrection.",
+      "start_ms": 54915,
+      "end_ms": 59860,
+      "text_sk": "Okrem pohrebu existuje aj zmŕtvychvstanie.",
+      "words": [
+        {
+          "text": "Beyond",
+          "start_ms": 54915,
+          "end_ms": 55723,
+          "confidence": 0.6274419
+        },
+        {
+          "text": "burial,",
+          "start_ms": 55723,
+          "end_ms": 56983,
+          "confidence": 0.9296449
+        },
+        {
+          "text": "there's",
+          "start_ms": 57242,
+          "end_ms": 57743,
+          "confidence": 0.9997857
+        },
+        {
+          "text": "a",
+          "start_ms": 58147,
+          "end_ms": 58179,
+          "confidence": 0.99916995
+        },
+        {
+          "text": "resurrection.",
+          "start_ms": 58551,
+          "end_ms": 59860,
+          "confidence": 0.992229
+        }
+      ]
+    },
+    {
+      "text": "Your will be done in me. In the stillness all around, you are working all the details out.",
+      "start_ms": 60716,
+      "end_ms": 79052,
+      "text_sk": "Tvoja vôľa nech sa stane vo mne. V tichu, ktoré ma obklopuje, Ty pracuješ na všetkých detailoch.",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 60716,
+          "end_ms": 60991,
+          "confidence": 0.9489851
+        },
+        {
+          "text": "will",
+          "start_ms": 61137,
+          "end_ms": 61928,
+          "confidence": 0.9993574
+        },
+        {
+          "text": "be",
+          "start_ms": 61928,
+          "end_ms": 62187,
+          "confidence": 0.9997999
+        },
+        {
+          "text": "done",
+          "start_ms": 62737,
+          "end_ms": 63111,
+          "confidence": 0.9999871
+        },
+        {
+          "text": "in",
+          "start_ms": 63241,
+          "end_ms": 63777,
+          "confidence": 0.99956137
+        },
+        {
+          "text": "me.",
+          "start_ms": 63972,
+          "end_ms": 64233,
+          "confidence": 0.949946
+        },
+        {
+          "text": "In",
+          "start_ms": 68742,
+          "end_ms": 69048,
+          "confidence": 0.9923078
+        },
+        {
+          "text": "the",
+          "start_ms": 69080,
+          "end_ms": 69161,
+          "confidence": 0.9970969
+        },
+        {
+          "text": "stillness",
+          "start_ms": 69161,
+          "end_ms": 70144,
+          "confidence": 0.9999426
+        },
+        {
+          "text": "all",
+          "start_ms": 70273,
+          "end_ms": 70402,
+          "confidence": 0.9879239
+        },
+        {
+          "text": "around,",
+          "start_ms": 70885,
+          "end_ms": 71224,
+          "confidence": 0.95705515
+        },
+        {
+          "text": "you",
+          "start_ms": 75337,
+          "end_ms": 75450,
+          "confidence": 0.9595435
+        },
+        {
+          "text": "are",
+          "start_ms": 75741,
+          "end_ms": 76016,
+          "confidence": 0.99977905
+        },
+        {
+          "text": "working",
+          "start_ms": 76080,
+          "end_ms": 76855,
+          "confidence": 0.9992842
+        },
+        {
+          "text": "all",
+          "start_ms": 77033,
+          "end_ms": 77259,
+          "confidence": 0.99990094
+        },
+        {
+          "text": "the",
+          "start_ms": 77534,
+          "end_ms": 77776,
+          "confidence": 0.99992454
+        },
+        {
+          "text": "details",
+          "start_ms": 77776,
+          "end_ms": 78793,
+          "confidence": 0.99996126
+        },
+        {
+          "text": "out.",
+          "start_ms": 78971,
+          "end_ms": 79052,
+          "confidence": 0.99827343
+        }
+      ]
+    },
+    {
+      "text": "What's in me will grow someday. I trust your timing and your ways. Underground is where life begins.",
+      "start_ms": 81935,
+      "end_ms": 100380,
+      "text_sk": "To, čo je vo mne, jedného dňa vyrastie. Dôverujem tvojmu načasovaniu a tvojim spôsobom. Pod zemou začína život.",
+      "words": [
+        {
+          "text": "What's",
+          "start_ms": 81935,
+          "end_ms": 82543,
+          "confidence": 0.946045
+        },
+        {
+          "text": "in",
+          "start_ms": 82576,
+          "end_ms": 82707,
+          "confidence": 0.99907196
+        },
+        {
+          "text": "me",
+          "start_ms": 82839,
+          "end_ms": 83085,
+          "confidence": 0.99970204
+        },
+        {
+          "text": "will",
+          "start_ms": 83479,
+          "end_ms": 83643,
+          "confidence": 0.99784863
+        },
+        {
+          "text": "grow",
+          "start_ms": 83660,
+          "end_ms": 83988,
+          "confidence": 0.9950937
+        },
+        {
+          "text": "someday.",
+          "start_ms": 84005,
+          "end_ms": 84645,
+          "confidence": 0.99333274
+        },
+        {
+          "text": "I",
+          "start_ms": 88800,
+          "end_ms": 88832,
+          "confidence": 0.7595711
+        },
+        {
+          "text": "trust",
+          "start_ms": 88832,
+          "end_ms": 89322,
+          "confidence": 0.9990589
+        },
+        {
+          "text": "your",
+          "start_ms": 89322,
+          "end_ms": 89501,
+          "confidence": 0.97474104
+        },
+        {
+          "text": "timing",
+          "start_ms": 89567,
+          "end_ms": 90432,
+          "confidence": 0.9998419
+        },
+        {
+          "text": "and",
+          "start_ms": 90530,
+          "end_ms": 90856,
+          "confidence": 0.9940848
+        },
+        {
+          "text": "your",
+          "start_ms": 90856,
+          "end_ms": 91052,
+          "confidence": 0.99882823
+        },
+        {
+          "text": "ways.",
+          "start_ms": 91346,
+          "end_ms": 92880,
+          "confidence": 0.9973514
+        },
+        {
+          "text": "Underground",
+          "start_ms": 95939,
+          "end_ms": 97505,
+          "confidence": 0.8882212
+        },
+        {
+          "text": "is",
+          "start_ms": 97505,
+          "end_ms": 97634,
+          "confidence": 0.9894965
+        },
+        {
+          "text": "where",
+          "start_ms": 97812,
+          "end_ms": 98070,
+          "confidence": 0.9995203
+        },
+        {
+          "text": "life",
+          "start_ms": 98070,
+          "end_ms": 98587,
+          "confidence": 0.9981838
+        },
+        {
+          "text": "begins.",
+          "start_ms": 98716,
+          "end_ms": 100380,
+          "confidence": 0.99274284
+        }
+      ]
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness.",
+      "start_ms": 102027,
+      "end_ms": 106424,
+      "text_sk": "Moje srdce sa bude tešiť v skrytosti.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 102027,
+          "end_ms": 102188,
+          "confidence": 0.91736054
+        },
+        {
+          "text": "heart",
+          "start_ms": 102576,
+          "end_ms": 102818,
+          "confidence": 0.99971193
+        },
+        {
+          "text": "will",
+          "start_ms": 103383,
+          "end_ms": 103739,
+          "confidence": 0.9987735
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 103787,
+          "end_ms": 104498,
+          "confidence": 0.9997857
+        },
+        {
+          "text": "in",
+          "start_ms": 104613,
+          "end_ms": 104663,
+          "confidence": 0.9968364
+        },
+        {
+          "text": "the",
+          "start_ms": 104781,
+          "end_ms": 105032,
+          "confidence": 0.99773407
+        },
+        {
+          "text": "hiddenness.",
+          "start_ms": 105284,
+          "end_ms": 106424,
+          "confidence": 0.75557417
+        }
+      ]
+    },
+    {
+      "text": "Beyond the burial, there's a resurrection.",
+      "start_ms": 109059,
+      "end_ms": 114124,
+      "text_sk": "Po pohrebe nasleduje zmŕtvychvstanie.",
+      "words": [
+        {
+          "text": "Beyond",
+          "start_ms": 109059,
+          "end_ms": 109640,
+          "confidence": 0.78425103
+        },
+        {
+          "text": "the",
+          "start_ms": 109640,
+          "end_ms": 109801,
+          "confidence": 0.99943894
+        },
+        {
+          "text": "burial,",
+          "start_ms": 109801,
+          "end_ms": 110721,
+          "confidence": 0.97113854
+        },
+        {
+          "text": "there's",
+          "start_ms": 111334,
+          "end_ms": 111850,
+          "confidence": 0.9996928
+        },
+        {
+          "text": "a",
+          "start_ms": 112286,
+          "end_ms": 112302,
+          "confidence": 0.9990721
+        },
+        {
+          "text": "resurrection.",
+          "start_ms": 112624,
+          "end_ms": 114124,
+          "confidence": 0.99178195
+        }
+      ]
+    },
+    {
+      "text": "Your will be done in me.",
+      "start_ms": 114705,
+      "end_ms": 118301,
+      "text_sk": "Nech sa stane tvoja vôľa vo mne.",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 114705,
+          "end_ms": 114996,
+          "confidence": 0.9963905
+        },
+        {
+          "text": "will",
+          "start_ms": 115189,
+          "end_ms": 115899,
+          "confidence": 0.99930215
+        },
+        {
+          "text": "be",
+          "start_ms": 115980,
+          "end_ms": 116205,
+          "confidence": 0.99974746
+        },
+        {
+          "text": "done",
+          "start_ms": 116834,
+          "end_ms": 117253,
+          "confidence": 0.9999839
+        },
+        {
+          "text": "in",
+          "start_ms": 117382,
+          "end_ms": 117995,
+          "confidence": 0.9985476
+        },
+        {
+          "text": "me.",
+          "start_ms": 118108,
+          "end_ms": 118301,
+          "confidence": 0.9912314
+        }
+      ]
+    },
+    {
+      "text": "Oh, let my roots go deep, and I will rise.",
+      "start_ms": 121090,
+      "end_ms": 133178,
+      "text_sk": "Nech moje korene siahajú hlboko a ja povstanem.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 121090,
+          "end_ms": 121267,
+          "confidence": 0.9860034
+        },
+        {
+          "text": "let",
+          "start_ms": 121977,
+          "end_ms": 122670,
+          "confidence": 0.99997365
+        },
+        {
+          "text": "my",
+          "start_ms": 122702,
+          "end_ms": 122976,
+          "confidence": 0.9999194
+        },
+        {
+          "text": "roots",
+          "start_ms": 123669,
+          "end_ms": 123927,
+          "confidence": 0.9999547
+        },
+        {
+          "text": "go",
+          "start_ms": 124057,
+          "end_ms": 124267,
+          "confidence": 0.98942333
+        },
+        {
+          "text": "deep,",
+          "start_ms": 124865,
+          "end_ms": 125706,
+          "confidence": 0.95814645
+        },
+        {
+          "text": "and",
+          "start_ms": 131108,
+          "end_ms": 131172,
+          "confidence": 0.99975234
+        },
+        {
+          "text": "I",
+          "start_ms": 131334,
+          "end_ms": 131350,
+          "confidence": 0.999602
+        },
+        {
+          "text": "will",
+          "start_ms": 131674,
+          "end_ms": 132078,
+          "confidence": 0.9994246
+        },
+        {
+          "text": "rise.",
+          "start_ms": 132078,
+          "end_ms": 133178,
+          "confidence": 0.9419448
+        }
+      ]
+    },
+    {
+      "text": "I will rise. He holds the time that I will rise.",
+      "start_ms": 134678,
+      "end_ms": 143799,
+      "text_sk": "Vstanem. On drží čas, kedy vstanem.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 134678,
+          "end_ms": 134806,
+          "confidence": 0.47368798
+        },
+        {
+          "text": "will",
+          "start_ms": 134999,
+          "end_ms": 135303,
+          "confidence": 0.99971217
+        },
+        {
+          "text": "rise.",
+          "start_ms": 135399,
+          "end_ms": 136826,
+          "confidence": 0.9872753
+        },
+        {
+          "text": "He",
+          "start_ms": 137419,
+          "end_ms": 137740,
+          "confidence": 0.9996495
+        },
+        {
+          "text": "holds",
+          "start_ms": 137964,
+          "end_ms": 138509,
+          "confidence": 0.9999441
+        },
+        {
+          "text": "the",
+          "start_ms": 138621,
+          "end_ms": 138878,
+          "confidence": 0.9999051
+        },
+        {
+          "text": "time",
+          "start_ms": 139006,
+          "end_ms": 139808,
+          "confidence": 0.9990563
+        },
+        {
+          "text": "that",
+          "start_ms": 141090,
+          "end_ms": 141346,
+          "confidence": 0.9842994
+        },
+        {
+          "text": "I",
+          "start_ms": 141411,
+          "end_ms": 141539,
+          "confidence": 0.9999498
+        },
+        {
+          "text": "will",
+          "start_ms": 141731,
+          "end_ms": 142068,
+          "confidence": 0.99995315
+        },
+        {
+          "text": "rise.",
+          "start_ms": 142068,
+          "end_ms": 143799,
+          "confidence": 0.9982474
+        }
+      ]
+    },
+    {
+      "text": "I will rise. I will rise. He holds the time that I will rise. I will rise. I will rise. God through God, through my life, be lifted high. I will rise, I will rise. God, through my life, be lifted high. Let Jesus rise in this place. Let Jesus rise. God through my life be glorified.",
+      "start_ms": 144777,
+      "end_ms": 196651,
+      "text_sk": "Vstanem. Vstanem. On drží čas, kedy vstanem. Vstanem. Vstanem. Boh skrze Boha, skrze môj život, buď vyzdvihnutý vysoko. Vstanem, vstanem. Bože, skrze môj život, buď vyzdvihnutý vysoko. Nech Ježiš vstane na tomto mieste. Nech Ježiš vstane. Bože, skrze môj život buď oslávený.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 144777,
+          "end_ms": 144825,
+          "confidence": 0.99980086
+        },
+        {
+          "text": "will",
+          "start_ms": 145194,
+          "end_ms": 145450,
+          "confidence": 0.9999516
+        },
+        {
+          "text": "rise.",
+          "start_ms": 145514,
+          "end_ms": 147326,
+          "confidence": 0.9961246
+        },
+        {
+          "text": "I",
+          "start_ms": 148143,
+          "end_ms": 148191,
+          "confidence": 0.99953413
+        },
+        {
+          "text": "will",
+          "start_ms": 148544,
+          "end_ms": 148801,
+          "confidence": 0.9999697
+        },
+        {
+          "text": "rise.",
+          "start_ms": 148801,
+          "end_ms": 150532,
+          "confidence": 0.9998796
+        },
+        {
+          "text": "He",
+          "start_ms": 150949,
+          "end_ms": 151205,
+          "confidence": 0.9994628
+        },
+        {
+          "text": "holds",
+          "start_ms": 151510,
+          "end_ms": 152151,
+          "confidence": 0.9999964
+        },
+        {
+          "text": "the",
+          "start_ms": 152167,
+          "end_ms": 152407,
+          "confidence": 0.99998546
+        },
+        {
+          "text": "time",
+          "start_ms": 152552,
+          "end_ms": 153706,
+          "confidence": 0.9999738
+        },
+        {
+          "text": "that",
+          "start_ms": 154652,
+          "end_ms": 154956,
+          "confidence": 0.99972683
+        },
+        {
+          "text": "I",
+          "start_ms": 154956,
+          "end_ms": 155084,
+          "confidence": 0.9999795
+        },
+        {
+          "text": "will",
+          "start_ms": 155357,
+          "end_ms": 155485,
+          "confidence": 0.9999665
+        },
+        {
+          "text": "rise.",
+          "start_ms": 155774,
+          "end_ms": 157537,
+          "confidence": 0.99991345
+        },
+        {
+          "text": "I",
+          "start_ms": 158322,
+          "end_ms": 158371,
+          "confidence": 0.99893767
+        },
+        {
+          "text": "will",
+          "start_ms": 158723,
+          "end_ms": 158948,
+          "confidence": 0.9999459
+        },
+        {
+          "text": "rise.",
+          "start_ms": 159140,
+          "end_ms": 161192,
+          "confidence": 0.9998045
+        },
+        {
+          "text": "I",
+          "start_ms": 161689,
+          "end_ms": 161817,
+          "confidence": 0.99669015
+        },
+        {
+          "text": "will",
+          "start_ms": 162106,
+          "end_ms": 162314,
+          "confidence": 0.9999399
+        },
+        {
+          "text": "rise.",
+          "start_ms": 162426,
+          "end_ms": 164238,
+          "confidence": 0.9920602
+        },
+        {
+          "text": "God",
+          "start_ms": 164590,
+          "end_ms": 165039,
+          "confidence": 0.9861696
+        },
+        {
+          "text": "through",
+          "start_ms": 165071,
+          "end_ms": 165263,
+          "confidence": 0.57004344
+        },
+        {
+          "text": "God,",
+          "start_ms": 165280,
+          "end_ms": 165608,
+          "confidence": 0.8518801
+        },
+        {
+          "text": "through",
+          "start_ms": 165657,
+          "end_ms": 165821,
+          "confidence": 0.9979505
+        },
+        {
+          "text": "my",
+          "start_ms": 165821,
+          "end_ms": 165870,
+          "confidence": 0.9995994
+        },
+        {
+          "text": "life,",
+          "start_ms": 165887,
+          "end_ms": 167544,
+          "confidence": 0.9352294
+        },
+        {
+          "text": "be",
+          "start_ms": 168020,
+          "end_ms": 168216,
+          "confidence": 0.9983802
+        },
+        {
+          "text": "lifted",
+          "start_ms": 168430,
+          "end_ms": 169217,
+          "confidence": 0.99995553
+        },
+        {
+          "text": "high.",
+          "start_ms": 169250,
+          "end_ms": 169431,
+          "confidence": 0.97319806
+        },
+        {
+          "text": "I",
+          "start_ms": 172080,
+          "end_ms": 172096,
+          "confidence": 0.98125136
+        },
+        {
+          "text": "will",
+          "start_ms": 172193,
+          "end_ms": 172387,
+          "confidence": 0.9996351
+        },
+        {
+          "text": "rise,",
+          "start_ms": 172517,
+          "end_ms": 174751,
+          "confidence": 0.7862479
+        },
+        {
+          "text": "I",
+          "start_ms": 175253,
+          "end_ms": 175382,
+          "confidence": 0.9994941
+        },
+        {
+          "text": "will",
+          "start_ms": 175593,
+          "end_ms": 175917,
+          "confidence": 0.9998728
+        },
+        {
+          "text": "rise.",
+          "start_ms": 175917,
+          "end_ms": 176208,
+          "confidence": 0.99348015
+        },
+        {
+          "text": "God,",
+          "start_ms": 178320,
+          "end_ms": 178400,
+          "confidence": 0.9379674
+        },
+        {
+          "text": "through",
+          "start_ms": 178513,
+          "end_ms": 178690,
+          "confidence": 0.9982382
+        },
+        {
+          "text": "my",
+          "start_ms": 178900,
+          "end_ms": 179013,
+          "confidence": 0.9991861
+        },
+        {
+          "text": "life,",
+          "start_ms": 179303,
+          "end_ms": 181012,
+          "confidence": 0.9982652
+        },
+        {
+          "text": "be",
+          "start_ms": 181480,
+          "end_ms": 181690,
+          "confidence": 0.99679226
+        },
+        {
+          "text": "lifted",
+          "start_ms": 181899,
+          "end_ms": 182706,
+          "confidence": 0.9999527
+        },
+        {
+          "text": "high.",
+          "start_ms": 182706,
+          "end_ms": 183012,
+          "confidence": 0.99810666
+        },
+        {
+          "text": "Let",
+          "start_ms": 185200,
+          "end_ms": 185313,
+          "confidence": 0.96974957
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 185313,
+          "end_ms": 186026,
+          "confidence": 0.9992269
+        },
+        {
+          "text": "rise",
+          "start_ms": 186123,
+          "end_ms": 186982,
+          "confidence": 0.99942774
+        },
+        {
+          "text": "in",
+          "start_ms": 187161,
+          "end_ms": 187226,
+          "confidence": 0.89485234
+        },
+        {
+          "text": "this",
+          "start_ms": 187242,
+          "end_ms": 187404,
+          "confidence": 0.99003744
+        },
+        {
+          "text": "place.",
+          "start_ms": 187404,
+          "end_ms": 187955,
+          "confidence": 0.9294439
+        },
+        {
+          "text": "Let",
+          "start_ms": 188506,
+          "end_ms": 188636,
+          "confidence": 0.7827855
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 188636,
+          "end_ms": 189592,
+          "confidence": 0.9998354
+        },
+        {
+          "text": "rise.",
+          "start_ms": 189592,
+          "end_ms": 189738,
+          "confidence": 0.95650905
+        },
+        {
+          "text": "God",
+          "start_ms": 191558,
+          "end_ms": 191688,
+          "confidence": 0.6254653
+        },
+        {
+          "text": "through",
+          "start_ms": 191899,
+          "end_ms": 192239,
+          "confidence": 0.867097
+        },
+        {
+          "text": "my",
+          "start_ms": 192466,
+          "end_ms": 192564,
+          "confidence": 0.9987023
+        },
+        {
+          "text": "life",
+          "start_ms": 192937,
+          "end_ms": 194591,
+          "confidence": 0.99971825
+        },
+        {
+          "text": "be",
+          "start_ms": 194980,
+          "end_ms": 195240,
+          "confidence": 0.7400879
+        },
+        {
+          "text": "glorified.",
+          "start_ms": 195305,
+          "end_ms": 196651,
+          "confidence": 0.9855691
+        }
+      ]
+    },
+    {
+      "text": "Sing it, sing it, sing it!",
+      "start_ms": 196764,
+      "end_ms": 198111,
+      "text_sk": "Spievaj to, spievaj to, spievaj to!",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 196764,
+          "end_ms": 196975,
+          "confidence": 0.9981797
+        },
+        {
+          "text": "it,",
+          "start_ms": 196992,
+          "end_ms": 197154,
+          "confidence": 0.9423178
+        },
+        {
+          "text": "sing",
+          "start_ms": 197170,
+          "end_ms": 197381,
+          "confidence": 0.9999527
+        },
+        {
+          "text": "it,",
+          "start_ms": 197413,
+          "end_ms": 197624,
+          "confidence": 0.9994346
+        },
+        {
+          "text": "sing",
+          "start_ms": 197657,
+          "end_ms": 197949,
+          "confidence": 0.9999709
+        },
+        {
+          "text": "it!",
+          "start_ms": 197965,
+          "end_ms": 198111,
+          "confidence": 0.75425637
+        }
+      ]
+    },
+    {
+      "text": "Let Jesus rise, Jesus rise.",
+      "start_ms": 198532,
+      "end_ms": 204752,
+      "text_sk": "Nech vstane Ježiš, Ježiš vstane.",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 198532,
+          "end_ms": 198760,
+          "confidence": 0.99894625
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 198760,
+          "end_ms": 199440,
+          "confidence": 0.999928
+        },
+        {
+          "text": "rise,",
+          "start_ms": 199683,
+          "end_ms": 201675,
+          "confidence": 0.9581282
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 202177,
+          "end_ms": 203084,
+          "confidence": 0.9996909
+        },
+        {
+          "text": "rise.",
+          "start_ms": 203084,
+          "end_ms": 204752,
+          "confidence": 0.8882118
+        }
+      ]
+    },
+    {
+      "text": "God through my life be glorified. Sing it! Let Jesus rise, Jesus rise. Come through my life, be glorified. Let Jesus rise, Jesus rise. Come through my life, be glorified. Sing it out. Let Jesus rise, Jesus rise. Come through my life. Be glorified! Sing him praise, praise, praise, praise, praise, praise, praise! Jesus, Jesus, Jesus, Jesus!",
+      "start_ms": 205173,
+      "end_ms": 265604,
+      "text_sk": "Nech je Boh oslávený v mojom živote. Spievajte! Nech Ježiš vstane, Ježiš vstane. Príď do môjho života, buď oslávený. Nech Ježiš vstane, Ježiš vstane. Príď do môjho života, buď oslávený. Vyjadrite to spevom. Nech Ježiš vstane, Ježiš vstane. Príď do môjho života. Buď oslávený! Spievajte mu chválu, chválu, chválu, chválu, chválu, chválu, chválu! Ježiš, Ježiš, Ježiš, Ježiš!",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 205173,
+          "end_ms": 205870,
+          "confidence": 0.9982596
+        },
+        {
+          "text": "through",
+          "start_ms": 205918,
+          "end_ms": 206096,
+          "confidence": 0.99963844
+        },
+        {
+          "text": "my",
+          "start_ms": 206323,
+          "end_ms": 206404,
+          "confidence": 0.99995553
+        },
+        {
+          "text": "life",
+          "start_ms": 207020,
+          "end_ms": 208085,
+          "confidence": 0.9998628
+        },
+        {
+          "text": "be",
+          "start_ms": 208504,
+          "end_ms": 208763,
+          "confidence": 0.99821365
+        },
+        {
+          "text": "glorified.",
+          "start_ms": 208827,
+          "end_ms": 210167,
+          "confidence": 0.999301
+        },
+        {
+          "text": "Sing",
+          "start_ms": 210845,
+          "end_ms": 211135,
+          "confidence": 0.9983909
+        },
+        {
+          "text": "it!",
+          "start_ms": 211232,
+          "end_ms": 211490,
+          "confidence": 0.986656
+        },
+        {
+          "text": "Let",
+          "start_ms": 211958,
+          "end_ms": 212378,
+          "confidence": 0.9997681
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 212378,
+          "end_ms": 213088,
+          "confidence": 0.99996686
+        },
+        {
+          "text": "rise,",
+          "start_ms": 213250,
+          "end_ms": 215332,
+          "confidence": 0.8065158
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 216220,
+          "end_ms": 216560,
+          "confidence": 0.9986802
+        },
+        {
+          "text": "rise.",
+          "start_ms": 216577,
+          "end_ms": 216730,
+          "confidence": 0.9899499
+        },
+        {
+          "text": "Come",
+          "start_ms": 218596,
+          "end_ms": 219014,
+          "confidence": 0.63024485
+        },
+        {
+          "text": "through",
+          "start_ms": 219014,
+          "end_ms": 219336,
+          "confidence": 0.8689429
+        },
+        {
+          "text": "my",
+          "start_ms": 219497,
+          "end_ms": 219754,
+          "confidence": 0.9927347
+        },
+        {
+          "text": "life,",
+          "start_ms": 221025,
+          "end_ms": 221878,
+          "confidence": 0.7965894
+        },
+        {
+          "text": "be",
+          "start_ms": 222071,
+          "end_ms": 222312,
+          "confidence": 0.99676406
+        },
+        {
+          "text": "glorified.",
+          "start_ms": 222377,
+          "end_ms": 224436,
+          "confidence": 0.9602847
+        },
+        {
+          "text": "Let",
+          "start_ms": 225353,
+          "end_ms": 225820,
+          "confidence": 0.93633085
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 225820,
+          "end_ms": 226676,
+          "confidence": 0.999775
+        },
+        {
+          "text": "rise,",
+          "start_ms": 226741,
+          "end_ms": 228729,
+          "confidence": 0.90539527
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 229182,
+          "end_ms": 229942,
+          "confidence": 0.99708277
+        },
+        {
+          "text": "rise.",
+          "start_ms": 230136,
+          "end_ms": 231801,
+          "confidence": 0.9640911
+        },
+        {
+          "text": "Come",
+          "start_ms": 232221,
+          "end_ms": 232560,
+          "confidence": 0.9200963
+        },
+        {
+          "text": "through",
+          "start_ms": 232560,
+          "end_ms": 233223,
+          "confidence": 0.9997596
+        },
+        {
+          "text": "my",
+          "start_ms": 233369,
+          "end_ms": 233660,
+          "confidence": 0.9998504
+        },
+        {
+          "text": "life,",
+          "start_ms": 233660,
+          "end_ms": 235206,
+          "confidence": 0.99618083
+        },
+        {
+          "text": "be",
+          "start_ms": 235544,
+          "end_ms": 235802,
+          "confidence": 0.9972269
+        },
+        {
+          "text": "glorified.",
+          "start_ms": 235866,
+          "end_ms": 237606,
+          "confidence": 0.9976252
+        },
+        {
+          "text": "Sing",
+          "start_ms": 237719,
+          "end_ms": 238008,
+          "confidence": 0.5535539
+        },
+        {
+          "text": "it",
+          "start_ms": 238041,
+          "end_ms": 238121,
+          "confidence": 0.99800223
+        },
+        {
+          "text": "out.",
+          "start_ms": 238121,
+          "end_ms": 238443,
+          "confidence": 0.7701136
+        },
+        {
+          "text": "Let",
+          "start_ms": 238927,
+          "end_ms": 239297,
+          "confidence": 0.9977278
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 239329,
+          "end_ms": 240199,
+          "confidence": 0.9999676
+        },
+        {
+          "text": "rise,",
+          "start_ms": 240199,
+          "end_ms": 241794,
+          "confidence": 0.93351114
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 242680,
+          "end_ms": 243485,
+          "confidence": 0.98777395
+        },
+        {
+          "text": "rise.",
+          "start_ms": 243501,
+          "end_ms": 245386,
+          "confidence": 0.98631495
+        },
+        {
+          "text": "Come",
+          "start_ms": 245676,
+          "end_ms": 246095,
+          "confidence": 0.82004064
+        },
+        {
+          "text": "through",
+          "start_ms": 246095,
+          "end_ms": 246353,
+          "confidence": 0.99978656
+        },
+        {
+          "text": "my",
+          "start_ms": 246353,
+          "end_ms": 246578,
+          "confidence": 0.9994271
+        },
+        {
+          "text": "life.",
+          "start_ms": 246578,
+          "end_ms": 246885,
+          "confidence": 0.8167161
+        },
+        {
+          "text": "Be",
+          "start_ms": 249148,
+          "end_ms": 249180,
+          "confidence": 0.84887564
+        },
+        {
+          "text": "glorified!",
+          "start_ms": 249406,
+          "end_ms": 252180,
+          "confidence": 0.9707788
+        },
+        {
+          "text": "Sing",
+          "start_ms": 252890,
+          "end_ms": 253325,
+          "confidence": 0.5384059
+        },
+        {
+          "text": "him",
+          "start_ms": 253342,
+          "end_ms": 253761,
+          "confidence": 0.25936416
+        },
+        {
+          "text": "praise,",
+          "start_ms": 253825,
+          "end_ms": 254503,
+          "confidence": 0.6520802
+        },
+        {
+          "text": "praise,",
+          "start_ms": 254567,
+          "end_ms": 255261,
+          "confidence": 0.956611
+        },
+        {
+          "text": "praise,",
+          "start_ms": 255374,
+          "end_ms": 256068,
+          "confidence": 0.9692385
+        },
+        {
+          "text": "praise,",
+          "start_ms": 257310,
+          "end_ms": 258004,
+          "confidence": 0.7235299
+        },
+        {
+          "text": "praise,",
+          "start_ms": 258197,
+          "end_ms": 258730,
+          "confidence": 0.9763876
+        },
+        {
+          "text": "praise,",
+          "start_ms": 258988,
+          "end_ms": 259779,
+          "confidence": 0.9645951
+        },
+        {
+          "text": "praise!",
+          "start_ms": 260683,
+          "end_ms": 261393,
+          "confidence": 0.7389932
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 262248,
+          "end_ms": 262877,
+          "confidence": 0.9510499
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 263022,
+          "end_ms": 263571,
+          "confidence": 0.9938135
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 263829,
+          "end_ms": 264555,
+          "confidence": 0.99637747
+        },
+        {
+          "text": "Jesus!",
+          "start_ms": 264717,
+          "end_ms": 265604,
+          "confidence": 0.95816606
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9510473,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "1a227956-d310-4901-b257-0f82e5fd265b",
+    "elapsed_s": 15.7,
+    "word_count": 248,
+    "utterance_count": 14,
+    "line_count": 14,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 273
+  }
+}

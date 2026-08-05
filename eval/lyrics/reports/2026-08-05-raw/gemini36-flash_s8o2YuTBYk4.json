@@ -1,0 +1,237 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\s8o2YuTBYk4_vocal16k.wav",
+  "duration_ms": 337340,
+  "lines": [
+    {
+      "text": "Can feel I'm not ready to let go",
+      "start_ms": 2340,
+      "end_ms": 5300,
+      "text_sk": "Cítim, že nie som pripravený vzdať sa",
+      "words": null
+    },
+    {
+      "text": "Of everything that's weighing me down",
+      "start_ms": 5300,
+      "end_ms": 9470,
+      "text_sk": "Všetkého, čo ma ťaží",
+      "words": null
+    },
+    {
+      "text": "Gotta listen to the voice that I know",
+      "start_ms": 9470,
+      "end_ms": 13350,
+      "text_sk": "Musím počúvať hlas, ktorý poznám",
+      "words": null
+    },
+    {
+      "text": "You speak to me and say I'm free",
+      "start_ms": 13350,
+      "end_ms": 18260,
+      "text_sk": "Hovoríš ku mne a hovoríš, že som slobodný",
+      "words": null
+    },
+    {
+      "text": "Come on, hands high, hands high!",
+      "start_ms": 18260,
+      "end_ms": 20430,
+      "text_sk": "Poďte, ruky hore, ruky hore!",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna hold me down, 'cause You keep setting me free",
+      "start_ms": 20430,
+      "end_ms": 27200,
+      "text_sk": "Nič ma neudrží dole, pretože ma stále oslobodzuješ",
+      "words": null
+    },
+    {
+      "text": "I can feel it all around, 'cause in Your presence I'm free",
+      "start_ms": 28310,
+      "end_ms": 34610,
+      "text_sk": "Cítim to všade okolo, pretože v Tvojej prítomnosti som slobodný",
+      "words": null
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 38870,
+      "end_ms": 44430,
+      "text_sk": "Som slobodný",
+      "words": null
+    },
+    {
+      "text": "When I think of how my life has been changed",
+      "start_ms": 102220,
+      "end_ms": 106090,
+      "text_sk": "Keď myslím na to, ako sa môj život zmenil",
+      "words": null
+    },
+    {
+      "text": "It all comes down to being with You",
+      "start_ms": 106090,
+      "end_ms": 110280,
+      "text_sk": "Všetko sa to zbieha k tomu byť s Tebou",
+      "words": null
+    },
+    {
+      "text": "And I know that You are always with me",
+      "start_ms": 110280,
+      "end_ms": 113940,
+      "text_sk": "A viem, že si vždy so mnou",
+      "words": null
+    },
+    {
+      "text": "Now I believe with You I'm free",
+      "start_ms": 113940,
+      "end_ms": 118490,
+      "text_sk": "Teraz verím, že s Tebou som slobodný",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna hold me down, 'cause You keep setting me free",
+      "start_ms": 121010,
+      "end_ms": 127620,
+      "text_sk": "Nič ma neudrží dole, pretože ma stále oslobodzuješ",
+      "words": null
+    },
+    {
+      "text": "I can feel it all around, 'cause in Your presence I'm free",
+      "start_ms": 128220,
+      "end_ms": 135310,
+      "text_sk": "Cítim to všade okolo, pretože v Tvojej prítomnosti som slobodný",
+      "words": null
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 139190,
+      "end_ms": 144570,
+      "text_sk": "Som slobodný",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 202160,
+      "end_ms": 205630,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 205630,
+      "end_ms": 209590,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 209590,
+      "end_ms": 213380,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high! Go!",
+      "start_ms": 213380,
+      "end_ms": 217640,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami! Poďme!",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 232260,
+      "end_ms": 235550,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 235550,
+      "end_ms": 239010,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 239010,
+      "end_ms": 243040,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 243040,
+      "end_ms": 247180,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised",
+      "start_ms": 247180,
+      "end_ms": 251140,
+      "text_sk": "Budem Ťa chváliť so zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 302270,
+      "end_ms": 305880,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 315260,
+      "end_ms": 319200,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 319200,
+      "end_ms": 323380,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "I'm gonna praise You with my hands raised high",
+      "start_ms": 328010,
+      "end_ms": 333670,
+      "text_sk": "Budem Ťa chváliť s vysoko zdvihnutými rukami",
+      "words": null
+    },
+    {
+      "text": "Come on, lift 'em up tonight!",
+      "start_ms": 333670,
+      "end_ms": 337340,
+      "text_sk": "Poďte, zdvihnite ich dnes večer!",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 23.6,
+    "line_count": 29,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 5993,
+      "candidatesTokenCount": 2244,
+      "totalTokenCount": 9495,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        },
+        {
+          "modality": "AUDIO",
+          "tokenCount": 5968
+        }
+      ],
+      "thoughtsTokenCount": 1258,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 15276212
+  }
+}

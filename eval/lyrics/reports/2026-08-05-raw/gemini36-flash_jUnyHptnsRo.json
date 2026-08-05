@@ -1,0 +1,216 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\jUnyHptnsRo_vocal16k.wav",
+  "duration_ms": 515200,
+  "lines": [
+    {
+      "text": "I say of the Lord",
+      "start_ms": 18270,
+      "end_ms": 23200,
+      "text_sk": "Hovorím o Pánovi",
+      "words": null
+    },
+    {
+      "text": "You cover me with feathers, keep me underneath your wings",
+      "start_ms": 23200,
+      "end_ms": 30730,
+      "text_sk": "Prikrývaš ma svojím perím, skrývaš ma pod svojimi krídlami",
+      "words": null
+    },
+    {
+      "text": "And arrows fly by day, but in your shadow I am safe",
+      "start_ms": 30730,
+      "end_ms": 40160,
+      "text_sk": "A šípy lietajú cez deň, no v tvojom stieni som v bezpečí",
+      "words": null
+    },
+    {
+      "text": "And angels guard my way, so I will not fear",
+      "start_ms": 40160,
+      "end_ms": 46420,
+      "text_sk": "A anjeli strážia moju cestu, preto sa nebudem báť",
+      "words": null
+    },
+    {
+      "text": "The terror of night, it will not come near",
+      "start_ms": 46420,
+      "end_ms": 53600,
+      "text_sk": "Nočná hrôza sa nepriblíži",
+      "words": null
+    },
+    {
+      "text": "Your presence is life and my fortress, and your love",
+      "start_ms": 53600,
+      "end_ms": 63440,
+      "text_sk": "Tvoja prítomnosť je život a moja pevnosť a tvoja láska",
+      "words": null
+    },
+    {
+      "text": "You're my fortress, my God in whom I trust, high shelter",
+      "start_ms": 63440,
+      "end_ms": 73280,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem, vysoké útočisko",
+      "words": null
+    },
+    {
+      "text": "In your name, amazing grace, my hiding place",
+      "start_ms": 73280,
+      "end_ms": 83940,
+      "text_sk": "V tvojom mene, úžasná milosť, moje skrýš",
+      "words": null
+    },
+    {
+      "text": "I say of the Lord, I say of the Lord",
+      "start_ms": 83940,
+      "end_ms": 129670,
+      "text_sk": "Hovorím o Pánovi, hovorím o Pánovi",
+      "words": null
+    },
+    {
+      "text": "No destruction, the name of Jesus, and he will save me from the snare",
+      "start_ms": 129670,
+      "end_ms": 145950,
+      "text_sk": "Žiadna skaza, meno Ježiš, a on ma vyslobodí z osídla",
+      "words": null
+    },
+    {
+      "text": "No harm can tarry here, so I will not fear",
+      "start_ms": 145950,
+      "end_ms": 153020,
+      "text_sk": "Žiadne zlo tu nezostane, preto sa nebudem báť",
+      "words": null
+    },
+    {
+      "text": "The terror of night, it will not come near",
+      "start_ms": 153020,
+      "end_ms": 159930,
+      "text_sk": "Nočná hrôza sa nepriblíži",
+      "words": null
+    },
+    {
+      "text": "Your presence is life and my fortress, and your love",
+      "start_ms": 159930,
+      "end_ms": 208880,
+      "text_sk": "Tvoja prítomnosť je život a moja pevnosť a tvoja láska",
+      "words": null
+    },
+    {
+      "text": "You're my fortress, my God in whom I trust, high shelter, in your name",
+      "start_ms": 208880,
+      "end_ms": 222300,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem, vysoké útočisko, v tvojom mene",
+      "words": null
+    },
+    {
+      "text": "Amazing grace, my hiding place",
+      "start_ms": 222300,
+      "end_ms": 237900,
+      "text_sk": "Úžasná milosť, moje úkryt",
+      "words": null
+    },
+    {
+      "text": "You are, you are, you are my hiding place",
+      "start_ms": 240000,
+      "end_ms": 249620,
+      "text_sk": "Si, si, si moje úkryt",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Because you love me, I will rescue you, I will deliver you\"",
+      "start_ms": 249620,
+      "end_ms": 304220,
+      "text_sk": "Počujem teba hovoriť: \"Pretože ma miluješ, zachránim ťa, vyslobodím ťa\"",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Because you call me, I will answer you, I will satisfy you\"",
+      "start_ms": 304220,
+      "end_ms": 316330,
+      "text_sk": "Počujem teba hovoriť: \"Pretože ma voláš, odpoviem ti, nasýtim ťa\"",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Because you love me, I will rescue you, I will deliver you\"",
+      "start_ms": 316330,
+      "end_ms": 329500,
+      "text_sk": "Počujem teba hovoriť: \"Pretože ma miluješ, zachránim ťa, vyslobodím ťa\"",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Because you call me, I will answer you, I will satisfy you\"",
+      "start_ms": 329500,
+      "end_ms": 342680,
+      "text_sk": "Počujem teba hovoriť: \"Pretože ma voláš, odpoviem ti, nasýtim ťa\"",
+      "words": null
+    },
+    {
+      "text": "A thousand may fall, ten thousand may fall, a thousand may fall",
+      "start_ms": 342680,
+      "end_ms": 359400,
+      "text_sk": "Tisíc môže padnúť, desaťtisíc môže padnúť, tisíc môže padnúť",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Come to me, satisfy\"",
+      "start_ms": 359400,
+      "end_ms": 412550,
+      "text_sk": "Počujem teba hovoriť: \"Poď ku mne, nasýť sa\"",
+      "words": null
+    },
+    {
+      "text": "My fortress, my God in whom I trust, high shelter, in your name",
+      "start_ms": 412550,
+      "end_ms": 431530,
+      "text_sk": "Moja pevnosť, môj Boh, ktorému dôverujem, vysoké útočisko, v tvojom mene",
+      "words": null
+    },
+    {
+      "text": "Amazing grace, my hiding place, amazing grace",
+      "start_ms": 431530,
+      "end_ms": 444700,
+      "text_sk": "Úžasná milosť, moje skrýš, úžasná milosť",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Because you love me, I will rescue you, I'll deliver you\"",
+      "start_ms": 444700,
+      "end_ms": 500000,
+      "text_sk": "Počujem teba hovoriť: \"Pretože ma miluješ, zachránim ťa, vyslobodím ťa\"",
+      "words": null
+    },
+    {
+      "text": "I hear you say, \"Because you know my name, I'll set you high and set you free\"",
+      "start_ms": 500000,
+      "end_ms": 515200,
+      "text_sk": "Počujem teba hovoriť: \"Pretože poznáš moje meno, postavím ťa vysoko a oslobodím ťa\"",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 28.0,
+    "line_count": 26,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 8133,
+      "candidatesTokenCount": 2233,
+      "totalTokenCount": 11419,
+      "promptTokensDetails": [
+        {
+          "modality": "AUDIO",
+          "tokenCount": 8108
+        },
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        }
+      ],
+      "thoughtsTokenCount": 1053,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 20754636
+  }
+}

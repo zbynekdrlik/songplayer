@@ -1,0 +1,1550 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\hk4woCR12MM_vocal16k.wav",
+  "duration_ms": 187605,
+  "lines": [
+    {
+      "text": "How could I thank the one who saved my life when there is no words to express what you deserve? You deserve the greatest, be lifted up the highest, worthy of my everything. Come on! This is why I praise 'Cause you're worthy of— oh, isn't he so worthy? In everything I do and all that I go through, I give you all my praise. Yeah, I got praise.",
+      "start_ms": 4030,
+      "end_ms": 42854,
+      "text_sk": "Ako by som mohol poďakovať tomu, kto mi zachránil život, keď neexistujú slová, ktoré by vyjadrili, čo si zaslúžiš? Zaslúžiš si to najväčšie, buď povýšený najvyššie, hoden môjho všetkého. No tak! Preto chválim, pretože si hoden – ó, nie je taký hoden? Vo všetkom, čo robím a všetkým, čím prechádzam, ti dávam všetku svoju chválu. Áno, mám chválu.",
+      "words": [
+        {
+          "text": "How",
+          "start_ms": 4030,
+          "end_ms": 4207,
+          "confidence": 0.7608132
+        },
+        {
+          "text": "could",
+          "start_ms": 4449,
+          "end_ms": 5076,
+          "confidence": 0.9997744
+        },
+        {
+          "text": "I",
+          "start_ms": 5076,
+          "end_ms": 5125,
+          "confidence": 0.99944454
+        },
+        {
+          "text": "thank",
+          "start_ms": 6863,
+          "end_ms": 7088,
+          "confidence": 0.9617601
+        },
+        {
+          "text": "the",
+          "start_ms": 7104,
+          "end_ms": 7281,
+          "confidence": 0.9990797
+        },
+        {
+          "text": "one",
+          "start_ms": 7329,
+          "end_ms": 7651,
+          "confidence": 0.96978664
+        },
+        {
+          "text": "who",
+          "start_ms": 7651,
+          "end_ms": 7764,
+          "confidence": 0.9999212
+        },
+        {
+          "text": "saved",
+          "start_ms": 7764,
+          "end_ms": 8392,
+          "confidence": 0.9989065
+        },
+        {
+          "text": "my",
+          "start_ms": 8392,
+          "end_ms": 8665,
+          "confidence": 0.99997103
+        },
+        {
+          "text": "life",
+          "start_ms": 8939,
+          "end_ms": 9389,
+          "confidence": 0.9999
+        },
+        {
+          "text": "when",
+          "start_ms": 11272,
+          "end_ms": 11594,
+          "confidence": 0.82583773
+        },
+        {
+          "text": "there",
+          "start_ms": 11594,
+          "end_ms": 11787,
+          "confidence": 0.99998033
+        },
+        {
+          "text": "is",
+          "start_ms": 11852,
+          "end_ms": 12143,
+          "confidence": 0.9899595
+        },
+        {
+          "text": "no",
+          "start_ms": 12256,
+          "end_ms": 12579,
+          "confidence": 0.9997625
+        },
+        {
+          "text": "words",
+          "start_ms": 12806,
+          "end_ms": 13404,
+          "confidence": 0.9899324
+        },
+        {
+          "text": "to",
+          "start_ms": 14535,
+          "end_ms": 14778,
+          "confidence": 0.997059
+        },
+        {
+          "text": "express",
+          "start_ms": 14907,
+          "end_ms": 15392,
+          "confidence": 0.9999924
+        },
+        {
+          "text": "what",
+          "start_ms": 15392,
+          "end_ms": 15715,
+          "confidence": 0.99846005
+        },
+        {
+          "text": "you",
+          "start_ms": 15715,
+          "end_ms": 15861,
+          "confidence": 0.909717
+        },
+        {
+          "text": "deserve?",
+          "start_ms": 16200,
+          "end_ms": 17073,
+          "confidence": 0.9952865
+        },
+        {
+          "text": "You",
+          "start_ms": 19580,
+          "end_ms": 19645,
+          "confidence": 0.99458176
+        },
+        {
+          "text": "deserve",
+          "start_ms": 19775,
+          "end_ms": 20148,
+          "confidence": 0.9999007
+        },
+        {
+          "text": "the",
+          "start_ms": 20262,
+          "end_ms": 20425,
+          "confidence": 0.99950576
+        },
+        {
+          "text": "greatest,",
+          "start_ms": 20425,
+          "end_ms": 21172,
+          "confidence": 0.9929258
+        },
+        {
+          "text": "be",
+          "start_ms": 21237,
+          "end_ms": 21481,
+          "confidence": 0.7980229
+        },
+        {
+          "text": "lifted",
+          "start_ms": 21481,
+          "end_ms": 22050,
+          "confidence": 0.9998647
+        },
+        {
+          "text": "up",
+          "start_ms": 22050,
+          "end_ms": 22213,
+          "confidence": 0.99964786
+        },
+        {
+          "text": "the",
+          "start_ms": 22278,
+          "end_ms": 22440,
+          "confidence": 0.9993499
+        },
+        {
+          "text": "highest,",
+          "start_ms": 22440,
+          "end_ms": 23155,
+          "confidence": 0.9978054
+        },
+        {
+          "text": "worthy",
+          "start_ms": 23432,
+          "end_ms": 23805,
+          "confidence": 0.9999491
+        },
+        {
+          "text": "of",
+          "start_ms": 24000,
+          "end_ms": 24130,
+          "confidence": 0.99997854
+        },
+        {
+          "text": "my",
+          "start_ms": 24163,
+          "end_ms": 24407,
+          "confidence": 0.9995135
+        },
+        {
+          "text": "everything.",
+          "start_ms": 24553,
+          "end_ms": 25024,
+          "confidence": 0.9966033
+        },
+        {
+          "text": "Come",
+          "start_ms": 26580,
+          "end_ms": 26758,
+          "confidence": 0.9952029
+        },
+        {
+          "text": "on!",
+          "start_ms": 26758,
+          "end_ms": 26823,
+          "confidence": 0.96156985
+        },
+        {
+          "text": "This",
+          "start_ms": 27244,
+          "end_ms": 27682,
+          "confidence": 0.99915373
+        },
+        {
+          "text": "is",
+          "start_ms": 27812,
+          "end_ms": 28120,
+          "confidence": 0.99972826
+        },
+        {
+          "text": "why",
+          "start_ms": 28234,
+          "end_ms": 28558,
+          "confidence": 0.9995272
+        },
+        {
+          "text": "I",
+          "start_ms": 28866,
+          "end_ms": 29044,
+          "confidence": 0.99951184
+        },
+        {
+          "text": "praise",
+          "start_ms": 29044,
+          "end_ms": 29580,
+          "confidence": 0.99397945
+        },
+        {
+          "text": "'Cause",
+          "start_ms": 30786,
+          "end_ms": 30882,
+          "confidence": 0.5512931
+        },
+        {
+          "text": "you're",
+          "start_ms": 30931,
+          "end_ms": 31044,
+          "confidence": 0.9901255
+        },
+        {
+          "text": "worthy",
+          "start_ms": 31173,
+          "end_ms": 31479,
+          "confidence": 0.99975485
+        },
+        {
+          "text": "of—",
+          "start_ms": 31737,
+          "end_ms": 32157,
+          "confidence": 0.5792388
+        },
+        {
+          "text": "oh,",
+          "start_ms": 32544,
+          "end_ms": 32560,
+          "confidence": 0.77259517
+        },
+        {
+          "text": "isn't",
+          "start_ms": 32705,
+          "end_ms": 32931,
+          "confidence": 0.9998289
+        },
+        {
+          "text": "he",
+          "start_ms": 32931,
+          "end_ms": 32963,
+          "confidence": 0.9331162
+        },
+        {
+          "text": "so",
+          "start_ms": 32963,
+          "end_ms": 33254,
+          "confidence": 0.9998987
+        },
+        {
+          "text": "worthy?",
+          "start_ms": 33270,
+          "end_ms": 33657,
+          "confidence": 0.99323475
+        },
+        {
+          "text": "In",
+          "start_ms": 34915,
+          "end_ms": 35125,
+          "confidence": 0.9119667
+        },
+        {
+          "text": "everything",
+          "start_ms": 35125,
+          "end_ms": 35835,
+          "confidence": 0.999902
+        },
+        {
+          "text": "I",
+          "start_ms": 35851,
+          "end_ms": 35948,
+          "confidence": 0.9975049
+        },
+        {
+          "text": "do",
+          "start_ms": 35948,
+          "end_ms": 36206,
+          "confidence": 0.99997056
+        },
+        {
+          "text": "and",
+          "start_ms": 36835,
+          "end_ms": 36996,
+          "confidence": 0.98141575
+        },
+        {
+          "text": "all",
+          "start_ms": 36996,
+          "end_ms": 37238,
+          "confidence": 0.9998822
+        },
+        {
+          "text": "that",
+          "start_ms": 37238,
+          "end_ms": 37545,
+          "confidence": 0.99981433
+        },
+        {
+          "text": "I",
+          "start_ms": 37545,
+          "end_ms": 37722,
+          "confidence": 0.99998295
+        },
+        {
+          "text": "go",
+          "start_ms": 37722,
+          "end_ms": 37883,
+          "confidence": 0.9965808
+        },
+        {
+          "text": "through,",
+          "start_ms": 37883,
+          "end_ms": 38141,
+          "confidence": 0.99984366
+        },
+        {
+          "text": "I",
+          "start_ms": 38851,
+          "end_ms": 38867,
+          "confidence": 0.9999616
+        },
+        {
+          "text": "give",
+          "start_ms": 38900,
+          "end_ms": 39404,
+          "confidence": 0.9990608
+        },
+        {
+          "text": "you",
+          "start_ms": 39404,
+          "end_ms": 39664,
+          "confidence": 0.99361974
+        },
+        {
+          "text": "all",
+          "start_ms": 39909,
+          "end_ms": 40104,
+          "confidence": 0.99976486
+        },
+        {
+          "text": "my",
+          "start_ms": 40397,
+          "end_ms": 40641,
+          "confidence": 0.98600334
+        },
+        {
+          "text": "praise.",
+          "start_ms": 40641,
+          "end_ms": 41259,
+          "confidence": 0.9973573
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 41520,
+          "end_ms": 41796,
+          "confidence": 0.68428165
+        },
+        {
+          "text": "I",
+          "start_ms": 42089,
+          "end_ms": 42187,
+          "confidence": 0.9991596
+        },
+        {
+          "text": "got",
+          "start_ms": 42187,
+          "end_ms": 42610,
+          "confidence": 0.5998527
+        },
+        {
+          "text": "praise.",
+          "start_ms": 42659,
+          "end_ms": 42854,
+          "confidence": 0.9146418
+        }
+      ]
+    },
+    {
+      "text": "I got praise. I got praise. I got praise.",
+      "start_ms": 45940,
+      "end_ms": 54487,
+      "text_sk": "Dostalo sa mi pochvaly. Dostalo sa mi pochvaly. Dostalo sa mi pochvaly.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 45940,
+          "end_ms": 45974,
+          "confidence": 0.77473253
+        },
+        {
+          "text": "got",
+          "start_ms": 45974,
+          "end_ms": 46111,
+          "confidence": 0.9995702
+        },
+        {
+          "text": "praise.",
+          "start_ms": 46230,
+          "end_ms": 46470,
+          "confidence": 0.99933195
+        },
+        {
+          "text": "I",
+          "start_ms": 49674,
+          "end_ms": 49692,
+          "confidence": 0.99238694
+        },
+        {
+          "text": "got",
+          "start_ms": 50024,
+          "end_ms": 50147,
+          "confidence": 0.99882287
+        },
+        {
+          "text": "praise.",
+          "start_ms": 50147,
+          "end_ms": 50479,
+          "confidence": 0.9960668
+        },
+        {
+          "text": "I",
+          "start_ms": 53661,
+          "end_ms": 53762,
+          "confidence": 0.9877643
+        },
+        {
+          "text": "got",
+          "start_ms": 53762,
+          "end_ms": 54217,
+          "confidence": 0.99759054
+        },
+        {
+          "text": "praise.",
+          "start_ms": 54268,
+          "end_ms": 54487,
+          "confidence": 0.99861354
+        }
+      ]
+    },
+    {
+      "text": "Woo! And I lift my voice to you. I make a joyful noise for you've been so good. I'd give you the whole world if I could. You deserve the greatest, to be lifted the highest, worthy of my everything. This is why 'Cause you are worthy, Lord. In everything I do and all that I go through, give you all my praise. Yeah, I got praise.",
+      "start_ms": 57639,
+      "end_ms": 97076,
+      "text_sk": "Ó! A pozdvihujem svoj hlas k Tebe. Vydávam radostný zvuk, lebo si bol taký dobrý. Dal by som Ti celý svet, keby som mohol. Zaslúžiš si to najväčšie, byť povýšený najvyššie, hoden môjho všetkého. Pretože si hoden, Pane. Vo všetkom, čo robím a všetkým, čím prechádzam, Ti dávam všetku svoju chválu. Áno, mám chválu.",
+      "words": [
+        {
+          "text": "Woo!",
+          "start_ms": 58021,
+          "end_ms": 58041,
+          "confidence": 0.8452597
+        },
+        {
+          "text": "And",
+          "start_ms": 58041,
+          "end_ms": 58266,
+          "confidence": 0.75065994
+        },
+        {
+          "text": "I",
+          "start_ms": 58362,
+          "end_ms": 58379,
+          "confidence": 0.99906343
+        },
+        {
+          "text": "lift",
+          "start_ms": 58379,
+          "end_ms": 58748,
+          "confidence": 0.9910691
+        },
+        {
+          "text": "my",
+          "start_ms": 58765,
+          "end_ms": 59022,
+          "confidence": 0.99911565
+        },
+        {
+          "text": "voice",
+          "start_ms": 59183,
+          "end_ms": 59842,
+          "confidence": 0.99982965
+        },
+        {
+          "text": "to",
+          "start_ms": 60872,
+          "end_ms": 61017,
+          "confidence": 0.7233551
+        },
+        {
+          "text": "you.",
+          "start_ms": 61017,
+          "end_ms": 61113,
+          "confidence": 0.7767506
+        },
+        {
+          "text": "I",
+          "start_ms": 61338,
+          "end_ms": 61515,
+          "confidence": 0.9953312
+        },
+        {
+          "text": "make",
+          "start_ms": 61515,
+          "end_ms": 61805,
+          "confidence": 0.9520947
+        },
+        {
+          "text": "a",
+          "start_ms": 61837,
+          "end_ms": 61998,
+          "confidence": 0.9979377
+        },
+        {
+          "text": "joyful",
+          "start_ms": 62078,
+          "end_ms": 62899,
+          "confidence": 0.9998585
+        },
+        {
+          "text": "noise",
+          "start_ms": 63108,
+          "end_ms": 63494,
+          "confidence": 0.99988437
+        },
+        {
+          "text": "for",
+          "start_ms": 65456,
+          "end_ms": 65842,
+          "confidence": 0.7834908
+        },
+        {
+          "text": "you've",
+          "start_ms": 65842,
+          "end_ms": 65987,
+          "confidence": 0.7238652
+        },
+        {
+          "text": "been",
+          "start_ms": 66019,
+          "end_ms": 66470,
+          "confidence": 0.999946
+        },
+        {
+          "text": "so",
+          "start_ms": 66470,
+          "end_ms": 66744,
+          "confidence": 0.999845
+        },
+        {
+          "text": "good.",
+          "start_ms": 66970,
+          "end_ms": 67924,
+          "confidence": 0.98734486
+        },
+        {
+          "text": "I'd",
+          "start_ms": 68667,
+          "end_ms": 68764,
+          "confidence": 0.73586786
+        },
+        {
+          "text": "give",
+          "start_ms": 68764,
+          "end_ms": 69071,
+          "confidence": 0.99993205
+        },
+        {
+          "text": "you",
+          "start_ms": 69071,
+          "end_ms": 69265,
+          "confidence": 0.99982625
+        },
+        {
+          "text": "the",
+          "start_ms": 69265,
+          "end_ms": 69491,
+          "confidence": 0.99958974
+        },
+        {
+          "text": "whole",
+          "start_ms": 69491,
+          "end_ms": 69717,
+          "confidence": 0.99995863
+        },
+        {
+          "text": "world",
+          "start_ms": 69895,
+          "end_ms": 70202,
+          "confidence": 0.9997557
+        },
+        {
+          "text": "if",
+          "start_ms": 70202,
+          "end_ms": 70412,
+          "confidence": 0.99827206
+        },
+        {
+          "text": "I",
+          "start_ms": 70445,
+          "end_ms": 70622,
+          "confidence": 0.9999436
+        },
+        {
+          "text": "could.",
+          "start_ms": 70865,
+          "end_ms": 71269,
+          "confidence": 0.9943413
+        },
+        {
+          "text": "You",
+          "start_ms": 73910,
+          "end_ms": 73942,
+          "confidence": 0.97679603
+        },
+        {
+          "text": "deserve",
+          "start_ms": 73942,
+          "end_ms": 74393,
+          "confidence": 0.999869
+        },
+        {
+          "text": "the",
+          "start_ms": 74426,
+          "end_ms": 74651,
+          "confidence": 0.99786407
+        },
+        {
+          "text": "greatest,",
+          "start_ms": 74651,
+          "end_ms": 75297,
+          "confidence": 0.97453946
+        },
+        {
+          "text": "to",
+          "start_ms": 75313,
+          "end_ms": 75410,
+          "confidence": 0.8981203
+        },
+        {
+          "text": "be",
+          "start_ms": 75410,
+          "end_ms": 75651,
+          "confidence": 0.9999434
+        },
+        {
+          "text": "lifted",
+          "start_ms": 75700,
+          "end_ms": 76168,
+          "confidence": 0.9994221
+        },
+        {
+          "text": "the",
+          "start_ms": 76361,
+          "end_ms": 76458,
+          "confidence": 0.9972063
+        },
+        {
+          "text": "highest,",
+          "start_ms": 76603,
+          "end_ms": 77200,
+          "confidence": 0.7750199
+        },
+        {
+          "text": "worthy",
+          "start_ms": 77635,
+          "end_ms": 77974,
+          "confidence": 0.7944947
+        },
+        {
+          "text": "of",
+          "start_ms": 77974,
+          "end_ms": 78022,
+          "confidence": 0.49732515
+        },
+        {
+          "text": "my",
+          "start_ms": 78280,
+          "end_ms": 78393,
+          "confidence": 0.9894867
+        },
+        {
+          "text": "everything.",
+          "start_ms": 78603,
+          "end_ms": 79845,
+          "confidence": 0.99260736
+        },
+        {
+          "text": "This",
+          "start_ms": 80635,
+          "end_ms": 80861,
+          "confidence": 0.99516296
+        },
+        {
+          "text": "is",
+          "start_ms": 80861,
+          "end_ms": 80926,
+          "confidence": 0.9995307
+        },
+        {
+          "text": "why",
+          "start_ms": 81022,
+          "end_ms": 81232,
+          "confidence": 0.9982622
+        },
+        {
+          "text": "'Cause",
+          "start_ms": 83600,
+          "end_ms": 83764,
+          "confidence": 0.9243744
+        },
+        {
+          "text": "you",
+          "start_ms": 83764,
+          "end_ms": 83944,
+          "confidence": 0.89954054
+        },
+        {
+          "text": "are",
+          "start_ms": 83944,
+          "end_ms": 84091,
+          "confidence": 0.96806383
+        },
+        {
+          "text": "worthy,",
+          "start_ms": 84091,
+          "end_ms": 84517,
+          "confidence": 0.9827657
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 84599,
+          "end_ms": 85171,
+          "confidence": 0.90023786
+        },
+        {
+          "text": "In",
+          "start_ms": 89170,
+          "end_ms": 89266,
+          "confidence": 0.6991384
+        },
+        {
+          "text": "everything",
+          "start_ms": 89266,
+          "end_ms": 89976,
+          "confidence": 0.99074674
+        },
+        {
+          "text": "I",
+          "start_ms": 89992,
+          "end_ms": 90041,
+          "confidence": 0.99126
+        },
+        {
+          "text": "do",
+          "start_ms": 90089,
+          "end_ms": 90428,
+          "confidence": 0.999542
+        },
+        {
+          "text": "and",
+          "start_ms": 91057,
+          "end_ms": 91122,
+          "confidence": 0.8810373
+        },
+        {
+          "text": "all",
+          "start_ms": 91203,
+          "end_ms": 91380,
+          "confidence": 0.9984389
+        },
+        {
+          "text": "that",
+          "start_ms": 91380,
+          "end_ms": 91687,
+          "confidence": 0.9971698
+        },
+        {
+          "text": "I",
+          "start_ms": 91687,
+          "end_ms": 91784,
+          "confidence": 0.9999014
+        },
+        {
+          "text": "go",
+          "start_ms": 91784,
+          "end_ms": 92026,
+          "confidence": 0.90907246
+        },
+        {
+          "text": "through,",
+          "start_ms": 92106,
+          "end_ms": 92284,
+          "confidence": 0.9817969
+        },
+        {
+          "text": "give",
+          "start_ms": 93139,
+          "end_ms": 93623,
+          "confidence": 0.7624747
+        },
+        {
+          "text": "you",
+          "start_ms": 93623,
+          "end_ms": 93817,
+          "confidence": 0.9781034
+        },
+        {
+          "text": "all",
+          "start_ms": 94204,
+          "end_ms": 94607,
+          "confidence": 0.9990447
+        },
+        {
+          "text": "my",
+          "start_ms": 94607,
+          "end_ms": 94849,
+          "confidence": 0.99841464
+        },
+        {
+          "text": "praise.",
+          "start_ms": 94849,
+          "end_ms": 95463,
+          "confidence": 0.98851144
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 95737,
+          "end_ms": 96205,
+          "confidence": 0.9265495
+        },
+        {
+          "text": "I",
+          "start_ms": 96302,
+          "end_ms": 96463,
+          "confidence": 0.99713564
+        },
+        {
+          "text": "got",
+          "start_ms": 96527,
+          "end_ms": 96866,
+          "confidence": 0.9525104
+        },
+        {
+          "text": "praise.",
+          "start_ms": 96866,
+          "end_ms": 97076,
+          "confidence": 0.8827751
+        }
+      ]
+    },
+    {
+      "text": "Hey, I got praise. I got— 'cause you've been good to me. I can praise God for setting me free from being my leash, for healing me, for loving me. Come on, put your hands together. This is why.",
+      "start_ms": 98550,
+      "end_ms": 142102,
+      "text_sk": "Prijal som chválu. Prijal som ju, pretože ste boli ku mne dobrí. Môžem chváliť Boha za to, že ma oslobodil z môjho jarma, za to, že ma uzdravil, za to, že ma miluje. No tak, spojte ruky. Toto je dôvod.",
+      "words": [
+        {
+          "text": "Hey,",
+          "start_ms": 98550,
+          "end_ms": 98905,
+          "confidence": 0.91457367
+        },
+        {
+          "text": "I",
+          "start_ms": 100036,
+          "end_ms": 100052,
+          "confidence": 0.93983585
+        },
+        {
+          "text": "got",
+          "start_ms": 100052,
+          "end_ms": 100472,
+          "confidence": 0.8779444
+        },
+        {
+          "text": "praise.",
+          "start_ms": 100601,
+          "end_ms": 101296,
+          "confidence": 0.7318582
+        },
+        {
+          "text": "I",
+          "start_ms": 104140,
+          "end_ms": 104156,
+          "confidence": 0.9488595
+        },
+        {
+          "text": "got—",
+          "start_ms": 104156,
+          "end_ms": 104544,
+          "confidence": 0.7936155
+        },
+        {
+          "text": "'cause",
+          "start_ms": 105125,
+          "end_ms": 105416,
+          "confidence": 0.9602557
+        },
+        {
+          "text": "you've",
+          "start_ms": 105416,
+          "end_ms": 105691,
+          "confidence": 0.90936875
+        },
+        {
+          "text": "been",
+          "start_ms": 105691,
+          "end_ms": 106030,
+          "confidence": 0.9996513
+        },
+        {
+          "text": "good",
+          "start_ms": 106095,
+          "end_ms": 106272,
+          "confidence": 0.9987342
+        },
+        {
+          "text": "to",
+          "start_ms": 106272,
+          "end_ms": 106321,
+          "confidence": 0.9994324
+        },
+        {
+          "text": "me.",
+          "start_ms": 106337,
+          "end_ms": 106483,
+          "confidence": 0.986478
+        },
+        {
+          "text": "I",
+          "start_ms": 107736,
+          "end_ms": 107784,
+          "confidence": 0.49177295
+        },
+        {
+          "text": "can",
+          "start_ms": 107881,
+          "end_ms": 108430,
+          "confidence": 0.3844592
+        },
+        {
+          "text": "praise",
+          "start_ms": 108446,
+          "end_ms": 108995,
+          "confidence": 0.7577262
+        },
+        {
+          "text": "God",
+          "start_ms": 110237,
+          "end_ms": 112190,
+          "confidence": 0.9960376
+        },
+        {
+          "text": "for",
+          "start_ms": 112238,
+          "end_ms": 112319,
+          "confidence": 0.9391242
+        },
+        {
+          "text": "setting",
+          "start_ms": 112319,
+          "end_ms": 112948,
+          "confidence": 0.9993581
+        },
+        {
+          "text": "me",
+          "start_ms": 112981,
+          "end_ms": 113223,
+          "confidence": 0.9999027
+        },
+        {
+          "text": "free",
+          "start_ms": 113304,
+          "end_ms": 113626,
+          "confidence": 0.99990654
+        },
+        {
+          "text": "from",
+          "start_ms": 114240,
+          "end_ms": 114931,
+          "confidence": 0.5477084
+        },
+        {
+          "text": "being",
+          "start_ms": 115300,
+          "end_ms": 116232,
+          "confidence": 0.9566141
+        },
+        {
+          "text": "my",
+          "start_ms": 116281,
+          "end_ms": 116377,
+          "confidence": 0.43179923
+        },
+        {
+          "text": "leash,",
+          "start_ms": 117245,
+          "end_ms": 118691,
+          "confidence": 0.6234051
+        },
+        {
+          "text": "for",
+          "start_ms": 119832,
+          "end_ms": 120154,
+          "confidence": 0.99672973
+        },
+        {
+          "text": "healing",
+          "start_ms": 120218,
+          "end_ms": 120989,
+          "confidence": 0.99978346
+        },
+        {
+          "text": "me,",
+          "start_ms": 121182,
+          "end_ms": 121375,
+          "confidence": 0.9832415
+        },
+        {
+          "text": "for",
+          "start_ms": 124060,
+          "end_ms": 124173,
+          "confidence": 0.99396944
+        },
+        {
+          "text": "loving",
+          "start_ms": 124173,
+          "end_ms": 124547,
+          "confidence": 0.99889874
+        },
+        {
+          "text": "me.",
+          "start_ms": 124564,
+          "end_ms": 124759,
+          "confidence": 0.95833665
+        },
+        {
+          "text": "Come",
+          "start_ms": 124987,
+          "end_ms": 125523,
+          "confidence": 0.98447406
+        },
+        {
+          "text": "on,",
+          "start_ms": 125556,
+          "end_ms": 125621,
+          "confidence": 0.9803464
+        },
+        {
+          "text": "put",
+          "start_ms": 127085,
+          "end_ms": 127231,
+          "confidence": 0.99976295
+        },
+        {
+          "text": "your",
+          "start_ms": 127247,
+          "end_ms": 127377,
+          "confidence": 0.99992836
+        },
+        {
+          "text": "hands",
+          "start_ms": 127426,
+          "end_ms": 127963,
+          "confidence": 0.9999089
+        },
+        {
+          "text": "together.",
+          "start_ms": 127995,
+          "end_ms": 128288,
+          "confidence": 0.8075204
+        },
+        {
+          "text": "This",
+          "start_ms": 141524,
+          "end_ms": 141765,
+          "confidence": 0.51708114
+        },
+        {
+          "text": "is",
+          "start_ms": 141765,
+          "end_ms": 141893,
+          "confidence": 0.99997604
+        },
+        {
+          "text": "why.",
+          "start_ms": 141909,
+          "end_ms": 142102,
+          "confidence": 0.68974495
+        }
+      ]
+    },
+    {
+      "text": "This is why I praise. You're worthy of all my praise. In everything I do and all that I go through, I give you all my praise.",
+      "start_ms": 143433,
+      "end_ms": 157614,
+      "text_sk": "Preto chválim. Si hoden všetkej mojej chvály. Vo všetkom, čo robím, a vo všetkom, čím prechádzam, ti dávam všetku svoju chválu.",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 143433,
+          "end_ms": 143722,
+          "confidence": 0.99991953
+        },
+        {
+          "text": "is",
+          "start_ms": 143995,
+          "end_ms": 144299,
+          "confidence": 0.9999175
+        },
+        {
+          "text": "why",
+          "start_ms": 144412,
+          "end_ms": 144668,
+          "confidence": 0.99997044
+        },
+        {
+          "text": "I",
+          "start_ms": 144957,
+          "end_ms": 145134,
+          "confidence": 0.99613166
+        },
+        {
+          "text": "praise.",
+          "start_ms": 145134,
+          "end_ms": 145711,
+          "confidence": 0.7840131
+        },
+        {
+          "text": "You're",
+          "start_ms": 147059,
+          "end_ms": 147283,
+          "confidence": 0.7178333
+        },
+        {
+          "text": "worthy",
+          "start_ms": 147283,
+          "end_ms": 147668,
+          "confidence": 0.99934405
+        },
+        {
+          "text": "of",
+          "start_ms": 147845,
+          "end_ms": 148278,
+          "confidence": 0.99338925
+        },
+        {
+          "text": "all",
+          "start_ms": 148326,
+          "end_ms": 148727,
+          "confidence": 0.8586134
+        },
+        {
+          "text": "my",
+          "start_ms": 148743,
+          "end_ms": 148839,
+          "confidence": 0.9635016
+        },
+        {
+          "text": "praise.",
+          "start_ms": 149128,
+          "end_ms": 149593,
+          "confidence": 0.8271865
+        },
+        {
+          "text": "In",
+          "start_ms": 151069,
+          "end_ms": 151117,
+          "confidence": 0.6673448
+        },
+        {
+          "text": "everything",
+          "start_ms": 151294,
+          "end_ms": 151919,
+          "confidence": 0.9986249
+        },
+        {
+          "text": "I",
+          "start_ms": 152015,
+          "end_ms": 152128,
+          "confidence": 0.9986343
+        },
+        {
+          "text": "do",
+          "start_ms": 152128,
+          "end_ms": 152384,
+          "confidence": 0.9985757
+        },
+        {
+          "text": "and",
+          "start_ms": 152994,
+          "end_ms": 153058,
+          "confidence": 0.5482158
+        },
+        {
+          "text": "all",
+          "start_ms": 153219,
+          "end_ms": 153331,
+          "confidence": 0.995481
+        },
+        {
+          "text": "that",
+          "start_ms": 153331,
+          "end_ms": 153620,
+          "confidence": 0.99049497
+        },
+        {
+          "text": "I",
+          "start_ms": 153620,
+          "end_ms": 153636,
+          "confidence": 0.99895966
+        },
+        {
+          "text": "go",
+          "start_ms": 153860,
+          "end_ms": 154117,
+          "confidence": 0.7024601
+        },
+        {
+          "text": "through,",
+          "start_ms": 154117,
+          "end_ms": 154357,
+          "confidence": 0.99370706
+        },
+        {
+          "text": "I",
+          "start_ms": 154935,
+          "end_ms": 154951,
+          "confidence": 0.9952035
+        },
+        {
+          "text": "give",
+          "start_ms": 155063,
+          "end_ms": 155528,
+          "confidence": 0.99920076
+        },
+        {
+          "text": "you",
+          "start_ms": 155561,
+          "end_ms": 155721,
+          "confidence": 0.79583466
+        },
+        {
+          "text": "all",
+          "start_ms": 155721,
+          "end_ms": 155865,
+          "confidence": 0.99205184
+        },
+        {
+          "text": "my",
+          "start_ms": 156042,
+          "end_ms": 156748,
+          "confidence": 0.999796
+        },
+        {
+          "text": "praise.",
+          "start_ms": 156764,
+          "end_ms": 157614,
+          "confidence": 0.9967705
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise. I gotta praise. I gotta praise you. I gotta praise you. Come on, sing it. Hey. For setting me free, for meeting my needs, oh, for healing me, yeah. For loving me! Yes.",
+      "start_ms": 158272,
+      "end_ms": 187605,
+      "text_sk": "Musím chváliť. Musím chváliť. Musím ťa chváliť. Musím ťa chváliť. Poď, zaspievaj to. Hej. Za to, že si ma oslobodil, za to, že si naplnil moje potreby, ó, za to, že si ma uzdravil, áno. Za to, že ma miluješ! Áno.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 158272,
+          "end_ms": 158368,
+          "confidence": 0.9091331
+        },
+        {
+          "text": "gotta",
+          "start_ms": 158368,
+          "end_ms": 158689,
+          "confidence": 0.7000648
+        },
+        {
+          "text": "praise.",
+          "start_ms": 158689,
+          "end_ms": 159459,
+          "confidence": 0.9651026
+        },
+        {
+          "text": "I",
+          "start_ms": 161925,
+          "end_ms": 161941,
+          "confidence": 0.47363076
+        },
+        {
+          "text": "gotta",
+          "start_ms": 161989,
+          "end_ms": 162473,
+          "confidence": 0.63779896
+        },
+        {
+          "text": "praise.",
+          "start_ms": 162473,
+          "end_ms": 163409,
+          "confidence": 0.7801974
+        },
+        {
+          "text": "I",
+          "start_ms": 166006,
+          "end_ms": 166022,
+          "confidence": 0.789797
+        },
+        {
+          "text": "gotta",
+          "start_ms": 166167,
+          "end_ms": 166570,
+          "confidence": 0.9958599
+        },
+        {
+          "text": "praise",
+          "start_ms": 166570,
+          "end_ms": 167119,
+          "confidence": 0.9990318
+        },
+        {
+          "text": "you.",
+          "start_ms": 167200,
+          "end_ms": 167618,
+          "confidence": 0.6382766
+        },
+        {
+          "text": "I",
+          "start_ms": 169792,
+          "end_ms": 169889,
+          "confidence": 0.97096765
+        },
+        {
+          "text": "gotta",
+          "start_ms": 169889,
+          "end_ms": 170372,
+          "confidence": 0.9982918
+        },
+        {
+          "text": "praise",
+          "start_ms": 170372,
+          "end_ms": 170984,
+          "confidence": 0.9997873
+        },
+        {
+          "text": "you.",
+          "start_ms": 171081,
+          "end_ms": 171226,
+          "confidence": 0.96051365
+        },
+        {
+          "text": "Come",
+          "start_ms": 172208,
+          "end_ms": 172353,
+          "confidence": 0.99152726
+        },
+        {
+          "text": "on,",
+          "start_ms": 172385,
+          "end_ms": 172514,
+          "confidence": 0.9486818
+        },
+        {
+          "text": "sing",
+          "start_ms": 172643,
+          "end_ms": 172836,
+          "confidence": 0.9960304
+        },
+        {
+          "text": "it.",
+          "start_ms": 172869,
+          "end_ms": 172949,
+          "confidence": 0.78032553
+        },
+        {
+          "text": "Hey.",
+          "start_ms": 173191,
+          "end_ms": 173271,
+          "confidence": 0.53796345
+        },
+        {
+          "text": "For",
+          "start_ms": 174093,
+          "end_ms": 174238,
+          "confidence": 0.99719006
+        },
+        {
+          "text": "setting",
+          "start_ms": 174238,
+          "end_ms": 174850,
+          "confidence": 0.9997732
+        },
+        {
+          "text": "me",
+          "start_ms": 174898,
+          "end_ms": 174978,
+          "confidence": 0.99997675
+        },
+        {
+          "text": "free,",
+          "start_ms": 175349,
+          "end_ms": 176170,
+          "confidence": 0.76731646
+        },
+        {
+          "text": "for",
+          "start_ms": 178080,
+          "end_ms": 178161,
+          "confidence": 0.9960685
+        },
+        {
+          "text": "meeting",
+          "start_ms": 178193,
+          "end_ms": 178404,
+          "confidence": 0.9997819
+        },
+        {
+          "text": "my",
+          "start_ms": 178598,
+          "end_ms": 178858,
+          "confidence": 0.9992465
+        },
+        {
+          "text": "needs,",
+          "start_ms": 179085,
+          "end_ms": 179911,
+          "confidence": 0.9428247
+        },
+        {
+          "text": "oh,",
+          "start_ms": 181419,
+          "end_ms": 181435,
+          "confidence": 0.98732996
+        },
+        {
+          "text": "for",
+          "start_ms": 181776,
+          "end_ms": 182165,
+          "confidence": 0.996914
+        },
+        {
+          "text": "healing",
+          "start_ms": 182165,
+          "end_ms": 182926,
+          "confidence": 0.9996222
+        },
+        {
+          "text": "me,",
+          "start_ms": 183137,
+          "end_ms": 183186,
+          "confidence": 0.7188754
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 183283,
+          "end_ms": 183688,
+          "confidence": 0.99308693
+        },
+        {
+          "text": "For",
+          "start_ms": 185665,
+          "end_ms": 185762,
+          "confidence": 0.9618416
+        },
+        {
+          "text": "loving",
+          "start_ms": 185762,
+          "end_ms": 186441,
+          "confidence": 0.9892245
+        },
+        {
+          "text": "me!",
+          "start_ms": 186473,
+          "end_ms": 186716,
+          "confidence": 0.8402862
+        },
+        {
+          "text": "Yes.",
+          "start_ms": 187007,
+          "end_ms": 187605,
+          "confidence": 0.45762098
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.92357045,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "bb972fa1-e983-43c2-bbce-c080f4e501aa",
+    "elapsed_s": 17.6,
+    "word_count": 247,
+    "utterance_count": 6,
+    "line_count": 6,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 204
+  }
+}

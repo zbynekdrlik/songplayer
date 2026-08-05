@@ -1,0 +1,1646 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\xPkg_vW4yE0_vocal16k.wav",
+  "duration_ms": 245001,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed, when I barely trust myself, lead me to the rock higher than I.",
+      "start_ms": 8460,
+      "end_ms": 22972,
+      "text_sk": "Keď je moje srdce preťažené, keď si sotva dôverujem, veď ma k skale vyššej ako ja.",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 8460,
+          "end_ms": 8605,
+          "confidence": 0.92833424
+        },
+        {
+          "text": "my",
+          "start_ms": 8798,
+          "end_ms": 8895,
+          "confidence": 0.9982084
+        },
+        {
+          "text": "heart",
+          "start_ms": 9024,
+          "end_ms": 9928,
+          "confidence": 0.9995797
+        },
+        {
+          "text": "is",
+          "start_ms": 9992,
+          "end_ms": 10057,
+          "confidence": 0.9946532
+        },
+        {
+          "text": "overwhelmed,",
+          "start_ms": 10234,
+          "end_ms": 11267,
+          "confidence": 0.9183488
+        },
+        {
+          "text": "when",
+          "start_ms": 14720,
+          "end_ms": 14816,
+          "confidence": 0.84455276
+        },
+        {
+          "text": "I",
+          "start_ms": 14816,
+          "end_ms": 14832,
+          "confidence": 0.9985511
+        },
+        {
+          "text": "barely",
+          "start_ms": 15057,
+          "end_ms": 15926,
+          "confidence": 0.9983748
+        },
+        {
+          "text": "trust",
+          "start_ms": 15942,
+          "end_ms": 16762,
+          "confidence": 0.9996785
+        },
+        {
+          "text": "myself,",
+          "start_ms": 16762,
+          "end_ms": 17309,
+          "confidence": 0.9498882
+        },
+        {
+          "text": "lead",
+          "start_ms": 18033,
+          "end_ms": 18275,
+          "confidence": 0.90413064
+        },
+        {
+          "text": "me",
+          "start_ms": 18275,
+          "end_ms": 18451,
+          "confidence": 0.99953425
+        },
+        {
+          "text": "to",
+          "start_ms": 18451,
+          "end_ms": 18773,
+          "confidence": 0.99862266
+        },
+        {
+          "text": "the",
+          "start_ms": 18773,
+          "end_ms": 19015,
+          "confidence": 0.9979361
+        },
+        {
+          "text": "rock",
+          "start_ms": 19079,
+          "end_ms": 19240,
+          "confidence": 0.8745027
+        },
+        {
+          "text": "higher",
+          "start_ms": 22055,
+          "end_ms": 22553,
+          "confidence": 0.40677348
+        },
+        {
+          "text": "than",
+          "start_ms": 22553,
+          "end_ms": 22843,
+          "confidence": 0.99561775
+        },
+        {
+          "text": "I.",
+          "start_ms": 22859,
+          "end_ms": 22972,
+          "confidence": 0.9388808
+        }
+      ]
+    },
+    {
+      "text": "When the night is closing in, to remind me of my sin, lead me to the rock higher than I. Lead me to the rock higher than I.",
+      "start_ms": 22972,
+      "end_ms": 48956,
+      "text_sk": "Keď sa noc blíži, aby mi pripomenula môj hriech, veď ma k skale vyššej ako ja. Veď ma k skale vyššej ako ja.",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 26534,
+          "end_ms": 26745,
+          "confidence": 0.9743629
+        },
+        {
+          "text": "the",
+          "start_ms": 26778,
+          "end_ms": 27005,
+          "confidence": 0.99953306
+        },
+        {
+          "text": "night",
+          "start_ms": 27021,
+          "end_ms": 27215,
+          "confidence": 0.99897325
+        },
+        {
+          "text": "is",
+          "start_ms": 27831,
+          "end_ms": 27880,
+          "confidence": 0.9974661
+        },
+        {
+          "text": "closing",
+          "start_ms": 27993,
+          "end_ms": 29160,
+          "confidence": 0.96494716
+        },
+        {
+          "text": "in,",
+          "start_ms": 29209,
+          "end_ms": 29484,
+          "confidence": 0.72668254
+        },
+        {
+          "text": "to",
+          "start_ms": 32550,
+          "end_ms": 32759,
+          "confidence": 0.76922464
+        },
+        {
+          "text": "remind",
+          "start_ms": 32807,
+          "end_ms": 33756,
+          "confidence": 0.998808
+        },
+        {
+          "text": "me",
+          "start_ms": 33788,
+          "end_ms": 34045,
+          "confidence": 0.99898034
+        },
+        {
+          "text": "of",
+          "start_ms": 34109,
+          "end_ms": 34688,
+          "confidence": 0.9973917
+        },
+        {
+          "text": "my",
+          "start_ms": 34688,
+          "end_ms": 34849,
+          "confidence": 0.9985531
+        },
+        {
+          "text": "sin,",
+          "start_ms": 34994,
+          "end_ms": 35959,
+          "confidence": 0.7433229
+        },
+        {
+          "text": "lead",
+          "start_ms": 36023,
+          "end_ms": 36248,
+          "confidence": 0.95477396
+        },
+        {
+          "text": "me",
+          "start_ms": 36280,
+          "end_ms": 36505,
+          "confidence": 0.9998264
+        },
+        {
+          "text": "to",
+          "start_ms": 36505,
+          "end_ms": 36843,
+          "confidence": 0.9993375
+        },
+        {
+          "text": "the",
+          "start_ms": 36843,
+          "end_ms": 37036,
+          "confidence": 0.9983205
+        },
+        {
+          "text": "rock",
+          "start_ms": 37149,
+          "end_ms": 38226,
+          "confidence": 0.9099094
+        },
+        {
+          "text": "higher",
+          "start_ms": 40043,
+          "end_ms": 40284,
+          "confidence": 0.7476139
+        },
+        {
+          "text": "than",
+          "start_ms": 40542,
+          "end_ms": 40848,
+          "confidence": 0.9990528
+        },
+        {
+          "text": "I.",
+          "start_ms": 40848,
+          "end_ms": 40977,
+          "confidence": 0.98015577
+        },
+        {
+          "text": "Lead",
+          "start_ms": 44072,
+          "end_ms": 44314,
+          "confidence": 0.5762494
+        },
+        {
+          "text": "me",
+          "start_ms": 44330,
+          "end_ms": 44491,
+          "confidence": 0.9998697
+        },
+        {
+          "text": "to",
+          "start_ms": 44491,
+          "end_ms": 44797,
+          "confidence": 0.9993806
+        },
+        {
+          "text": "the",
+          "start_ms": 44797,
+          "end_ms": 44894,
+          "confidence": 0.9986407
+        },
+        {
+          "text": "rock",
+          "start_ms": 44894,
+          "end_ms": 45361,
+          "confidence": 0.99910635
+        },
+        {
+          "text": "higher",
+          "start_ms": 48021,
+          "end_ms": 48263,
+          "confidence": 0.88279504
+        },
+        {
+          "text": "than",
+          "start_ms": 48585,
+          "end_ms": 48843,
+          "confidence": 0.998324
+        },
+        {
+          "text": "I.",
+          "start_ms": 48843,
+          "end_ms": 48956,
+          "confidence": 0.995705
+        }
+      ]
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I. So much stronger, so much greater, so much wiser, so much higher. Higher than I, higher than I.",
+      "start_ms": 48956,
+      "end_ms": 80904,
+      "text_sk": "Vyššie ako ja, vyššie ako ja, vyššie ako ja, vyššie ako ja. Oveľa silnejší, oveľa väčší, oveľa múdrejší, oveľa vyšší. Vyššie ako ja, vyššie ako ja.",
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 51889,
+          "end_ms": 52485,
+          "confidence": 0.89469546
+        },
+        {
+          "text": "than",
+          "start_ms": 52485,
+          "end_ms": 52855,
+          "confidence": 0.99804795
+        },
+        {
+          "text": "I,",
+          "start_ms": 52855,
+          "end_ms": 53032,
+          "confidence": 0.9138752
+        },
+        {
+          "text": "higher",
+          "start_ms": 55991,
+          "end_ms": 56361,
+          "confidence": 0.9974854
+        },
+        {
+          "text": "than",
+          "start_ms": 56490,
+          "end_ms": 56892,
+          "confidence": 0.9998981
+        },
+        {
+          "text": "I,",
+          "start_ms": 56892,
+          "end_ms": 57069,
+          "confidence": 0.8549292
+        },
+        {
+          "text": "higher",
+          "start_ms": 60450,
+          "end_ms": 60567,
+          "confidence": 0.9980538
+        },
+        {
+          "text": "than",
+          "start_ms": 60567,
+          "end_ms": 60901,
+          "confidence": 0.99992716
+        },
+        {
+          "text": "I,",
+          "start_ms": 60901,
+          "end_ms": 61085,
+          "confidence": 0.99539006
+        },
+        {
+          "text": "higher",
+          "start_ms": 64370,
+          "end_ms": 64660,
+          "confidence": 0.99962866
+        },
+        {
+          "text": "than",
+          "start_ms": 64724,
+          "end_ms": 64885,
+          "confidence": 0.99989617
+        },
+        {
+          "text": "I.",
+          "start_ms": 64885,
+          "end_ms": 64917,
+          "confidence": 0.98821187
+        },
+        {
+          "text": "So",
+          "start_ms": 67689,
+          "end_ms": 68027,
+          "confidence": 0.9995629
+        },
+        {
+          "text": "much",
+          "start_ms": 68269,
+          "end_ms": 68559,
+          "confidence": 0.9999616
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 68591,
+          "end_ms": 69558,
+          "confidence": 0.9925493
+        },
+        {
+          "text": "so",
+          "start_ms": 69719,
+          "end_ms": 70025,
+          "confidence": 0.99995804
+        },
+        {
+          "text": "much",
+          "start_ms": 70202,
+          "end_ms": 70654,
+          "confidence": 0.9999951
+        },
+        {
+          "text": "greater,",
+          "start_ms": 70766,
+          "end_ms": 71508,
+          "confidence": 0.9960329
+        },
+        {
+          "text": "so",
+          "start_ms": 71733,
+          "end_ms": 71959,
+          "confidence": 0.99995625
+        },
+        {
+          "text": "much",
+          "start_ms": 72297,
+          "end_ms": 72700,
+          "confidence": 0.99999607
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 72910,
+          "end_ms": 73361,
+          "confidence": 0.9983956
+        },
+        {
+          "text": "so",
+          "start_ms": 73603,
+          "end_ms": 74070,
+          "confidence": 0.99972004
+        },
+        {
+          "text": "much",
+          "start_ms": 74231,
+          "end_ms": 74602,
+          "confidence": 0.99999046
+        },
+        {
+          "text": "higher.",
+          "start_ms": 74779,
+          "end_ms": 75359,
+          "confidence": 0.9148833
+        },
+        {
+          "text": "Higher",
+          "start_ms": 75988,
+          "end_ms": 76568,
+          "confidence": 0.9995683
+        },
+        {
+          "text": "than",
+          "start_ms": 76568,
+          "end_ms": 76874,
+          "confidence": 0.99996877
+        },
+        {
+          "text": "I,",
+          "start_ms": 76874,
+          "end_ms": 77052,
+          "confidence": 0.99810344
+        },
+        {
+          "text": "higher",
+          "start_ms": 80017,
+          "end_ms": 80565,
+          "confidence": 0.9998246
+        },
+        {
+          "text": "than",
+          "start_ms": 80598,
+          "end_ms": 80839,
+          "confidence": 0.99989283
+        },
+        {
+          "text": "I.",
+          "start_ms": 80839,
+          "end_ms": 80904,
+          "confidence": 0.99077404
+        }
+      ]
+    },
+    {
+      "text": "When the doubt is rising up, when it comes in like a flood, lead me to the rock higher than I. Yeah, lead me to the rock, to the rock higher than I, higher than I, higher than I. Higher than I, higher than I, higher than I. So much stronger, so much greater, so much wiser, so much higher. Higher than I, higher than I.",
+      "start_ms": 84484,
+      "end_ms": 139004,
+      "text_sk": "Keď rastú pochybnosti, keď prichádzajú ako povodeň, veď ma k skale vyššej ako ja. Áno, veď ma k skale, k skale vyššej ako ja, vyššej ako ja, vyššej ako ja. Vyššej ako ja, vyššej ako ja, vyššej ako ja. Oveľa silnejší, oveľa väčší, oveľa múdrejší, oveľa vyšší. Vyššej ako ja, vyššej ako ja.",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 84484,
+          "end_ms": 84613,
+          "confidence": 0.5672277
+        },
+        {
+          "text": "the",
+          "start_ms": 84710,
+          "end_ms": 84888,
+          "confidence": 0.99770594
+        },
+        {
+          "text": "doubt",
+          "start_ms": 84953,
+          "end_ms": 85777,
+          "confidence": 0.97583276
+        },
+        {
+          "text": "is",
+          "start_ms": 85777,
+          "end_ms": 85825,
+          "confidence": 0.9997397
+        },
+        {
+          "text": "rising",
+          "start_ms": 86100,
+          "end_ms": 87086,
+          "confidence": 0.9963074
+        },
+        {
+          "text": "up,",
+          "start_ms": 87134,
+          "end_ms": 87490,
+          "confidence": 0.9762789
+        },
+        {
+          "text": "when",
+          "start_ms": 90545,
+          "end_ms": 90787,
+          "confidence": 0.9997358
+        },
+        {
+          "text": "it",
+          "start_ms": 90852,
+          "end_ms": 91029,
+          "confidence": 0.99966466
+        },
+        {
+          "text": "comes",
+          "start_ms": 91240,
+          "end_ms": 91757,
+          "confidence": 0.999464
+        },
+        {
+          "text": "in",
+          "start_ms": 91757,
+          "end_ms": 91886,
+          "confidence": 0.9419469
+        },
+        {
+          "text": "like",
+          "start_ms": 92064,
+          "end_ms": 92808,
+          "confidence": 0.99367684
+        },
+        {
+          "text": "a",
+          "start_ms": 92873,
+          "end_ms": 92921,
+          "confidence": 0.9993393
+        },
+        {
+          "text": "flood,",
+          "start_ms": 93034,
+          "end_ms": 93665,
+          "confidence": 0.99054134
+        },
+        {
+          "text": "lead",
+          "start_ms": 94085,
+          "end_ms": 94198,
+          "confidence": 0.99481875
+        },
+        {
+          "text": "me",
+          "start_ms": 94198,
+          "end_ms": 94506,
+          "confidence": 0.9998976
+        },
+        {
+          "text": "to",
+          "start_ms": 94506,
+          "end_ms": 94683,
+          "confidence": 0.99965274
+        },
+        {
+          "text": "the",
+          "start_ms": 94732,
+          "end_ms": 94942,
+          "confidence": 0.99979585
+        },
+        {
+          "text": "rock",
+          "start_ms": 94991,
+          "end_ms": 96122,
+          "confidence": 0.8523251
+        },
+        {
+          "text": "higher",
+          "start_ms": 98046,
+          "end_ms": 98548,
+          "confidence": 0.849566
+        },
+        {
+          "text": "than",
+          "start_ms": 98548,
+          "end_ms": 98839,
+          "confidence": 0.9999833
+        },
+        {
+          "text": "I.",
+          "start_ms": 98952,
+          "end_ms": 98968,
+          "confidence": 0.99205023
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 100167,
+          "end_ms": 101933,
+          "confidence": 0.9963477
+        },
+        {
+          "text": "lead",
+          "start_ms": 101965,
+          "end_ms": 102095,
+          "confidence": 0.9997384
+        },
+        {
+          "text": "me",
+          "start_ms": 102192,
+          "end_ms": 102289,
+          "confidence": 0.99999046
+        },
+        {
+          "text": "to",
+          "start_ms": 102435,
+          "end_ms": 102613,
+          "confidence": 0.99996483
+        },
+        {
+          "text": "the",
+          "start_ms": 102743,
+          "end_ms": 102905,
+          "confidence": 0.9999665
+        },
+        {
+          "text": "rock,",
+          "start_ms": 102905,
+          "end_ms": 104055,
+          "confidence": 0.839879
+        },
+        {
+          "text": "to",
+          "start_ms": 104168,
+          "end_ms": 104589,
+          "confidence": 0.741412
+        },
+        {
+          "text": "the",
+          "start_ms": 104946,
+          "end_ms": 105189,
+          "confidence": 0.9999474
+        },
+        {
+          "text": "rock",
+          "start_ms": 105270,
+          "end_ms": 105740,
+          "confidence": 0.99985564
+        },
+        {
+          "text": "higher",
+          "start_ms": 105999,
+          "end_ms": 106452,
+          "confidence": 0.96825737
+        },
+        {
+          "text": "than",
+          "start_ms": 106566,
+          "end_ms": 106857,
+          "confidence": 0.9999702
+        },
+        {
+          "text": "I,",
+          "start_ms": 106955,
+          "end_ms": 106971,
+          "confidence": 0.98030365
+        },
+        {
+          "text": "higher",
+          "start_ms": 109921,
+          "end_ms": 110510,
+          "confidence": 0.999482
+        },
+        {
+          "text": "than",
+          "start_ms": 110510,
+          "end_ms": 110789,
+          "confidence": 0.99988365
+        },
+        {
+          "text": "I,",
+          "start_ms": 110789,
+          "end_ms": 110805,
+          "confidence": 0.916154
+        },
+        {
+          "text": "higher",
+          "start_ms": 110821,
+          "end_ms": 110920,
+          "confidence": 0.9819332
+        },
+        {
+          "text": "than",
+          "start_ms": 110920,
+          "end_ms": 111132,
+          "confidence": 0.5493494
+        },
+        {
+          "text": "I.",
+          "start_ms": 111165,
+          "end_ms": 111230,
+          "confidence": 0.98908347
+        },
+        {
+          "text": "Higher",
+          "start_ms": 114280,
+          "end_ms": 114494,
+          "confidence": 0.7170159
+        },
+        {
+          "text": "than",
+          "start_ms": 114494,
+          "end_ms": 114797,
+          "confidence": 0.9994542
+        },
+        {
+          "text": "I,",
+          "start_ms": 114922,
+          "end_ms": 115118,
+          "confidence": 0.9271758
+        },
+        {
+          "text": "higher",
+          "start_ms": 118440,
+          "end_ms": 118541,
+          "confidence": 0.9982401
+        },
+        {
+          "text": "than",
+          "start_ms": 118541,
+          "end_ms": 118878,
+          "confidence": 0.9999722
+        },
+        {
+          "text": "I,",
+          "start_ms": 118878,
+          "end_ms": 118962,
+          "confidence": 0.97735775
+        },
+        {
+          "text": "higher",
+          "start_ms": 121956,
+          "end_ms": 122457,
+          "confidence": 0.9988543
+        },
+        {
+          "text": "than",
+          "start_ms": 122457,
+          "end_ms": 122845,
+          "confidence": 0.99997497
+        },
+        {
+          "text": "I.",
+          "start_ms": 122845,
+          "end_ms": 123023,
+          "confidence": 0.969293
+        },
+        {
+          "text": "So",
+          "start_ms": 125608,
+          "end_ms": 125947,
+          "confidence": 0.9995055
+        },
+        {
+          "text": "much",
+          "start_ms": 126254,
+          "end_ms": 126577,
+          "confidence": 0.9999757
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 126577,
+          "end_ms": 127563,
+          "confidence": 0.98814195
+        },
+        {
+          "text": "so",
+          "start_ms": 127773,
+          "end_ms": 128112,
+          "confidence": 0.99996185
+        },
+        {
+          "text": "much",
+          "start_ms": 128355,
+          "end_ms": 128645,
+          "confidence": 0.99999607
+        },
+        {
+          "text": "greater,",
+          "start_ms": 128758,
+          "end_ms": 129550,
+          "confidence": 0.9936255
+        },
+        {
+          "text": "so",
+          "start_ms": 129728,
+          "end_ms": 130019,
+          "confidence": 0.9999411
+        },
+        {
+          "text": "much",
+          "start_ms": 130212,
+          "end_ms": 130583,
+          "confidence": 0.9999962
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 130760,
+          "end_ms": 131421,
+          "confidence": 0.99577546
+        },
+        {
+          "text": "so",
+          "start_ms": 131647,
+          "end_ms": 132001,
+          "confidence": 0.9996958
+        },
+        {
+          "text": "much",
+          "start_ms": 132291,
+          "end_ms": 132597,
+          "confidence": 0.99986863
+        },
+        {
+          "text": "higher.",
+          "start_ms": 132710,
+          "end_ms": 133129,
+          "confidence": 0.6239213
+        },
+        {
+          "text": "Higher",
+          "start_ms": 133983,
+          "end_ms": 134483,
+          "confidence": 0.99958414
+        },
+        {
+          "text": "than",
+          "start_ms": 134483,
+          "end_ms": 134773,
+          "confidence": 0.9999672
+        },
+        {
+          "text": "I,",
+          "start_ms": 134870,
+          "end_ms": 135047,
+          "confidence": 0.9965796
+        },
+        {
+          "text": "higher",
+          "start_ms": 138012,
+          "end_ms": 138480,
+          "confidence": 0.99960953
+        },
+        {
+          "text": "than",
+          "start_ms": 138480,
+          "end_ms": 138725,
+          "confidence": 0.99992716
+        },
+        {
+          "text": "I.",
+          "start_ms": 138824,
+          "end_ms": 139004,
+          "confidence": 0.9133387
+        }
+      ]
+    },
+    {
+      "text": "Where else would I go? Who else would I run to? Where else would I go? Who else would I run to? Where else would I go? Who else would I run to? Where else would I go? Where else would I go? Who else would arise to? Whoa, whoa, bring me to the rock, oh Lord, higher than I.",
+      "start_ms": 141731,
+      "end_ms": 189058,
+      "text_sk": "Kam inam by som šiel? Ku komu inému by som sa utiekal? Kam inam by som šiel? Ku komu inému by som sa utiekal? Kam inam by som šiel? Ku komu inému by som sa utiekal? Kam inam by som šiel? Kam inam by som šiel? Kto iný by povstal? Whoa, whoa, priveď ma k skale, ó Pane, vyššie ako ja.",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 141731,
+          "end_ms": 141829,
+          "confidence": 0.97916436
+        },
+        {
+          "text": "else",
+          "start_ms": 141829,
+          "end_ms": 142575,
+          "confidence": 0.99983585
+        },
+        {
+          "text": "would",
+          "start_ms": 142623,
+          "end_ms": 142867,
+          "confidence": 0.99979657
+        },
+        {
+          "text": "I",
+          "start_ms": 142867,
+          "end_ms": 143045,
+          "confidence": 0.9999621
+        },
+        {
+          "text": "go?",
+          "start_ms": 143110,
+          "end_ms": 143370,
+          "confidence": 0.99307024
+        },
+        {
+          "text": "Who",
+          "start_ms": 145730,
+          "end_ms": 145859,
+          "confidence": 0.9808606
+        },
+        {
+          "text": "else",
+          "start_ms": 146084,
+          "end_ms": 146488,
+          "confidence": 0.99997497
+        },
+        {
+          "text": "would",
+          "start_ms": 146488,
+          "end_ms": 146794,
+          "confidence": 0.9999157
+        },
+        {
+          "text": "I",
+          "start_ms": 146794,
+          "end_ms": 146923,
+          "confidence": 0.99992
+        },
+        {
+          "text": "run",
+          "start_ms": 147052,
+          "end_ms": 147907,
+          "confidence": 0.9997503
+        },
+        {
+          "text": "to?",
+          "start_ms": 147955,
+          "end_ms": 148213,
+          "confidence": 0.9995033
+        },
+        {
+          "text": "Where",
+          "start_ms": 149778,
+          "end_ms": 150197,
+          "confidence": 0.83855593
+        },
+        {
+          "text": "else",
+          "start_ms": 150197,
+          "end_ms": 150504,
+          "confidence": 0.99990904
+        },
+        {
+          "text": "would",
+          "start_ms": 150504,
+          "end_ms": 150762,
+          "confidence": 0.999899
+        },
+        {
+          "text": "I",
+          "start_ms": 150762,
+          "end_ms": 150939,
+          "confidence": 0.99993825
+        },
+        {
+          "text": "go?",
+          "start_ms": 151004,
+          "end_ms": 151214,
+          "confidence": 0.99892664
+        },
+        {
+          "text": "Who",
+          "start_ms": 153708,
+          "end_ms": 153838,
+          "confidence": 0.97760177
+        },
+        {
+          "text": "else",
+          "start_ms": 154114,
+          "end_ms": 154342,
+          "confidence": 0.99997985
+        },
+        {
+          "text": "would",
+          "start_ms": 154520,
+          "end_ms": 154780,
+          "confidence": 0.99990106
+        },
+        {
+          "text": "I",
+          "start_ms": 154845,
+          "end_ms": 154894,
+          "confidence": 0.9996574
+        },
+        {
+          "text": "run",
+          "start_ms": 155024,
+          "end_ms": 155999,
+          "confidence": 0.999902
+        },
+        {
+          "text": "to?",
+          "start_ms": 155999,
+          "end_ms": 156291,
+          "confidence": 0.9998378
+        },
+        {
+          "text": "Where",
+          "start_ms": 157119,
+          "end_ms": 157867,
+          "confidence": 0.9502982
+        },
+        {
+          "text": "else",
+          "start_ms": 157867,
+          "end_ms": 158370,
+          "confidence": 0.9998361
+        },
+        {
+          "text": "would",
+          "start_ms": 158435,
+          "end_ms": 158809,
+          "confidence": 0.99984586
+        },
+        {
+          "text": "I",
+          "start_ms": 158841,
+          "end_ms": 159004,
+          "confidence": 0.9998754
+        },
+        {
+          "text": "go?",
+          "start_ms": 159004,
+          "end_ms": 159345,
+          "confidence": 0.99975127
+        },
+        {
+          "text": "Who",
+          "start_ms": 161769,
+          "end_ms": 161817,
+          "confidence": 0.9769314
+        },
+        {
+          "text": "else",
+          "start_ms": 162109,
+          "end_ms": 162514,
+          "confidence": 0.99997115
+        },
+        {
+          "text": "would",
+          "start_ms": 162514,
+          "end_ms": 162822,
+          "confidence": 0.9998549
+        },
+        {
+          "text": "I",
+          "start_ms": 162822,
+          "end_ms": 162871,
+          "confidence": 0.9996057
+        },
+        {
+          "text": "run",
+          "start_ms": 163065,
+          "end_ms": 163940,
+          "confidence": 0.9998809
+        },
+        {
+          "text": "to?",
+          "start_ms": 163989,
+          "end_ms": 164167,
+          "confidence": 0.9997736
+        },
+        {
+          "text": "Where",
+          "start_ms": 165756,
+          "end_ms": 166096,
+          "confidence": 0.92354506
+        },
+        {
+          "text": "else",
+          "start_ms": 166242,
+          "end_ms": 166469,
+          "confidence": 0.99883634
+        },
+        {
+          "text": "would",
+          "start_ms": 166469,
+          "end_ms": 166695,
+          "confidence": 0.99467343
+        },
+        {
+          "text": "I",
+          "start_ms": 166728,
+          "end_ms": 166793,
+          "confidence": 0.99421495
+        },
+        {
+          "text": "go?",
+          "start_ms": 166809,
+          "end_ms": 167052,
+          "confidence": 0.9875522
+        },
+        {
+          "text": "Where",
+          "start_ms": 167117,
+          "end_ms": 167295,
+          "confidence": 0.04053118
+        },
+        {
+          "text": "else",
+          "start_ms": 167295,
+          "end_ms": 168170,
+          "confidence": 0.8880685
+        },
+        {
+          "text": "would",
+          "start_ms": 168170,
+          "end_ms": 168235,
+          "confidence": 0.9199747
+        },
+        {
+          "text": "I",
+          "start_ms": 168267,
+          "end_ms": 168284,
+          "confidence": 0.92922145
+        },
+        {
+          "text": "go?",
+          "start_ms": 168673,
+          "end_ms": 169224,
+          "confidence": 0.8959308
+        },
+        {
+          "text": "Who",
+          "start_ms": 169814,
+          "end_ms": 169863,
+          "confidence": 0.74780536
+        },
+        {
+          "text": "else",
+          "start_ms": 170075,
+          "end_ms": 170467,
+          "confidence": 0.99981374
+        },
+        {
+          "text": "would",
+          "start_ms": 170467,
+          "end_ms": 170875,
+          "confidence": 0.9749424
+        },
+        {
+          "text": "arise",
+          "start_ms": 170875,
+          "end_ms": 172084,
+          "confidence": 0.5609472
+        },
+        {
+          "text": "to?",
+          "start_ms": 172181,
+          "end_ms": 172279,
+          "confidence": 0.8060641
+        },
+        {
+          "text": "Whoa,",
+          "start_ms": 176890,
+          "end_ms": 178055,
+          "confidence": 0.60962546
+        },
+        {
+          "text": "whoa,",
+          "start_ms": 180549,
+          "end_ms": 180694,
+          "confidence": 0.7936623
+        },
+        {
+          "text": "bring",
+          "start_ms": 184046,
+          "end_ms": 184305,
+          "confidence": 0.4161012
+        },
+        {
+          "text": "me",
+          "start_ms": 184305,
+          "end_ms": 184548,
+          "confidence": 0.99974304
+        },
+        {
+          "text": "to",
+          "start_ms": 184548,
+          "end_ms": 184742,
+          "confidence": 0.99968946
+        },
+        {
+          "text": "the",
+          "start_ms": 184855,
+          "end_ms": 185390,
+          "confidence": 0.9987962
+        },
+        {
+          "text": "rock,",
+          "start_ms": 185390,
+          "end_ms": 185680,
+          "confidence": 0.65990514
+        },
+        {
+          "text": "oh",
+          "start_ms": 186375,
+          "end_ms": 186440,
+          "confidence": 0.598428
+        },
+        {
+          "text": "Lord,",
+          "start_ms": 186472,
+          "end_ms": 186957,
+          "confidence": 0.9248506
+        },
+        {
+          "text": "higher",
+          "start_ms": 187992,
+          "end_ms": 188493,
+          "confidence": 0.9992955
+        },
+        {
+          "text": "than",
+          "start_ms": 188493,
+          "end_ms": 188881,
+          "confidence": 0.99992764
+        },
+        {
+          "text": "I.",
+          "start_ms": 188881,
+          "end_ms": 189058,
+          "confidence": 0.9394806
+        }
+      ]
+    },
+    {
+      "text": "Hey, higher than I. Higher than I, higher than I, higher than I. So much stronger, so much greater, so much wiser. So much higher, so much stronger, so much greater, so much wiser. So much higher, so much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I, higher than I, higher than I.",
+      "start_ms": 190658,
+      "end_ms": 245001,
+      "text_sk": "Vyššie ako ja. Vyššie ako ja, vyššie ako ja, vyššie ako ja. Oveľa silnejší, oveľa väčší, oveľa múdrejší. Oveľa vyššie, oveľa silnejší, oveľa väčší, oveľa múdrejší. Oveľa vyššie, oveľa silnejší, oveľa väčší, oveľa múdrejší, oveľa vyššie, vyššie ako ja, vyššie ako ja, vyššie ako ja, vyššie ako ja.",
+      "words": [
+        {
+          "text": "Hey,",
+          "start_ms": 190658,
+          "end_ms": 190917,
+          "confidence": 0.99576
+        },
+        {
+          "text": "higher",
+          "start_ms": 191968,
+          "end_ms": 192549,
+          "confidence": 0.99994266
+        },
+        {
+          "text": "than",
+          "start_ms": 192614,
+          "end_ms": 192889,
+          "confidence": 0.9999598
+        },
+        {
+          "text": "I.",
+          "start_ms": 193002,
+          "end_ms": 193180,
+          "confidence": 0.99169105
+        },
+        {
+          "text": "Higher",
+          "start_ms": 195978,
+          "end_ms": 196487,
+          "confidence": 0.68024313
+        },
+        {
+          "text": "than",
+          "start_ms": 196487,
+          "end_ms": 196882,
+          "confidence": 0.9992231
+        },
+        {
+          "text": "I,",
+          "start_ms": 196882,
+          "end_ms": 197013,
+          "confidence": 0.8918457
+        },
+        {
+          "text": "higher",
+          "start_ms": 199900,
+          "end_ms": 200742,
+          "confidence": 0.9980654
+        },
+        {
+          "text": "than",
+          "start_ms": 200807,
+          "end_ms": 203608,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "I,",
+          "start_ms": 203737,
+          "end_ms": 203786,
+          "confidence": 0.99329036
+        },
+        {
+          "text": "higher",
+          "start_ms": 204029,
+          "end_ms": 204417,
+          "confidence": 0.99966836
+        },
+        {
+          "text": "than",
+          "start_ms": 204530,
+          "end_ms": 204919,
+          "confidence": 0.99997187
+        },
+        {
+          "text": "I.",
+          "start_ms": 204919,
+          "end_ms": 205097,
+          "confidence": 0.9685295
+        },
+        {
+          "text": "So",
+          "start_ms": 207671,
+          "end_ms": 208060,
+          "confidence": 0.99975806
+        },
+        {
+          "text": "much",
+          "start_ms": 208172,
+          "end_ms": 208542,
+          "confidence": 0.99996614
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 208574,
+          "end_ms": 209522,
+          "confidence": 0.9892849
+        },
+        {
+          "text": "so",
+          "start_ms": 209699,
+          "end_ms": 210021,
+          "confidence": 0.99996233
+        },
+        {
+          "text": "much",
+          "start_ms": 210181,
+          "end_ms": 210631,
+          "confidence": 0.99999547
+        },
+        {
+          "text": "greater,",
+          "start_ms": 210728,
+          "end_ms": 211419,
+          "confidence": 0.99593717
+        },
+        {
+          "text": "so",
+          "start_ms": 211692,
+          "end_ms": 212030,
+          "confidence": 0.9999552
+        },
+        {
+          "text": "much",
+          "start_ms": 212207,
+          "end_ms": 212608,
+          "confidence": 0.9999964
+        },
+        {
+          "text": "wiser.",
+          "start_ms": 212673,
+          "end_ms": 213541,
+          "confidence": 0.8064129
+        },
+        {
+          "text": "So",
+          "start_ms": 213637,
+          "end_ms": 214039,
+          "confidence": 0.99874735
+        },
+        {
+          "text": "much",
+          "start_ms": 214280,
+          "end_ms": 214698,
+          "confidence": 0.99998236
+        },
+        {
+          "text": "higher,",
+          "start_ms": 214843,
+          "end_ms": 215100,
+          "confidence": 0.99873614
+        },
+        {
+          "text": "so",
+          "start_ms": 215566,
+          "end_ms": 216048,
+          "confidence": 0.9999664
+        },
+        {
+          "text": "much",
+          "start_ms": 216289,
+          "end_ms": 216579,
+          "confidence": 0.9999887
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 216740,
+          "end_ms": 217336,
+          "confidence": 0.99908346
+        },
+        {
+          "text": "so",
+          "start_ms": 217724,
+          "end_ms": 217982,
+          "confidence": 0.99991
+        },
+        {
+          "text": "much",
+          "start_ms": 218224,
+          "end_ms": 218595,
+          "confidence": 0.9999889
+        },
+        {
+          "text": "greater,",
+          "start_ms": 218691,
+          "end_ms": 219514,
+          "confidence": 0.9988348
+        },
+        {
+          "text": "so",
+          "start_ms": 219692,
+          "end_ms": 219966,
+          "confidence": 0.9998691
+        },
+        {
+          "text": "much",
+          "start_ms": 220159,
+          "end_ms": 220579,
+          "confidence": 0.99998164
+        },
+        {
+          "text": "wiser.",
+          "start_ms": 220788,
+          "end_ms": 221530,
+          "confidence": 0.99911475
+        },
+        {
+          "text": "So",
+          "start_ms": 221710,
+          "end_ms": 222064,
+          "confidence": 0.4871074
+        },
+        {
+          "text": "much",
+          "start_ms": 222240,
+          "end_ms": 222594,
+          "confidence": 0.9998559
+        },
+        {
+          "text": "higher,",
+          "start_ms": 222611,
+          "end_ms": 223206,
+          "confidence": 0.9800914
+        },
+        {
+          "text": "so",
+          "start_ms": 223528,
+          "end_ms": 223994,
+          "confidence": 0.99960965
+        },
+        {
+          "text": "much",
+          "start_ms": 224236,
+          "end_ms": 224525,
+          "confidence": 0.99998224
+        },
+        {
+          "text": "stronger,",
+          "start_ms": 224558,
+          "end_ms": 225410,
+          "confidence": 0.97087115
+        },
+        {
+          "text": "so",
+          "start_ms": 225620,
+          "end_ms": 226006,
+          "confidence": 0.9998105
+        },
+        {
+          "text": "much",
+          "start_ms": 226167,
+          "end_ms": 226617,
+          "confidence": 0.99999
+        },
+        {
+          "text": "greater,",
+          "start_ms": 226730,
+          "end_ms": 227518,
+          "confidence": 0.99340093
+        },
+        {
+          "text": "so",
+          "start_ms": 227695,
+          "end_ms": 228033,
+          "confidence": 0.99993277
+        },
+        {
+          "text": "much",
+          "start_ms": 228258,
+          "end_ms": 228629,
+          "confidence": 0.9999926
+        },
+        {
+          "text": "wiser,",
+          "start_ms": 228790,
+          "end_ms": 229550,
+          "confidence": 0.9676946
+        },
+        {
+          "text": "so",
+          "start_ms": 229712,
+          "end_ms": 230052,
+          "confidence": 0.99979156
+        },
+        {
+          "text": "much",
+          "start_ms": 230278,
+          "end_ms": 230764,
+          "confidence": 0.9999509
+        },
+        {
+          "text": "higher,",
+          "start_ms": 230764,
+          "end_ms": 231184,
+          "confidence": 0.85409284
+        },
+        {
+          "text": "higher",
+          "start_ms": 231961,
+          "end_ms": 232528,
+          "confidence": 0.99934644
+        },
+        {
+          "text": "than",
+          "start_ms": 232528,
+          "end_ms": 232754,
+          "confidence": 0.9995098
+        },
+        {
+          "text": "I,",
+          "start_ms": 232867,
+          "end_ms": 232884,
+          "confidence": 0.92838097
+        },
+        {
+          "text": "higher",
+          "start_ms": 236430,
+          "end_ms": 236481,
+          "confidence": 0.9989517
+        },
+        {
+          "text": "than",
+          "start_ms": 236481,
+          "end_ms": 236775,
+          "confidence": 0.9999726
+        },
+        {
+          "text": "I,",
+          "start_ms": 236879,
+          "end_ms": 236896,
+          "confidence": 0.9899914
+        },
+        {
+          "text": "higher",
+          "start_ms": 239938,
+          "end_ms": 240409,
+          "confidence": 0.9970284
+        },
+        {
+          "text": "than",
+          "start_ms": 240506,
+          "end_ms": 240717,
+          "confidence": 0.99992704
+        },
+        {
+          "text": "I,",
+          "start_ms": 240831,
+          "end_ms": 240847,
+          "confidence": 0.99478024
+        },
+        {
+          "text": "higher",
+          "start_ms": 244011,
+          "end_ms": 244498,
+          "confidence": 0.9997241
+        },
+        {
+          "text": "than",
+          "start_ms": 244579,
+          "end_ms": 244855,
+          "confidence": 0.9998795
+        },
+        {
+          "text": "I.",
+          "start_ms": 244969,
+          "end_ms": 245001,
+          "confidence": 0.99646276
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9521648,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "0b92a933-52b4-441c-8d4c-6535b2cb8800",
+    "elapsed_s": 19.9,
+    "word_count": 263,
+    "utterance_count": 6,
+    "line_count": 6,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 259
+  }
+}

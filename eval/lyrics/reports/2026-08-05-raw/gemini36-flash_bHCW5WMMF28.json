@@ -1,0 +1,265 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\bHCW5WMMF28_vocal16k.wav",
+  "duration_ms": 196000,
+  "lines": [
+    {
+      "text": "One, You made it all, You made it all",
+      "start_ms": 4500,
+      "end_ms": 8500,
+      "text_sk": "Jedno, Ty si stvoril všetko, Ty si stvoril všetko",
+      "words": null
+    },
+    {
+      "text": "and two, I'm alive, it's all because of You",
+      "start_ms": 8500,
+      "end_ms": 15500,
+      "text_sk": "a dva, som nažive, je to všetko kvôli Tebe",
+      "words": null
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "start_ms": 16000,
+      "end_ms": 20500,
+      "text_sk": "Mám tak veľa dôvodov na chválu",
+      "words": null
+    },
+    {
+      "text": "and three, You're Holy, You set me free",
+      "start_ms": 21000,
+      "end_ms": 25500,
+      "text_sk": "a tri, si Svätý, oslobodil si ma",
+      "words": null
+    },
+    {
+      "text": "and four, I'm not a slave to sin no more",
+      "start_ms": 26000,
+      "end_ms": 31000,
+      "text_sk": "a štyri, už nie som otrokom hriechu",
+      "words": null
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "start_ms": 32500,
+      "end_ms": 37500,
+      "text_sk": "Mám tak veľa dôvodov na chválu",
+      "words": null
+    },
+    {
+      "text": "In the morning, in the evening, every time of day",
+      "start_ms": 37500,
+      "end_ms": 42000,
+      "text_sk": "Ráno, večer, v každý čas dňa",
+      "words": null
+    },
+    {
+      "text": "We got a reason to lift up Jesus, let's sing!",
+      "start_ms": 42000,
+      "end_ms": 46000,
+      "text_sk": "Máme dôvod vyvýšiť Ježiša, spievajme!",
+      "words": null
+    },
+    {
+      "text": "Say: We will lift You higher",
+      "start_ms": 46000,
+      "end_ms": 49500,
+      "text_sk": "Povedz: Vyvýšime Ťa vyššie",
+      "words": null
+    },
+    {
+      "text": "You are our desire",
+      "start_ms": 49500,
+      "end_ms": 54000,
+      "text_sk": "Ty si naša túžba",
+      "words": null
+    },
+    {
+      "text": "Oh, we will lift You higher",
+      "start_ms": 54000,
+      "end_ms": 58000,
+      "text_sk": "Ó, vyvýšime Ťa vyššie",
+      "words": null
+    },
+    {
+      "text": "And we won't stop, no, we won't stop, no!",
+      "start_ms": 58000,
+      "end_ms": 10250,
+      "text_sk": "A neprestaneme, nie, neprestaneme, nie!",
+      "words": null
+    },
+    {
+      "text": "Five, every need You will provide",
+      "start_ms": 103000,
+      "end_ms": 106500,
+      "text_sk": "Päť, každú potrebu postaráš",
+      "words": null
+    },
+    {
+      "text": "Six, God, You are the reason I exist",
+      "start_ms": 107000,
+      "end_ms": 112500,
+      "text_sk": "Šesť, Bože, Ty si dôvod, prečo existujem",
+      "words": null
+    },
+    {
+      "text": "Yeah, I've got so many reasons to praise, yeah",
+      "start_ms": 113500,
+      "end_ms": 118000,
+      "text_sk": "Jé, mám tak veľa dôvodov na chválu, jé",
+      "words": null
+    },
+    {
+      "text": "In the morning, in the evening, every time of day",
+      "start_ms": 118000,
+      "end_ms": 122500,
+      "text_sk": "Ráno, večer, v každý čas dňa",
+      "words": null
+    },
+    {
+      "text": "We got a reason to lift up Jesus, let's go!",
+      "start_ms": 122500,
+      "end_ms": 126000,
+      "text_sk": "Máme dôvod vyvýšiť Ježiša, poďme!",
+      "words": null
+    },
+    {
+      "text": "We will lift You higher",
+      "start_ms": 126000,
+      "end_ms": 130000,
+      "text_sk": "Vyvýšime Ťa vyššie",
+      "words": null
+    },
+    {
+      "text": "You are our desire",
+      "start_ms": 130000,
+      "end_ms": 134000,
+      "text_sk": "Ty si naša túžba",
+      "words": null
+    },
+    {
+      "text": "Oh, we will lift You higher",
+      "start_ms": 134000,
+      "end_ms": 138000,
+      "text_sk": "Ó, vyvýšime Ťa vyššie",
+      "words": null
+    },
+    {
+      "text": "And we won't stop, no, we won't stop, no!",
+      "start_ms": 138000,
+      "end_ms": 143000,
+      "text_sk": "A neprestaneme, nie, neprestaneme, nie!",
+      "words": null
+    },
+    {
+      "text": "Gonna use all my breath to praise You on and on",
+      "start_ms": 143500,
+      "end_ms": 147000,
+      "text_sk": "Použijem všetok svoj dych, aby som Ťa chválil stále",
+      "words": null
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "start_ms": 147000,
+      "end_ms": 151500,
+      "text_sk": "Nech všetko, čo dýcha, chváli Ho",
+      "words": null
+    },
+    {
+      "text": "Let all the earth rejoice and make a joyful noise",
+      "start_ms": 151500,
+      "end_ms": 155500,
+      "text_sk": "Nech sa celá zem raduje a vydáva radostný hluk",
+      "words": null
+    },
+    {
+      "text": "And give Him all the praise, yeah!",
+      "start_ms": 155500,
+      "end_ms": 159000,
+      "text_sk": "A vzdáva Mu všetku chválu, jé!",
+      "words": null
+    },
+    {
+      "text": "Gonna use all my breath to praise You on and on",
+      "start_ms": 159000,
+      "end_ms": 163500,
+      "text_sk": "Použijem všetok svoj dych, aby som Ťa chválil stále",
+      "words": null
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "start_ms": 163500,
+      "end_ms": 167500,
+      "text_sk": "Nech všetko, čo dýcha, chváli Ho",
+      "words": null
+    },
+    {
+      "text": "Let all the earth rejoice and make a joyful noise",
+      "start_ms": 167500,
+      "end_ms": 172000,
+      "text_sk": "Nech sa celá zem raduje a vydáva radostný hluk",
+      "words": null
+    },
+    {
+      "text": "And give Him all the praise, yeah!",
+      "start_ms": 172000,
+      "end_ms": 176000,
+      "text_sk": "A vzdáva Mu všetku chválu, jé!",
+      "words": null
+    },
+    {
+      "text": "Say: We will lift You higher",
+      "start_ms": 179000,
+      "end_ms": 183000,
+      "text_sk": "Povedz: Vyvýšime Ťa vyššie",
+      "words": null
+    },
+    {
+      "text": "You are our desire",
+      "start_ms": 183000,
+      "end_ms": 187000,
+      "text_sk": "Ty si naša túžba",
+      "words": null
+    },
+    {
+      "text": "Oh, we will lift You higher",
+      "start_ms": 187000,
+      "end_ms": 191000,
+      "text_sk": "Ó, vyvýšime Ťa vyššie",
+      "words": null
+    },
+    {
+      "text": "Oh, and we won't stop, no, we won't stop, no!",
+      "start_ms": 191000,
+      "end_ms": 196000,
+      "text_sk": "Ó, a neprestaneme, nie, neprestaneme, nie!",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 36.8,
+    "line_count": 33,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 3971,
+      "candidatesTokenCount": 2465,
+      "totalTokenCount": 9227,
+      "promptTokensDetails": [
+        {
+          "modality": "AUDIO",
+          "tokenCount": 3946
+        },
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        }
+      ],
+      "thoughtsTokenCount": 2791,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 10099452
+  }
+}

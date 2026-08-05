@@ -1,0 +1,3408 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\cej4vn4sWtE_vocal16k.wav",
+  "duration_ms": 528630,
+  "lines": [
+    {
+      "text": "Jesus. Jesus. I could sing your name for all my life. And still find more to love each time. Jesus be the name ever on my lips. It's sweeter every time that I call on it. There's just something about your name. There's just something about your name. There's just something about your name that makes me cry holy. There is no other name. There is no other name. There is no other name. Jesus, you're worthy. You have been The friend who never left. I won't forget your faithfulness. Jesus be the name ever on my lips. It's sweeter every time that I call on you. There's just something about your name. There's just something about your name. There's just something about your name that makes me cry holy.",
+      "start_ms": 7641,
+      "end_ms": 119296,
+      "text_sk": "Ježiš. Ježiš. Tvoje meno by som mohol oslavovať po celý svoj život. A vždy by som našiel viac lásky. Ježiš nech je meno, ktoré mám stále na perách. Je sladšie zakaždým, keď naňho volám. Tvoje meno má proste niečo do seba. Tvoje meno má proste niečo do seba. Tvoje meno má proste niečo do seba, že ma rozplače svätosťou. Neexistuje iné meno. Neexistuje iné meno. Neexistuje iné meno. Ježiš, si hoden. Bol si priateľom, ktorý nikdy neopustil. Nezabudnem na tvoju vernosť. Ježiš nech je meno, ktoré mám stále na perách. Je sladšie zakaždým, keď na teba volám. Tvoje meno má proste niečo do seba. Tvoje meno má proste niečo do seba. Tvoje meno má proste niečo do seba, že ma rozplače svätosťou.",
+      "words": [
+        {
+          "text": "Jesus.",
+          "start_ms": 7641,
+          "end_ms": 8428,
+          "confidence": 0.6600001
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 17579,
+          "end_ms": 17599,
+          "confidence": 0.97449756
+        },
+        {
+          "text": "I",
+          "start_ms": 17599,
+          "end_ms": 17711,
+          "confidence": 0.98579365
+        },
+        {
+          "text": "could",
+          "start_ms": 18421,
+          "end_ms": 18792,
+          "confidence": 0.9982603
+        },
+        {
+          "text": "sing",
+          "start_ms": 18824,
+          "end_ms": 19195,
+          "confidence": 0.99073374
+        },
+        {
+          "text": "your",
+          "start_ms": 20355,
+          "end_ms": 20468,
+          "confidence": 0.94626
+        },
+        {
+          "text": "name",
+          "start_ms": 20516,
+          "end_ms": 21741,
+          "confidence": 0.9998148
+        },
+        {
+          "text": "for",
+          "start_ms": 22128,
+          "end_ms": 22709,
+          "confidence": 0.99894065
+        },
+        {
+          "text": "all",
+          "start_ms": 23176,
+          "end_ms": 23241,
+          "confidence": 0.99980205
+        },
+        {
+          "text": "my",
+          "start_ms": 23579,
+          "end_ms": 23756,
+          "confidence": 0.99952817
+        },
+        {
+          "text": "life.",
+          "start_ms": 24627,
+          "end_ms": 25030,
+          "confidence": 0.99057233
+        },
+        {
+          "text": "And",
+          "start_ms": 25964,
+          "end_ms": 26206,
+          "confidence": 0.5632392
+        },
+        {
+          "text": "still",
+          "start_ms": 26206,
+          "end_ms": 26866,
+          "confidence": 0.9998429
+        },
+        {
+          "text": "find",
+          "start_ms": 27655,
+          "end_ms": 28090,
+          "confidence": 0.9629448
+        },
+        {
+          "text": "more",
+          "start_ms": 28299,
+          "end_ms": 28412,
+          "confidence": 0.99595034
+        },
+        {
+          "text": "to",
+          "start_ms": 29523,
+          "end_ms": 29829,
+          "confidence": 0.9988833
+        },
+        {
+          "text": "love",
+          "start_ms": 29829,
+          "end_ms": 30280,
+          "confidence": 0.99979943
+        },
+        {
+          "text": "each",
+          "start_ms": 31182,
+          "end_ms": 31633,
+          "confidence": 0.998727
+        },
+        {
+          "text": "time.",
+          "start_ms": 31987,
+          "end_ms": 32615,
+          "confidence": 0.9830868
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 34339,
+          "end_ms": 34903,
+          "confidence": 0.99979824
+        },
+        {
+          "text": "be",
+          "start_ms": 34903,
+          "end_ms": 35131,
+          "confidence": 0.7094278
+        },
+        {
+          "text": "the",
+          "start_ms": 35131,
+          "end_ms": 35163,
+          "confidence": 0.99993694
+        },
+        {
+          "text": "name",
+          "start_ms": 35163,
+          "end_ms": 35748,
+          "confidence": 0.99827814
+        },
+        {
+          "text": "ever",
+          "start_ms": 35813,
+          "end_ms": 36284,
+          "confidence": 0.9916021
+        },
+        {
+          "text": "on",
+          "start_ms": 36349,
+          "end_ms": 36658,
+          "confidence": 0.9995865
+        },
+        {
+          "text": "my",
+          "start_ms": 36690,
+          "end_ms": 36788,
+          "confidence": 0.9997011
+        },
+        {
+          "text": "lips.",
+          "start_ms": 37015,
+          "end_ms": 37730,
+          "confidence": 0.989128
+        },
+        {
+          "text": "It's",
+          "start_ms": 41726,
+          "end_ms": 41953,
+          "confidence": 0.99744725
+        },
+        {
+          "text": "sweeter",
+          "start_ms": 41953,
+          "end_ms": 42392,
+          "confidence": 0.999942
+        },
+        {
+          "text": "every",
+          "start_ms": 42392,
+          "end_ms": 42603,
+          "confidence": 0.9999311
+        },
+        {
+          "text": "time",
+          "start_ms": 42700,
+          "end_ms": 43236,
+          "confidence": 0.99992967
+        },
+        {
+          "text": "that",
+          "start_ms": 43269,
+          "end_ms": 43512,
+          "confidence": 0.999009
+        },
+        {
+          "text": "I",
+          "start_ms": 43512,
+          "end_ms": 43691,
+          "confidence": 0.999956
+        },
+        {
+          "text": "call",
+          "start_ms": 43691,
+          "end_ms": 43967,
+          "confidence": 0.9999552
+        },
+        {
+          "text": "on",
+          "start_ms": 44259,
+          "end_ms": 44747,
+          "confidence": 0.99939144
+        },
+        {
+          "text": "it.",
+          "start_ms": 44747,
+          "end_ms": 44909,
+          "confidence": 0.99118334
+        },
+        {
+          "text": "There's",
+          "start_ms": 46127,
+          "end_ms": 46436,
+          "confidence": 0.99987763
+        },
+        {
+          "text": "just",
+          "start_ms": 46436,
+          "end_ms": 46614,
+          "confidence": 0.99977475
+        },
+        {
+          "text": "something",
+          "start_ms": 46614,
+          "end_ms": 47069,
+          "confidence": 0.9933609
+        },
+        {
+          "text": "about",
+          "start_ms": 47069,
+          "end_ms": 47426,
+          "confidence": 0.92404115
+        },
+        {
+          "text": "your",
+          "start_ms": 47426,
+          "end_ms": 47605,
+          "confidence": 0.9752299
+        },
+        {
+          "text": "name.",
+          "start_ms": 47670,
+          "end_ms": 48173,
+          "confidence": 0.9958026
+        },
+        {
+          "text": "There's",
+          "start_ms": 49789,
+          "end_ms": 50006,
+          "confidence": 0.9997544
+        },
+        {
+          "text": "just",
+          "start_ms": 50106,
+          "end_ms": 50289,
+          "confidence": 0.9998412
+        },
+        {
+          "text": "something",
+          "start_ms": 50289,
+          "end_ms": 50755,
+          "confidence": 0.9998134
+        },
+        {
+          "text": "about",
+          "start_ms": 50755,
+          "end_ms": 51121,
+          "confidence": 0.99927634
+        },
+        {
+          "text": "your",
+          "start_ms": 51121,
+          "end_ms": 51304,
+          "confidence": 0.99972266
+        },
+        {
+          "text": "name.",
+          "start_ms": 51371,
+          "end_ms": 51936,
+          "confidence": 0.9987838
+        },
+        {
+          "text": "There's",
+          "start_ms": 53589,
+          "end_ms": 53834,
+          "confidence": 0.979995
+        },
+        {
+          "text": "just",
+          "start_ms": 53834,
+          "end_ms": 54029,
+          "confidence": 0.99821496
+        },
+        {
+          "text": "something",
+          "start_ms": 54029,
+          "end_ms": 54469,
+          "confidence": 0.9522018
+        },
+        {
+          "text": "about",
+          "start_ms": 54518,
+          "end_ms": 54893,
+          "confidence": 0.7727043
+        },
+        {
+          "text": "your",
+          "start_ms": 54893,
+          "end_ms": 54991,
+          "confidence": 0.9058937
+        },
+        {
+          "text": "name",
+          "start_ms": 54991,
+          "end_ms": 55822,
+          "confidence": 0.99837434
+        },
+        {
+          "text": "that",
+          "start_ms": 56197,
+          "end_ms": 56833,
+          "confidence": 0.9453985
+        },
+        {
+          "text": "makes",
+          "start_ms": 56947,
+          "end_ms": 57387,
+          "confidence": 0.99889356
+        },
+        {
+          "text": "me",
+          "start_ms": 57436,
+          "end_ms": 57534,
+          "confidence": 0.9996141
+        },
+        {
+          "text": "cry",
+          "start_ms": 57746,
+          "end_ms": 58202,
+          "confidence": 0.99980444
+        },
+        {
+          "text": "holy.",
+          "start_ms": 58316,
+          "end_ms": 58463,
+          "confidence": 0.88722706
+        },
+        {
+          "text": "There",
+          "start_ms": 61490,
+          "end_ms": 61690,
+          "confidence": 0.8762128
+        },
+        {
+          "text": "is",
+          "start_ms": 61690,
+          "end_ms": 61740,
+          "confidence": 0.9959726
+        },
+        {
+          "text": "no",
+          "start_ms": 61858,
+          "end_ms": 62125,
+          "confidence": 0.9998373
+        },
+        {
+          "text": "other",
+          "start_ms": 62192,
+          "end_ms": 62376,
+          "confidence": 0.99971944
+        },
+        {
+          "text": "name.",
+          "start_ms": 62376,
+          "end_ms": 62828,
+          "confidence": 0.9445636
+        },
+        {
+          "text": "There",
+          "start_ms": 65071,
+          "end_ms": 65331,
+          "confidence": 0.90430117
+        },
+        {
+          "text": "is",
+          "start_ms": 65331,
+          "end_ms": 65462,
+          "confidence": 0.99963033
+        },
+        {
+          "text": "no",
+          "start_ms": 65576,
+          "end_ms": 65820,
+          "confidence": 0.9998673
+        },
+        {
+          "text": "other",
+          "start_ms": 65820,
+          "end_ms": 66112,
+          "confidence": 0.99987125
+        },
+        {
+          "text": "name.",
+          "start_ms": 66112,
+          "end_ms": 66942,
+          "confidence": 0.99902403
+        },
+        {
+          "text": "There",
+          "start_ms": 68890,
+          "end_ms": 69084,
+          "confidence": 0.9756604
+        },
+        {
+          "text": "is",
+          "start_ms": 69084,
+          "end_ms": 69213,
+          "confidence": 0.9996351
+        },
+        {
+          "text": "no",
+          "start_ms": 69311,
+          "end_ms": 69570,
+          "confidence": 0.9998987
+        },
+        {
+          "text": "other",
+          "start_ms": 69570,
+          "end_ms": 69894,
+          "confidence": 0.9998735
+        },
+        {
+          "text": "name.",
+          "start_ms": 69894,
+          "end_ms": 70995,
+          "confidence": 0.9879842
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 71821,
+          "end_ms": 72533,
+          "confidence": 0.84169984
+        },
+        {
+          "text": "you're",
+          "start_ms": 72808,
+          "end_ms": 73003,
+          "confidence": 0.9905409
+        },
+        {
+          "text": "worthy.",
+          "start_ms": 73359,
+          "end_ms": 74444,
+          "confidence": 0.9925254
+        },
+        {
+          "text": "You",
+          "start_ms": 77674,
+          "end_ms": 77739,
+          "confidence": 0.89746344
+        },
+        {
+          "text": "have",
+          "start_ms": 78486,
+          "end_ms": 78877,
+          "confidence": 0.98936087
+        },
+        {
+          "text": "been",
+          "start_ms": 78990,
+          "end_ms": 79608,
+          "confidence": 0.9900563
+        },
+        {
+          "text": "The",
+          "start_ms": 80278,
+          "end_ms": 80455,
+          "confidence": 0.9676876
+        },
+        {
+          "text": "friend",
+          "start_ms": 80615,
+          "end_ms": 81789,
+          "confidence": 0.9816838
+        },
+        {
+          "text": "who",
+          "start_ms": 82127,
+          "end_ms": 82256,
+          "confidence": 0.99295914
+        },
+        {
+          "text": "never",
+          "start_ms": 82545,
+          "end_ms": 83687,
+          "confidence": 0.9979024
+        },
+        {
+          "text": "left.",
+          "start_ms": 84540,
+          "end_ms": 85199,
+          "confidence": 0.9225813
+        },
+        {
+          "text": "I",
+          "start_ms": 86067,
+          "end_ms": 86244,
+          "confidence": 0.7104031
+        },
+        {
+          "text": "won't",
+          "start_ms": 86469,
+          "end_ms": 87515,
+          "confidence": 0.9998147
+        },
+        {
+          "text": "forget",
+          "start_ms": 87692,
+          "end_ms": 89338,
+          "confidence": 0.99851555
+        },
+        {
+          "text": "your",
+          "start_ms": 89693,
+          "end_ms": 89967,
+          "confidence": 0.9236879
+        },
+        {
+          "text": "faithfulness.",
+          "start_ms": 90032,
+          "end_ms": 92905,
+          "confidence": 0.9969998
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 94300,
+          "end_ms": 94874,
+          "confidence": 0.70090455
+        },
+        {
+          "text": "be",
+          "start_ms": 94890,
+          "end_ms": 95054,
+          "confidence": 0.5891783
+        },
+        {
+          "text": "the",
+          "start_ms": 95054,
+          "end_ms": 95152,
+          "confidence": 0.9996474
+        },
+        {
+          "text": "name",
+          "start_ms": 95152,
+          "end_ms": 95857,
+          "confidence": 0.9966714
+        },
+        {
+          "text": "ever",
+          "start_ms": 95857,
+          "end_ms": 96283,
+          "confidence": 0.8984561
+        },
+        {
+          "text": "on",
+          "start_ms": 96365,
+          "end_ms": 96693,
+          "confidence": 0.9997551
+        },
+        {
+          "text": "my",
+          "start_ms": 96693,
+          "end_ms": 97021,
+          "confidence": 0.9998369
+        },
+        {
+          "text": "lips.",
+          "start_ms": 97103,
+          "end_ms": 97841,
+          "confidence": 0.99572
+        },
+        {
+          "text": "It's",
+          "start_ms": 101756,
+          "end_ms": 101870,
+          "confidence": 0.9878642
+        },
+        {
+          "text": "sweeter",
+          "start_ms": 101902,
+          "end_ms": 102277,
+          "confidence": 0.99990743
+        },
+        {
+          "text": "every",
+          "start_ms": 102424,
+          "end_ms": 102636,
+          "confidence": 0.9995353
+        },
+        {
+          "text": "time",
+          "start_ms": 102669,
+          "end_ms": 103304,
+          "confidence": 0.9999137
+        },
+        {
+          "text": "that",
+          "start_ms": 103304,
+          "end_ms": 103565,
+          "confidence": 0.99673426
+        },
+        {
+          "text": "I",
+          "start_ms": 103565,
+          "end_ms": 103647,
+          "confidence": 0.9998109
+        },
+        {
+          "text": "call",
+          "start_ms": 103647,
+          "end_ms": 104005,
+          "confidence": 0.9997273
+        },
+        {
+          "text": "on",
+          "start_ms": 104299,
+          "end_ms": 104722,
+          "confidence": 0.9835523
+        },
+        {
+          "text": "you.",
+          "start_ms": 104722,
+          "end_ms": 104755,
+          "confidence": 0.6313423
+        },
+        {
+          "text": "There's",
+          "start_ms": 106001,
+          "end_ms": 106378,
+          "confidence": 0.99327046
+        },
+        {
+          "text": "just",
+          "start_ms": 106378,
+          "end_ms": 106559,
+          "confidence": 0.99895275
+        },
+        {
+          "text": "something",
+          "start_ms": 106559,
+          "end_ms": 106854,
+          "confidence": 0.9444683
+        },
+        {
+          "text": "about",
+          "start_ms": 106953,
+          "end_ms": 107380,
+          "confidence": 0.6138077
+        },
+        {
+          "text": "your",
+          "start_ms": 107380,
+          "end_ms": 107609,
+          "confidence": 0.87769914
+        },
+        {
+          "text": "name.",
+          "start_ms": 107626,
+          "end_ms": 108528,
+          "confidence": 0.9758748
+        },
+        {
+          "text": "There's",
+          "start_ms": 109782,
+          "end_ms": 110109,
+          "confidence": 0.86219805
+        },
+        {
+          "text": "just",
+          "start_ms": 110109,
+          "end_ms": 110272,
+          "confidence": 0.99937195
+        },
+        {
+          "text": "something",
+          "start_ms": 110272,
+          "end_ms": 110730,
+          "confidence": 0.9977215
+        },
+        {
+          "text": "about",
+          "start_ms": 110730,
+          "end_ms": 111040,
+          "confidence": 0.96759325
+        },
+        {
+          "text": "your",
+          "start_ms": 111089,
+          "end_ms": 111252,
+          "confidence": 0.9996861
+        },
+        {
+          "text": "name.",
+          "start_ms": 111252,
+          "end_ms": 111465,
+          "confidence": 0.9981245
+        },
+        {
+          "text": "There's",
+          "start_ms": 113567,
+          "end_ms": 113828,
+          "confidence": 0.98370355
+        },
+        {
+          "text": "just",
+          "start_ms": 113828,
+          "end_ms": 114007,
+          "confidence": 0.99946934
+        },
+        {
+          "text": "something",
+          "start_ms": 114007,
+          "end_ms": 114446,
+          "confidence": 0.99933165
+        },
+        {
+          "text": "about",
+          "start_ms": 114446,
+          "end_ms": 114771,
+          "confidence": 0.9866599
+        },
+        {
+          "text": "your",
+          "start_ms": 114869,
+          "end_ms": 114950,
+          "confidence": 0.99945515
+        },
+        {
+          "text": "name",
+          "start_ms": 115048,
+          "end_ms": 115911,
+          "confidence": 0.9999517
+        },
+        {
+          "text": "that",
+          "start_ms": 116594,
+          "end_ms": 116741,
+          "confidence": 0.8428732
+        },
+        {
+          "text": "makes",
+          "start_ms": 116920,
+          "end_ms": 117261,
+          "confidence": 0.99807066
+        },
+        {
+          "text": "me",
+          "start_ms": 117408,
+          "end_ms": 117505,
+          "confidence": 0.9988405
+        },
+        {
+          "text": "cry",
+          "start_ms": 117733,
+          "end_ms": 118173,
+          "confidence": 0.99951863
+        },
+        {
+          "text": "holy.",
+          "start_ms": 118384,
+          "end_ms": 119296,
+          "confidence": 0.88018167
+        }
+      ]
+    },
+    {
+      "text": "There is no other name. Oh!",
+      "start_ms": 121262,
+      "end_ms": 123452,
+      "text_sk": "Neexistuje žiadne iné meno. Ach!",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 121262,
+          "end_ms": 121521,
+          "confidence": 0.77755314
+        },
+        {
+          "text": "is",
+          "start_ms": 121586,
+          "end_ms": 121716,
+          "confidence": 0.9950441
+        },
+        {
+          "text": "no",
+          "start_ms": 121830,
+          "end_ms": 122073,
+          "confidence": 0.999315
+        },
+        {
+          "text": "other",
+          "start_ms": 122235,
+          "end_ms": 122462,
+          "confidence": 0.9991086
+        },
+        {
+          "text": "name.",
+          "start_ms": 122543,
+          "end_ms": 123111,
+          "confidence": 0.8601909
+        },
+        {
+          "text": "Oh!",
+          "start_ms": 123273,
+          "end_ms": 123452,
+          "confidence": 0.4784398
+        }
+      ]
+    },
+    {
+      "text": "There is no other name. There is no other name.",
+      "start_ms": 125073,
+      "end_ms": 130213,
+      "text_sk": "Neexistuje žiadne iné meno. Neexistuje žiadne iné meno.",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 125073,
+          "end_ms": 125398,
+          "confidence": 0.67744714
+        },
+        {
+          "text": "is",
+          "start_ms": 125398,
+          "end_ms": 125528,
+          "confidence": 0.9973482
+        },
+        {
+          "text": "no",
+          "start_ms": 125625,
+          "end_ms": 125884,
+          "confidence": 0.9999596
+        },
+        {
+          "text": "other",
+          "start_ms": 125965,
+          "end_ms": 126176,
+          "confidence": 0.9999516
+        },
+        {
+          "text": "name.",
+          "start_ms": 126193,
+          "end_ms": 126420,
+          "confidence": 0.99454707
+        },
+        {
+          "text": "There",
+          "start_ms": 128880,
+          "end_ms": 129150,
+          "confidence": 0.97680205
+        },
+        {
+          "text": "is",
+          "start_ms": 129150,
+          "end_ms": 129335,
+          "confidence": 0.99940014
+        },
+        {
+          "text": "no",
+          "start_ms": 129386,
+          "end_ms": 129589,
+          "confidence": 0.99994063
+        },
+        {
+          "text": "other",
+          "start_ms": 129656,
+          "end_ms": 129926,
+          "confidence": 0.999931
+        },
+        {
+          "text": "name.",
+          "start_ms": 129926,
+          "end_ms": 130213,
+          "confidence": 0.9713053
+        }
+      ]
+    },
+    {
+      "text": "Jesus, you're worthy. We sing. There's just something about your name, oh Jesus. There's just something about your name. There's just something about your name that makes me cry holy. There is no other name I know. There is no other name. There is no other name. Jesus, you're worthy. Yes, you are.",
+      "start_ms": 131900,
+      "end_ms": 167986,
+      "text_sk": "Ježiš, si hoden. Spievame. Je niečo na tvojom mene, ó Ježiš. Je niečo na tvojom mene. Je niečo na tvojom mene, čo ma rozplače sväto. Neznám iné meno. Neznám iné meno. Neznám iné meno. Ježiš, si hoden. Áno, si.",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 131900,
+          "end_ms": 132463,
+          "confidence": 0.78796333
+        },
+        {
+          "text": "you're",
+          "start_ms": 132640,
+          "end_ms": 133010,
+          "confidence": 0.8288742
+        },
+        {
+          "text": "worthy.",
+          "start_ms": 133283,
+          "end_ms": 134200,
+          "confidence": 0.76722026
+        },
+        {
+          "text": "We",
+          "start_ms": 134571,
+          "end_ms": 134683,
+          "confidence": 0.9994685
+        },
+        {
+          "text": "sing.",
+          "start_ms": 134683,
+          "end_ms": 135504,
+          "confidence": 0.8284405
+        },
+        {
+          "text": "There's",
+          "start_ms": 136019,
+          "end_ms": 136357,
+          "confidence": 0.9895725
+        },
+        {
+          "text": "just",
+          "start_ms": 136357,
+          "end_ms": 136518,
+          "confidence": 0.96814954
+        },
+        {
+          "text": "something",
+          "start_ms": 136518,
+          "end_ms": 136968,
+          "confidence": 0.99946696
+        },
+        {
+          "text": "about",
+          "start_ms": 136984,
+          "end_ms": 137322,
+          "confidence": 0.99610645
+        },
+        {
+          "text": "your",
+          "start_ms": 137322,
+          "end_ms": 137483,
+          "confidence": 0.95568454
+        },
+        {
+          "text": "name,",
+          "start_ms": 137483,
+          "end_ms": 137869,
+          "confidence": 0.92688364
+        },
+        {
+          "text": "oh",
+          "start_ms": 137950,
+          "end_ms": 137966,
+          "confidence": 0.6870143
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 138207,
+          "end_ms": 139494,
+          "confidence": 0.89351857
+        },
+        {
+          "text": "There's",
+          "start_ms": 139881,
+          "end_ms": 140122,
+          "confidence": 0.9991503
+        },
+        {
+          "text": "just",
+          "start_ms": 140122,
+          "end_ms": 140267,
+          "confidence": 0.9988703
+        },
+        {
+          "text": "something",
+          "start_ms": 140299,
+          "end_ms": 140750,
+          "confidence": 0.9998981
+        },
+        {
+          "text": "about",
+          "start_ms": 140750,
+          "end_ms": 141126,
+          "confidence": 0.999534
+        },
+        {
+          "text": "your",
+          "start_ms": 141126,
+          "end_ms": 141263,
+          "confidence": 0.9968731
+        },
+        {
+          "text": "name.",
+          "start_ms": 141297,
+          "end_ms": 142050,
+          "confidence": 0.9967376
+        },
+        {
+          "text": "There's",
+          "start_ms": 143310,
+          "end_ms": 143825,
+          "confidence": 0.9993235
+        },
+        {
+          "text": "just",
+          "start_ms": 143825,
+          "end_ms": 144002,
+          "confidence": 0.9993105
+        },
+        {
+          "text": "something",
+          "start_ms": 144002,
+          "end_ms": 144485,
+          "confidence": 0.9999614
+        },
+        {
+          "text": "about",
+          "start_ms": 144517,
+          "end_ms": 144791,
+          "confidence": 0.99978155
+        },
+        {
+          "text": "your",
+          "start_ms": 144791,
+          "end_ms": 144936,
+          "confidence": 0.999405
+        },
+        {
+          "text": "name",
+          "start_ms": 144952,
+          "end_ms": 146095,
+          "confidence": 0.99997234
+        },
+        {
+          "text": "that",
+          "start_ms": 146626,
+          "end_ms": 146868,
+          "confidence": 0.97302204
+        },
+        {
+          "text": "makes",
+          "start_ms": 146868,
+          "end_ms": 147174,
+          "confidence": 0.9994653
+        },
+        {
+          "text": "me",
+          "start_ms": 147367,
+          "end_ms": 147609,
+          "confidence": 0.9999075
+        },
+        {
+          "text": "cry",
+          "start_ms": 147689,
+          "end_ms": 148092,
+          "confidence": 0.9991109
+        },
+        {
+          "text": "holy.",
+          "start_ms": 148172,
+          "end_ms": 149315,
+          "confidence": 0.87326
+        },
+        {
+          "text": "There",
+          "start_ms": 151310,
+          "end_ms": 151585,
+          "confidence": 0.9997849
+        },
+        {
+          "text": "is",
+          "start_ms": 151585,
+          "end_ms": 151796,
+          "confidence": 0.99852353
+        },
+        {
+          "text": "no",
+          "start_ms": 151829,
+          "end_ms": 152072,
+          "confidence": 0.99977905
+        },
+        {
+          "text": "other",
+          "start_ms": 152153,
+          "end_ms": 152332,
+          "confidence": 0.99990106
+        },
+        {
+          "text": "name",
+          "start_ms": 152332,
+          "end_ms": 153208,
+          "confidence": 0.9997943
+        },
+        {
+          "text": "I",
+          "start_ms": 153273,
+          "end_ms": 153289,
+          "confidence": 0.91135937
+        },
+        {
+          "text": "know.",
+          "start_ms": 153289,
+          "end_ms": 153662,
+          "confidence": 0.9935567
+        },
+        {
+          "text": "There",
+          "start_ms": 155139,
+          "end_ms": 155414,
+          "confidence": 0.9956013
+        },
+        {
+          "text": "is",
+          "start_ms": 155479,
+          "end_ms": 155609,
+          "confidence": 0.9997552
+        },
+        {
+          "text": "no",
+          "start_ms": 155642,
+          "end_ms": 155885,
+          "confidence": 0.9999716
+        },
+        {
+          "text": "other",
+          "start_ms": 155885,
+          "end_ms": 156193,
+          "confidence": 0.9999734
+        },
+        {
+          "text": "name.",
+          "start_ms": 156210,
+          "end_ms": 156518,
+          "confidence": 0.97616714
+        },
+        {
+          "text": "There",
+          "start_ms": 158877,
+          "end_ms": 159123,
+          "confidence": 0.8988653
+        },
+        {
+          "text": "is",
+          "start_ms": 159123,
+          "end_ms": 159272,
+          "confidence": 0.99596524
+        },
+        {
+          "text": "no",
+          "start_ms": 159304,
+          "end_ms": 159634,
+          "confidence": 0.9781999
+        },
+        {
+          "text": "other",
+          "start_ms": 159634,
+          "end_ms": 159880,
+          "confidence": 0.9174638
+        },
+        {
+          "text": "name.",
+          "start_ms": 160045,
+          "end_ms": 160753,
+          "confidence": 0.7485403
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 162410,
+          "end_ms": 162670,
+          "confidence": 0.9911605
+        },
+        {
+          "text": "you're",
+          "start_ms": 162832,
+          "end_ms": 163157,
+          "confidence": 0.92813706
+        },
+        {
+          "text": "worthy.",
+          "start_ms": 163239,
+          "end_ms": 164312,
+          "confidence": 0.9703341
+        },
+        {
+          "text": "Yes,",
+          "start_ms": 165840,
+          "end_ms": 167075,
+          "confidence": 0.99666154
+        },
+        {
+          "text": "you",
+          "start_ms": 167157,
+          "end_ms": 167287,
+          "confidence": 0.9791835
+        },
+        {
+          "text": "are.",
+          "start_ms": 167400,
+          "end_ms": 167986,
+          "confidence": 0.98625255
+        }
+      ]
+    },
+    {
+      "text": "Oh, see ye, see ye, see ye, see ye.",
+      "start_ms": 173040,
+      "end_ms": 178072,
+      "text_sk": "Ach, vidíte, vidíte, vidíte, vidíte.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 173040,
+          "end_ms": 173072,
+          "confidence": 0.5252243
+        },
+        {
+          "text": "see",
+          "start_ms": 174375,
+          "end_ms": 174635,
+          "confidence": 0.28459328
+        },
+        {
+          "text": "ye,",
+          "start_ms": 174701,
+          "end_ms": 174847,
+          "confidence": 0.69267875
+        },
+        {
+          "text": "see",
+          "start_ms": 175287,
+          "end_ms": 175499,
+          "confidence": 0.9993062
+        },
+        {
+          "text": "ye,",
+          "start_ms": 175499,
+          "end_ms": 175531,
+          "confidence": 0.98170465
+        },
+        {
+          "text": "see",
+          "start_ms": 175955,
+          "end_ms": 176166,
+          "confidence": 0.9532307
+        },
+        {
+          "text": "ye,",
+          "start_ms": 176166,
+          "end_ms": 176248,
+          "confidence": 0.92536044
+        },
+        {
+          "text": "see",
+          "start_ms": 176655,
+          "end_ms": 176964,
+          "confidence": 0.7410186
+        },
+        {
+          "text": "ye.",
+          "start_ms": 176964,
+          "end_ms": 178072,
+          "confidence": 0.8727865
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah to the worthy one. Sing it!",
+      "start_ms": 180487,
+      "end_ms": 186248,
+      "text_sk": "Aleluja hodnému. Spievajte!",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 180487,
+          "end_ms": 180536,
+          "confidence": 0.9561775
+        },
+        {
+          "text": "hallelujah",
+          "start_ms": 180779,
+          "end_ms": 181913,
+          "confidence": 0.95411086
+        },
+        {
+          "text": "to",
+          "start_ms": 181913,
+          "end_ms": 182237,
+          "confidence": 0.9733785
+        },
+        {
+          "text": "the",
+          "start_ms": 182237,
+          "end_ms": 182399,
+          "confidence": 0.99853396
+        },
+        {
+          "text": "worthy",
+          "start_ms": 182399,
+          "end_ms": 183290,
+          "confidence": 0.3342092
+        },
+        {
+          "text": "one.",
+          "start_ms": 183371,
+          "end_ms": 184327,
+          "confidence": 0.91709125
+        },
+        {
+          "text": "Sing",
+          "start_ms": 185516,
+          "end_ms": 185809,
+          "confidence": 0.24634452
+        },
+        {
+          "text": "it!",
+          "start_ms": 185841,
+          "end_ms": 186248,
+          "confidence": 0.78374416
+        }
+      ]
+    },
+    {
+      "text": "Yes, Jesus! Yes, Jesus, your name is like the morning light, the one the darkness can't deny, the resurrection and the life.",
+      "start_ms": 186248,
+      "end_ms": 208010,
+      "text_sk": "Áno, Ježiš! Áno, Ježiš, tvoje meno je ako ranné svetlo, ktoré tma nemôže zaprieť, vzkriesenie a život.",
+      "words": [
+        {
+          "text": "Yes,",
+          "start_ms": 186475,
+          "end_ms": 186622,
+          "confidence": 0.43125585
+        },
+        {
+          "text": "Jesus!",
+          "start_ms": 186979,
+          "end_ms": 187435,
+          "confidence": 0.46063513
+        },
+        {
+          "text": "Yes,",
+          "start_ms": 192313,
+          "end_ms": 194209,
+          "confidence": 0.46196306
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 195527,
+          "end_ms": 196314,
+          "confidence": 0.7466913
+        },
+        {
+          "text": "your",
+          "start_ms": 196555,
+          "end_ms": 196684,
+          "confidence": 0.54969484
+        },
+        {
+          "text": "name",
+          "start_ms": 196989,
+          "end_ms": 197327,
+          "confidence": 0.9932066
+        },
+        {
+          "text": "is",
+          "start_ms": 198018,
+          "end_ms": 198082,
+          "confidence": 0.9973586
+        },
+        {
+          "text": "like",
+          "start_ms": 198242,
+          "end_ms": 198917,
+          "confidence": 0.99974185
+        },
+        {
+          "text": "the",
+          "start_ms": 198950,
+          "end_ms": 199143,
+          "confidence": 0.9996457
+        },
+        {
+          "text": "morning",
+          "start_ms": 199143,
+          "end_ms": 199918,
+          "confidence": 0.9999137
+        },
+        {
+          "text": "light,",
+          "start_ms": 200096,
+          "end_ms": 200225,
+          "confidence": 0.9794567
+        },
+        {
+          "text": "the",
+          "start_ms": 200822,
+          "end_ms": 200935,
+          "confidence": 0.9992537
+        },
+        {
+          "text": "one",
+          "start_ms": 201065,
+          "end_ms": 201500,
+          "confidence": 0.99787307
+        },
+        {
+          "text": "the",
+          "start_ms": 201727,
+          "end_ms": 201807,
+          "confidence": 0.5155117
+        },
+        {
+          "text": "darkness",
+          "start_ms": 201969,
+          "end_ms": 202921,
+          "confidence": 0.9999001
+        },
+        {
+          "text": "can't",
+          "start_ms": 202921,
+          "end_ms": 203583,
+          "confidence": 0.99476653
+        },
+        {
+          "text": "deny,",
+          "start_ms": 203583,
+          "end_ms": 204100,
+          "confidence": 0.98888224
+        },
+        {
+          "text": "the",
+          "start_ms": 204552,
+          "end_ms": 204794,
+          "confidence": 0.9995629
+        },
+        {
+          "text": "resurrection",
+          "start_ms": 204794,
+          "end_ms": 206602,
+          "confidence": 0.9978629
+        },
+        {
+          "text": "and",
+          "start_ms": 206732,
+          "end_ms": 207377,
+          "confidence": 0.99743146
+        },
+        {
+          "text": "the",
+          "start_ms": 207377,
+          "end_ms": 207620,
+          "confidence": 0.9876325
+        },
+        {
+          "text": "life.",
+          "start_ms": 207830,
+          "end_ms": 208010,
+          "confidence": 0.8903509
+        }
+      ]
+    },
+    {
+      "text": "Jesus!",
+      "start_ms": 208256,
+      "end_ms": 210029,
+      "text_sk": "Ježiš!",
+      "words": [
+        {
+          "text": "Jesus!",
+          "start_ms": 208256,
+          "end_ms": 210029,
+          "confidence": 0.90753376
+        }
+      ]
+    },
+    {
+      "text": "Jesus, your name can save.",
+      "start_ms": 210592,
+      "end_ms": 213365,
+      "text_sk": "Ježiš, tvoje meno môže zachrániť.",
+      "words": [
+        {
+          "text": "Jesus,",
+          "start_ms": 210592,
+          "end_ms": 211281,
+          "confidence": 0.8625172
+        },
+        {
+          "text": "your",
+          "start_ms": 211538,
+          "end_ms": 211666,
+          "confidence": 0.8217286
+        },
+        {
+          "text": "name",
+          "start_ms": 211955,
+          "end_ms": 212708,
+          "confidence": 0.9968376
+        },
+        {
+          "text": "can",
+          "start_ms": 212917,
+          "end_ms": 213077,
+          "confidence": 0.99911386
+        },
+        {
+          "text": "save.",
+          "start_ms": 213077,
+          "end_ms": 213365,
+          "confidence": 0.84497887
+        }
+      ]
+    },
+    {
+      "text": "Your name can heal. Your name can make the storm be still. You never fail. You never will. Jesus, Jesus, the bread of life broken for us. The wounded and the worthy one. The first and last, the still to come. Jesus, Jesus, the King. The overwhelming grace, the Lord who will forever reign, the name above all other names, Jesus!",
+      "start_ms": 213942,
+      "end_ms": 255647,
+      "text_sk": "Tvoje meno dokáže uzdravovať. Tvoje meno dokáže utíšiť búrku. Nikdy nesklameš. Nikdy nesklameš. Ježiš, Ježiš, chlieb života, ktorý bol pre nás lámaný. Ranený a hoden. Prvý a posledný, ten, ktorý ešte príde. Ježiš, Ježiš, Kráľ. Prebývajúca milosť, Pán, ktorý bude kraľovať naveky, meno nad všetky mená, Ježiš!",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 213942,
+          "end_ms": 214039,
+          "confidence": 0.99976796
+        },
+        {
+          "text": "name",
+          "start_ms": 214039,
+          "end_ms": 214840,
+          "confidence": 0.99991083
+        },
+        {
+          "text": "can",
+          "start_ms": 214840,
+          "end_ms": 215000,
+          "confidence": 0.9999529
+        },
+        {
+          "text": "heal.",
+          "start_ms": 215000,
+          "end_ms": 215481,
+          "confidence": 0.9994441
+        },
+        {
+          "text": "Your",
+          "start_ms": 215786,
+          "end_ms": 215882,
+          "confidence": 0.99988115
+        },
+        {
+          "text": "name",
+          "start_ms": 215882,
+          "end_ms": 216668,
+          "confidence": 0.9999347
+        },
+        {
+          "text": "can",
+          "start_ms": 216684,
+          "end_ms": 216876,
+          "confidence": 0.9999596
+        },
+        {
+          "text": "make",
+          "start_ms": 216924,
+          "end_ms": 217629,
+          "confidence": 0.99986374
+        },
+        {
+          "text": "the",
+          "start_ms": 217629,
+          "end_ms": 217661,
+          "confidence": 0.9908785
+        },
+        {
+          "text": "storm",
+          "start_ms": 217661,
+          "end_ms": 218511,
+          "confidence": 0.99315166
+        },
+        {
+          "text": "be",
+          "start_ms": 218527,
+          "end_ms": 218687,
+          "confidence": 0.9978248
+        },
+        {
+          "text": "still.",
+          "start_ms": 218687,
+          "end_ms": 219248,
+          "confidence": 0.9986447
+        },
+        {
+          "text": "You",
+          "start_ms": 219553,
+          "end_ms": 219649,
+          "confidence": 0.9989261
+        },
+        {
+          "text": "never",
+          "start_ms": 219649,
+          "end_ms": 220499,
+          "confidence": 0.98013395
+        },
+        {
+          "text": "fail.",
+          "start_ms": 220611,
+          "end_ms": 221140,
+          "confidence": 0.9310457
+        },
+        {
+          "text": "You",
+          "start_ms": 221396,
+          "end_ms": 221509,
+          "confidence": 0.99945456
+        },
+        {
+          "text": "never",
+          "start_ms": 221637,
+          "end_ms": 222599,
+          "confidence": 0.9970595
+        },
+        {
+          "text": "will.",
+          "start_ms": 222599,
+          "end_ms": 222903,
+          "confidence": 0.93261933
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 223240,
+          "end_ms": 225436,
+          "confidence": 0.9371729
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 225500,
+          "end_ms": 226366,
+          "confidence": 0.9730442
+        },
+        {
+          "text": "the",
+          "start_ms": 226526,
+          "end_ms": 226718,
+          "confidence": 0.9996244
+        },
+        {
+          "text": "bread",
+          "start_ms": 227007,
+          "end_ms": 227985,
+          "confidence": 0.98036504
+        },
+        {
+          "text": "of",
+          "start_ms": 227985,
+          "end_ms": 228113,
+          "confidence": 0.9995548
+        },
+        {
+          "text": "life",
+          "start_ms": 228209,
+          "end_ms": 228434,
+          "confidence": 0.99934775
+        },
+        {
+          "text": "broken",
+          "start_ms": 228546,
+          "end_ms": 229556,
+          "confidence": 0.7922074
+        },
+        {
+          "text": "for",
+          "start_ms": 229828,
+          "end_ms": 230069,
+          "confidence": 0.9996007
+        },
+        {
+          "text": "us.",
+          "start_ms": 230069,
+          "end_ms": 230421,
+          "confidence": 0.8318118
+        },
+        {
+          "text": "The",
+          "start_ms": 230790,
+          "end_ms": 231031,
+          "confidence": 0.9977069
+        },
+        {
+          "text": "wounded",
+          "start_ms": 231031,
+          "end_ms": 232057,
+          "confidence": 0.9911986
+        },
+        {
+          "text": "and",
+          "start_ms": 232057,
+          "end_ms": 232553,
+          "confidence": 0.41663402
+        },
+        {
+          "text": "the",
+          "start_ms": 232698,
+          "end_ms": 232874,
+          "confidence": 0.9860858
+        },
+        {
+          "text": "worthy",
+          "start_ms": 232874,
+          "end_ms": 233676,
+          "confidence": 0.99946326
+        },
+        {
+          "text": "one.",
+          "start_ms": 233836,
+          "end_ms": 234189,
+          "confidence": 0.9415071
+        },
+        {
+          "text": "The",
+          "start_ms": 234557,
+          "end_ms": 234750,
+          "confidence": 0.9991817
+        },
+        {
+          "text": "first",
+          "start_ms": 234798,
+          "end_ms": 235519,
+          "confidence": 0.9990546
+        },
+        {
+          "text": "and",
+          "start_ms": 235519,
+          "end_ms": 236128,
+          "confidence": 0.985182
+        },
+        {
+          "text": "last,",
+          "start_ms": 236160,
+          "end_ms": 236337,
+          "confidence": 0.82113403
+        },
+        {
+          "text": "the",
+          "start_ms": 236401,
+          "end_ms": 236497,
+          "confidence": 0.9542202
+        },
+        {
+          "text": "still",
+          "start_ms": 236497,
+          "end_ms": 237363,
+          "confidence": 0.634025
+        },
+        {
+          "text": "to",
+          "start_ms": 237363,
+          "end_ms": 237459,
+          "confidence": 0.99844897
+        },
+        {
+          "text": "come.",
+          "start_ms": 237523,
+          "end_ms": 237811,
+          "confidence": 0.99975526
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 238260,
+          "end_ms": 240264,
+          "confidence": 0.9986149
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 240569,
+          "end_ms": 241386,
+          "confidence": 0.9885418
+        },
+        {
+          "text": "the",
+          "start_ms": 241611,
+          "end_ms": 241643,
+          "confidence": 0.9833415
+        },
+        {
+          "text": "King.",
+          "start_ms": 241643,
+          "end_ms": 241739,
+          "confidence": 0.59076583
+        },
+        {
+          "text": "The",
+          "start_ms": 242965,
+          "end_ms": 243160,
+          "confidence": 0.57157093
+        },
+        {
+          "text": "overwhelming",
+          "start_ms": 243225,
+          "end_ms": 244973,
+          "confidence": 0.46355265
+        },
+        {
+          "text": "grace,",
+          "start_ms": 245006,
+          "end_ms": 245702,
+          "confidence": 0.46960223
+        },
+        {
+          "text": "the",
+          "start_ms": 245799,
+          "end_ms": 245897,
+          "confidence": 0.9958106
+        },
+        {
+          "text": "Lord",
+          "start_ms": 245897,
+          "end_ms": 246836,
+          "confidence": 0.9167597
+        },
+        {
+          "text": "who",
+          "start_ms": 246836,
+          "end_ms": 246884,
+          "confidence": 0.9266122
+        },
+        {
+          "text": "will",
+          "start_ms": 247014,
+          "end_ms": 247305,
+          "confidence": 0.83090216
+        },
+        {
+          "text": "forever",
+          "start_ms": 247662,
+          "end_ms": 248892,
+          "confidence": 0.9990038
+        },
+        {
+          "text": "reign,",
+          "start_ms": 248892,
+          "end_ms": 249508,
+          "confidence": 0.82090956
+        },
+        {
+          "text": "the",
+          "start_ms": 249621,
+          "end_ms": 249702,
+          "confidence": 0.9948802
+        },
+        {
+          "text": "name",
+          "start_ms": 249702,
+          "end_ms": 250512,
+          "confidence": 0.78964776
+        },
+        {
+          "text": "above",
+          "start_ms": 250512,
+          "end_ms": 251406,
+          "confidence": 0.9997384
+        },
+        {
+          "text": "all",
+          "start_ms": 251406,
+          "end_ms": 251666,
+          "confidence": 0.99910957
+        },
+        {
+          "text": "other",
+          "start_ms": 251715,
+          "end_ms": 252462,
+          "confidence": 0.9973158
+        },
+        {
+          "text": "names,",
+          "start_ms": 252462,
+          "end_ms": 252998,
+          "confidence": 0.6961862
+        },
+        {
+          "text": "Jesus!",
+          "start_ms": 253210,
+          "end_ms": 255647,
+          "confidence": 0.9556714
+        }
+      ]
+    },
+    {
+      "text": "Thank you!",
+      "start_ms": 255647,
+      "end_ms": 255972,
+      "text_sk": "Ďakujem!",
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 255761,
+          "end_ms": 255858,
+          "confidence": 0.44423366
+        },
+        {
+          "text": "you!",
+          "start_ms": 255858,
+          "end_ms": 255972,
+          "confidence": 0.6786192
+        }
+      ]
+    },
+    {
+      "text": "Oh, Jesus be the name! Jesus be the name! Oh, Jesus be the name that gets all the glory! Oh, Jesus be the name. Jesus be the name. Oh, Jesus be the name that gets all the glory. Jesus. Oh, Jesus be the name. Jesus be the name above it all. Jesus be the name that gets all the glory. Oh, Jesus be the name. Jesus be the name. Oh, Jesus be the name that gets all the glory. Yeah, yeah. Oh, oh, shout his name, Jesus.",
+      "start_ms": 256183,
+      "end_ms": 330679,
+      "text_sk": "Nech je Ježiš to meno! Nech je Ježiš to meno! Nech je Ježiš to meno, ktorému patrí všetka sláva! Nech je Ježiš to meno. Nech je Ježiš to meno. Nech je Ježiš to meno, ktorému patrí všetka sláva. Ježiš. Nech je Ježiš to meno. Nech je Ježiš meno nad všetkým. Nech je Ježiš to meno, ktorému patrí všetka sláva! Nech je Ježiš to meno. Nech je Ježiš to meno. Nech je Ježiš to meno, ktorému patrí všetka sláva. Áno, áno. Ach, ach, volajte Jeho meno, Ježiš.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 256183,
+          "end_ms": 256362,
+          "confidence": 0.72947186
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 256541,
+          "end_ms": 257012,
+          "confidence": 0.9995982
+        },
+        {
+          "text": "be",
+          "start_ms": 257012,
+          "end_ms": 257254,
+          "confidence": 0.79828644
+        },
+        {
+          "text": "the",
+          "start_ms": 257254,
+          "end_ms": 257335,
+          "confidence": 0.9986929
+        },
+        {
+          "text": "name!",
+          "start_ms": 257335,
+          "end_ms": 259287,
+          "confidence": 0.8491848
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 260175,
+          "end_ms": 260836,
+          "confidence": 0.9927624
+        },
+        {
+          "text": "be",
+          "start_ms": 260868,
+          "end_ms": 261046,
+          "confidence": 0.9977724
+        },
+        {
+          "text": "the",
+          "start_ms": 261046,
+          "end_ms": 261143,
+          "confidence": 0.9999819
+        },
+        {
+          "text": "name!",
+          "start_ms": 261143,
+          "end_ms": 263289,
+          "confidence": 0.99623656
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 263466,
+          "end_ms": 263547,
+          "confidence": 0.9921943
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 263951,
+          "end_ms": 264548,
+          "confidence": 0.99998033
+        },
+        {
+          "text": "be",
+          "start_ms": 264596,
+          "end_ms": 264838,
+          "confidence": 0.99624926
+        },
+        {
+          "text": "the",
+          "start_ms": 264838,
+          "end_ms": 264919,
+          "confidence": 0.99987006
+        },
+        {
+          "text": "name",
+          "start_ms": 264919,
+          "end_ms": 266226,
+          "confidence": 0.9998311
+        },
+        {
+          "text": "that",
+          "start_ms": 266601,
+          "end_ms": 266848,
+          "confidence": 0.9585205
+        },
+        {
+          "text": "gets",
+          "start_ms": 266848,
+          "end_ms": 267227,
+          "confidence": 0.9822318
+        },
+        {
+          "text": "all",
+          "start_ms": 267425,
+          "end_ms": 267574,
+          "confidence": 0.9963921
+        },
+        {
+          "text": "the",
+          "start_ms": 267920,
+          "end_ms": 268184,
+          "confidence": 0.9981489
+        },
+        {
+          "text": "glory!",
+          "start_ms": 268184,
+          "end_ms": 269338,
+          "confidence": 0.9663128
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 271130,
+          "end_ms": 271313,
+          "confidence": 0.3658135
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 271496,
+          "end_ms": 271946,
+          "confidence": 0.9999033
+        },
+        {
+          "text": "be",
+          "start_ms": 272130,
+          "end_ms": 272313,
+          "confidence": 0.8760266
+        },
+        {
+          "text": "the",
+          "start_ms": 272313,
+          "end_ms": 272380,
+          "confidence": 0.99950933
+        },
+        {
+          "text": "name.",
+          "start_ms": 272380,
+          "end_ms": 272780,
+          "confidence": 0.6455451
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 275099,
+          "end_ms": 275806,
+          "confidence": 0.9995296
+        },
+        {
+          "text": "be",
+          "start_ms": 275806,
+          "end_ms": 276047,
+          "confidence": 0.9970489
+        },
+        {
+          "text": "the",
+          "start_ms": 276047,
+          "end_ms": 276128,
+          "confidence": 0.99997175
+        },
+        {
+          "text": "name.",
+          "start_ms": 276128,
+          "end_ms": 277881,
+          "confidence": 0.9984547
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 278604,
+          "end_ms": 278781,
+          "confidence": 0.98764455
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 278942,
+          "end_ms": 279569,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "be",
+          "start_ms": 279569,
+          "end_ms": 279746,
+          "confidence": 0.99562645
+        },
+        {
+          "text": "the",
+          "start_ms": 279746,
+          "end_ms": 279842,
+          "confidence": 0.999977
+        },
+        {
+          "text": "name",
+          "start_ms": 279842,
+          "end_ms": 281129,
+          "confidence": 0.9997638
+        },
+        {
+          "text": "that",
+          "start_ms": 281595,
+          "end_ms": 281836,
+          "confidence": 0.9759335
+        },
+        {
+          "text": "gets",
+          "start_ms": 281836,
+          "end_ms": 282190,
+          "confidence": 0.9962298
+        },
+        {
+          "text": "all",
+          "start_ms": 282383,
+          "end_ms": 282528,
+          "confidence": 0.9651207
+        },
+        {
+          "text": "the",
+          "start_ms": 282850,
+          "end_ms": 283060,
+          "confidence": 0.9905331
+        },
+        {
+          "text": "glory.",
+          "start_ms": 283190,
+          "end_ms": 284308,
+          "confidence": 0.94316614
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 284600,
+          "end_ms": 285897,
+          "confidence": 0.80377674
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 286270,
+          "end_ms": 286351,
+          "confidence": 0.99578476
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 286448,
+          "end_ms": 287097,
+          "confidence": 0.9999857
+        },
+        {
+          "text": "be",
+          "start_ms": 287097,
+          "end_ms": 287259,
+          "confidence": 0.998971
+        },
+        {
+          "text": "the",
+          "start_ms": 287340,
+          "end_ms": 287502,
+          "confidence": 0.99997616
+        },
+        {
+          "text": "name.",
+          "start_ms": 287502,
+          "end_ms": 288864,
+          "confidence": 0.9982877
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 290181,
+          "end_ms": 290793,
+          "confidence": 0.8590789
+        },
+        {
+          "text": "be",
+          "start_ms": 290793,
+          "end_ms": 290986,
+          "confidence": 0.99604696
+        },
+        {
+          "text": "the",
+          "start_ms": 290986,
+          "end_ms": 291212,
+          "confidence": 0.9999441
+        },
+        {
+          "text": "name",
+          "start_ms": 291212,
+          "end_ms": 291921,
+          "confidence": 0.9995159
+        },
+        {
+          "text": "above",
+          "start_ms": 292017,
+          "end_ms": 292501,
+          "confidence": 0.9792814
+        },
+        {
+          "text": "it",
+          "start_ms": 292501,
+          "end_ms": 292726,
+          "confidence": 0.9979722
+        },
+        {
+          "text": "all.",
+          "start_ms": 292726,
+          "end_ms": 292775,
+          "confidence": 0.9998138
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 293967,
+          "end_ms": 294579,
+          "confidence": 0.9999076
+        },
+        {
+          "text": "be",
+          "start_ms": 294579,
+          "end_ms": 294756,
+          "confidence": 0.99923503
+        },
+        {
+          "text": "the",
+          "start_ms": 294756,
+          "end_ms": 294998,
+          "confidence": 0.99998283
+        },
+        {
+          "text": "name",
+          "start_ms": 294998,
+          "end_ms": 295868,
+          "confidence": 0.99987185
+        },
+        {
+          "text": "that",
+          "start_ms": 296029,
+          "end_ms": 296544,
+          "confidence": 0.9988469
+        },
+        {
+          "text": "gets",
+          "start_ms": 296609,
+          "end_ms": 297270,
+          "confidence": 0.99991775
+        },
+        {
+          "text": "all",
+          "start_ms": 297479,
+          "end_ms": 297882,
+          "confidence": 0.99921024
+        },
+        {
+          "text": "the",
+          "start_ms": 297898,
+          "end_ms": 298430,
+          "confidence": 0.9994449
+        },
+        {
+          "text": "glory.",
+          "start_ms": 298430,
+          "end_ms": 299179,
+          "confidence": 0.999823
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 299295,
+          "end_ms": 299478,
+          "confidence": 0.9735086
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 300227,
+          "end_ms": 300527,
+          "confidence": 0.99994576
+        },
+        {
+          "text": "be",
+          "start_ms": 300527,
+          "end_ms": 300610,
+          "confidence": 0.9990927
+        },
+        {
+          "text": "the",
+          "start_ms": 300610,
+          "end_ms": 300643,
+          "confidence": 0.99949574
+        },
+        {
+          "text": "name.",
+          "start_ms": 300643,
+          "end_ms": 300843,
+          "confidence": 0.9501584
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 302930,
+          "end_ms": 305846,
+          "confidence": 0.6862468
+        },
+        {
+          "text": "be",
+          "start_ms": 305846,
+          "end_ms": 306023,
+          "confidence": 0.6305064
+        },
+        {
+          "text": "the",
+          "start_ms": 306023,
+          "end_ms": 306104,
+          "confidence": 0.99824464
+        },
+        {
+          "text": "name.",
+          "start_ms": 306104,
+          "end_ms": 308150,
+          "confidence": 0.7922658
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 308666,
+          "end_ms": 308843,
+          "confidence": 0.7945271
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 309020,
+          "end_ms": 309568,
+          "confidence": 0.9999739
+        },
+        {
+          "text": "be",
+          "start_ms": 309568,
+          "end_ms": 309810,
+          "confidence": 0.9853403
+        },
+        {
+          "text": "the",
+          "start_ms": 309810,
+          "end_ms": 309874,
+          "confidence": 0.9999559
+        },
+        {
+          "text": "name",
+          "start_ms": 309874,
+          "end_ms": 311308,
+          "confidence": 0.99988294
+        },
+        {
+          "text": "that",
+          "start_ms": 311582,
+          "end_ms": 311840,
+          "confidence": 0.9346877
+        },
+        {
+          "text": "gets",
+          "start_ms": 311840,
+          "end_ms": 312244,
+          "confidence": 0.83974934
+        },
+        {
+          "text": "all",
+          "start_ms": 312373,
+          "end_ms": 312712,
+          "confidence": 0.93300956
+        },
+        {
+          "text": "the",
+          "start_ms": 312857,
+          "end_ms": 313115,
+          "confidence": 0.9887212
+        },
+        {
+          "text": "glory.",
+          "start_ms": 313131,
+          "end_ms": 314905,
+          "confidence": 0.95969826
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 314954,
+          "end_ms": 316341,
+          "confidence": 0.5385492
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 316405,
+          "end_ms": 317873,
+          "confidence": 0.90081173
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 323931,
+          "end_ms": 324109,
+          "confidence": 0.70058984
+        },
+        {
+          "text": "oh,",
+          "start_ms": 324579,
+          "end_ms": 324595,
+          "confidence": 0.78557926
+        },
+        {
+          "text": "shout",
+          "start_ms": 326942,
+          "end_ms": 327395,
+          "confidence": 0.66170114
+        },
+        {
+          "text": "his",
+          "start_ms": 327395,
+          "end_ms": 327541,
+          "confidence": 0.88940334
+        },
+        {
+          "text": "name,",
+          "start_ms": 327638,
+          "end_ms": 328140,
+          "confidence": 0.9028665
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 328270,
+          "end_ms": 330679,
+          "confidence": 0.8779142
+        }
+      ]
+    },
+    {
+      "text": "Oh, oh.",
+      "start_ms": 330826,
+      "end_ms": 331167,
+      "text_sk": "Ach, ach.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 330826,
+          "end_ms": 330907,
+          "confidence": 0.65331894
+        },
+        {
+          "text": "oh.",
+          "start_ms": 331070,
+          "end_ms": 331167,
+          "confidence": 0.9574048
+        }
+      ]
+    },
+    {
+      "text": "Hey, Jesus! Oh, Jesus be the name! Jesus be the name! Oh, Jesus be the name that gets all the glory! Jesus! Oh, Jesus be the name! Be the name!",
+      "start_ms": 341930,
+      "end_ms": 363879,
+      "text_sk": "Ježiš! Ó, Ježiš nech je to meno! Ježiš nech je to meno! Ó, Ježiš nech je to meno, ktorému sa dostane všetka sláva! Ježiš! Ó, Ježiš nech je to meno! Nech je to meno!",
+      "words": [
+        {
+          "text": "Hey,",
+          "start_ms": 341930,
+          "end_ms": 342445,
+          "confidence": 0.64887756
+        },
+        {
+          "text": "Jesus!",
+          "start_ms": 343107,
+          "end_ms": 345573,
+          "confidence": 0.85712814
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 345815,
+          "end_ms": 345977,
+          "confidence": 0.8434118
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 346412,
+          "end_ms": 347105,
+          "confidence": 0.99954945
+        },
+        {
+          "text": "be",
+          "start_ms": 347105,
+          "end_ms": 347283,
+          "confidence": 0.5800833
+        },
+        {
+          "text": "the",
+          "start_ms": 347283,
+          "end_ms": 347379,
+          "confidence": 0.99938583
+        },
+        {
+          "text": "name!",
+          "start_ms": 347379,
+          "end_ms": 349717,
+          "confidence": 0.8018503
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 350201,
+          "end_ms": 350765,
+          "confidence": 0.99936765
+        },
+        {
+          "text": "be",
+          "start_ms": 350830,
+          "end_ms": 351072,
+          "confidence": 0.99849415
+        },
+        {
+          "text": "the",
+          "start_ms": 351218,
+          "end_ms": 351396,
+          "confidence": 0.99998116
+        },
+        {
+          "text": "name!",
+          "start_ms": 352771,
+          "end_ms": 353014,
+          "confidence": 0.9976578
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 353726,
+          "end_ms": 353904,
+          "confidence": 0.9918411
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 353985,
+          "end_ms": 354616,
+          "confidence": 0.9999919
+        },
+        {
+          "text": "be",
+          "start_ms": 354616,
+          "end_ms": 354794,
+          "confidence": 0.99718934
+        },
+        {
+          "text": "the",
+          "start_ms": 354794,
+          "end_ms": 354875,
+          "confidence": 0.99997985
+        },
+        {
+          "text": "name",
+          "start_ms": 354875,
+          "end_ms": 356575,
+          "confidence": 0.99994767
+        },
+        {
+          "text": "that",
+          "start_ms": 356575,
+          "end_ms": 356883,
+          "confidence": 0.95373905
+        },
+        {
+          "text": "gets",
+          "start_ms": 356883,
+          "end_ms": 357255,
+          "confidence": 0.80880815
+        },
+        {
+          "text": "all",
+          "start_ms": 357368,
+          "end_ms": 357806,
+          "confidence": 0.60329634
+        },
+        {
+          "text": "the",
+          "start_ms": 357871,
+          "end_ms": 358113,
+          "confidence": 0.8142598
+        },
+        {
+          "text": "glory!",
+          "start_ms": 358178,
+          "end_ms": 358810,
+          "confidence": 0.75454557
+        },
+        {
+          "text": "Jesus!",
+          "start_ms": 359085,
+          "end_ms": 360446,
+          "confidence": 0.75244004
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 361191,
+          "end_ms": 361207,
+          "confidence": 0.9760661
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 361531,
+          "end_ms": 362146,
+          "confidence": 0.9997075
+        },
+        {
+          "text": "be",
+          "start_ms": 362146,
+          "end_ms": 362341,
+          "confidence": 0.993707
+        },
+        {
+          "text": "the",
+          "start_ms": 362389,
+          "end_ms": 362486,
+          "confidence": 0.99984896
+        },
+        {
+          "text": "name!",
+          "start_ms": 362486,
+          "end_ms": 362826,
+          "confidence": 0.96505255
+        },
+        {
+          "text": "Be",
+          "start_ms": 363037,
+          "end_ms": 363134,
+          "confidence": 0.99675936
+        },
+        {
+          "text": "the",
+          "start_ms": 363215,
+          "end_ms": 363377,
+          "confidence": 0.99993014
+        },
+        {
+          "text": "name!",
+          "start_ms": 363377,
+          "end_ms": 363879,
+          "confidence": 0.92088383
+        }
+      ]
+    },
+    {
+      "text": "Be the name!",
+      "start_ms": 363944,
+      "end_ms": 364365,
+      "text_sk": "Staň sa legendou!",
+      "words": [
+        {
+          "text": "Be",
+          "start_ms": 363944,
+          "end_ms": 364025,
+          "confidence": 0.9995352
+        },
+        {
+          "text": "the",
+          "start_ms": 364106,
+          "end_ms": 364187,
+          "confidence": 0.99991596
+        },
+        {
+          "text": "name!",
+          "start_ms": 364187,
+          "end_ms": 364365,
+          "confidence": 0.99796253
+        }
+      ]
+    },
+    {
+      "text": "Oh, Jesus, give Him name that gets all the glory. Oh, all the glory. Give Him glory. Give Him glory. I lift it up. Avec nourriture.",
+      "start_ms": 368653,
+      "end_ms": 399970,
+      "text_sk": "Pane Ježišu, daj Mu meno, ktorému patrí všetka sláva. Ó, všetka sláva. Daj Mu slávu. Daj Mu slávu. Pozdvihujem ju. S jedlom.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 368653,
+          "end_ms": 368831,
+          "confidence": 0.6586104
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 368993,
+          "end_ms": 369445,
+          "confidence": 0.68970037
+        },
+        {
+          "text": "give",
+          "start_ms": 369558,
+          "end_ms": 369752,
+          "confidence": 0.63195026
+        },
+        {
+          "text": "Him",
+          "start_ms": 369784,
+          "end_ms": 370026,
+          "confidence": 0.6322898
+        },
+        {
+          "text": "name",
+          "start_ms": 370026,
+          "end_ms": 370947,
+          "confidence": 0.4367743
+        },
+        {
+          "text": "that",
+          "start_ms": 371642,
+          "end_ms": 371868,
+          "confidence": 0.96777445
+        },
+        {
+          "text": "gets",
+          "start_ms": 371884,
+          "end_ms": 372240,
+          "confidence": 0.54312545
+        },
+        {
+          "text": "all",
+          "start_ms": 372433,
+          "end_ms": 372724,
+          "confidence": 0.82870954
+        },
+        {
+          "text": "the",
+          "start_ms": 372918,
+          "end_ms": 373176,
+          "confidence": 0.9898318
+        },
+        {
+          "text": "glory.",
+          "start_ms": 373257,
+          "end_ms": 374275,
+          "confidence": 0.8150502
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 379493,
+          "end_ms": 379673,
+          "confidence": 0.7846538
+        },
+        {
+          "text": "all",
+          "start_ms": 380700,
+          "end_ms": 380863,
+          "confidence": 0.52022994
+        },
+        {
+          "text": "the",
+          "start_ms": 380863,
+          "end_ms": 380961,
+          "confidence": 0.99868065
+        },
+        {
+          "text": "glory.",
+          "start_ms": 381010,
+          "end_ms": 381525,
+          "confidence": 0.8108576
+        },
+        {
+          "text": "Give",
+          "start_ms": 389112,
+          "end_ms": 389483,
+          "confidence": 0.9480022
+        },
+        {
+          "text": "Him",
+          "start_ms": 389660,
+          "end_ms": 389870,
+          "confidence": 0.9986487
+        },
+        {
+          "text": "glory.",
+          "start_ms": 389870,
+          "end_ms": 390950,
+          "confidence": 0.7236926
+        },
+        {
+          "text": "Give",
+          "start_ms": 391030,
+          "end_ms": 391288,
+          "confidence": 0.997159
+        },
+        {
+          "text": "Him",
+          "start_ms": 391288,
+          "end_ms": 391498,
+          "confidence": 0.9998841
+        },
+        {
+          "text": "glory.",
+          "start_ms": 391514,
+          "end_ms": 392126,
+          "confidence": 0.9550908
+        },
+        {
+          "text": "I",
+          "start_ms": 394335,
+          "end_ms": 394351,
+          "confidence": 0.5285888
+        },
+        {
+          "text": "lift",
+          "start_ms": 394351,
+          "end_ms": 394658,
+          "confidence": 0.99201864
+        },
+        {
+          "text": "it",
+          "start_ms": 394658,
+          "end_ms": 394819,
+          "confidence": 0.43142775
+        },
+        {
+          "text": "up.",
+          "start_ms": 394819,
+          "end_ms": 394899,
+          "confidence": 0.96038646
+        },
+        {
+          "text": "Avec",
+          "start_ms": 397934,
+          "end_ms": 399081,
+          "confidence": 0.3356184
+        },
+        {
+          "text": "nourriture.",
+          "start_ms": 399146,
+          "end_ms": 399970,
+          "confidence": 0.7023643
+        }
+      ]
+    },
+    {
+      "text": "Bois. Come on, sing it again. There's healing in Your name. There's healing in Your name. There's healing in Your name. It makes me cry holy. There's freedom in your name. There's freedom in your name. There's freedom in your name. It makes me cry holy. There's salvation in your name. Salvation in your name alone. Salvation in your name, it makes me cry. Oh, sing Jesus be the name, Jesus be the name, Jesus be the name that gets all the glory. Yeah, yeah, yeah, yeah.",
+      "start_ms": 399970,
+      "end_ms": 528630,
+      "text_sk": "Bratia. Poďte, spievajte to znova. Vo Vašom mene je uzdravenie. Vo Vašom mene je uzdravenie. Vo Vašom mene je uzdravenie. Rozplače ma to sväto. Vo Vašom mene je sloboda. Vo Vašom mene je sloboda. Vo Vašom mene je sloboda. Rozplače ma to sväto. Vo Vašom mene je spasenie. Spasenie vo Vašom mene samom. Spasenie vo Vašom mene, rozplače ma to. Ó, spievajte Ježiš nech je to meno, Ježiš nech je to meno, Ježiš nech je to meno, ktorému patrí všetka sláva. Áno, áno, áno, áno.",
+      "words": [
+        {
+          "text": "Bois.",
+          "start_ms": 405110,
+          "end_ms": 405431,
+          "confidence": 0.6990693
+        },
+        {
+          "text": "Come",
+          "start_ms": 434485,
+          "end_ms": 434600,
+          "confidence": 0.92776316
+        },
+        {
+          "text": "on,",
+          "start_ms": 434666,
+          "end_ms": 434731,
+          "confidence": 0.9936654
+        },
+        {
+          "text": "sing",
+          "start_ms": 434748,
+          "end_ms": 434960,
+          "confidence": 0.9995054
+        },
+        {
+          "text": "it",
+          "start_ms": 435059,
+          "end_ms": 435141,
+          "confidence": 0.9968574
+        },
+        {
+          "text": "again.",
+          "start_ms": 435141,
+          "end_ms": 435370,
+          "confidence": 0.76863205
+        },
+        {
+          "text": "There's",
+          "start_ms": 466022,
+          "end_ms": 466329,
+          "confidence": 0.9384399
+        },
+        {
+          "text": "healing",
+          "start_ms": 466442,
+          "end_ms": 467056,
+          "confidence": 0.99680746
+        },
+        {
+          "text": "in",
+          "start_ms": 467153,
+          "end_ms": 467299,
+          "confidence": 0.9982224
+        },
+        {
+          "text": "Your",
+          "start_ms": 467412,
+          "end_ms": 467573,
+          "confidence": 0.5593432
+        },
+        {
+          "text": "name.",
+          "start_ms": 467573,
+          "end_ms": 468203,
+          "confidence": 0.80563
+        },
+        {
+          "text": "There's",
+          "start_ms": 470077,
+          "end_ms": 470206,
+          "confidence": 0.9942032
+        },
+        {
+          "text": "healing",
+          "start_ms": 470319,
+          "end_ms": 470852,
+          "confidence": 0.9999453
+        },
+        {
+          "text": "in",
+          "start_ms": 470949,
+          "end_ms": 471062,
+          "confidence": 0.99961996
+        },
+        {
+          "text": "Your",
+          "start_ms": 471062,
+          "end_ms": 471191,
+          "confidence": 0.99948776
+        },
+        {
+          "text": "name.",
+          "start_ms": 471353,
+          "end_ms": 471870,
+          "confidence": 0.99765825
+        },
+        {
+          "text": "There's",
+          "start_ms": 473796,
+          "end_ms": 474043,
+          "confidence": 0.99949735
+        },
+        {
+          "text": "healing",
+          "start_ms": 474043,
+          "end_ms": 474587,
+          "confidence": 0.9998803
+        },
+        {
+          "text": "in",
+          "start_ms": 474784,
+          "end_ms": 474850,
+          "confidence": 0.99948514
+        },
+        {
+          "text": "Your",
+          "start_ms": 474949,
+          "end_ms": 475048,
+          "confidence": 0.9997334
+        },
+        {
+          "text": "name.",
+          "start_ms": 475048,
+          "end_ms": 475361,
+          "confidence": 0.9944165
+        },
+        {
+          "text": "It",
+          "start_ms": 476688,
+          "end_ms": 476850,
+          "confidence": 0.82007045
+        },
+        {
+          "text": "makes",
+          "start_ms": 476850,
+          "end_ms": 477333,
+          "confidence": 0.999905
+        },
+        {
+          "text": "me",
+          "start_ms": 477333,
+          "end_ms": 477430,
+          "confidence": 0.9998715
+        },
+        {
+          "text": "cry",
+          "start_ms": 477801,
+          "end_ms": 478011,
+          "confidence": 0.99909437
+        },
+        {
+          "text": "holy.",
+          "start_ms": 478381,
+          "end_ms": 479429,
+          "confidence": 0.91707903
+        },
+        {
+          "text": "There's",
+          "start_ms": 481283,
+          "end_ms": 481670,
+          "confidence": 0.8179707
+        },
+        {
+          "text": "freedom",
+          "start_ms": 481670,
+          "end_ms": 482218,
+          "confidence": 0.9995592
+        },
+        {
+          "text": "in",
+          "start_ms": 482315,
+          "end_ms": 482380,
+          "confidence": 0.9983735
+        },
+        {
+          "text": "your",
+          "start_ms": 482476,
+          "end_ms": 482605,
+          "confidence": 0.6582202
+        },
+        {
+          "text": "name.",
+          "start_ms": 482654,
+          "end_ms": 483363,
+          "confidence": 0.96320826
+        },
+        {
+          "text": "There's",
+          "start_ms": 485130,
+          "end_ms": 485395,
+          "confidence": 0.9433088
+        },
+        {
+          "text": "freedom",
+          "start_ms": 485395,
+          "end_ms": 485876,
+          "confidence": 0.99993074
+        },
+        {
+          "text": "in",
+          "start_ms": 485976,
+          "end_ms": 486042,
+          "confidence": 0.9997831
+        },
+        {
+          "text": "your",
+          "start_ms": 486142,
+          "end_ms": 486308,
+          "confidence": 0.99996424
+        },
+        {
+          "text": "name.",
+          "start_ms": 486324,
+          "end_ms": 487121,
+          "confidence": 0.99810755
+        },
+        {
+          "text": "There's",
+          "start_ms": 488890,
+          "end_ms": 489085,
+          "confidence": 0.95985526
+        },
+        {
+          "text": "freedom",
+          "start_ms": 489085,
+          "end_ms": 489654,
+          "confidence": 0.9998729
+        },
+        {
+          "text": "in",
+          "start_ms": 489654,
+          "end_ms": 489784,
+          "confidence": 0.9998004
+        },
+        {
+          "text": "your",
+          "start_ms": 489816,
+          "end_ms": 490044,
+          "confidence": 0.99994314
+        },
+        {
+          "text": "name.",
+          "start_ms": 490060,
+          "end_ms": 490759,
+          "confidence": 0.98500997
+        },
+        {
+          "text": "It",
+          "start_ms": 491686,
+          "end_ms": 491882,
+          "confidence": 0.67688084
+        },
+        {
+          "text": "makes",
+          "start_ms": 491914,
+          "end_ms": 492369,
+          "confidence": 0.9996886
+        },
+        {
+          "text": "me",
+          "start_ms": 492418,
+          "end_ms": 492613,
+          "confidence": 0.99948704
+        },
+        {
+          "text": "cry",
+          "start_ms": 492825,
+          "end_ms": 493101,
+          "confidence": 0.9985241
+        },
+        {
+          "text": "holy.",
+          "start_ms": 493459,
+          "end_ms": 493930,
+          "confidence": 0.99320936
+        },
+        {
+          "text": "There's",
+          "start_ms": 496050,
+          "end_ms": 496309,
+          "confidence": 0.97564965
+        },
+        {
+          "text": "salvation",
+          "start_ms": 496309,
+          "end_ms": 497268,
+          "confidence": 0.99993527
+        },
+        {
+          "text": "in",
+          "start_ms": 497365,
+          "end_ms": 497511,
+          "confidence": 0.99982965
+        },
+        {
+          "text": "your",
+          "start_ms": 497625,
+          "end_ms": 497804,
+          "confidence": 0.99987864
+        },
+        {
+          "text": "name.",
+          "start_ms": 497853,
+          "end_ms": 498600,
+          "confidence": 0.9508246
+        },
+        {
+          "text": "Salvation",
+          "start_ms": 499916,
+          "end_ms": 500988,
+          "confidence": 0.998533
+        },
+        {
+          "text": "in",
+          "start_ms": 501101,
+          "end_ms": 501166,
+          "confidence": 0.99959606
+        },
+        {
+          "text": "your",
+          "start_ms": 501199,
+          "end_ms": 501410,
+          "confidence": 0.99985147
+        },
+        {
+          "text": "name",
+          "start_ms": 501507,
+          "end_ms": 501832,
+          "confidence": 0.99988425
+        },
+        {
+          "text": "alone.",
+          "start_ms": 501930,
+          "end_ms": 502628,
+          "confidence": 0.9953175
+        },
+        {
+          "text": "Salvation",
+          "start_ms": 503662,
+          "end_ms": 504648,
+          "confidence": 0.9314058
+        },
+        {
+          "text": "in",
+          "start_ms": 504761,
+          "end_ms": 504826,
+          "confidence": 0.99799997
+        },
+        {
+          "text": "your",
+          "start_ms": 504858,
+          "end_ms": 505084,
+          "confidence": 0.8779164
+        },
+        {
+          "text": "name,",
+          "start_ms": 505100,
+          "end_ms": 505731,
+          "confidence": 0.72075045
+        },
+        {
+          "text": "it",
+          "start_ms": 506717,
+          "end_ms": 506765,
+          "confidence": 0.892896
+        },
+        {
+          "text": "makes",
+          "start_ms": 506878,
+          "end_ms": 507315,
+          "confidence": 0.9999664
+        },
+        {
+          "text": "me",
+          "start_ms": 507363,
+          "end_ms": 507622,
+          "confidence": 0.9999629
+        },
+        {
+          "text": "cry.",
+          "start_ms": 507848,
+          "end_ms": 508123,
+          "confidence": 0.8283067
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 508495,
+          "end_ms": 508511,
+          "confidence": 0.88058364
+        },
+        {
+          "text": "sing",
+          "start_ms": 510935,
+          "end_ms": 511533,
+          "confidence": 0.99724364
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 511582,
+          "end_ms": 512357,
+          "confidence": 0.8862143
+        },
+        {
+          "text": "be",
+          "start_ms": 512357,
+          "end_ms": 512550,
+          "confidence": 0.9231827
+        },
+        {
+          "text": "the",
+          "start_ms": 512679,
+          "end_ms": 512711,
+          "confidence": 0.99924505
+        },
+        {
+          "text": "name,",
+          "start_ms": 512711,
+          "end_ms": 513597,
+          "confidence": 0.8413486
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 515256,
+          "end_ms": 515787,
+          "confidence": 0.9999796
+        },
+        {
+          "text": "be",
+          "start_ms": 515981,
+          "end_ms": 516158,
+          "confidence": 0.99957556
+        },
+        {
+          "text": "the",
+          "start_ms": 516158,
+          "end_ms": 516254,
+          "confidence": 0.9999876
+        },
+        {
+          "text": "name,",
+          "start_ms": 516254,
+          "end_ms": 516770,
+          "confidence": 0.9149662
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 518928,
+          "end_ms": 519673,
+          "confidence": 0.9975782
+        },
+        {
+          "text": "be",
+          "start_ms": 519706,
+          "end_ms": 519868,
+          "confidence": 0.42678198
+        },
+        {
+          "text": "the",
+          "start_ms": 519868,
+          "end_ms": 519900,
+          "confidence": 0.96723986
+        },
+        {
+          "text": "name",
+          "start_ms": 519900,
+          "end_ms": 520257,
+          "confidence": 0.9942397
+        },
+        {
+          "text": "that",
+          "start_ms": 521650,
+          "end_ms": 521893,
+          "confidence": 0.7242371
+        },
+        {
+          "text": "gets",
+          "start_ms": 521893,
+          "end_ms": 522201,
+          "confidence": 0.9997464
+        },
+        {
+          "text": "all",
+          "start_ms": 522460,
+          "end_ms": 522606,
+          "confidence": 0.999658
+        },
+        {
+          "text": "the",
+          "start_ms": 523043,
+          "end_ms": 523286,
+          "confidence": 0.9997683
+        },
+        {
+          "text": "glory.",
+          "start_ms": 523286,
+          "end_ms": 524145,
+          "confidence": 0.99748826
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 526796,
+          "end_ms": 527013,
+          "confidence": 0.97479993
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 527030,
+          "end_ms": 527096,
+          "confidence": 0.99840754
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 527113,
+          "end_ms": 527796,
+          "confidence": 0.9924248
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 527946,
+          "end_ms": 528630,
+          "confidence": 0.98940295
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.92239994,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "52597355-155a-4256-94b1-27a44781a7f6",
+    "elapsed_s": 23.5,
+    "word_count": 542,
+    "utterance_count": 17,
+    "line_count": 17,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 540
+  }
+}
