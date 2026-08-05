@@ -400,6 +400,29 @@ returncode/elapsed/ok per fixture.
 
 ## Results — full 22-fixture run
 
+**Scoring summary** (`python3 -m eval.lyrics.score_aligner --backends lyrics-alignment-mtl --raw-dir eval/lyrics/reports/2026-08-05-aligner-raw`, 21 fixtures pooled, poisoned fixture reported separately per that scorer's own convention):
+
+```
+official     : within400=  43.5%  median_delta=   528.0ms  p90=  7288.5ms  coverage=  72.6%
+conservative : within400=  34.8%  median_delta=    1115ms  n_pairs=379
+untimed      : 0/1553 (0.0%)
+runtime      : mean=150.8s median=86.9s (n=21)
+poisoned fixture (Xvm4_fWkXe8): untimed=0.0%  official_within400=0.0%  conservative_within400=0.0%
+```
+
+Against the task brief's stated bar to beat (prior best combination: 41.4%
+within 400ms, median 573ms, 20.2% of lines completely untimed) — this
+forced aligner **matches/slightly beats the timing accuracy (43.5% vs
+41.4% within 400ms; 528ms vs 573ms median) and essentially eliminates the
+untimed-line problem the task set out to fix (0.0% vs 20.2% untimed)**.
+The poisoned fixture's 0% official/conservative match is expected and not
+a defect in the aligner — its GOLD reference (real lrclib/spotify lyrics
+for the actual song) has almost nothing in common with the hallucinated
+qwen35-omni reference text this aligner was correctly asked to time, so a
+text-similarity-based scorer has nothing to match against; the aligner
+itself still produced real, non-null timestamps for all 395 lines (see
+"The poisoned fixture" section below for what actually happened on it).
+
 **22/22 fixtures produced valid output.** 21 of 22 succeeded on the first
 pass; the one that didn't (`q5m09rqOoxE`, mid-batch — see Trap 5) was
 re-run individually once the CUDA-OOM-to-CPU fallback landed and succeeded
