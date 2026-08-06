@@ -288,6 +288,131 @@ def test_rank_fixtures_best_and_worst_by_within_400_then_median_delta() -> None:
     ]
 
 
+def test_pooled_aggregate_reports_gold_normalized_within_400ms() -> None:
+    """REGRESSION (synthesis #2): `pct_within_400ms` divides by MATCHED lines
+    only, so each backend is graded on the subset it happened to handle and the
+    denominator moves between backends. The gold-normalized twin uses every gold
+    line, so two backends are always comparable."""
+    gold = [
+        {"text": "line one of four", "start_ms": 0, "end_ms": 1000},
+        {"text": "line two of four", "start_ms": 2000, "end_ms": 3000},
+        {"text": "line three of four", "start_ms": 4000, "end_ms": 5000},
+        {"text": "line four of four", "start_ms": 6000, "end_ms": 7000},
+    ]
+    # Backend A: matches ONE gold line, dead on. Conditional view = 100%.
+    a = score_one_call.score_fixture(
+        backend="a",
+        video_id="v",
+        category="clean_pop",
+        produced={"lines": [{"text": "line one of four", "start_ms": 50}]},
+        gold_lines=gold,
+    )
+    # Backend B: matches all four, three of them dead on. Conditional = 75%.
+    b = score_one_call.score_fixture(
+        backend="b",
+        video_id="v",
+        category="clean_pop",
+        produced={
+            "lines": [
+                {"text": "line one of four", "start_ms": 50},
+                {"text": "line two of four", "start_ms": 2050},
+                {"text": "line three of four", "start_ms": 4050},
+                {"text": "line four of four", "start_ms": 12000},
+            ]
+        },
+        gold_lines=gold,
+    )
+    agg_a = score_one_call.pooled_aggregate([a])
+    agg_b = score_one_call.pooled_aggregate([b])
+
+    assert agg_a["pct_within_400ms"] == 100.0
+    assert agg_b["pct_within_400ms"] == 75.0
+    # ...but B timed three gold lines correctly and A only one.
+    assert agg_a["pct_gold_within_400ms"] == 25.0
+    assert agg_b["pct_gold_within_400ms"] == 75.0
+
+
+def test_pooled_aggregate_errored_fixture_stays_in_gold_denominator() -> None:
+    """REGRESSION (synthesis #7): a backend that crashes with NO output file
+    must not score better than one that honestly emits all-untimed lines."""
+    gold_ok = [{"text": "hello world today", "start_ms": 0, "end_ms": 1000}]
+    ok_score = score_one_call.score_fixture(
+        backend="b",
+        video_id="v1",
+        category="clean_pop",
+        produced={"lines": [{"text": "hello world today", "start_ms": 50}]},
+        gold_lines=gold_ok,
+    )
+    errored = {
+        "backend": "b",
+        "video_id": "v2",
+        "category": "clean_pop",
+        "n_gold": 9,
+        "error": "output file missing or unparseable",
+    }
+    agg = score_one_call.pooled_aggregate([ok_score, errored])
+
+    assert agg["total_gold_lines"] == 1  # scored fixtures only (unchanged)
+    assert agg["total_gold_lines_all_fixtures"] == 10  # honest denominator
+    assert agg["gold_coverage_pct"] == 100.0
+    assert agg["gold_coverage_pct_all_fixtures"] == 10.0
+    assert agg["pct_gold_within_400ms"] == 100.0
+    assert agg["pct_gold_within_400ms_all_fixtures"] == 10.0
+
+
+def test_monotonic_match_rejects_out_of_order_pairs() -> None:
+    """synthesis #3: greedy_match picks the closest-start eligible gold line
+    with no ordering constraint, so a produced line can bind to a gold line
+    that comes BEFORE one already consumed by an earlier produced line."""
+    gold = [
+        {"text": "alpha bravo charlie", "start_ms": 1000, "end_ms": 2000},
+        {"text": "delta echo foxtrot", "start_ms": 5000, "end_ms": 6000},
+    ]
+    # produced order (by start_ms) is delta-first, so greedy binds gold[1]
+    # then walks BACKWARDS to gold[0].
+    produced = [
+        {"text": "delta echo foxtrot", "start_ms": 2000},
+        {"text": "alpha bravo charlie", "start_ms": 9000},
+    ]
+    greedy = score_one_call.greedy_match(produced, gold)
+    assert [m["gold_idx"] for m in greedy] == [1, 0]
+
+    mono = score_one_call.monotonic_match(produced, gold)
+    assert [m["gold_idx"] for m in mono] == [1]
+
+
+def test_monotonic_match_keeps_in_order_pairs_identical_to_greedy() -> None:
+    gold = [
+        {"text": "alpha bravo charlie", "start_ms": 1000, "end_ms": 2000},
+        {"text": "delta echo foxtrot", "start_ms": 5000, "end_ms": 6000},
+    ]
+    produced = [
+        {"text": "alpha bravo charlie", "start_ms": 1100},
+        {"text": "delta echo foxtrot", "start_ms": 5100},
+    ]
+    assert score_one_call.monotonic_match(
+        produced, gold
+    ) == score_one_call.greedy_match(produced, gold)
+
+
+def test_delta_aggregate_pools_matches_and_gold_normalizes() -> None:
+    matches = [
+        {"abs_delta_ms": 100},
+        {"abs_delta_ms": 300},
+        {"abs_delta_ms": 5000},
+    ]
+    agg = score_one_call.delta_aggregate(matches, total_gold=12)
+    assert agg["n_pairs"] == 3
+    assert agg["median_abs_delta_ms"] == 300
+    assert agg["pct_within_400ms"] == 66.7
+    assert agg["pct_gold_within_400ms"] == 16.7
+
+    empty = score_one_call.delta_aggregate([], total_gold=12)
+    assert empty["n_pairs"] == 0
+    assert empty["median_abs_delta_ms"] is None
+    assert empty["pct_gold_within_400ms"] == 0.0
+
+
 def test_rank_fixtures_excludes_errored_and_unmatched() -> None:
     scores = [
         _fake_score("aaaaaaaaaaa", pct_within_400ms=100.0, median_abs_delta_ms=50.0),

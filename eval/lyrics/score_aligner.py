@@ -94,6 +94,16 @@ def score_one_fixture(
                 "backend": backend,
                 "video_id": video_id,
                 "category": category,
+                # An errored fixture MUST still carry its gold-line count.
+                # Without it, `pooled_aggregate`'s denominator silently shrinks
+                # for whichever backend crashed, so a backend that dies with no
+                # output file scores strictly BETTER than one that honestly
+                # writes an all-untimed output — and this shootout has both
+                # conventions in play (ctc writes a stub; mtl/elevenlabs write
+                # nothing). Measured counterfactual: had ctc crashed silently on
+                # p74PDWAFk0A instead of writing its honest all-untimed file,
+                # its coverage would read 72.8% instead of 66.9% — above MTL.
+                "n_gold": len(gold_lines),
                 "error": "output file missing or unparseable",
             },
             [],
@@ -114,7 +124,15 @@ def score_one_fixture(
     score["untimed_pct"] = (
         round(n_untimed / len(produced_lines) * 100.0, 1) if produced_lines else None
     )
-    score["runtime_sec"] = (produced.get("metadata") or {}).get("runtime_sec")
+    metadata = produced.get("metadata") or {}
+    score["runtime_sec"] = metadata.get("runtime_sec")
+    # A fixture that OOM'd on the GPU and was retried on CPU costs ~5x the
+    # wall-clock of a GPU run; pooling both into one mean attributes a
+    # CPU-fallback penalty to the MODEL. Carry the provenance through so the
+    # runtime rollup can split by device (lyrics_alignment_mtl/run.py records
+    # both fields; backends that don't simply report None).
+    score["device"] = metadata.get("device")
+    score["cuda_oom_retried"] = metadata.get("cuda_oom_retried")
 
     cons_matches = conservative_match(scoreable, gold_lines)
     for m in cons_matches:
@@ -131,6 +149,7 @@ def score_backend(
 ) -> dict[str, Any]:
     fixture_scores: list[dict[str, Any]] = []
     conservative_matches: list[dict[str, Any]] = []
+    monotonic_matches: list[dict[str, Any]] = []
     poisoned_score: dict[str, Any] | None = None
     poisoned_conservative: list[dict[str, Any]] = []
 
@@ -143,20 +162,45 @@ def score_backend(
             produced=produced,
             gold_lines=fixture["gold_lines"],
         )
+        # THIRD view — same matcher as the official one plus the monotonicity
+        # constraint it lacks (see score_one_call.monotonic_match). Computed
+        # here rather than inside score_one_fixture so that function's return
+        # signature (and every caller/test of it) stays unchanged.
+        scoreable, _ = to_scoreable_lines((produced or {}).get("lines") or [])
+        mono = score_one_call.monotonic_match(scoreable, fixture["gold_lines"])
+        for m in mono:
+            m["video_id"] = video_id
+            m["category"] = fixture["category"]
+
         if video_id == POISONED_FIXTURE_VIDEO_ID:
             poisoned_score = score
             poisoned_conservative = cons
             continue  # excluded from every pooled/per-category aggregate
         fixture_scores.append(score)
         conservative_matches.extend(cons)
+        monotonic_matches.extend(mono)
 
     report = score_one_call.build_backend_report(backend, fixture_scores)
+    total_gold = sum(
+        s["n_gold"] for s in fixture_scores if s.get("error") is None
+    )  # matches pooled_aggregate's total_gold_lines
     categories = sorted({f["category"] for f in manifest.values()})
     report["conservative"] = {
-        "aggregate": conservative_aggregate(conservative_matches),
+        "aggregate": conservative_aggregate(conservative_matches, total_gold),
         "by_category": {
             cat: conservative_aggregate(
                 [m for m in conservative_matches if m["category"] == cat]
+            )
+            for cat in categories
+        },
+    }
+    report["monotonic"] = {
+        "aggregate": score_one_call.delta_aggregate(
+            monotonic_matches, total_gold=total_gold
+        ),
+        "by_category": {
+            cat: score_one_call.delta_aggregate(
+                [m for m in monotonic_matches if m["category"] == cat]
             )
             for cat in categories
         },
@@ -175,7 +219,23 @@ def score_backend(
         else None,
     }
 
-    runtimes = [s["runtime_sec"] for s in ok_scores if s.get("runtime_sec") is not None]
+    timed_scores = [s for s in ok_scores if s.get("runtime_sec") is not None]
+    runtimes = [s["runtime_sec"] for s in timed_scores]
+    # Split by device: a fixture that OOM'd on the GPU and was retried on CPU
+    # runs ~5x slower, so blending it into one mean attributes a CPU-fallback
+    # penalty to the model. `mean_runtime_sec` below keeps the blended figure
+    # for continuity with earlier reports — quote the per-device one.
+    by_device: dict[str, dict[str, Any]] = {}
+    for device in sorted({str(s.get("device")) for s in timed_scores}):
+        vals = [
+            s["runtime_sec"] for s in timed_scores if str(s.get("device")) == device
+        ]
+        by_device[device] = {
+            "n_fixtures": len(vals),
+            "mean_runtime_sec": round(statistics.fmean(vals), 1),
+            "median_runtime_sec": round(statistics.median(vals), 1),
+            "total_runtime_sec": round(sum(vals), 1),
+        }
     report["runtime"] = {
         "n_fixtures_with_runtime": len(runtimes),
         "mean_runtime_sec": round(statistics.fmean(runtimes), 1) if runtimes else None,
@@ -183,6 +243,8 @@ def score_backend(
         if runtimes
         else None,
         "total_runtime_sec": round(sum(runtimes), 1) if runtimes else None,
+        "n_cuda_oom_retried": sum(1 for s in ok_scores if s.get("cuda_oom_retried")),
+        "by_device": by_device,
     }
 
     if poisoned_score is not None:
@@ -245,18 +307,34 @@ def main(argv: list[str] | None = None) -> int:
     for backend, report in results.items():
         agg = report["aggregate"]
         cons = report["conservative"]["aggregate"]
+        mono = report["monotonic"]["aggregate"]
         untimed = report["untimed"]
         runtime = report["runtime"]
-        print(f"--- {backend} (21 fixtures, poisoned fixture excluded) ---")
         print(
-            f"  official     : within400={agg['pct_within_400ms']!s:>6}%  "
+            f"--- {backend} ({agg['n_fixtures']} fixtures scored, "
+            f"{agg['n_fixtures_errored']} errored, poisoned fixture excluded) ---"
+        )
+        print(
+            f"  gold lines   : {agg['total_gold_lines']} in scored fixtures / "
+            f"{agg['total_gold_lines_all_fixtures']} incl. errored fixtures"
+        )
+        print(
+            f"  official     : within400={agg['pct_within_400ms']!s:>6}% of matched  "
+            f"gold_within400={agg['pct_gold_within_400ms']!s:>6}%  "
             f"median_delta={agg['median_abs_delta_ms']!s:>8}ms  "
             f"p90={agg['p90_abs_delta_ms']!s:>8}ms  "
-            f"coverage={agg['gold_coverage_pct']!s:>6}%"
+            f"coverage={agg['gold_coverage_pct']!s:>6}% "
+            f"({agg['gold_coverage_pct_all_fixtures']}% of all gold)"
         )
         print(
             f"  conservative : within400={cons['pct_within_400ms']!s:>6}%  "
+            f"gold_within400={cons['pct_gold_within_400ms']!s:>6}%  "
             f"median_delta={cons['median_abs_delta_ms']!s:>8}ms  n_pairs={cons['n_pairs']}"
+        )
+        print(
+            f"  monotonic    : within400={mono['pct_within_400ms']!s:>6}%  "
+            f"gold_within400={mono['pct_gold_within_400ms']!s:>6}%  "
+            f"median_delta={mono['median_abs_delta_ms']!s:>8}ms  n_pairs={mono['n_pairs']}"
         )
         print(
             f"  untimed      : {untimed['total_untimed']}/{untimed['total_lines']} "
@@ -265,8 +343,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  runtime      : mean={runtime['mean_runtime_sec']}s "
             f"median={runtime['median_runtime_sec']}s "
-            f"(n={runtime['n_fixtures_with_runtime']})"
+            f"(n={runtime['n_fixtures_with_runtime']}, "
+            f"cuda_oom_retried={runtime['n_cuda_oom_retried']})"
         )
+        for device, stats in runtime["by_device"].items():
+            print(
+                f"    device {device:8s}: n={stats['n_fixtures']:>2} "
+                f"mean={stats['mean_runtime_sec']}s "
+                f"median={stats['median_runtime_sec']}s"
+            )
         print("  by category (official):")
         for cat, cagg in report["by_category"].items():
             print(

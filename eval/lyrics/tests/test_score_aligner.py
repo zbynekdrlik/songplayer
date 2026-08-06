@@ -122,6 +122,157 @@ def test_score_backend_excludes_poisoned_fixture_from_aggregate(
     assert pf["untimed_pct"] == 100.0
 
 
+def test_score_one_fixture_errored_record_carries_gold_count() -> None:
+    """REGRESSION (synthesis #7): a crashed fixture with no output file must
+    still contribute its gold lines to the honest denominator — otherwise a
+    backend that dies silently outscores one that writes all-untimed nulls."""
+    gold = [
+        {"text": "line one of two", "start_ms": 0, "end_ms": 1000},
+        {"text": "line two of two", "start_ms": 1000, "end_ms": 2000},
+    ]
+    score, matches = score_aligner.score_one_fixture(
+        backend="test-aligner",
+        video_id="abc123",
+        category="clean_pop",
+        produced=None,
+        gold_lines=gold,
+    )
+    assert score["error"] == "output file missing or unparseable"
+    assert score["n_gold"] == 2
+    assert matches == []
+
+
+def test_score_backend_errored_fixture_stays_in_gold_denominator(
+    tmp_path: Path,
+) -> None:
+    """REGRESSION (synthesis #7): end-to-end — the pooled aggregate must expose
+    a denominator that includes the fixtures the backend produced nothing for."""
+    raw_dir = tmp_path
+    backend = "test-aligner"
+    (raw_dir / f"{backend}_okvid.json").write_text(
+        json.dumps({"lines": [_line("hello world today", 50, 1000)]})
+    )
+    manifest = {
+        "okvid": {
+            "video_id": "okvid",
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "hello world today", "start_ms": 0, "end_ms": 1000}
+            ],
+        },
+        "crashedvid": {
+            "video_id": "crashedvid",
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "line one of three", "start_ms": 0, "end_ms": 1000},
+                {"text": "line two of three", "start_ms": 1000, "end_ms": 2000},
+                {"text": "line three of three", "start_ms": 2000, "end_ms": 3000},
+            ],
+        },
+    }
+    report = score_aligner.score_backend(backend, manifest, raw_dir)
+    agg = report["aggregate"]
+    assert agg["total_gold_lines"] == 1
+    assert agg["total_gold_lines_all_fixtures"] == 4
+    assert agg["gold_coverage_pct"] == 100.0
+    assert agg["gold_coverage_pct_all_fixtures"] == 25.0
+
+
+def test_score_one_fixture_carries_device_and_oom_flag() -> None:
+    """synthesis #6: a CPU-fallback run must never be blended into a GPU mean."""
+    gold = [{"text": "hello world today", "start_ms": 0, "end_ms": 1000}]
+    produced = {
+        "lines": [_line("hello world today", 50, 1000)],
+        "metadata": {"runtime_sec": 500.0, "device": "cpu", "cuda_oom_retried": True},
+    }
+    score, _ = score_aligner.score_one_fixture(
+        backend="test-aligner",
+        video_id="abc123",
+        category="clean_pop",
+        produced=produced,
+        gold_lines=gold,
+    )
+    assert score["device"] == "cpu"
+    assert score["cuda_oom_retried"] is True
+
+
+def test_score_backend_splits_runtime_by_device(tmp_path: Path) -> None:
+    """synthesis #6: two fixtures that fell back to CPU must not drag the
+    reported GPU runtime of the model."""
+    raw_dir = tmp_path
+    backend = "test-aligner"
+    manifest = {}
+    for vid, runtime, device, oom in (
+        ("gpu1", 100.0, "cuda", False),
+        ("gpu2", 120.0, "cuda", False),
+        ("cpu1", 600.0, "cpu", True),
+    ):
+        (raw_dir / f"{backend}_{vid}.json").write_text(
+            json.dumps(
+                {
+                    "lines": [_line("hello world today", 50, 1000)],
+                    "metadata": {
+                        "runtime_sec": runtime,
+                        "device": device,
+                        "cuda_oom_retried": oom,
+                    },
+                }
+            )
+        )
+        manifest[vid] = {
+            "video_id": vid,
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "hello world today", "start_ms": 0, "end_ms": 1000}
+            ],
+        }
+
+    report = score_aligner.score_backend(backend, manifest, raw_dir)
+    runtime = report["runtime"]
+    assert runtime["n_fixtures_with_runtime"] == 3
+    assert runtime["mean_runtime_sec"] == 273.3  # device-blended, kept for history
+    assert runtime["n_cuda_oom_retried"] == 1
+    by_device = runtime["by_device"]
+    assert by_device["cuda"]["n_fixtures"] == 2
+    assert by_device["cuda"]["mean_runtime_sec"] == 110.0
+    assert by_device["cpu"]["n_fixtures"] == 1
+    assert by_device["cpu"]["mean_runtime_sec"] == 600.0
+
+
+def test_score_backend_reports_monotonic_view(tmp_path: Path) -> None:
+    """synthesis #3: a third, order-respecting view alongside official and
+    conservative — the official matcher may pair a produced line to a gold line
+    that precedes one already consumed."""
+    raw_dir = tmp_path
+    backend = "test-aligner"
+    (raw_dir / f"{backend}_v1.json").write_text(
+        json.dumps(
+            {
+                "lines": [
+                    _line("delta echo foxtrot", 2000, 3000),
+                    _line("alpha bravo charlie", 9000, 10000),
+                ]
+            }
+        )
+    )
+    manifest = {
+        "v1": {
+            "video_id": "v1",
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "alpha bravo charlie", "start_ms": 1000, "end_ms": 2000},
+                {"text": "delta echo foxtrot", "start_ms": 5000, "end_ms": 6000},
+            ],
+        }
+    }
+    report = score_aligner.score_backend(backend, manifest, raw_dir)
+    assert report["aggregate"]["total_matched_lines"] == 2
+    mono = report["monotonic"]["aggregate"]
+    assert mono["n_pairs"] == 1
+    assert mono["pct_gold_within_400ms"] == 0.0
+    assert "clean_pop" in report["monotonic"]["by_category"]
+
+
 def test_score_backend_missing_poisoned_fixture_reports_error(
     tmp_path: Path,
 ) -> None:

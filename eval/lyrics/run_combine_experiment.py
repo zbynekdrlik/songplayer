@@ -8,9 +8,18 @@ Runs `combine_lines_times.combine_lines_times()` for every (line_backend,
 time_backend) pair in COMBOS across every fixture in the manifest, scores
 each combined output with the EXISTING `score_one_call.py` matcher
 (imported, never modified) plus a stricter "conservative" parallel metric
-defined here, and computes word-alignment-rate statistics (overall, and
-split by whether the line's text repeats elsewhere in the same song) plus a
-sample of concrete LLM-word-vs-ASR-word mismatches.
+defined here and the order-respecting "monotonic" view
+(`score_one_call.monotonic_match`), and computes word-alignment-rate
+statistics (overall, and split by whether the line's text repeats elsewhere
+in the same song) plus a sample of concrete LLM-word-vs-ASR-word mismatches.
+
+Every pooled aggregate here EXCLUDES the poisoned fixture
+(`POISONED_FIXTURE_VIDEO_ID`) and reports it separately, matching
+`score_aligner.py` — the combo rows produced here are the baseline the
+forced-aligner shootout is measured against, so the two must pool the same
+fixtures. Both the conditional %<=400ms (denominator = matched, timed lines)
+and its gold-normalized twin (denominator = gold lines, identical for every
+backend) are reported; only the second is comparable across backends.
 
 Also re-scores each backend's own untouched `lines[]` as a baseline
 (`BASELINE_BACKENDS`), so the combo numbers can be read against "how did
@@ -51,6 +60,17 @@ logger = logging.getLogger("lyrics_eval.run_combine_experiment")
 # rather than disambiguating it by closest-start time) and a higher text
 # similarity. See conservative_match()'s docstring.
 CONSERVATIVE_RATIO_THRESHOLD = 0.75
+
+# `Xvm4_fWkXe8` — qwen35-omni hallucinated a degenerate 395-line repetition
+# loop on this song. `score_aligner.py` has ALWAYS excluded it from its pooled
+# aggregates; this module did not, so the baseline row every forced aligner is
+# compared against was pooled over 22 fixtures while every aligner row was
+# pooled over 21 — under a header that said "21 fixtures". The two scorers MUST
+# use the same constant (asserted in
+# tests/test_run_combine_experiment.py::test_poisoned_fixture_video_id_matches_score_aligner);
+# it is defined here rather than imported to avoid a circular import
+# (score_aligner imports this module).
+POISONED_FIXTURE_VIDEO_ID = "Xvm4_fWkXe8"
 
 BASELINE_BACKENDS = [
     "gemini36-flash",
@@ -129,7 +149,14 @@ def conservative_match(
     return matches
 
 
-def conservative_aggregate(matches: list[dict[str, Any]]) -> dict[str, Any]:
+def conservative_aggregate(
+    matches: list[dict[str, Any]], total_gold: int | None = None
+) -> dict[str, Any]:
+    """Pool conservative-view pairs. `total_gold` is optional and additive:
+    when given, the gold-normalized %<=400ms is reported alongside the
+    conditional one (this view drops every repeated-text gold line, so its
+    conditional denominator is a pool only it uses). Field set and every
+    pre-existing key are unchanged, so historical numbers stay comparable."""
     deltas = [m["abs_delta_ms"] for m in matches]
     within_400 = sum(1 for d in deltas if d <= score_one_call.WALL_TOLERANCE_MS)
     within_1000 = sum(1 for d in deltas if d <= score_one_call.LOOSE_TOLERANCE_MS)
@@ -142,6 +169,10 @@ def conservative_aggregate(matches: list[dict[str, Any]]) -> dict[str, Any]:
         else None,
         "pct_within_1000ms": round(within_1000 / len(deltas) * 100.0, 1)
         if deltas
+        else None,
+        "total_gold_lines": total_gold,
+        "pct_gold_within_400ms": round(within_400 / total_gold * 100.0, 1)
+        if total_gold
         else None,
     }
 
@@ -179,6 +210,45 @@ def normalized_line_text_counts(lines: list[dict[str, Any]]) -> Counter:
     )
 
 
+def split_poisoned(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split any list of per-fixture records (each carrying `video_id`) into
+    (kept, poisoned). The poisoned fixture is excluded from every pooled
+    aggregate — exactly as `score_aligner.py` does — and reported on its own
+    under `poisoned_fixture`, never silently dropped."""
+    kept = [r for r in records if r.get("video_id") != POISONED_FIXTURE_VIDEO_ID]
+    poisoned = [r for r in records if r.get("video_id") == POISONED_FIXTURE_VIDEO_ID]
+    return kept, poisoned
+
+
+def build_poisoned_block(
+    poisoned_scores: list[dict[str, Any]],
+    poisoned_conservative: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Same shape score_aligner.py uses: the excluded fixture stays visible
+    with its own score instead of vanishing from the report."""
+    if not poisoned_scores:
+        return {
+            "video_id": POISONED_FIXTURE_VIDEO_ID,
+            "error": "no output found for poisoned fixture",
+        }
+    block: dict[str, Any] = {
+        "video_id": POISONED_FIXTURE_VIDEO_ID,
+        "official": poisoned_scores[0],
+    }
+    if poisoned_conservative is not None:
+        block["conservative"] = conservative_aggregate(poisoned_conservative)
+    return block
+
+
+def total_gold_of(fixture_scores: list[dict[str, Any]]) -> int:
+    """Gold-line count of the SCORED (non-errored) fixtures — the denominator
+    the parallel views are gold-normalized against, matching
+    `pooled_aggregate`'s `total_gold_lines`."""
+    return sum(s["n_gold"] for s in fixture_scores if s.get("error") is None)
+
+
 def run_combo(
     *,
     line_backend: str,
@@ -190,6 +260,7 @@ def run_combo(
     cid = combo_id(line_backend, time_backend)
     fixture_scores: list[dict[str, Any]] = []
     conservative_matches: list[dict[str, Any]] = []
+    monotonic_matches: list[dict[str, Any]] = []
     align_rate_records: list[dict[str, Any]] = []
     mismatch_examples: list[dict[str, Any]] = []
     n_lines_start_past_audio_end = 0
@@ -205,6 +276,9 @@ def run_combo(
                     "backend": cid,
                     "video_id": video_id,
                     "category": fixture["category"],
+                    # kept so the fixture still counts toward the honest gold
+                    # denominator (pooled_aggregate's *_all_fixtures)
+                    "n_gold": len(fixture["gold_lines"]),
                     "error": str(exc),
                 }
             )
@@ -257,6 +331,12 @@ def run_combo(
             m["category"] = fixture["category"]
         conservative_matches.extend(cons_matches)
 
+        mono_matches = score_one_call.monotonic_match(scoreable, fixture["gold_lines"])
+        for m in mono_matches:
+            m["video_id"] = video_id
+            m["category"] = fixture["category"]
+        monotonic_matches.extend(mono_matches)
+
         # NOTE on what this metric actually proves: `time_output["duration_ms"]`
         # is each backend's OWN self-reported max(line.end_ms) (see e.g.
         # soniox_v5.py::estimate_duration_ms), not an externally-verified true
@@ -270,7 +350,7 @@ def run_combo(
         # qwen35-omni backends' past-end-of-file lines (a genuine LLM
         # hallucination artifact, cited from the prior sweep) would need.
         duration_ms = time_output.get("duration_ms") or 0
-        if duration_ms:
+        if duration_ms and video_id != POISONED_FIXTURE_VIDEO_ID:
             n_lines_start_past_audio_end += sum(
                 1 for line in scoreable if line["start_ms"] > duration_ms
             )
@@ -312,10 +392,19 @@ def run_combo(
                 }
             )
 
+    # The poisoned fixture leaves every pooled view here, matching
+    # score_aligner.py — otherwise this row is a 22-fixture number compared
+    # against 21-fixture aligner rows.
+    fixture_scores, poisoned_scores = split_poisoned(fixture_scores)
+    conservative_matches, poisoned_conservative = split_poisoned(conservative_matches)
+    monotonic_matches, _ = split_poisoned(monotonic_matches)
+    align_rate_records, _ = split_poisoned(align_rate_records)
+
     report = score_one_call.build_backend_report(cid, fixture_scores)
+    total_gold = total_gold_of(fixture_scores)
     categories = sorted({f["category"] for f in manifest.values()})
     report["conservative"] = {
-        "aggregate": conservative_aggregate(conservative_matches),
+        "aggregate": conservative_aggregate(conservative_matches, total_gold),
         "by_category": {
             cat: conservative_aggregate(
                 [m for m in conservative_matches if m["category"] == cat]
@@ -323,6 +412,20 @@ def run_combo(
             for cat in categories
         },
     }
+    report["monotonic"] = {
+        "aggregate": score_one_call.delta_aggregate(
+            monotonic_matches, total_gold=total_gold
+        ),
+        "by_category": {
+            cat: score_one_call.delta_aggregate(
+                [m for m in monotonic_matches if m["category"] == cat]
+            )
+            for cat in categories
+        },
+    }
+    report["poisoned_fixture"] = build_poisoned_block(
+        poisoned_scores, poisoned_conservative
+    )
 
     total_words = sum(r["words_total"] for r in align_rate_records)
     total_aligned = sum(r["words_aligned"] for r in align_rate_records)
@@ -352,8 +455,10 @@ def run_baseline(
 ) -> dict[str, Any]:
     """Score a backend's own untouched lines[] via score_one_call.py's
     unmodified functions — the "before" picture the combos are compared
-    against."""
+    against. The poisoned fixture is excluded from the pooled aggregate (and
+    reported on its own) exactly as in run_combo / score_aligner."""
     fixture_scores: list[dict[str, Any]] = []
+    monotonic_matches: list[dict[str, Any]] = []
     for video_id, fixture in manifest.items():
         produced = score_one_call.load_produced(raw_dir, backend, video_id)
         if produced is None:
@@ -362,6 +467,9 @@ def run_baseline(
                     "backend": backend,
                     "video_id": video_id,
                     "category": fixture["category"],
+                    # kept so the fixture still counts toward the honest gold
+                    # denominator (pooled_aggregate's *_all_fixtures)
+                    "n_gold": len(fixture["gold_lines"]),
                     "error": "output file missing or unparseable",
                 }
             )
@@ -375,7 +483,28 @@ def run_baseline(
                 gold_lines=fixture["gold_lines"],
             )
         )
-    return score_one_call.build_backend_report(backend, fixture_scores)
+        timed = [
+            line
+            for line in (produced.get("lines") or [])
+            if line.get("start_ms") is not None
+        ]
+        mono = score_one_call.monotonic_match(timed, fixture["gold_lines"])
+        for m in mono:
+            m["video_id"] = video_id
+            m["category"] = fixture["category"]
+        monotonic_matches.extend(mono)
+
+    fixture_scores, poisoned_scores = split_poisoned(fixture_scores)
+    monotonic_matches, _ = split_poisoned(monotonic_matches)
+
+    report = score_one_call.build_backend_report(backend, fixture_scores)
+    report["monotonic"] = {
+        "aggregate": score_one_call.delta_aggregate(
+            monotonic_matches, total_gold=total_gold_of(fixture_scores)
+        )
+    }
+    report["poisoned_fixture"] = build_poisoned_block(poisoned_scores)
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -429,11 +558,19 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("wrote %s", args.out)
 
     print(f"\n=== combine experiment summary ({args.out}) ===\n")
+    print(
+        f"(poisoned fixture {POISONED_FIXTURE_VIDEO_ID} excluded from every pooled "
+        f"aggregate below, as in score_aligner.py)\n"
+    )
     print("--- baselines (each backend's own untouched lines) ---")
     for backend, report in results["baselines"].items():
         agg = report["aggregate"]
+        mono = report["monotonic"]["aggregate"]
         print(
-            f"  {backend:20s} within400={agg['pct_within_400ms']!s:>6}%  "
+            f"  {backend:20s} n={agg['n_fixtures']}ok/{agg['n_fixtures_errored']}err  "
+            f"within400={agg['pct_within_400ms']!s:>6}% of matched  "
+            f"gold_within400={agg['pct_gold_within_400ms']!s:>6}%  "
+            f"mono_gold_within400={mono['pct_gold_within_400ms']!s:>6}%  "
             f"median_delta={agg['median_abs_delta_ms']!s:>8}ms  "
             f"coverage={agg['gold_coverage_pct']!s:>6}%  "
             f"line_ratio={agg['line_count_ratio']}"
@@ -442,17 +579,31 @@ def main(argv: list[str] | None = None) -> int:
     for cid, report in results["combos"].items():
         agg = report["aggregate"]
         cons = report["conservative"]["aggregate"]
+        mono = report["monotonic"]["aggregate"]
         wa = report["word_alignment"]
         print(f"  {cid}")
         print(
-            f"    official     : within400={agg['pct_within_400ms']!s:>6}%  "
+            f"    fixtures     : {agg['n_fixtures']} scored, "
+            f"{agg['n_fixtures_errored']} errored; gold lines "
+            f"{agg['total_gold_lines']} scored / "
+            f"{agg['total_gold_lines_all_fixtures']} incl. errored"
+        )
+        print(
+            f"    official     : within400={agg['pct_within_400ms']!s:>6}% of matched  "
+            f"gold_within400={agg['pct_gold_within_400ms']!s:>6}%  "
             f"median_delta={agg['median_abs_delta_ms']!s:>8}ms  "
             f"coverage={agg['gold_coverage_pct']!s:>6}%  "
             f"untimed_excluded={sum(s.get('n_lines_untimed_excluded', 0) for s in report['per_fixture'] if s.get('error') is None)}"
         )
         print(
-            f"    conservative  : within400={cons['pct_within_400ms']!s:>6}%  "
+            f"    conservative : within400={cons['pct_within_400ms']!s:>6}%  "
+            f"gold_within400={cons['pct_gold_within_400ms']!s:>6}%  "
             f"median_delta={cons['median_abs_delta_ms']!s:>8}ms  n_pairs={cons['n_pairs']}"
+        )
+        print(
+            f"    monotonic    : within400={mono['pct_within_400ms']!s:>6}%  "
+            f"gold_within400={mono['pct_gold_within_400ms']!s:>6}%  "
+            f"median_delta={mono['median_abs_delta_ms']!s:>8}ms  n_pairs={mono['n_pairs']}"
         )
         print(
             f"    word_align_rate={wa['overall_rate']}  "

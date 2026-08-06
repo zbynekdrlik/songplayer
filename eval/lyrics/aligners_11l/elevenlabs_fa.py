@@ -108,6 +108,7 @@ import argparse
 import json
 import logging
 import os
+import time
 import wave
 from pathlib import Path
 from typing import Any
@@ -243,8 +244,13 @@ def reconstruct_lines(
     match the token count, since the positional mapping would otherwise be
     silently wrong.
 
-    Returns (lines_out, stats) where stats carries n_lines_untimed and
-    n_words_missing_timing for logging/reporting."""
+    Returns (lines_out, stats). `stats` mirrors the exact metadata fields the
+    live backend actually emits — `n_lines`, `n_lines_timed`, and the untimed
+    count split into `n_lines_untimed_empty_text` (a line with zero
+    reference words to begin with, untimed by construction per the module
+    docstring) vs `n_lines_untimed_other` (the line had words sent but none
+    of them came back with usable timing) — plus `n_words_missing_timing`
+    for logging/diagnostics."""
     if len(content_words) != len(word_to_line):
         raise RuntimeError(
             f"elevenlabs word count mismatch: sent {len(word_to_line)} tokens, "
@@ -259,7 +265,8 @@ def reconstruct_lines(
         words_by_line[line_idx].append(word)
 
     lines_out: list[dict[str, Any]] = []
-    n_lines_untimed = 0
+    n_lines_untimed_empty_text = 0
+    n_lines_untimed_other = 0
     n_words_missing_timing = 0
 
     for line_idx, ref_line in enumerate(ref_lines):
@@ -293,7 +300,16 @@ def reconstruct_lines(
             )
 
         if not timed_word_spans:
-            n_lines_untimed += 1
+            # Same emptiness convention as build_transcript's tokenization
+            # check — a line with no reference words never had anything for
+            # the API to align (untimed by construction); a line that DID
+            # send words but got no usable timing back is a distinct "other"
+            # case (e.g. every one of its words individually missing
+            # start/end, see the defensive branch above).
+            if not (ref_line.get("text") or "").strip():
+                n_lines_untimed_empty_text += 1
+            else:
+                n_lines_untimed_other += 1
             start_ms = None
             end_ms = None
             mean_word_loss = None
@@ -313,16 +329,23 @@ def reconstruct_lines(
             }
         )
 
+    n_lines = len(ref_lines)
+    n_lines_timed = n_lines - n_lines_untimed_empty_text - n_lines_untimed_other
     stats = {
-        "n_lines_untimed": n_lines_untimed,
+        "n_lines": n_lines,
+        "n_lines_timed": n_lines_timed,
+        "n_lines_untimed_empty_text": n_lines_untimed_empty_text,
+        "n_lines_untimed_other": n_lines_untimed_other,
         "n_words_missing_timing": n_words_missing_timing,
-        "n_lines_total": len(ref_lines),
     }
     logger.info(
-        "reconstructed lines: n_lines=%d n_untimed=%d n_words_missing_timing=%d",
-        stats["n_lines_total"],
-        stats["n_lines_untimed"],
-        stats["n_words_missing_timing"],
+        "reconstructed lines: n_lines=%d n_lines_timed=%d "
+        "n_untimed_empty_text=%d n_untimed_other=%d n_words_missing_timing=%d",
+        n_lines,
+        n_lines_timed,
+        n_lines_untimed_empty_text,
+        n_lines_untimed_other,
+        n_words_missing_timing,
     )
     return lines_out, stats
 
@@ -351,6 +374,11 @@ def emit_result(
     lines_out: list[dict[str, Any]],
     top_level_loss: float | None,
     stats: dict[str, Any],
+    n_tokens_sent: int,
+    n_words_returned_raw: int,
+    n_words_returned_content: int,
+    n_characters_returned: int,
+    runtime_sec: float | None,
     out_path: Path,
 ) -> None:
     result = {
@@ -367,8 +395,15 @@ def emit_result(
         "raw_confidence": None,
         "top_level_loss": top_level_loss,
         "metadata": {
-            "n_lines_untimed": stats["n_lines_untimed"],
-            "n_words_missing_timing": stats["n_words_missing_timing"],
+            "n_tokens_sent": n_tokens_sent,
+            "n_words_returned_raw": n_words_returned_raw,
+            "n_words_returned_content": n_words_returned_content,
+            "n_characters_returned": n_characters_returned,
+            "runtime_sec": runtime_sec,
+            "n_lines": stats["n_lines"],
+            "n_lines_timed": stats["n_lines_timed"],
+            "n_lines_untimed_empty_text": stats["n_lines_untimed_empty_text"],
+            "n_lines_untimed_other": stats["n_lines_untimed_other"],
         },
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,7 +442,12 @@ def main(argv: list[str] | None = None) -> int:
             f"(every line's text was blank) — nothing to align"
         )
 
+    t0 = time.perf_counter()
     payload = call_forced_alignment(args.wav, transcript, api_key)
+    runtime_sec = round(time.perf_counter() - t0, 1)
+
+    n_words_returned_raw = len(payload["words"])
+    n_characters_returned = len(payload.get("characters") or [])
     content_words = filter_content_words(payload["words"])
     lines_out, stats = reconstruct_lines(ref_lines, word_to_line, content_words)
     duration_ms = estimate_duration_ms(args.wav)
@@ -418,6 +458,11 @@ def main(argv: list[str] | None = None) -> int:
         lines_out=lines_out,
         top_level_loss=payload.get("loss"),
         stats=stats,
+        n_tokens_sent=len(word_to_line),
+        n_words_returned_raw=n_words_returned_raw,
+        n_words_returned_content=len(content_words),
+        n_characters_returned=n_characters_returned,
+        runtime_sec=runtime_sec,
         out_path=args.out,
     )
     return 0

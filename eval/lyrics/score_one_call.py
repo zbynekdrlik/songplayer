@@ -40,6 +40,20 @@ chant_repetition fixtures) by time proximity instead of arbitrarily
 picking whichever repeat has a marginally higher text ratio. A matched
 gold line is removed from the pool so no gold line is double-matched.
 
+That matcher has NO monotonicity constraint, so a produced line can bind to
+a gold line far earlier in the song than one already consumed. `monotonic_match`
+is the same matcher with that one constraint added and is reported as a THIRD
+view beside the official and conservative ones — `greedy_match` itself is never
+changed, so every historical number in `reports/` stays comparable.
+
+TWO DENOMINATORS, always reported together: `pct_within_400ms` is CONDITIONAL
+on a line having been matched AND timed, so its denominator is whatever subset
+that backend handled; `pct_gold_within_400ms` divides the same numerator by the
+gold-line count, which is identical for every backend and is therefore the
+comparable figure. `*_all_fixtures` variants additionally count the gold lines
+of fixtures the backend produced no output for at all, so a silent crash never
+outscores an honest all-untimed output.
+
 Usage:
     python3 eval/lyrics/score_one_call.py \\
         --manifest eval/lyrics/manifest.json \\
@@ -128,12 +142,15 @@ def load_produced(raw_dir: Path, backend: str, video_id: str) -> dict[str, Any] 
         return None
 
 
-def greedy_match(
-    produced_lines: list[dict[str, Any]], gold_lines: list[dict[str, Any]]
+def _match(
+    produced_lines: list[dict[str, Any]],
+    gold_lines: list[dict[str, Any]],
+    *,
+    monotonic: bool,
 ) -> list[dict[str, Any]]:
-    """Greedy, gold-line-consuming match. Returns a list of match records:
-    {produced_idx, gold_idx, abs_delta_ms, ratio}. A gold line is matched
-    to at most one produced line."""
+    """Shared body of `greedy_match` (monotonic=False — the OFFICIAL view,
+    byte-for-byte the historical behaviour) and `monotonic_match`
+    (monotonic=True — the third, order-respecting view)."""
     gold_available = list(range(len(gold_lines)))
     gold_norm = [normalize_text(g["text"]) for g in gold_lines]
     matches: list[dict[str, Any]] = []
@@ -141,11 +158,14 @@ def greedy_match(
     produced_order = sorted(
         range(len(produced_lines)), key=lambda i: produced_lines[i]["start_ms"]
     )
+    last_gi = -1
     for pi in produced_order:
         p = produced_lines[pi]
         p_norm = normalize_text(p["text"])
         candidates: list[tuple[int, float]] = []
         for gi in gold_available:
+            if monotonic and gi < last_gi:
+                continue
             ratio = difflib.SequenceMatcher(None, p_norm, gold_norm[gi]).ratio()
             if ratio >= RATIO_THRESHOLD:
                 candidates.append((gi, ratio))
@@ -164,7 +184,42 @@ def greedy_match(
             }
         )
         gold_available.remove(best_gi)
+        last_gi = best_gi
     return matches
+
+
+def greedy_match(
+    produced_lines: list[dict[str, Any]], gold_lines: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Greedy, gold-line-consuming match. Returns a list of match records:
+    {produced_idx, gold_idx, abs_delta_ms, ratio}. A gold line is matched
+    to at most one produced line.
+
+    UNCHANGED — this is the OFFICIAL view every historical number in
+    `reports/` was computed with, and it stays comparable across sessions.
+    Its known limitation (no ordering constraint, so a produced line can bind
+    to a gold line far earlier in the song) is measured by the parallel
+    `monotonic_match` view rather than silently patched here."""
+    return _match(produced_lines, gold_lines, monotonic=False)
+
+
+def monotonic_match(
+    produced_lines: list[dict[str, Any]], gold_lines: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """THIRD scoring view — same matcher as `greedy_match` plus the one
+    constraint it lacks: a produced line may only bind to a gold line at or
+    after the highest gold index already consumed. Gold lines are
+    chronologically ordered in every manifest fixture, so a backwards pair is
+    a genuine mis-pairing, not legitimate reordering; ~27-28% of the official
+    view's pairs are out of gold order and the resulting delta distortion
+    differs per backend by several points, which is larger than the margins
+    the shootout reports.
+
+    Report this ALONGSIDE the official view, never instead of it: dropping an
+    out-of-order pair removes a (usually large) delta from the numerator AND
+    the denominator, so the conditional percentage rises for everyone — only
+    the relative ordering and the gold-normalized twin are meaningful."""
+    return _match(produced_lines, gold_lines, monotonic=True)
 
 
 def score_fixture(
@@ -265,6 +320,15 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
     total_produced = sum(s["n_produced"] for s in ok_scores)
     total_gold = sum(s["n_gold"] for s in ok_scores)
     total_matched = sum(s["n_matched"] for s in ok_scores)
+    # ...and the HONEST denominator, which also counts the gold lines of
+    # fixtures this backend produced no output for. Without it a backend that
+    # crashes with no file scores strictly BETTER than one that honestly
+    # writes an all-untimed output — the two conventions are both in use in
+    # this harness (ctc writes a stub, mtl/elevenlabs die with no file), so
+    # the two must be read side by side. Requires errored fixture records to
+    # carry `n_gold`; a legacy record without it contributes 0, which is the
+    # pre-fix behaviour rather than a crash.
+    total_gold_all = sum(s.get("n_gold") or 0 for s in fixture_scores)
     total_sk_ok = sum(
         round((s["sk_ok_pct"] or 0.0) / 100.0 * s["n_produced"])
         for s in ok_scores
@@ -290,12 +354,18 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         "n_fixtures_errored": len(fixture_scores) - len(ok_scores),
         "total_produced_lines": total_produced,
         "total_gold_lines": total_gold,
+        "total_gold_lines_all_fixtures": total_gold_all,
         "total_matched_lines": total_matched,
         "line_count_ratio": round(total_produced / total_gold, 3)
         if total_gold
         else None,
         "gold_coverage_pct": round(total_matched / total_gold * 100.0, 1)
         if total_gold
+        else None,
+        "gold_coverage_pct_all_fixtures": round(
+            total_matched / total_gold_all * 100.0, 1
+        )
+        if total_gold_all
         else None,
         "mean_abs_delta_ms": round(statistics.fmean(all_deltas), 1)
         if all_deltas
@@ -312,6 +382,23 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         "pct_within_1000ms": round(within_1000 / len(all_deltas) * 100.0, 1)
         if all_deltas
         else None,
+        # Same numerator, GOLD denominator. `pct_within_400ms` above is
+        # CONDITIONAL on a line having been both text-matched and timed, so
+        # each backend is graded on the subset it happened to handle and the
+        # denominator moves between backends (measured 1138 -> 1243 across the
+        # 2026-08-05 shootout) — the worst backend gets the smallest
+        # denominator. These two normalize every backend onto the same gold
+        # line count and are the comparable figure; always print both, and
+        # never quote the conditional one without saying what it is conditional
+        # on.
+        "pct_gold_within_400ms": round(within_400 / total_gold * 100.0, 1)
+        if total_gold
+        else None,
+        "pct_gold_within_400ms_all_fixtures": round(
+            within_400 / total_gold_all * 100.0, 1
+        )
+        if total_gold_all
+        else None,
         "pct_gt32_chars_en": round(total_gt32_en / total_produced * 100.0, 1)
         if total_produced
         else None,
@@ -322,6 +409,39 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         if total_produced
         else None,
         "fixtures_with_word_timings": n_with_words,
+    }
+
+
+def delta_aggregate(
+    matches: list[dict[str, Any]], *, total_gold: int | None = None
+) -> dict[str, Any]:
+    """Pool a FLAT list of match records (anything carrying `abs_delta_ms`)
+    into the standard delta stats. Used by the parallel scoring views
+    (`monotonic_match`, `run_combine_experiment.conservative_match`) so every
+    view reports the same fields as `pooled_aggregate`'s timing block.
+
+    `total_gold` is the gold-line count the view was computed over; pass it so
+    the gold-normalized %<=400ms is available for the view too (a view that
+    drops pairs — as both parallel views do — otherwise reports a percentage
+    over a denominator only it uses)."""
+    deltas = [m["abs_delta_ms"] for m in matches]
+    within_400 = sum(1 for d in deltas if d <= WALL_TOLERANCE_MS)
+    within_1000 = sum(1 for d in deltas if d <= LOOSE_TOLERANCE_MS)
+    return {
+        "n_pairs": len(matches),
+        "total_gold_lines": total_gold,
+        "mean_abs_delta_ms": round(statistics.fmean(deltas), 1) if deltas else None,
+        "median_abs_delta_ms": round(statistics.median(deltas), 1) if deltas else None,
+        "p90_abs_delta_ms": round(percentile(deltas, 0.9), 1) if deltas else None,
+        "pct_within_400ms": round(within_400 / len(deltas) * 100.0, 1)
+        if deltas
+        else None,
+        "pct_within_1000ms": round(within_1000 / len(deltas) * 100.0, 1)
+        if deltas
+        else None,
+        "pct_gold_within_400ms": round(within_400 / total_gold * 100.0, 1)
+        if total_gold
+        else None,
     }
 
 
@@ -427,6 +547,9 @@ def main(argv: list[str] | None = None) -> int:
                         "backend": backend,
                         "video_id": video_id,
                         "category": fixture["category"],
+                        # kept so the fixture still counts toward the honest
+                        # gold denominator (pooled_aggregate's *_all_fixtures)
+                        "n_gold": len(fixture["gold_lines"]),
                         "error": "output file missing or unparseable",
                     }
                 )
@@ -460,14 +583,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             f"  matched lines: {agg['total_matched_lines']}/{agg['total_gold_lines']} gold "
-            f"({agg['gold_coverage_pct']}% coverage)"
+            f"({agg['gold_coverage_pct']}% coverage; "
+            f"{agg['gold_coverage_pct_all_fixtures']}% over all "
+            f"{agg['total_gold_lines_all_fixtures']} gold lines incl. errored fixtures)"
         )
         print(
             f"  start delta (ms): mean={agg['mean_abs_delta_ms']} "
             f"median={agg['median_abs_delta_ms']} p90={agg['p90_abs_delta_ms']}"
         )
         print(
-            f"  within 400ms: {agg['pct_within_400ms']}%   within 1000ms: {agg['pct_within_1000ms']}%"
+            f"  within 400ms: {agg['pct_within_400ms']}% of MATCHED+TIMED lines   "
+            f"within 1000ms: {agg['pct_within_1000ms']}%"
+        )
+        print(
+            f"  within 400ms (gold-normalized, the comparable figure): "
+            f"{agg['pct_gold_within_400ms']}% of scored gold lines   "
+            f"{agg['pct_gold_within_400ms_all_fixtures']}% of ALL gold lines"
         )
         print(f"  line_count_ratio (produced/gold): {agg['line_count_ratio']}")
         print(

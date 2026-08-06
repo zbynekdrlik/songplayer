@@ -150,8 +150,10 @@ def test_reconstruct_lines_basic_two_line_case():
     assert lines_out[1]["end_ms"] == 3400
     assert lines_out[1]["mean_word_loss"] == pytest.approx(0.2)
 
-    assert stats["n_lines_untimed"] == 0
-    assert stats["n_lines_total"] == 2
+    assert stats["n_lines_untimed_empty_text"] == 0
+    assert stats["n_lines_untimed_other"] == 0
+    assert stats["n_lines_timed"] == 2
+    assert stats["n_lines"] == 2
 
 
 def test_reconstruct_lines_empty_source_line_is_untimed():
@@ -164,7 +166,11 @@ def test_reconstruct_lines_empty_source_line_is_untimed():
     assert lines_out[1]["end_ms"] is None
     assert lines_out[1]["mean_word_loss"] is None
     assert lines_out[1]["words"] == []
-    assert stats["n_lines_untimed"] == 1
+    # a line with no source text is a DIFFERENT failure from a line whose words
+    # came back untimed — the two counters must not be conflated
+    assert stats["n_lines_untimed_empty_text"] == 1
+    assert stats["n_lines_untimed_other"] == 0
+    assert stats["n_lines_timed"] == 1
 
 
 def test_reconstruct_lines_word_count_mismatch_fails_loud():
@@ -202,7 +208,11 @@ def test_reconstruct_lines_all_words_missing_timing_line_is_untimed():
     ]
     lines_out, stats = reconstruct_lines(ref_lines, word_to_line, content_words)
     assert lines_out[0]["start_ms"] is None
-    assert stats["n_lines_untimed"] == 1
+    # words WERE sent for this line, they just came back untimed — so this is
+    # the `other` bucket, not `empty_text`
+    assert stats["n_lines_untimed_other"] == 1
+    assert stats["n_lines_untimed_empty_text"] == 0
+    assert stats["n_lines_timed"] == 0
     assert stats["n_words_missing_timing"] == 2
 
 
