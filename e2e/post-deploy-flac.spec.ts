@@ -321,9 +321,9 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     //     of synthesized per-word timings — if this ever flips back, the
     //     karaoke wall will drift again)
     //
-    // Runs the same way as the other post-deploy tests: read catalog
-    // one-shot, skip gracefully if the reprocess queue hasn't reached
-    // any song yet, otherwise assert the shape of what's persisted.
+    // Runs the same way as the other post-deploy tests: read the catalog
+    // one-shot, then assert the shape of what's persisted. An absent fixture
+    // population fails the test rather than skipping it.
     test.setTimeout(3 * 60 * 1000);
 
     interface Word {
@@ -359,12 +359,18 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         s.source.startsWith("ensemble:gemini"),
     );
 
-    test.skip(
-      geminiSongs.length === 0,
-      "no ensemble:gemini song at current pipeline version yet — reprocess " +
-        "queue hasn't produced any. Sanitizer correctness is covered by " +
-        "unit tests in crates/sp-server/src/lyrics/merge_tests.rs.",
-    );
+    // A missing fixture population must FAIL, not skip (test-strictness): a
+    // skip here is permanent silent green, and this assertion is the only
+    // end-to-end guard that v18's "no synthesized per-word timings" invariant
+    // still holds on real persisted data. If the catalog genuinely stops
+    // carrying ensemble:gemini rows, rescope or delete this test deliberately
+    // — do not let it quietly stop running.
+    expect(
+      geminiSongs.length,
+      "no non-stale ensemble:gemini song in the catalog — this test's fixture " +
+        "population is gone; rescope or delete this test rather than letting " +
+        "it skip into permanent silent green",
+    ).toBeGreaterThan(0);
 
     const tested: string[] = [];
     for (const s of geminiSongs.slice(0, 3)) {
