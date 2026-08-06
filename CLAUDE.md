@@ -9,6 +9,8 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 `.claude/skills/` load on demand.
 
 - lyrics-eval backends → `.claude/rules/lyrics-eval-backends.md` (auto-loads on `eval/lyrics/**`)
+- sp-ui / e2e mock gotchas → `.claude/rules/sp-ui-frontend.md` (auto-loads on `sp-ui/**`, `e2e/mock-api.mjs`)
+- pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|

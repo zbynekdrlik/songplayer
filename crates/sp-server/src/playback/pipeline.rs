@@ -813,9 +813,11 @@ fn run_heartbeat_inner(
 /// unconditionally on every 100ms poll — and so the cadence behaviour is
 /// directly unit-testable (see `paused_heartbeat_respects_5s_cadence` in
 /// `pipeline_heartbeat_tests.rs`). Generic + `#[cfg(any(windows, test))]` for
-/// the same reason as `emit_heartbeat`.
+/// the same reason as `emit_heartbeat`. Deliberately NOT `mutants::skip` —
+/// unlike its siblings, both branches (gated / emits) have direct assertions
+/// in `pipeline_heartbeat_tests.rs`, so mutation testing should hold it to
+/// account.
 #[cfg(any(windows, test))]
-#[cfg_attr(test, mutants::skip)]
 fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
     submitter: &mut FrameSubmitter<B>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
