@@ -619,6 +619,17 @@ fn decode_and_send(
             // heartbeat was emitted while inside decode_and_send.
             // run_heartbeat_paused self-gates on the same 5s cadence as the
             // Playing branch, so calling it every 100ms poll is safe.
+            //
+            // Known rolling-window edge case: if pause begins mid-window
+            // (not exactly on a 5s heartbeat boundary), THIS first paused
+            // heartbeat's drain_window() still contains whatever frames
+            // were submitted during the Playing portion of that window, so
+            // observed_fps briefly reads a blended (nonzero) value. It
+            // converges to a true 0.0 on the FOLLOWING heartbeat, once a
+            // full window has elapsed with no submissions. Not a
+            // regression — the same window-drain semantics the Playing
+            // branch already has; harmless because classify_bad_poll never
+            // flags a Paused state as a bad poll regardless of fps.
             run_heartbeat_paused(
                 submitter,
                 event_tx,

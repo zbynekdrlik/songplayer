@@ -40,7 +40,9 @@ so neither ever touches `sp-ui/` or `src-tauri/`. `build-wasm` only runs
 
 Consequence: `sp-ui` has accumulated real rustfmt drift across many
 pre-existing files (verified 2026-08-06: `cd sp-ui && cargo fmt --all --
---check` fails on ~10 files unrelated to any single change).
+--check` fails on 17 files unrelated to any single change — re-check the
+count if you're relying on this, it will keep drifting until someone
+deliberately reformats the whole crate in its own PR).
 
 **Never run a blanket `cd sp-ui && cargo fmt --all`** — it silently rewrites
 every drifted file into your diff. Instead, format-check ONLY the files you
