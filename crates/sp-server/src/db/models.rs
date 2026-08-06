@@ -788,6 +788,26 @@ pub async fn position_for_playlist_item(
     .await
 }
 
+/// Membership + readiness check for the `videos.playlist_id` model used by
+/// youtube-kind playlists (issue #134) — the direct-link counterpart of
+/// `position_for_playlist_item`'s `playlist_items` set-list model that only
+/// custom-kind playlists use. Returns `Some(normalized)` when `video_id`
+/// belongs to `playlist_id`, `None` when it doesn't exist or belongs to a
+/// different playlist (prevents a client from triggering playback of an
+/// arbitrary video via another playlist's URL — same protection
+/// `position_for_playlist_item` gives the custom-playlist path).
+pub async fn video_playlist_membership(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar("SELECT normalized FROM videos WHERE id = ? AND playlist_id = ?")
+        .bind(video_id)
+        .bind(playlist_id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Outcome of a successful `quarantine_video_lyrics` call. Surfaced through
 /// the HTTP layer so operators can confirm what was changed.
 #[derive(Debug)]

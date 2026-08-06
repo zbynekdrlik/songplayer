@@ -169,10 +169,14 @@ pub struct PlayVideoRequest {
 }
 
 // HTTP handler: sends EngineCommand::PlayVideo to the engine after
-// validating (a) the playlist exists, (b) it's kind='custom', and (c) the
-// video is actually a member of the set list. Matches the 404/409 status
-// code discipline of the sibling handlers so malformed clients don't get
-// a silent 204.
+// validating (a) the playlist exists and (b) the video is playable on it.
+// Validation branches on playlist kind (#134): 'custom' playlists (ytlive)
+// require the video to be a member of the playlist_items set list — same
+// as before. Any other kind (today only 'youtube') instead requires the
+// video to belong to the playlist directly via videos.playlist_id AND be
+// normalized — those playlists have no set-list concept, they just have
+// cached videos. Matches the 404/409 status code discipline of the sibling
+// handlers so malformed clients don't get a silent 204.
 // mutants::skip: pure dispatch to engine channel; behaviour covered by play_video_sends_engine_command.
 #[cfg_attr(test, mutants::skip)]
 pub async fn post_play_video(
@@ -192,22 +196,42 @@ pub async fn post_play_video(
         }
     };
     match kind.as_deref() {
-        Some("custom") => {}
-        Some(_) => return (StatusCode::CONFLICT, "playlist is not custom").into_response(),
+        Some("custom") => {
+            // Verify the video is in the set list — prevents a client from
+            // triggering playback of an arbitrary video via a
+            // custom-playlist URL.
+            match models::position_for_playlist_item(&state.pool, playlist_id, req.video_id).await {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return (StatusCode::NOT_FOUND, "video not in playlist set list")
+                        .into_response();
+                }
+                Err(e) => {
+                    warn!(playlist_id, video_id = req.video_id, %e, "post_play_video: position lookup failed");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            }
+        }
+        Some(_) => {
+            // youtube-kind (or any future non-custom kind): the video must
+            // belong to THIS playlist directly (videos.playlist_id) and be
+            // normalized (a cached-but-not-yet-processed video has no
+            // sidecar files for the engine to play).
+            match models::video_playlist_membership(&state.pool, playlist_id, req.video_id).await {
+                Ok(Some(true)) => {}
+                Ok(Some(false)) => {
+                    return (StatusCode::CONFLICT, "video not normalized").into_response();
+                }
+                Ok(None) => {
+                    return (StatusCode::NOT_FOUND, "video not in playlist").into_response();
+                }
+                Err(e) => {
+                    warn!(playlist_id, video_id = req.video_id, %e, "post_play_video: membership lookup failed");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            }
+        }
         None => return (StatusCode::NOT_FOUND, "playlist not found").into_response(),
-    }
-
-    // Verify the video is in the set list — prevents a client from triggering
-    // playback of an arbitrary video via a custom-playlist URL.
-    match models::position_for_playlist_item(&state.pool, playlist_id, req.video_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, "video not in playlist set list").into_response();
-        }
-        Err(e) => {
-            warn!(playlist_id, video_id = req.video_id, %e, "post_play_video: position lookup failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
     }
 
     let _ = state

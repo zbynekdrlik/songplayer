@@ -518,6 +518,51 @@ async fn position_for_video_lookup() {
     assert_eq!(missing, None);
 }
 
+/// #134: video_playlist_membership is the youtube-kind counterpart of
+/// position_for_playlist_item — direct videos.playlist_id membership + the
+/// normalized flag, instead of the playlist_items set-list table.
+#[tokio::test]
+async fn video_playlist_membership_reports_normalized_and_ownership() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let yt = insert_playlist(&pool, "src", "https://yt.com/src")
+        .await
+        .unwrap();
+    let other = insert_playlist(&pool, "other", "https://yt.com/other")
+        .await
+        .unwrap();
+    let a = upsert_video(&pool, yt.id, "a", Some("A")).await.unwrap().id;
+    sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+        .bind(a)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let not_ready = upsert_video(&pool, yt.id, "b", Some("B")).await.unwrap().id;
+
+    // Belongs + normalized.
+    let m = video_playlist_membership(&pool, yt.id, a).await.unwrap();
+    assert_eq!(m, Some(true));
+
+    // Belongs but not normalized.
+    let m = video_playlist_membership(&pool, yt.id, not_ready)
+        .await
+        .unwrap();
+    assert_eq!(m, Some(false));
+
+    // Video exists but belongs to a DIFFERENT playlist.
+    let m = video_playlist_membership(&pool, other.id, a).await.unwrap();
+    assert_eq!(
+        m, None,
+        "must not report membership for a video belonging to a different playlist"
+    );
+
+    // Video doesn't exist at all.
+    let m = video_playlist_membership(&pool, yt.id, 999_999)
+        .await
+        .unwrap();
+    assert_eq!(m, None);
+}
+
 #[tokio::test]
 async fn video_row_carries_suppress_resolume_en() {
     let pool = crate::db::create_memory_pool().await.unwrap();
