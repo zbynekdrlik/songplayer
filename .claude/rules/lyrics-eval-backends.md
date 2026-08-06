@@ -85,11 +85,22 @@ wrong numbers in front of the user. All are fixed; these are the invariants that
 keep them fixed. **Quoting a bare "% ≤400 ms" is the mistake — it is meaningless
 without its denominator.**
 
+### Corrections (2026-08-06)
+
+A second-pass prose review of this file's own claims (not the JSON scorers —
+those were already correct) found two more errors in the bullets below,
+independently of the scoring-defect fixes above.
+
+| # | Was | Is now | Cause |
+|---|---|---|---|
+| 1 | Conditional-column denominator stated as **1138–1243** | **1138–1236.** The max `n matched` across every committed row (baseline 1191, `ctc` 1139, `ctc-star` 1138, `elevenlabs-fa` 1236, `lyrics-alignment-mtl` 1236) is 1236 — no `1243` value exists in any committed JSON. | Independently re-derived from `2026-08-05-aligner-scores.json` / `2026-08-05-combine-scores.json` / `aligners_11l/scores.json`. |
+| 2 | Monotonic view "drops the dropped pair from numerator AND denominator, so every backend's number rises — only the relative ORDER is meaningful" — stated as a universal law | **Usually rises, but not always** — it can FALL when the reordered greedy pass re-pairs to worse deltas (e.g. `gemini36-flash × soniox-v5` 29.3%→21.5% in `2026-08-05-combine-experiment.md`). Also, the 27–28% "binding backwards" rate and the 34–39% "pairs dropped" rate are two different numbers, not one — the original text conflated them. | Overgeneralized without checking every report's combo rows. |
+
 Three views now exist, and a backend comparison quotes at least the first two:
 
 - **conditional** (`pct_within_400ms`) — divides by matched-AND-timed lines only,
   so each backend is graded on the subset it handled and the denominator VARIES
-  per backend (1138–1243 in the shootout). Useful, but **not** "% of lines
+  per backend (1138–1236 in the shootout). Useful, but **not** "% of lines
   correctly timed", and it flatters whichever backend left most lines untimed.
 - **gold-normalized** (`pct_gold_within_400ms`) — same numerator over the
   identical gold-line count. **This is the comparable figure.** In the shootout
@@ -97,10 +108,14 @@ Three views now exist, and a backend comparison quotes at least the first two:
 - **monotonic** (`monotonic_match`) — the same matcher with an ordering
   constraint. `greedy_match` has NO monotonicity constraint and picks the
   CLOSEST-START eligible candidate, so on repetitive worship material 27–28% of
-  pairs bind backwards in the song; the penalty differs per backend by up to 4
-  points, which exceeded the reported winning margin. It drops the dropped pair
-  from numerator AND denominator, so every backend's number rises — only the
-  relative ORDER is meaningful here.
+  pairs bind backwards in the song; rejecting them cascades and removes
+  34–39% of all pairs — two different numbers, not one. The penalty differs
+  per backend by up to 4 points, which exceeded the reported winning margin.
+  It drops the dropped pair from numerator AND denominator, which USUALLY
+  raises each backend's number — but not always: it can FALL when the
+  reordered greedy pass re-pairs to worse deltas (e.g. `gemini36-flash ×
+  soniox-v5` 29.3%→21.5% in `2026-08-05-combine-experiment.md`). Only the
+  relative ORDER is meaningful here, never the direction of change.
 
 Also load-bearing:
 

@@ -16,9 +16,12 @@ this table is the audit trail so nothing was changed silently.
 | 3 | "clears the baseline's **20.2% untimed** by the largest margin of any metric in this report" | Measured against a figure **3.3× too large**. Restated against the corrected **6.2%** — still a clean win (0.0% vs 6.2%), no longer the largest margin in the report. | Same defect as #1. |
 | 4 | "**2nd of 4** … on both headline metrics — ahead of both CTC configs and the ASR-combiner baseline" | On %≤400ms it **ties** the baseline rather than leading it; **on median Δ it is 3rd, BEHIND the baseline** (625ms vs 570ms). | Same defect as #1. |
 | 5 | "6.9s per song, **~22× faster than MTL**" | **~15×.** 21.9× was computed against MTL's *device-blended* 150.8s; against MTL's GPU-only **106.0s** it is 15.4×. | MTL's CUDA-OOM→CPU fallback was pooled into one runtime number (two fixtures ran on CPU at 575.4s mean). |
-| 6 | The 41–44% band quoted as one comparable quality figure | Restated as **conditional on matched, timed lines** (denominator 1138–1243, different per backend) and published beside a **gold-normalized** column on the shared 1702-gold-line denominator, where the band is **19.7–31.6%**. | `score_one_call.py` divided by matched-and-timed lines only. |
+| 6 | The 41–44% band quoted as one comparable quality figure | Restated as **conditional on matched, timed lines** (denominator 1138–1236, different per backend) and published beside a **gold-normalized** column on the shared 1702-gold-line denominator, where the band is **19.7–31.6%**. | `score_one_call.py` divided by matched-and-timed lines only. |
 | 7 | (not surfaced in this report) `scores.json` → `fixtures_with_word_timings: 0` | **An artifact of the transfer, not a capability finding.** `aligners_11l/README.md` documents that `words[]` was stripped remotely before commit to shrink the diff. The 8 re-run fixtures in `aligners_11l/raw_rerun_20260806/` carry per-line `words[]` on **every** line of all 8 songs. This word-level aligner does return word timings. | Remote `words[]` stripping, never annotated in the scored artifacts. |
 | 8 | The **6.9s** runtime figure, presented as measured | **Partially verified.** The committed `elevenlabs_fa.py` could not have written the `runtime_sec` it reports (no `import time`); `d42264e` restored the instrumentation and a partial re-run confirmed it emits `runtime_sec`. Only **8 of the 21** scored fixtures have been re-measured (mean **5.74s** — identical to the same 8 in the committed set); the other 13 still come from the pre-fix-era script. | Instrumentation absent from the committed script. Full re-run blocked until the free-tier quota resets **2026-09-05** — issue **#125 (eval: elevenlabs-fa re-run blocked mid-way by exhausted free-tier quota)**. |
+| 9 | Conditional-column denominator published as **1138–1243** (this table's own row #6 and the Method section) | **1138–1236.** The max `n matched` across every row in the sibling shootout (baseline 1191, `ctc` 1139, `ctc-star` 1138, `elevenlabs-fa` 1236, `lyrics-alignment-mtl` 1236) is 1236 — no `1243` value exists in any committed JSON. | Independently re-derived from `2026-08-05-aligner-scores.json` / `2026-08-05-combine-scores.json` / `aligners_11l/scores.json`. |
+| 10 | Method section: "so every backend's number rises" under the monotonic view, stated as a universal law | **Usually rises, but not always** — it can FALL when the reordered greedy pass re-pairs to worse deltas (e.g. `gemini36-flash × soniox-v5` 29.3%→21.5% in the sibling combine-experiment report). Only the relative ORDER is meaningful, never the direction of change. | Overgeneralized without checking the sibling report's combo rows. |
+| 11 | Method section: monotonic view "drops the 27–28% of pairs that bind backwards in the song" — read as though 27–28% IS the drop rate | **27–28% of pairs bind backwards; rejecting them cascades and removes 34–39% of all pairs** overall (see the sibling shootout report's "discards 34–39% of all pairs") — two different numbers, not one. | Conflated the backwards-binding rate with the total pairs-dropped rate. |
 
 **What did NOT change** — re-derived and confirmed identical:
 `elevenlabs-fa`'s own conditional 42.2% ≤400ms, 625ms median, 72.6%
@@ -88,16 +91,22 @@ are directly comparable.
   submitted; **1702** gold lines in the scored fixtures; **1867** gold
   lines counting the two errored ones.
   - **Conditional %≤400ms** = within-400ms ÷ *matched-and-timed lines*.
-    That denominator is **1138–1243 and differs per backend** — each
+    That denominator is **1138–1236 and differs per backend** — each
     backend is graded only on the subset it handled. It is **not** "% of
     lines correctly timed", and it is not comparable across backends on
     its own.
   - **Gold-normalized %≤400ms** = within-400ms ÷ *the same 1702 gold
     lines*, for every backend. **This is the comparable figure.**
-  - **Monotonic** = the same matcher re-run with an ordering constraint,
-    which drops the 27–28% of pairs that bind backwards in the song. It
-    removes large deltas from numerator and denominator together, so every
-    backend's number rises; only the relative ordering is meaningful.
+  - **Monotonic** = the same matcher re-run with an ordering constraint.
+    Roughly 27–28% of pairs bind backwards in the song; rejecting them
+    cascades and removes 34–39% of all pairs overall — two different
+    numbers, not one (correction #11). It removes large deltas from
+    numerator and denominator together, which usually RAISES each
+    backend's number — but not always: it can FALL when the reordered
+    greedy pass re-pairs to worse deltas (e.g. `gemini36-flash × soniox-v5`
+    falls 29.3%→21.5% in the sibling combine-experiment report; correction
+    #10). Only the relative ORDER is meaningful, never the direction of
+    change.
 
 ## What the API actually is, and what the docs got wrong
 

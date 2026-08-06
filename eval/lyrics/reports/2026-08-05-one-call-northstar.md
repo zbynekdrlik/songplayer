@@ -3,20 +3,39 @@
 ## Corrections (2026-08-06)
 
 An adversarial review of the eval harness on 2026-08-06 found 14 verified
-defects. **None of this report's numbers is arithmetically wrong** — they
-re-derive exactly from `reports/2026-08-05-scores.json` — but two of them
-are readable in a way that has since caused real misreadings downstream, so
-the denominators are now stated explicitly and a comparable column has been
-added. No figure below was altered; the additions are marked.
+defects, in two passes on the same day.
+
+**First pass** (denominators clarified, no numbers changed yet): the
+original figures re-derived exactly from `reports/2026-08-05-scores.json`
+as it stood at the time — but two of them were readable in a way that had
+already caused real misreadings downstream, so the denominators were
+stated explicitly and a comparable column was added.
+
+**Second pass, later the same day** (correction #3 below): the first
+pass's row #2 turned out to be the bug itself, not a documented design
+choice — `score_one_call.py`'s own CLI path was missing the poisoned-fixture
+exclusion the sibling scorers already had. Fixed, `2026-08-05-scores.json`
+regenerated, and **every pooled figure and the `clean_pop` per-category row
+for both backends changed as a result** — see "What did NOT change" below
+for exactly what stayed the same.
 
 | # | Was | Is now | Cause |
 |---|---|---|---|
-| 1 | "**% matched lines within 400ms (wall gate)** — 16.0 / 31.1" read as the share of lines correctly timed | Restated as **conditional on matched lines**, with a **gold-normalized** row added: **7.1%** (gemini) / **3.6%** (aai) of the 1772 gold lines. AAI's 31.1% is computed over **206 matched lines**; its coverage is 11.6%. | `score_one_call.py` divided by matched lines only, so a backend that matches almost nothing scores on its easiest 12%. |
-| 2 | "22 fixtures / 1772 gold lines", with no note on which fixtures | Unchanged, but now stated as a **different denominator from the sibling reports**: this sweep **INCLUDES** the poisoned fixture `Xvm4_fWkXe8`, which `2026-08-05-combine-experiment.md`, `-aligner-shootout.md` and `-elevenlabs-fa.md` all exclude (they pool 21 fixtures / 1702 gold lines). **Do not compare a number from this report directly against one from those three.** | The poisoned-fixture exclusion lives in `run_combine_experiment.py` / `score_aligner.py`, never in `score_one_call.py`'s own CLI path. |
+| 1 | "**% matched lines within 400ms (wall gate)** — 16.0 / 31.1" read as the share of lines correctly timed | Restated as **conditional on matched lines**, with a **gold-normalized** row added: originally hand-computed as **7.1%** (gemini) / **3.6%** (aai) of the 1772 gold lines — see correction #3 for the now-current, JSON-native figures. AAI's 31.1% is computed over **206 matched lines**. | `score_one_call.py` divided by matched lines only, so a backend that matches almost nothing scores on its easiest 12%. |
+| 2 | "22 fixtures / 1772 gold lines", with no note on which fixtures | **SUPERSEDED by correction #3 — no longer true.** This row said the sweep genuinely INCLUDES the poisoned fixture `Xvm4_fWkXe8` as a different-but-intentional denominator from the sibling reports. That framing was itself the defect: see #3. | The poisoned-fixture exclusion lived in `run_combine_experiment.py` / `score_aligner.py` but was missing from `score_one_call.py`'s own CLI entry point. |
+| 3 | Row #2 above, plus every pooled aggregate and the `clean_pop` per-category row, computed over the 22-fixture / 1772-gold-line pool (poisoned fixture included) | `score_one_call.py`'s CLI path now excludes `POISONED_FIXTURE_VIDEO_ID` **exactly like `run_combine_experiment.py` / `score_aligner.py` already did.** `2026-08-05-scores.json` regenerated: **21 fixtures scored, 2 errored** (`vpwDdb8r9Bk`, `fHYLw-2tTx4` — no cached vocal WAV, now formally reported as errored rather than silently omitted), **1702 gold lines** (1867 counting the two errored fixtures) — **the SAME denominator as every sibling report** (`2026-08-05-combine-experiment.md`, `-aligner-shootout.md`, `-elevenlabs-fa.md`). `pct_gold_within_400ms` is now a real JSON field (**7.3%** gemini / **3.8%** aai), not a hand-derived number. Every pooled figure below is updated. | The exclusion constant already existed in the shared scorer code but was never wired into `score_one_call.py`'s own CLI entry point. |
 
-**What did NOT change:** every aggregate, per-category, per-fixture and
-side-by-side figure in this report. The report's verdict — neither backend
-is wall-ready — is if anything strengthened by the gold-normalized view.
+**What did NOT change:** per-fixture figures for every fixture other than
+the now-excluded `Xvm4_fWkXe8` itself — including every per-category row
+except `clean_pop` (the only category that contained the poisoned fixture),
+and the `5JW87KKDTcU` side-by-side example below, byte-identical.
+`reverb_heavy`'s per-category numbers are ALSO unchanged even though one of
+its fixtures (`vpwDdb8r9Bk`) is newly labeled "errored": it was already
+silently absent from the scored pool before this fix, so the successfully-
+scored subset for that category is identical — only its bookkeeping label
+changed, matching the sibling reports' convention. The report's verdict —
+neither backend is wall-ready — is unchanged and, on the gold-normalized
+view, still the load-bearing evidence for it.
 
 **Backends:** `gemini36-flash` rev 1 (Google Gemini 3.6 Flash, direct API) and
 `aai-u35-translate` rev 2 (AssemblyAI Universal-3.5 Pro + same-call Speech
@@ -33,6 +52,12 @@ different investigation and are not part of this report.
 `vpwDdb8r9Bk`, `fHYLw-2tTx4`), 44/44 backend×fixture pairs completed with
 **zero failures and zero Gemini RECITATION blocks**. Full batch log and raw
 per-pair outputs are committed under `eval/lyrics/reports/2026-08-05-raw/`.
+**Scoring is now 21 fixtures** (corrected 2026-08-06, correction #3): the
+poisoned fixture `Xvm4_fWkXe8` — one of the 22 that DID run — is excluded
+from every pooled/per-category aggregate exactly as it already was in the
+sibling combine/aligner reports, and the scorer's own per-fixture rollup
+now also formally reports `vpwDdb8r9Bk` / `fHYLw-2tTx4` as **errored** (no
+output — they were never run) rather than silently omitting them.
 
 ## Methodology
 
@@ -82,40 +107,42 @@ this):**
 
 ## Aggregate results (pooled across all matched lines)
 
-**Denominators, stated explicitly (added 2026-08-06, correction #1).** This
-sweep pools **22 fixtures / 1772 gold lines, INCLUDING the poisoned fixture
-`Xvm4_fWkXe8`** — a different set from the sibling combine/aligner reports,
-which exclude it and pool 21 fixtures / 1702 gold lines. Rows marked
-"matched lines" divide by the **matched** count in the row above them (783
-for gemini, **206** for AAI), not by the 1772 gold lines; the
-**gold-normalized** row divides by 1772 for both and is the only one of the
-two that is comparable between backends.
+**Denominators, stated explicitly (added 2026-08-06, correction #1;
+figures updated 2026-08-06, correction #3).** This sweep pools **21
+fixtures / 1702 gold lines, the poisoned fixture `Xvm4_fWkXe8` excluded** —
+**the SAME denominator as the sibling combine/aligner reports.** 2 more
+fixtures errored (`vpwDdb8r9Bk`, `fHYLw-2tTx4` — no cached vocal WAV);
+1867 gold lines counting those two. Rows marked "matched lines" divide by
+the **matched** count in the row above them (776 for gemini, **206** for
+AAI), not by the 1702 gold lines; the **gold-normalized** row divides by
+1702 for both and is the only one of the two that is comparable between
+backends.
 
 | Metric | gemini36-flash | aai-u35-translate |
 |---|---:|---:|
-| Fixtures scored (of 22) | 22 | 22 |
-| Total gold lines | 1772 | 1772 |
-| Total produced lines | 982 | 403 |
-| Line-count ratio (produced/gold) | 0.554 | 0.227 |
-| Matched lines *(the conditional denominator)* | 783 | 206 |
-| Gold coverage % | 44.2 | 11.6 |
-| Mean start delta (ms, pooled) *(not quotable)* | 34837.2 | 14428.9 |
-| **Median start delta (ms, pooled)** | **2160** | **1575.5** |
-| P90 start delta (ms, pooled) *(not quotable)* | 109110.0 | 25244.0 |
-| **% within 400ms — conditional on MATCHED lines** | **16.0** | **31.1** |
-| **% within 400ms — gold-normalized (of 1772)** *(added 2026-08-06)* | **7.1** | **3.6** |
-| % matched lines within 1000ms | 36.1 | 41.3 |
-| % produced lines > 32 chars (EN, LED wall width) | 44.1 | 66.5 |
-| % produced lines > 32 chars (SK) | 41.0 | 63.8 |
-| sk_ok_pct (SK translation present, diacritic, non-duplicate of EN) | 81.2 | 89.6 |
-| Fixtures with any word-level timings | 15/22 | 22/22 |
+| Fixtures scored (of 21, 2 errored) | 21 | 21 |
+| Total gold lines | 1702 | 1702 |
+| Total produced lines | 964 | 402 |
+| Line-count ratio (produced/gold) | 0.566 | 0.236 |
+| Matched lines *(the conditional denominator)* | 776 | 206 |
+| Gold coverage % | 45.6 | 12.1 |
+| Mean start delta (ms, pooled) *(not quotable)* | 34656.0 | 14428.9 |
+| **Median start delta (ms, pooled)** | **2145** | **1575.5** |
+| P90 start delta (ms, pooled) *(not quotable)* | 108540.0 | 25244.0 |
+| **% within 400ms — conditional on MATCHED lines** | **16.1** | **31.1** |
+| **% within 400ms — gold-normalized (of 1702)** *(JSON-native since correction #3)* | **7.3** | **3.8** |
+| % matched lines within 1000ms | 36.2 | 41.3 |
+| % produced lines > 32 chars (EN, LED wall width) | 43.4 | 66.4 |
+| % produced lines > 32 chars (SK) | 40.2 | 63.7 |
+| sk_ok_pct (SK translation present, diacritic, non-duplicate of EN) | 80.8 | 89.6 |
+| Fixtures with any word-level timings | 14/21 | 21/21 |
 
 **The two %-within-400ms rows invert, and that inversion is the whole
 point of publishing both.** On the conditional row `aai-u35-translate`
-(31.1%) looks nearly twice as good as `gemini36-flash` (16.0%) — but AAI
-matched only 206 of 1772 gold lines, so it is being graded on the easiest
+(31.1%) looks nearly twice as good as `gemini36-flash` (16.1%) — but AAI
+matched only 206 of 1702 gold lines, so it is being graded on the easiest
 12% of the corpus it managed to segment at all. Normalized onto the same
-1772 gold lines the order **reverses**: gemini 7.1%, AAI 3.6%. Neither is
+1702 gold lines the order **reverses**: gemini 7.3%, AAI 3.8%. Neither is
 close to wall-ready, which is this report's verdict either way — but the
 conditional figure alone would tell a reader that AAI is the better timer,
 and on a like-for-like denominator it is not. Read the coverage row next to
@@ -127,17 +154,17 @@ ones):
 
 | Metric | gemini36-flash | aai-u35-translate |
 |---|---:|---:|
-| Fixtures with ≥1 matched line | 21/22 | 16/22 |
-| Median-of-per-fixture medians (ms) | 14200.0 | 1386.0 |
-| Fixtures with per-fixture median ≤1000ms | 4/21 | 7/16 |
-| Fixtures with per-fixture within-400ms rate ≥30% | 4/21 | 9/16 |
+| Fixtures with ≥1 matched line | 20/21 | 16/21 |
+| Median-of-per-fixture medians (ms) | 11806.0 | 1386.0 |
+| Fixtures with per-fixture median ≤1000ms | 4/20 | 7/16 |
+| Fixtures with per-fixture within-400ms rate ≥30% | 4/20 | 9/16 |
 
 This per-fixture view sharpens the picture: **AAI's timing, when it manages
 to segment a fixture at all, is meaningfully more accurate than Gemini's**
-(median-of-medians 1.4s vs 14.2s) — but AAI fails to segment reliably in
-the first place (7/22 fixtures produced 8 or fewer lines, 4 of those
+(median-of-medians 1.4s vs 11.8s) — but AAI fails to segment reliably in
+the first place (8/21 fixtures produced 8 or fewer lines, 3 of those
 collapsing the ENTIRE song into a single utterance — see Failures below).
-Gemini almost always produces SOME structure (21/22 fixtures have at least
+Gemini almost always produces SOME structure (20/21 fixtures have at least
 one matched line) but its raw timestamps drift badly on the majority of
 songs.
 
@@ -152,22 +179,26 @@ under the table already said this in prose; the denominator is now named.
 | Category | Backend | n | Coverage % | Median delta (ms) | Within 400ms % *(cond.)* | sk_ok % |
 |---|---|---:|---:|---:|---:|---:|
 | chant_repetition | gemini36-flash | 4 | 46.9 | 4180.0 | 16.5 | 59.6 |
-| clean_pop | gemini36-flash | 3 | 23.6 | 39415 | 7.3 | 100.0 |
+| clean_pop | gemini36-flash | 2 | 32.7 | 39555.0 | 8.8 | 100.0 |
 | dense_vocal | gemini36-flash | 4 | 49.4 | 1610 | 14.1 | 95.8 |
 | instrumental_breaks | gemini36-flash | 4 | 65.1 | 3802.5 | 16.0 | 69.7 |
 | multi_language | gemini36-flash | 4 | 36.6 | 2321.5 | 6.4 | 94.4 |
 | reverb_heavy | gemini36-flash | 3 | 38.3 | 770 | 35.8 | 84.5 |
 | chant_repetition | aai-u35-translate | 4 | 6.4 | 328 | 52.0 | 88.0 |
-| clean_pop | aai-u35-translate | 3 | 15.5 | 280 | 59.3 | 100.0 |
+| clean_pop | aai-u35-translate | 2 | 26.0 | 280 | 59.3 | 100.0 |
 | dense_vocal | aai-u35-translate | 4 | 21.2 | 1676.0 | 30.0 | 85.6 |
 | instrumental_breaks | aai-u35-translate | 4 | 8.8 | 541.0 | 40.9 | 88.9 |
 | multi_language | aai-u35-translate | 4 | 6.3 | 1809.5 | 8.3 | 92.4 |
 | reverb_heavy | aai-u35-translate | 3 | 15.3 | 5385.0 | 7.9 | 88.6 |
 
+(`clean_pop`'s `n` dropped from 3 to 2 for both backends — corrected
+2026-08-06, correction #3: that category contained the poisoned fixture
+`Xvm4_fWkXe8`, now excluded. Every other category row is unchanged.)
+
 Neither backend has a category that clears the 400ms bar on the MEDIAN —
 `aai-u35-translate` on `chant_repetition`/`clean_pop` comes closest (median
 280-328ms, within-400% 52-59%), but its **coverage on those same
-categories is only 6-16%** — it is accurate on the small number of lines it
+categories is only 6-26%** — it is accurate on the small number of lines it
 manages to isolate, not comprehensive. `gemini36-flash`'s best category
 (`reverb_heavy`, median 770ms) still misses the 400ms bar on the median.
 
@@ -185,18 +216,23 @@ manages to isolate, not comprehensive. `gemini36-flash`'s best category
 
 | video_id | category | within400% | median delta (ms) | coverage % |
 |---|---|---:|---:|---:|
-| Xvm4_fWkXe8 | clean_pop | 0.0 | 38970 | 10.0 |
 | hSMJa5tImRU | multi_language | 0.0 | 34800 | 15.6 |
 | wjJ-izYndWs | chant_repetition | 0.0 | 14200.0 | 96.7 |
+| edZVnKxKEUU | instrumental_breaks | 2.4 | 81250 | 45.6 |
 
-`Xvm4_fWkXe8` is a clear case of the "coarse merge" failure mode: Gemini
-produced only 18 lines for a 70-gold-line song, each one a run-on paragraph
-combining 3-4 sung phrases (violating its own prompt's "at most 32
-characters" instruction) — see the raw output for concrete examples. `
-wjJ-izYndWs` is the opposite and more troubling case: line COUNT is fine
-(64 vs 60 gold, 96.7% text-coverage), but per-line START times drift badly
-— a repeat-confusion case on a highly repetitive chant song, not a
-segmentation problem.
+(Corrected 2026-08-06, correction #3: `Xvm4_fWkXe8`, the poisoned/
+hallucinated fixture, is now excluded from scoring entirely, so it no
+longer appears in this table; `edZVnKxKEUU` moves in as the new
+third-worst. `Xvm4_fWkXe8` itself was a clear case of the "coarse merge"
+failure mode — Gemini produced only 18 lines for a 70-gold-line song, each
+one a run-on paragraph combining 3-4 sung phrases — but it is no longer a
+scored data point.) `wjJ-izYndWs` is the more troubling case of the two
+shown here: line COUNT is fine (64 vs 60 gold, 96.7% text-coverage), but
+per-line START times drift badly — a repeat-confusion case on a highly
+repetitive chant song, not a segmentation problem. `edZVnKxKEUU` shows the
+same drift pattern on `instrumental_breaks`: reasonable coverage (45.6%,
+41/90 gold lines matched) but a huge median delta (81.25s) — a
+timing-accuracy failure, not a segmentation one.
 
 **aai-u35-translate — best 3:**
 
@@ -225,14 +261,16 @@ coverage, sub-300ms median).
   this sweep.
 - **Hard failures (non-zero exit, timeout): 0/44 pairs.** Both backends
   completed every pair they attempted.
-- **AAI utterance-segmentation collapse: 4/22 fixtures produced exactly 1
-  line for the entire song** (`JRRbGCyr2Ac`, `KeZaADiRHVI`, `jUnyHptnsRo`,
-  `Xvm4_fWkXe8`) — AAI's `match_original_utterance` translation feature
-  sometimes returns a single utterance spanning the whole track instead of
-  per-phrase segments, with no error signal distinguishing this from a
-  correctly-segmented short song. This is the dominant cause of AAI's low
-  pooled coverage (11.6%) — it is not that AAI's TEXT/translation quality
-  is worse (`sk_ok_pct` 89.6% vs Gemini's 81.2%, and the raw side-by-side
+- **AAI utterance-segmentation collapse: 3/21 fixtures produced exactly 1
+  line for the entire song** (`JRRbGCyr2Ac`, `KeZaADiRHVI`, `jUnyHptnsRo` —
+  corrected 2026-08-06, correction #3: a 4th, `Xvm4_fWkXe8`, is the poisoned
+  fixture and no longer part of the scored pool) — AAI's
+  `match_original_utterance` translation feature sometimes returns a single
+  utterance spanning the whole track instead of per-phrase segments, with
+  no error signal distinguishing this from a correctly-segmented short
+  song. This is the dominant cause of AAI's low pooled coverage (12.1%) —
+  it is not that AAI's TEXT/translation quality is worse (`sk_ok_pct` 89.6%
+  vs Gemini's 80.8%, and the raw side-by-side
   below shows AAI's transcript text is if anything closer to gold's
   wording), it is that its LINE BOUNDARIES are unreliable at the utterance
   level, which this same-call translation design has no way to correct
@@ -296,9 +334,9 @@ production LED-wall use, and for different reasons:**
 - **gemini36-flash** produces roughly the right STRUCTURE (line count and
   segmentation are close to gold, `sk_ok_pct` and `>32-char` figures are
   the more wall-friendly of the two) but its raw **timestamps are
-  unreliable on the majority of fixtures** — only 4 of 21 matched
+  unreliable on the majority of fixtures** — only 4 of 20 matched
   fixtures land a per-fixture median under 1 second, and the pooled
-  within-400ms rate is 16.0% of matched lines (**7.1% of gold lines**).
+  within-400ms rate is 16.1% of matched lines (**7.3% of gold lines**).
   This is a genuine timing-accuracy problem in
   the model's output, not a scoring artifact: the qualitative example
   above shows correct short lines drifting into confidently-wrong,
@@ -306,12 +344,12 @@ production LED-wall use, and for different reasons:**
 - **aai-u35-translate** is the more accurate backend WHEN it manages to
   segment a song at all (median-of-medians 1.4s, 9/16 matched fixtures
   ≥30% within-400ms — closer to, though still short of, wall-acceptable;
-  **but only 3.6% of gold lines land inside the gate, the worst of the
-  two**, because "when it manages to segment at all" is 11.6% of the
+  **but only 3.8% of gold lines land inside the gate, the worst of the
+  two**, because "when it manages to segment at all" is 12.1% of the
   corpus),
   but its same-call translation feature's utterance segmentation is
-  **unreliable at the structural level**: 7 of 22 fixtures produced 8 or
-  fewer lines (produced/gold line-count ratio ≤0.1), 4 of those collapsing
+  **unreliable at the structural level**: 8 of 21 fixtures produced 8 or
+  fewer lines (produced/gold line-count ratio ≤0.1), 3 of those collapsing
   an entire song into one utterance. Its `sk_ok_pct` and text fidelity are
   the stronger of the two, but a 1-line-per-song output is useless for
   karaoke regardless of translation quality.

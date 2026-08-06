@@ -27,6 +27,9 @@ independently confirms the recombination step is deterministic).
 | 8 | Per-fixture "typical fixture" view: 805 / **475** / 740ms median-of-medians | **790 / 437 / 695ms** | Same. |
 | 9 | The 41.4% figure presented as "% of lines inside the wall gate" | Restated as **conditional on matched, timed lines** and published beside a **gold-normalized** column on the shared 1702-line denominator, where the best combo is **29.6%**. | `score_one_call.py` divided by matched-and-timed lines only. |
 | 10 | (no such view existed) | A **monotonic** (order-respecting) view added. | The greedy matcher has no monotonicity constraint. |
+| 11 | Monotonic-view "discards 34–35% of the pairs" (Method section and the headline paragraph) | **16–35%.** `gemini36-flash × soniox-v5` drops only **16.4%** (736→615 pairs); the other two combos drop 34.7%. | Independently re-derived per-combo from `2026-08-05-combine-scores.json`; the original text stated one rounded figure instead of the true per-combo range. |
+| 12 | "Every backend's number rises under this view" (monotonic headline paragraph), directly below a table where `gemini36-flash × soniox-v5` FALLS 29.3%→21.5% | **Not universal.** `gemini36-flash × soniox-v5` FALLS (29.3%→21.5%); the other two combos rise. Only the relative ORDER is meaningful, never the direction of change. | The claim was contradicted by the report's own table three lines above it. |
+| 13 | "`qwen×aai` clears 400ms on median in **four** categories" under the monotonic view | **Three** (`clean_pop` 306ms, `dense_vocal` 311.5ms, `instrumental_breaks` 362ms) — the same sentence's next clause already flags the fourth, `multi_language` (512.5ms), as "still over". | Miscounted; the fourth category named in the same sentence explicitly does NOT clear. |
 
 **What did NOT change** — re-derived and confirmed identical: all
 per-category rows except `clean_pop`; every qualitative finding about the
@@ -161,10 +164,13 @@ combo is scored **three times**:
   one of them is unambiguous.
 - **Monotonic** — the official matcher re-run with an ordering constraint,
   so a produced line can never bind to a gold line earlier than the one its
-  predecessor took. 34–35% of the official view's pairs violate that
-  ordering here. It removes large deltas from numerator and denominator
-  together, so every combo's number rises; only the relative ordering
-  across combos is meaningful.
+  predecessor took. **16–35%** of the official view's pairs violate that
+  ordering here — `gemini36-flash × soniox-v5` at the low end (16.4%), the
+  other two combos at 34.7% (correction #11). It removes large deltas from
+  numerator and denominator together, which usually RAISES each combo's
+  number — but not always: `gemini36-flash × soniox-v5` FALLS (29.3%→21.5%,
+  see the table below; correction #12). Only the relative ORDER across
+  combos is meaningful, never the direction of change.
 
 UNTIMED lines are excluded from what's fed to any of the three scorers (a
 `None` `start_ms` cannot be sorted/compared) — their count is reported
@@ -212,8 +218,8 @@ lines** — the worst row here apart from `qwen35-omni` alone. Conservative
 `n_pairs`: 376 (`qwen×soniox`), 373 (`qwen×aai`), 223 (`gemini×soniox`).
 
 **Order-respecting (monotonic) view**, added 2026-08-06 — the same matcher
-with a monotonicity constraint, which discards 34–35% of the pairs (they
-bind backwards in the song):
+with a monotonicity constraint, which discards **16–35%** of the pairs
+(those that bind backwards in the song — correction #11):
 
 | Combo | Mono. % ≤400ms (cond.) | Mono. % ≤400ms (gold-norm.) | Mono. median Δ |
 |---|---:|---:|---:|
@@ -221,9 +227,12 @@ bind backwards in the song):
 | **`qwen35-omni` × `aai-u35-translate`** | **48.7** | **22.3** | **419.5 ms** |
 | `gemini36-flash` × `soniox-v5` | 21.5 | 7.8 | 950 ms |
 
-Every backend's number rises under this view because it removes large
-deltas from numerator and denominator together — only the relative ordering
-is meaningful, never the absolute value.
+Two of the three combos' numbers rise under this view because it removes
+large deltas from numerator and denominator together — but not
+`gemini36-flash × soniox-v5`, which FALLS from 29.3% to 21.5% (correction
+#12): the reordered greedy pass re-pairs a meaningful share of its lines to
+worse deltas instead of better ones. Only the relative ORDER is meaningful,
+never the direction of change.
 
 **Per-fixture "typical fixture" view** (median of each fixture's own median
 delta — the north-star report's own preferred statistic, since pooled
@@ -291,10 +300,10 @@ repeated content — never clears on median under either matcher, on any
 combo (758–1045ms).
 
 Under the order-respecting **monotonic** view, `qwen×aai` clears 400ms on
-median in **four** categories (clean_pop 306ms, dense_vocal 311.5ms,
-instrumental_breaks 362ms — and it comes to 512.5ms on `multi_language`,
-still over). `chant_repetition` improves to 694ms but never clears, on any
-combo or any view.
+median in **three** categories (clean_pop 306ms, dense_vocal 311.5ms,
+instrumental_breaks 362ms — correction #13; it comes to 512.5ms on
+`multi_language`, still over). `chant_repetition` improves to 694ms but
+never clears, on any combo or any view.
 
 ## Does the "two backends transcribe differently" worry actually materialize?
 

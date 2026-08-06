@@ -15,6 +15,8 @@ API call**. Nothing was edited silently; this is the audit trail.
 | 2 | "**the one** that didn't [succeed on the first pass] (`q5m09rqOoxE`)" + the per-fixture table listing **`hSMJa5tImRU` as `cuda`** | **TWO fixtures ran on CPU after CUDA-OOM.** `hSMJa5tImRU` — its own output JSON says `device: "cpu"`, `cuda_oom_retried: true`, `runtime_sec: 565.5` — was caught in-process by the fallback (579.8s wall, which is why it looked like a slow GPU run). `q5m09rqOoxE` OOM'd *before* the fallback landed and was re-run separately (585.4s alignment, 596.2s wall). | Same defect as #1: the README's device column was filled in from the batch log's assumption rather than from each fixture's own `metadata.device`. |
 | 3 | Bar to beat: "prior best combination: **41.4%** within 400ms, median **573ms**, **20.2%** untimed" | **42.2% / 570ms / 6.2%** | The poisoned fixture was pooled into that baseline but excluded from every aligner row. **297 of its 394 untimed lines were the poisoned fixture's** — the whole 20.2% → 6.2% move. See `reports/2026-08-05-combine-experiment.md`'s own corrections table. |
 | 4 | "matches/slightly beats the timing accuracy (43.5% vs 41.4%)" | **43.5% vs 42.2% — a 1.3-point lead, not 2.1.** On the comparable gold-normalized denominator (the same 1702 gold lines for every backend) it is **31.6% vs 29.6%**. | Same as #3, plus the conditional-denominator defect: the 43.5% divides by matched-and-timed lines only. |
+| 5 | Conditional-column denominator stated as **1138–1243** | **1138–1236.** The max `n matched` across every row in the shootout (baseline 1191, `ctc` 1139, `ctc-star` 1138, `elevenlabs-fa` 1236, `lyrics-alignment-mtl` 1236) is 1236 — no `1243` value exists in any committed JSON. | Independently re-derived from `reports/2026-08-05-aligner-scores.json` / `reports/2026-08-05-combine-scores.json` / `aligners_11l/scores.json`. |
+| 6 | "discarding the **35.1%** of pairs that bind backwards in the song" — read as though 35.1% IS the backwards-binding rate | **Inverted.** 35.1% is the DROP rate (1236→802 pairs); the backwards-binding rate is **27.1%** — rejecting those cascades to discard the larger 35.1%. Two different numbers, not one. | Conflated the backwards-binding rate with the total pairs-dropped rate — the mirror-image of the same error in `reports/2026-08-05-aligner-shootout.md` (which had the two numbers the right way round but described them as one). |
 
 **What did NOT change:** every accuracy figure this backend produced —
 43.5% conditional ≤400ms, 528ms median, 72.6% coverage, 0.0% untimed,
@@ -453,12 +455,15 @@ poisoned fixture (Xvm4_fWkXe8): untimed=0.0%  official_within400=0.0%  conservat
 **Denominators (added 2026-08-06).** `within400` is **conditional on
 matched, timed lines** (1236 here) — it is not "% of lines correctly
 timed", and it is not comparable across backends because each backend's
-denominator is the subset it handled (1138–1243 across the shootout).
-`gold_within400` divides by the identical **1702** gold lines for every
-backend and is the comparable figure. The `monotonic` view re-runs the same
-matcher with an ordering constraint, discarding the 35.1% of pairs that
-bind backwards in the song; it removes large deltas from numerator and
-denominator alike, so only its relative ordering is meaningful.
+denominator is the subset it handled (1138–1236 across the shootout;
+correction #5). `gold_within400` divides by the identical **1702** gold
+lines for every backend and is the comparable figure. The `monotonic` view
+re-runs the same matcher with an ordering constraint: **27.1%** of this
+aligner's pairs bind backwards in the song, and rejecting them cascades to
+discard **35.1%** of all pairs — two different numbers, not one
+(correction #6). It removes large deltas from numerator and denominator
+alike, which usually raises the number but not always (see the sibling
+shootout report); only its relative ordering is meaningful.
 
 Against the task brief's stated bar to beat (prior best combination —
 **corrected 2026-08-06**: 42.2% conditional / 29.6% gold-normalized within

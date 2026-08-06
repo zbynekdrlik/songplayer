@@ -13,11 +13,14 @@ trail so nothing was changed silently.
 |---|---|---|---|
 | 1 | Baseline row **41.4%** ≤400ms / **573ms** median / **20.2%** untimed / **70.1%** coverage | **42.2%** / **570ms** / **6.2%** / **70.0%** | The poisoned fixture `Xvm4_fWkXe8` was excluded from every aligner row but pooled into the baseline — a 22-fixture baseline compared against 21-fixture aligners under a "21 fixtures" header. **297 of the baseline's 394 untimed lines were that one fixture's**, which is the entire 20.2% → 6.2% move. (`run_combine_experiment.py`, both `build_backend_report` call sites.) |
 | 2 | "`ctc-forced-aligner-star` (41.7%) beats the ASR-combiner baseline (41.4%)" | **STRUCK — false. The baseline wins**: 42.2% vs 41.7% conditional, 29.6% vs 27.8% gold-normalized. | Same defect as #1. |
-| 3 | The 41–44% band quoted as one comparable quality figure | Restated as **conditional on matched, timed lines** (denominator 1138–1243, different per backend) and published beside a **gold-normalized** column on the shared 1702-gold-line denominator — where the band is **19.7–31.6%**. | `score_one_call.py` divided by matched-and-timed lines only, so the worst backend got the smallest denominator. |
+| 3 | The 41–44% band quoted as one comparable quality figure | Restated as **conditional on matched, timed lines** (denominator 1138–1236, different per backend) and published beside a **gold-normalized** column on the shared 1702-gold-line denominator — where the band is **19.7–31.6%**. | `score_one_call.py` divided by matched-and-timed lines only, so the worst backend got the smallest denominator. |
 | 4 | (no such view existed) | A third **monotonic** (order-respecting) view added throughout — 27–28% of all scored pairs bind backwards in the song. | The greedy matcher has no monotonicity constraint. |
 | 5 | `lyrics-alignment-mtl` "**150s/song** mean vs 1.4s" | **Device-blended.** GPU-only **106.0s (n=19)**, CPU-fallback **575.4s (n=2)**. The GPU-normalized MTL-vs-`ctc-star` ratio is **75.7×**, not the 107.7× the blended figure implies. | The CUDA-OOM→CPU fallback recorded `metadata.device`, but `score_aligner.py` never read it, so two populations were pooled and attributed to the model. |
 | 6 | "a ~10 min CPU-fallback retry for **the one fixture** that OOM'd, `q5m09rqOoxE`" | **TWO fixtures ran on CPU after CUDA-OOM**: `hSMJa5tImRU` (565.5s, caught in-process) and `q5m09rqOoxE` (585.4s, re-run separately) — both `cuda_oom_retried: true`. | Same defect as #5. `aligners/lyrics_alignment_mtl/README.md` additionally listed `hSMJa5tImRU` as `cuda`, contradicting its own output JSON; corrected there too. |
 | 7 | "21 fixtures" (a hardcoded string in the scorer's own summary) | **21 scored, 2 errored** (`fHYLw-2tTx4`, `vpwDdb8r9Bk` — no output produced), stated with every table. | `score_aligner.py` printed a literal instead of `agg['n_fixtures']` and never printed the errored count. |
+| 8 | Conditional-column denominator published as **1138–1243** (this table's own row #3, the Method section, and the headline table caption) | **1138–1236.** The max `n matched` across every row in this report (baseline 1191, `ctc` 1139, `ctc-star` 1138, `elevenlabs-fa` 1236, `lyrics-alignment-mtl` 1236) is 1236 — no `1243` value exists in any committed JSON. | Independently re-derived from `2026-08-05-aligner-scores.json` / `2026-08-05-combine-scores.json` / `aligners_11l/scores.json`; `1243` appears to have been a stale/typo'd figure that survived the first correction pass. |
+| 9 | Method section: "so every backend's number rises" under the monotonic view, stated as a universal law | **Usually rises, but not always** — it can FALL when the reordered greedy pass re-pairs to worse deltas (e.g. `gemini36-flash × soniox-v5` 29.3%→21.5% in the sibling combine-experiment report). Only the relative ORDER is meaningful, never the direction of change. | Overgeneralized from this report's own 5 rows (which do all rise) without checking the sibling report's combo rows. |
+| 10 | Method section: monotonic view "drops the 27–28% of pairs binding backwards in the song" — read as though 27–28% IS the drop rate | **27–28% of pairs bind backwards; rejecting them cascades and removes 34–39% of all pairs** overall (see "The monotonic view discards 34–39% of all pairs" further down) — two different numbers, not one. | Conflated the backwards-binding rate with the total pairs-dropped rate. |
 
 **What did NOT change** — re-derived and confirmed identical: all three
 aligner rows' conditional %≤400ms (29.4 / 41.7 / 43.5), medians (900 / 650
@@ -90,19 +93,24 @@ This report benchmarks two forced aligners, installed and run on
   fixtures.
   - **Conditional %≤400ms** = within-400ms ÷ *matched-and-timed lines*.
     Untimed lines are stripped upstream and unmatched gold lines never
-    enter, so this denominator is **1138–1243 and differs per backend** —
-    each backend is graded only on the subset it managed to handle. It is
-    **not** "% of lines correctly timed" and is not comparable across
-    backends on its own.
+    enter, so this denominator is **1138–1236 and differs per backend**
+    (correction #8) — each backend is graded only on the subset it managed
+    to handle. It is **not** "% of lines correctly timed" and is not
+    comparable across backends on its own.
   - **Gold-normalized %≤400ms** = within-400ms ÷ *the same 1702 gold
     lines*, for every backend. **This is the comparable figure.** A
     variant over all 1867 (counting the errored fixtures' gold) is given
     in the secondary table.
-  - **Monotonic** = the same matcher re-run with an ordering constraint,
-    which drops the 27–28% of pairs binding backwards in the song. It
-    removes large deltas from numerator and denominator together, so
-    every backend's number rises; only the relative ordering is
-    meaningful.
+  - **Monotonic** = the same matcher re-run with an ordering constraint.
+    Roughly 27–28% of pairs bind backwards in the song; rejecting them
+    cascades and removes 34–39% of all pairs overall (see "The monotonic
+    view discards 34–39% of all pairs" below — two different numbers, not
+    one; correction #10). It removes large deltas from numerator and
+    denominator together, which usually RAISES each backend's number — but
+    not always: it can FALL when the reordered greedy pass re-pairs to
+    worse deltas (see the sibling combine-experiment report, where
+    `gemini36-flash × soniox-v5` falls 29.3%→21.5%; correction #9). Only
+    the relative ORDER is meaningful, never the direction of change.
 
 ## Aligners benchmarked
 
@@ -195,7 +203,7 @@ included here because it was scored on exactly this denominator set.
 | `elevenlabs-fa` (hosted API — sibling report) | 42.2% | 30.7% | 625ms | **72.6%** | **0.0%** | 1236 | 6.9s |
 | **`lyrics-alignment-mtl` (MTL+BDR)** | **43.5%** | **31.6%** | **528ms** | **72.6%** | **0.0%** | 1236 | **106.0s (GPU)** |
 
-The conditional column's denominator ranges 1138 → 1243 across these rows;
+The conditional column's denominator ranges 1138 → 1236 across these rows;
 the gold-normalized column's is 1702 for all of them. **Quote the
 gold-normalized column when comparing backends.**
 
