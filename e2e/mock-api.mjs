@@ -59,6 +59,10 @@ const playlists = [
   },
 ];
 
+// `normalized` and `gemini_failed` are required (non-`#[serde(default)]`)
+// fields on sp_core::models::Video — every fixture must include them or
+// the dashboard's VideoList (#134) fails to deserialize GET
+// /api/v1/playlists/:id/videos entirely.
 const videos = [
   {
     id: 1,
@@ -68,6 +72,8 @@ const videos = [
     artist: "Rick Astley",
     duration_ms: 213000,
     cached: true,
+    normalized: true,
+    gemini_failed: false,
   },
   {
     id: 2,
@@ -77,6 +83,8 @@ const videos = [
     artist: "Traditional",
     duration_ms: 180000,
     cached: false,
+    normalized: false,
+    gemini_failed: false,
   },
 ];
 

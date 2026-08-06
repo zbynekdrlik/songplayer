@@ -119,6 +119,20 @@ body {
 .np-time { font-size: 0.8rem; color: var(--text-dim); }
 .np-idle { color: var(--text-dim); font-style: italic; }
 
+/* ---- Per-card song list toggle (#134: play a specific song from any
+   playlist) — collapsed by default so a busy playlist's dashboard card
+   doesn't balloon in height. ---- */
+.playlist-songs { margin-top: 10px; }
+.playlist-songs-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 4px 0;
+}
+.playlist-songs-toggle:hover { color: var(--text); }
+
 /* ---- Progress bar ---- */
 
 .progress-bar {
@@ -329,6 +343,34 @@ body {
     padding: 6px 10px;
     border-bottom: 1px solid var(--border);
     font-size: 0.85rem;
+}
+
+.video-list-col-play { width: 1%; white-space: nowrap; }
+
+.video-list-btn-play {
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 1rem;
+    border-radius: 6px;
+    border: 1px solid #4a7a5a;
+    background: #2a4a3a;
+    color: #fff;
+    cursor: pointer;
+}
+
+.video-list-btn-play:disabled {
+    border-color: #555;
+    background: #2a2a2a;
+    color: #777;
+    cursor: not-allowed;
+}
+
+.video-list-btn-play:active:not(:disabled) { transform: scale(0.95); }
+
+.video-list-error {
+    color: #e94560;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
 }
 
 /* Karaoke panel */
