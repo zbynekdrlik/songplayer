@@ -105,7 +105,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked
       - name: Run security audit
         run: cargo audit --ignore RUSTSEC-2023-0071  # rsa crate via sqlx-mysql (transitive, we only use sqlite)
 
@@ -165,7 +165,7 @@ jobs:
           name: dist
           path: dist/
       - name: Install Tauri CLI
-        run: cargo install tauri-cli
+        run: cargo install tauri-cli --version "^2.0.0" --locked
       - name: Build Tauri app
         run: cargo tauri build
       - name: Upload NSIS installer
@@ -318,7 +318,8 @@ jobs:
 
       - name: Ban skip patterns in E2E tests
         run: |
-          FOUND=$(grep -rn '\.skip(' e2e/tests/ 2>/dev/null || true)
+          test -d e2e || { echo "ERROR: e2e/ not found"; exit 1; }
+          FOUND=$(grep -rn '\.skip(' e2e --include='*.spec.ts' --exclude-dir=node_modules || true)
           if [ -n "$FOUND" ]; then
             echo "ERROR: .skip() found in E2E tests. Tests must run, not skip."
             echo "$FOUND"
@@ -457,7 +458,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
       - name: Run coverage
         run: cargo tarpaulin --workspace --exclude-files "src-tauri/*" --exclude-files "sp-ui/*" --fail-under 40 --skip-clean --timeout 300
 
@@ -494,7 +495,7 @@ jobs:
           # shared key would deadlock concurrent shards on cache write.
           key: mutants-shard-${{ strategy.job-index }}
       - name: Install cargo-mutants
-        run: cargo install cargo-mutants
+        run: cargo install cargo-mutants --locked
       # GitHub-hosted ubuntu-latest has 16GB RAM and no swap. cargo-mutants
       # compiling rustc + linking sqlx/wiremock/tokio/reqwest for each mutant
       # pushes peak memory past 16GB, triggering runner OOM-kill that
@@ -682,6 +683,15 @@ jobs:
             echo "$job: $result"
             if [ "$result" != "success" ]; then
               echo "FAILED: job '$job' did not succeed (result: $result)"
+              exit 1
+            fi
+          done
+          # conditional jobs: skipped is acceptable, failure is NOT
+          for job in version-check dev-version-check red-green-order mutation-testing; do
+            result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
+            echo "$job: $result"
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "FAILED: conditional job '$job' did not succeed (result: $result)"
               exit 1
             fi
           done
@@ -1268,11 +1278,9 @@ jobs:
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
 
           if ($titleClips.Count -eq 0) {
-            # Resolume is reachable but has no #sp-title clips configured.
-            # Operator must create them - this is a configuration issue, not a code bug.
-            Write-Host "INFO: Resolume is reachable but has zero #sp-title clips."
-            Write-Host "      Operator must create at least one clip with '#sp-title' in its name."
-            exit 0
+            Write-Error "FAIL: Resolume is reachable but has zero #sp-title clips."
+            Write-Error "      Titles cannot reach the wall. Create a clip with '#sp-title' in its name."
+            exit 1
           }
 
           # ASSERT: every #sp-title clip must have non-empty text after playback.
@@ -1309,7 +1317,17 @@ jobs:
             }
           }
           if ($subsNextClips.Count -eq 0) {
-            Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project - skipping lookahead gate"
+            # Unlike the two content-dependent skips below (which pass
+            # because the specific song currently playing legitimately has
+            # no comparable text), zero #sp-subs-next clips is a static
+            # composition-configuration gap: the app's own dashboard
+            # (resolume_health.rs) treats zero clips for ANY of the four
+            # expected tokens (#sp-title, #sp-subs, #sp-subs-next,
+            # #sp-subssk) as unhealthy. Silently skipping here let a
+            # discovery break (renamed clips, missing token) go undetected
+            # the same way the #sp-title zero-clips case did (issue #89).
+            Write-Error "FAIL: Resolume is reachable but has zero #sp-subs-next clips configured. Create a clip with '#sp-subs-next' in its name."
+            exit 1
           } else {
             Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips"
             Write-Host "  #sp-subs texts:"

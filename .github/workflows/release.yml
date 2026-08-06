@@ -41,7 +41,11 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Install trunk
-        run: cargo install trunk
+        # --locked pins trunk's OWN Cargo.lock, matching ci.yml — without it
+        # cargo resolves trunk's deps fresh on every run, so an unrelated
+        # upstream release can break the build with no change on our side
+        # (cssparser 0.37.0 broke lightningcss 1.0.0-alpha.65 on 2026-08-05).
+        run: cargo install trunk --version 0.21.14 --locked
       - name: Build WASM frontend
         run: cd sp-ui && trunk build --release
       - name: Upload dist artifact
@@ -65,7 +69,7 @@ jobs:
           name: dist
           path: dist/
       - name: Install Tauri CLI
-        run: cargo install tauri-cli
+        run: cargo install tauri-cli --version "^2.0.0" --locked
       - name: Build Tauri app
         run: cargo tauri build
       - name: Upload NSIS installer
