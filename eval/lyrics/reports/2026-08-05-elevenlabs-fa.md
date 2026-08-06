@@ -1,10 +1,39 @@
 # Lyrics Eval — ElevenLabs Forced Alignment API — 2026-08-05
 
+## Corrections (2026-08-06)
+
+An adversarial review of the eval harness on 2026-08-06 found 14 verified
+defects; several invalidated numbers published in this report. The scorers
+were fixed (commits `d42264e`, `b048953`) and every row below was re-scored
+**from the same committed artifacts — no backend was re-run for the score
+table, no API call was made for it**. The body has been amended in place;
+this table is the audit trail so nothing was changed silently.
+
+| # | Was | Is now | Cause |
+|---|---|---|---|
+| 1 | Baseline row **41.4%** ≤400ms / **573ms** median / **20.2%** untimed / **70.1%** coverage | **42.2%** / **570ms** / **6.2%** / **70.0%** | The poisoned fixture `Xvm4_fWkXe8` was excluded from every aligner row but pooled into the baseline. **297 of the baseline's 394 untimed lines were that one fixture's** — the entire 20.2% → 6.2% move. (`run_combine_experiment.py`, both `build_backend_report` call sites.) |
+| 2 | "It clears the primary %-within-400ms metric (**42.2% > baseline's 41.4%**)" | **A TIE, not a win: 42.2% vs 42.2%.** On the comparable gold-normalized view `elevenlabs-fa` does genuinely lead, 30.7% vs 29.6%. | Same defect as #1. |
+| 3 | "clears the baseline's **20.2% untimed** by the largest margin of any metric in this report" | Measured against a figure **3.3× too large**. Restated against the corrected **6.2%** — still a clean win (0.0% vs 6.2%), no longer the largest margin in the report. | Same defect as #1. |
+| 4 | "**2nd of 4** … on both headline metrics — ahead of both CTC configs and the ASR-combiner baseline" | On %≤400ms it **ties** the baseline rather than leading it; **on median Δ it is 3rd, BEHIND the baseline** (625ms vs 570ms). | Same defect as #1. |
+| 5 | "6.9s per song, **~22× faster than MTL**" | **~15×.** 21.9× was computed against MTL's *device-blended* 150.8s; against MTL's GPU-only **106.0s** it is 15.4×. | MTL's CUDA-OOM→CPU fallback was pooled into one runtime number (two fixtures ran on CPU at 575.4s mean). |
+| 6 | The 41–44% band quoted as one comparable quality figure | Restated as **conditional on matched, timed lines** (denominator 1138–1243, different per backend) and published beside a **gold-normalized** column on the shared 1702-gold-line denominator, where the band is **19.7–31.6%**. | `score_one_call.py` divided by matched-and-timed lines only. |
+| 7 | (not surfaced in this report) `scores.json` → `fixtures_with_word_timings: 0` | **An artifact of the transfer, not a capability finding.** `aligners_11l/README.md` documents that `words[]` was stripped remotely before commit to shrink the diff. The 8 re-run fixtures in `aligners_11l/raw_rerun_20260806/` carry per-line `words[]` on **every** line of all 8 songs. This word-level aligner does return word timings. | Remote `words[]` stripping, never annotated in the scored artifacts. |
+| 8 | The **6.9s** runtime figure, presented as measured | **Partially verified.** The committed `elevenlabs_fa.py` could not have written the `runtime_sec` it reports (no `import time`); `d42264e` restored the instrumentation and a partial re-run confirmed it emits `runtime_sec`. Only **8 of the 21** scored fixtures have been re-measured (mean **5.74s** — identical to the same 8 in the committed set); the other 13 still come from the pre-fix-era script. | Instrumentation absent from the committed script. Full re-run blocked until the free-tier quota resets **2026-09-05** — issue **#125 (eval: elevenlabs-fa re-run blocked mid-way by exhausted free-tier quota)**. |
+
+**What did NOT change** — re-derived and confirmed identical:
+`elevenlabs-fa`'s own conditional 42.2% ≤400ms, 625ms median, 72.6%
+coverage, 0.0% untimed, every per-category figure, the conservative view
+(34.3% / 1470ms / 379 pairs) and the whole confidence-quartile analysis.
+The 8 re-run fixtures are **byte-identical to the committed ones** on every
+line's `start_ms` / `end_ms` / `text`, which is why finding #8 touches only
+the runtime figure and none of the accuracy figures.
+
 **Question:** does a hosted, no-install forced-alignment API — given the
 `qwen35-omni` audio-LLM's fixed reference lines plus the isolated-vocal WAV,
 doing real forced alignment rather than ASR-then-graft — beat the
-ASR-word-combiner baseline (41.4% of lines ≤400ms, median 573ms, 20.2%
-UNTIMED — `2026-08-05-combine-experiment.md`), and how does it compare to
+ASR-word-combiner baseline (**42.2% of matched-and-timed lines ≤400ms,
+median 570ms, 6.2% UNTIMED** — `2026-08-05-combine-experiment.md`,
+corrected 2026-08-06 per the table above), and how does it compare to
 the two locally-installed forced aligners benchmarked the same day
 (`2026-08-05-aligner-shootout.md`: `ctc-forced-aligner` and
 `lyrics-alignment-mtl`)?
@@ -53,6 +82,22 @@ are directly comparable.
   `n_fixtures_errored: 2` (1 each in the `reverb_heavy`/`clean_pop`
   category rollups) rather than silently treating them as zero-score
   fixtures.
+- **Denominators — identical for every row in this report, and stated on
+  purpose** (see correction #6): 21 fixtures scored, **2 errored**,
+  poisoned fixture excluded. **1553** `qwen35-omni` reference lines
+  submitted; **1702** gold lines in the scored fixtures; **1867** gold
+  lines counting the two errored ones.
+  - **Conditional %≤400ms** = within-400ms ÷ *matched-and-timed lines*.
+    That denominator is **1138–1243 and differs per backend** — each
+    backend is graded only on the subset it handled. It is **not** "% of
+    lines correctly timed", and it is not comparable across backends on
+    its own.
+  - **Gold-normalized %≤400ms** = within-400ms ÷ *the same 1702 gold
+    lines*, for every backend. **This is the comparable figure.**
+  - **Monotonic** = the same matcher re-run with an ordering constraint,
+    which drops the 27–28% of pairs that bind backwards in the song. It
+    removes large deltas from numerator and denominator together, so every
+    backend's number rises; only the relative ordering is meaningful.
 
 ## What the API actually is, and what the docs got wrong
 
@@ -75,63 +120,112 @@ page (per-audio-second, not per-request) — the exact $/min is
 account-plan-dependent and not restated here; see the account's usage
 dashboard for the actual charge this run incurred.
 
-## Headline comparison — official view (21 fixtures, poisoned excluded)
+## Headline comparison — official view (21 fixtures scored, 2 errored, poisoned excluded)
 
-| Backend | % ≤400ms | Median Δ | p90 Δ | Coverage | Untimed % | Mean runtime/song |
+**Every row shares one denominator set: 1553 reference lines in, 1702 gold
+lines in the scored fixtures, 21 scored / 2 errored.** The two %-columns
+must be read together — see the Method section's denominator block.
+
+| Backend | Cond. %≤400ms *(matched+timed only)* | **Gold-norm. %≤400ms** *(of 1702)* | Median Δ | Coverage | Untimed % | n matched | Mean runtime/song |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **Baseline** (`qwen35-omni` lines × `aai-u35-translate` ASR times) | 42.2% | 29.6% | **570ms** | 70.0% | 6.2% | 1191 | — |
+| `ctc-forced-aligner` (no star) | 29.4% | 19.7% | 900ms | 66.9% | 10.4% | 1139 | 1.5s |
+| `ctc-forced-aligner-star` | 41.7% | 27.8% | 650ms | 66.9% | 10.4% | 1138 | 1.4s |
+| **`elevenlabs-fa`** | **42.2%** | **30.7%** | 625ms | **72.6%** | **0.0%** | 1236 | **6.9s** |
+| `lyrics-alignment-mtl` (MTL+BDR) | 43.5% | 31.6% | 528ms | 72.6% | 0.0% | 1236 | 106.0s (GPU) |
+
+### Secondary views (same 21 fixtures)
+
+| Backend | Mono. cond. %≤400ms | Mono. gold-norm. %≤400ms | Mono. median Δ | Gold-norm. over all 1867 | Coverage over all 1867 | p90 Δ *(NOT quotable)* |
 |---|---:|---:|---:|---:|---:|---:|
-| **Baseline** (`qwen35-omni` lines × `aai-u35-translate` ASR times, prior report) | 41.4% | 573ms | — | 70.1% | 20.2% | — |
-| `ctc-forced-aligner` (no star) | 29.4% | 900ms | 8338ms | 66.9% | 10.4% | 1.5s |
-| `ctc-forced-aligner-star` | 41.7% | 650ms | 10817ms | 66.9% | 10.4% | 1.4s |
-| **`elevenlabs-fa`** | **42.2%** | **625ms** | 12580ms | **72.6%** | **0.0%** | **6.9s** |
-| `lyrics-alignment-mtl` (MTL+BDR) | 43.5% | 528ms | 7289ms | 72.6% | 0.0% | 150s |
+| Baseline | 48.7% | 22.3% | 419.5ms | 26.9% | 63.8% | 7238ms |
+| `ctc-forced-aligner` | 31.8% | 13.7% | 755ms | 17.9% | 61.0% | 8338ms |
+| `ctc-forced-aligner-star` | 47.7% | 19.6% | 460ms | 25.4% | 61.0% | 10817ms |
+| **`elevenlabs-fa`** | 49.4% | 23.6% | 417ms | 28.0% | 66.2% | 12580ms |
+| `lyrics-alignment-mtl` | **50.5%** | **23.8%** | **387.5ms** | **28.8%** | **66.2%** | 7289ms |
 
-ElevenLabs sits **2nd of 4 aligners tested this shootout** on both headline
-metrics — ahead of both CTC configs and the ASR-combiner baseline, behind
-only `lyrics-alignment-mtl` — while running in **6.9s per song, ~22×
-faster than MTL** and requiring **zero local install, zero GPU, zero
-digit-crash/OOM edge cases** (both of which the local aligners hit and had
-to work around, see `2026-08-05-aligner-shootout.md`'s install-reality
-section).
+p90 is carried only for continuity with the original publication: per
+`.claude/rules/lyrics-eval-backends.md` **only median and %≤400ms are
+quotable**.
+
+**Where `elevenlabs-fa` actually sits** (corrected — see corrections #2 and
+#4). It is **2nd of 5 on the comparable gold-normalized metric** (30.7%,
+behind only MTL's 31.6%) and 2nd on both monotonic views. But on the
+conditional %≤400ms it **ties** the ASR-combiner baseline at 42.2% rather
+than leading it, and **on median Δ it is 3rd, behind the baseline** (625ms
+vs 570ms) as well as MTL. It matches MTL exactly on coverage and untimed
+rate (72.6% / 0.0%) while running in **6.9s per song, ~15× faster than
+MTL's GPU-normalized 106.0s** (the originally published "~22×" was measured
+against MTL's device-blended 150.8s), and requiring **zero local install,
+zero GPU, zero digit-crash/OOM edge cases** — both of which the local
+aligners hit and had to work around, see
+`2026-08-05-aligner-shootout.md`'s install-reality section.
+
+**Runtime provenance (correction #8).** The 6.9s mean is **partially
+verified**: commit `d42264e` restored the `runtime_sec` instrumentation the
+committed script was missing, and a re-run confirmed it emits the field —
+but the ElevenLabs free-tier character quota was exhausted after **8 of 22**
+fixtures, so only 8 of the 21 scored runtimes have been re-measured. Those
+8 come out at **mean 5.74s / median 5.55s**, and the *same* 8 in the
+committed set also mean 5.74s (individual values differ by live-network
+variance; the means coincide). The other 13 still originate from the
+pre-fix-era script. A clean full re-run is blocked until the quota resets
+**2026-09-05** — issue **#125 (eval: elevenlabs-fa re-run blocked mid-way by
+exhausted free-tier quota)**. The 8 salvaged artifacts are committed at
+`aligners_11l/raw_rerun_20260806/` as evidence; they are **not** a scoreable
+row and must never be pooled beside the 21-fixture rows above.
 
 ## Conservative view (unique-gold-line only, ratio ≥0.75)
 
-| Backend | % ≤400ms | Median Δ | n pairs |
-|---|---:|---:|---:|
-| Baseline (prior report) | 33.8% | 1142ms | — |
-| `ctc-forced-aligner-star` | 35.2% | 1090ms | 355 |
-| `lyrics-alignment-mtl` | 34.8% | 1115ms | 379 |
-| **`elevenlabs-fa`** | 34.3% | **1470ms** | 379 |
+| Backend | Cond. %≤400ms *(of n pairs)* | **Gold-norm. %≤400ms** *(of 1702)* | Median Δ | n pairs |
+|---|---:|---:|---:|---:|
+| Baseline | 33.5% | 7.3% | 1155ms | 373 |
+| `ctc-forced-aligner` (no star) | 21.4% | 4.5% | 1570ms | 355 |
+| `ctc-forced-aligner-star` | **35.2%** | 7.3% | 1090ms | 355 |
+| `lyrics-alignment-mtl` | 34.8% | **7.8%** | 1115ms | 379 |
+| **`elevenlabs-fa`** | 34.3% | 7.6% | **1470ms** | 379 |
 
 `elevenlabs-fa` and `lyrics-alignment-mtl` have the same `n_pairs` (379,
 both beat CTC's 355) because both leave 0% of lines untimed, so the
 conservative pool is not thinned by missing timestamps for either. On the
 harder conservative view, `elevenlabs-fa`'s %≤400ms is competitive
-(34.3%, within 1pt of the other two real aligners) but its **median is
-noticeably worse** — 1470ms vs 1090-1142ms for everything else tested.
+(34.3% conditional, within 1pt of the other two real aligners; 7.6%
+gold-normalized, 2nd of five) but its **median is noticeably worse** —
+1470ms vs 1090–1155ms for everything else tested.
 This is the one metric where ElevenLabs is a clear step behind, not a
 close call — flagged honestly rather than folded into the generally
 favorable headline picture above.
 
+Note the conditional column's ranking here is not trustworthy: `ctc-star`'s
+35.2% is computed over 355 pairs and MTL's 34.8% over 379. On the shared
+1702-line denominator the order is MTL 7.8% > `elevenlabs-fa` 7.6% >
+`ctc-star` 7.3% = baseline 7.3%.
+
 ## Per-category breakdown (official view) — all four backends
 
-Format: median Δ / % ≤400ms. **Bold** = best of the four per category.
+Format: median Δ / **conditional** %≤400ms / **gold-normalized** %≤400ms.
+**Bold** = best of the four per category. Per-category coverage differs per
+backend (`reverb_heavy`: CTC-star 35.5% vs 75.0% for the other two), so the
+conditional column is not comparable across a row — the gold-normalized one
+is.
 
 | Category | `ctc-star` | `elevenlabs-fa` | `lyrics-alignment-mtl` |
 |---|---|---|---|
-| chant_repetition | 833ms / 33.8% | 859.5ms / 31.8% | **751ms / 34.8%** |
-| clean_pop | 272ms / 71.6% | **260ms / 79.4%** | 260ms / 74.5% |
-| dense_vocal | 470ms / 48.1% | 340ms / **51.9%** | **332ms** / 51.9% |
-| instrumental_breaks | 390ms / 51.1% | 380ms / 53.9% | **323ms / 60.1%** |
-| multi_language | 1340ms / **32.1%** | 1440ms / **32.1%** | **1250ms** / 33.8% |
-| reverb_heavy | 800ms / 22.7% | 1025ms / **28.0%** | 881ms / 26.3%* |
+| chant_repetition | 833ms / 33.8% / 25.8% | 859.5ms / 31.8% / 24.2% | **751ms / 34.8% / 26.5%** |
+| clean_pop | 272.5ms / 71.6% / 70.2% | **260ms / 79.4% / 77.9%** | 260ms / 74.5% / 73.1% |
+| dense_vocal | 470ms / 48.1% / 34.5% | 340ms / 51.9% / 37.3% | **332ms** / 51.9% / 37.3% |
+| instrumental_breaks | 390ms / 51.1% / 36.5% | 380ms / 53.9% / 38.6% | **323ms / 60.1% / 43.0%** |
+| multi_language | 1340ms / 32.1% / 19.8% | 1440ms / 32.1% / 19.8% | **1250ms / 33.8% / 20.9%** |
+| reverb_heavy | **800ms** / 22.7% / 8.1% | 1025ms / 28.0% / **21.0%** | 881.5ms / 26.3% / 19.8%* |
 
-`elevenlabs-fa` wins or ties outright on `clean_pop` (79.4% ≤400ms — the
-single best result of any backend in either shootout on any category) and
-essentially ties `lyrics-alignment-mtl` on `dense_vocal` (51.9% either way,
-8ms apart on median). It wins `reverb_heavy`'s %≤400ms outright (28.0%,
-best of all four) despite the worst median there — meaning it has fewer
-severe outliers pulling the median up on that category, an inversion worth
-noting rather than smoothing over. `multi_language` and `chant_repetition`
+`elevenlabs-fa` wins outright on `clean_pop` (79.4% conditional / 77.9%
+gold-normalized — the single best result of any backend in either shootout
+on any category) and essentially ties `lyrics-alignment-mtl` on
+`dense_vocal` (identical 37.3% gold-normalized, 8ms apart on median). It
+wins `reverb_heavy` on both %-columns (28.0% / 21.0%, best of all four)
+despite the worst median there — meaning it has fewer severe outliers
+pulling the median up on that category, an inversion worth noting rather
+than smoothing over. `multi_language` and `chant_repetition`
 remain the two hardest categories for every backend tested across both
 reports — the same finding as the sibling shootout, and (per that report)
 substantially a TEXT/line-boundary problem inherited from `qwen35-omni`'s
@@ -140,7 +234,29 @@ aligner.
 
 *`reverb_heavy`'s CTC-vs-MTL comparison is not apples-to-apples (one CTC
 fixture hit a digit-crash limitation, see the sibling report) —
-`elevenlabs-fa` hit no such issue on any fixture in any category.
+`elevenlabs-fa` hit no such issue on any fixture in any category. The
+gold-normalized column is precisely what makes that visible: `ctc-star`'s
+22.7% conditional collapses to 8.1% once the lines it never timed are put
+back into the denominator.
+
+### The three hardest categories under the monotonic view (added 2026-08-06)
+
+Median Δ, order-respecting pairs only:
+
+| Category | `ctc-star` | `elevenlabs-fa` | `lyrics-alignment-mtl` | Baseline | Pairs kept (11l) |
+|---|---:|---:|---:|---:|---:|
+| chant_repetition | 1162ms | 928ms | 874ms | 694ms | 165 of 296 (−44.3%) |
+| multi_language | 775ms | **351.5ms ✅** | **302ms ✅** | 512.5ms | 136 of 237 (−42.6%) |
+| reverb_heavy | 730ms | 660ms | 650ms | 693ms | 125 of 186 (−32.8%) |
+
+`multi_language` is the **only** hard category that clears the 400ms median
+under any view, and only for `elevenlabs-fa` and MTL — i.e. a large part of
+that category's apparent difficulty is the matcher mis-pairing lines across
+languages rather than the aligner mistiming them. **Caveat, load-bearing:
+the monotonic view discards 42.6% of that category's pairs** and removes
+large deltas from numerator and denominator together, so this is a lower
+bound on the category's true difficulty, not a pass. `chant_repetition` and
+`reverb_heavy` fail under every backend and every view.
 
 ## Untimed-line rate — crushed to 0%, as hypothesized
 
@@ -148,9 +264,14 @@ fixture hit a digit-crash limitation, see the sibling report) —
 received a real timestamp on every one of the 22 fixtures run**, matching
 `lyrics-alignment-mtl`'s result and confirming the task's hypothesis: a
 true forced aligner structurally cannot leave a line untimed the way the
-ASR-word-combiner (20.2% untimed) or CTC forced alignment's digit-crash
-fallback (10.4% untimed, a real but fixable upstream limitation, not
-structural) can. This holds even on the poisoned fixture's 395 hallucinated
+ASR-word-combiner (**6.2% untimed** — corrected 2026-08-06 from the
+poisoned-fixture-inflated 20.2%, correction #3) or CTC forced alignment's
+digit-crash fallback (10.4% untimed, a real but fixable upstream
+limitation, not structural) can. The corrected baseline figure makes this a
+**smaller** win than published — 0.0% vs 6.2%, not 0.0% vs 20.2% — and it
+is no longer the largest margin in this report; the hypothesis itself is
+still confirmed, and note that the CTC pair is now *worse* than the
+baseline on this metric, not better. This holds even on the poisoned fixture's 395 hallucinated
 lines — see below for what "timed, but not necessarily correctly" means in
 that case.
 
@@ -264,50 +385,77 @@ view it aligned exactly the text it was given, correctly.
 
 ## Ranked verdict (all four backends, this shootout + the sibling one)
 
-**Does `elevenlabs-fa` clear the 400ms bar?** Partially, the same qualified
-way the sibling report found for `lyrics-alignment-mtl`. It clears the
-primary %-within-400ms metric (42.2% > baseline's 41.4%) but not on the
-pooled median (625ms) or the conservative view's %≤400ms (34.3%, and its
-conservative median at 1470ms is the weakest of any real aligner tested).
-**Untimed% is fully crushed to 0.0%, matching MTL and clearing the
-baseline's 20.2% by the largest margin of any metric in this report** —
-the task's central hypothesis is confirmed.
+*(Rewritten 2026-08-06 against the corrected numbers.)*
 
-**Where `elevenlabs-fa` fits among the three real aligners tested across
-both 2026-08-05 reports:**
+**Does `elevenlabs-fa` clear the 400ms bar?** Partially, the same qualified
+way the sibling report found for `lyrics-alignment-mtl` — and by less than
+originally reported. On the primary %-within-400ms metric it **ties the
+corrected baseline** (42.2% vs 42.2% conditional) rather than beating it;
+on the comparable gold-normalized view it does genuinely lead (30.7% vs
+29.6%), but that number also says plainly that **fewer than a third of gold
+lines land inside the gate**. It does not clear the pooled median (625ms —
+**3rd of five, behind the baseline's 570ms**) or the conservative view's
+%≤400ms (34.3%, with a 1470ms conservative median, the weakest of any real
+aligner tested). **Untimed% is fully crushed to 0.0%, matching MTL and
+clearing the corrected baseline's 6.2%** — the task's central hypothesis is
+confirmed, though the margin is 6.2 points rather than the 20.2 originally
+claimed, so this is no longer the report's largest margin.
+
+**Where `elevenlabs-fa` fits among the backends tested across both
+2026-08-05 reports:**
 
 - **`lyrics-alignment-mtl` remains the best pure timing-quality result**
-  (43.5%/528ms official, 0.0% untimed) but at 150s/song and a real local
-  GPU/install burden (see the sibling report's ~15min setup + OOM-retry
-  reality).
-- **`elevenlabs-fa` is a close 2nd on quality** (42.2%/625ms official,
-  0.0% untimed, ties or beats MTL outright on 2 of 6 categories) with
-  **dramatically lower operational cost**: no install, no GPU, no
-  digit-crash or CUDA-OOM edge cases, 6.9s/song (fast enough to run inline
-  in a production pipeline rather than as an offline batch job), at the
-  cost of a paid per-audio-second API call and a materially worse
-  conservative-view median (1470ms).
+  (43.5% conditional / 31.6% gold-normalized, 528ms median, 0.0% untimed)
+  — but by a **0.9-point gold-normalized margin over `elevenlabs-fa`, and
+  only 0.2 points on the monotonic gold-normalized view**, at
+  **106.0s/song GPU-normalized** plus a real local GPU/install burden (see
+  the sibling report's ~15min setup + the CUDA-OOM fallback that fired on
+  **two** of 21 fixtures).
+- **`elevenlabs-fa` is a genuinely close 2nd on quality** (42.2%
+  conditional / 30.7% gold-normalized, 625ms median, 0.0% untimed, wins 2
+  of 6 categories on the gold-normalized column) with **dramatically lower
+  operational cost**: no install, no GPU, no digit-crash or CUDA-OOM edge
+  cases, 6.9s/song — ~15× faster than MTL's GPU-normalized figure, fast
+  enough to run inline in a production pipeline rather than as an offline
+  batch job — at the cost of a paid per-audio-second API call and a
+  materially worse conservative-view median (1470ms).
+- **The ASR-combiner baseline is not the floor this report assumed.**
+  Corrected, it ties `elevenlabs-fa` on conditional %≤400ms and **beats it
+  on median** (570ms vs 625ms). What the forced aligners genuinely buy over
+  it is coverage (72.6% vs 70.0%) and untimed lines (0.0% vs 6.2%) — not a
+  large timing-accuracy jump.
 - **`ctc-forced-aligner-star` is the throughput choice** (1.4s/song,
-  single warm process) but is clearly behind both `elevenlabs-fa` and MTL
-  on every accuracy metric, and carries a real digit-crash limitation
-  neither of the other two hit.
+  single warm process) but is clearly behind `elevenlabs-fa`, MTL **and the
+  corrected baseline** on the gold-normalized metric (27.8% vs 30.7 /
+  31.6 / 29.6), and carries a real digit-crash limitation neither of the
+  other two hit.
 
 **For a production pipeline that cannot run a local GPU worker (or wants to
-avoid the 150s/song MTL latency) but needs forced-alignment-grade
-untimed-line elimination, `elevenlabs-fa` is the best available option of
-the three tested** — it is the only backend that clears BOTH the 0%-untimed
-bar AND runs fast enough (single-digit seconds) for inline use. Its
+avoid MTL's 106s/song GPU-normalized latency) but needs
+forced-alignment-grade untimed-line elimination, `elevenlabs-fa` is the
+best available option of the backends tested** — it is the only one that
+clears BOTH the 0%-untimed bar AND runs fast enough (single-digit seconds)
+for inline use. With the corrected numbers the quality cost of choosing it
+over MTL is **0.9 gold-normalized points** (0.2 on the monotonic view), for
+~15× the throughput and no GPU — a materially better trade than the
+originally published 2.1-point gap implied. Its
 confidence (`loss`) field, while not a clean linear predictor, usefully
 separates a high-accuracy top quartile (54.7% ≤400ms) from a
 low-accuracy bottom quartile (27.2%) and is worth wiring into a
-production quality gate.
+production quality gate. It also **does** return per-word timings — the
+`fixtures_with_word_timings: 0` in `scores.json` is an artifact of `words[]`
+being stripped before transfer, not a capability gap (correction #7).
 
 **Where it still fails**: the same three categories every backend
 struggles with — `chant_repetition`, `multi_language`, and `reverb_heavy`
-never clear 400ms on median under `elevenlabs-fa` either — and the
+never clear 400ms on median under `elevenlabs-fa` on the official view
+(the one exception, `multi_language` at 351.5ms under the order-respecting
+monotonic view, discards 42.6% of that category's pairs and is a lower
+bound on its difficulty, not a pass) — and the
 conservative-view median gap (1470ms vs ~1100ms for the local aligners) is
 a genuine, unresolved weakness worth re-checking if ElevenLabs ships a
-model update.
+model update. Its runtime headline also remains **partially verified**
+until the quota-blocked full re-run lands (#125).
 
 ## Reproducing this experiment
 
@@ -341,3 +489,10 @@ reading, Pearson correlation, and quartile bucketing).
 
 Full request/response shape and remote-transfer notes:
 `eval/lyrics/aligners_11l/README.md`.
+
+**The scored row above regenerates byte-identically from the committed
+`aligners_11l/raw/` — no API call is needed to reproduce any accuracy
+figure in this report.** The separate `aligners_11l/raw_rerun_20260806/`
+directory holds 8 fixtures re-run on 2026-08-06 with the restored
+instrumentation; it is **evidence only** (runtime reproducibility +
+per-word `words[]`), never a scoreable row, and its README explains why.

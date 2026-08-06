@@ -1,5 +1,30 @@
 # lyrics-alignment-mtl — LyricsAlignment-MTL (Huang/Benetos/Ewert, ICASSP 2022)
 
+## Corrections (2026-08-06)
+
+An adversarial review of the eval harness on 2026-08-06 found that this
+README's runtime and device story was wrong in two connected ways, and that
+its "bar to beat" comparison quoted a baseline measured on a different
+fixture set. The scorers were fixed (commits `d42264e`, `b048953`) and
+everything below re-derived from the committed artifacts — **no re-run, no
+API call**. Nothing was edited silently; this is the audit trail.
+
+| # | Was | Is now | Cause |
+|---|---|---|---|
+| 1 | `runtime: mean=150.8s median=86.9s (n=21)` presented as this model's speed | **Device-blended.** GPU-only **mean 106.0s / median 85.2s (n=19)**; CPU-fallback **mean 575.4s (n=2)**. **Quote 106.0s** for the model. | `score_aligner.py` read only `runtime_sec`, never `metadata.device`, so a GPU population and a CPU population were pooled into one number. |
+| 2 | "**the one** that didn't [succeed on the first pass] (`q5m09rqOoxE`)" + the per-fixture table listing **`hSMJa5tImRU` as `cuda`** | **TWO fixtures ran on CPU after CUDA-OOM.** `hSMJa5tImRU` — its own output JSON says `device: "cpu"`, `cuda_oom_retried: true`, `runtime_sec: 565.5` — was caught in-process by the fallback (579.8s wall, which is why it looked like a slow GPU run). `q5m09rqOoxE` OOM'd *before* the fallback landed and was re-run separately (585.4s alignment, 596.2s wall). | Same defect as #1: the README's device column was filled in from the batch log's assumption rather than from each fixture's own `metadata.device`. |
+| 3 | Bar to beat: "prior best combination: **41.4%** within 400ms, median **573ms**, **20.2%** untimed" | **42.2% / 570ms / 6.2%** | The poisoned fixture was pooled into that baseline but excluded from every aligner row. **297 of its 394 untimed lines were the poisoned fixture's** — the whole 20.2% → 6.2% move. See `reports/2026-08-05-combine-experiment.md`'s own corrections table. |
+| 4 | "matches/slightly beats the timing accuracy (43.5% vs 41.4%)" | **43.5% vs 42.2% — a 1.3-point lead, not 2.1.** On the comparable gold-normalized denominator (the same 1702 gold lines for every backend) it is **31.6% vs 29.6%**. | Same as #3, plus the conditional-denominator defect: the 43.5% divides by matched-and-timed lines only. |
+
+**What did NOT change:** every accuracy figure this backend produced —
+43.5% conditional ≤400ms, 528ms median, 72.6% coverage, 0.0% untimed,
+34.8% / 1115ms conservative, every per-category number, and the
+`n_untimed=0` result on all 22 fixtures including the poisoned one. The
+shootout's ranking is unchanged (`lyrics-alignment-mtl` is 1st on every
+accuracy view) — but the margins are thinner than published and this
+model is **last of the field on runtime by two orders of magnitude**. Full
+context: `reports/2026-08-05-aligner-shootout.md`'s own corrections table.
+
 Forced-aligner benchmark backend for the 2026-08-05 aligner shootout. Given
 the FIXED reference text (an audio-LLM's already-transcribed `lines[].text`)
 plus the isolated-vocal WAV, this tool returns timestamps for that exact
@@ -195,15 +220,25 @@ around the `wrapper.align(cuda=True)` call, logs it, calls
 `torch.cuda.empty_cache()`, and retries the SAME fixture with
 `wrapper.align(cuda=False)` (CPU). This is not a different tool or a
 different checkpoint — identical algorithm, identical weights, just a
-different execution device for that one fixture — and it is never silent:
+different execution device for that fixture — and it is never silent:
 every output JSON records `metadata.device` (`"cuda"` or `"cpu"`) and
 `metadata.cuda_oom_retried` (bool) so a CPU-executed fixture is always
 visible in the data, not just in this README. The task brief explicitly
 says not to wait around for the sibling's GPU usage to free up, so a CPU
 retry (rather than a blocking wait-and-retry-on-GPU loop) is the correct
 response to transient shared-GPU contention here. `q5m09rqOoxE` itself was
-re-run after this fix landed — see the results table below for its actual
-`device`/timing.
+re-run after this fix landed; **the fallback then fired a second time, on
+`hSMJa5tImRU`, later in the same batch** — so the final results contain
+**two** CPU-executed fixtures, not one (corrected 2026-08-06). See the
+results table below for each one's actual `device`/timing.
+
+**The recording worked; the READING of it did not.** `metadata.device` was
+written correctly on every fixture from the start — but `score_aligner.py`
+never read it, so the shootout's runtime rollup pooled 19 GPU runs with 2
+CPU runs into a single "150.8s/song" attributed to the model, and this
+README's own per-fixture table transcribed `hSMJa5tImRU` as `cuda` from the
+batch log instead of from its JSON. Instrumenting a fallback is only half
+the job; the scorer has to consume the field.
 
 ### Trap 6 — fixture WAVs are IEEE-float PCM; stdlib `wave` can't read them
 
@@ -404,17 +439,37 @@ returncode/elapsed/ok per fixture.
 
 ```
 official     : within400=  43.5%  median_delta=   528.0ms  p90=  7288.5ms  coverage=  72.6%
-conservative : within400=  34.8%  median_delta=    1115ms  n_pairs=379
+               gold_within400=  31.6%   (of the same 1702 gold lines, comparable across backends)
+conservative : within400=  34.8%  median_delta=    1115ms  n_pairs=379   gold_within400=7.8%
+monotonic    : within400=  50.5%  median_delta=   387.5ms  n_pairs=802   gold_within400=23.8%
 untimed      : 0/1553 (0.0%)
-runtime      : mean=150.8s median=86.9s (n=21)
+runtime      : cuda   mean=106.0s median= 85.2s (n=19)   <- QUOTE THIS
+               cpu    mean=575.4s median=575.4s (n=2, after CUDA-OOM)
+               blended mean=150.8s median=86.9s (n=21)   <- device-blended, do NOT quote
+scope        : 21 fixtures scored, 2 errored (fHYLw-2tTx4, vpwDdb8r9Bk), poisoned excluded
 poisoned fixture (Xvm4_fWkXe8): untimed=0.0%  official_within400=0.0%  conservative_within400=0.0%
 ```
 
-Against the task brief's stated bar to beat (prior best combination: 41.4%
-within 400ms, median 573ms, 20.2% of lines completely untimed) — this
-forced aligner **matches/slightly beats the timing accuracy (43.5% vs
-41.4% within 400ms; 528ms vs 573ms median) and essentially eliminates the
-untimed-line problem the task set out to fix (0.0% vs 20.2% untimed)**.
+**Denominators (added 2026-08-06).** `within400` is **conditional on
+matched, timed lines** (1236 here) — it is not "% of lines correctly
+timed", and it is not comparable across backends because each backend's
+denominator is the subset it handled (1138–1243 across the shootout).
+`gold_within400` divides by the identical **1702** gold lines for every
+backend and is the comparable figure. The `monotonic` view re-runs the same
+matcher with an ordering constraint, discarding the 35.1% of pairs that
+bind backwards in the song; it removes large deltas from numerator and
+denominator alike, so only its relative ordering is meaningful.
+
+Against the task brief's stated bar to beat (prior best combination —
+**corrected 2026-08-06**: 42.2% conditional / 29.6% gold-normalized within
+400ms, median 570ms, **6.2%** of lines completely untimed) — this
+forced aligner **slightly beats the timing accuracy (43.5% vs 42.2%
+conditional, a 1.3-point lead; 31.6% vs 29.6% gold-normalized; 528ms vs
+570ms median) and eliminates the untimed-line problem the task set out to
+fix (0.0% vs 6.2% untimed)**. Note that the untimed-line problem was
+**much smaller than the brief stated** — 297 of the baseline's 394 untimed
+lines came from the single poisoned fixture, which every aligner row
+excluded and the baseline row did not.
 The poisoned fixture's 0% official/conservative match is expected and not
 a defect in the aligner — its GOLD reference (real lrclib/spotify lyrics
 for the actual song) has almost nothing in common with the hallucinated
@@ -423,13 +478,24 @@ text-similarity-based scorer has nothing to match against; the aligner
 itself still produced real, non-null timestamps for all 395 lines (see
 "The poisoned fixture" section below for what actually happened on it).
 
-**22/22 fixtures produced valid output.** 21 of 22 succeeded on the first
-pass; the one that didn't (`q5m09rqOoxE`, mid-batch — see Trap 5) was
-re-run individually once the CUDA-OOM-to-CPU fallback landed and succeeded
-on the retry (CPU device, 585.4s). Zero fixtures were skipped, zero
+**22/22 fixtures produced valid output.** Zero fixtures were skipped, zero
 produced corrupt/unparseable output, zero lines came back UNTIMED across
 the whole 22-fixture set (`n_untimed=0` on every single fixture, including
 the poisoned one).
+
+**TWO fixtures ran on CPU after a CUDA-OOM, not one** (corrected
+2026-08-06, correction #2 — each fixture's own `metadata.device` /
+`metadata.cuda_oom_retried` is authoritative, and both say `cpu` / `true`):
+
+| Fixture | What happened | `runtime_sec` (alignment) | Wall `elapsed_s` |
+|---|---|---:|---:|
+| `hSMJa5tImRU` | OOM'd, caught **in-process** by the fallback and finished on CPU inside the same subprocess — which is why it reads as one slow run in the batch log and was mis-recorded as `cuda` below | 565.5s (`device: "cpu"`) | 579.8s |
+| `q5m09rqOoxE` | OOM'd **before** the fallback landed (see Trap 5); re-run individually afterwards and succeeded on CPU | 585.4s (`device: "cpu"`) | 596.2s |
+
+Every other fixture ran on `cuda`. This matters for one reason only: it
+means **the batch's own wall-clock is device-blended and must never be
+divided by 21 to get "the model's speed"** — GPU-normalized, this aligner
+is 106.0s/song (n=19).
 
 Wall-clock **per-fixture** (`elapsed_s` = full subprocess wall time
 including the ~7-9s process/import/model-load overhead described above —
@@ -458,20 +524,31 @@ only):
 | JRRbGCyr2Ac | chant_repetition | — | — | 300.1 | cuda |
 | cej4vn4sWtE | multi_language | — | — | 240.1 | cuda |
 | p74PDWAFk0A | reverb_heavy | 162 | 800 | 352.0 | cuda |
-| hSMJa5tImRU | multi_language | — | — | 579.8 | cuda |
-| q5m09rqOoxE | dense_vocal | 214 | 913 | 60.8 (FAIL, OOM) → 596.2 (retry) | cuda→**cpu** (OOM fallback) |
+| hSMJa5tImRU | multi_language | — | — | 579.8 | cuda→**cpu** (OOM fallback, in-process) |
+| q5m09rqOoxE | dense_vocal | 214 | 913 | 60.8 (FAIL, OOM) → 596.2 (retry) | cuda→**cpu** (OOM fallback, re-run) |
+
+**`hSMJa5tImRU`'s device was corrected 2026-08-06 from `cuda` to `cpu`** —
+this table said `cuda` while the fixture's own output JSON says
+`device: "cpu"`, `cuda_oom_retried: true`. That single wrong cell is what
+made its 579.8s look like a normal (if slow) GPU run and hid the fact that
+two fixtures, not one, fell back to CPU.
 
 (n_lines/n_words filled in only where captured during live debugging;
 every fixture's own `metadata.granularity`/word count is authoritative in
 its output JSON — read those directly for exact per-fixture figures
-rather than this table, which exists for the wall-clock/device story.)
+rather than this table, which exists for the wall-clock/device story.
+**When this table and a fixture's JSON disagree, the JSON wins** — that is
+exactly how correction #2 was found.)
 
-**Total batch wall-clock: ~53.5 minutes for 21 fixtures (first pass,
-including the one that failed) + ~10 minutes for the `q5m09rqOoxE` CPU
-retry ≈ under 65 minutes for the full 22-fixture set**, run as one
+**Total batch wall-clock: ~53.5 minutes for 21 fixtures (first pass —
+which already includes `hSMJa5tImRU`'s in-process CPU fallback, and the
+failed `q5m09rqOoxE` attempt) + ~10 minutes for the `q5m09rqOoxE` CPU
+re-run ≈ under 65 minutes for the full 22-fixture set**, run as one
 sequential Windows process (`batch_run.py`), never overlapping with the
 sibling `ctc-forced-aligner` shootout run except for shared GPU memory
-pressure (Trap 5).
+pressure (Trap 5). **This total is device-blended** (two CPU fixtures at
+~575s each contribute ~19 minutes of it) — see the runtime block above for
+the GPU-normalized per-song figure.
 
 **Range observed: ~26s (smallest fixture, 77 words) to ~600s / 10 min
 (largest normal fixtures, 800-913 words)** — dominated by
@@ -510,10 +587,12 @@ memoization shim was in place:
   for how qwen35-omni's own guessed timestamps fared here).
 - **Total wall-clock for this one fixture: 315.2s (~5.25 min)** — well
   within the 2400s (40 min) budget allotted to it, and in fact *faster*
-  than two of the normal fixtures (`hSMJa5tImRU` at 579.8s,
-  `q5m09rqOoxE`'s CPU-fallback retry at ~596s) — word/phone count and
-  audio duration matter more to this algorithm's wall-clock than whether
-  the underlying reference text is degenerate.
+  than the two fixtures that fell back to CPU (`hSMJa5tImRU` 579.8s,
+  `q5m09rqOoxE` ~596s) — though that particular comparison is
+  device-mixed, so it says more about CPU-vs-GPU than about degenerate
+  text. Against the GPU population it is the slowest of the lot: word/phone
+  count and audio duration matter more to this algorithm's wall-clock than
+  whether the underlying reference text is degenerate.
 
 ## What we deliberately did NOT do
 
