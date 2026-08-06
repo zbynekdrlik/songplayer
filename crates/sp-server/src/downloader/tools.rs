@@ -58,8 +58,23 @@ impl ToolsManager {
             }
             #[cfg(not(windows))]
             {
-                Self::download_file(ffmpeg_download_url(), &ffmpeg).await?;
-                Self::make_executable(&ffmpeg).await?;
+                // FFmpeg for Linux is distributed as a .tar.xz archive. This
+                // crate has no tar/xz decoder, so downloading it straight
+                // onto the `ffmpeg` binary path would write a corrupt
+                // "executable" that fails `verify_executable`'s ELF check
+                // forever, re-downloading ~80MB on every start while every
+                // FFmpeg call fails with ENOEXEC. Fail loudly instead of
+                // shipping a broken binary — Windows is the shipped target
+                // (see project CLAUDE.md "Deployment target"); this branch
+                // only runs on a Linux dev/CI box.
+                anyhow::bail!(
+                    "automatic FFmpeg download is Windows-only (the Linux release at {} \
+                     is a .tar.xz archive and this crate has no xz decoder). Install \
+                     ffmpeg via the system package manager, or extract it from that \
+                     archive yourself, and place/symlink the binary at {}",
+                    ffmpeg_download_url(),
+                    ffmpeg.display()
+                );
             }
         }
 
@@ -381,6 +396,35 @@ mod tests {
         } else {
             assert!(!name.contains('.'));
         }
+    }
+
+    /// The Linux (`not(windows)`) branch of `ensure_tools` must fail loudly
+    /// instead of downloading the `.tar.xz` FFmpeg release straight onto
+    /// the `ffmpeg` binary path — this crate has no tar/xz decoder, so the
+    /// resulting file can never pass `verify_executable`'s ELF check.
+    /// Pre-seed a fake yt-dlp so the earlier step in `ensure_tools` doesn't
+    /// attempt a real network download; only the ffmpeg branch is exercised.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn ensure_tools_bails_loudly_instead_of_shipping_corrupt_ffmpeg() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tools_dir = dir.path().to_path_buf();
+        tokio::fs::write(tools_dir.join(ytdlp_filename()), b"fake-ytdlp")
+            .await
+            .expect("write fake ytdlp");
+
+        let mgr = ToolsManager::new(tools_dir.clone());
+        let err = mgr
+            .ensure_tools()
+            .await
+            .expect_err("non-Windows ffmpeg auto-download must fail, not ship a corrupt binary");
+        let msg = err.to_string();
+        assert!(msg.contains("Windows-only"), "message was: {msg}");
+        assert!(msg.contains("ffmpeg"), "message was: {msg}");
+        assert!(
+            !tools_dir.join(ffmpeg_filename()).exists(),
+            "must not leave a corrupt file at the ffmpeg binary path"
+        );
     }
 
     #[test]
