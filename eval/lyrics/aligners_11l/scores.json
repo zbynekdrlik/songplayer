@@ -6,14 +6,18 @@
       "n_fixtures_errored": 2,
       "total_produced_lines": 1553,
       "total_gold_lines": 1702,
+      "total_gold_lines_all_fixtures": 1867,
       "total_matched_lines": 1236,
       "line_count_ratio": 0.912,
       "gold_coverage_pct": 72.6,
+      "gold_coverage_pct_all_fixtures": 66.2,
       "mean_abs_delta_ms": 7721.0,
       "median_abs_delta_ms": 625.0,
       "p90_abs_delta_ms": 12580.0,
       "pct_within_400ms": 42.2,
       "pct_within_1000ms": 57.8,
+      "pct_gold_within_400ms": 30.7,
+      "pct_gold_within_400ms_all_fixtures": 28.0,
       "pct_gt32_chars_en": 23.3,
       "pct_gt32_chars_sk": 18.7,
       "sk_ok_pct": 86.0,
@@ -25,14 +29,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 358,
         "total_gold_lines": 388,
+        "total_gold_lines_all_fixtures": 388,
         "total_matched_lines": 296,
         "line_count_ratio": 0.923,
         "gold_coverage_pct": 76.3,
+        "gold_coverage_pct_all_fixtures": 76.3,
         "mean_abs_delta_ms": 5877.8,
         "median_abs_delta_ms": 859.5,
         "p90_abs_delta_ms": 5490.5,
         "pct_within_400ms": 31.8,
         "pct_within_1000ms": 53.7,
+        "pct_gold_within_400ms": 24.2,
+        "pct_gold_within_400ms_all_fixtures": 24.2,
         "pct_gt32_chars_en": 19.0,
         "pct_gt32_chars_sk": 14.5,
         "sk_ok_pct": 84.4,
@@ -43,14 +51,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 104,
         "total_gold_lines": 104,
+        "total_gold_lines_all_fixtures": 187,
         "total_matched_lines": 102,
         "line_count_ratio": 1.0,
         "gold_coverage_pct": 98.1,
+        "gold_coverage_pct_all_fixtures": 54.5,
         "mean_abs_delta_ms": 389.9,
         "median_abs_delta_ms": 260.0,
         "p90_abs_delta_ms": 558.0,
         "pct_within_400ms": 79.4,
         "pct_within_1000ms": 93.1,
+        "pct_gold_within_400ms": 77.9,
+        "pct_gold_within_400ms_all_fixtures": 43.3,
         "pct_gt32_chars_en": 40.4,
         "pct_gt32_chars_sk": 26.9,
         "sk_ok_pct": 100.0,
@@ -61,14 +73,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 364,
         "total_gold_lines": 330,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 237,
         "line_count_ratio": 1.103,
         "gold_coverage_pct": 71.8,
+        "gold_coverage_pct_all_fixtures": 71.8,
         "mean_abs_delta_ms": 15882.2,
         "median_abs_delta_ms": 340,
         "p90_abs_delta_ms": 60130.0,
         "pct_within_400ms": 51.9,
         "pct_within_1000ms": 58.2,
+        "pct_gold_within_400ms": 37.3,
+        "pct_gold_within_400ms_all_fixtures": 37.3,
         "pct_gt32_chars_en": 12.4,
         "pct_gt32_chars_sk": 9.1,
         "sk_ok_pct": 79.7,
@@ -79,14 +95,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 204,
         "total_gold_lines": 249,
+        "total_gold_lines_all_fixtures": 249,
         "total_matched_lines": 178,
         "line_count_ratio": 0.819,
         "gold_coverage_pct": 71.5,
+        "gold_coverage_pct_all_fixtures": 71.5,
         "mean_abs_delta_ms": 3980.6,
         "median_abs_delta_ms": 380.0,
         "p90_abs_delta_ms": 8493.6,
         "pct_within_400ms": 53.9,
         "pct_within_1000ms": 69.7,
+        "pct_gold_within_400ms": 38.6,
+        "pct_gold_within_400ms_all_fixtures": 38.6,
         "pct_gt32_chars_en": 27.0,
         "pct_gt32_chars_sk": 22.1,
         "sk_ok_pct": 79.4,
@@ -97,14 +117,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 267,
         "total_gold_lines": 383,
+        "total_gold_lines_all_fixtures": 383,
         "total_matched_lines": 237,
         "line_count_ratio": 0.697,
         "gold_coverage_pct": 61.9,
+        "gold_coverage_pct_all_fixtures": 61.9,
         "mean_abs_delta_ms": 9014.5,
         "median_abs_delta_ms": 1440,
         "p90_abs_delta_ms": 12118.0,
         "pct_within_400ms": 32.1,
         "pct_within_1000ms": 44.3,
+        "pct_gold_within_400ms": 19.8,
+        "pct_gold_within_400ms_all_fixtures": 19.8,
         "pct_gt32_chars_en": 40.1,
         "pct_gt32_chars_sk": 32.6,
         "sk_ok_pct": 91.8,
@@ -115,14 +139,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 256,
         "total_gold_lines": 248,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 186,
         "line_count_ratio": 1.032,
         "gold_coverage_pct": 75.0,
+        "gold_coverage_pct_all_fixtures": 56.4,
         "mean_abs_delta_ms": 6207.2,
         "median_abs_delta_ms": 1025.0,
         "p90_abs_delta_ms": 12965.0,
         "pct_within_400ms": 28.0,
         "pct_within_1000ms": 50.0,
+        "pct_gold_within_400ms": 21.0,
+        "pct_gold_within_400ms_all_fixtures": 15.8,
         "pct_gt32_chars_en": 17.6,
         "pct_gt32_chars_sk": 18.0,
         "sk_ok_pct": 90.6,
@@ -256,7 +284,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 63,
         "untimed_pct": 0.0,
-        "runtime_sec": 7.7
+        "runtime_sec": 7.7,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -383,7 +413,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 162,
         "untimed_pct": 0.0,
-        "runtime_sec": 9.1
+        "runtime_sec": 9.1,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -439,7 +471,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 44,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.4
+        "runtime_sec": 4.4,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -506,7 +540,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 39,
         "untimed_pct": 0.0,
-        "runtime_sec": 3.8
+        "runtime_sec": 3.8,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -589,7 +625,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 56,
         "untimed_pct": 0.0,
-        "runtime_sec": 5.7
+        "runtime_sec": 5.7,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -668,7 +706,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 5.7
+        "runtime_sec": 5.7,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -709,7 +749,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 13,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.6
+        "runtime_sec": 4.6,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -784,7 +826,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.6
+        "runtime_sec": 4.6,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -848,7 +892,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 40,
         "untimed_pct": 0.0,
-        "runtime_sec": 6.0
+        "runtime_sec": 6.0,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -950,7 +996,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 86,
         "untimed_pct": 0.0,
-        "runtime_sec": 9.4
+        "runtime_sec": 9.4,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1123,7 +1171,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 158,
         "untimed_pct": 0.0,
-        "runtime_sec": 9.5
+        "runtime_sec": 9.5,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1264,7 +1314,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 214,
         "untimed_pct": 0.0,
-        "runtime_sec": 12.1
+        "runtime_sec": 12.1,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1335,7 +1387,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 3.8
+        "runtime_sec": 3.8,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1417,7 +1471,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 7.4
+        "runtime_sec": 7.4,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1479,7 +1535,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 43,
         "untimed_pct": 0.0,
-        "runtime_sec": 7.8
+        "runtime_sec": 7.8,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1556,7 +1614,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.8
+        "runtime_sec": 4.8,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1633,7 +1693,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 8.4
+        "runtime_sec": 8.4,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1722,12 +1784,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 74,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.3
+        "runtime_sec": 4.3,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
         "video_id": "vpwDdb8r9Bk",
         "category": "reverb_heavy",
+        "n_gold": 82,
         "error": "output file missing or unparseable"
       },
       {
@@ -1820,7 +1885,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 67,
         "untimed_pct": 0.0,
-        "runtime_sec": 7.1
+        "runtime_sec": 7.1,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
@@ -1942,12 +2009,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 12.3
+        "runtime_sec": 12.3,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "elevenlabs-fa",
         "video_id": "fHYLw-2tTx4",
         "category": "clean_pop",
+        "n_gold": 83,
         "error": "output file missing or unparseable"
       },
       {
@@ -2031,7 +2101,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 5.5
+        "runtime_sec": 5.5,
+        "device": null,
+        "cuda_oom_retried": null
       }
     ],
     "conservative": {
@@ -2040,7 +2112,9 @@
         "median_abs_delta_ms": 1470,
         "mean_abs_delta_ms": 33957.0,
         "pct_within_400ms": 34.3,
-        "pct_within_1000ms": 45.9
+        "pct_within_1000ms": 45.9,
+        "total_gold_lines": 1702,
+        "pct_gold_within_400ms": 7.6
       },
       "by_category": {
         "chant_repetition": {
@@ -2048,42 +2122,128 @@
           "median_abs_delta_ms": 2410,
           "mean_abs_delta_ms": 34376.8,
           "pct_within_400ms": 13.0,
-          "pct_within_1000ms": 36.2
+          "pct_within_1000ms": 36.2,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "clean_pop": {
           "n_pairs": 30,
           "median_abs_delta_ms": 430.0,
           "mean_abs_delta_ms": 21291.8,
           "pct_within_400ms": 50.0,
-          "pct_within_1000ms": 70.0
+          "pct_within_1000ms": 70.0,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "dense_vocal": {
           "n_pairs": 88,
           "median_abs_delta_ms": 885.0,
           "mean_abs_delta_ms": 41280.8,
           "pct_within_400ms": 46.6,
-          "pct_within_1000ms": 50.0
+          "pct_within_1000ms": 50.0,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "instrumental_breaks": {
           "n_pairs": 63,
           "median_abs_delta_ms": 370,
           "mean_abs_delta_ms": 10132.8,
           "pct_within_400ms": 55.6,
-          "pct_within_1000ms": 68.3
+          "pct_within_1000ms": 68.3,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "multi_language": {
           "n_pairs": 91,
           "median_abs_delta_ms": 1870,
           "mean_abs_delta_ms": 36233.6,
           "pct_within_400ms": 23.1,
-          "pct_within_1000ms": 29.7
+          "pct_within_1000ms": 29.7,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "reverb_heavy": {
           "n_pairs": 38,
           "median_abs_delta_ms": 1885.0,
           "mean_abs_delta_ms": 60279.5,
           "pct_within_400ms": 23.7,
-          "pct_within_1000ms": 36.8
+          "pct_within_1000ms": 36.8,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
+        }
+      }
+    },
+    "monotonic": {
+      "aggregate": {
+        "n_pairs": 812,
+        "total_gold_lines": 1702,
+        "mean_abs_delta_ms": 23582.5,
+        "median_abs_delta_ms": 417.0,
+        "p90_abs_delta_ms": 85158.0,
+        "pct_within_400ms": 49.4,
+        "pct_within_1000ms": 64.3,
+        "pct_gold_within_400ms": 23.6
+      },
+      "by_category": {
+        "chant_repetition": {
+          "n_pairs": 165,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 36819.8,
+          "median_abs_delta_ms": 928,
+          "p90_abs_delta_ms": 178296.0,
+          "pct_within_400ms": 34.5,
+          "pct_within_1000ms": 52.7,
+          "pct_gold_within_400ms": null
+        },
+        "clean_pop": {
+          "n_pairs": 102,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 389.9,
+          "median_abs_delta_ms": 260.0,
+          "p90_abs_delta_ms": 558.0,
+          "pct_within_400ms": 79.4,
+          "pct_within_1000ms": 93.1,
+          "pct_gold_within_400ms": null
+        },
+        "dense_vocal": {
+          "n_pairs": 111,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 31041.5,
+          "median_abs_delta_ms": 280,
+          "p90_abs_delta_ms": 138360,
+          "pct_within_400ms": 55.0,
+          "pct_within_1000ms": 58.6,
+          "pct_gold_within_400ms": null
+        },
+        "instrumental_breaks": {
+          "n_pairs": 173,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 4826.0,
+          "median_abs_delta_ms": 380,
+          "p90_abs_delta_ms": 15084.0,
+          "pct_within_400ms": 52.0,
+          "pct_within_1000ms": 67.6,
+          "pct_gold_within_400ms": null
+        },
+        "multi_language": {
+          "n_pairs": 136,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 30660.9,
+          "median_abs_delta_ms": 351.5,
+          "p90_abs_delta_ms": 76945.0,
+          "pct_within_400ms": 52.2,
+          "pct_within_1000ms": 61.8,
+          "pct_gold_within_400ms": null
+        },
+        "reverb_heavy": {
+          "n_pairs": 125,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 36668.7,
+          "median_abs_delta_ms": 660,
+          "p90_abs_delta_ms": 180906.0,
+          "pct_within_400ms": 32.8,
+          "pct_within_1000ms": 59.2,
+          "pct_gold_within_400ms": null
         }
       }
     },
@@ -2096,7 +2256,16 @@
       "n_fixtures_with_runtime": 21,
       "mean_runtime_sec": 6.9,
       "median_runtime_sec": 6.0,
-      "total_runtime_sec": 144.0
+      "total_runtime_sec": 144.0,
+      "n_cuda_oom_retried": 0,
+      "by_device": {
+        "None": {
+          "n_fixtures": 21,
+          "mean_runtime_sec": 6.9,
+          "median_runtime_sec": 6.0,
+          "total_runtime_sec": 144.0
+        }
+      }
     },
     "poisoned_fixture": {
       "video_id": "Xvm4_fWkXe8",
@@ -2179,14 +2348,18 @@
         "n_lines_untimed": 0,
         "n_lines_total": 395,
         "untimed_pct": 0.0,
-        "runtime_sec": 5.6
+        "runtime_sec": 5.6,
+        "device": null,
+        "cuda_oom_retried": null
       },
       "conservative": {
         "n_pairs": 6,
         "median_abs_delta_ms": 635.0,
         "mean_abs_delta_ms": 35251.7,
         "pct_within_400ms": 50.0,
-        "pct_within_1000ms": 66.7
+        "pct_within_1000ms": 66.7,
+        "total_gold_lines": null,
+        "pct_gold_within_400ms": null
       },
       "untimed_pct": 0.0
     }

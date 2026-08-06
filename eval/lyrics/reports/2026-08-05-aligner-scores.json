@@ -6,14 +6,18 @@
       "n_fixtures_errored": 2,
       "total_produced_lines": 1391,
       "total_gold_lines": 1702,
+      "total_gold_lines_all_fixtures": 1867,
       "total_matched_lines": 1139,
       "line_count_ratio": 0.817,
       "gold_coverage_pct": 66.9,
+      "gold_coverage_pct_all_fixtures": 61.0,
       "mean_abs_delta_ms": 7325.3,
       "median_abs_delta_ms": 900,
       "p90_abs_delta_ms": 8338.4,
       "pct_within_400ms": 29.4,
       "pct_within_1000ms": 52.9,
+      "pct_gold_within_400ms": 19.7,
+      "pct_gold_within_400ms_all_fixtures": 17.9,
       "pct_gt32_chars_en": 24.2,
       "pct_gt32_chars_sk": 18.7,
       "sk_ok_pct": 85.6,
@@ -25,14 +29,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 358,
         "total_gold_lines": 388,
+        "total_gold_lines_all_fixtures": 388,
         "total_matched_lines": 296,
         "line_count_ratio": 0.923,
         "gold_coverage_pct": 76.3,
+        "gold_coverage_pct_all_fixtures": 76.3,
         "mean_abs_delta_ms": 5757.0,
         "median_abs_delta_ms": 902.0,
         "p90_abs_delta_ms": 4508.0,
         "pct_within_400ms": 25.7,
         "pct_within_1000ms": 54.4,
+        "pct_gold_within_400ms": 19.6,
+        "pct_gold_within_400ms_all_fixtures": 19.6,
         "pct_gt32_chars_en": 19.0,
         "pct_gt32_chars_sk": 14.5,
         "sk_ok_pct": 84.4,
@@ -43,14 +51,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 104,
         "total_gold_lines": 104,
+        "total_gold_lines_all_fixtures": 187,
         "total_matched_lines": 102,
         "line_count_ratio": 1.0,
         "gold_coverage_pct": 98.1,
+        "gold_coverage_pct_all_fixtures": 54.5,
         "mean_abs_delta_ms": 755.5,
         "median_abs_delta_ms": 390.0,
         "p90_abs_delta_ms": 1651.0,
         "pct_within_400ms": 50.0,
         "pct_within_1000ms": 75.5,
+        "pct_gold_within_400ms": 49.0,
+        "pct_gold_within_400ms_all_fixtures": 27.3,
         "pct_gt32_chars_en": 40.4,
         "pct_gt32_chars_sk": 26.9,
         "sk_ok_pct": 100.0,
@@ -61,14 +73,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 364,
         "total_gold_lines": 330,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 238,
         "line_count_ratio": 1.103,
         "gold_coverage_pct": 72.1,
+        "gold_coverage_pct_all_fixtures": 72.1,
         "mean_abs_delta_ms": 16031.8,
         "median_abs_delta_ms": 820.0,
         "p90_abs_delta_ms": 60294.0,
         "pct_within_400ms": 32.8,
         "pct_within_1000ms": 54.2,
+        "pct_gold_within_400ms": 23.6,
+        "pct_gold_within_400ms_all_fixtures": 23.6,
         "pct_gt32_chars_en": 12.4,
         "pct_gt32_chars_sk": 9.1,
         "sk_ok_pct": 79.7,
@@ -79,14 +95,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 204,
         "total_gold_lines": 249,
+        "total_gold_lines_all_fixtures": 249,
         "total_matched_lines": 178,
         "line_count_ratio": 0.819,
         "gold_coverage_pct": 71.5,
+        "gold_coverage_pct_all_fixtures": 71.5,
         "mean_abs_delta_ms": 3036.9,
         "median_abs_delta_ms": 561.5,
         "p90_abs_delta_ms": 6833.1,
         "pct_within_400ms": 37.6,
         "pct_within_1000ms": 61.2,
+        "pct_gold_within_400ms": 26.9,
+        "pct_gold_within_400ms_all_fixtures": 26.9,
         "pct_gt32_chars_en": 27.0,
         "pct_gt32_chars_sk": 22.1,
         "sk_ok_pct": 79.4,
@@ -97,14 +117,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 267,
         "total_gold_lines": 383,
+        "total_gold_lines_all_fixtures": 383,
         "total_matched_lines": 237,
         "line_count_ratio": 0.697,
         "gold_coverage_pct": 61.9,
+        "gold_coverage_pct_all_fixtures": 61.9,
         "mean_abs_delta_ms": 8531.3,
         "median_abs_delta_ms": 1730,
         "p90_abs_delta_ms": 9932.2,
         "pct_within_400ms": 16.0,
         "pct_within_1000ms": 32.1,
+        "pct_gold_within_400ms": 9.9,
+        "pct_gold_within_400ms_all_fixtures": 9.9,
         "pct_gt32_chars_en": 40.1,
         "pct_gt32_chars_sk": 32.6,
         "sk_ok_pct": 91.8,
@@ -115,14 +139,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 94,
         "total_gold_lines": 248,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 88,
         "line_count_ratio": 0.379,
         "gold_coverage_pct": 35.5,
+        "gold_coverage_pct_all_fixtures": 26.7,
         "mean_abs_delta_ms": 2094.3,
         "median_abs_delta_ms": 805.0,
         "p90_abs_delta_ms": 3242.0,
         "pct_within_400ms": 28.4,
         "pct_within_1000ms": 56.8,
+        "pct_gold_within_400ms": 10.1,
+        "pct_gold_within_400ms_all_fixtures": 7.6,
         "pct_gt32_chars_en": 21.3,
         "pct_gt32_chars_sk": 16.0,
         "sk_ok_pct": 93.6,
@@ -256,7 +284,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 63,
         "untimed_pct": 0.0,
-        "runtime_sec": 3.13
+        "runtime_sec": 3.13,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -284,7 +314,9 @@
         "n_lines_untimed": 162,
         "n_lines_total": 162,
         "untimed_pct": 100.0,
-        "runtime_sec": null
+        "runtime_sec": null,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -340,7 +372,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 44,
         "untimed_pct": 0.0,
-        "runtime_sec": 2.0
+        "runtime_sec": 2.0,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -407,7 +441,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 39,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.04
+        "runtime_sec": 1.04,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -490,7 +526,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 56,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.17
+        "runtime_sec": 1.17,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -569,7 +607,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.12
+        "runtime_sec": 1.12,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -610,7 +650,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 13,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.89
+        "runtime_sec": 0.89,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -685,7 +727,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.75
+        "runtime_sec": 0.75,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -749,7 +793,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 40,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.13
+        "runtime_sec": 1.13,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -851,7 +897,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 86,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.98
+        "runtime_sec": 1.98,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1024,7 +1072,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 158,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.78
+        "runtime_sec": 1.78,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1166,7 +1216,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 214,
         "untimed_pct": 0.0,
-        "runtime_sec": 3.35
+        "runtime_sec": 3.35,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1237,7 +1289,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.66
+        "runtime_sec": 0.66,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1319,7 +1373,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.32
+        "runtime_sec": 1.32,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1381,7 +1437,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 43,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.13
+        "runtime_sec": 1.13,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1458,7 +1516,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.89
+        "runtime_sec": 0.89,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1535,7 +1595,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.39
+        "runtime_sec": 1.39,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1624,12 +1686,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 74,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.91
+        "runtime_sec": 0.91,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
         "video_id": "vpwDdb8r9Bk",
         "category": "reverb_heavy",
+        "n_gold": 82,
         "error": "output file missing or unparseable"
       },
       {
@@ -1722,7 +1787,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 67,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.53
+        "runtime_sec": 1.53,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
@@ -1844,12 +1911,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 2.56
+        "runtime_sec": 2.56,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner",
         "video_id": "fHYLw-2tTx4",
         "category": "clean_pop",
+        "n_gold": 83,
         "error": "output file missing or unparseable"
       },
       {
@@ -1933,7 +2003,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.26
+        "runtime_sec": 1.26,
+        "device": null,
+        "cuda_oom_retried": null
       }
     ],
     "conservative": {
@@ -1942,7 +2014,9 @@
         "median_abs_delta_ms": 1570,
         "mean_abs_delta_ms": 30186.3,
         "pct_within_400ms": 21.4,
-        "pct_within_1000ms": 40.3
+        "pct_within_1000ms": 40.3,
+        "total_gold_lines": 1702,
+        "pct_gold_within_400ms": 4.5
       },
       "by_category": {
         "chant_repetition": {
@@ -1950,42 +2024,128 @@
           "median_abs_delta_ms": 2730,
           "mean_abs_delta_ms": 34476.7,
           "pct_within_400ms": 21.7,
-          "pct_within_1000ms": 36.2
+          "pct_within_1000ms": 36.2,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "clean_pop": {
           "n_pairs": 30,
           "median_abs_delta_ms": 1015.0,
           "mean_abs_delta_ms": 21625.8,
           "pct_within_400ms": 30.0,
-          "pct_within_1000ms": 46.7
+          "pct_within_1000ms": 46.7,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "dense_vocal": {
           "n_pairs": 88,
           "median_abs_delta_ms": 1395.0,
           "mean_abs_delta_ms": 41483.9,
           "pct_within_400ms": 22.7,
-          "pct_within_1000ms": 45.5
+          "pct_within_1000ms": 45.5,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "instrumental_breaks": {
           "n_pairs": 63,
           "median_abs_delta_ms": 680,
           "mean_abs_delta_ms": 9921.5,
           "pct_within_400ms": 27.0,
-          "pct_within_1000ms": 57.1
+          "pct_within_1000ms": 57.1,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "multi_language": {
           "n_pairs": 91,
           "median_abs_delta_ms": 2280,
           "mean_abs_delta_ms": 36264.9,
           "pct_within_400ms": 12.1,
-          "pct_within_1000ms": 23.1
+          "pct_within_1000ms": 23.1,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "reverb_heavy": {
           "n_pairs": 14,
           "median_abs_delta_ms": 1420.0,
           "mean_abs_delta_ms": 8052.9,
           "pct_within_400ms": 28.6,
-          "pct_within_1000ms": 50.0
+          "pct_within_1000ms": 50.0,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
+        }
+      }
+    },
+    "monotonic": {
+      "aggregate": {
+        "n_pairs": 733,
+        "total_gold_lines": 1702,
+        "mean_abs_delta_ms": 23087.3,
+        "median_abs_delta_ms": 755,
+        "p90_abs_delta_ms": 91366.0,
+        "pct_within_400ms": 31.8,
+        "pct_within_1000ms": 56.2,
+        "pct_gold_within_400ms": 13.7
+      },
+      "by_category": {
+        "chant_repetition": {
+          "n_pairs": 153,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 48301.1,
+          "median_abs_delta_ms": 1294,
+          "p90_abs_delta_ms": 178843.2,
+          "pct_within_400ms": 20.3,
+          "pct_within_1000ms": 45.8,
+          "pct_gold_within_400ms": null
+        },
+        "clean_pop": {
+          "n_pairs": 101,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 625.8,
+          "median_abs_delta_ms": 375,
+          "p90_abs_delta_ms": 1615,
+          "pct_within_400ms": 50.5,
+          "pct_within_1000ms": 76.2,
+          "pct_gold_within_400ms": null
+        },
+        "dense_vocal": {
+          "n_pairs": 111,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 31345.9,
+          "median_abs_delta_ms": 740,
+          "p90_abs_delta_ms": 139080,
+          "pct_within_400ms": 31.5,
+          "pct_within_1000ms": 53.2,
+          "pct_gold_within_400ms": null
+        },
+        "instrumental_breaks": {
+          "n_pairs": 169,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 8417.7,
+          "median_abs_delta_ms": 630,
+          "p90_abs_delta_ms": 15000.0,
+          "pct_within_400ms": 35.5,
+          "pct_within_1000ms": 58.6,
+          "pct_gold_within_400ms": null
+        },
+        "multi_language": {
+          "n_pairs": 136,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 30859.4,
+          "median_abs_delta_ms": 1093.5,
+          "p90_abs_delta_ms": 77280.0,
+          "pct_within_400ms": 26.5,
+          "pct_within_1000ms": 48.5,
+          "pct_gold_within_400ms": null
+        },
+        "reverb_heavy": {
+          "n_pairs": 63,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 5886.7,
+          "median_abs_delta_ms": 700,
+          "p90_abs_delta_ms": 7302.0,
+          "pct_within_400ms": 31.7,
+          "pct_within_1000ms": 65.1,
+          "pct_gold_within_400ms": null
         }
       }
     },
@@ -1998,7 +2158,16 @@
       "n_fixtures_with_runtime": 20,
       "mean_runtime_sec": 1.5,
       "median_runtime_sec": 1.2,
-      "total_runtime_sec": 30.0
+      "total_runtime_sec": 30.0,
+      "n_cuda_oom_retried": 0,
+      "by_device": {
+        "None": {
+          "n_fixtures": 20,
+          "mean_runtime_sec": 1.5,
+          "median_runtime_sec": 1.2,
+          "total_runtime_sec": 30.0
+        }
+      }
     },
     "poisoned_fixture": {
       "video_id": "Xvm4_fWkXe8",
@@ -2081,14 +2250,18 @@
         "n_lines_untimed": 0,
         "n_lines_total": 395,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.11
+        "runtime_sec": 4.11,
+        "device": null,
+        "cuda_oom_retried": null
       },
       "conservative": {
         "n_pairs": 6,
         "median_abs_delta_ms": 106820.0,
         "mean_abs_delta_ms": 115625.0,
         "pct_within_400ms": 0.0,
-        "pct_within_1000ms": 0.0
+        "pct_within_1000ms": 0.0,
+        "total_gold_lines": null,
+        "pct_gold_within_400ms": null
       },
       "untimed_pct": 0.0
     }
@@ -2100,14 +2273,18 @@
       "n_fixtures_errored": 2,
       "total_produced_lines": 1391,
       "total_gold_lines": 1702,
+      "total_gold_lines_all_fixtures": 1867,
       "total_matched_lines": 1138,
       "line_count_ratio": 0.817,
       "gold_coverage_pct": 66.9,
+      "gold_coverage_pct_all_fixtures": 61.0,
       "mean_abs_delta_ms": 7763.8,
       "median_abs_delta_ms": 650.0,
       "p90_abs_delta_ms": 10817.0,
       "pct_within_400ms": 41.7,
       "pct_within_1000ms": 58.5,
+      "pct_gold_within_400ms": 27.8,
+      "pct_gold_within_400ms_all_fixtures": 25.4,
       "pct_gt32_chars_en": 24.2,
       "pct_gt32_chars_sk": 18.7,
       "sk_ok_pct": 85.6,
@@ -2119,14 +2296,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 358,
         "total_gold_lines": 388,
+        "total_gold_lines_all_fixtures": 388,
         "total_matched_lines": 296,
         "line_count_ratio": 0.923,
         "gold_coverage_pct": 76.3,
+        "gold_coverage_pct_all_fixtures": 76.3,
         "mean_abs_delta_ms": 5781.6,
         "median_abs_delta_ms": 833.0,
         "p90_abs_delta_ms": 4789.0,
         "pct_within_400ms": 33.8,
         "pct_within_1000ms": 54.4,
+        "pct_gold_within_400ms": 25.8,
+        "pct_gold_within_400ms_all_fixtures": 25.8,
         "pct_gt32_chars_en": 19.0,
         "pct_gt32_chars_sk": 14.5,
         "sk_ok_pct": 84.4,
@@ -2137,14 +2318,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 104,
         "total_gold_lines": 104,
+        "total_gold_lines_all_fixtures": 187,
         "total_matched_lines": 102,
         "line_count_ratio": 1.0,
         "gold_coverage_pct": 98.1,
+        "gold_coverage_pct_all_fixtures": 54.5,
         "mean_abs_delta_ms": 387.1,
         "median_abs_delta_ms": 272.5,
         "p90_abs_delta_ms": 708.5,
         "pct_within_400ms": 71.6,
         "pct_within_1000ms": 92.2,
+        "pct_gold_within_400ms": 70.2,
+        "pct_gold_within_400ms_all_fixtures": 39.0,
         "pct_gt32_chars_en": 40.4,
         "pct_gt32_chars_sk": 26.9,
         "sk_ok_pct": 100.0,
@@ -2155,14 +2340,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 364,
         "total_gold_lines": 330,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 237,
         "line_count_ratio": 1.103,
         "gold_coverage_pct": 71.8,
+        "gold_coverage_pct_all_fixtures": 71.8,
         "mean_abs_delta_ms": 15996.2,
         "median_abs_delta_ms": 470,
         "p90_abs_delta_ms": 60362.0,
         "pct_within_400ms": 48.1,
         "pct_within_1000ms": 56.1,
+        "pct_gold_within_400ms": 34.5,
+        "pct_gold_within_400ms_all_fixtures": 34.5,
         "pct_gt32_chars_en": 12.4,
         "pct_gt32_chars_sk": 9.1,
         "sk_ok_pct": 79.7,
@@ -2173,14 +2362,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 204,
         "total_gold_lines": 249,
+        "total_gold_lines_all_fixtures": 249,
         "total_matched_lines": 178,
         "line_count_ratio": 0.819,
         "gold_coverage_pct": 71.5,
+        "gold_coverage_pct_all_fixtures": 71.5,
         "mean_abs_delta_ms": 7162.2,
         "median_abs_delta_ms": 390.0,
         "p90_abs_delta_ms": 19230.3,
         "pct_within_400ms": 51.1,
         "pct_within_1000ms": 69.1,
+        "pct_gold_within_400ms": 36.5,
+        "pct_gold_within_400ms_all_fixtures": 36.5,
         "pct_gt32_chars_en": 27.0,
         "pct_gt32_chars_sk": 22.1,
         "sk_ok_pct": 79.4,
@@ -2191,14 +2384,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 267,
         "total_gold_lines": 383,
+        "total_gold_lines_all_fixtures": 383,
         "total_matched_lines": 237,
         "line_count_ratio": 0.697,
         "gold_coverage_pct": 61.9,
+        "gold_coverage_pct_all_fixtures": 61.9,
         "mean_abs_delta_ms": 7749.8,
         "median_abs_delta_ms": 1340,
         "p90_abs_delta_ms": 5204.0,
         "pct_within_400ms": 32.1,
         "pct_within_1000ms": 45.1,
+        "pct_gold_within_400ms": 19.8,
+        "pct_gold_within_400ms_all_fixtures": 19.8,
         "pct_gt32_chars_en": 40.1,
         "pct_gt32_chars_sk": 32.6,
         "sk_ok_pct": 91.8,
@@ -2209,14 +2406,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 94,
         "total_gold_lines": 248,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 88,
         "line_count_ratio": 0.379,
         "gold_coverage_pct": 35.5,
+        "gold_coverage_pct_all_fixtures": 26.7,
         "mean_abs_delta_ms": 2065.0,
         "median_abs_delta_ms": 800.0,
         "p90_abs_delta_ms": 3203.0,
         "pct_within_400ms": 22.7,
         "pct_within_1000ms": 54.5,
+        "pct_gold_within_400ms": 8.1,
+        "pct_gold_within_400ms_all_fixtures": 6.1,
         "pct_gt32_chars_en": 21.3,
         "pct_gt32_chars_sk": 16.0,
         "sk_ok_pct": 93.6,
@@ -2350,7 +2551,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 63,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.23
+        "runtime_sec": 1.23,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2378,7 +2581,9 @@
         "n_lines_untimed": 162,
         "n_lines_total": 162,
         "untimed_pct": 100.0,
-        "runtime_sec": null
+        "runtime_sec": null,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2434,7 +2639,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 44,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.21
+        "runtime_sec": 1.21,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2501,7 +2708,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 39,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.8
+        "runtime_sec": 0.8,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2584,7 +2793,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 56,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.09
+        "runtime_sec": 1.09,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2663,7 +2874,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.12
+        "runtime_sec": 1.12,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2704,7 +2917,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 13,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.88
+        "runtime_sec": 0.88,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2779,7 +2994,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.72
+        "runtime_sec": 0.72,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2843,7 +3060,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 40,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.08
+        "runtime_sec": 1.08,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -2945,7 +3164,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 86,
         "untimed_pct": 0.0,
-        "runtime_sec": 2.0
+        "runtime_sec": 2.0,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3118,7 +3339,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 158,
         "untimed_pct": 0.0,
-        "runtime_sec": 2.02
+        "runtime_sec": 2.02,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3259,7 +3482,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 214,
         "untimed_pct": 0.0,
-        "runtime_sec": 3.33
+        "runtime_sec": 3.33,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3330,7 +3555,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.67
+        "runtime_sec": 0.67,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3412,7 +3639,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.27
+        "runtime_sec": 1.27,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3474,7 +3703,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 43,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.15
+        "runtime_sec": 1.15,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3551,7 +3782,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.89
+        "runtime_sec": 0.89,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3628,7 +3861,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.4
+        "runtime_sec": 1.4,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3717,12 +3952,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 74,
         "untimed_pct": 0.0,
-        "runtime_sec": 0.96
+        "runtime_sec": 0.96,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
         "video_id": "vpwDdb8r9Bk",
         "category": "reverb_heavy",
+        "n_gold": 82,
         "error": "output file missing or unparseable"
       },
       {
@@ -3815,7 +4053,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 67,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.46
+        "runtime_sec": 1.46,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
@@ -3937,12 +4177,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 2.71
+        "runtime_sec": 2.71,
+        "device": null,
+        "cuda_oom_retried": null
       },
       {
         "backend": "ctc-forced-aligner-star",
         "video_id": "fHYLw-2tTx4",
         "category": "clean_pop",
+        "n_gold": 83,
         "error": "output file missing or unparseable"
       },
       {
@@ -4026,7 +4269,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 1.18
+        "runtime_sec": 1.18,
+        "device": null,
+        "cuda_oom_retried": null
       }
     ],
     "conservative": {
@@ -4035,7 +4280,9 @@
         "median_abs_delta_ms": 1090,
         "mean_abs_delta_ms": 29724.0,
         "pct_within_400ms": 35.2,
-        "pct_within_1000ms": 49.0
+        "pct_within_1000ms": 49.0,
+        "total_gold_lines": 1702,
+        "pct_gold_within_400ms": 7.3
       },
       "by_category": {
         "chant_repetition": {
@@ -4043,42 +4290,128 @@
           "median_abs_delta_ms": 2370,
           "mean_abs_delta_ms": 34128.4,
           "pct_within_400ms": 13.0,
-          "pct_within_1000ms": 36.2
+          "pct_within_1000ms": 36.2,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "clean_pop": {
           "n_pairs": 30,
           "median_abs_delta_ms": 465.0,
           "mean_abs_delta_ms": 21361.8,
           "pct_within_400ms": 43.3,
-          "pct_within_1000ms": 66.7
+          "pct_within_1000ms": 66.7,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "dense_vocal": {
           "n_pairs": 88,
           "median_abs_delta_ms": 670.0,
           "mean_abs_delta_ms": 41089.1,
           "pct_within_400ms": 45.5,
-          "pct_within_1000ms": 53.4
+          "pct_within_1000ms": 53.4,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "instrumental_breaks": {
           "n_pairs": 63,
           "median_abs_delta_ms": 360,
           "mean_abs_delta_ms": 9564.4,
           "pct_within_400ms": 55.6,
-          "pct_within_1000ms": 73.0
+          "pct_within_1000ms": 73.0,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "multi_language": {
           "n_pairs": 91,
           "median_abs_delta_ms": 1720,
           "mean_abs_delta_ms": 35448.2,
           "pct_within_400ms": 25.3,
-          "pct_within_1000ms": 31.9
+          "pct_within_1000ms": 31.9,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "reverb_heavy": {
           "n_pairs": 14,
           "median_abs_delta_ms": 1030.0,
           "mean_abs_delta_ms": 8008.6,
           "pct_within_400ms": 35.7,
-          "pct_within_1000ms": 50.0
+          "pct_within_1000ms": 50.0,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
+        }
+      }
+    },
+    "monotonic": {
+      "aggregate": {
+        "n_pairs": 698,
+        "total_gold_lines": 1702,
+        "mean_abs_delta_ms": 25353.3,
+        "median_abs_delta_ms": 460.0,
+        "p90_abs_delta_ms": 105542.0,
+        "pct_within_400ms": 47.7,
+        "pct_within_1000ms": 64.0,
+        "pct_gold_within_400ms": 19.6
+      },
+      "by_category": {
+        "chant_repetition": {
+          "n_pairs": 152,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 48489.6,
+          "median_abs_delta_ms": 1162.0,
+          "p90_abs_delta_ms": 178380.5,
+          "pct_within_400ms": 36.2,
+          "pct_within_1000ms": 49.3,
+          "pct_gold_within_400ms": null
+        },
+        "clean_pop": {
+          "n_pairs": 102,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 387.1,
+          "median_abs_delta_ms": 272.5,
+          "p90_abs_delta_ms": 708.5,
+          "pct_within_400ms": 71.6,
+          "pct_within_1000ms": 92.2,
+          "pct_gold_within_400ms": null
+        },
+        "dense_vocal": {
+          "n_pairs": 111,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 31239.3,
+          "median_abs_delta_ms": 290,
+          "p90_abs_delta_ms": 138400,
+          "pct_within_400ms": 54.1,
+          "pct_within_1000ms": 59.5,
+          "pct_gold_within_400ms": null
+        },
+        "instrumental_breaks": {
+          "n_pairs": 164,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 3709.9,
+          "median_abs_delta_ms": 385.0,
+          "p90_abs_delta_ms": 12861.0,
+          "pct_within_400ms": 51.8,
+          "pct_within_1000ms": 71.3,
+          "pct_gold_within_400ms": null
+        },
+        "multi_language": {
+          "n_pairs": 106,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 55146.8,
+          "median_abs_delta_ms": 775.0,
+          "p90_abs_delta_ms": 254410.0,
+          "pct_within_400ms": 42.5,
+          "pct_within_1000ms": 52.8,
+          "pct_gold_within_400ms": null
+        },
+        "reverb_heavy": {
+          "n_pairs": 63,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 5795.9,
+          "median_abs_delta_ms": 730,
+          "p90_abs_delta_ms": 4256.0,
+          "pct_within_400ms": 23.8,
+          "pct_within_1000ms": 61.9,
+          "pct_gold_within_400ms": null
         }
       }
     },
@@ -4091,7 +4424,16 @@
       "n_fixtures_with_runtime": 20,
       "mean_runtime_sec": 1.4,
       "median_runtime_sec": 1.2,
-      "total_runtime_sec": 27.2
+      "total_runtime_sec": 27.2,
+      "n_cuda_oom_retried": 0,
+      "by_device": {
+        "None": {
+          "n_fixtures": 20,
+          "mean_runtime_sec": 1.4,
+          "median_runtime_sec": 1.2,
+          "total_runtime_sec": 27.2
+        }
+      }
     },
     "poisoned_fixture": {
       "video_id": "Xvm4_fWkXe8",
@@ -4174,14 +4516,18 @@
         "n_lines_untimed": 0,
         "n_lines_total": 395,
         "untimed_pct": 0.0,
-        "runtime_sec": 4.53
+        "runtime_sec": 4.53,
+        "device": null,
+        "cuda_oom_retried": null
       },
       "conservative": {
         "n_pairs": 6,
         "median_abs_delta_ms": 119000.0,
         "mean_abs_delta_ms": 124718.3,
         "pct_within_400ms": 0.0,
-        "pct_within_1000ms": 0.0
+        "pct_within_1000ms": 0.0,
+        "total_gold_lines": null,
+        "pct_gold_within_400ms": null
       },
       "untimed_pct": 0.0
     }
@@ -4193,14 +4539,18 @@
       "n_fixtures_errored": 2,
       "total_produced_lines": 1553,
       "total_gold_lines": 1702,
+      "total_gold_lines_all_fixtures": 1867,
       "total_matched_lines": 1236,
       "line_count_ratio": 0.912,
       "gold_coverage_pct": 72.6,
+      "gold_coverage_pct_all_fixtures": 66.2,
       "mean_abs_delta_ms": 7168.4,
       "median_abs_delta_ms": 528.0,
       "p90_abs_delta_ms": 7288.5,
       "pct_within_400ms": 43.5,
       "pct_within_1000ms": 61.3,
+      "pct_gold_within_400ms": 31.6,
+      "pct_gold_within_400ms_all_fixtures": 28.8,
       "pct_gt32_chars_en": 23.3,
       "pct_gt32_chars_sk": 18.7,
       "sk_ok_pct": 86.0,
@@ -4212,14 +4562,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 358,
         "total_gold_lines": 388,
+        "total_gold_lines_all_fixtures": 388,
         "total_matched_lines": 296,
         "line_count_ratio": 0.923,
         "gold_coverage_pct": 76.3,
+        "gold_coverage_pct_all_fixtures": 76.3,
         "mean_abs_delta_ms": 5359.8,
         "median_abs_delta_ms": 751.0,
         "p90_abs_delta_ms": 2554.0,
         "pct_within_400ms": 34.8,
         "pct_within_1000ms": 58.8,
+        "pct_gold_within_400ms": 26.5,
+        "pct_gold_within_400ms_all_fixtures": 26.5,
         "pct_gt32_chars_en": 19.0,
         "pct_gt32_chars_sk": 14.5,
         "sk_ok_pct": 84.4,
@@ -4230,14 +4584,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 104,
         "total_gold_lines": 104,
+        "total_gold_lines_all_fixtures": 187,
         "total_matched_lines": 102,
         "line_count_ratio": 1.0,
         "gold_coverage_pct": 98.1,
+        "gold_coverage_pct_all_fixtures": 54.5,
         "mean_abs_delta_ms": 362.2,
         "median_abs_delta_ms": 260.0,
         "p90_abs_delta_ms": 590.2,
         "pct_within_400ms": 74.5,
         "pct_within_1000ms": 93.1,
+        "pct_gold_within_400ms": 73.1,
+        "pct_gold_within_400ms_all_fixtures": 40.6,
         "pct_gt32_chars_en": 40.4,
         "pct_gt32_chars_sk": 26.9,
         "sk_ok_pct": 100.0,
@@ -4248,14 +4606,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 364,
         "total_gold_lines": 330,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 237,
         "line_count_ratio": 1.103,
         "gold_coverage_pct": 71.8,
+        "gold_coverage_pct_all_fixtures": 71.8,
         "mean_abs_delta_ms": 15920.5,
         "median_abs_delta_ms": 332,
         "p90_abs_delta_ms": 60361.8,
         "pct_within_400ms": 51.9,
         "pct_within_1000ms": 58.2,
+        "pct_gold_within_400ms": 37.3,
+        "pct_gold_within_400ms_all_fixtures": 37.3,
         "pct_gt32_chars_en": 12.4,
         "pct_gt32_chars_sk": 9.1,
         "sk_ok_pct": 79.7,
@@ -4266,14 +4628,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 204,
         "total_gold_lines": 249,
+        "total_gold_lines_all_fixtures": 249,
         "total_matched_lines": 178,
         "line_count_ratio": 0.819,
         "gold_coverage_pct": 71.5,
+        "gold_coverage_pct_all_fixtures": 71.5,
         "mean_abs_delta_ms": 2584.5,
         "median_abs_delta_ms": 323.0,
         "p90_abs_delta_ms": 1816.9,
         "pct_within_400ms": 60.1,
         "pct_within_1000ms": 79.2,
+        "pct_gold_within_400ms": 43.0,
+        "pct_gold_within_400ms_all_fixtures": 43.0,
         "pct_gt32_chars_en": 27.0,
         "pct_gt32_chars_sk": 22.1,
         "sk_ok_pct": 79.4,
@@ -4284,14 +4650,18 @@
         "n_fixtures_errored": 0,
         "total_produced_lines": 267,
         "total_gold_lines": 383,
+        "total_gold_lines_all_fixtures": 383,
         "total_matched_lines": 237,
         "line_count_ratio": 0.697,
         "gold_coverage_pct": 61.9,
+        "gold_coverage_pct_all_fixtures": 61.9,
         "mean_abs_delta_ms": 7940.4,
         "median_abs_delta_ms": 1250,
         "p90_abs_delta_ms": 5869.8,
         "pct_within_400ms": 33.8,
         "pct_within_1000ms": 47.3,
+        "pct_gold_within_400ms": 20.9,
+        "pct_gold_within_400ms_all_fixtures": 20.9,
         "pct_gt32_chars_en": 40.1,
         "pct_gt32_chars_sk": 32.6,
         "sk_ok_pct": 91.8,
@@ -4302,14 +4672,18 @@
         "n_fixtures_errored": 1,
         "total_produced_lines": 256,
         "total_gold_lines": 248,
+        "total_gold_lines_all_fixtures": 330,
         "total_matched_lines": 186,
         "line_count_ratio": 1.032,
         "gold_coverage_pct": 75.0,
+        "gold_coverage_pct_all_fixtures": 56.4,
         "mean_abs_delta_ms": 6030.4,
         "median_abs_delta_ms": 881.5,
         "p90_abs_delta_ms": 11903.0,
         "pct_within_400ms": 26.3,
         "pct_within_1000ms": 52.7,
+        "pct_gold_within_400ms": 19.8,
+        "pct_gold_within_400ms_all_fixtures": 14.8,
         "pct_gt32_chars_en": 17.6,
         "pct_gt32_chars_sk": 18.0,
         "sk_ok_pct": 90.6,
@@ -4443,7 +4817,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 63,
         "untimed_pct": 0.0,
-        "runtime_sec": 57.889
+        "runtime_sec": 57.465,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4570,7 +4946,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 162,
         "untimed_pct": 0.0,
-        "runtime_sec": 336.937
+        "runtime_sec": 360.772,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4626,7 +5004,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 44,
         "untimed_pct": 0.0,
-        "runtime_sec": 50.474
+        "runtime_sec": 50.474,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4693,7 +5073,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 39,
         "untimed_pct": 0.0,
-        "runtime_sec": 42.659
+        "runtime_sec": 42.659,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4776,7 +5158,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 56,
         "untimed_pct": 0.0,
-        "runtime_sec": 97.116
+        "runtime_sec": 97.116,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4855,7 +5239,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 108.956
+        "runtime_sec": 108.956,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4896,7 +5282,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 13,
         "untimed_pct": 0.0,
-        "runtime_sec": 16.246
+        "runtime_sec": 15.819,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -4971,7 +5359,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 36.464
+        "runtime_sec": 36.464,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5035,7 +5425,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 40,
         "untimed_pct": 0.0,
-        "runtime_sec": 51.615
+        "runtime_sec": 51.615,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5137,7 +5529,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 86,
         "untimed_pct": 0.0,
-        "runtime_sec": 226.961
+        "runtime_sec": 226.961,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5310,7 +5704,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 158,
         "untimed_pct": 0.0,
-        "runtime_sec": 284.103
+        "runtime_sec": 284.103,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5451,7 +5847,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 214,
         "untimed_pct": 0.0,
-        "runtime_sec": 585.434
+        "runtime_sec": 585.434,
+        "device": "cpu",
+        "cuda_oom_retried": true
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5522,7 +5920,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 47,
         "untimed_pct": 0.0,
-        "runtime_sec": 32.652
+        "runtime_sec": 32.652,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5604,7 +6004,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 53,
         "untimed_pct": 0.0,
-        "runtime_sec": 128.965
+        "runtime_sec": 128.965,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5666,7 +6068,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 43,
         "untimed_pct": 0.0,
-        "runtime_sec": 86.946
+        "runtime_sec": 86.946,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5743,7 +6147,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 61.331
+        "runtime_sec": 61.331,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5820,7 +6226,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 48,
         "untimed_pct": 0.0,
-        "runtime_sec": 102.694
+        "runtime_sec": 102.694,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -5909,12 +6317,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 74,
         "untimed_pct": 0.0,
-        "runtime_sec": 76.404
+        "runtime_sec": 70.344,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
         "video_id": "vpwDdb8r9Bk",
         "category": "reverb_heavy",
+        "n_gold": 82,
         "error": "output file missing or unparseable"
       },
       {
@@ -6007,7 +6418,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 67,
         "untimed_pct": 0.0,
-        "runtime_sec": 114.374
+        "runtime_sec": 114.374,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       {
         "backend": "lyrics-alignment-mtl",
@@ -6129,12 +6542,15 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 565.462
+        "runtime_sec": 565.462,
+        "device": "cpu",
+        "cuda_oom_retried": true
       },
       {
         "backend": "lyrics-alignment-mtl",
         "video_id": "fHYLw-2tTx4",
         "category": "clean_pop",
+        "n_gold": 83,
         "error": "output file missing or unparseable"
       },
       {
@@ -6218,7 +6634,9 @@
         "n_lines_untimed": 0,
         "n_lines_total": 99,
         "untimed_pct": 0.0,
-        "runtime_sec": 85.162
+        "runtime_sec": 85.162,
+        "device": "cuda",
+        "cuda_oom_retried": false
       }
     ],
     "conservative": {
@@ -6227,7 +6645,9 @@
         "median_abs_delta_ms": 1115,
         "mean_abs_delta_ms": 33519.5,
         "pct_within_400ms": 34.8,
-        "pct_within_1000ms": 48.3
+        "pct_within_1000ms": 48.3,
+        "total_gold_lines": 1702,
+        "pct_gold_within_400ms": 7.8
       },
       "by_category": {
         "chant_repetition": {
@@ -6235,42 +6655,128 @@
           "median_abs_delta_ms": 2339,
           "mean_abs_delta_ms": 33904.6,
           "pct_within_400ms": 15.9,
-          "pct_within_1000ms": 40.6
+          "pct_within_1000ms": 40.6,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "clean_pop": {
           "n_pairs": 30,
           "median_abs_delta_ms": 474.5,
           "mean_abs_delta_ms": 21302.2,
           "pct_within_400ms": 46.7,
-          "pct_within_1000ms": 70.0
+          "pct_within_1000ms": 70.0,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "dense_vocal": {
           "n_pairs": 88,
           "median_abs_delta_ms": 444.5,
           "mean_abs_delta_ms": 41027.4,
           "pct_within_400ms": 48.9,
-          "pct_within_1000ms": 54.5
+          "pct_within_1000ms": 54.5,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "instrumental_breaks": {
           "n_pairs": 63,
           "median_abs_delta_ms": 323,
           "mean_abs_delta_ms": 9569.2,
           "pct_within_400ms": 55.6,
-          "pct_within_1000ms": 71.4
+          "pct_within_1000ms": 71.4,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "multi_language": {
           "n_pairs": 91,
           "median_abs_delta_ms": 1693,
           "mean_abs_delta_ms": 35581.2,
           "pct_within_400ms": 23.1,
-          "pct_within_1000ms": 29.7
+          "pct_within_1000ms": 29.7,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
         },
         "reverb_heavy": {
           "n_pairs": 38,
           "median_abs_delta_ms": 2020.5,
           "mean_abs_delta_ms": 59848.2,
           "pct_within_400ms": 21.1,
-          "pct_within_1000ms": 36.8
+          "pct_within_1000ms": 36.8,
+          "total_gold_lines": null,
+          "pct_gold_within_400ms": null
+        }
+      }
+    },
+    "monotonic": {
+      "aggregate": {
+        "n_pairs": 802,
+        "total_gold_lines": 1702,
+        "mean_abs_delta_ms": 25120.6,
+        "median_abs_delta_ms": 387.5,
+        "p90_abs_delta_ms": 108418.7,
+        "pct_within_400ms": 50.5,
+        "pct_within_1000ms": 67.5,
+        "pct_gold_within_400ms": 23.8
+      },
+      "by_category": {
+        "chant_repetition": {
+          "n_pairs": 155,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 47548.6,
+          "median_abs_delta_ms": 874,
+          "p90_abs_delta_ms": 178377.0,
+          "pct_within_400ms": 34.2,
+          "pct_within_1000ms": 52.3,
+          "pct_gold_within_400ms": null
+        },
+        "clean_pop": {
+          "n_pairs": 102,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 362.2,
+          "median_abs_delta_ms": 260.0,
+          "p90_abs_delta_ms": 590.2,
+          "pct_within_400ms": 74.5,
+          "pct_within_1000ms": 93.1,
+          "pct_gold_within_400ms": null
+        },
+        "dense_vocal": {
+          "n_pairs": 111,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 31045.1,
+          "median_abs_delta_ms": 271,
+          "p90_abs_delta_ms": 138348,
+          "pct_within_400ms": 55.9,
+          "pct_within_1000ms": 61.3,
+          "pct_gold_within_400ms": null
+        },
+        "instrumental_breaks": {
+          "n_pairs": 173,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 3423.1,
+          "median_abs_delta_ms": 334,
+          "p90_abs_delta_ms": 2073.6,
+          "pct_within_400ms": 57.8,
+          "pct_within_1000ms": 75.7,
+          "pct_gold_within_400ms": null
+        },
+        "multi_language": {
+          "n_pairs": 136,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 30339.0,
+          "median_abs_delta_ms": 302.0,
+          "p90_abs_delta_ms": 76792.0,
+          "pct_within_400ms": 55.1,
+          "pct_within_1000ms": 64.7,
+          "pct_gold_within_400ms": null
+        },
+        "reverb_heavy": {
+          "n_pairs": 125,
+          "total_gold_lines": null,
+          "mean_abs_delta_ms": 36603.6,
+          "median_abs_delta_ms": 650,
+          "p90_abs_delta_ms": 180932.6,
+          "pct_within_400ms": 31.2,
+          "pct_within_1000ms": 62.4,
+          "pct_gold_within_400ms": null
         }
       }
     },
@@ -6281,9 +6787,24 @@
     },
     "runtime": {
       "n_fixtures_with_runtime": 21,
-      "mean_runtime_sec": 149.9,
+      "mean_runtime_sec": 150.8,
       "median_runtime_sec": 86.9,
-      "total_runtime_sec": 3148.8
+      "total_runtime_sec": 3165.8,
+      "n_cuda_oom_retried": 2,
+      "by_device": {
+        "cpu": {
+          "n_fixtures": 2,
+          "mean_runtime_sec": 575.4,
+          "median_runtime_sec": 575.4,
+          "total_runtime_sec": 1150.9
+        },
+        "cuda": {
+          "n_fixtures": 19,
+          "mean_runtime_sec": 106.0,
+          "median_runtime_sec": 85.2,
+          "total_runtime_sec": 2014.9
+        }
+      }
     },
     "poisoned_fixture": {
       "video_id": "Xvm4_fWkXe8",
@@ -6366,14 +6887,18 @@
         "n_lines_untimed": 0,
         "n_lines_total": 395,
         "untimed_pct": 0.0,
-        "runtime_sec": 295.343
+        "runtime_sec": 295.343,
+        "device": "cuda",
+        "cuda_oom_retried": false
       },
       "conservative": {
         "n_pairs": 6,
         "median_abs_delta_ms": 122592.5,
         "mean_abs_delta_ms": 128153.2,
         "pct_within_400ms": 0.0,
-        "pct_within_1000ms": 0.0
+        "pct_within_1000ms": 0.0,
+        "total_gold_lines": null,
+        "pct_gold_within_400ms": null
       },
       "untimed_pct": 0.0
     }

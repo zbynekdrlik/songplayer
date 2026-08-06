@@ -1,0 +1,3468 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\KeZaADiRHVI_vocal16k.wav",
+  "duration_ms": null,
+  "lines": [
+    {
+      "text": "When the Holy Ghost gets a hold of you",
+      "text_sk": "Keď sa ťa zmocní Duch Svätý",
+      "start_ms": 10380,
+      "end_ms": 13760,
+      "mean_word_loss": 0.41801365746392144,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 10380,
+          "end_ms": 10540,
+          "loss": 0.9449462890625
+        },
+        {
+          "text": "the",
+          "start_ms": 10560,
+          "end_ms": 10640,
+          "loss": 0.025785446166992188
+        },
+        {
+          "text": "Holy",
+          "start_ms": 10680,
+          "end_ms": 11020,
+          "loss": 0.9720840454101562
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 11080,
+          "end_ms": 11640,
+          "loss": 0.01671772003173828
+        },
+        {
+          "text": "gets",
+          "start_ms": 12780,
+          "end_ms": 12940,
+          "loss": 1.0621185302734375
+        },
+        {
+          "text": "a",
+          "start_ms": 12960,
+          "end_ms": 13040,
+          "loss": 0.287109375
+        },
+        {
+          "text": "hold",
+          "start_ms": 13080,
+          "end_ms": 13380,
+          "loss": 0.26445770263671875
+        },
+        {
+          "text": "of",
+          "start_ms": 13420,
+          "end_ms": 13520,
+          "loss": 0.18310546875
+        },
+        {
+          "text": "you",
+          "start_ms": 13620,
+          "end_ms": 13760,
+          "loss": 0.00579833984375
+        }
+      ]
+    },
+    {
+      "text": "There's no telling what you're liable to do",
+      "text_sk": "Nedá sa povedať, čo všetko môžeš urobiť",
+      "start_ms": 15600,
+      "end_ms": 17280,
+      "mean_word_loss": 0.2735293252127511,
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 15600,
+          "end_ms": 15740,
+          "loss": 0.4470585414341518
+        },
+        {
+          "text": "no",
+          "start_ms": 15780,
+          "end_ms": 15880,
+          "loss": 0.0086212158203125
+        },
+        {
+          "text": "telling",
+          "start_ms": 16040,
+          "end_ms": 16340,
+          "loss": 0.27700369698660715
+        },
+        {
+          "text": "what",
+          "start_ms": 16379,
+          "end_ms": 16500,
+          "loss": 0.04152679443359375
+        },
+        {
+          "text": "you're",
+          "start_ms": 16560,
+          "end_ms": 16640,
+          "loss": 0.3394635518391927
+        },
+        {
+          "text": "liable",
+          "start_ms": 16680,
+          "end_ms": 17000,
+          "loss": 0.9956461588541666
+        },
+        {
+          "text": "to",
+          "start_ms": 17020,
+          "end_ms": 17100,
+          "loss": 0.0753173828125
+        },
+        {
+          "text": "do",
+          "start_ms": 17160,
+          "end_ms": 17280,
+          "loss": 0.003597259521484375
+        }
+      ]
+    },
+    {
+      "text": "No telling what you're liable to do",
+      "text_sk": "Nedá sa povedať, čo všetko môžeš urobiť",
+      "start_ms": 17600,
+      "end_ms": 19080,
+      "mean_word_loss": 0.5738507614654749,
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 17600,
+          "end_ms": 17800,
+          "loss": 1.9307861328125
+        },
+        {
+          "text": "telling",
+          "start_ms": 17840,
+          "end_ms": 18140,
+          "loss": 0.41166904994419645
+        },
+        {
+          "text": "what",
+          "start_ms": 18200,
+          "end_ms": 18300,
+          "loss": 0.03285980224609375
+        },
+        {
+          "text": "you're",
+          "start_ms": 18360,
+          "end_ms": 18440,
+          "loss": 0.3376502990722656
+        },
+        {
+          "text": "liable",
+          "start_ms": 18500,
+          "end_ms": 18690,
+          "loss": 1.1794840494791667
+        },
+        {
+          "text": "to",
+          "start_ms": 18860,
+          "end_ms": 18920,
+          "loss": 0.120391845703125
+        },
+        {
+          "text": "do",
+          "start_ms": 18960,
+          "end_ms": 19080,
+          "loss": 0.0041141510009765625
+        }
+      ]
+    },
+    {
+      "text": "Might get fired up",
+      "text_sk": "Možno sa rozhoríš",
+      "start_ms": 19560,
+      "end_ms": 20980,
+      "mean_word_loss": 0.5294784545898438,
+      "words": [
+        {
+          "text": "Might",
+          "start_ms": 19560,
+          "end_ms": 19810,
+          "loss": 1.07763671875
+        },
+        {
+          "text": "get",
+          "start_ms": 19840,
+          "end_ms": 19990,
+          "loss": 0.246551513671875
+        },
+        {
+          "text": "fired",
+          "start_ms": 20240,
+          "end_ms": 20780,
+          "loss": 0.136865234375
+        },
+        {
+          "text": "up",
+          "start_ms": 20840,
+          "end_ms": 20980,
+          "loss": 0.6568603515625
+        }
+      ]
+    },
+    {
+      "text": "You might get free",
+      "text_sk": "Možno sa oslobodíš",
+      "start_ms": 22360,
+      "end_ms": 23680,
+      "mean_word_loss": 0.5553763707478842,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 22360,
+          "end_ms": 22460,
+          "loss": 1.8420206705729167
+        },
+        {
+          "text": "might",
+          "start_ms": 22560,
+          "end_ms": 22800,
+          "loss": 0.3254203796386719
+        },
+        {
+          "text": "get",
+          "start_ms": 22840,
+          "end_ms": 23160,
+          "loss": 0.028589884440104168
+        },
+        {
+          "text": "free",
+          "start_ms": 23260,
+          "end_ms": 23680,
+          "loss": 0.02547454833984375
+        }
+      ]
+    },
+    {
+      "text": "But if you bring cold water don't pour your water on me",
+      "text_sk": "Ale ak prinesieš studenú vodu, nevylej ju na mňa",
+      "start_ms": 25380,
+      "end_ms": 28920,
+      "mean_word_loss": 0.5900182512071398,
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 25380,
+          "end_ms": 25700,
+          "loss": 1.0071614583333333
+        },
+        {
+          "text": "if",
+          "start_ms": 25800,
+          "end_ms": 25960,
+          "loss": 0.08219146728515625
+        },
+        {
+          "text": "you",
+          "start_ms": 26020,
+          "end_ms": 26160,
+          "loss": 0.014556884765625
+        },
+        {
+          "text": "bring",
+          "start_ms": 26240,
+          "end_ms": 26520,
+          "loss": 0.7732421875
+        },
+        {
+          "text": "cold",
+          "start_ms": 26580,
+          "end_ms": 26820,
+          "loss": 1.66552734375
+        },
+        {
+          "text": "water",
+          "start_ms": 26860,
+          "end_ms": 27150,
+          "loss": 1.0890625
+        },
+        {
+          "text": "don't",
+          "start_ms": 27220,
+          "end_ms": 27380,
+          "loss": 0.2115264892578125
+        },
+        {
+          "text": "pour",
+          "start_ms": 27480,
+          "end_ms": 27720,
+          "loss": 0.333251953125
+        },
+        {
+          "text": "your",
+          "start_ms": 27780,
+          "end_ms": 27980,
+          "loss": 0.62249755859375
+        },
+        {
+          "text": "water",
+          "start_ms": 28040,
+          "end_ms": 28400,
+          "loss": 1.0763671875
+        },
+        {
+          "text": "on",
+          "start_ms": 28460,
+          "end_ms": 28620,
+          "loss": 0.18310546875
+        },
+        {
+          "text": "me",
+          "start_ms": 28680,
+          "end_ms": 28920,
+          "loss": 0.021728515625
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "text_sk": "Mám Ducha Svätého a horím",
+      "start_ms": 29260,
+      "end_ms": 32380,
+      "mean_word_loss": 0.09781604645744203,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 29260,
+          "end_ms": 29340,
+          "loss": 0.181640625
+        },
+        {
+          "text": "got",
+          "start_ms": 29460,
+          "end_ms": 29700,
+          "loss": 0.005406697591145833
+        },
+        {
+          "text": "the",
+          "start_ms": 29720,
+          "end_ms": 29800,
+          "loss": 0.0177764892578125
+        },
+        {
+          "text": "Holy",
+          "start_ms": 29840,
+          "end_ms": 30240,
+          "loss": 0.34804630279541016
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 30280,
+          "end_ms": 30880,
+          "loss": 0.018898582458496092
+        },
+        {
+          "text": "and",
+          "start_ms": 31280,
+          "end_ms": 31400,
+          "loss": 0.23812103271484375
+        },
+        {
+          "text": "I'm",
+          "start_ms": 31480,
+          "end_ms": 31600,
+          "loss": 0.0032297770182291665
+        },
+        {
+          "text": "burning",
+          "start_ms": 31680,
+          "end_ms": 32160,
+          "loss": 0.05816595894949777
+        },
+        {
+          "text": "up",
+          "start_ms": 32220,
+          "end_ms": 32380,
+          "loss": 0.009058952331542969
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up now now now now",
+      "text_sk": "Mám Ducha Svätého a horím teraz teraz teraz teraz",
+      "start_ms": 34080,
+      "end_ms": 37850,
+      "mean_word_loss": 0.47889618786263377,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 34080,
+          "end_ms": 34200,
+          "loss": 0.3828125
+        },
+        {
+          "text": "got",
+          "start_ms": 34260,
+          "end_ms": 34460,
+          "loss": 0.013209025065104166
+        },
+        {
+          "text": "the",
+          "start_ms": 34500,
+          "end_ms": 34580,
+          "loss": 0.026265462239583332
+        },
+        {
+          "text": "Holy",
+          "start_ms": 34640,
+          "end_ms": 35020,
+          "loss": 0.06258106231689453
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 35120,
+          "end_ms": 35720,
+          "loss": 0.013598823547363281
+        },
+        {
+          "text": "and",
+          "start_ms": 36060,
+          "end_ms": 36180,
+          "loss": 0.19489097595214844
+        },
+        {
+          "text": "I'm",
+          "start_ms": 36320,
+          "end_ms": 36410,
+          "loss": 0.002166748046875
+        },
+        {
+          "text": "burning",
+          "start_ms": 36480,
+          "end_ms": 36960,
+          "loss": 0.050295421055385044
+        },
+        {
+          "text": "up",
+          "start_ms": 37040,
+          "end_ms": 37180,
+          "loss": 0.00749969482421875
+        },
+        {
+          "text": "now",
+          "start_ms": 37240,
+          "end_ms": 37460,
+          "loss": 2.220703125
+        },
+        {
+          "text": "now",
+          "start_ms": 37560,
+          "end_ms": 37800,
+          "loss": 1.2649739583333333
+        },
+        {
+          "text": "now",
+          "start_ms": 37810,
+          "end_ms": 37811,
+          "loss": 0.9951171875
+        },
+        {
+          "text": "now",
+          "start_ms": 37840,
+          "end_ms": 37850,
+          "loss": 0.9915364583333334
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "text_sk": "Mám Ducha Svätého a horím",
+      "start_ms": 38920,
+      "end_ms": 42040,
+      "mean_word_loss": 0.20740769704182943,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 38920,
+          "end_ms": 38960,
+          "loss": 1.3359375
+        },
+        {
+          "text": "got",
+          "start_ms": 39060,
+          "end_ms": 39240,
+          "loss": 0.18952178955078125
+        },
+        {
+          "text": "the",
+          "start_ms": 39300,
+          "end_ms": 39360,
+          "loss": 0.061442057291666664
+        },
+        {
+          "text": "Holy",
+          "start_ms": 39440,
+          "end_ms": 39820,
+          "loss": 0.09253311157226562
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 39920,
+          "end_ms": 40540,
+          "loss": 0.01872596740722656
+        },
+        {
+          "text": "and",
+          "start_ms": 40840,
+          "end_ms": 41000,
+          "loss": 0.11064211527506511
+        },
+        {
+          "text": "I'm",
+          "start_ms": 41080,
+          "end_ms": 41240,
+          "loss": 0.0015970865885416667
+        },
+        {
+          "text": "burning",
+          "start_ms": 41300,
+          "end_ms": 41790,
+          "loss": 0.049056053161621094
+        },
+        {
+          "text": "up",
+          "start_ms": 41840,
+          "end_ms": 42040,
+          "loss": 0.007213592529296875
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Holy Ghost and I'm burning up I'm burning up I'm burning up",
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím horím",
+      "start_ms": 43720,
+      "end_ms": 49140,
+      "mean_word_loss": 0.17597712164833432,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 43720,
+          "end_ms": 43820,
+          "loss": 0.2236328125
+        },
+        {
+          "text": "got",
+          "start_ms": 43880,
+          "end_ms": 44080,
+          "loss": 0.015350341796875
+        },
+        {
+          "text": "the",
+          "start_ms": 44120,
+          "end_ms": 44220,
+          "loss": 0.029886881510416668
+        },
+        {
+          "text": "Holy",
+          "start_ms": 44260,
+          "end_ms": 44700,
+          "loss": 0.042517662048339844
+        },
+        {
+          "text": "Holy",
+          "start_ms": 44800,
+          "end_ms": 45100,
+          "loss": 1.7971343994140625
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 45200,
+          "end_ms": 45680,
+          "loss": 0.01461963653564453
+        },
+        {
+          "text": "and",
+          "start_ms": 45700,
+          "end_ms": 45830,
+          "loss": 0.20774459838867188
+        },
+        {
+          "text": "I'm",
+          "start_ms": 45900,
+          "end_ms": 46040,
+          "loss": 0.001739501953125
+        },
+        {
+          "text": "burning",
+          "start_ms": 46100,
+          "end_ms": 46560,
+          "loss": 0.060254505702427456
+        },
+        {
+          "text": "up",
+          "start_ms": 46640,
+          "end_ms": 46940,
+          "loss": 0.0074672698974609375
+        },
+        {
+          "text": "I'm",
+          "start_ms": 47040,
+          "end_ms": 47230,
+          "loss": 0.16056315104166666
+        },
+        {
+          "text": "burning",
+          "start_ms": 47300,
+          "end_ms": 47780,
+          "loss": 0.08022349221365792
+        },
+        {
+          "text": "up",
+          "start_ms": 47840,
+          "end_ms": 47940,
+          "loss": 0.0054759979248046875
+        },
+        {
+          "text": "I'm",
+          "start_ms": 48260,
+          "end_ms": 48460,
+          "loss": 0.09444173177083333
+        },
+        {
+          "text": "burning",
+          "start_ms": 48500,
+          "end_ms": 48980,
+          "loss": 0.0698021480015346
+        },
+        {
+          "text": "up",
+          "start_ms": 49040,
+          "end_ms": 49140,
+          "loss": 0.004779815673828125
+        }
+      ]
+    },
+    {
+      "text": "Well it's getting wild in this upper room",
+      "text_sk": "No, v tejto hornej izbe sa to divočí",
+      "start_ms": 58260,
+      "end_ms": 61840,
+      "mean_word_loss": 1.3339544568743025,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 58260,
+          "end_ms": 58340,
+          "loss": 2.2801513671875
+        },
+        {
+          "text": "it's",
+          "start_ms": 58400,
+          "end_ms": 58640,
+          "loss": 1.5367431640625
+        },
+        {
+          "text": "getting",
+          "start_ms": 58680,
+          "end_ms": 59060,
+          "loss": 1.1608080182756697
+        },
+        {
+          "text": "wild",
+          "start_ms": 59140,
+          "end_ms": 59680,
+          "loss": 1.234375
+        },
+        {
+          "text": "in",
+          "start_ms": 59860,
+          "end_ms": 60720,
+          "loss": 1.75
+        },
+        {
+          "text": "this",
+          "start_ms": 60760,
+          "end_ms": 60970,
+          "loss": 0.978424072265625
+        },
+        {
+          "text": "upper",
+          "start_ms": 61060,
+          "end_ms": 61420,
+          "loss": 1.39364013671875
+        },
+        {
+          "text": "room",
+          "start_ms": 61520,
+          "end_ms": 61840,
+          "loss": 0.337493896484375
+        }
+      ]
+    },
+    {
+      "text": "It ain't wine no it's a different juice",
+      "text_sk": "Nie je to víno, nie, je to iná šťava",
+      "start_ms": 61940,
+      "end_ms": 66720,
+      "mean_word_loss": 1.0065461609098647,
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 61940,
+          "end_ms": 62120,
+          "loss": 3.6328125
+        },
+        {
+          "text": "ain't",
+          "start_ms": 63620,
+          "end_ms": 63800,
+          "loss": 0.44757232666015623
+        },
+        {
+          "text": "wine",
+          "start_ms": 63860,
+          "end_ms": 64300,
+          "loss": 1.25390625
+        },
+        {
+          "text": "no",
+          "start_ms": 64920,
+          "end_ms": 65140,
+          "loss": 1.498779296875
+        },
+        {
+          "text": "it's",
+          "start_ms": 65519,
+          "end_ms": 65680,
+          "loss": 0.47003173828125
+        },
+        {
+          "text": "a",
+          "start_ms": 65740,
+          "end_ms": 65800,
+          "loss": 0.236328125
+        },
+        {
+          "text": "different",
+          "start_ms": 65860,
+          "end_ms": 66260,
+          "loss": 0.01054647233751085
+        },
+        {
+          "text": "juice",
+          "start_ms": 66320,
+          "end_ms": 66720,
+          "loss": 0.502392578125
+        }
+      ]
+    },
+    {
+      "text": "Well it don't run out you can get it for free",
+      "text_sk": "No, neminie sa, môžeš ho mať zadarmo",
+      "start_ms": 67860,
+      "end_ms": 71540,
+      "mean_word_loss": 0.27896339532100795,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 67860,
+          "end_ms": 67960,
+          "loss": 1.7803955078125
+        },
+        {
+          "text": "it",
+          "start_ms": 68000,
+          "end_ms": 68040,
+          "loss": 0.1947021484375
+        },
+        {
+          "text": "don't",
+          "start_ms": 68140,
+          "end_ms": 68360,
+          "loss": 0.12159461975097656
+        },
+        {
+          "text": "run",
+          "start_ms": 68420,
+          "end_ms": 68720,
+          "loss": 0.3653157552083333
+        },
+        {
+          "text": "out",
+          "start_ms": 68860,
+          "end_ms": 69040,
+          "loss": 0.06637064615885417
+        },
+        {
+          "text": "you",
+          "start_ms": 70380,
+          "end_ms": 70460,
+          "loss": 0.3944753011067708
+        },
+        {
+          "text": "can",
+          "start_ms": 70500,
+          "end_ms": 70620,
+          "loss": 0.08113606770833333
+        },
+        {
+          "text": "get",
+          "start_ms": 70680,
+          "end_ms": 70840,
+          "loss": 0.025534311930338543
+        },
+        {
+          "text": "it",
+          "start_ms": 70900,
+          "end_ms": 70940,
+          "loss": 0.0080108642578125
+        },
+        {
+          "text": "for",
+          "start_ms": 70960,
+          "end_ms": 71070,
+          "loss": 0.021820068359375
+        },
+        {
+          "text": "free",
+          "start_ms": 71140,
+          "end_ms": 71540,
+          "loss": 0.009242057800292969
+        }
+      ]
+    },
+    {
+      "text": "But I didn't get it from you so you can't take it from me",
+      "text_sk": "Ale nedostal som ho od teba, takže mi ho nemôžeš vziať",
+      "start_ms": 73160,
+      "end_ms": 77020,
+      "mean_word_loss": 0.2412581125895182,
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 73160,
+          "end_ms": 73320,
+          "loss": 0.9500617980957031
+        },
+        {
+          "text": "I",
+          "start_ms": 73520,
+          "end_ms": 73560,
+          "loss": 0.004241943359375
+        },
+        {
+          "text": "didn't",
+          "start_ms": 73660,
+          "end_ms": 74020,
+          "loss": 0.020314534505208332
+        },
+        {
+          "text": "get",
+          "start_ms": 74300,
+          "end_ms": 74440,
+          "loss": 0.011049906412760416
+        },
+        {
+          "text": "it",
+          "start_ms": 74460,
+          "end_ms": 74540,
+          "loss": 0.48793792724609375
+        },
+        {
+          "text": "from",
+          "start_ms": 74600,
+          "end_ms": 74740,
+          "loss": 0.018260955810546875
+        },
+        {
+          "text": "you",
+          "start_ms": 74820,
+          "end_ms": 75060,
+          "loss": 0.003931681315104167
+        },
+        {
+          "text": "so",
+          "start_ms": 75340,
+          "end_ms": 75460,
+          "loss": 0.09716796875
+        },
+        {
+          "text": "you",
+          "start_ms": 75520,
+          "end_ms": 75700,
+          "loss": 0.030008951822916668
+        },
+        {
+          "text": "can't",
+          "start_ms": 75820,
+          "end_ms": 76040,
+          "loss": 1.3939430236816406
+        },
+        {
+          "text": "take",
+          "start_ms": 76080,
+          "end_ms": 76320,
+          "loss": 0.279296875
+        },
+        {
+          "text": "it",
+          "start_ms": 76380,
+          "end_ms": 76460,
+          "loss": 0.00803375244140625
+        },
+        {
+          "text": "from",
+          "start_ms": 76520,
+          "end_ms": 76700,
+          "loss": 0.0672149658203125
+        },
+        {
+          "text": "me",
+          "start_ms": 76760,
+          "end_ms": 77020,
+          "loss": 0.0061492919921875
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "text_sk": "Mám Ducha Svätého a horím",
+      "start_ms": 77280,
+      "end_ms": 81580,
+      "mean_word_loss": 0.05590427640884642,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 77280,
+          "end_ms": 77340,
+          "loss": 0.248046875
+        },
+        {
+          "text": "got",
+          "start_ms": 77440,
+          "end_ms": 77620,
+          "loss": 0.010584513346354166
+        },
+        {
+          "text": "the",
+          "start_ms": 77680,
+          "end_ms": 77780,
+          "loss": 0.023648579915364582
+        },
+        {
+          "text": "Holy",
+          "start_ms": 77840,
+          "end_ms": 78240,
+          "loss": 0.06489944458007812
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 78340,
+          "end_ms": 79040,
+          "loss": 0.013254928588867187
+        },
+        {
+          "text": "and",
+          "start_ms": 79280,
+          "end_ms": 79400,
+          "loss": 0.04354222615559896
+        },
+        {
+          "text": "I'm",
+          "start_ms": 79480,
+          "end_ms": 79600,
+          "loss": 0.0015055338541666667
+        },
+        {
+          "text": "burning",
+          "start_ms": 79680,
+          "end_ms": 80180,
+          "loss": 0.09076322828020368
+        },
+        {
+          "text": "up",
+          "start_ms": 80260,
+          "end_ms": 81580,
+          "loss": 0.006893157958984375
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up now now now now",
+      "text_sk": "Mám Ducha Svätého a horím teraz teraz teraz teraz",
+      "start_ms": 81980,
+      "end_ms": 86051,
+      "mean_word_loss": 0.47230899796817766,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 81980,
+          "end_ms": 82100,
+          "loss": 0.2353515625
+        },
+        {
+          "text": "got",
+          "start_ms": 82220,
+          "end_ms": 82480,
+          "loss": 0.020696004231770832
+        },
+        {
+          "text": "the",
+          "start_ms": 82500,
+          "end_ms": 82570,
+          "loss": 0.031453450520833336
+        },
+        {
+          "text": "Holy",
+          "start_ms": 82640,
+          "end_ms": 83040,
+          "loss": 0.04201221466064453
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 83140,
+          "end_ms": 83760,
+          "loss": 0.011841964721679688
+        },
+        {
+          "text": "and",
+          "start_ms": 84080,
+          "end_ms": 84180,
+          "loss": 0.13745943705240884
+        },
+        {
+          "text": "I'm",
+          "start_ms": 84280,
+          "end_ms": 84430,
+          "loss": 0.0017547607421875
+        },
+        {
+          "text": "burning",
+          "start_ms": 84520,
+          "end_ms": 84960,
+          "loss": 0.08486134665352958
+        },
+        {
+          "text": "up",
+          "start_ms": 85020,
+          "end_ms": 85160,
+          "loss": 0.007854461669921875
+        },
+        {
+          "text": "now",
+          "start_ms": 85380,
+          "end_ms": 85490,
+          "loss": 2.2350260416666665
+        },
+        {
+          "text": "now",
+          "start_ms": 85490,
+          "end_ms": 85491,
+          "loss": 1.3470052083333333
+        },
+        {
+          "text": "now",
+          "start_ms": 85491,
+          "end_ms": 86050,
+          "loss": 1.0045572916666667
+        },
+        {
+          "text": "now",
+          "start_ms": 86050,
+          "end_ms": 86051,
+          "loss": 0.9801432291666666
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "text_sk": "Mám Ducha Svätého, horím",
+      "start_ms": 86140,
+      "end_ms": 90020,
+      "mean_word_loss": 0.44912041141873316,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 86140,
+          "end_ms": 86180,
+          "loss": 1.640625
+        },
+        {
+          "text": "got",
+          "start_ms": 87080,
+          "end_ms": 87280,
+          "loss": 0.3982747395833333
+        },
+        {
+          "text": "the",
+          "start_ms": 87340,
+          "end_ms": 87420,
+          "loss": 0.1025390625
+        },
+        {
+          "text": "Holy",
+          "start_ms": 87460,
+          "end_ms": 87880,
+          "loss": 0.08855056762695312
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 87940,
+          "end_ms": 88600,
+          "loss": 0.017560577392578124
+        },
+        {
+          "text": "I'm",
+          "start_ms": 89060,
+          "end_ms": 89240,
+          "loss": 1.248046875
+        },
+        {
+          "text": "burning",
+          "start_ms": 89300,
+          "end_ms": 89760,
+          "loss": 0.08922209058489118
+        },
+        {
+          "text": "up",
+          "start_ms": 89860,
+          "end_ms": 90020,
+          "loss": 0.008144378662109375
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Holy Ghost and I'm burning up I'm burning up",
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím",
+      "start_ms": 91620,
+      "end_ms": 95980,
+      "mean_word_loss": 0.20965733860001895,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 91620,
+          "end_ms": 91680,
+          "loss": 0.2734375
+        },
+        {
+          "text": "got",
+          "start_ms": 91840,
+          "end_ms": 92000,
+          "loss": 0.0305328369140625
+        },
+        {
+          "text": "the",
+          "start_ms": 92080,
+          "end_ms": 92130,
+          "loss": 0.052734375
+        },
+        {
+          "text": "Holy",
+          "start_ms": 92220,
+          "end_ms": 93080,
+          "loss": 0.03794288635253906
+        },
+        {
+          "text": "Holy",
+          "start_ms": 93090,
+          "end_ms": 93091,
+          "loss": 1.7671279907226562
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 93180,
+          "end_ms": 93600,
+          "loss": 0.016464614868164064
+        },
+        {
+          "text": "and",
+          "start_ms": 93740,
+          "end_ms": 93780,
+          "loss": 0.19594128926595053
+        },
+        {
+          "text": "I'm",
+          "start_ms": 93880,
+          "end_ms": 94010,
+          "loss": 0.0016352335611979167
+        },
+        {
+          "text": "burning",
+          "start_ms": 94080,
+          "end_ms": 94550,
+          "loss": 0.10030950818743024
+        },
+        {
+          "text": "up",
+          "start_ms": 94640,
+          "end_ms": 94740,
+          "loss": 0.00769805908203125
+        },
+        {
+          "text": "I'm",
+          "start_ms": 95060,
+          "end_ms": 95220,
+          "loss": 0.13981119791666666
+        },
+        {
+          "text": "burning",
+          "start_ms": 95280,
+          "end_ms": 95740,
+          "loss": 0.09590462275913783
+        },
+        {
+          "text": "up",
+          "start_ms": 95820,
+          "end_ms": 95980,
+          "loss": 0.006005287170410156
+        }
+      ]
+    },
+    {
+      "text": "I'm bbbbbburning up I'm burning up I'm burning up",
+      "text_sk": "Hhhhhhhorím, horím, horím",
+      "start_ms": 96200,
+      "end_ms": 99520,
+      "mean_word_loss": 0.5652709965983396,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 96200,
+          "end_ms": 96300,
+          "loss": 0.08528645833333333
+        },
+        {
+          "text": "bbbbbburning",
+          "start_ms": 96420,
+          "end_ms": 98120,
+          "loss": 4.560703118642171
+        },
+        {
+          "text": "up",
+          "start_ms": 98180,
+          "end_ms": 98280,
+          "loss": 0.008271217346191406
+        },
+        {
+          "text": "I'm",
+          "start_ms": 98600,
+          "end_ms": 98780,
+          "loss": 0.12052408854166667
+        },
+        {
+          "text": "burning",
+          "start_ms": 98790,
+          "end_ms": 98791,
+          "loss": 0.07390172140938896
+        },
+        {
+          "text": "up",
+          "start_ms": 98790,
+          "end_ms": 98791,
+          "loss": 0.02577686309814453
+        },
+        {
+          "text": "I'm",
+          "start_ms": 98790,
+          "end_ms": 98791,
+          "loss": 0.10833740234375
+        },
+        {
+          "text": "burning",
+          "start_ms": 98840,
+          "end_ms": 99340,
+          "loss": 0.07386398315429688
+        },
+        {
+          "text": "up",
+          "start_ms": 99420,
+          "end_ms": 99520,
+          "loss": 0.03077411651611328
+        }
+      ]
+    },
+    {
+      "text": "I'm bbbbbburning up I'm burning up",
+      "text_sk": "Hhhhhhhorím, horím",
+      "start_ms": 99840,
+      "end_ms": 104360,
+      "mean_word_loss": 0.7943176655542282,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 99840,
+          "end_ms": 100000,
+          "loss": 0.11204020182291667
+        },
+        {
+          "text": "bbbbbburning",
+          "start_ms": 100060,
+          "end_ms": 100530,
+          "loss": 4.395145257314046
+        },
+        {
+          "text": "up",
+          "start_ms": 100600,
+          "end_ms": 100820,
+          "loss": 0.020172119140625
+        },
+        {
+          "text": "I'm",
+          "start_ms": 100960,
+          "end_ms": 103620,
+          "loss": 0.117919921875
+        },
+        {
+          "text": "burning",
+          "start_ms": 103660,
+          "end_ms": 104140,
+          "loss": 0.08509363446916852
+        },
+        {
+          "text": "up",
+          "start_ms": 104220,
+          "end_ms": 104360,
+          "loss": 0.03553485870361328
+        }
+      ]
+    },
+    {
+      "text": "Burning up",
+      "text_sk": "Horím",
+      "start_ms": 105760,
+      "end_ms": 108460,
+      "mean_word_loss": 0.4877826145717076,
+      "words": [
+        {
+          "text": "Burning",
+          "start_ms": 105760,
+          "end_ms": 106200,
+          "loss": 0.8640005929129464
+        },
+        {
+          "text": "up",
+          "start_ms": 108220,
+          "end_ms": 108460,
+          "loss": 0.11156463623046875
+        }
+      ]
+    },
+    {
+      "text": "Burning up",
+      "text_sk": "Horím",
+      "start_ms": 108480,
+      "end_ms": 111510,
+      "mean_word_loss": 0.41756629943847656,
+      "words": [
+        {
+          "text": "Burning",
+          "start_ms": 108480,
+          "end_ms": 108940,
+          "loss": 0.7030525207519531
+        },
+        {
+          "text": "up",
+          "start_ms": 109040,
+          "end_ms": 111510,
+          "loss": 0.132080078125
+        }
+      ]
+    },
+    {
+      "text": "Hey Moses Moses hey Moses",
+      "text_sk": "Hej Mojžiš, Mojžiš, hej Mojžiš",
+      "start_ms": 115320,
+      "end_ms": 120770,
+      "mean_word_loss": 1.4023046875,
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 115320,
+          "end_ms": 115620,
+          "loss": 1.83203125
+        },
+        {
+          "text": "Moses",
+          "start_ms": 116240,
+          "end_ms": 116720,
+          "loss": 1.9818359375
+        },
+        {
+          "text": "Moses",
+          "start_ms": 116780,
+          "end_ms": 117460,
+          "loss": 1.0375
+        },
+        {
+          "text": "hey",
+          "start_ms": 117680,
+          "end_ms": 117960,
+          "loss": 1.166015625
+        },
+        {
+          "text": "Moses",
+          "start_ms": 118020,
+          "end_ms": 120770,
+          "loss": 0.994140625
+        }
+      ]
+    },
+    {
+      "text": "Said hey Moses yeah",
+      "text_sk": "Povedal hej Mojžiš, áno",
+      "start_ms": 120771,
+      "end_ms": 123860,
+      "mean_word_loss": 1.5085895538330079,
+      "words": [
+        {
+          "text": "Said",
+          "start_ms": 120771,
+          "end_ms": 121000,
+          "loss": 2.884765625
+        },
+        {
+          "text": "hey",
+          "start_ms": 121400,
+          "end_ms": 121620,
+          "loss": 1.3515625
+        },
+        {
+          "text": "Moses",
+          "start_ms": 121660,
+          "end_ms": 122340,
+          "loss": 0.707080078125
+        },
+        {
+          "text": "yeah",
+          "start_ms": 123160,
+          "end_ms": 123860,
+          "loss": 1.0909500122070312
+        }
+      ]
+    },
+    {
+      "text": "Yeah said Moses Moses take off your shoes",
+      "text_sk": "Áno, povedal Mojžiš, Mojžiš, vyzuj si topánky",
+      "start_ms": 124980,
+      "end_ms": 129240,
+      "mean_word_loss": 1.0644426703453065,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 124980,
+          "end_ms": 125160,
+          "loss": 2.4902796745300293
+        },
+        {
+          "text": "said",
+          "start_ms": 125500,
+          "end_ms": 125780,
+          "loss": 2.36956787109375
+        },
+        {
+          "text": "Moses",
+          "start_ms": 125880,
+          "end_ms": 126400,
+          "loss": 0.577734375
+        },
+        {
+          "text": "Moses",
+          "start_ms": 126480,
+          "end_ms": 127060,
+          "loss": 0.3126220703125
+        },
+        {
+          "text": "take",
+          "start_ms": 127920,
+          "end_ms": 128160,
+          "loss": 1.532958984375
+        },
+        {
+          "text": "off",
+          "start_ms": 128199,
+          "end_ms": 128420,
+          "loss": 1.037109375
+        },
+        {
+          "text": "your",
+          "start_ms": 128460,
+          "end_ms": 128600,
+          "loss": 0.08530807495117188
+        },
+        {
+          "text": "shoes",
+          "start_ms": 128699,
+          "end_ms": 129240,
+          "loss": 0.1099609375
+        }
+      ]
+    },
+    {
+      "text": "This is holy ground you've got a job to do",
+      "text_sk": "Toto je svätá zem, máš prácu, ktorú musíš urobiť",
+      "start_ms": 130340,
+      "end_ms": 133880,
+      "mean_word_loss": 0.2381512482961019,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 130340,
+          "end_ms": 130479,
+          "loss": 1.0576324462890625
+        },
+        {
+          "text": "is",
+          "start_ms": 130539,
+          "end_ms": 130640,
+          "loss": 0.1705322265625
+        },
+        {
+          "text": "holy",
+          "start_ms": 130680,
+          "end_ms": 131009,
+          "loss": 0.1260528564453125
+        },
+        {
+          "text": "ground",
+          "start_ms": 131100,
+          "end_ms": 131640,
+          "loss": 0.025358200073242188
+        },
+        {
+          "text": "you've",
+          "start_ms": 132220,
+          "end_ms": 132590,
+          "loss": 0.13347514470418295
+        },
+        {
+          "text": "got",
+          "start_ms": 132620,
+          "end_ms": 132780,
+          "loss": 0.00273895263671875
+        },
+        {
+          "text": "a",
+          "start_ms": 132820,
+          "end_ms": 132880,
+          "loss": 0.057861328125
+        },
+        {
+          "text": "job",
+          "start_ms": 133000,
+          "end_ms": 133260,
+          "loss": 0.7158203125
+        },
+        {
+          "text": "to",
+          "start_ms": 133280,
+          "end_ms": 133400,
+          "loss": 0.05859375
+        },
+        {
+          "text": "do",
+          "start_ms": 133500,
+          "end_ms": 133880,
+          "loss": 0.033447265625
+        }
+      ]
+    },
+    {
+      "text": "I said Moses Moses yeah I'm talking to you",
+      "text_sk": "Povedal som Mojžiš, Mojžiš, áno, hovorím s tebou",
+      "start_ms": 135000,
+      "end_ms": 138700,
+      "mean_word_loss": 0.5885851239401196,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 135000,
+          "end_ms": 135040,
+          "loss": 2.625
+        },
+        {
+          "text": "said",
+          "start_ms": 135120,
+          "end_ms": 135380,
+          "loss": 0.17350006103515625
+        },
+        {
+          "text": "Moses",
+          "start_ms": 135440,
+          "end_ms": 135880,
+          "loss": 0.5419921875
+        },
+        {
+          "text": "Moses",
+          "start_ms": 135920,
+          "end_ms": 136620,
+          "loss": 0.38974609375
+        },
+        {
+          "text": "yeah",
+          "start_ms": 137560,
+          "end_ms": 137700,
+          "loss": 1.3877143859863281
+        },
+        {
+          "text": "I'm",
+          "start_ms": 137760,
+          "end_ms": 137820,
+          "loss": 0.004475911458333333
+        },
+        {
+          "text": "talking",
+          "start_ms": 137880,
+          "end_ms": 138180,
+          "loss": 0.1661679404122489
+        },
+        {
+          "text": "to",
+          "start_ms": 138200,
+          "end_ms": 138320,
+          "loss": 0.00162506103515625
+        },
+        {
+          "text": "you",
+          "start_ms": 138420,
+          "end_ms": 138700,
+          "loss": 0.007044474283854167
+        }
+      ]
+    },
+    {
+      "text": "This is holy ground you've got a job to do",
+      "text_sk": "Toto je svätá zem, máš prácu, ktorú musíš urobiť",
+      "start_ms": 139060,
+      "end_ms": 143320,
+      "mean_word_loss": 0.4596280415852864,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 139060,
+          "end_ms": 140080,
+          "loss": 2.1715087890625
+        },
+        {
+          "text": "is",
+          "start_ms": 140140,
+          "end_ms": 140260,
+          "loss": 0.095123291015625
+        },
+        {
+          "text": "holy",
+          "start_ms": 140300,
+          "end_ms": 140640,
+          "loss": 0.2994384765625
+        },
+        {
+          "text": "ground",
+          "start_ms": 140720,
+          "end_ms": 141430,
+          "loss": 0.580963134765625
+        },
+        {
+          "text": "you've",
+          "start_ms": 141860,
+          "end_ms": 142220,
+          "loss": 0.38091786702473956
+        },
+        {
+          "text": "got",
+          "start_ms": 142240,
+          "end_ms": 142440,
+          "loss": 0.009653727213541666
+        },
+        {
+          "text": "a",
+          "start_ms": 142500,
+          "end_ms": 142600,
+          "loss": 0.416015625
+        },
+        {
+          "text": "job",
+          "start_ms": 142660,
+          "end_ms": 142900,
+          "loss": 0.5655110677083334
+        },
+        {
+          "text": "to",
+          "start_ms": 142980,
+          "end_ms": 143060,
+          "loss": 0.0540771484375
+        },
+        {
+          "text": "do",
+          "start_ms": 143120,
+          "end_ms": 143320,
+          "loss": 0.0230712890625
+        }
+      ]
+    },
+    {
+      "text": "Tell that Pharaoh how you like those frogs",
+      "text_sk": "Povedz tomu faraónovi, ako sa ti páčia tie žaby",
+      "start_ms": 145080,
+      "end_ms": 148660,
+      "mean_word_loss": 0.4542867104212443,
+      "words": [
+        {
+          "text": "Tell",
+          "start_ms": 145080,
+          "end_ms": 145320,
+          "loss": 0.887603759765625
+        },
+        {
+          "text": "that",
+          "start_ms": 145340,
+          "end_ms": 145500,
+          "loss": 0.33484458923339844
+        },
+        {
+          "text": "Pharaoh",
+          "start_ms": 145560,
+          "end_ms": 146540,
+          "loss": 1.47265625
+        },
+        {
+          "text": "how",
+          "start_ms": 147180,
+          "end_ms": 147320,
+          "loss": 0.21196111043294272
+        },
+        {
+          "text": "you",
+          "start_ms": 147360,
+          "end_ms": 147440,
+          "loss": 0.0048828125
+        },
+        {
+          "text": "like",
+          "start_ms": 147500,
+          "end_ms": 147680,
+          "loss": 0.025366783142089844
+        },
+        {
+          "text": "those",
+          "start_ms": 147720,
+          "end_ms": 147960,
+          "loss": 0.008355331420898438
+        },
+        {
+          "text": "frogs",
+          "start_ms": 147980,
+          "end_ms": 148660,
+          "loss": 0.688623046875
+        }
+      ]
+    },
+    {
+      "text": "Better let me go if you want 'em gone",
+      "text_sk": "Radšej ma pusť, ak ich chceš preč",
+      "start_ms": 149640,
+      "end_ms": 153340,
+      "mean_word_loss": 0.27018773114239725,
+      "words": [
+        {
+          "text": "Better",
+          "start_ms": 149640,
+          "end_ms": 149860,
+          "loss": 1.4705518086751301
+        },
+        {
+          "text": "let",
+          "start_ms": 149960,
+          "end_ms": 150140,
+          "loss": 0.017515818277994793
+        },
+        {
+          "text": "me",
+          "start_ms": 150220,
+          "end_ms": 150340,
+          "loss": 0.05558013916015625
+        },
+        {
+          "text": "go",
+          "start_ms": 150480,
+          "end_ms": 150880,
+          "loss": 0.012821197509765625
+        },
+        {
+          "text": "if",
+          "start_ms": 152020,
+          "end_ms": 152140,
+          "loss": 0.1313343048095703
+        },
+        {
+          "text": "you",
+          "start_ms": 152180,
+          "end_ms": 152240,
+          "loss": 0.003399531046549479
+        },
+        {
+          "text": "want",
+          "start_ms": 152320,
+          "end_ms": 152520,
+          "loss": 0.0698699951171875
+        },
+        {
+          "text": "'em",
+          "start_ms": 152530,
+          "end_ms": 152680,
+          "loss": 0.5851847330729166
+        },
+        {
+          "text": "gone",
+          "start_ms": 152760,
+          "end_ms": 153340,
+          "loss": 0.08543205261230469
+        }
+      ]
+    },
+    {
+      "text": "Yeah tell that Pharaoh how you like those frogs",
+      "text_sk": "Áno, povedz tomu faraónovi, ako sa ti páčia tie žaby",
+      "start_ms": 154400,
+      "end_ms": 158480,
+      "mean_word_loss": 0.662483315493064,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 154400,
+          "end_ms": 154530,
+          "loss": 2.049468994140625
+        },
+        {
+          "text": "tell",
+          "start_ms": 154680,
+          "end_ms": 154900,
+          "loss": 0.7144012451171875
+        },
+        {
+          "text": "that",
+          "start_ms": 154920,
+          "end_ms": 155080,
+          "loss": 0.63165283203125
+        },
+        {
+          "text": "Pharaoh",
+          "start_ms": 155140,
+          "end_ms": 155920,
+          "loss": 1.4518694196428572
+        },
+        {
+          "text": "how",
+          "start_ms": 156760,
+          "end_ms": 156920,
+          "loss": 0.3035176595052083
+        },
+        {
+          "text": "you",
+          "start_ms": 156960,
+          "end_ms": 157080,
+          "loss": 0.009267171223958334
+        },
+        {
+          "text": "like",
+          "start_ms": 157120,
+          "end_ms": 157340,
+          "loss": 0.016762971878051758
+        },
+        {
+          "text": "those",
+          "start_ms": 157400,
+          "end_ms": 157680,
+          "loss": 0.0268280029296875
+        },
+        {
+          "text": "frogs",
+          "start_ms": 157700,
+          "end_ms": 158480,
+          "loss": 0.75858154296875
+        }
+      ]
+    },
+    {
+      "text": "You better let me go if you want 'em gone",
+      "text_sk": "Radšej ma pusť, ak ich chceš preč",
+      "start_ms": 158840,
+      "end_ms": 163000,
+      "mean_word_loss": 0.18637237548828126,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 158840,
+          "end_ms": 159160,
+          "loss": 0.9774576822916666
+        },
+        {
+          "text": "better",
+          "start_ms": 159240,
+          "end_ms": 159540,
+          "loss": 0.0047206878662109375
+        },
+        {
+          "text": "let",
+          "start_ms": 159620,
+          "end_ms": 159860,
+          "loss": 0.009663899739583334
+        },
+        {
+          "text": "me",
+          "start_ms": 159940,
+          "end_ms": 160060,
+          "loss": 0.02440643310546875
+        },
+        {
+          "text": "go",
+          "start_ms": 160240,
+          "end_ms": 161060,
+          "loss": 0.0056819915771484375
+        },
+        {
+          "text": "if",
+          "start_ms": 161600,
+          "end_ms": 161760,
+          "loss": 0.10649871826171875
+        },
+        {
+          "text": "you",
+          "start_ms": 161800,
+          "end_ms": 161880,
+          "loss": 0.004215240478515625
+        },
+        {
+          "text": "want",
+          "start_ms": 161940,
+          "end_ms": 162160,
+          "loss": 0.07026481628417969
+        },
+        {
+          "text": "'em",
+          "start_ms": 162180,
+          "end_ms": 162360,
+          "loss": 0.584228515625
+        },
+        {
+          "text": "gone",
+          "start_ms": 162400,
+          "end_ms": 163000,
+          "loss": 0.07658576965332031
+        }
+      ]
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie",
+      "start_ms": 163080,
+      "end_ms": 167980,
+      "mean_word_loss": 0.48503897303626653,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 163080,
+          "end_ms": 164540,
+          "loss": 1.411651611328125
+        },
+        {
+          "text": "that",
+          "start_ms": 164600,
+          "end_ms": 164820,
+          "loss": 0.0738058090209961
+        },
+        {
+          "text": "bush",
+          "start_ms": 164860,
+          "end_ms": 165140,
+          "loss": 0.18951416015625
+        },
+        {
+          "text": "was",
+          "start_ms": 165220,
+          "end_ms": 165420,
+          "loss": 0.015248616536458334
+        },
+        {
+          "text": "burning",
+          "start_ms": 165480,
+          "end_ms": 165760,
+          "loss": 0.059349196297781806
+        },
+        {
+          "text": "but",
+          "start_ms": 165800,
+          "end_ms": 166020,
+          "loss": 0.023869832356770832
+        },
+        {
+          "text": "it",
+          "start_ms": 166240,
+          "end_ms": 166380,
+          "loss": 2.50689697265625
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 166420,
+          "end_ms": 166660,
+          "loss": 0.05244763692220052
+        },
+        {
+          "text": "burning",
+          "start_ms": 166700,
+          "end_ms": 167160,
+          "loss": 0.07132107870919364
+        },
+        {
+          "text": "up",
+          "start_ms": 167240,
+          "end_ms": 167370,
+          "loss": 0.037944793701171875
+        },
+        {
+          "text": "no",
+          "start_ms": 167460,
+          "end_ms": 167620,
+          "loss": 0.46240234375
+        },
+        {
+          "text": "no",
+          "start_ms": 167760,
+          "end_ms": 167980,
+          "loss": 0.916015625
+        }
+      ]
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no no no no no",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie nie nie nie nie",
+      "start_ms": 169220,
+      "end_ms": 173770,
+      "mean_word_loss": 0.5951425851810546,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 169220,
+          "end_ms": 169320,
+          "loss": 1.538330078125
+        },
+        {
+          "text": "that",
+          "start_ms": 169380,
+          "end_ms": 169620,
+          "loss": 0.06712698936462402
+        },
+        {
+          "text": "bush",
+          "start_ms": 169680,
+          "end_ms": 169920,
+          "loss": 0.446380615234375
+        },
+        {
+          "text": "was",
+          "start_ms": 170000,
+          "end_ms": 170220,
+          "loss": 0.037638346354166664
+        },
+        {
+          "text": "burning",
+          "start_ms": 170300,
+          "end_ms": 170530,
+          "loss": 0.13211972372872488
+        },
+        {
+          "text": "but",
+          "start_ms": 170660,
+          "end_ms": 170800,
+          "loss": 0.6443277994791666
+        },
+        {
+          "text": "it",
+          "start_ms": 170900,
+          "end_ms": 171180,
+          "loss": 1.458099365234375
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 171200,
+          "end_ms": 171480,
+          "loss": 0.08196576436360677
+        },
+        {
+          "text": "burning",
+          "start_ms": 171500,
+          "end_ms": 171960,
+          "loss": 0.07298633030482701
+        },
+        {
+          "text": "up",
+          "start_ms": 172020,
+          "end_ms": 172150,
+          "loss": 0.05429267883300781
+        },
+        {
+          "text": "no",
+          "start_ms": 172260,
+          "end_ms": 172420,
+          "loss": 0.2747802734375
+        },
+        {
+          "text": "no",
+          "start_ms": 172560,
+          "end_ms": 172800,
+          "loss": 1.276611328125
+        },
+        {
+          "text": "no",
+          "start_ms": 172810,
+          "end_ms": 172811,
+          "loss": 1.29052734375
+        },
+        {
+          "text": "no",
+          "start_ms": 172860,
+          "end_ms": 173160,
+          "loss": 0.90380859375
+        },
+        {
+          "text": "no",
+          "start_ms": 173580,
+          "end_ms": 173760,
+          "loss": 0.65185546875
+        },
+        {
+          "text": "no",
+          "start_ms": 173769,
+          "end_ms": 173770,
+          "loss": 0.5914306640625
+        }
+      ]
+    },
+    {
+      "text": "That bush was burning but it wasn't burning up",
+      "text_sk": "Ten ker horel, ale nezhorel",
+      "start_ms": 174160,
+      "end_ms": 178820,
+      "mean_word_loss": 0.5457613203260634,
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 174160,
+          "end_ms": 174360,
+          "loss": 1.1521177291870117
+        },
+        {
+          "text": "bush",
+          "start_ms": 174460,
+          "end_ms": 174740,
+          "loss": 0.6957855224609375
+        },
+        {
+          "text": "was",
+          "start_ms": 174820,
+          "end_ms": 175000,
+          "loss": 0.045168558756510414
+        },
+        {
+          "text": "burning",
+          "start_ms": 175080,
+          "end_ms": 175360,
+          "loss": 0.15000574929373606
+        },
+        {
+          "text": "but",
+          "start_ms": 175420,
+          "end_ms": 175560,
+          "loss": 0.72314453125
+        },
+        {
+          "text": "it",
+          "start_ms": 175740,
+          "end_ms": 175920,
+          "loss": 1.770965576171875
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 175980,
+          "end_ms": 176230,
+          "loss": 0.22294171651204428
+        },
+        {
+          "text": "burning",
+          "start_ms": 176280,
+          "end_ms": 176780,
+          "loss": 0.06497246878487724
+        },
+        {
+          "text": "up",
+          "start_ms": 176900,
+          "end_ms": 178820,
+          "loss": 0.08675003051757812
+        }
+      ]
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "text_sk": "No, ten ker horel, ale nezhorel",
+      "start_ms": 178840,
+      "end_ms": 181780,
+      "mean_word_loss": 0.545790087609064,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 178840,
+          "end_ms": 178940,
+          "loss": 2.037567138671875
+        },
+        {
+          "text": "that",
+          "start_ms": 179000,
+          "end_ms": 179160,
+          "loss": 0.037554025650024414
+        },
+        {
+          "text": "bush",
+          "start_ms": 179240,
+          "end_ms": 179540,
+          "loss": 0.47955322265625
+        },
+        {
+          "text": "was",
+          "start_ms": 179620,
+          "end_ms": 179820,
+          "loss": 0.034960428873697914
+        },
+        {
+          "text": "burning",
+          "start_ms": 179880,
+          "end_ms": 180250,
+          "loss": 0.12685326167515346
+        },
+        {
+          "text": "but",
+          "start_ms": 180251,
+          "end_ms": 180380,
+          "loss": 1.0154622395833333
+        },
+        {
+          "text": "it",
+          "start_ms": 180580,
+          "end_ms": 180780,
+          "loss": 1.520263671875
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 180800,
+          "end_ms": 181020,
+          "loss": 0.08137257893880208
+        },
+        {
+          "text": "burning",
+          "start_ms": 181120,
+          "end_ms": 181540,
+          "loss": 0.07123851776123047
+        },
+        {
+          "text": "up",
+          "start_ms": 181580,
+          "end_ms": 181780,
+          "loss": 0.05307579040527344
+        }
+      ]
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no it wasn't burning",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie, nehorel",
+      "start_ms": 183680,
+      "end_ms": 188220,
+      "mean_word_loss": 0.5882930203089638,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 183680,
+          "end_ms": 183790,
+          "loss": 2.009765625
+        },
+        {
+          "text": "that",
+          "start_ms": 183840,
+          "end_ms": 184000,
+          "loss": 0.07146906852722168
+        },
+        {
+          "text": "bush",
+          "start_ms": 184100,
+          "end_ms": 184340,
+          "loss": 0.52520751953125
+        },
+        {
+          "text": "was",
+          "start_ms": 184420,
+          "end_ms": 184640,
+          "loss": 0.034319559733072914
+        },
+        {
+          "text": "burning",
+          "start_ms": 184680,
+          "end_ms": 184980,
+          "loss": 0.1257187979561942
+        },
+        {
+          "text": "but",
+          "start_ms": 185020,
+          "end_ms": 185200,
+          "loss": 1.0522867838541667
+        },
+        {
+          "text": "it",
+          "start_ms": 185420,
+          "end_ms": 185520,
+          "loss": 1.543670654296875
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 185600,
+          "end_ms": 185900,
+          "loss": 0.07755978902180989
+        },
+        {
+          "text": "burning",
+          "start_ms": 185940,
+          "end_ms": 186400,
+          "loss": 0.06572777884347099
+        },
+        {
+          "text": "up",
+          "start_ms": 186460,
+          "end_ms": 186600,
+          "loss": 0.055477142333984375
+        },
+        {
+          "text": "no",
+          "start_ms": 186640,
+          "end_ms": 186820,
+          "loss": 0.2572021484375
+        },
+        {
+          "text": "no",
+          "start_ms": 186940,
+          "end_ms": 187220,
+          "loss": 1.220458984375
+        },
+        {
+          "text": "it",
+          "start_ms": 187320,
+          "end_ms": 187360,
+          "loss": 1.6568603515625
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 187420,
+          "end_ms": 187680,
+          "loss": 0.024133682250976562
+        },
+        {
+          "text": "burning",
+          "start_ms": 187720,
+          "end_ms": 188220,
+          "loss": 0.10453741891043526
+        }
+      ]
+    },
+    {
+      "text": "That bush was burning but it wasn't burning up it wasn't burning up no",
+      "text_sk": "Ten ker horel, ale nezhorel, nezhorel, nie",
+      "start_ms": 188640,
+      "end_ms": 192920,
+      "mean_word_loss": 0.5972098655441181,
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 188640,
+          "end_ms": 188760,
+          "loss": 1.8195571899414062
+        },
+        {
+          "text": "bush",
+          "start_ms": 188860,
+          "end_ms": 189140,
+          "loss": 0.49188232421875
+        },
+        {
+          "text": "was",
+          "start_ms": 189180,
+          "end_ms": 189420,
+          "loss": 0.035552978515625
+        },
+        {
+          "text": "burning",
+          "start_ms": 189500,
+          "end_ms": 189690,
+          "loss": 0.12755067007882254
+        },
+        {
+          "text": "but",
+          "start_ms": 189800,
+          "end_ms": 190080,
+          "loss": 0.9691162109375
+        },
+        {
+          "text": "it",
+          "start_ms": 190160,
+          "end_ms": 190220,
+          "loss": 1.389129638671875
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 190400,
+          "end_ms": 190690,
+          "loss": 0.10632069905598958
+        },
+        {
+          "text": "burning",
+          "start_ms": 190740,
+          "end_ms": 191180,
+          "loss": 0.06807490757533483
+        },
+        {
+          "text": "up",
+          "start_ms": 191220,
+          "end_ms": 191300,
+          "loss": 0.059906005859375
+        },
+        {
+          "text": "it",
+          "start_ms": 191460,
+          "end_ms": 191520,
+          "loss": 2.890625
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 191580,
+          "end_ms": 191860,
+          "loss": 0.12410926818847656
+        },
+        {
+          "text": "burning",
+          "start_ms": 191880,
+          "end_ms": 192340,
+          "loss": 0.08881514413016182
+        },
+        {
+          "text": "up",
+          "start_ms": 192420,
+          "end_ms": 192560,
+          "loss": 0.05931663513183594
+        },
+        {
+          "text": "no",
+          "start_ms": 192620,
+          "end_ms": 192920,
+          "loss": 0.1309814453125
+        }
+      ]
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no no",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie nie",
+      "start_ms": 193240,
+      "end_ms": 197820,
+      "mean_word_loss": 0.5429797286079043,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 193240,
+          "end_ms": 193350,
+          "loss": 1.29840087890625
+        },
+        {
+          "text": "that",
+          "start_ms": 193380,
+          "end_ms": 193620,
+          "loss": 0.038712263107299805
+        },
+        {
+          "text": "bush",
+          "start_ms": 193680,
+          "end_ms": 193940,
+          "loss": 0.4390869140625
+        },
+        {
+          "text": "was",
+          "start_ms": 194000,
+          "end_ms": 194220,
+          "loss": 0.038530985514322914
+        },
+        {
+          "text": "burning",
+          "start_ms": 194280,
+          "end_ms": 194540,
+          "loss": 0.1392082486833845
+        },
+        {
+          "text": "but",
+          "start_ms": 194860,
+          "end_ms": 194870,
+          "loss": 0.6400146484375
+        },
+        {
+          "text": "it",
+          "start_ms": 195020,
+          "end_ms": 195109,
+          "loss": 1.44183349609375
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 195160,
+          "end_ms": 195480,
+          "loss": 0.0756212870279948
+        },
+        {
+          "text": "burning",
+          "start_ms": 195540,
+          "end_ms": 196020,
+          "loss": 0.06859888349260602
+        },
+        {
+          "text": "up",
+          "start_ms": 196060,
+          "end_ms": 196240,
+          "loss": 0.05451011657714844
+        },
+        {
+          "text": "no",
+          "start_ms": 197040,
+          "end_ms": 197300,
+          "loss": 0.2301025390625
+        },
+        {
+          "text": "no",
+          "start_ms": 197320,
+          "end_ms": 197580,
+          "loss": 1.2742919921875
+        },
+        {
+          "text": "no",
+          "start_ms": 197600,
+          "end_ms": 197820,
+          "loss": 1.31982421875
+        }
+      ]
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "text_sk": "No, ten ker horel, ale nezhorel",
+      "start_ms": 198040,
+      "end_ms": 201000,
+      "mean_word_loss": 0.4491358348301479,
+      "words": [
+        {
+          "text": "Well",
+          "start_ms": 198040,
+          "end_ms": 198200,
+          "loss": 1.6361083984375
+        },
+        {
+          "text": "that",
+          "start_ms": 198220,
+          "end_ms": 198380,
+          "loss": 0.051377296447753906
+        },
+        {
+          "text": "bush",
+          "start_ms": 198480,
+          "end_ms": 198740,
+          "loss": 0.423126220703125
+        },
+        {
+          "text": "was",
+          "start_ms": 198780,
+          "end_ms": 199020,
+          "loss": 0.03952789306640625
+        },
+        {
+          "text": "burning",
+          "start_ms": 199080,
+          "end_ms": 199380,
+          "loss": 0.1455526351928711
+        },
+        {
+          "text": "but",
+          "start_ms": 199420,
+          "end_ms": 199520,
+          "loss": 0.6841227213541666
+        },
+        {
+          "text": "it",
+          "start_ms": 199800,
+          "end_ms": 199930,
+          "loss": 1.29449462890625
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 199940,
+          "end_ms": 200260,
+          "loss": 0.08858426411946614
+        },
+        {
+          "text": "burning",
+          "start_ms": 200280,
+          "end_ms": 200760,
+          "loss": 0.0724740709577288
+        },
+        {
+          "text": "up",
+          "start_ms": 200840,
+          "end_ms": 201000,
+          "loss": 0.05599021911621094
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "text_sk": "Mám Ducha Svätého, horím",
+      "start_ms": 201040,
+      "end_ms": 209980,
+      "mean_word_loss": 0.9971802348182315,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 201040,
+          "end_ms": 201200,
+          "loss": 4.90625
+        },
+        {
+          "text": "got",
+          "start_ms": 207000,
+          "end_ms": 207200,
+          "loss": 0.7587483723958334
+        },
+        {
+          "text": "the",
+          "start_ms": 207320,
+          "end_ms": 207380,
+          "loss": 0.381591796875
+        },
+        {
+          "text": "Holy",
+          "start_ms": 207440,
+          "end_ms": 207840,
+          "loss": 0.4375934600830078
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 207920,
+          "end_ms": 208480,
+          "loss": 0.012755393981933594
+        },
+        {
+          "text": "I'm",
+          "start_ms": 209060,
+          "end_ms": 209180,
+          "loss": 1.3789876302083333
+        },
+        {
+          "text": "burning",
+          "start_ms": 209280,
+          "end_ms": 209780,
+          "loss": 0.09139292580740792
+        },
+        {
+          "text": "up",
+          "start_ms": 209820,
+          "end_ms": 209980,
+          "loss": 0.010122299194335938
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up now now now now",
+      "text_sk": "Mám Ducha Svätého, horím teraz teraz teraz teraz",
+      "start_ms": 211640,
+      "end_ms": 215810,
+      "mean_word_loss": 0.6056103683653332,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 211640,
+          "end_ms": 211740,
+          "loss": 1.1953125
+        },
+        {
+          "text": "got",
+          "start_ms": 211840,
+          "end_ms": 212020,
+          "loss": 0.037445068359375
+        },
+        {
+          "text": "the",
+          "start_ms": 212120,
+          "end_ms": 212180,
+          "loss": 0.060953776041666664
+        },
+        {
+          "text": "Holy",
+          "start_ms": 212260,
+          "end_ms": 212620,
+          "loss": 0.06276893615722656
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 212720,
+          "end_ms": 213500,
+          "loss": 0.010849380493164062
+        },
+        {
+          "text": "I'm",
+          "start_ms": 213860,
+          "end_ms": 214040,
+          "loss": 0.9815470377604166
+        },
+        {
+          "text": "burning",
+          "start_ms": 214100,
+          "end_ms": 214600,
+          "loss": 0.10537869589669364
+        },
+        {
+          "text": "up",
+          "start_ms": 214660,
+          "end_ms": 214820,
+          "loss": 0.008218765258789062
+        },
+        {
+          "text": "now",
+          "start_ms": 214840,
+          "end_ms": 215140,
+          "loss": 1.966796875
+        },
+        {
+          "text": "now",
+          "start_ms": 215200,
+          "end_ms": 215420,
+          "loss": 1.0716145833333333
+        },
+        {
+          "text": "now",
+          "start_ms": 215430,
+          "end_ms": 215431,
+          "loss": 0.83984375
+        },
+        {
+          "text": "now",
+          "start_ms": 215480,
+          "end_ms": 215810,
+          "loss": 0.9265950520833334
+        }
+      ]
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "text_sk": "Mám Ducha Svätého, horím",
+      "start_ms": 216580,
+      "end_ms": 219620,
+      "mean_word_loss": 0.5312794378825596,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 216580,
+          "end_ms": 216600,
+          "loss": 2.078125
+        },
+        {
+          "text": "got",
+          "start_ms": 216680,
+          "end_ms": 216900,
+          "loss": 0.5100962320963541
+        },
+        {
+          "text": "the",
+          "start_ms": 216920,
+          "end_ms": 217020,
+          "loss": 0.17399088541666666
+        },
+        {
+          "text": "Holy",
+          "start_ms": 217060,
+          "end_ms": 217460,
+          "loss": 0.12498855590820312
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 217560,
+          "end_ms": 218140,
+          "loss": 0.017151641845703124
+        },
+        {
+          "text": "I'm",
+          "start_ms": 218160,
+          "end_ms": 218840,
+          "loss": 1.2441813151041667
+        },
+        {
+          "text": "burning",
+          "start_ms": 218880,
+          "end_ms": 219380,
+          "loss": 0.09334959302629743
+        },
+        {
+          "text": "up",
+          "start_ms": 219480,
+          "end_ms": 219620,
+          "loss": 0.008352279663085938
+        }
+      ]
+    },
+    {
+      "text": "I got Holy Holy Ghost and I'm burning up I'm burning up I'm burning up",
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím horím",
+      "start_ms": 221300,
+      "end_ms": 226050,
+      "mean_word_loss": 0.24677247668069505,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 221300,
+          "end_ms": 221380,
+          "loss": 0.353515625
+        },
+        {
+          "text": "got",
+          "start_ms": 221440,
+          "end_ms": 221600,
+          "loss": 0.037333170572916664
+        },
+        {
+          "text": "Holy",
+          "start_ms": 221820,
+          "end_ms": 222280,
+          "loss": 1.45721435546875
+        },
+        {
+          "text": "Holy",
+          "start_ms": 222380,
+          "end_ms": 222680,
+          "loss": 1.040496826171875
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 222780,
+          "end_ms": 223140,
+          "loss": 0.01820793151855469
+        },
+        {
+          "text": "and",
+          "start_ms": 223340,
+          "end_ms": 223370,
+          "loss": 0.20516649881998697
+        },
+        {
+          "text": "I'm",
+          "start_ms": 223540,
+          "end_ms": 223660,
+          "loss": 0.00203704833984375
+        },
+        {
+          "text": "burning",
+          "start_ms": 223700,
+          "end_ms": 224160,
+          "loss": 0.09712014879499163
+        },
+        {
+          "text": "up",
+          "start_ms": 224240,
+          "end_ms": 224520,
+          "loss": 0.007907867431640625
+        },
+        {
+          "text": "I'm",
+          "start_ms": 224620,
+          "end_ms": 224820,
+          "loss": 0.14473470052083334
+        },
+        {
+          "text": "burning",
+          "start_ms": 224860,
+          "end_ms": 225340,
+          "loss": 0.1034607206072126
+        },
+        {
+          "text": "up",
+          "start_ms": 225440,
+          "end_ms": 225740,
+          "loss": 0.0064849853515625
+        },
+        {
+          "text": "I'm",
+          "start_ms": 225880,
+          "end_ms": 225990,
+          "loss": 0.10166422526041667
+        },
+        {
+          "text": "burning",
+          "start_ms": 226040,
+          "end_ms": 226049,
+          "loss": 0.11896651131766182
+        },
+        {
+          "text": "up",
+          "start_ms": 226049,
+          "end_ms": 226050,
+          "loss": 0.0072765350341796875
+        }
+      ]
+    },
+    {
+      "text": "I'm bbbbbburning up I'm bbbbbburning up",
+      "text_sk": "Hhhhhhhorím, hhhhhhhorím",
+      "start_ms": 226049,
+      "end_ms": 229080,
+      "mean_word_loss": 1.5268221961127386,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 226049,
+          "end_ms": 226050,
+          "loss": 0.13447062174479166
+        },
+        {
+          "text": "bbbbbburning",
+          "start_ms": 226080,
+          "end_ms": 226540,
+          "loss": 4.569102923075358
+        },
+        {
+          "text": "up",
+          "start_ms": 226640,
+          "end_ms": 226860,
+          "loss": 0.0125274658203125
+        },
+        {
+          "text": "I'm",
+          "start_ms": 226980,
+          "end_ms": 227090,
+          "loss": 0.165252685546875
+        },
+        {
+          "text": "bbbbbburning",
+          "start_ms": 227160,
+          "end_ms": 228960,
+          "loss": 4.252043088277181
+        },
+        {
+          "text": "up",
+          "start_ms": 229000,
+          "end_ms": 229080,
+          "loss": 0.027536392211914062
+        }
+      ]
+    },
+    {
+      "text": "I'm bbbb I'm burning I'm burning up I'm burning up",
+      "text_sk": "Som bbbb horím horím horím",
+      "start_ms": 229340,
+      "end_ms": 236400,
+      "mean_word_loss": 1.0119701158432732,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 229340,
+          "end_ms": 231980,
+          "loss": 0.1390380859375
+        },
+        {
+          "text": "bbbb",
+          "start_ms": 232040,
+          "end_ms": 232780,
+          "loss": 7.2536468505859375
+        },
+        {
+          "text": "I'm",
+          "start_ms": 232960,
+          "end_ms": 233200,
+          "loss": 0.6693522135416666
+        },
+        {
+          "text": "burning",
+          "start_ms": 233240,
+          "end_ms": 233680,
+          "loss": 0.09402711050851005
+        },
+        {
+          "text": "I'm",
+          "start_ms": 234120,
+          "end_ms": 234420,
+          "loss": 1.1698811848958333
+        },
+        {
+          "text": "burning",
+          "start_ms": 234460,
+          "end_ms": 234940,
+          "loss": 0.11608478001185826
+        },
+        {
+          "text": "up",
+          "start_ms": 234980,
+          "end_ms": 235300,
+          "loss": 0.29120922088623047
+        },
+        {
+          "text": "I'm",
+          "start_ms": 235400,
+          "end_ms": 235560,
+          "loss": 0.09807332356770833
+        },
+        {
+          "text": "burning",
+          "start_ms": 235640,
+          "end_ms": 236080,
+          "loss": 0.12122835431780134
+        },
+        {
+          "text": "up",
+          "start_ms": 236160,
+          "end_ms": 236400,
+          "loss": 0.1671600341796875
+        }
+      ]
+    },
+    {
+      "text": "Yeah that's the Holy Ghost I'm burning up",
+      "text_sk": "Áno, to je Duch Svätý, horím",
+      "start_ms": 236800,
+      "end_ms": 241180,
+      "mean_word_loss": 0.8930938118980044,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 236800,
+          "end_ms": 236840,
+          "loss": 2.33355712890625
+        },
+        {
+          "text": "that's",
+          "start_ms": 237120,
+          "end_ms": 237300,
+          "loss": 1.208859125773112
+        },
+        {
+          "text": "the",
+          "start_ms": 237320,
+          "end_ms": 237460,
+          "loss": 1.041015625
+        },
+        {
+          "text": "Holy",
+          "start_ms": 237500,
+          "end_ms": 237860,
+          "loss": 1.2485504150390625
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 238100,
+          "end_ms": 238510,
+          "loss": 0.011324691772460937
+        },
+        {
+          "text": "I'm",
+          "start_ms": 238960,
+          "end_ms": 239160,
+          "loss": 1.042236328125
+        },
+        {
+          "text": "burning",
+          "start_ms": 239180,
+          "end_ms": 239620,
+          "loss": 0.24045698983328684
+        },
+        {
+          "text": "up",
+          "start_ms": 239940,
+          "end_ms": 241180,
+          "loss": 0.01875019073486328
+        }
+      ]
+    },
+    {
+      "text": "Yeah that's the Holy Ghost that's just the Holy Ghost",
+      "text_sk": "Áno, to je Duch Svätý, to je len Duch Svätý",
+      "start_ms": 241300,
+      "end_ms": 243220,
+      "mean_word_loss": 0.81424648920695,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 241300,
+          "end_ms": 241560,
+          "loss": 2.039520263671875
+        },
+        {
+          "text": "that's",
+          "start_ms": 241580,
+          "end_ms": 241880,
+          "loss": 0.9776255289713541
+        },
+        {
+          "text": "the",
+          "start_ms": 241890,
+          "end_ms": 241891,
+          "loss": 0.869140625
+        },
+        {
+          "text": "Holy",
+          "start_ms": 241890,
+          "end_ms": 241891,
+          "loss": 0.8477401733398438
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 241890,
+          "end_ms": 241891,
+          "loss": 0.01500396728515625
+        },
+        {
+          "text": "that's",
+          "start_ms": 241890,
+          "end_ms": 241891,
+          "loss": 1.277313232421875
+        },
+        {
+          "text": "just",
+          "start_ms": 241900,
+          "end_ms": 242100,
+          "loss": 0.6658563613891602
+        },
+        {
+          "text": "the",
+          "start_ms": 242160,
+          "end_ms": 242340,
+          "loss": 0.611328125
+        },
+        {
+          "text": "Holy",
+          "start_ms": 242350,
+          "end_ms": 242600,
+          "loss": 0.801361083984375
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 242820,
+          "end_ms": 243220,
+          "loss": 0.03757553100585938
+        }
+      ]
+    },
+    {
+      "text": "That's just the Holy Ghost I'm on fire",
+      "text_sk": "To je len Duch Svätý, horím",
+      "start_ms": 243680,
+      "end_ms": 246240,
+      "mean_word_loss": 0.9544327020645141,
+      "words": [
+        {
+          "text": "That's",
+          "start_ms": 243680,
+          "end_ms": 243750,
+          "loss": 1.0798746744791667
+        },
+        {
+          "text": "just",
+          "start_ms": 243750,
+          "end_ms": 243751,
+          "loss": 0.47955799102783203
+        },
+        {
+          "text": "the",
+          "start_ms": 243751,
+          "end_ms": 244620,
+          "loss": 0.6920572916666666
+        },
+        {
+          "text": "Holy",
+          "start_ms": 244800,
+          "end_ms": 244980,
+          "loss": 0.7293701171875
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 245100,
+          "end_ms": 245380,
+          "loss": 0.08168487548828125
+        },
+        {
+          "text": "I'm",
+          "start_ms": 245460,
+          "end_ms": 245560,
+          "loss": 0.8365885416666666
+        },
+        {
+          "text": "on",
+          "start_ms": 245600,
+          "end_ms": 245740,
+          "loss": 1.224609375
+        },
+        {
+          "text": "fire",
+          "start_ms": 245800,
+          "end_ms": 246240,
+          "loss": 2.51171875
+        }
+      ]
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno, horím áno áno",
+      "start_ms": 247220,
+      "end_ms": 252160,
+      "mean_word_loss": 0.7809279759724934,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 247220,
+          "end_ms": 247230,
+          "loss": 0.8108723958333334
+        },
+        {
+          "text": "on",
+          "start_ms": 247230,
+          "end_ms": 247231,
+          "loss": 0.7841796875
+        },
+        {
+          "text": "fire",
+          "start_ms": 248200,
+          "end_ms": 248540,
+          "loss": 1.935546875
+        },
+        {
+          "text": "yeah",
+          "start_ms": 248900,
+          "end_ms": 249680,
+          "loss": 0.834869384765625
+        },
+        {
+          "text": "yeah",
+          "start_ms": 249690,
+          "end_ms": 249691,
+          "loss": 0.17441177368164062
+        },
+        {
+          "text": "I'm",
+          "start_ms": 250100,
+          "end_ms": 250230,
+          "loss": 0.3382568359375
+        },
+        {
+          "text": "on",
+          "start_ms": 250280,
+          "end_ms": 250560,
+          "loss": 0.470703125
+        },
+        {
+          "text": "fire",
+          "start_ms": 250600,
+          "end_ms": 251200,
+          "loss": 2.15234375
+        },
+        {
+          "text": "yeah",
+          "start_ms": 251260,
+          "end_ms": 251680,
+          "loss": 0.27217864990234375
+        },
+        {
+          "text": "yeah",
+          "start_ms": 251800,
+          "end_ms": 252160,
+          "loss": 0.03591728210449219
+        }
+      ]
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno, horím áno áno",
+      "start_ms": 252500,
+      "end_ms": 256779,
+      "mean_word_loss": 0.5903148015340169,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 252500,
+          "end_ms": 252660,
+          "loss": 0.34356689453125
+        },
+        {
+          "text": "on",
+          "start_ms": 252720,
+          "end_ms": 252920,
+          "loss": 0.553955078125
+        },
+        {
+          "text": "fire",
+          "start_ms": 252980,
+          "end_ms": 253660,
+          "loss": 1.9326171875
+        },
+        {
+          "text": "yeah",
+          "start_ms": 253740,
+          "end_ms": 254080,
+          "loss": 0.13901901245117188
+        },
+        {
+          "text": "yeah",
+          "start_ms": 254160,
+          "end_ms": 254500,
+          "loss": 0.025442123413085938
+        },
+        {
+          "text": "I'm",
+          "start_ms": 254920,
+          "end_ms": 255060,
+          "loss": 0.4077962239583333
+        },
+        {
+          "text": "on",
+          "start_ms": 255120,
+          "end_ms": 255300,
+          "loss": 0.57177734375
+        },
+        {
+          "text": "fire",
+          "start_ms": 255380,
+          "end_ms": 255800,
+          "loss": 1.806640625
+        },
+        {
+          "text": "yeah",
+          "start_ms": 256100,
+          "end_ms": 256440,
+          "loss": 0.10097122192382812
+        },
+        {
+          "text": "yeah",
+          "start_ms": 256579,
+          "end_ms": 256779,
+          "loss": 0.0213623046875
+        }
+      ]
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno, horím áno áno",
+      "start_ms": 257380,
+      "end_ms": 261700,
+      "mean_word_loss": 0.5775895436604818,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 257380,
+          "end_ms": 257480,
+          "loss": 0.42974853515625
+        },
+        {
+          "text": "on",
+          "start_ms": 257500,
+          "end_ms": 257700,
+          "loss": 0.57470703125
+        },
+        {
+          "text": "fire",
+          "start_ms": 257780,
+          "end_ms": 258100,
+          "loss": 1.759765625
+        },
+        {
+          "text": "yeah",
+          "start_ms": 258459,
+          "end_ms": 258920,
+          "loss": 0.09381103515625
+        },
+        {
+          "text": "yeah",
+          "start_ms": 259000,
+          "end_ms": 259320,
+          "loss": 0.021266937255859375
+        },
+        {
+          "text": "I'm",
+          "start_ms": 259380,
+          "end_ms": 259880,
+          "loss": 0.4784138997395833
+        },
+        {
+          "text": "on",
+          "start_ms": 259899,
+          "end_ms": 260120,
+          "loss": 0.5963134765625
+        },
+        {
+          "text": "fire",
+          "start_ms": 260200,
+          "end_ms": 260640,
+          "loss": 1.7099609375
+        },
+        {
+          "text": "yeah",
+          "start_ms": 260940,
+          "end_ms": 261280,
+          "loss": 0.09110641479492188
+        },
+        {
+          "text": "yeah",
+          "start_ms": 261380,
+          "end_ms": 261700,
+          "loss": 0.020801544189453125
+        }
+      ]
+    },
+    {
+      "text": "I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno",
+      "start_ms": 262140,
+      "end_ms": 263980,
+      "mean_word_loss": 0.5863498687744141,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 262140,
+          "end_ms": 262260,
+          "loss": 0.46563720703125
+        },
+        {
+          "text": "on",
+          "start_ms": 262300,
+          "end_ms": 262480,
+          "loss": 0.572265625
+        },
+        {
+          "text": "fire",
+          "start_ms": 262500,
+          "end_ms": 262940,
+          "loss": 1.7841796875
+        },
+        {
+          "text": "yeah",
+          "start_ms": 263280,
+          "end_ms": 263680,
+          "loss": 0.08763504028320312
+        },
+        {
+          "text": "yeah",
+          "start_ms": 263740,
+          "end_ms": 263980,
+          "loss": 0.022031784057617188
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.503030184065517,
+  "metadata": {
+    "n_tokens_sent": 495,
+    "n_words_returned_raw": 989,
+    "n_words_returned_content": 495,
+    "n_characters_returned": 2358,
+    "runtime_sec": 5.6,
+    "n_lines": 53,
+    "n_lines_timed": 53,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}
