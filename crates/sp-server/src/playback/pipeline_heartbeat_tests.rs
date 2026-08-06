@@ -172,6 +172,12 @@ fn paused_heartbeat_reports_paused_state_with_non_increasing_counters() {
     }
     let total_before_pause = submitter.frames_submitted_total();
     assert_eq!(total_before_pause, 5);
+    // Simulate the last Playing-state heartbeat that would have drained
+    // this window before pause began (mirrors run_heartbeat_inner's
+    // drain_window call) — otherwise the paused tick below would still see
+    // those 5 frames sitting in the undrained window and report a bogus
+    // nonzero fps instead of the zeroed fps a real paused tick produces.
+    let _ = submitter.drain_window();
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     // Force should_run_heartbeat(...) to gate true on the first tick.

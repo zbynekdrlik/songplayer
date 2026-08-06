@@ -15,7 +15,12 @@ use std::thread;
 use tracing::{info, warn};
 
 // Used in cfg(windows) blocks:
-#[cfg(windows)]
+// FrameSubmitter is also needed under `test` cfg — emit_heartbeat /
+// run_heartbeat_paused are generic over `B: NdiBackend` so they can be
+// unit-tested on Linux CI via MockNdiBackend (see pipeline_heartbeat_tests.rs
+// / #133); the live decode loop still only ever instantiates them with the
+// real (Windows-only) NDI backend.
+#[cfg(any(windows, test))]
 use crate::playback::submitter::FrameSubmitter;
 #[cfg(windows)]
 use crossbeam_channel::TryRecvError;
@@ -607,6 +612,20 @@ fn decode_and_send(
 
         if *paused {
             submitter.send_black_bgra(1920, 1080);
+            // #133: without this, /api/v1/ndi/health froze on the last
+            // pre-pause HealthSnapshot (state=Playing, stale fps) for as
+            // long as the pause lasted — this loop never reached the
+            // decode-success arm below, which was the only place a
+            // heartbeat was emitted while inside decode_and_send.
+            // run_heartbeat_paused self-gates on the same 5s cadence as the
+            // Playing branch, so calling it every 100ms poll is safe.
+            run_heartbeat_paused(
+                submitter,
+                event_tx,
+                playlist_id,
+                last_heartbeat,
+                consecutive_bad_polls,
+            );
             std::thread::sleep(std::time::Duration::from_millis(100));
             continue;
         }
@@ -783,14 +802,53 @@ fn run_heartbeat_inner(
     );
 }
 
-// mutants::skip — drives the live MF + NDI SDK heartbeat path; cross-platform
-// behaviour is verified by the pure helpers should_run_heartbeat /
-// classify_bad_poll plus the engine-side ndi_health tests using synthetic
-// HealthSnapshot events. Same status as run_loop_windows.
-#[cfg(windows)]
+/// #133: sibling of `run_heartbeat_inner` for `decode_and_send`'s paused
+/// branch. Always reports `PlaybackStateLabel::Paused` — unlike
+/// `run_heartbeat_outer` (used only when no song is loaded at all, where
+/// Idle-vs-Paused is ambiguous), this call site knows for certain a song is
+/// mid-decode and simply not advancing, so there is no Idle case to
+/// distinguish. Unlike `run_heartbeat_inner` (whose 5s-cadence gate lives at
+/// the call site, `if should_run_heartbeat(...) { run_heartbeat_inner(...) }`),
+/// this one self-gates internally so the paused branch can call it
+/// unconditionally on every 100ms poll — and so the cadence behaviour is
+/// directly unit-testable (see `paused_heartbeat_respects_5s_cadence` in
+/// `pipeline_heartbeat_tests.rs`). Generic + `#[cfg(any(windows, test))]` for
+/// the same reason as `emit_heartbeat`.
+#[cfg(any(windows, test))]
 #[cfg_attr(test, mutants::skip)]
-fn emit_heartbeat(
-    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
+fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
+    submitter: &mut FrameSubmitter<B>,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    playlist_id: i64,
+    last_heartbeat: &mut std::time::Instant,
+    consecutive_bad_polls: &mut u32,
+) {
+    if !should_run_heartbeat(last_heartbeat.elapsed()) {
+        return;
+    }
+    emit_heartbeat(
+        submitter,
+        event_tx,
+        playlist_id,
+        crate::playback::ndi_health::PlaybackStateLabel::Paused,
+        last_heartbeat,
+        consecutive_bad_polls,
+    );
+}
+
+// #133: generic over `B: NdiBackend` (rather than hardcoded to the
+// Windows-only `RealNdiBackend`) and gated `#[cfg(any(windows, test))]`
+// (rather than plain `#[cfg(windows)]`) so it — and the paused-heartbeat
+// path built on top of it — can be exercised directly on Linux CI via
+// MockNdiBackend. FrameSubmitter<B> itself has always been generic (see
+// submitter.rs's own MockNdiBackend-based tests); only this function's
+// signature was needlessly narrowed. The live pipeline thread still only
+// ever instantiates it with the real NDI backend via run_loop_windows /
+// decode_and_send, both of which stay `#[cfg(windows)]`-only.
+#[cfg(any(windows, test))]
+#[cfg_attr(test, mutants::skip)]
+fn emit_heartbeat<B: sp_ndi::NdiBackend>(
+    submitter: &mut FrameSubmitter<B>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
     state: crate::playback::ndi_health::PlaybackStateLabel,
