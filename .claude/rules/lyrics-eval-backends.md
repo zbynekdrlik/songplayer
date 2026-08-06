@@ -78,20 +78,55 @@ if a call starts failing.
   (`original`/`none` vs `translation`). Tokens can be sub-word — join on leading
   spaces before grouping.
 
-## Scoring — known defects in `score_one_call.py`
+## Scoring — ALWAYS state the denominator, and never quote one view alone
 
-`greedy_match` has **no monotonicity constraint** and picks the CLOSEST-START
-eligible candidate, so on repetitive worship material it mis-pairs lines and
-systematically pulls repeated-phrase deltas toward zero. 35.6% of one backend's
-pairs violated ordering and carried 78% of the total delta mass, including a
-physically impossible 603 s pair. **Only `median` and `% ≤400 ms` are quotable;
-mean/p90 are not.** Always report a conservative second view alongside it: pair
-only to gold lines whose normalized text is UNIQUE in the song, similarity ≥0.75
-— see `eval/lyrics/reports/2026-08-05-combine-experiment.md` and reuse
-`combine_lines_times.py` / `run_combine_experiment.py` so numbers stay comparable
-across sessions.
+A 2026-08-06 adversarial review found four scoring defects that had already put
+wrong numbers in front of the user. All are fixed; these are the invariants that
+keep them fixed. **Quoting a bare "% ≤400 ms" is the mistake — it is meaningless
+without its denominator.**
 
-Gold itself (lrclib/spotify/yt_subs line-sync) has its own noise floor, and the
-models often transcribe what is REALLY sung more accurately than the gold text —
-which weakens text-similarity matching while the timing is fine. Say so when
-quoting any figure.
+Three views now exist, and a backend comparison quotes at least the first two:
+
+- **conditional** (`pct_within_400ms`) — divides by matched-AND-timed lines only,
+  so each backend is graded on the subset it handled and the denominator VARIES
+  per backend (1138–1243 in the shootout). Useful, but **not** "% of lines
+  correctly timed", and it flatters whichever backend left most lines untimed.
+- **gold-normalized** (`pct_gold_within_400ms`) — same numerator over the
+  identical gold-line count. **This is the comparable figure.** In the shootout
+  the conditional band was 29–44% while the gold-normalized band was 20–32%.
+- **monotonic** (`monotonic_match`) — the same matcher with an ordering
+  constraint. `greedy_match` has NO monotonicity constraint and picks the
+  CLOSEST-START eligible candidate, so on repetitive worship material 27–28% of
+  pairs bind backwards in the song; the penalty differs per backend by up to 4
+  points, which exceeded the reported winning margin. It drops the dropped pair
+  from numerator AND denominator, so every backend's number rises — only the
+  relative ORDER is meaningful here.
+
+Also load-bearing:
+
+- **`POISONED_FIXTURE_VIDEO_ID = "Xvm4_fWkXe8"` must be excluded identically by
+  EVERY scorer.** `score_aligner.py` excluded it and `run_combine_experiment.py`
+  did not, so the baseline pooled 22 fixtures against the aligners' 21 under a
+  header saying 21 — and 297 of the baseline's 394 "untimed" lines came from that
+  one fixture, inflating a headline figure 3.3×. A test pins the two constants
+  together; keep it.
+- **Errored fixtures keep their gold lines in the denominator**
+  (`total_gold_lines_all_fixtures`). Otherwise a backend that crashes with NO
+  output file scores strictly BETTER than one that honestly writes all-untimed
+  nulls — and backends in the same shootout used opposite conventions.
+- **`mean` and `p90` are still not quotable** (the out-of-order pairs carry most
+  of the delta mass, including a physically impossible 603 s pair).
+- **Runtime must be split by device.** A CUDA-OOM→CPU fallback blended two
+  fixtures at ~575 s into a 19-fixture GPU mean of 106 s and published 150 s.
+  `metadata.device` / `cuda_oom_retried` are carried through — read them.
+
+Reuse `combine_lines_times.py` / `run_combine_experiment.py` / `score_aligner.py`
+so numbers stay comparable across sessions; see the `## Corrections (2026-08-06)`
+block at the top of each report in `eval/lyrics/reports/`.
+
+Gold itself (lrclib/spotify/yt_subs line-sync) has its own **unmeasured** noise
+floor, and the models often transcribe what is REALLY sung more accurately than
+the gold text — which weakens text-similarity matching while the timing is fine.
+Say so when quoting any figure. Measuring the gold's own accuracy on a few
+hand-verified fixtures is the highest-value next step before any further model
+hunting — until it exists, every number here is a floor, not a verdict.
