@@ -86,6 +86,15 @@ WALL_TOLERANCE_MS = 400
 LOOSE_TOLERANCE_MS = 1000
 WALL_LINE_WIDTH_CHARS = 32
 
+# `Xvm4_fWkXe8` — qwen35-omni hallucinated a degenerate 395-line repetition
+# loop on this song (see score_aligner.py's module docstring). EVERY scorer
+# in this harness must exclude it identically from pooled/by-category
+# aggregates, or one scorer's baseline ends up pooled over more fixtures than
+# another's comparison row. Defined here — the base module `score_aligner.py`
+# and `run_combine_experiment.py` both already import — and re-exported by
+# them rather than duplicated, so there is exactly one source of truth.
+POISONED_FIXTURE_VIDEO_ID = "Xvm4_fWkXe8"
+
 _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 _SK_DIACRITIC_RE = re.compile(r"[áäčďéíĺľňóôŕšťúýž]", re.IGNORECASE)
@@ -217,8 +226,12 @@ def monotonic_match(
 
     Report this ALONGSIDE the official view, never instead of it: dropping an
     out-of-order pair removes a (usually large) delta from the numerator AND
-    the denominator, so the conditional percentage rises for everyone — only
-    the relative ordering and the gold-normalized twin are meaningful."""
+    the denominator, so the conditional percentage USUALLY rises — but it can
+    also FALL, when the reordered pass re-pairs a produced line to a
+    worse-delta gold line than the one the (unconstrained) official view
+    picked. Measured on the 2026-08-05 shootout: 3 of 11 rows fell under this
+    view (e.g. the aai-u35-translate baseline 31.1% -> 27.3%). Only the
+    relative ordering and the gold-normalized twin are meaningful."""
     return _match(produced_lines, gold_lines, monotonic=True)
 
 
@@ -385,7 +398,7 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         # Same numerator, GOLD denominator. `pct_within_400ms` above is
         # CONDITIONAL on a line having been both text-matched and timed, so
         # each backend is graded on the subset it happened to handle and the
-        # denominator moves between backends (measured 1138 -> 1243 across the
+        # denominator moves between backends (measured 1138 -> 1236 across the
         # 2026-08-05 shootout) — the worst backend gets the smallest
         # denominator. These two normalize every backend onto the same gold
         # line count and are the comparable figure; always print both, and
@@ -563,6 +576,13 @@ def main(argv: list[str] | None = None) -> int:
                     gold_lines=fixture["gold_lines"],
                 )
             )
+        # Exclude the poisoned fixture from the pooled/by-category aggregate —
+        # score_aligner.py and run_combine_experiment.py have always done
+        # this; this CLI path did not, so a comparison against either of
+        # those two scorers' baselines was pooling a different fixture set.
+        fixture_scores = [
+            s for s in fixture_scores if s["video_id"] != POISONED_FIXTURE_VIDEO_ID
+        ]
         reports[backend] = build_backend_report(backend, fixture_scores)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -273,6 +273,40 @@ def test_score_backend_reports_monotonic_view(tmp_path: Path) -> None:
     assert "clean_pop" in report["monotonic"]["by_category"]
 
 
+def test_score_backend_monotonic_gold_normalized_differs_from_conditional(
+    tmp_path: Path,
+) -> None:
+    """REGRESSION: `test_score_backend_reports_monotonic_view` above passes
+    even if `total_gold` were wired to `n_pairs` instead of the true gold
+    count, because its fixture's conditional `pct_within_400ms` is ALSO
+    0.0 — 0/1 and 0/2 both round to 0.0, so the test can't tell the two
+    apart. Here the single produced line is IN-GATE (within 400ms) while
+    gold has 4 lines total, so the two views genuinely diverge: 100%
+    conditional vs 25% gold-normalized."""
+    raw_dir = tmp_path
+    backend = "test-aligner"
+    (raw_dir / f"{backend}_v1.json").write_text(
+        json.dumps({"lines": [_line("alpha bravo charlie", 50, 1000)]})
+    )
+    manifest = {
+        "v1": {
+            "video_id": "v1",
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "alpha bravo charlie", "start_ms": 0, "end_ms": 1000},
+                {"text": "delta echo foxtrot", "start_ms": 2000, "end_ms": 3000},
+                {"text": "golf hotel india", "start_ms": 4000, "end_ms": 5000},
+                {"text": "juliet kilo lima", "start_ms": 6000, "end_ms": 7000},
+            ],
+        }
+    }
+    report = score_aligner.score_backend(backend, manifest, raw_dir)
+    mono = report["monotonic"]["aggregate"]
+    assert mono["n_pairs"] == 1
+    assert mono["pct_within_400ms"] == 100.0
+    assert mono["pct_gold_within_400ms"] == 25.0
+
+
 def test_score_backend_missing_poisoned_fixture_reports_error(
     tmp_path: Path,
 ) -> None:

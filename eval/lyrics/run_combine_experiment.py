@@ -45,13 +45,13 @@ import argparse
 import difflib
 import json
 import logging
-import statistics
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from eval.lyrics import combine_lines_times as clt
 from eval.lyrics import score_one_call
+from eval.lyrics.score_one_call import POISONED_FIXTURE_VIDEO_ID
 
 logger = logging.getLogger("lyrics_eval.run_combine_experiment")
 
@@ -65,12 +65,10 @@ CONSERVATIVE_RATIO_THRESHOLD = 0.75
 # loop on this song. `score_aligner.py` has ALWAYS excluded it from its pooled
 # aggregates; this module did not, so the baseline row every forced aligner is
 # compared against was pooled over 22 fixtures while every aligner row was
-# pooled over 21 — under a header that said "21 fixtures". The two scorers MUST
-# use the same constant (asserted in
-# tests/test_run_combine_experiment.py::test_poisoned_fixture_video_id_matches_score_aligner);
-# it is defined here rather than imported to avoid a circular import
-# (score_aligner imports this module).
-POISONED_FIXTURE_VIDEO_ID = "Xvm4_fWkXe8"
+# pooled over 21 — under a header that said "21 fixtures". Both scorers MUST
+# use the same constant, so it is imported from `score_one_call` (the base
+# module both `score_aligner.py` and this module already import — see
+# POISONED_FIXTURE_VIDEO_ID's definition there) rather than duplicated here.
 
 BASELINE_BACKENDS = [
     "gemini36-flash",
@@ -155,26 +153,18 @@ def conservative_aggregate(
     """Pool conservative-view pairs. `total_gold` is optional and additive:
     when given, the gold-normalized %<=400ms is reported alongside the
     conditional one (this view drops every repeated-text gold line, so its
-    conditional denominator is a pool only it uses). Field set and every
-    pre-existing key are unchanged, so historical numbers stay comparable."""
-    deltas = [m["abs_delta_ms"] for m in matches]
-    within_400 = sum(1 for d in deltas if d <= score_one_call.WALL_TOLERANCE_MS)
-    within_1000 = sum(1 for d in deltas if d <= score_one_call.LOOSE_TOLERANCE_MS)
-    return {
-        "n_pairs": len(matches),
-        "median_abs_delta_ms": round(statistics.median(deltas), 1) if deltas else None,
-        "mean_abs_delta_ms": round(statistics.fmean(deltas), 1) if deltas else None,
-        "pct_within_400ms": round(within_400 / len(deltas) * 100.0, 1)
-        if deltas
-        else None,
-        "pct_within_1000ms": round(within_1000 / len(deltas) * 100.0, 1)
-        if deltas
-        else None,
-        "total_gold_lines": total_gold,
-        "pct_gold_within_400ms": round(within_400 / total_gold * 100.0, 1)
-        if total_gold
-        else None,
-    }
+    conditional denominator is a pool only it uses).
+
+    Thin wrapper over `score_one_call.delta_aggregate` — this function and
+    that one used to be near-identical hand-maintained implementations of
+    the same pooling math (differing only in that `delta_aggregate` also
+    emits `p90_abs_delta_ms`) and would drift the next time a field was
+    added to one but not the other. `p90_abs_delta_ms` is dropped from the
+    result so every pre-existing key here — and every historical committed
+    number — stays unchanged."""
+    result = score_one_call.delta_aggregate(matches, total_gold=total_gold)
+    del result["p90_abs_delta_ms"]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +228,14 @@ def build_poisoned_block(
         "official": poisoned_scores[0],
     }
     if poisoned_conservative is not None:
-        block["conservative"] = conservative_aggregate(poisoned_conservative)
+        # Gold-normalize against the poisoned fixture's OWN gold count, the
+        # same way its `official` sibling already is. Leaving this view null
+        # made it the one cell a reader could only quote bare — and the gap
+        # is large enough to mislead (elevenlabs-fa: 50.0% conditional vs
+        # 4.3% gold-normalized on this fixture).
+        block["conservative"] = conservative_aggregate(
+            poisoned_conservative, poisoned_scores[0].get("n_gold")
+        )
     return block
 
 
@@ -394,20 +391,33 @@ def run_combo(
 
     # The poisoned fixture leaves every pooled view here, matching
     # score_aligner.py — otherwise this row is a 22-fixture number compared
-    # against 21-fixture aligner rows.
+    # against 21-fixture aligner rows. `mismatch_examples` too: it is a
+    # per-fixture list like the others above, so leaving it out of this
+    # split (as it used to be) means the published sample could silently
+    # fill with the poisoned fixture's 395-line hallucination the moment the
+    # manifest order or the 80-item cap changes.
     fixture_scores, poisoned_scores = split_poisoned(fixture_scores)
     conservative_matches, poisoned_conservative = split_poisoned(conservative_matches)
     monotonic_matches, _ = split_poisoned(monotonic_matches)
     align_rate_records, _ = split_poisoned(align_rate_records)
+    mismatch_examples, _ = split_poisoned(mismatch_examples)
 
     report = score_one_call.build_backend_report(cid, fixture_scores)
     total_gold = total_gold_of(fixture_scores)
     categories = sorted({f["category"] for f in manifest.values()})
+    # Per-category gold total — WITHOUT this, every per-category cell below
+    # ships `pct_gold_within_400ms: null` even though the official view's
+    # per-category cells (via pooled_aggregate) carry real values.
+    gold_by_category = {
+        cat: total_gold_of([s for s in fixture_scores if s["category"] == cat])
+        for cat in categories
+    }
     report["conservative"] = {
         "aggregate": conservative_aggregate(conservative_matches, total_gold),
         "by_category": {
             cat: conservative_aggregate(
-                [m for m in conservative_matches if m["category"] == cat]
+                [m for m in conservative_matches if m["category"] == cat],
+                gold_by_category[cat],
             )
             for cat in categories
         },
@@ -418,7 +428,8 @@ def run_combo(
         ),
         "by_category": {
             cat: score_one_call.delta_aggregate(
-                [m for m in monotonic_matches if m["category"] == cat]
+                [m for m in monotonic_matches if m["category"] == cat],
+                total_gold=gold_by_category[cat],
             )
             for cat in categories
         },

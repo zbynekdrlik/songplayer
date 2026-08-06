@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 
 from eval.lyrics import run_combine_experiment as rce
-from eval.lyrics import score_aligner
 
 
 def _line(text: str, start_ms: int | None, end_ms: int | None) -> dict:
@@ -49,12 +48,6 @@ def _manifest_with_poisoned() -> dict[str, dict]:
             ],
         },
     }
-
-
-def test_poisoned_fixture_video_id_matches_score_aligner() -> None:
-    """The two scorers MUST exclude the same fixture, or the baseline row and
-    the aligner rows are pooled over different fixture sets."""
-    assert rce.POISONED_FIXTURE_VIDEO_ID == score_aligner.POISONED_FIXTURE_VIDEO_ID
 
 
 def test_run_baseline_excludes_poisoned_fixture_from_aggregate(

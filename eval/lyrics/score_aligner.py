@@ -57,11 +57,23 @@ from eval.lyrics import score_one_call
 from eval.lyrics.run_combine_experiment import (
     conservative_aggregate,
     conservative_match,
+    total_gold_of,
 )
+from eval.lyrics.score_one_call import POISONED_FIXTURE_VIDEO_ID
 
 logger = logging.getLogger("lyrics_eval.score_aligner")
 
-POISONED_FIXTURE_VIDEO_ID = "Xvm4_fWkXe8"
+# A backend that never recorded `metadata.device` (e.g. elevenlabs-fa, the
+# ctc-* rows) must not collapse into the string "None" — that reads as a
+# real device to any consumer doing `by_device["cuda"]` or rendering a chart
+# legend. An explicit sentinel says plainly that the value was never
+# recorded, as opposed to genuinely being device=None.
+UNRECORDED_DEVICE = "unrecorded"
+
+
+def _device_bucket(score: dict[str, Any]) -> str:
+    device = score.get("device")
+    return device if device is not None else UNRECORDED_DEVICE
 
 
 def to_scoreable_lines(
@@ -181,15 +193,24 @@ def score_backend(
         monotonic_matches.extend(mono)
 
     report = score_one_call.build_backend_report(backend, fixture_scores)
-    total_gold = sum(
-        s["n_gold"] for s in fixture_scores if s.get("error") is None
-    )  # matches pooled_aggregate's total_gold_lines
+    # matches pooled_aggregate's total_gold_lines
+    total_gold = total_gold_of(fixture_scores)
     categories = sorted({f["category"] for f in manifest.values()})
+    # Per-category gold total — WITHOUT this, every per-category cell below
+    # ships `pct_gold_within_400ms: null` even though the official view's
+    # per-category cells (via pooled_aggregate) carry real values, and a
+    # report author quoting a per-category number has no gold-normalized
+    # figure available at all.
+    gold_by_category = {
+        cat: total_gold_of([s for s in fixture_scores if s["category"] == cat])
+        for cat in categories
+    }
     report["conservative"] = {
         "aggregate": conservative_aggregate(conservative_matches, total_gold),
         "by_category": {
             cat: conservative_aggregate(
-                [m for m in conservative_matches if m["category"] == cat]
+                [m for m in conservative_matches if m["category"] == cat],
+                gold_by_category[cat],
             )
             for cat in categories
         },
@@ -200,7 +221,8 @@ def score_backend(
         ),
         "by_category": {
             cat: score_one_call.delta_aggregate(
-                [m for m in monotonic_matches if m["category"] == cat]
+                [m for m in monotonic_matches if m["category"] == cat],
+                total_gold=gold_by_category[cat],
             )
             for cat in categories
         },
@@ -226,10 +248,8 @@ def score_backend(
     # penalty to the model. `mean_runtime_sec` below keeps the blended figure
     # for continuity with earlier reports — quote the per-device one.
     by_device: dict[str, dict[str, Any]] = {}
-    for device in sorted({str(s.get("device")) for s in timed_scores}):
-        vals = [
-            s["runtime_sec"] for s in timed_scores if str(s.get("device")) == device
-        ]
+    for device in sorted({_device_bucket(s) for s in timed_scores}):
+        vals = [s["runtime_sec"] for s in timed_scores if _device_bucket(s) == device]
         by_device[device] = {
             "n_fixtures": len(vals),
             "mean_runtime_sec": round(statistics.fmean(vals), 1),
@@ -253,7 +273,13 @@ def score_backend(
         report["poisoned_fixture"] = {
             "video_id": POISONED_FIXTURE_VIDEO_ID,
             "official": poisoned_score,
-            "conservative": conservative_aggregate(poisoned_conservative),
+            # Gold-normalize against the poisoned fixture's OWN gold count.
+            # Its `official` and `monotonic` siblings already carry a real
+            # `pct_gold_within_400ms`; leaving only this view null invited
+            # exactly the bare-conditional quote the rule forbids.
+            "conservative": conservative_aggregate(
+                poisoned_conservative, poisoned_score.get("n_gold")
+            ),
             "untimed_pct": round(poisoned_untimed / poisoned_total * 100.0, 1)
             if poisoned_total
             else None,
