@@ -8,46 +8,8 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use super::parser::shorten_artist;
+use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
-
-/// Replace common emojis with text equivalents, then strip remaining non-text chars.
-fn strip_emoji(s: &str) -> String {
-    // Replace known emojis: hearts → "Love", others → remove
-    let replaced = s
-        .replace(
-            [
-                '\u{2764}',
-                '\u{1F90D}',
-                '\u{1F499}',
-                '\u{1F49C}',
-                '\u{2665}',
-            ],
-            "Love",
-        )
-        .replace(
-            [
-                '\u{1F525}',
-                '\u{1F64F}',
-                '\u{2728}',
-                '\u{1F3B6}',
-                '\u{1F3B5}',
-            ],
-            "",
-        );
-    // Strip any remaining non-text characters.
-    // Keep: ASCII + Latin Extended (< 0x2600) and variation selectors (FE00-FE0F).
-    // 0x00C0-0x024F (Latin Extended) is already covered by < 0x2600.
-    replaced
-        .chars()
-        .filter(|c| {
-            let cp = *c as u32;
-            cp < 0x2600 || (0xFE00..=0xFE0F).contains(&cp)
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));

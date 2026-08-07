@@ -3,6 +3,7 @@
 pub mod claude;
 pub mod gemini;
 pub mod parser;
+pub mod sanitize;
 
 use async_trait::async_trait;
 use sp_core::metadata::VideoMetadata;
@@ -32,6 +33,12 @@ pub trait MetadataProvider: Send + Sync {
 ///
 /// If providers were available but all failed, the returned metadata has
 /// `gemini_failed = true` so the caller can schedule a retry later.
+///
+/// This is the single choke point for emoji sanitization (#135): both
+/// return paths run `sanitize::strip_emoji` over `song`/`artist` before
+/// returning, so every source — a provider's own output (Gemini, Claude)
+/// and the regex-parser fallback — ships clean text regardless of whether
+/// that source sanitizes itself.
 pub async fn get_metadata(
     providers: &[Box<dyn MetadataProvider>],
     video_id: &str,
@@ -41,7 +48,11 @@ pub async fn get_metadata(
 
     for provider in providers {
         match provider.extract(video_id, title).await {
-            Ok(meta) => return meta,
+            Ok(mut meta) => {
+                meta.song = sanitize::strip_emoji(&meta.song);
+                meta.artist = sanitize::strip_emoji(&meta.artist);
+                return meta;
+            }
             Err(e) => {
                 tracing::warn!(
                     provider = provider.name(),
@@ -58,6 +69,8 @@ pub async fn get_metadata(
     if has_providers {
         meta.gemini_failed = true;
     }
+    meta.song = sanitize::strip_emoji(&meta.song);
+    meta.artist = sanitize::strip_emoji(&meta.artist);
     meta
 }
 

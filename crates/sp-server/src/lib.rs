@@ -191,6 +191,13 @@ pub async fn start(
         tracing::warn!("self-heal cache failed (non-fatal): {e}");
     }
 
+    // Self-heal stored metadata: re-run the emoji sanitizer over every
+    // song/artist value written before it was centralized in
+    // metadata::get_metadata (#135). Non-fatal on error.
+    if let Err(e) = startup::self_heal_emoji_metadata(&pool).await {
+        tracing::warn!("self-heal emoji metadata failed (non-fatal): {e}");
+    }
+
     // 2. Channels
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let (event_tx, _) = broadcast::channel::<ServerMsg>(256);

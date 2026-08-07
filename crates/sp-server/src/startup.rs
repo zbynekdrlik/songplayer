@@ -115,6 +115,63 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     Ok(())
 }
 
+/// Re-run the emoji sanitizer (`metadata::sanitize::strip_emoji`) over every
+/// stored `song` / `artist` value and UPDATE only the rows whose sanitized
+/// text differs from what is stored (#135).
+///
+/// `metadata::get_metadata` sanitizes every NEW write, but a row written
+/// before that choke point existed stays dirty forever unless something
+/// re-visits it — and a row whose provider(s) keep failing (`gemini_failed
+/// = 1` with no working provider) can NEVER be healed by
+/// `ReprocessWorker`'s provider retry, since that path never falls back to
+/// the regex parser. This pass fixes the DB directly, independent of
+/// `gemini_failed` state, so it also cleans a `gemini_failed = 0` row that
+/// simply has a dirty stored value from before the fix.
+///
+/// Idempotent: a row whose sanitized song/artist already matches the
+/// stored value is left untouched (and NULL stays NULL — an absent value
+/// is not "dirty"). Returns the number of rows healed.
+pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+    let rows = sqlx::query("SELECT id, song, artist FROM videos")
+        .fetch_all(pool)
+        .await?;
+
+    let mut healed = 0usize;
+    for row in rows {
+        let id: i64 = row.get("id");
+        let song: Option<String> = row.get("song");
+        let artist: Option<String> = row.get("artist");
+
+        let clean_song = song.as_deref().map(crate::metadata::sanitize::strip_emoji);
+        let clean_artist = artist
+            .as_deref()
+            .map(crate::metadata::sanitize::strip_emoji);
+
+        if clean_song == song && clean_artist == artist {
+            continue;
+        }
+
+        sqlx::query("UPDATE videos SET song = ?, artist = ? WHERE id = ?")
+            .bind(clean_song)
+            .bind(clean_artist)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        healed += 1;
+    }
+
+    if healed > 0 {
+        tracing::info!(
+            healed,
+            "self-heal: sanitized emoji from stored song/artist metadata"
+        );
+    } else {
+        tracing::debug!("self-heal: no stored song/artist metadata needed emoji sanitization");
+    }
+
+    Ok(healed)
+}
+
 /// Probe sample rates of every `normalized = 1` row's `audio_file_path`
 /// and flip any row whose audio is not at 48 kHz back to `normalized = 0`
 /// so the download worker re-normalizes it.
@@ -479,5 +536,56 @@ mod emoji_self_heal_tests {
             artist, "Christian Afro House 2025",
             "self-heal must strip emoji from the stored artist"
         );
+    }
+
+    /// A row already clean (no emoji, `gemini_failed = 0`) must be left
+    /// untouched — proves the pass doesn't rewrite every row on every boot.
+    #[tokio::test]
+    async fn skips_already_clean_rows() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'clean1', 't', 'The Blessing', 'Elevation Worship', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "no row should be touched when already clean");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'clean1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "The Blessing");
+        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
+    }
+
+    /// A row with NULL song/artist (never processed yet) must stay NULL —
+    /// the sanitizer must never turn an absent value into `""`.
+    #[tokio::test]
+    async fn preserves_null_song_and_artist() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized)
+             VALUES (1, 'unprocessed', 't', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "a NULL song/artist row is not dirty");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'unprocessed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: Option<String> = row.get("song");
+        let artist: Option<String> = row.get("artist");
+        assert_eq!(song, None, "song must stay NULL, never coerced to \"\"");
+        assert_eq!(artist, None, "artist must stay NULL, never coerced to \"\"");
     }
 }
