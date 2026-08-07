@@ -760,6 +760,75 @@ mod tests {
         );
     }
 
+    // ---- shorten_single_artist: isolate each `||` guard condition ----
+    //
+    // Mutation testing (PR #135 CI gate) surfaced two surviving mutants on
+    // the `has_terminal_punct || is_all_caps || has_non_alphabetic_word`
+    // guard (parser.rs:319, cols 27 and 42 — the two `||` operators):
+    // every existing regression string above trips more than one of the
+    // three conditions at once, so replacing either `||` with `&&` left
+    // the guard's early-return outcome unchanged for every existing test.
+    //
+    // Two of the three cases below are genuinely isolated (all-caps-only,
+    // non-alphabetic-word-only) and each kills at least one mutant — see
+    // the per-condition reasoning after each test. The terminal-punct
+    // case is included for completeness and behavioral pinning, but — as
+    // explained there — it cannot be fully isolated from
+    // `has_non_alphabetic_word`: the terminal punctuation characters
+    // (`!`, `?`, `.`, `:`) are themselves never alphabetic, so any word
+    // that trips `has_terminal_punct` (ends with one of them) necessarily
+    // also trips `has_non_alphabetic_word` (contains a non-alphabetic
+    // char). That's a structural property of the guard, not a gap in
+    // this test.
+
+    #[test]
+    fn shorten_leaves_terminal_punctuation_only_unchanged() {
+        // Isolates has_terminal_punct=true, is_all_caps=false (mixed
+        // case). has_non_alphabetic_word is unavoidably ALSO true here —
+        // "Last." contains '.', which is non-alphabetic — so this test
+        // cannot, by itself, distinguish either `&&` mutant (see block
+        // comment above): with has_terminal_punct forced true and
+        // has_non_alphabetic_word forced true alongside it, both
+        // `(A && B) || C` and `A || (B && C)` evaluate to `true` exactly
+        // like the original `A || B || C`, mutant or not. It still pins
+        // the intended behavior: a terminally-punctuated, mixed-case
+        // string must be left unchanged.
+        assert_eq!(shorten_artist("First Last."), "First Last.");
+    }
+
+    #[test]
+    fn shorten_leaves_all_caps_only_unchanged() {
+        // Isolates is_all_caps=true with has_terminal_punct=false and
+        // has_non_alphabetic_word=false ("JOHN SMITH" — no punctuation,
+        // every word purely alphabetic). Original guard: false || true
+        // || false = true (unchanged). Mutant at col 27,
+        // `(has_terminal_punct && is_all_caps) || has_non_alphabetic_word`
+        // = (false && true) || false = false — the mutant would fall
+        // through to abbreviation and return "J. Smith"-shaped output
+        // instead, so this assertion fails under that mutant. Mutant at
+        // col 42, `has_terminal_punct || (is_all_caps && has_non_alphabetic_word)`
+        // = false || (true && false) = false — same failure. This single
+        // case kills BOTH surviving mutants.
+        assert_eq!(shorten_artist("JOHN SMITH"), "JOHN SMITH");
+    }
+
+    #[test]
+    fn shorten_leaves_non_alphabetic_word_only_unchanged() {
+        // Isolates has_non_alphabetic_word=true with has_terminal_punct=false
+        // and is_all_caps=false ("Anna Jo-Lee" — mixed case, no terminal
+        // punctuation, but "Jo-Lee" contains an inner hyphen so it isn't
+        // purely alphabetic). Original guard: false || false || true =
+        // true (unchanged). Mutant at col 42,
+        // `has_terminal_punct || (is_all_caps && has_non_alphabetic_word)`
+        // = false || (false && true) = false — the mutant would fall
+        // through to abbreviation instead of returning the name
+        // unchanged, so this assertion fails under that mutant. (Mutant
+        // at col 27 still evaluates true here — `(false && false) ||
+        // true = true` — so this case alone doesn't kill it; col 27 is
+        // killed by the all-caps-only case above.)
+        assert_eq!(shorten_artist("Anna Jo-Lee"), "Anna Jo-Lee");
+    }
+
     #[test]
     fn shorten_still_abbreviates_genuine_personal_name() {
         // Regression guard: the new guard must not break real
