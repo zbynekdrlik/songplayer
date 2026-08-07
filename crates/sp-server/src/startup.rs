@@ -296,6 +296,181 @@ pub async fn startup_sync_active_playlists(
 }
 
 #[cfg(test)]
+mod empty_song_self_heal_tests {
+    use super::*;
+    use crate::db;
+
+    async fn seed_pool() -> SqlitePool {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name)
+             VALUES (1, 'p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    /// RED: mirrors the live #136 production defect — a stored row whose
+    /// `song` was written empty (`gemini_failed = 0`, so the provider
+    /// retry worker never revisits it) must be repaired from its stored
+    /// `title` via the regex parser, and flagged `gemini_failed = 1` so
+    /// it is visibly not a real provider result.
+    #[tokio::test]
+    async fn heals_dirty_row_with_empty_song_from_title() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'q_T_-Lh8AFI', 'Elevation Worship - The Blessing', '', '', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 1, "exactly the dirty row should be healed");
+
+        let row =
+            sqlx::query("SELECT song, artist, gemini_failed FROM videos WHERE youtube_id = 'q_T_-Lh8AFI'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "The Blessing");
+        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
+        assert_eq!(
+            row.get::<i64, _>("gemini_failed"),
+            1,
+            "a repaired row must be flagged gemini_failed so it reads as parser-derived"
+        );
+    }
+
+    /// A whitespace-only stored song is just as dirty as `""`.
+    #[tokio::test]
+    async fn heals_whitespace_only_song() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'whitespace1', 'Pat Barrett - Count On You', '   ', NULL, 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 1);
+
+        let row = sqlx::query("SELECT song FROM videos WHERE youtube_id = 'whitespace1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "Count On You");
+    }
+
+    /// When the title parser ALSO produces an empty song (e.g. an empty
+    /// or NULL title), the row must be left completely untouched — never
+    /// write an empty value, per the same invariant as the write choke
+    /// point in `db::models::mark_video_processed_pair`.
+    #[tokio::test]
+    async fn leaves_row_untouched_when_parser_also_yields_empty_song() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'notitle', NULL, '', '', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(
+            healed, 0,
+            "a row the parser also can't derive a song for must not count as healed"
+        );
+
+        let row = sqlx::query("SELECT song FROM videos WHERE youtube_id = 'notitle'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: String = row.get("song");
+        assert_eq!(song, "", "row must stay untouched, never coerced further");
+    }
+
+    /// A row that already has a real song must never be touched.
+    #[tokio::test]
+    async fn skips_already_populated_rows() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'clean1', 'irrelevant', 'The Blessing', 'Elevation Worship', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "no row should be touched when already populated");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'clean1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "The Blessing");
+        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
+    }
+
+    /// A row with NULL song (not yet processed) is not "dirty" — it must
+    /// never be touched by this pass, which only repairs rows that were
+    /// actually written empty.
+    #[tokio::test]
+    async fn skips_null_song_rows() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized)
+             VALUES (1, 'unprocessed', 'Some Title', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "a NULL song row is unprocessed, not dirty");
+
+        let row = sqlx::query("SELECT song FROM videos WHERE youtube_id = 'unprocessed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: Option<String> = row.get("song");
+        assert_eq!(song, None, "song must stay NULL, never coerced to \"\"");
+    }
+
+    /// Idempotent: a second run over an already-repaired catalog heals
+    /// nothing.
+    #[tokio::test]
+    async fn is_idempotent() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'dirty1', 'Elevation Worship - The Blessing', '', '', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let first = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(first, 1);
+        let second = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(second, 0, "second run must find nothing left to repair");
+    }
+}
+
+#[cfg(test)]
 mod sample_rate_self_heal_tests {
     use super::*;
     use crate::db;
