@@ -348,6 +348,12 @@ impl ReprocessWorker {
     /// successful result, or the last error encountered (prioritising
     /// `RateLimited` so the batch-abort path always wins over generic
     /// failures).
+    ///
+    /// This path bypasses `metadata::get_metadata` (and its
+    /// `sanitize::strip_emoji` choke point, #135) entirely, so it sanitizes
+    /// the returned `song`/`artist` itself — the invariant "nothing
+    /// unsanitized is ever persisted" must hold here too, independent of
+    /// which providers are wired.
     async fn try_providers(
         &self,
         video_id: &str,
@@ -362,7 +368,11 @@ impl ReprocessWorker {
 
         for provider in self.providers.iter() {
             match provider.extract(video_id, title).await {
-                Ok(meta) => return Ok(meta),
+                Ok(mut meta) => {
+                    meta.song = crate::metadata::sanitize::strip_emoji(&meta.song);
+                    meta.artist = crate::metadata::sanitize::strip_emoji(&meta.artist);
+                    return Ok(meta);
+                }
                 Err(MetadataError::RateLimited) => {
                     saw_rate_limit = true;
                     last_err = MetadataError::RateLimited;
