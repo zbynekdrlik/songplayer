@@ -160,14 +160,10 @@ pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::
         healed += 1;
     }
 
-    if healed > 0 {
-        tracing::info!(
-            healed,
-            "self-heal: sanitized emoji from stored song/artist metadata"
-        );
-    } else {
-        tracing::debug!("self-heal: no stored song/artist metadata needed emoji sanitization");
-    }
+    tracing::info!(
+        healed,
+        "self-heal: sanitized emoji from stored song/artist metadata"
+    );
 
     Ok(healed)
 }
