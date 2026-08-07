@@ -96,6 +96,73 @@ async fn mark_video_processed_pair_stores_gemini_failed_flag() {
     assert_eq!(gf, 1);
 }
 
+/// `mark_video_processed_pair` is the write choke point for every
+/// normalized video row. It must never write an empty `song` — a live
+/// production defect shipped five rows with `song=""`, `artist=""`,
+/// `gemini_failed=false` because nothing at this layer re-validated the
+/// caller's (already-sanitized) metadata before the UPDATE. The row must
+/// be left completely untouched (still unprocessed) on rejection.
+#[tokio::test]
+async fn mark_video_processed_pair_rejects_empty_song() {
+    let (pool, id) = setup_with_video().await;
+
+    let result = mark_video_processed_pair(
+        &pool,
+        id,
+        "",
+        "Some Artist",
+        "gemini",
+        false,
+        "/cache/v.mp4",
+        "/cache/a.flac",
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "writing an empty song must be rejected, not silently written"
+    );
+
+    let row = sqlx::query("SELECT song, normalized FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let song: Option<String> = row.get("song");
+    assert_eq!(
+        song, None,
+        "row must stay completely untouched, never written with an empty song"
+    );
+    assert_eq!(
+        row.get::<i64, _>("normalized"),
+        0,
+        "row must stay unprocessed on rejection"
+    );
+}
+
+/// A whitespace-only song is just as empty as `""` after trimming.
+#[tokio::test]
+async fn mark_video_processed_pair_rejects_whitespace_only_song() {
+    let (pool, id) = setup_with_video().await;
+
+    let result = mark_video_processed_pair(
+        &pool,
+        id,
+        "   ",
+        "Some Artist",
+        "gemini",
+        false,
+        "/cache/v.mp4",
+        "/cache/a.flac",
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "a whitespace-only song must be rejected exactly like an empty one"
+    );
+}
+
 #[tokio::test]
 async fn get_song_paths_returns_both_when_normalized() {
     let (pool, id) = setup_with_video().await;

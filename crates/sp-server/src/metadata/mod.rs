@@ -185,4 +185,50 @@ mod tests {
             "should NOT mark gemini_failed when no providers configured"
         );
     }
+
+    /// A provider whose song sanitizes to nothing (e.g. an all-emoji
+    /// title) validated itself against the RAW, unsanitized text — its
+    /// own check passes, but `strip_emoji` at the choke point can still
+    /// turn it into `""`. Mirrors the live production defect: five
+    /// ytalex rows shipped `song=""`, `gemini_failed=false` because
+    /// nothing re-checked emptiness AFTER sanitization.
+    struct EmptyAfterSanitizeProvider;
+
+    #[async_trait]
+    impl MetadataProvider for EmptyAfterSanitizeProvider {
+        async fn extract(
+            &self,
+            _video_id: &str,
+            _title: &str,
+        ) -> Result<VideoMetadata, MetadataError> {
+            Ok(VideoMetadata {
+                song: "🔥".into(),
+                artist: "Ignored Artist".into(),
+                source: MetadataSource::Gemini,
+                gemini_failed: false,
+            })
+        }
+
+        fn name(&self) -> &str {
+            "empty-after-sanitize-mock"
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_song_empty_after_sanitization_falls_back_to_parser() {
+        let providers: Vec<Box<dyn MetadataProvider>> = vec![Box::new(EmptyAfterSanitizeProvider)];
+
+        let meta = get_metadata(&providers, "abc123", "Elevation Worship - The Blessing").await;
+
+        assert_eq!(
+            meta.song, "The Blessing",
+            "an empty-after-sanitization song must fall back to the title parser"
+        );
+        assert_eq!(meta.artist, "Elevation Worship");
+        assert_eq!(meta.source, MetadataSource::Regex);
+        assert!(
+            meta.gemini_failed,
+            "falling back after a provider's song sanitized to empty must set gemini_failed"
+        );
+    }
 }
