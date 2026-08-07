@@ -392,11 +392,12 @@ mod empty_song_self_heal_tests {
         let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
         assert_eq!(healed, 1, "exactly the dirty row should be healed");
 
-        let row =
-            sqlx::query("SELECT song, artist, gemini_failed FROM videos WHERE youtube_id = 'q_T_-Lh8AFI'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let row = sqlx::query(
+            "SELECT song, artist, gemini_failed FROM videos WHERE youtube_id = 'q_T_-Lh8AFI'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(row.get::<String, _>("song"), "The Blessing");
         assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
         assert_eq!(
