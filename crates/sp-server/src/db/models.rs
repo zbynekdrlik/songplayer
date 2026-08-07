@@ -949,6 +949,21 @@ pub async fn mark_unsupported_source(
 // Tests
 // ---------------------------------------------------------------------------
 
-#[path = "models_tests.rs"]
+// Split into focused sibling files (#137) to keep every file under the
+// 1000-line airuleset cap. `tests_helpers` holds the shared fixture; the
+// other three group tests by subject under test.
+#[path = "models_tests_helpers.rs"]
 #[cfg(test)]
-mod tests;
+mod tests_helpers;
+
+#[path = "models_tests_playlist.rs"]
+#[cfg(test)]
+mod tests_playlist;
+
+#[path = "models_tests_video.rs"]
+#[cfg(test)]
+mod tests_video;
+
+#[path = "models_tests_lyrics.rs"]
+#[cfg(test)]
+mod tests_lyrics;
