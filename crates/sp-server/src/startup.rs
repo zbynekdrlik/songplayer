@@ -168,11 +168,26 @@ pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::
     Ok(healed)
 }
 
-/// Repair stored rows whose `song` was written empty/whitespace-only by
-/// the since-fixed metadata bug (#136: five ytalex rows shipped
-/// `song=""`, `artist=""`, `gemini_failed=false`) — re-derive song+artist
+/// Repair stored rows whose `song` was written empty/whitespace-only, or
+/// left NULL despite processing having finished — re-derive song+artist
 /// from the stored `title` via the regex title parser
 /// (`metadata::parser::parse_title`).
+///
+/// Two distinct broken shapes are repaired:
+///
+/// * `song` is an empty/whitespace string (#136: five ytalex rows
+///   shipped `song=""`, `artist=""`, `gemini_failed=false`).
+/// * `song IS NULL` **and** `normalized = 1` — the download/metadata
+///   pipeline ran to completion but never wrote a song value at all
+///   (observed live post-#136: five catalog rows stuck with
+///   `song=NULL`, `artist=NULL`, `normalized=1`, `gemini_failed=false`,
+///   which the E2E gate's `gemini_failed=false but empty song` check
+///   correctly flags).
+///
+/// A `song IS NULL` row with `normalized = 0` is deliberately NOT
+/// touched — that row simply hasn't been processed yet, it is not
+/// broken, and repairing it would race the download worker that is
+/// about to write real metadata for it.
 ///
 /// `metadata::get_metadata`'s provider-success path now re-checks for an
 /// empty song after sanitization and falls back to the title parser
@@ -182,20 +197,21 @@ pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::
 /// the DB directly.
 ///
 /// Every repaired row is stamped `gemini_failed = 1` — mirrors the
-/// `get_metadata` fallback contract: a repaired empty-song row always
-/// means the title parser produced the value, never a real provider
-/// result. If the title parser ALSO yields an empty song for a row (e.g.
-/// an empty/NULL title), the row is left untouched and logged at
-/// `warn!` — this pass never writes an empty value, same invariant as
-/// the write choke point.
+/// `get_metadata` fallback contract: a repaired row always means the
+/// title parser produced the value, never a real provider result. If
+/// the title parser ALSO yields an empty song for a row (e.g. an
+/// empty/NULL title), the row is left untouched and logged at `warn!`
+/// — this pass never writes an empty value, same invariant as the
+/// write choke point.
 ///
-/// Idempotent: a row whose `song` is already non-empty (including a NULL
-/// — not yet processed, not "dirty") is left alone. Returns the number
-/// of rows healed.
+/// Idempotent: a row whose `song` is already non-empty, or whose `song`
+/// is NULL with `normalized = 0` (not yet processed, not "dirty"), is
+/// left alone. Returns the number of rows healed.
 pub async fn self_heal_empty_song_metadata(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, youtube_id, title FROM videos
-         WHERE song IS NOT NULL AND TRIM(song) = ''",
+         WHERE (song IS NOT NULL AND TRIM(song) = '')
+            OR (song IS NULL AND normalized = 1)",
     )
     .fetch_all(pool)
     .await?;
