@@ -500,11 +500,15 @@ mod empty_song_self_heal_tests {
         assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
     }
 
-    /// A row with NULL song (not yet processed) is not "dirty" — it must
-    /// never be touched by this pass, which only repairs rows that were
-    /// actually written empty.
+    /// A row with NULL song AND `normalized = 0` is genuinely unprocessed
+    /// (the download worker hasn't run yet), not "dirty" — it must never
+    /// be touched by this pass. This is the narrower half of what used to
+    /// be a single blanket "NULL song is always untouched" rule: see
+    /// `heals_null_song_row_when_already_normalized` for the other half,
+    /// where `normalized = 1` means processing already finished and the
+    /// row IS broken.
     #[tokio::test]
-    async fn skips_null_song_rows() {
+    async fn skips_null_song_rows_when_unprocessed() {
         let pool = seed_pool().await;
         sqlx::query(
             "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized)
