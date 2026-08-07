@@ -28,6 +28,42 @@ triggers:
 - **SongPlayer data:** `C:\ProgramData\SongPlayer\`
 - **SongPlayer install:** `C:\Program Files\SongPlayer\`
 
+## Public URL `sp.newlevel.media` — Cloudflare Tunnel, TCP-only on this network
+
+The dashboard is published through a token-run Cloudflare Tunnel (`Cloudflared`
+Windows service, tunnel `0242c8d3-…`, token file
+`C:\ProgramData\cloudflared_tunnel_token.txt`). Ingress is managed remotely in
+the Cloudflare dashboard, so there is no local ingress config to inspect.
+
+**Symptom → cause map when the domain is down:**
+
+| What you see | What it means |
+|---|---|
+| HTTP **530 / `error code: 1033`** | No connector registered — the tunnel is down. The origin is irrelevant; check the service, not SongPlayer. |
+| `Cloudflared` service `Running` but the Application event log shows *"Cloudflared service starting"* every ~40 s | Crash loop. `sc.exe qfailure Cloudflared` shows `RESTART -- Delay = 20000 ms`, so a dead connector looks alive in `Get-Service`. |
+| stderr `failed to dial to edge with quic: timeout: handshake did not complete in time` | **UDP 7844 is blocked on the current network** — the 2026-08-07 outage, which began at a reboot after the LAN was switched. |
+
+**The fix (already applied, persists across reboots):** force the TCP transport.
+The service `binPath` now carries `--protocol http2`:
+
+```powershell
+$tok = (Get-Content C:\ProgramData\cloudflared_tunnel_token.txt -Raw).Trim()
+$bp  = '"C:\Program Files\cloudflared\cloudflared.exe" tunnel --no-autoupdate --protocol http2 run --token ' + $tok
+(Get-WmiObject Win32_Service -Filter "Name='Cloudflared'").Change($null,$bp)   # 0 = OK
+Restart-Service Cloudflared -Force
+```
+
+Read the token from that file — never type or echo it. Confirm with
+`Test-NetConnection region1.v2.argotunnel.com -Port 7844` (TCP reachable while
+QUIC is not) and expect four `Registered tunnel connection … protocol=http2`
+lines within seconds. Verify from the dev side, not the box:
+`curl -s -o /dev/null -w '%{http_code}' https://sp.newlevel.media/` → `200`.
+
+Diagnose the service's own stderr by launching a SECOND short-lived copy with
+`Start-Process -RedirectStandardError` (extra connectors are harmless) — the
+Windows service itself writes only "starting"/"stopped" to the event log and
+discards cloudflared's real output.
+
 ## MCP tool traps (cost two agents hours on 2026-08-05)
 
 - **`mcp__win-resolume__FileWrite` SILENTLY TRUNCATES `content` over ~20,000
