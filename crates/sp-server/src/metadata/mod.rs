@@ -51,6 +51,20 @@ pub async fn get_metadata(
             Ok(mut meta) => {
                 meta.song = sanitize::strip_emoji(&meta.song);
                 meta.artist = sanitize::strip_emoji(&meta.artist);
+                if meta.song.trim().is_empty() {
+                    // A provider's own emptiness check runs on the RAW
+                    // text — it can pass for e.g. an all-emoji song —
+                    // but sanitization just reduced it to nothing.
+                    // Never ship an empty song; fall back to the title
+                    // parser the same way an outright provider failure
+                    // would (#136).
+                    tracing::warn!(
+                        provider = provider.name(),
+                        video_id,
+                        "provider song sanitized to empty; falling back to title parser"
+                    );
+                    return fallback_from_title(title, true);
+                }
                 return meta;
             }
             Err(e) => {
@@ -65,8 +79,15 @@ pub async fn get_metadata(
     }
 
     // All providers failed (or none configured) — use regex parser.
+    fallback_from_title(title, has_providers)
+}
+
+/// Regex-parser fallback shared by both "all providers failed" and "a
+/// provider's song sanitized to empty" — always runs the sanitizer over
+/// its own output too, since a title can itself carry emoji.
+fn fallback_from_title(title: &str, mark_gemini_failed: bool) -> VideoMetadata {
     let mut meta = parser::parse_title(title);
-    if has_providers {
+    if mark_gemini_failed {
         meta.gemini_failed = true;
     }
     meta.song = sanitize::strip_emoji(&meta.song);

@@ -258,6 +258,13 @@ pub async fn get_video_file_path(
 }
 
 /// Update a video row with both sidecar paths after a successful download.
+///
+/// Rejects an empty (post-trim) `song` with `Err(sqlx::Error::InvalidArgument)`
+/// and leaves the row completely untouched — this is the last-line write
+/// choke point, so no upstream mistake can ever persist an empty song
+/// (#136: a live defect shipped five rows with `song=""`, `gemini_failed
+/// = false` because nothing here re-validated the caller's metadata). An
+/// empty `artist` stays legal — `playback/title.rs` handles it.
 #[allow(clippy::too_many_arguments)]
 pub async fn mark_video_processed_pair(
     pool: &SqlitePool,
@@ -269,6 +276,12 @@ pub async fn mark_video_processed_pair(
     video_path: &str,
     audio_path: &str,
 ) -> Result<(), sqlx::Error> {
+    if song.trim().is_empty() {
+        return Err(sqlx::Error::InvalidArgument(format!(
+            "mark_video_processed_pair: refusing to write an empty song for video_db_id={video_db_id}"
+        )));
+    }
+
     let result = sqlx::query(
         "UPDATE videos
          SET song = ?, artist = ?, metadata_source = ?,
