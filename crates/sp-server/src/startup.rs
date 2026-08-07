@@ -172,6 +172,69 @@ pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::
     Ok(healed)
 }
 
+/// Repair stored rows whose `song` was written empty/whitespace-only by
+/// the since-fixed metadata bug (#136: five ytalex rows shipped
+/// `song=""`, `artist=""`, `gemini_failed=false`) — re-derive song+artist
+/// from the stored `title` via the regex title parser
+/// (`metadata::parser::parse_title`).
+///
+/// `metadata::get_metadata`'s provider-success path now re-checks for an
+/// empty song after sanitization and falls back to the title parser
+/// itself, and `db::models::mark_video_processed_pair` refuses to WRITE
+/// an empty song — but a row already stored before those guards existed
+/// stays broken forever unless something re-visits it. This pass fixes
+/// the DB directly.
+///
+/// Every repaired row is stamped `gemini_failed = 1` — mirrors the
+/// `get_metadata` fallback contract: a repaired empty-song row always
+/// means the title parser produced the value, never a real provider
+/// result. If the title parser ALSO yields an empty song for a row (e.g.
+/// an empty/NULL title), the row is left untouched and logged at
+/// `warn!` — this pass never writes an empty value, same invariant as
+/// the write choke point.
+///
+/// Idempotent: a row whose `song` is already non-empty (including a NULL
+/// — not yet processed, not "dirty") is left alone. Returns the number
+/// of rows healed.
+pub async fn self_heal_empty_song_metadata(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, youtube_id, title FROM videos
+         WHERE song IS NOT NULL AND TRIM(song) = ''",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut healed = 0usize;
+    for row in rows {
+        let id: i64 = row.get("id");
+        let youtube_id: String = row.get("youtube_id");
+        let title: Option<String> = row.get("title");
+        let title = title.unwrap_or_default();
+
+        let parsed = crate::metadata::parser::parse_title(&title);
+        if parsed.song.trim().is_empty() {
+            tracing::warn!(
+                video_id = id,
+                youtube_id = %youtube_id,
+                title = %title,
+                "self-heal: title parser also produced an empty song; leaving row untouched"
+            );
+            continue;
+        }
+
+        sqlx::query("UPDATE videos SET song = ?, artist = ?, gemini_failed = 1 WHERE id = ?")
+            .bind(&parsed.song)
+            .bind(&parsed.artist)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        healed += 1;
+    }
+
+    tracing::info!(healed, "self-heal: repaired stored rows with empty song");
+    Ok(healed)
+}
+
 /// Probe sample rates of every `normalized = 1` row's `audio_file_path`
 /// and flip any row whose audio is not at 48 kHz back to `normalized = 0`
 /// so the download worker re-normalizes it.
