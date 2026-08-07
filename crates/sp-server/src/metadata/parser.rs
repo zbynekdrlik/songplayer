@@ -708,6 +708,50 @@ mod tests {
         assert_eq!(m.artist, "Elevation Worship");
     }
 
+    // ---- shorten_single_artist: don't mangle non-personal-name strings ----
+    //
+    // Live catalog damage (#TBD): `shorten_single_artist` treated any
+    // 2-3 word string as "First Last" and abbreviated it, wrecking
+    // stylized event/band names that happen to parse as 2-3 "words".
+    // These regression tests pin the exact live-damaged strings.
+
+    #[test]
+    fn shorten_leaves_exclamation_event_name_unchanged() {
+        // Live damage: "PRAISE BREAK! - planetboom" title parsed
+        // artist="PRAISE BREAK!" then got mangled to "P. Break!".
+        assert_eq!(shorten_artist("PRAISE BREAK!"), "PRAISE BREAK!");
+    }
+
+    #[test]
+    fn shorten_leaves_period_abbreviated_band_name_unchanged() {
+        // Live damage: "F. B. NATION" — already contains period tokens,
+        // must not be re-abbreviated.
+        assert_eq!(shorten_artist("F. B. NATION"), "F. B. NATION");
+    }
+
+    #[test]
+    fn shorten_leaves_comma_separated_period_names_unchanged() {
+        // Live damage: "C. Stop, W. Stop" — comma-split, each segment
+        // already carries a period token.
+        assert_eq!(shorten_artist("C. Stop, W. Stop"), "C. Stop, W. Stop");
+    }
+
+    #[test]
+    fn shorten_leaves_all_caps_comma_names_unchanged() {
+        // Live damage: "I. DECLARE, I. DECREE".
+        assert_eq!(
+            shorten_artist("I. DECLARE, I. DECREE"),
+            "I. DECLARE, I. DECREE"
+        );
+    }
+
+    #[test]
+    fn shorten_still_abbreviates_genuine_personal_name() {
+        // Regression guard: the new guard must not break real
+        // "First Last" abbreviation.
+        assert_eq!(shorten_artist("Michael Bethany"), "M. Bethany");
+    }
+
     // ---- fallback-path emoji regression (live #135 E2E failure) ----
 
     /// `parser::parse_title` is the regex FALLBACK `metadata::get_metadata`
