@@ -707,4 +707,40 @@ mod tests {
         assert_eq!(m.song, "The Blessing");
         assert_eq!(m.artist, "Elevation Worship");
     }
+
+    // ---- fallback-path emoji regression (live #135 E2E failure) ----
+
+    /// `parser::parse_title` is the regex FALLBACK `metadata::get_metadata`
+    /// (metadata/mod.rs) uses when every provider fails or none are
+    /// configured. Unlike `GeminiProvider::parse_response`, it never
+    /// stripped emoji — so a fallback-produced artist/song could leak
+    /// emoji straight into the DB. Mirrors the live post-deploy E2E
+    /// failure: video `0HQOYVf6-Yg` stored
+    /// `artist = "Christian Afro House 2025 🔥"`.
+    ///
+    /// This exercises the fallback through `metadata::get_metadata` (empty
+    /// provider list — no provider is ever tried, so `parse_title` is what
+    /// actually produces the returned metadata), because the sanitizer's
+    /// single choke point lives at `get_metadata`'s return, not inside
+    /// `parse_title` itself.
+    #[tokio::test]
+    async fn fallback_path_strips_emoji_from_artist() {
+        let providers: Vec<Box<dyn crate::metadata::MetadataProvider>> = vec![];
+        let meta = crate::metadata::get_metadata(
+            &providers,
+            "0HQOYVf6-Yg",
+            "Our God + The Blessing | Christian Afro House 2025 \u{1F525}",
+        )
+        .await;
+        assert_eq!(meta.song, "Our God + The Blessing");
+        assert_eq!(
+            meta.artist, "Christian Afro House 2025",
+            "fallback path must strip emoji from the artist"
+        );
+        assert!(
+            !meta.artist.chars().any(|c| c as u32 >= 0x2600),
+            "no emoji codepoints may remain in artist: {:?}",
+            meta.artist
+        );
+    }
 }
