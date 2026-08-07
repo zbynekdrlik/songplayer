@@ -1,0 +1,438 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "5JW87KKDTcU",
+  "duration_ms": 232890,
+  "lines": [
+    {
+      "text": "Nothing satisfies like Jesus",
+      "start_ms": 5610,
+      "end_ms": 7530,
+      "text_sk": "Nič nenapĺňa tak ako Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "'Cos in His presence there's freedom",
+      "start_ms": 9570,
+      "end_ms": 11250,
+      "text_sk": "Lebo v Jeho prítomnosti je sloboda",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "All our sin is forgiven",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Všetky naše hriechy sú odpustené",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "So we give to Him the highest praise",
+      "start_ms": 15990,
+      "end_ms": 19770,
+      "text_sk": "Tak Mu vzdávame najvyššiu chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Yes, the greatest thing when you feel His grace",
+      "start_ms": 24210,
+      "end_ms": 26310,
+      "text_sk": "Áno, tá najväčšia vec, keď cítiš Jeho milosť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "In this moment You are moving as we draw close",
+      "start_ms": 28050,
+      "end_ms": 32130,
+      "text_sk": "V tomto momente konáš, keď sa približujeme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Oh, come right now, Holy Spirit, release Your power",
+      "start_ms": 35610,
+      "end_ms": 40410,
+      "text_sk": "Ó, príď práve teraz, Duchu Svätý, uvoľni svoju moc",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Lord, we are hungry for more of You",
+      "start_ms": 41010,
+      "end_ms": 43950,
+      "text_sk": "Pane, sme hladní po väčšom množstve Teba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Heavens open, You're bursting through",
+      "start_ms": 44730,
+      "end_ms": 48270,
+      "text_sk": "Nebesia sa otvárajú, Ty prerážaš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Send in this place like a rushing wind",
+      "start_ms": 48810,
+      "end_ms": 52530,
+      "text_sk": "Zasiahni toto miesto ako mocný víchor",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Come and move again",
+      "start_ms": 53430,
+      "end_ms": 56130,
+      "text_sk": "Príď a konaj znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a fire within",
+      "start_ms": 57090,
+      "end_ms": 59910,
+      "text_sk": "Ako oheň vo vnútri",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "We will burn, burn, burn, burn, burn, burn, woah",
+      "start_ms": 60810,
+      "end_ms": 63930,
+      "text_sk": "Budeme horieť, horieť, horieť, horieť, horieť, horieť, woah",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "We will burn!",
+      "start_ms": 71190,
+      "end_ms": 72090,
+      "text_sk": "Budeme horieť!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "See every body that's hurting",
+      "start_ms": 81750,
+      "end_ms": 82530,
+      "text_sk": "Viď každé telo, ktoré trpí",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Here comes the sound of rejoicing",
+      "start_ms": 84270,
+      "end_ms": 86190,
+      "text_sk": "Prichádza zvuk radovania",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Our happiness restored",
+      "start_ms": 88350,
+      "end_ms": 88770,
+      "text_sk": "Naše šťastie je obnovené",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "So we give to Him the highest praise",
+      "start_ms": 90870,
+      "end_ms": 94950,
+      "text_sk": "Tak Mu vzdávame najvyššiu chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Yes, the greatest thing when you feel His grace",
+      "start_ms": 95850,
+      "end_ms": 100110,
+      "text_sk": "Áno, tá najväčšia vec, keď cítiš Jeho milosť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "In this moment You are moving as we draw close",
+      "start_ms": 103170,
+      "end_ms": 107010,
+      "text_sk": "V tomto momente konáš, keď sa približujeme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Oh, come right now, Holy Spirit, release Your power",
+      "start_ms": 110190,
+      "end_ms": 115410,
+      "text_sk": "Ó, príď práve teraz, Duchu Svätý, uvoľni svoju moc",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Lord, we are hungry for more of You",
+      "start_ms": 115890,
+      "end_ms": 119010,
+      "text_sk": "Pane, sme hladní po väčšom množstve Teba",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Heavens open, You're bursting through",
+      "start_ms": 119730,
+      "end_ms": 122970,
+      "text_sk": "Nebesia sa otvárajú, Ty prerážaš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Send in this place like a rushing wind",
+      "start_ms": 123750,
+      "end_ms": 127590,
+      "text_sk": "Zasiahni toto miesto ako mocný víchor",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Come and move again",
+      "start_ms": 128430,
+      "end_ms": 131070,
+      "text_sk": "Príď a konaj znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a fire within",
+      "start_ms": 132210,
+      "end_ms": 133230,
+      "text_sk": "Ako oheň vo vnútri",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "We will burn",
+      "start_ms": 134670,
+      "end_ms": 135990,
+      "text_sk": "Budeme horieť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "We raise our hands up, we're going all out",
+      "start_ms": 155550,
+      "end_ms": 158970,
+      "text_sk": "Dvíhame ruky, ideme do toho naplno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "We're lifting up the name of Jesus",
+      "start_ms": 159270,
+      "end_ms": 161550,
+      "text_sk": "Vystatujeme meno Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Nothing will stop us singing Your praises",
+      "start_ms": 163050,
+      "end_ms": 166110,
+      "text_sk": "Nič nás nezastaví v spievaní Tvojich chvál",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Your Holy Spirit is here",
+      "start_ms": 166770,
+      "end_ms": 169110,
+      "text_sk": "Tvoj Duch Svätý je tu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Like a rushing wind",
+      "start_ms": 169650,
+      "end_ms": 172650,
+      "text_sk": "Ako mocný víchor",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Come and move again",
+      "start_ms": 173430,
+      "end_ms": 176010,
+      "text_sk": "Príď a konaj znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a fire within",
+      "start_ms": 177030,
+      "end_ms": 179970,
+      "text_sk": "Ako oheň vo vnútri",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "We will burn, burn, burn, burn, oh we raise our hands up, we raise our hands up!",
+      "start_ms": 180750,
+      "end_ms": 186990,
+      "text_sk": "Budeme horieť, horieť, horieť, horieť, ó, dvíhame ruky, dvíhame ruky!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "We raise our hands, and we give You all the glory, yeah!",
+      "start_ms": 189270,
+      "end_ms": 193230,
+      "text_sk": "Dvíhame ruky a vzdávame Ti všetku slávu, jé!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "We raise our hands up!",
+      "start_ms": 196770,
+      "end_ms": 198210,
+      "text_sk": "Dvíhame ruky!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And we give You all the praise, we give You all the glory, Jesus!",
+      "start_ms": 201630,
+      "end_ms": 208290,
+      "text_sk": "A vzdávame Ti všetku chválu, vzdávame Ti všetku slávu, Ježiš!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "Our faith is breaking through the ceiling",
+      "start_ms": 219390,
+      "end_ms": 221970,
+      "text_sk": "Naša viera preráža strop",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "There's no doubt we are believing",
+      "start_ms": 223410,
+      "end_ms": 225390,
+      "text_sk": "Nepochybne veríme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "That in this moment we are seeing",
+      "start_ms": 226710,
+      "end_ms": 229350,
+      "text_sk": "Že v tomto momente vidíme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Oh, everything that we've been dreaming",
+      "start_ms": 230730,
+      "end_ms": 232890,
+      "text_sk": "Ó, všetko, o čom sme snívali",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 42,
+    "n_lines_timed": 41,
+    "n_lines_untimed": 1,
+    "n_words_total": 288,
+    "n_words_aligned": 257,
+    "word_align_rate": 0.8923611111111112,
+    "n_monotonic_violations_clamped": 0
+  }
+}

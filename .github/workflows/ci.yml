@@ -105,7 +105,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Run security audit
         run: cargo audit --ignore RUSTSEC-2023-0071  # rsa crate via sqlx-mysql (transitive, we only use sqlite)
 
@@ -137,7 +137,11 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Install trunk
-        run: cargo install trunk
+        # --locked pins trunk's OWN Cargo.lock. Without it, cargo resolves
+        # trunk's deps fresh on every run, so an unrelated upstream release
+        # breaks our CI: cssparser 0.37.0 broke lightningcss 1.0.0-alpha.65
+        # on 2026-08-05 and took build-wasm red with no change on our side.
+        run: cargo install trunk --version 0.21.14 --locked
       - name: Build WASM frontend
         run: cd sp-ui && trunk build --release
       - name: Upload dist artifact
@@ -161,7 +165,7 @@ jobs:
           name: dist
           path: dist/
       - name: Install Tauri CLI
-        run: cargo install tauri-cli
+        run: cargo install tauri-cli --version "^2.0.0" --locked
       - name: Build Tauri app
         run: cargo tauri build
       - name: Upload NSIS installer
@@ -314,7 +318,8 @@ jobs:
 
       - name: Ban skip patterns in E2E tests
         run: |
-          FOUND=$(grep -rn '\.skip(' e2e/tests/ 2>/dev/null || true)
+          test -d e2e || { echo "ERROR: e2e/ not found"; exit 1; }
+          FOUND=$(grep -rn '\.skip(' e2e --include='*.ts' --exclude-dir=node_modules || true)
           if [ -n "$FOUND" ]; then
             echo "ERROR: .skip() found in E2E tests. Tests must run, not skip."
             echo "$FOUND"
@@ -453,7 +458,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --version 0.37.0 --locked
       - name: Run coverage
         run: cargo tarpaulin --workspace --exclude-files "src-tauri/*" --exclude-files "sp-ui/*" --fail-under 40 --skip-clean --timeout 300
 
@@ -490,7 +495,7 @@ jobs:
           # shared key would deadlock concurrent shards on cache write.
           key: mutants-shard-${{ strategy.job-index }}
       - name: Install cargo-mutants
-        run: cargo install cargo-mutants
+        run: cargo install cargo-mutants --version 27.1.0 --locked
       # GitHub-hosted ubuntu-latest has 16GB RAM and no swap. cargo-mutants
       # compiling rustc + linking sqlx/wiremock/tokio/reqwest for each mutant
       # pushes peak memory past 16GB, triggering runner OOM-kill that
@@ -678,6 +683,15 @@ jobs:
             echo "$job: $result"
             if [ "$result" != "success" ]; then
               echo "FAILED: job '$job' did not succeed (result: $result)"
+              exit 1
+            fi
+          done
+          # conditional jobs: skipped is acceptable, failure is NOT
+          for job in version-check dev-version-check red-green-order mutation-testing; do
+            result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
+            echo "$job: $result"
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "FAILED: conditional job '$job' did not succeed (result: $result)"
               exit 1
             fi
           done
@@ -1264,11 +1278,8 @@ jobs:
           Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
 
           if ($titleClips.Count -eq 0) {
-            # Resolume is reachable but has no #sp-title clips configured.
-            # Operator must create them - this is a configuration issue, not a code bug.
-            Write-Host "INFO: Resolume is reachable but has zero #sp-title clips."
-            Write-Host "      Operator must create at least one clip with '#sp-title' in its name."
-            exit 0
+            Write-Error "FAIL: Resolume is reachable but has zero #sp-title clips. Titles cannot reach the wall. Create a clip with '#sp-title' in its name."
+            exit 1
           }
 
           # ASSERT: every #sp-title clip must have non-empty text after playback.
@@ -1288,61 +1299,84 @@ jobs:
 
           Write-Host "OK: All $($titleClips.Count) #sp-title clips have non-empty, clean title text."
 
-          # --- #sp-subs-next regression gate (v0.22.0) ---
+          # --- #sp-subs / #sp-subs-next / #sp-subssk regression gate (v0.22.0, extended) ---
           # SongPlayer must push the upcoming line to any #sp-subs-next clip
           # in parallel with the current line on #sp-subs. If both tokens'
           # clips carry the SAME text, the lookahead push isn't wired.
+          #
+          # All four Resolume tokens SongPlayer targets (#sp-title, #sp-subs,
+          # #sp-subs-next, #sp-subssk — see resolume_health.rs, which treats
+          # zero clips for ANY of them as unhealthy) get the SAME zero-clip
+          # hard assertion below: a renamed/missing clip is a static
+          # composition-configuration gap, not a content-dependent skip, and
+          # must fail CI the same way the #sp-title zero-clips case does
+          # (issue #89). Previously only #sp-subs-next had this assertion —
+          # zero #sp-subs or zero #sp-subssk clips silently reached the
+          # content-dependent "all empty" skip below and went undetected.
           $subsClips = @()
           $subsNextClips = @()
+          $subsSkClips = @()
           foreach ($layer in $comp.layers) {
             foreach ($clip in $layer.clips) {
               $n = $clip.name.value
               if ($n -match '#sp-subs-next') {
                 $subsNextClips += $clip.video.sourceparams.Text.value
-              } elseif ($n -match '#sp-subs(?!sk)') {
+              } elseif ($n -match '#sp-subssk') {
+                $subsSkClips += $clip.video.sourceparams.Text.value
+              } elseif ($n -match '#sp-subs') {
                 $subsClips += $clip.video.sourceparams.Text.value
               }
             }
           }
           if ($subsNextClips.Count -eq 0) {
-            Write-Host "INFO: no #sp-subs-next clips configured on this Resolume project - skipping lookahead gate"
+            Write-Error "FAIL: Resolume is reachable but has zero #sp-subs-next clips configured. Create a clip with '#sp-subs-next' in its name."
+            exit 1
+          }
+          if ($subsSkClips.Count -eq 0) {
+            Write-Error "FAIL: Resolume is reachable but has zero #sp-subssk clips configured. Create a clip with '#sp-subssk' in its name."
+            exit 1
+          }
+          if ($subsClips.Count -eq 0) {
+            Write-Error "FAIL: Resolume is reachable but has zero #sp-subs clips configured. Create a clip with '#sp-subs' in its name."
+            exit 1
+          }
+          Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips, $($subsSkClips.Count) #sp-subssk clips"
+          Write-Host "  #sp-subs texts:"
+          foreach ($t in $subsClips) { Write-Host "    '$t'" }
+          Write-Host "  #sp-subs-next texts:"
+          foreach ($t in $subsNextClips) { Write-Host "    '$t'" }
+          Write-Host "  #sp-subssk texts:"
+          foreach ($t in $subsSkClips) { Write-Host "    '$t'" }
+          # Skip the lookahead gate when subs clips are all empty/whitespace.
+          # ytwarmup playlist's continuous picker is non-deterministic — it
+          # may select a vocal-exercise video with no lyrics, in which case
+          # SongPlayer pushes nothing and every clip retains its empty
+          # default. "Empty == empty" is not a regression, so the gate must
+          # only fire when there IS lyric text on #sp-subs to compare.
+          $nonEmptySubs = $subsClips | Where-Object { $_ -and $_.Trim() -ne '' }
+          if ($nonEmptySubs.Count -eq 0) {
+            Write-Host "INFO: #sp-subs clips all empty (video has no lyrics) - skipping lookahead gate"
           } else {
-            Write-Host "Found $($subsClips.Count) #sp-subs clips, $($subsNextClips.Count) #sp-subs-next clips"
-            Write-Host "  #sp-subs texts:"
-            foreach ($t in $subsClips) { Write-Host "    '$t'" }
-            Write-Host "  #sp-subs-next texts:"
-            foreach ($t in $subsNextClips) { Write-Host "    '$t'" }
-            # Skip the lookahead gate when subs clips are all empty/whitespace.
-            # ytwarmup playlist's continuous picker is non-deterministic — it
-            # may select a vocal-exercise video with no lyrics, in which case
-            # SongPlayer pushes nothing and every clip retains its empty
-            # default. "Empty == empty" is not a regression, so the gate must
-            # only fire when there IS lyric text on #sp-subs to compare.
-            $nonEmptySubs = $subsClips | Where-Object { $_ -and $_.Trim() -ne '' }
-            if ($nonEmptySubs.Count -eq 0) {
-              Write-Host "INFO: #sp-subs clips all empty (video has no lyrics) - skipping lookahead gate"
+            # Songs legitimately have consecutive repeated lyric lines
+            # (e.g. "Everything I need" sung 4× in a chorus). When the
+            # 15s capture lands on such a section, every #sp-subs and
+            # #sp-subs-next clip carries the same text — that is correct
+            # behaviour, not a missing lookahead. ~87% of allowed-set
+            # songs have at least one consecutive-duplicate-line pair, so
+            # the gate must tolerate it (see issue #105).
+            $distinctSubs = $nonEmptySubs | Select-Object -Unique
+            if ($distinctSubs.Count -eq 1) {
+              Write-Host "INFO: #sp-subs has only one distinct text ('$($distinctSubs[0])') - repeated-line section, skipping lookahead gate"
             } else {
-              # Songs legitimately have consecutive repeated lyric lines
-              # (e.g. "Everything I need" sung 4× in a chorus). When the
-              # 15s capture lands on such a section, every #sp-subs and
-              # #sp-subs-next clip carries the same text — that is correct
-              # behaviour, not a missing lookahead. ~87% of allowed-set
-              # songs have at least one consecutive-duplicate-line pair, so
-              # the gate must tolerate it (see issue #105).
-              $distinctSubs = $nonEmptySubs | Select-Object -Unique
-              if ($distinctSubs.Count -eq 1) {
-                Write-Host "INFO: #sp-subs has only one distinct text ('$($distinctSubs[0])') - repeated-line section, skipping lookahead gate"
-              } else {
-                $identical = $true
-                foreach ($t in $subsNextClips) {
-                  if (-not ($subsClips -contains $t)) { $identical = $false; break }
-                }
-                if ($identical) {
-                  Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
-                  exit 1
-                }
-                Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
+              $identical = $true
+              foreach ($t in $subsNextClips) {
+                if (-not ($subsClips -contains $t)) { $identical = $false; break }
               }
+              if ($identical) {
+                Write-Error "FAIL: every #sp-subs-next clip text matches a #sp-subs clip text - lookahead push not wired"
+                exit 1
+              }
+              Write-Host "OK: #sp-subs-next clips carry distinct lookahead text"
             }
           }
 

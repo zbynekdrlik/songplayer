@@ -24,10 +24,30 @@ impl ToolsManager {
 
     /// Check if tools exist and return paths, or download them.
     pub async fn ensure_tools(&self) -> Result<ToolPaths, anyhow::Error> {
+        self.ensure_tools_with_ffmpeg_path_override(None).await
+    }
+
+    /// Same as `ensure_tools`, but lets a test point the non-Windows ffmpeg
+    /// `PATH` probe at a controlled directory instead of inheriting the real
+    /// environment — this is what makes both PATH-probe outcomes (found /
+    /// not found) deterministic in tests regardless of whether the host
+    /// running them happens to have ffmpeg installed.
+    async fn ensure_tools_with_ffmpeg_path_override(
+        &self,
+        ffmpeg_path_override: Option<&str>,
+    ) -> Result<ToolPaths, anyhow::Error> {
+        // Only consulted by the non-Windows branch below; referenced here
+        // unconditionally (Option<&str> is Copy, so this doesn't consume
+        // the binding) so a Windows build doesn't warn on an unused arg.
+        let _ = ffmpeg_path_override;
+
         tokio::fs::create_dir_all(&self.tools_dir).await?;
 
         let ytdlp = self.tools_dir.join(ytdlp_filename());
-        let ffmpeg = self.tools_dir.join(ffmpeg_filename());
+        // Reassigned only by the non-Windows PATH-probe branch below, so on
+        // Windows the `mut` is genuinely unused.
+        #[cfg_attr(windows, allow(unused_mut))]
+        let mut ffmpeg = self.tools_dir.join(ffmpeg_filename());
 
         if !ytdlp.exists() {
             tracing::info!("downloading yt-dlp to {}", ytdlp.display());
@@ -46,9 +66,9 @@ impl ToolsManager {
         }
 
         if !ffmpeg.exists() {
-            tracing::info!("downloading ffmpeg to {}", ffmpeg.display());
             #[cfg(windows)]
             {
+                tracing::info!("downloading ffmpeg to {}", ffmpeg.display());
                 // FFmpeg for Windows is distributed as a ZIP archive — download and
                 // extract the ffmpeg.exe binary from it.
                 let zip_path = self.tools_dir.join("ffmpeg.zip");
@@ -58,8 +78,37 @@ impl ToolsManager {
             }
             #[cfg(not(windows))]
             {
-                Self::download_file(ffmpeg_download_url(), &ffmpeg).await?;
-                Self::make_executable(&ffmpeg).await?;
+                // FFmpeg for Linux is distributed as a .tar.xz archive. This
+                // crate has no tar/xz decoder, so downloading it straight
+                // onto the `ffmpeg` binary path would write a corrupt
+                // "executable" that fails `verify_executable`'s ELF check
+                // forever, re-downloading ~80MB on every start while every
+                // FFmpeg call fails with ENOEXEC. Windows is the shipped
+                // target (see project CLAUDE.md "Deployment target"); this
+                // branch only runs on a Linux dev/CI box.
+                //
+                // Most Linux boxes already have a package-manager-installed
+                // ffmpeg on PATH (yt_subs-only lyrics paths don't even need
+                // it) — probe for that first, same shape as `detect_python`
+                // below, before giving up.
+                if let Some(existing) = Self::detect_ffmpeg(ffmpeg_path_override).await {
+                    tracing::info!(
+                        "using ffmpeg found on PATH: {} (skipping the unsupported \
+                         managed .tar.xz download)",
+                        existing.display()
+                    );
+                    ffmpeg = existing;
+                } else {
+                    anyhow::bail!(
+                        "automatic FFmpeg download is Windows-only (the Linux release at {} \
+                         is a .tar.xz archive and this crate has no xz decoder), and no \
+                         `ffmpeg` was found on PATH either. Install ffmpeg via the system \
+                         package manager, or extract it from that archive yourself, and \
+                         place/symlink the binary at {}",
+                        ffmpeg_download_url(),
+                        ffmpeg.display()
+                    );
+                }
             }
         }
 
@@ -118,7 +167,7 @@ impl ToolsManager {
             return false;
         }
         if cfg!(windows) {
-            buf == [b'M', b'Z'] // PE header
+            buf == *b"MZ" // PE header
         } else {
             buf == [0x7F, b'E'] // ELF header
         }
@@ -188,7 +237,7 @@ impl ToolsManager {
                 if output.status.success() {
                     // Resolve to an absolute path so the caller doesn't need
                     // to rely on PATH being set in child processes.
-                    if let Ok(path) = which_python(candidate).await {
+                    if let Ok(path) = which_on_path(candidate, None).await {
                         tracing::info!("Python detected: {} ({:?})", candidate, path);
                         return Some(path);
                     }
@@ -200,19 +249,55 @@ impl ToolsManager {
         tracing::info!("Python not found on PATH; lyrics ASR/alignment disabled");
         None
     }
+
+    /// Detect an existing `ffmpeg` on `PATH` (non-Windows only) — mirrors
+    /// `detect_python`'s probe-then-resolve shape. Returns `None` when
+    /// `ffmpeg` is not runnable via `PATH`, so the caller falls through to
+    /// the Windows-only auto-download's explanatory bail.
+    ///
+    /// `path_override`, when set, replaces the probe subprocess's `PATH` env
+    /// var instead of inheriting the real one — used by tests to make both
+    /// outcomes (found / not found) deterministic.
+    #[cfg(not(windows))]
+    async fn detect_ffmpeg(path_override: Option<&str>) -> Option<PathBuf> {
+        let mut cmd = tokio::process::Command::new("ffmpeg");
+        cmd.arg("-version");
+        if let Some(path) = path_override {
+            cmd.env("PATH", path);
+        }
+        super::hide_console_window(&mut cmd);
+        let output = cmd.output().await.ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        if let Ok(path) = which_on_path("ffmpeg", path_override).await {
+            tracing::info!("ffmpeg resolved to absolute path: {}", path.display());
+            return Some(path);
+        }
+        // Fallback: just return the bare command name — a child process
+        // that inherits PATH will still find it, same fallback
+        // `detect_python` uses above.
+        Some(PathBuf::from("ffmpeg"))
+    }
 }
 
 /// Try to resolve a command name to an absolute path using the OS `where`/`which` command.
-async fn which_python(name: &str) -> Result<PathBuf, anyhow::Error> {
+///
+/// `path_override`, when set, replaces the child's `PATH` env var instead of
+/// inheriting the real one — used by tests to point the lookup at a
+/// controlled directory instead of the real environment.
+async fn which_on_path(name: &str, path_override: Option<&str>) -> Result<PathBuf, anyhow::Error> {
     #[cfg(windows)]
     let locator = "where";
     #[cfg(not(windows))]
     let locator = "which";
 
-    let output = tokio::process::Command::new(locator)
-        .arg(name)
-        .output()
-        .await?;
+    let mut cmd = tokio::process::Command::new(locator);
+    cmd.arg(name);
+    if let Some(path) = path_override {
+        cmd.env("PATH", path);
+    }
+    let output = cmd.output().await?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -381,6 +466,101 @@ mod tests {
         } else {
             assert!(!name.contains('.'));
         }
+    }
+
+    /// Write an executable no-op script at `dir/ffmpeg` (Unix shebang script
+    /// that exits 0) so a `Command::new("ffmpeg").arg("-version")` probe
+    /// succeeds when `PATH` is overridden to point at `dir`.
+    #[cfg(not(windows))]
+    async fn write_fake_ffmpeg(dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let fake_ffmpeg = dir.join("ffmpeg");
+        tokio::fs::write(&fake_ffmpeg, "#!/bin/sh\nexit 0\n")
+            .await
+            .expect("write fake ffmpeg script");
+        let mut perms = tokio::fs::metadata(&fake_ffmpeg)
+            .await
+            .expect("stat fake ffmpeg script")
+            .permissions();
+        perms.set_mode(0o755);
+        tokio::fs::set_permissions(&fake_ffmpeg, perms)
+            .await
+            .expect("chmod fake ffmpeg script");
+    }
+
+    /// When `ffmpeg` IS found on `PATH`, the non-Windows branch of
+    /// `ensure_tools` must use it instead of bailing — most Linux boxes
+    /// (incl. GitHub-hosted Ubuntu runners, which ship ffmpeg pre-installed)
+    /// already have a package-manager ffmpeg, so the previous unconditional
+    /// bail silently started zero workers on a machine that had everything
+    /// it needed. `PATH` is overridden to an isolated directory containing
+    /// only the fake ffmpeg, so this is deterministic regardless of whether
+    /// the real host also happens to have ffmpeg installed.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn ensure_tools_uses_ffmpeg_found_on_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tools_dir = dir.path().to_path_buf();
+        tokio::fs::write(tools_dir.join(ytdlp_filename()), b"fake-ytdlp")
+            .await
+            .expect("write fake ytdlp");
+
+        let fake_path_dir = tempfile::tempdir().expect("fake PATH dir");
+        write_fake_ffmpeg(fake_path_dir.path()).await;
+        let path_override = fake_path_dir.path().to_str().expect("utf8 tempdir path");
+
+        let mgr = ToolsManager::new(tools_dir.clone());
+        let paths = mgr
+            .ensure_tools_with_ffmpeg_path_override(Some(path_override))
+            .await
+            .expect("ffmpeg on PATH must be used instead of bailing");
+        assert_eq!(
+            paths.ffmpeg.file_name().and_then(|n| n.to_str()),
+            Some("ffmpeg"),
+            "ffmpeg path was: {:?}",
+            paths.ffmpeg
+        );
+        assert!(
+            !tools_dir.join(ffmpeg_filename()).exists(),
+            "must not attempt the unsupported managed .tar.xz download when ffmpeg is on PATH"
+        );
+    }
+
+    /// When `ffmpeg` is NOT found on `PATH` either, the non-Windows branch
+    /// of `ensure_tools` must still fail loudly instead of downloading the
+    /// `.tar.xz` FFmpeg release straight onto the `ffmpeg` binary path —
+    /// this crate has no tar/xz decoder, so the resulting file can never
+    /// pass `verify_executable`'s ELF check. `PATH` is overridden to an
+    /// empty directory so this is deterministic even on a host (e.g. a
+    /// GitHub-hosted Ubuntu runner) that has ffmpeg pre-installed for real.
+    /// Pre-seed a fake yt-dlp so the earlier step in `ensure_tools` doesn't
+    /// attempt a real network download; only the ffmpeg branch is exercised.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn ensure_tools_bails_loudly_instead_of_shipping_corrupt_ffmpeg() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tools_dir = dir.path().to_path_buf();
+        tokio::fs::write(tools_dir.join(ytdlp_filename()), b"fake-ytdlp")
+            .await
+            .expect("write fake ytdlp");
+
+        let empty_path_dir = tempfile::tempdir().expect("empty PATH dir");
+        let path_override = empty_path_dir.path().to_str().expect("utf8 tempdir path");
+
+        let mgr = ToolsManager::new(tools_dir.clone());
+        let err = mgr
+            .ensure_tools_with_ffmpeg_path_override(Some(path_override))
+            .await
+            .expect_err(
+                "non-Windows ffmpeg auto-download must fail when nothing is on PATH either",
+            );
+        let msg = err.to_string();
+        assert!(msg.contains("Windows-only"), "message was: {msg}");
+        assert!(msg.contains("ffmpeg"), "message was: {msg}");
+        assert!(
+            !tools_dir.join(ffmpeg_filename()).exists(),
+            "must not leave a corrupt file at the ffmpeg binary path"
+        );
     }
 
     #[test]

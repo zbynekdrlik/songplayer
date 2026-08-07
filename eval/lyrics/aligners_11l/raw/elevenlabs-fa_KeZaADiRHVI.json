@@ -1,0 +1,392 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\KeZaADiRHVI_vocal16k.wav",
+  "duration_ms": 263980,
+  "lines": [
+    {
+      "text": "When the Holy Ghost gets a hold of you",
+      "text_sk": "Keď sa ťa zmocní Duch Svätý",
+      "start_ms": 10380,
+      "end_ms": 13760,
+      "mean_word_loss": 0.41801365746392144
+    },
+    {
+      "text": "There's no telling what you're liable to do",
+      "text_sk": "Nedá sa povedať, čo všetko môžeš urobiť",
+      "start_ms": 15600,
+      "end_ms": 17280,
+      "mean_word_loss": 0.2735293252127511
+    },
+    {
+      "text": "No telling what you're liable to do",
+      "text_sk": "Nedá sa povedať, čo všetko môžeš urobiť",
+      "start_ms": 17600,
+      "end_ms": 19080,
+      "mean_word_loss": 0.5738507614654749
+    },
+    {
+      "text": "Might get fired up",
+      "text_sk": "Možno sa rozhoríš",
+      "start_ms": 19560,
+      "end_ms": 20980,
+      "mean_word_loss": 0.5294784545898438
+    },
+    {
+      "text": "You might get free",
+      "text_sk": "Možno sa oslobodíš",
+      "start_ms": 22360,
+      "end_ms": 23680,
+      "mean_word_loss": 0.5553763707478842
+    },
+    {
+      "text": "But if you bring cold water don't pour your water on me",
+      "text_sk": "Ale ak prinesieš studenú vodu, nevylej ju na mňa",
+      "start_ms": 25380,
+      "end_ms": 28920,
+      "mean_word_loss": 0.5900182512071398
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "text_sk": "Mám Ducha Svätého a horím",
+      "start_ms": 29260,
+      "end_ms": 32380,
+      "mean_word_loss": 0.09781604645744203
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up now now now now",
+      "text_sk": "Mám Ducha Svätého a horím teraz teraz teraz teraz",
+      "start_ms": 34080,
+      "end_ms": 37850,
+      "mean_word_loss": 0.47889618786263377
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "text_sk": "Mám Ducha Svätého a horím",
+      "start_ms": 38920,
+      "end_ms": 42040,
+      "mean_word_loss": 0.20740769704182943
+    },
+    {
+      "text": "I got the Holy Holy Ghost and I'm burning up I'm burning up I'm burning up",
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím horím",
+      "start_ms": 43720,
+      "end_ms": 49140,
+      "mean_word_loss": 0.17597712164833432
+    },
+    {
+      "text": "Well it's getting wild in this upper room",
+      "text_sk": "No, v tejto hornej izbe sa to divočí",
+      "start_ms": 58260,
+      "end_ms": 61840,
+      "mean_word_loss": 1.3339544568743025
+    },
+    {
+      "text": "It ain't wine no it's a different juice",
+      "text_sk": "Nie je to víno, nie, je to iná šťava",
+      "start_ms": 61940,
+      "end_ms": 66720,
+      "mean_word_loss": 1.0065461609098647
+    },
+    {
+      "text": "Well it don't run out you can get it for free",
+      "text_sk": "No, neminie sa, môžeš ho mať zadarmo",
+      "start_ms": 67860,
+      "end_ms": 71540,
+      "mean_word_loss": 0.27896339532100795
+    },
+    {
+      "text": "But I didn't get it from you so you can't take it from me",
+      "text_sk": "Ale nedostal som ho od teba, takže mi ho nemôžeš vziať",
+      "start_ms": 73160,
+      "end_ms": 77020,
+      "mean_word_loss": 0.2412581125895182
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up",
+      "text_sk": "Mám Ducha Svätého a horím",
+      "start_ms": 77280,
+      "end_ms": 81580,
+      "mean_word_loss": 0.05590427640884642
+    },
+    {
+      "text": "I got the Holy Ghost and I'm burning up now now now now",
+      "text_sk": "Mám Ducha Svätého a horím teraz teraz teraz teraz",
+      "start_ms": 81980,
+      "end_ms": 86051,
+      "mean_word_loss": 0.47230899796817766
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "text_sk": "Mám Ducha Svätého, horím",
+      "start_ms": 86140,
+      "end_ms": 90020,
+      "mean_word_loss": 0.44912041141873316
+    },
+    {
+      "text": "I got the Holy Holy Ghost and I'm burning up I'm burning up",
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím",
+      "start_ms": 91620,
+      "end_ms": 95980,
+      "mean_word_loss": 0.20965733860001895
+    },
+    {
+      "text": "I'm bbbbbburning up I'm burning up I'm burning up",
+      "text_sk": "Hhhhhhhorím, horím, horím",
+      "start_ms": 96200,
+      "end_ms": 99520,
+      "mean_word_loss": 0.5652709965983396
+    },
+    {
+      "text": "I'm bbbbbburning up I'm burning up",
+      "text_sk": "Hhhhhhhorím, horím",
+      "start_ms": 99840,
+      "end_ms": 104360,
+      "mean_word_loss": 0.7943176655542282
+    },
+    {
+      "text": "Burning up",
+      "text_sk": "Horím",
+      "start_ms": 105760,
+      "end_ms": 108460,
+      "mean_word_loss": 0.4877826145717076
+    },
+    {
+      "text": "Burning up",
+      "text_sk": "Horím",
+      "start_ms": 108480,
+      "end_ms": 111510,
+      "mean_word_loss": 0.41756629943847656
+    },
+    {
+      "text": "Hey Moses Moses hey Moses",
+      "text_sk": "Hej Mojžiš, Mojžiš, hej Mojžiš",
+      "start_ms": 115320,
+      "end_ms": 120770,
+      "mean_word_loss": 1.4023046875
+    },
+    {
+      "text": "Said hey Moses yeah",
+      "text_sk": "Povedal hej Mojžiš, áno",
+      "start_ms": 120771,
+      "end_ms": 123860,
+      "mean_word_loss": 1.5085895538330079
+    },
+    {
+      "text": "Yeah said Moses Moses take off your shoes",
+      "text_sk": "Áno, povedal Mojžiš, Mojžiš, vyzuj si topánky",
+      "start_ms": 124980,
+      "end_ms": 129240,
+      "mean_word_loss": 1.0644426703453065
+    },
+    {
+      "text": "This is holy ground you've got a job to do",
+      "text_sk": "Toto je svätá zem, máš prácu, ktorú musíš urobiť",
+      "start_ms": 130340,
+      "end_ms": 133880,
+      "mean_word_loss": 0.2381512482961019
+    },
+    {
+      "text": "I said Moses Moses yeah I'm talking to you",
+      "text_sk": "Povedal som Mojžiš, Mojžiš, áno, hovorím s tebou",
+      "start_ms": 135000,
+      "end_ms": 138700,
+      "mean_word_loss": 0.5885851239401196
+    },
+    {
+      "text": "This is holy ground you've got a job to do",
+      "text_sk": "Toto je svätá zem, máš prácu, ktorú musíš urobiť",
+      "start_ms": 139060,
+      "end_ms": 143320,
+      "mean_word_loss": 0.4596280415852864
+    },
+    {
+      "text": "Tell that Pharaoh how you like those frogs",
+      "text_sk": "Povedz tomu faraónovi, ako sa ti páčia tie žaby",
+      "start_ms": 145080,
+      "end_ms": 148660,
+      "mean_word_loss": 0.4542867104212443
+    },
+    {
+      "text": "Better let me go if you want 'em gone",
+      "text_sk": "Radšej ma pusť, ak ich chceš preč",
+      "start_ms": 149640,
+      "end_ms": 153340,
+      "mean_word_loss": 0.27018773114239725
+    },
+    {
+      "text": "Yeah tell that Pharaoh how you like those frogs",
+      "text_sk": "Áno, povedz tomu faraónovi, ako sa ti páčia tie žaby",
+      "start_ms": 154400,
+      "end_ms": 158480,
+      "mean_word_loss": 0.662483315493064
+    },
+    {
+      "text": "You better let me go if you want 'em gone",
+      "text_sk": "Radšej ma pusť, ak ich chceš preč",
+      "start_ms": 158840,
+      "end_ms": 163000,
+      "mean_word_loss": 0.18637237548828126
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie",
+      "start_ms": 163080,
+      "end_ms": 167980,
+      "mean_word_loss": 0.48503897303626653
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no no no no no",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie nie nie nie nie",
+      "start_ms": 169220,
+      "end_ms": 173770,
+      "mean_word_loss": 0.5951425851810546
+    },
+    {
+      "text": "That bush was burning but it wasn't burning up",
+      "text_sk": "Ten ker horel, ale nezhorel",
+      "start_ms": 174160,
+      "end_ms": 178820,
+      "mean_word_loss": 0.5457613203260634
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "text_sk": "No, ten ker horel, ale nezhorel",
+      "start_ms": 178840,
+      "end_ms": 181780,
+      "mean_word_loss": 0.545790087609064
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no it wasn't burning",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie, nehorel",
+      "start_ms": 183680,
+      "end_ms": 188220,
+      "mean_word_loss": 0.5882930203089638
+    },
+    {
+      "text": "That bush was burning but it wasn't burning up it wasn't burning up no",
+      "text_sk": "Ten ker horel, ale nezhorel, nezhorel, nie",
+      "start_ms": 188640,
+      "end_ms": 192920,
+      "mean_word_loss": 0.5972098655441181
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up no no no",
+      "text_sk": "No, ten ker horel, ale nezhorel, nie nie nie",
+      "start_ms": 193240,
+      "end_ms": 197820,
+      "mean_word_loss": 0.5429797286079043
+    },
+    {
+      "text": "Well that bush was burning but it wasn't burning up",
+      "text_sk": "No, ten ker horel, ale nezhorel",
+      "start_ms": 198040,
+      "end_ms": 201000,
+      "mean_word_loss": 0.4491358348301479
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "text_sk": "Mám Ducha Svätého, horím",
+      "start_ms": 201040,
+      "end_ms": 209980,
+      "mean_word_loss": 0.9971802348182315
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up now now now now",
+      "text_sk": "Mám Ducha Svätého, horím teraz teraz teraz teraz",
+      "start_ms": 211640,
+      "end_ms": 215810,
+      "mean_word_loss": 0.6056103683653332
+    },
+    {
+      "text": "I got the Holy Ghost I'm burning up",
+      "text_sk": "Mám Ducha Svätého, horím",
+      "start_ms": 216580,
+      "end_ms": 219620,
+      "mean_word_loss": 0.5312794378825596
+    },
+    {
+      "text": "I got Holy Holy Ghost and I'm burning up I'm burning up I'm burning up",
+      "text_sk": "Mám Svätého Svätého Ducha a horím horím horím",
+      "start_ms": 221300,
+      "end_ms": 226050,
+      "mean_word_loss": 0.24677247668069505
+    },
+    {
+      "text": "I'm bbbbbburning up I'm bbbbbburning up",
+      "text_sk": "Hhhhhhhorím, hhhhhhhorím",
+      "start_ms": 226049,
+      "end_ms": 229080,
+      "mean_word_loss": 1.5268221961127386
+    },
+    {
+      "text": "I'm bbbb I'm burning I'm burning up I'm burning up",
+      "text_sk": "Som bbbb horím horím horím",
+      "start_ms": 229340,
+      "end_ms": 236400,
+      "mean_word_loss": 1.0119701158432732
+    },
+    {
+      "text": "Yeah that's the Holy Ghost I'm burning up",
+      "text_sk": "Áno, to je Duch Svätý, horím",
+      "start_ms": 236800,
+      "end_ms": 241180,
+      "mean_word_loss": 0.8930938118980044
+    },
+    {
+      "text": "Yeah that's the Holy Ghost that's just the Holy Ghost",
+      "text_sk": "Áno, to je Duch Svätý, to je len Duch Svätý",
+      "start_ms": 241300,
+      "end_ms": 243220,
+      "mean_word_loss": 0.81424648920695
+    },
+    {
+      "text": "That's just the Holy Ghost I'm on fire",
+      "text_sk": "To je len Duch Svätý, horím",
+      "start_ms": 243680,
+      "end_ms": 246240,
+      "mean_word_loss": 0.9544327020645141
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno, horím áno áno",
+      "start_ms": 247220,
+      "end_ms": 252160,
+      "mean_word_loss": 0.7809279759724934
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno, horím áno áno",
+      "start_ms": 252500,
+      "end_ms": 256779,
+      "mean_word_loss": 0.5903148015340169
+    },
+    {
+      "text": "I'm on fire yeah yeah I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno, horím áno áno",
+      "start_ms": 257380,
+      "end_ms": 261700,
+      "mean_word_loss": 0.5775895436604818
+    },
+    {
+      "text": "I'm on fire yeah yeah",
+      "text_sk": "Horím áno áno",
+      "start_ms": 262140,
+      "end_ms": 263980,
+      "mean_word_loss": 0.5863498687744141
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.503030184065517,
+  "metadata": {
+    "n_tokens_sent": 495,
+    "n_words_returned_raw": 989,
+    "n_words_returned_content": 495,
+    "n_characters_returned": 2358,
+    "runtime_sec": 5.7,
+    "n_lines": 53,
+    "n_lines_timed": 53,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

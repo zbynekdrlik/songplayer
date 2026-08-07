@@ -1,0 +1,4474 @@
+{
+  "backend_id": "soniox-v5",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wjJ-izYndWs_vocal16k.wav",
+  "duration_ms": 293430,
+  "lines": [
+    {
+      "text": "By your grace,",
+      "start_ms": 13410,
+      "end_ms": 14370,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "By",
+          "start_ms": 13410,
+          "end_ms": 13470,
+          "confidence": 0.9703362584114075
+        },
+        {
+          "text": "your",
+          "start_ms": 13650,
+          "end_ms": 13770,
+          "confidence": 0.9257449209690094
+        },
+        {
+          "text": "grace,",
+          "start_ms": 14130,
+          "end_ms": 14370,
+          "confidence": 0.7489339709281921
+        }
+      ]
+    },
+    {
+      "text": "I'm",
+      "start_ms": 14790,
+      "end_ms": 15090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 14790,
+          "end_ms": 15090,
+          "confidence": 0.9980083703994751
+        }
+      ]
+    },
+    {
+      "text": "alive,",
+      "start_ms": 15510,
+      "end_ms": 15690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "alive,",
+          "start_ms": 15510,
+          "end_ms": 15690,
+          "confidence": 0.9903786182403564
+        }
+      ]
+    },
+    {
+      "text": "and I'm here to testify,",
+      "start_ms": 16230,
+      "end_ms": 18390,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 16230,
+          "end_ms": 16290,
+          "confidence": 0.9999656677246094
+        },
+        {
+          "text": "I'm",
+          "start_ms": 16470,
+          "end_ms": 16650,
+          "confidence": 0.9999917348225912
+        },
+        {
+          "text": "here",
+          "start_ms": 16830,
+          "end_ms": 17010,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "to",
+          "start_ms": 17190,
+          "end_ms": 17250,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "testify,",
+          "start_ms": 17610,
+          "end_ms": 18390,
+          "confidence": 0.9039580225944519
+        }
+      ]
+    },
+    {
+      "text": "my God.",
+      "start_ms": 19170,
+      "end_ms": 19890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 19170,
+          "end_ms": 19230,
+          "confidence": 0.9187156558036804
+        },
+        {
+          "text": "God.",
+          "start_ms": 19590,
+          "end_ms": 19890,
+          "confidence": 0.972347766160965
+        }
+      ]
+    },
+    {
+      "text": "I live to",
+      "start_ms": 21270,
+      "end_ms": 22170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 21270,
+          "end_ms": 21330,
+          "confidence": 0.9999542236328125
+        },
+        {
+          "text": "live",
+          "start_ms": 21690,
+          "end_ms": 21750,
+          "confidence": 0.9990677833557129
+        },
+        {
+          "text": "to",
+          "start_ms": 22110,
+          "end_ms": 22170,
+          "confidence": 0.9999942779541016
+        }
+      ]
+    },
+    {
+      "text": "praise You,",
+      "start_ms": 22770,
+      "end_ms": 23610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "praise",
+          "start_ms": 22770,
+          "end_ms": 23010,
+          "confidence": 0.999974250793457
+        },
+        {
+          "text": "You,",
+          "start_ms": 23310,
+          "end_ms": 23610,
+          "confidence": 0.6757047176361084
+        }
+      ]
+    },
+    {
+      "text": "my",
+      "start_ms": 25350,
+      "end_ms": 25410,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 25350,
+          "end_ms": 25410,
+          "confidence": 0.5611020922660828
+        }
+      ]
+    },
+    {
+      "text": "defense",
+      "start_ms": 25890,
+      "end_ms": 26370,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "defense",
+          "start_ms": 25890,
+          "end_ms": 26370,
+          "confidence": 0.8988853693008423
+        }
+      ]
+    },
+    {
+      "text": "day and night.",
+      "start_ms": 27090,
+      "end_ms": 28530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "day",
+          "start_ms": 27090,
+          "end_ms": 27150,
+          "confidence": 0.9795889854431152
+        },
+        {
+          "text": "and",
+          "start_ms": 27510,
+          "end_ms": 27570,
+          "confidence": 0.9999904632568359
+        },
+        {
+          "text": "night.",
+          "start_ms": 27690,
+          "end_ms": 28530,
+          "confidence": 0.997640073299408
+        }
+      ]
+    },
+    {
+      "text": "In the name of",
+      "start_ms": 29010,
+      "end_ms": 29430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 29010,
+          "end_ms": 29070,
+          "confidence": 0.8144485950469971
+        },
+        {
+          "text": "the",
+          "start_ms": 29070,
+          "end_ms": 29070,
+          "confidence": 0.9998112320899963
+        },
+        {
+          "text": "name",
+          "start_ms": 29250,
+          "end_ms": 29310,
+          "confidence": 0.9994927644729614
+        },
+        {
+          "text": "of",
+          "start_ms": 29370,
+          "end_ms": 29430,
+          "confidence": 0.9999961853027344
+        }
+      ]
+    },
+    {
+      "text": "Jesus",
+      "start_ms": 29850,
+      "end_ms": 30210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 29850,
+          "end_ms": 30210,
+          "confidence": 0.9999437928199768
+        }
+      ]
+    },
+    {
+      "text": "Christ, my God,",
+      "start_ms": 30630,
+      "end_ms": 32550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Christ,",
+          "start_ms": 30630,
+          "end_ms": 31290,
+          "confidence": 0.9998430013656616
+        },
+        {
+          "text": "my",
+          "start_ms": 31590,
+          "end_ms": 31650,
+          "confidence": 0.9705744385719299
+        },
+        {
+          "text": "God,",
+          "start_ms": 32010,
+          "end_ms": 32550,
+          "confidence": 0.9990168213844299
+        }
+      ]
+    },
+    {
+      "text": "I",
+      "start_ms": 33570,
+      "end_ms": 33630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 33570,
+          "end_ms": 33630,
+          "confidence": 0.9999866485595703
+        }
+      ]
+    },
+    {
+      "text": "live",
+      "start_ms": 34050,
+      "end_ms": 34110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "live",
+          "start_ms": 34050,
+          "end_ms": 34110,
+          "confidence": 0.9998818039894104
+        }
+      ]
+    },
+    {
+      "text": "to",
+      "start_ms": 34530,
+      "end_ms": 34590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 34530,
+          "end_ms": 34590,
+          "confidence": 0.9999905228614807
+        }
+      ]
+    },
+    {
+      "text": "praise You.",
+      "start_ms": 35130,
+      "end_ms": 36030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "praise",
+          "start_ms": 35130,
+          "end_ms": 35370,
+          "confidence": 0.9999838173389435
+        },
+        {
+          "text": "You.",
+          "start_ms": 35730,
+          "end_ms": 36030,
+          "confidence": 0.9993980228900909
+        }
+      ]
+    },
+    {
+      "text": "What else can I do",
+      "start_ms": 38670,
+      "end_ms": 39930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 38670,
+          "end_ms": 38790,
+          "confidence": 0.9999856948852539
+        },
+        {
+          "text": "else",
+          "start_ms": 38970,
+          "end_ms": 39090,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "can",
+          "start_ms": 39330,
+          "end_ms": 39390,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "I",
+          "start_ms": 39570,
+          "end_ms": 39630,
+          "confidence": 0.9999828338623047
+        },
+        {
+          "text": "do",
+          "start_ms": 39870,
+          "end_ms": 39930,
+          "confidence": 0.9999904632568359
+        }
+      ]
+    },
+    {
+      "text": "but",
+      "start_ms": 40650,
+      "end_ms": 40710,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 40650,
+          "end_ms": 40710,
+          "confidence": 0.9977825880050659
+        }
+      ]
+    },
+    {
+      "text": "praise",
+      "start_ms": 42210,
+      "end_ms": 42750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "praise",
+          "start_ms": 42210,
+          "end_ms": 42750,
+          "confidence": 0.9996678531169891
+        }
+      ]
+    },
+    {
+      "text": "You?",
+      "start_ms": 43410,
+      "end_ms": 43710,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You?",
+          "start_ms": 43410,
+          "end_ms": 43710,
+          "confidence": 0.9989405572414398
+        }
+      ]
+    },
+    {
+      "text": "Are you ready?",
+      "start_ms": 45090,
+      "end_ms": 45690,
+      "text_sk": "Si pripravený?",
+      "words": [
+        {
+          "text": "Are",
+          "start_ms": 45090,
+          "end_ms": 45150,
+          "confidence": 0.9987611174583435
+        },
+        {
+          "text": "you",
+          "start_ms": 45210,
+          "end_ms": 45330,
+          "confidence": 0.9999685287475586
+        },
+        {
+          "text": "ready?",
+          "start_ms": 45390,
+          "end_ms": 45690,
+          "confidence": 0.9999275604883829
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 47550,
+      "end_ms": 47610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 47550,
+          "end_ms": 47610,
+          "confidence": 0.9630109071731567
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 48330,
+      "end_ms": 48390,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 48330,
+          "end_ms": 48390,
+          "confidence": 0.9973680377006531
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 48930,
+      "end_ms": 48990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 48930,
+          "end_ms": 48990,
+          "confidence": 0.999691367149353
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 49710,
+      "end_ms": 50010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 49710,
+          "end_ms": 50010,
+          "confidence": 0.9659111797809601
+        }
+      ]
+    },
+    {
+      "text": "no one else",
+      "start_ms": 51210,
+      "end_ms": 51930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "no",
+          "start_ms": 51210,
+          "end_ms": 51270,
+          "confidence": 0.998193621635437
+        },
+        {
+          "text": "one",
+          "start_ms": 51510,
+          "end_ms": 51570,
+          "confidence": 0.9996586441993713
+        },
+        {
+          "text": "else",
+          "start_ms": 51690,
+          "end_ms": 51930,
+          "confidence": 0.9993252456188202
+        }
+      ]
+    },
+    {
+      "text": "besides.",
+      "start_ms": 52350,
+      "end_ms": 53010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "besides.",
+          "start_ms": 52350,
+          "end_ms": 53010,
+          "confidence": 0.92417444785436
+        }
+      ]
+    },
+    {
+      "text": "Else should die if you don't",
+      "start_ms": 54270,
+      "end_ms": 56610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Else",
+          "start_ms": 54270,
+          "end_ms": 54450,
+          "confidence": 0.7090829610824585
+        },
+        {
+          "text": "should",
+          "start_ms": 54630,
+          "end_ms": 54810,
+          "confidence": 0.9866633117198944
+        },
+        {
+          "text": "die",
+          "start_ms": 55110,
+          "end_ms": 55170,
+          "confidence": 0.9936283826828003
+        },
+        {
+          "text": "if",
+          "start_ms": 55410,
+          "end_ms": 55470,
+          "confidence": 0.9536362290382385
+        },
+        {
+          "text": "you",
+          "start_ms": 55710,
+          "end_ms": 55950,
+          "confidence": 0.8393192887306213
+        },
+        {
+          "text": "don't",
+          "start_ms": 56310,
+          "end_ms": 56610,
+          "confidence": 0.9660246074199677
+        }
+      ]
+    },
+    {
+      "text": "worry,",
+      "start_ms": 57210,
+      "end_ms": 57570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "worry,",
+          "start_ms": 57210,
+          "end_ms": 57570,
+          "confidence": 0.9038830995559692
+        }
+      ]
+    },
+    {
+      "text": "why should I?",
+      "start_ms": 58050,
+      "end_ms": 59250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "why",
+          "start_ms": 58050,
+          "end_ms": 58230,
+          "confidence": 0.8394367098808289
+        },
+        {
+          "text": "should",
+          "start_ms": 58350,
+          "end_ms": 58530,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "I?",
+          "start_ms": 58830,
+          "end_ms": 59250,
+          "confidence": 0.9998878240585327
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 60030,
+      "end_ms": 60090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 60030,
+          "end_ms": 60090,
+          "confidence": 0.9995500445365906
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 60690,
+      "end_ms": 60750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 60690,
+          "end_ms": 60750,
+          "confidence": 0.9999735951423645
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 61350,
+      "end_ms": 61410,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 61350,
+          "end_ms": 61410,
+          "confidence": 0.9999827742576599
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 62130,
+      "end_ms": 62430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 62130,
+          "end_ms": 62430,
+          "confidence": 0.9085164368152618
+        }
+      ]
+    },
+    {
+      "text": "author of my",
+      "start_ms": 63750,
+      "end_ms": 64770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "author",
+          "start_ms": 63750,
+          "end_ms": 64110,
+          "confidence": 0.8977346420288086
+        },
+        {
+          "text": "of",
+          "start_ms": 64350,
+          "end_ms": 64410,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "my",
+          "start_ms": 64710,
+          "end_ms": 64770,
+          "confidence": 0.99993896484375
+        }
+      ]
+    },
+    {
+      "text": "life.",
+      "start_ms": 65310,
+      "end_ms": 65550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "life.",
+          "start_ms": 65310,
+          "end_ms": 65550,
+          "confidence": 0.9995646874109904
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your",
+      "start_ms": 66030,
+      "end_ms": 67770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 66030,
+          "end_ms": 66210,
+          "confidence": 0.9999669392903646
+        },
+        {
+          "text": "trusting",
+          "start_ms": 66510,
+          "end_ms": 67050,
+          "confidence": 0.9926400780677795
+        },
+        {
+          "text": "in",
+          "start_ms": 67350,
+          "end_ms": 67410,
+          "confidence": 0.9999963045120239
+        },
+        {
+          "text": "Your",
+          "start_ms": 67710,
+          "end_ms": 67770,
+          "confidence": 0.9738136529922485
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 68370,
+      "end_ms": 69270,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 68370,
+          "end_ms": 68790,
+          "confidence": 0.9998874664306641
+        },
+        {
+          "text": "God,",
+          "start_ms": 68970,
+          "end_ms": 69270,
+          "confidence": 0.9997197091579437
+        }
+      ]
+    },
+    {
+      "text": "till the",
+      "start_ms": 69810,
+      "end_ms": 70110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 69810,
+          "end_ms": 69870,
+          "confidence": 0.8216148018836975
+        },
+        {
+          "text": "the",
+          "start_ms": 70050,
+          "end_ms": 70110,
+          "confidence": 0.9999961853027344
+        }
+      ]
+    },
+    {
+      "text": "day I",
+      "start_ms": 70530,
+      "end_ms": 70950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "day",
+          "start_ms": 70530,
+          "end_ms": 70590,
+          "confidence": 0.9999656677246094
+        },
+        {
+          "text": "I",
+          "start_ms": 70890,
+          "end_ms": 70950,
+          "confidence": 0.9999923706054688
+        }
+      ]
+    },
+    {
+      "text": "die.",
+      "start_ms": 71430,
+      "end_ms": 71790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "die.",
+          "start_ms": 71430,
+          "end_ms": 71790,
+          "confidence": 0.999394029378891
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 72510,
+      "end_ms": 72570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 72510,
+          "end_ms": 72570,
+          "confidence": 0.9997813105583191
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 73170,
+      "end_ms": 73230,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 73170,
+          "end_ms": 73230,
+          "confidence": 0.9999765753746033
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 73830,
+      "end_ms": 73890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 73830,
+          "end_ms": 73890,
+          "confidence": 0.9999793767929077
+        }
+      ]
+    },
+    {
+      "text": "God.",
+      "start_ms": 74550,
+      "end_ms": 74850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God.",
+          "start_ms": 74550,
+          "end_ms": 74850,
+          "confidence": 0.9958783090114594
+        }
+      ]
+    },
+    {
+      "text": "Cornerstone,",
+      "start_ms": 80130,
+      "end_ms": 81030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Cornerstone,",
+          "start_ms": 80130,
+          "end_ms": 81030,
+          "confidence": 0.980199913183848
+        }
+      ]
+    },
+    {
+      "text": "solid rock,",
+      "start_ms": 81570,
+      "end_ms": 82530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "solid",
+          "start_ms": 81570,
+          "end_ms": 81930,
+          "confidence": 0.998742938041687
+        },
+        {
+          "text": "rock,",
+          "start_ms": 82230,
+          "end_ms": 82530,
+          "confidence": 0.996199369430542
+        }
+      ]
+    },
+    {
+      "text": "faithful",
+      "start_ms": 82950,
+      "end_ms": 83430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "faithful",
+          "start_ms": 82950,
+          "end_ms": 83430,
+          "confidence": 0.9179576436678568
+        }
+      ]
+    },
+    {
+      "text": "even",
+      "start_ms": 83910,
+      "end_ms": 83970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 83910,
+          "end_ms": 83970,
+          "confidence": 0.8662447333335876
+        }
+      ]
+    },
+    {
+      "text": "when I'm not",
+      "start_ms": 84510,
+      "end_ms": 85410,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "when",
+          "start_ms": 84510,
+          "end_ms": 84570,
+          "confidence": 0.999054491519928
+        },
+        {
+          "text": "I'm",
+          "start_ms": 84750,
+          "end_ms": 84990,
+          "confidence": 0.9946778615315756
+        },
+        {
+          "text": "not",
+          "start_ms": 85350,
+          "end_ms": 85410,
+          "confidence": 0.9963400363922119
+        }
+      ]
+    },
+    {
+      "text": "my king.",
+      "start_ms": 86370,
+      "end_ms": 87030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 86370,
+          "end_ms": 86430,
+          "confidence": 0.9284337162971497
+        },
+        {
+          "text": "king.",
+          "start_ms": 86730,
+          "end_ms": 87030,
+          "confidence": 0.9091473817825317
+        }
+      ]
+    },
+    {
+      "text": "I live",
+      "start_ms": 88290,
+      "end_ms": 88770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 88290,
+          "end_ms": 88350,
+          "confidence": 0.9999580979347229
+        },
+        {
+          "text": "live",
+          "start_ms": 88710,
+          "end_ms": 88770,
+          "confidence": 0.9996989369392395
+        }
+      ]
+    },
+    {
+      "text": "to",
+      "start_ms": 89190,
+      "end_ms": 89250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 89190,
+          "end_ms": 89250,
+          "confidence": 0.9999890327453613
+        }
+      ]
+    },
+    {
+      "text": "praise You.",
+      "start_ms": 89850,
+      "end_ms": 90750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "praise",
+          "start_ms": 89850,
+          "end_ms": 90150,
+          "confidence": 0.9999647736549377
+        },
+        {
+          "text": "You.",
+          "start_ms": 90510,
+          "end_ms": 90750,
+          "confidence": 0.9725195467472076
+        }
+      ]
+    },
+    {
+      "text": "Only",
+      "start_ms": 92490,
+      "end_ms": 92730,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Only",
+          "start_ms": 92490,
+          "end_ms": 92730,
+          "confidence": 0.9987749755382538
+        }
+      ]
+    },
+    {
+      "text": "one",
+      "start_ms": 93450,
+      "end_ms": 93510,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "one",
+          "start_ms": 93450,
+          "end_ms": 93510,
+          "confidence": 0.9572417736053467
+        }
+      ]
+    },
+    {
+      "text": "name will",
+      "start_ms": 93990,
+      "end_ms": 94350,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 93990,
+          "end_ms": 94050,
+          "confidence": 0.987869143486023
+        },
+        {
+          "text": "will",
+          "start_ms": 94290,
+          "end_ms": 94350,
+          "confidence": 0.9976415038108826
+        }
+      ]
+    },
+    {
+      "text": "stand:",
+      "start_ms": 94950,
+      "end_ms": 95250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "stand:",
+          "start_ms": 94950,
+          "end_ms": 95250,
+          "confidence": 0.7962187826633453
+        }
+      ]
+    },
+    {
+      "text": "Jesus",
+      "start_ms": 95850,
+      "end_ms": 96270,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 95850,
+          "end_ms": 96270,
+          "confidence": 0.9788748025894165
+        }
+      ]
+    },
+    {
+      "text": "the Great",
+      "start_ms": 96810,
+      "end_ms": 97170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "the",
+          "start_ms": 96810,
+          "end_ms": 96870,
+          "confidence": 0.9998055696487427
+        },
+        {
+          "text": "Great",
+          "start_ms": 97110,
+          "end_ms": 97170,
+          "confidence": 0.3750331401824951
+        }
+      ]
+    },
+    {
+      "text": "I am",
+      "start_ms": 97650,
+      "end_ms": 98130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 97650,
+          "end_ms": 97710,
+          "confidence": 0.9897797107696533
+        },
+        {
+          "text": "am",
+          "start_ms": 98070,
+          "end_ms": 98130,
+          "confidence": 0.8207033276557922
+        }
+      ]
+    },
+    {
+      "text": "my",
+      "start_ms": 98670,
+      "end_ms": 98730,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 98670,
+          "end_ms": 98730,
+          "confidence": 0.832354724407196
+        }
+      ]
+    },
+    {
+      "text": "King.",
+      "start_ms": 99270,
+      "end_ms": 99570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "King.",
+          "start_ms": 99270,
+          "end_ms": 99570,
+          "confidence": 0.7641166746616364
+        }
+      ]
+    },
+    {
+      "text": "I live",
+      "start_ms": 100830,
+      "end_ms": 101310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 100830,
+          "end_ms": 100890,
+          "confidence": 0.9998226761817932
+        },
+        {
+          "text": "live",
+          "start_ms": 101250,
+          "end_ms": 101310,
+          "confidence": 0.994964599609375
+        }
+      ]
+    },
+    {
+      "text": "to",
+      "start_ms": 101850,
+      "end_ms": 101910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 101850,
+          "end_ms": 101910,
+          "confidence": 0.9999783039093018
+        }
+      ]
+    },
+    {
+      "text": "praise You,",
+      "start_ms": 102390,
+      "end_ms": 103110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "praise",
+          "start_ms": 102390,
+          "end_ms": 102630,
+          "confidence": 0.9999429285526276
+        },
+        {
+          "text": "You,",
+          "start_ms": 102870,
+          "end_ms": 103110,
+          "confidence": 0.7804279327392578
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 103890,
+      "end_ms": 103950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 103890,
+          "end_ms": 103950,
+          "confidence": 0.7807419896125793
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 104610,
+      "end_ms": 104670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 104610,
+          "end_ms": 104670,
+          "confidence": 0.8665333390235901
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 105270,
+      "end_ms": 105330,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 105270,
+          "end_ms": 105330,
+          "confidence": 0.9999065399169922
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 105990,
+      "end_ms": 106290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 105990,
+          "end_ms": 106290,
+          "confidence": 0.9993977546691895
+        }
+      ]
+    },
+    {
+      "text": "no one else besides.",
+      "start_ms": 107370,
+      "end_ms": 109290,
+      "text_sk": "nikto iný okrem neho.",
+      "words": [
+        {
+          "text": "no",
+          "start_ms": 107370,
+          "end_ms": 107430,
+          "confidence": 0.9999752044677734
+        },
+        {
+          "text": "one",
+          "start_ms": 107730,
+          "end_ms": 107790,
+          "confidence": 0.9999551773071289
+        },
+        {
+          "text": "else",
+          "start_ms": 107970,
+          "end_ms": 108150,
+          "confidence": 0.9999309182167053
+        },
+        {
+          "text": "besides.",
+          "start_ms": 108450,
+          "end_ms": 109290,
+          "confidence": 0.9677247405052185
+        }
+      ]
+    },
+    {
+      "text": "Else should die if you",
+      "start_ms": 110490,
+      "end_ms": 112170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Else",
+          "start_ms": 110490,
+          "end_ms": 110670,
+          "confidence": 0.9980118572711945
+        },
+        {
+          "text": "should",
+          "start_ms": 110790,
+          "end_ms": 110970,
+          "confidence": 0.9999332427978516
+        },
+        {
+          "text": "die",
+          "start_ms": 111270,
+          "end_ms": 111330,
+          "confidence": 0.9997749924659729
+        },
+        {
+          "text": "if",
+          "start_ms": 111570,
+          "end_ms": 111630,
+          "confidence": 0.9999332427978516
+        },
+        {
+          "text": "you",
+          "start_ms": 111930,
+          "end_ms": 112170,
+          "confidence": 0.9919495582580566
+        }
+      ]
+    },
+    {
+      "text": "don't",
+      "start_ms": 112590,
+      "end_ms": 112830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "don't",
+          "start_ms": 112590,
+          "end_ms": 112830,
+          "confidence": 0.9999428689479828
+        }
+      ]
+    },
+    {
+      "text": "worry,",
+      "start_ms": 113430,
+      "end_ms": 113790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "worry,",
+          "start_ms": 113430,
+          "end_ms": 113790,
+          "confidence": 0.9998582402865092
+        }
+      ]
+    },
+    {
+      "text": "why should I?",
+      "start_ms": 114210,
+      "end_ms": 115350,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "why",
+          "start_ms": 114210,
+          "end_ms": 114450,
+          "confidence": 0.9944797456264496
+        },
+        {
+          "text": "should",
+          "start_ms": 114630,
+          "end_ms": 114750,
+          "confidence": 0.9999913275241852
+        },
+        {
+          "text": "I?",
+          "start_ms": 114990,
+          "end_ms": 115350,
+          "confidence": 0.9998787641525269
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 116250,
+      "end_ms": 116310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 116250,
+          "end_ms": 116310,
+          "confidence": 0.9999351501464844
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 117030,
+      "end_ms": 117090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 117030,
+          "end_ms": 117090,
+          "confidence": 0.9999790191650391
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 117570,
+      "end_ms": 117630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 117570,
+          "end_ms": 117630,
+          "confidence": 0.9999885559082031
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 118230,
+      "end_ms": 118590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 118230,
+          "end_ms": 118590,
+          "confidence": 0.9999629259109497
+        }
+      ]
+    },
+    {
+      "text": "author of my",
+      "start_ms": 119910,
+      "end_ms": 120930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "author",
+          "start_ms": 119910,
+          "end_ms": 120330,
+          "confidence": 0.9999742805957794
+        },
+        {
+          "text": "of",
+          "start_ms": 120510,
+          "end_ms": 120570,
+          "confidence": 0.9999944567680359
+        },
+        {
+          "text": "my",
+          "start_ms": 120870,
+          "end_ms": 120930,
+          "confidence": 0.9999146461486816
+        }
+      ]
+    },
+    {
+      "text": "life.",
+      "start_ms": 121470,
+      "end_ms": 121770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "life.",
+          "start_ms": 121470,
+          "end_ms": 121770,
+          "confidence": 0.9997002482414246
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting",
+      "start_ms": 122130,
+      "end_ms": 123210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 122130,
+          "end_ms": 122370,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "trusting",
+          "start_ms": 122610,
+          "end_ms": 123210,
+          "confidence": 0.9999904632568359
+        }
+      ]
+    },
+    {
+      "text": "in Your",
+      "start_ms": 123690,
+      "end_ms": 124050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 123690,
+          "end_ms": 123750,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "Your",
+          "start_ms": 123990,
+          "end_ms": 124050,
+          "confidence": 0.9998970031738281
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 124650,
+      "end_ms": 125430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 124650,
+          "end_ms": 124950,
+          "confidence": 0.9999685287475586
+        },
+        {
+          "text": "God,",
+          "start_ms": 125130,
+          "end_ms": 125430,
+          "confidence": 0.9999095499515533
+        }
+      ]
+    },
+    {
+      "text": "till",
+      "start_ms": 125910,
+      "end_ms": 125970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 125910,
+          "end_ms": 125970,
+          "confidence": 0.9985972046852112
+        }
+      ]
+    },
+    {
+      "text": "the day I die.",
+      "start_ms": 126390,
+      "end_ms": 127890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "the",
+          "start_ms": 126390,
+          "end_ms": 126450,
+          "confidence": 0.9999867081642151
+        },
+        {
+          "text": "day",
+          "start_ms": 126750,
+          "end_ms": 126810,
+          "confidence": 0.9999638199806213
+        },
+        {
+          "text": "I",
+          "start_ms": 127110,
+          "end_ms": 127170,
+          "confidence": 0.9999874234199524
+        },
+        {
+          "text": "die.",
+          "start_ms": 127530,
+          "end_ms": 127890,
+          "confidence": 0.9995699226856232
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 128610,
+      "end_ms": 128670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 128610,
+          "end_ms": 128670,
+          "confidence": 0.9996739029884338
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 129330,
+      "end_ms": 129390,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 129330,
+          "end_ms": 129390,
+          "confidence": 0.9999828338623047
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 129990,
+      "end_ms": 130050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 129990,
+          "end_ms": 130050,
+          "confidence": 0.9999885559082031
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 130770,
+      "end_ms": 131250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 130770,
+          "end_ms": 131250,
+          "confidence": 0.999948650598526
+        }
+      ]
+    },
+    {
+      "text": "no one else besides.",
+      "start_ms": 132270,
+      "end_ms": 134250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "no",
+          "start_ms": 132270,
+          "end_ms": 132330,
+          "confidence": 0.9961791038513184
+        },
+        {
+          "text": "one",
+          "start_ms": 132630,
+          "end_ms": 132690,
+          "confidence": 0.9999583959579468
+        },
+        {
+          "text": "else",
+          "start_ms": 132930,
+          "end_ms": 133110,
+          "confidence": 0.9999747574329376
+        },
+        {
+          "text": "besides.",
+          "start_ms": 133350,
+          "end_ms": 134250,
+          "confidence": 0.9855841795603434
+        }
+      ]
+    },
+    {
+      "text": "Oh, else should die if you",
+      "start_ms": 135030,
+      "end_ms": 137070,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 135030,
+          "end_ms": 135210,
+          "confidence": 0.9397165179252625
+        },
+        {
+          "text": "else",
+          "start_ms": 135390,
+          "end_ms": 135630,
+          "confidence": 0.8503649532794952
+        },
+        {
+          "text": "should",
+          "start_ms": 135750,
+          "end_ms": 135930,
+          "confidence": 0.9997969269752502
+        },
+        {
+          "text": "die",
+          "start_ms": 136170,
+          "end_ms": 136230,
+          "confidence": 0.9429699778556824
+        },
+        {
+          "text": "if",
+          "start_ms": 136470,
+          "end_ms": 136530,
+          "confidence": 0.9973999857902527
+        },
+        {
+          "text": "you",
+          "start_ms": 136830,
+          "end_ms": 137070,
+          "confidence": 0.999877005815506
+        }
+      ]
+    },
+    {
+      "text": "don't",
+      "start_ms": 137490,
+      "end_ms": 137850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "don't",
+          "start_ms": 137490,
+          "end_ms": 137850,
+          "confidence": 0.9999406933784485
+        }
+      ]
+    },
+    {
+      "text": "worry,",
+      "start_ms": 138330,
+      "end_ms": 138690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "worry,",
+          "start_ms": 138330,
+          "end_ms": 138690,
+          "confidence": 0.9998983343442281
+        }
+      ]
+    },
+    {
+      "text": "why should I?",
+      "start_ms": 139170,
+      "end_ms": 140310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "why",
+          "start_ms": 139170,
+          "end_ms": 139350,
+          "confidence": 0.9661897420883179
+        },
+        {
+          "text": "should",
+          "start_ms": 139470,
+          "end_ms": 139650,
+          "confidence": 0.999995231628418
+        },
+        {
+          "text": "I?",
+          "start_ms": 139950,
+          "end_ms": 140310,
+          "confidence": 0.9998749494552612
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 141150,
+      "end_ms": 141210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 141150,
+          "end_ms": 141210,
+          "confidence": 0.9998035430908203
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 141870,
+      "end_ms": 141930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 141870,
+          "end_ms": 141930,
+          "confidence": 0.999977171421051
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 142530,
+      "end_ms": 142590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 142530,
+          "end_ms": 142590,
+          "confidence": 0.9999866485595703
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 143130,
+      "end_ms": 143790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 143130,
+          "end_ms": 143790,
+          "confidence": 0.9997457563877106
+        }
+      ]
+    },
+    {
+      "text": "author of my",
+      "start_ms": 144870,
+      "end_ms": 145890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "author",
+          "start_ms": 144870,
+          "end_ms": 145230,
+          "confidence": 0.9999420046806335
+        },
+        {
+          "text": "of",
+          "start_ms": 145530,
+          "end_ms": 145590,
+          "confidence": 0.9999968409538269
+        },
+        {
+          "text": "my",
+          "start_ms": 145830,
+          "end_ms": 145890,
+          "confidence": 0.9999622106552124
+        }
+      ]
+    },
+    {
+      "text": "life.",
+      "start_ms": 146370,
+      "end_ms": 146730,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "life.",
+          "start_ms": 146370,
+          "end_ms": 146730,
+          "confidence": 0.9999815622965494
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting",
+      "start_ms": 147090,
+      "end_ms": 148110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 147090,
+          "end_ms": 147330,
+          "confidence": 0.9999764760335287
+        },
+        {
+          "text": "trusting",
+          "start_ms": 147510,
+          "end_ms": 148110,
+          "confidence": 0.9999872843424479
+        }
+      ]
+    },
+    {
+      "text": "in Your",
+      "start_ms": 148530,
+      "end_ms": 148890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 148530,
+          "end_ms": 148590,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "Your",
+          "start_ms": 148830,
+          "end_ms": 148890,
+          "confidence": 0.9999179840087891
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 149490,
+      "end_ms": 150330,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 149490,
+          "end_ms": 149850,
+          "confidence": 0.9999752044677734
+        },
+        {
+          "text": "God,",
+          "start_ms": 150030,
+          "end_ms": 150330,
+          "confidence": 0.9998717308044434
+        }
+      ]
+    },
+    {
+      "text": "till the",
+      "start_ms": 150870,
+      "end_ms": 151170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 150870,
+          "end_ms": 150930,
+          "confidence": 0.9992183446884155
+        },
+        {
+          "text": "the",
+          "start_ms": 151110,
+          "end_ms": 151170,
+          "confidence": 0.999994695186615
+        }
+      ]
+    },
+    {
+      "text": "day I",
+      "start_ms": 151650,
+      "end_ms": 152010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "day",
+          "start_ms": 151650,
+          "end_ms": 151710,
+          "confidence": 0.9999716281890869
+        },
+        {
+          "text": "I",
+          "start_ms": 151950,
+          "end_ms": 152010,
+          "confidence": 0.999957799911499
+        }
+      ]
+    },
+    {
+      "text": "die.",
+      "start_ms": 152490,
+      "end_ms": 152850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "die.",
+          "start_ms": 152490,
+          "end_ms": 152850,
+          "confidence": 0.9998607933521271
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 153510,
+      "end_ms": 153570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 153510,
+          "end_ms": 153570,
+          "confidence": 0.9993479251861572
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 154230,
+      "end_ms": 154290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 154230,
+          "end_ms": 154290,
+          "confidence": 0.9998074769973755
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 154710,
+      "end_ms": 154770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 154710,
+          "end_ms": 154770,
+          "confidence": 0.9967570900917053
+        }
+      ]
+    },
+    {
+      "text": "Prince of",
+      "start_ms": 155550,
+      "end_ms": 156030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Prince",
+          "start_ms": 155550,
+          "end_ms": 155790,
+          "confidence": 0.8757100701332092
+        },
+        {
+          "text": "of",
+          "start_ms": 155970,
+          "end_ms": 156030,
+          "confidence": 0.9999619126319885
+        }
+      ]
+    },
+    {
+      "text": "Peace, King of Kings,",
+      "start_ms": 156450,
+      "end_ms": 158070,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Peace,",
+          "start_ms": 156450,
+          "end_ms": 156870,
+          "confidence": 0.852519154548645
+        },
+        {
+          "text": "King",
+          "start_ms": 157050,
+          "end_ms": 157110,
+          "confidence": 0.7961378693580627
+        },
+        {
+          "text": "of",
+          "start_ms": 157410,
+          "end_ms": 157470,
+          "confidence": 0.999981164932251
+        },
+        {
+          "text": "Kings,",
+          "start_ms": 157770,
+          "end_ms": 158070,
+          "confidence": 0.998657763004303
+        }
+      ]
+    },
+    {
+      "text": "Lord of Lords,",
+      "start_ms": 158730,
+      "end_ms": 159690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord",
+          "start_ms": 158730,
+          "end_ms": 158790,
+          "confidence": 0.9993745684623718
+        },
+        {
+          "text": "of",
+          "start_ms": 159090,
+          "end_ms": 159150,
+          "confidence": 0.9958601593971252
+        },
+        {
+          "text": "Lords,",
+          "start_ms": 159450,
+          "end_ms": 159690,
+          "confidence": 0.8748663365840912
+        }
+      ]
+    },
+    {
+      "text": "Alpha and Omega.",
+      "start_ms": 160350,
+      "end_ms": 162750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Alpha",
+          "start_ms": 160350,
+          "end_ms": 160830,
+          "confidence": 0.6314708292484283
+        },
+        {
+          "text": "and",
+          "start_ms": 161070,
+          "end_ms": 161130,
+          "confidence": 0.9909033179283142
+        },
+        {
+          "text": "Omega.",
+          "start_ms": 161490,
+          "end_ms": 162750,
+          "confidence": 0.869182288646698
+        }
+      ]
+    },
+    {
+      "text": "My",
+      "start_ms": 164610,
+      "end_ms": 164670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 164610,
+          "end_ms": 164670,
+          "confidence": 0.997497022151947
+        }
+      ]
+    },
+    {
+      "text": "Savior,",
+      "start_ms": 165210,
+      "end_ms": 165750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Savior,",
+          "start_ms": 165210,
+          "end_ms": 165750,
+          "confidence": 0.829146683216095
+        }
+      ]
+    },
+    {
+      "text": "Oh, through the",
+      "start_ms": 167670,
+      "end_ms": 168450,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 167670,
+          "end_ms": 167850,
+          "confidence": 0.45335184037685394
+        },
+        {
+          "text": "through",
+          "start_ms": 168090,
+          "end_ms": 168150,
+          "confidence": 0.9378476738929749
+        },
+        {
+          "text": "the",
+          "start_ms": 168390,
+          "end_ms": 168450,
+          "confidence": 0.9994452595710754
+        }
+      ]
+    },
+    {
+      "text": "storm",
+      "start_ms": 168990,
+      "end_ms": 169170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "storm",
+          "start_ms": 168990,
+          "end_ms": 169170,
+          "confidence": 0.9994358122348785
+        }
+      ]
+    },
+    {
+      "text": "it is well",
+      "start_ms": 169770,
+      "end_ms": 170430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "it",
+          "start_ms": 169770,
+          "end_ms": 169830,
+          "confidence": 0.5325397849082947
+        },
+        {
+          "text": "is",
+          "start_ms": 169950,
+          "end_ms": 170010,
+          "confidence": 0.999515950679779
+        },
+        {
+          "text": "well",
+          "start_ms": 170370,
+          "end_ms": 170430,
+          "confidence": 0.8940823078155518
+        }
+      ]
+    },
+    {
+      "text": "with my",
+      "start_ms": 171150,
+      "end_ms": 171630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "with",
+          "start_ms": 171150,
+          "end_ms": 171210,
+          "confidence": 0.9809837937355042
+        },
+        {
+          "text": "my",
+          "start_ms": 171570,
+          "end_ms": 171630,
+          "confidence": 0.9999256134033203
+        }
+      ]
+    },
+    {
+      "text": "soul.",
+      "start_ms": 172050,
+      "end_ms": 172290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "soul.",
+          "start_ms": 172050,
+          "end_ms": 172290,
+          "confidence": 0.7921130061149597
+        }
+      ]
+    },
+    {
+      "text": "I know You",
+      "start_ms": 172650,
+      "end_ms": 173430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 172650,
+          "end_ms": 172710,
+          "confidence": 0.9992621541023254
+        },
+        {
+          "text": "know",
+          "start_ms": 172890,
+          "end_ms": 173070,
+          "confidence": 0.9999256134033203
+        },
+        {
+          "text": "You",
+          "start_ms": 173370,
+          "end_ms": 173430,
+          "confidence": 0.9668053388595581
+        }
+      ]
+    },
+    {
+      "text": "are",
+      "start_ms": 173970,
+      "end_ms": 174030,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "are",
+          "start_ms": 173970,
+          "end_ms": 174030,
+          "confidence": 0.9933942556381226
+        }
+      ]
+    },
+    {
+      "text": "faithful,",
+      "start_ms": 174570,
+      "end_ms": 175530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "faithful,",
+          "start_ms": 174570,
+          "end_ms": 175530,
+          "confidence": 0.9944089949131012
+        }
+      ]
+    },
+    {
+      "text": "my",
+      "start_ms": 177030,
+      "end_ms": 177090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 177030,
+          "end_ms": 177090,
+          "confidence": 0.9947666525840759
+        }
+      ]
+    },
+    {
+      "text": "Savior.",
+      "start_ms": 177630,
+      "end_ms": 178170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Savior.",
+          "start_ms": 177630,
+          "end_ms": 178170,
+          "confidence": 0.9825589855511984
+        }
+      ]
+    },
+    {
+      "text": "Hey!",
+      "start_ms": 179250,
+      "end_ms": 179610,
+      "text_sk": "Hej!",
+      "words": [
+        {
+          "text": "Hey!",
+          "start_ms": 179250,
+          "end_ms": 179610,
+          "confidence": 0.9455757935841879
+        }
+      ]
+    },
+    {
+      "text": "And Prince of Peace,",
+      "start_ms": 180270,
+      "end_ms": 181590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 180270,
+          "end_ms": 180330,
+          "confidence": 0.6402713656425476
+        },
+        {
+          "text": "Prince",
+          "start_ms": 180510,
+          "end_ms": 180750,
+          "confidence": 0.9998405277729034
+        },
+        {
+          "text": "of",
+          "start_ms": 180870,
+          "end_ms": 180930,
+          "confidence": 0.9999797344207764
+        },
+        {
+          "text": "Peace,",
+          "start_ms": 181290,
+          "end_ms": 181590,
+          "confidence": 0.9996023972829183
+        }
+      ]
+    },
+    {
+      "text": "King of Kings,",
+      "start_ms": 182130,
+      "end_ms": 183090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "King",
+          "start_ms": 182130,
+          "end_ms": 182190,
+          "confidence": 0.9999046325683594
+        },
+        {
+          "text": "of",
+          "start_ms": 182490,
+          "end_ms": 182550,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "Kings,",
+          "start_ms": 182790,
+          "end_ms": 183090,
+          "confidence": 0.9998350739479065
+        }
+      ]
+    },
+    {
+      "text": "Lord of",
+      "start_ms": 183630,
+      "end_ms": 184110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord",
+          "start_ms": 183630,
+          "end_ms": 183690,
+          "confidence": 0.9999332427978516
+        },
+        {
+          "text": "of",
+          "start_ms": 184050,
+          "end_ms": 184110,
+          "confidence": 0.999969482421875
+        }
+      ]
+    },
+    {
+      "text": "Lords,",
+      "start_ms": 184530,
+      "end_ms": 184830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lords,",
+          "start_ms": 184530,
+          "end_ms": 184830,
+          "confidence": 0.9985112845897675
+        }
+      ]
+    },
+    {
+      "text": "Alpha and Omega,",
+      "start_ms": 185370,
+      "end_ms": 187650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Alpha",
+          "start_ms": 185370,
+          "end_ms": 185790,
+          "confidence": 0.9984045624732971
+        },
+        {
+          "text": "and",
+          "start_ms": 186090,
+          "end_ms": 186150,
+          "confidence": 0.9999204874038696
+        },
+        {
+          "text": "Omega,",
+          "start_ms": 186510,
+          "end_ms": 187650,
+          "confidence": 0.9255550702412924
+        }
+      ]
+    },
+    {
+      "text": "my",
+      "start_ms": 189570,
+      "end_ms": 189630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 189570,
+          "end_ms": 189630,
+          "confidence": 0.999588131904602
+        }
+      ]
+    },
+    {
+      "text": "Savior.",
+      "start_ms": 190110,
+      "end_ms": 190650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Savior.",
+          "start_ms": 190110,
+          "end_ms": 190650,
+          "confidence": 0.9886809388796488
+        }
+      ]
+    },
+    {
+      "text": "Hey!",
+      "start_ms": 192690,
+      "end_ms": 192930,
+      "text_sk": "Hej!",
+      "words": [
+        {
+          "text": "Hey!",
+          "start_ms": 192690,
+          "end_ms": 192930,
+          "confidence": 0.6286955177783966
+        }
+      ]
+    },
+    {
+      "text": "Through the",
+      "start_ms": 192990,
+      "end_ms": 193530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Through",
+          "start_ms": 192990,
+          "end_ms": 193110,
+          "confidence": 0.9836504459381104
+        },
+        {
+          "text": "the",
+          "start_ms": 193470,
+          "end_ms": 193530,
+          "confidence": 0.9997974634170532
+        }
+      ]
+    },
+    {
+      "text": "storm it is well",
+      "start_ms": 194070,
+      "end_ms": 195330,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "storm",
+          "start_ms": 194070,
+          "end_ms": 194310,
+          "confidence": 0.9999704360961914
+        },
+        {
+          "text": "it",
+          "start_ms": 194670,
+          "end_ms": 194730,
+          "confidence": 0.9983305931091309
+        },
+        {
+          "text": "is",
+          "start_ms": 194970,
+          "end_ms": 195030,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "well",
+          "start_ms": 195270,
+          "end_ms": 195330,
+          "confidence": 0.9997444748878479
+        }
+      ]
+    },
+    {
+      "text": "with my soul.",
+      "start_ms": 196170,
+      "end_ms": 197130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "with",
+          "start_ms": 196170,
+          "end_ms": 196230,
+          "confidence": 0.9144734144210815
+        },
+        {
+          "text": "my",
+          "start_ms": 196590,
+          "end_ms": 196650,
+          "confidence": 0.9999600648880005
+        },
+        {
+          "text": "soul.",
+          "start_ms": 196950,
+          "end_ms": 197130,
+          "confidence": 0.9994747936725616
+        }
+      ]
+    },
+    {
+      "text": "I know You",
+      "start_ms": 197670,
+      "end_ms": 198390,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 197670,
+          "end_ms": 197730,
+          "confidence": 0.9999600052833557
+        },
+        {
+          "text": "know",
+          "start_ms": 197910,
+          "end_ms": 198090,
+          "confidence": 0.9999675750732422
+        },
+        {
+          "text": "You",
+          "start_ms": 198330,
+          "end_ms": 198390,
+          "confidence": 0.9998437166213989
+        }
+      ]
+    },
+    {
+      "text": "are faithful,",
+      "start_ms": 198990,
+      "end_ms": 200850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "are",
+          "start_ms": 198990,
+          "end_ms": 199050,
+          "confidence": 0.9998750686645508
+        },
+        {
+          "text": "faithful,",
+          "start_ms": 199410,
+          "end_ms": 200850,
+          "confidence": 0.9991304278373718
+        }
+      ]
+    },
+    {
+      "text": "my",
+      "start_ms": 202050,
+      "end_ms": 202110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 202050,
+          "end_ms": 202110,
+          "confidence": 0.9990681409835815
+        }
+      ]
+    },
+    {
+      "text": "Savior.",
+      "start_ms": 202590,
+      "end_ms": 203130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Savior.",
+          "start_ms": 202590,
+          "end_ms": 203130,
+          "confidence": 0.9990350604057312
+        }
+      ]
+    },
+    {
+      "text": "Oh, You are",
+      "start_ms": 204390,
+      "end_ms": 205170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 204390,
+          "end_ms": 204570,
+          "confidence": 0.9992521107196808
+        },
+        {
+          "text": "You",
+          "start_ms": 204690,
+          "end_ms": 204750,
+          "confidence": 0.9817436337471008
+        },
+        {
+          "text": "are",
+          "start_ms": 205110,
+          "end_ms": 205170,
+          "confidence": 0.9999754428863525
+        }
+      ]
+    },
+    {
+      "text": "faithful, my",
+      "start_ms": 205650,
+      "end_ms": 208290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "faithful,",
+          "start_ms": 205650,
+          "end_ms": 207870,
+          "confidence": 0.99974624812603
+        },
+        {
+          "text": "my",
+          "start_ms": 208230,
+          "end_ms": 208290,
+          "confidence": 0.9995100498199463
+        }
+      ]
+    },
+    {
+      "text": "Savior.",
+      "start_ms": 208890,
+      "end_ms": 209310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Savior.",
+          "start_ms": 208890,
+          "end_ms": 209310,
+          "confidence": 0.9996924002965292
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 209730,
+      "end_ms": 209790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 209730,
+          "end_ms": 209790,
+          "confidence": 0.9999085664749146
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 210390,
+      "end_ms": 210450,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 210390,
+          "end_ms": 210450,
+          "confidence": 0.9999134540557861
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 211110,
+      "end_ms": 211170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 211110,
+          "end_ms": 211170,
+          "confidence": 0.9999765753746033
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 211950,
+      "end_ms": 212310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 211950,
+          "end_ms": 212310,
+          "confidence": 0.999707967042923
+        }
+      ]
+    },
+    {
+      "text": "no one else besides.",
+      "start_ms": 213270,
+      "end_ms": 215250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "no",
+          "start_ms": 213270,
+          "end_ms": 213330,
+          "confidence": 0.9839465022087097
+        },
+        {
+          "text": "one",
+          "start_ms": 213570,
+          "end_ms": 213630,
+          "confidence": 0.9999809265136719
+        },
+        {
+          "text": "else",
+          "start_ms": 213810,
+          "end_ms": 214050,
+          "confidence": 0.9999752044677734
+        },
+        {
+          "text": "besides.",
+          "start_ms": 214410,
+          "end_ms": 215250,
+          "confidence": 0.9988299409548441
+        }
+      ]
+    },
+    {
+      "text": "Else should die if you",
+      "start_ms": 216450,
+      "end_ms": 218310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Else",
+          "start_ms": 216450,
+          "end_ms": 216630,
+          "confidence": 0.9994094371795654
+        },
+        {
+          "text": "should",
+          "start_ms": 216810,
+          "end_ms": 216990,
+          "confidence": 0.9999789297580719
+        },
+        {
+          "text": "die",
+          "start_ms": 217350,
+          "end_ms": 217410,
+          "confidence": 0.992464542388916
+        },
+        {
+          "text": "if",
+          "start_ms": 217770,
+          "end_ms": 217830,
+          "confidence": 0.8438065648078918
+        },
+        {
+          "text": "you",
+          "start_ms": 218130,
+          "end_ms": 218310,
+          "confidence": 0.9263059794902802
+        }
+      ]
+    },
+    {
+      "text": "don't worry,",
+      "start_ms": 219210,
+      "end_ms": 219870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "don't",
+          "start_ms": 219210,
+          "end_ms": 219330,
+          "confidence": 0.9288474321365356
+        },
+        {
+          "text": "worry,",
+          "start_ms": 219510,
+          "end_ms": 219870,
+          "confidence": 0.9994815389315287
+        }
+      ]
+    },
+    {
+      "text": "why should I?",
+      "start_ms": 220350,
+      "end_ms": 221550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "why",
+          "start_ms": 220350,
+          "end_ms": 220530,
+          "confidence": 0.9620113372802734
+        },
+        {
+          "text": "should",
+          "start_ms": 220710,
+          "end_ms": 220890,
+          "confidence": 0.9999943375587463
+        },
+        {
+          "text": "I?",
+          "start_ms": 221190,
+          "end_ms": 221550,
+          "confidence": 0.9999565184116364
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 222210,
+      "end_ms": 222270,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 222210,
+          "end_ms": 222270,
+          "confidence": 0.999765932559967
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 222870,
+      "end_ms": 222930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 222870,
+          "end_ms": 222930,
+          "confidence": 0.9999707341194153
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 223590,
+      "end_ms": 223650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 223590,
+          "end_ms": 223650,
+          "confidence": 0.9148668646812439
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 224310,
+      "end_ms": 224670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 224310,
+          "end_ms": 224670,
+          "confidence": 0.9999533295631409
+        }
+      ]
+    },
+    {
+      "text": "author of my life.",
+      "start_ms": 225930,
+      "end_ms": 228150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "author",
+          "start_ms": 225930,
+          "end_ms": 226290,
+          "confidence": 0.9999589920043945
+        },
+        {
+          "text": "of",
+          "start_ms": 226650,
+          "end_ms": 226710,
+          "confidence": 0.9999945759773254
+        },
+        {
+          "text": "my",
+          "start_ms": 227010,
+          "end_ms": 227070,
+          "confidence": 0.99990314245224
+        },
+        {
+          "text": "life.",
+          "start_ms": 227430,
+          "end_ms": 228150,
+          "confidence": 0.9999733169873556
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your",
+      "start_ms": 228330,
+      "end_ms": 229950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 228330,
+          "end_ms": 228570,
+          "confidence": 0.9999714891115824
+        },
+        {
+          "text": "trusting",
+          "start_ms": 228690,
+          "end_ms": 229230,
+          "confidence": 0.9999898870786031
+        },
+        {
+          "text": "in",
+          "start_ms": 229590,
+          "end_ms": 229650,
+          "confidence": 0.9999967217445374
+        },
+        {
+          "text": "Your",
+          "start_ms": 229890,
+          "end_ms": 229950,
+          "confidence": 0.9998536705970764
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 230550,
+      "end_ms": 231450,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 230550,
+          "end_ms": 230910,
+          "confidence": 0.9999837875366211
+        },
+        {
+          "text": "God,",
+          "start_ms": 231150,
+          "end_ms": 231450,
+          "confidence": 0.999784529209137
+        }
+      ]
+    },
+    {
+      "text": "till the day I",
+      "start_ms": 232050,
+      "end_ms": 233190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 232050,
+          "end_ms": 232110,
+          "confidence": 0.9991706609725952
+        },
+        {
+          "text": "the",
+          "start_ms": 232350,
+          "end_ms": 232410,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "day",
+          "start_ms": 232770,
+          "end_ms": 232830,
+          "confidence": 0.9999675750732422
+        },
+        {
+          "text": "I",
+          "start_ms": 233130,
+          "end_ms": 233190,
+          "confidence": 0.9999809861183167
+        }
+      ]
+    },
+    {
+      "text": "die.",
+      "start_ms": 233850,
+      "end_ms": 234270,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "die.",
+          "start_ms": 233850,
+          "end_ms": 234270,
+          "confidence": 0.9998809397220612
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 234690,
+      "end_ms": 234750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 234690,
+          "end_ms": 234750,
+          "confidence": 0.9997750520706177
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 235290,
+      "end_ms": 235350,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 235290,
+          "end_ms": 235350,
+          "confidence": 0.9999841451644897
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 236010,
+      "end_ms": 236070,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 236010,
+          "end_ms": 236070,
+          "confidence": 0.9995504021644592
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 236790,
+      "end_ms": 237090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 236790,
+          "end_ms": 237090,
+          "confidence": 0.9999675750732422
+        }
+      ]
+    },
+    {
+      "text": "no one else besides.",
+      "start_ms": 238290,
+      "end_ms": 240150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "no",
+          "start_ms": 238290,
+          "end_ms": 238350,
+          "confidence": 0.9958008527755737
+        },
+        {
+          "text": "one",
+          "start_ms": 238590,
+          "end_ms": 238650,
+          "confidence": 0.9999732971191406
+        },
+        {
+          "text": "else",
+          "start_ms": 238890,
+          "end_ms": 239070,
+          "confidence": 0.9999723732471466
+        },
+        {
+          "text": "besides.",
+          "start_ms": 239370,
+          "end_ms": 240150,
+          "confidence": 0.999569316705068
+        }
+      ]
+    },
+    {
+      "text": "Else should die if you",
+      "start_ms": 241350,
+      "end_ms": 243090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Else",
+          "start_ms": 241350,
+          "end_ms": 241590,
+          "confidence": 0.9994342923164368
+        },
+        {
+          "text": "should",
+          "start_ms": 241770,
+          "end_ms": 241890,
+          "confidence": 0.9999634325504303
+        },
+        {
+          "text": "die",
+          "start_ms": 242190,
+          "end_ms": 242250,
+          "confidence": 0.9997445344924927
+        },
+        {
+          "text": "if",
+          "start_ms": 242490,
+          "end_ms": 242550,
+          "confidence": 0.9999371767044067
+        },
+        {
+          "text": "you",
+          "start_ms": 242850,
+          "end_ms": 243090,
+          "confidence": 0.9990169405937195
+        }
+      ]
+    },
+    {
+      "text": "don't worry,",
+      "start_ms": 243510,
+      "end_ms": 245130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "don't",
+          "start_ms": 243510,
+          "end_ms": 243810,
+          "confidence": 0.9869756996631622
+        },
+        {
+          "text": "worry,",
+          "start_ms": 243990,
+          "end_ms": 245130,
+          "confidence": 0.992066502571106
+        }
+      ]
+    },
+    {
+      "text": "why should I?",
+      "start_ms": 246150,
+      "end_ms": 246570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "why",
+          "start_ms": 246150,
+          "end_ms": 246210,
+          "confidence": 0.9070085883140564
+        },
+        {
+          "text": "should",
+          "start_ms": 246210,
+          "end_ms": 246210,
+          "confidence": 0.999051421880722
+        },
+        {
+          "text": "I?",
+          "start_ms": 246210,
+          "end_ms": 246570,
+          "confidence": 0.9987243711948395
+        }
+      ]
+    },
+    {
+      "text": "Oh, Your",
+      "start_ms": 246810,
+      "end_ms": 247290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 246810,
+          "end_ms": 246990,
+          "confidence": 0.9964658617973328
+        },
+        {
+          "text": "Your",
+          "start_ms": 247230,
+          "end_ms": 247290,
+          "confidence": 0.9994802474975586
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 247830,
+      "end_ms": 247890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 247830,
+          "end_ms": 247890,
+          "confidence": 0.9967855215072632
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 248490,
+      "end_ms": 248550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 248490,
+          "end_ms": 248550,
+          "confidence": 0.9999408721923828
+        }
+      ]
+    },
+    {
+      "text": "God,",
+      "start_ms": 249150,
+      "end_ms": 249690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 249150,
+          "end_ms": 249690,
+          "confidence": 0.9999809265136719
+        }
+      ]
+    },
+    {
+      "text": "author of my",
+      "start_ms": 250830,
+      "end_ms": 251850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "author",
+          "start_ms": 250830,
+          "end_ms": 251190,
+          "confidence": 0.9996777772903442
+        },
+        {
+          "text": "of",
+          "start_ms": 251370,
+          "end_ms": 251430,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "my",
+          "start_ms": 251790,
+          "end_ms": 251850,
+          "confidence": 0.9999619126319885
+        }
+      ]
+    },
+    {
+      "text": "life.",
+      "start_ms": 252390,
+      "end_ms": 252690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "life.",
+          "start_ms": 252390,
+          "end_ms": 252690,
+          "confidence": 0.9999924500783285
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your",
+      "start_ms": 253110,
+      "end_ms": 254790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 253110,
+          "end_ms": 253290,
+          "confidence": 0.9999812642733256
+        },
+        {
+          "text": "trusting",
+          "start_ms": 253530,
+          "end_ms": 254130,
+          "confidence": 0.9999912977218628
+        },
+        {
+          "text": "in",
+          "start_ms": 254430,
+          "end_ms": 254490,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "Your",
+          "start_ms": 254730,
+          "end_ms": 254790,
+          "confidence": 0.9999160766601562
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 255450,
+      "end_ms": 256290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 255450,
+          "end_ms": 255810,
+          "confidence": 0.999613881111145
+        },
+        {
+          "text": "God,",
+          "start_ms": 255990,
+          "end_ms": 256290,
+          "confidence": 0.9996377527713776
+        }
+      ]
+    },
+    {
+      "text": "till the",
+      "start_ms": 256890,
+      "end_ms": 257190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 256890,
+          "end_ms": 256950,
+          "confidence": 0.9974531531333923
+        },
+        {
+          "text": "the",
+          "start_ms": 257130,
+          "end_ms": 257190,
+          "confidence": 0.9999962449073792
+        }
+      ]
+    },
+    {
+      "text": "day I",
+      "start_ms": 257670,
+      "end_ms": 258090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "day",
+          "start_ms": 257670,
+          "end_ms": 257730,
+          "confidence": 0.9999771118164062
+        },
+        {
+          "text": "I",
+          "start_ms": 258030,
+          "end_ms": 258090,
+          "confidence": 0.999973475933075
+        }
+      ]
+    },
+    {
+      "text": "die.",
+      "start_ms": 258570,
+      "end_ms": 258810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "die.",
+          "start_ms": 258570,
+          "end_ms": 258810,
+          "confidence": 0.9998912811279297
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting",
+      "start_ms": 259290,
+      "end_ms": 260310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 259290,
+          "end_ms": 259530,
+          "confidence": 0.9999374945958456
+        },
+        {
+          "text": "trusting",
+          "start_ms": 259650,
+          "end_ms": 260310,
+          "confidence": 0.9999878406524658
+        }
+      ]
+    },
+    {
+      "text": "in Your",
+      "start_ms": 260730,
+      "end_ms": 261090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 260730,
+          "end_ms": 260790,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "Your",
+          "start_ms": 261030,
+          "end_ms": 261090,
+          "confidence": 0.9999427795410156
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 261630,
+      "end_ms": 262470,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 261630,
+          "end_ms": 261990,
+          "confidence": 0.9999475479125977
+        },
+        {
+          "text": "God,",
+          "start_ms": 262170,
+          "end_ms": 262470,
+          "confidence": 0.9996771216392517
+        }
+      ]
+    },
+    {
+      "text": "till the day I",
+      "start_ms": 263130,
+      "end_ms": 264210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 263130,
+          "end_ms": 263190,
+          "confidence": 0.9937694072723389
+        },
+        {
+          "text": "the",
+          "start_ms": 263430,
+          "end_ms": 263490,
+          "confidence": 0.9999943375587463
+        },
+        {
+          "text": "day",
+          "start_ms": 263790,
+          "end_ms": 263850,
+          "confidence": 0.9999657273292542
+        },
+        {
+          "text": "I",
+          "start_ms": 264150,
+          "end_ms": 264210,
+          "confidence": 0.9999717473983765
+        }
+      ]
+    },
+    {
+      "text": "die.",
+      "start_ms": 264630,
+      "end_ms": 264930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "die.",
+          "start_ms": 264630,
+          "end_ms": 264930,
+          "confidence": 0.999824196100235
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your",
+      "start_ms": 265470,
+      "end_ms": 267210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 265470,
+          "end_ms": 265710,
+          "confidence": 0.9998855789502462
+        },
+        {
+          "text": "trusting",
+          "start_ms": 265890,
+          "end_ms": 266490,
+          "confidence": 0.9999743898709615
+        },
+        {
+          "text": "in",
+          "start_ms": 266850,
+          "end_ms": 266910,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "Your",
+          "start_ms": 267150,
+          "end_ms": 267210,
+          "confidence": 0.9998760223388672
+        }
+      ]
+    },
+    {
+      "text": "name, God,",
+      "start_ms": 267810,
+      "end_ms": 268650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name,",
+          "start_ms": 267810,
+          "end_ms": 268110,
+          "confidence": 0.9999418258666992
+        },
+        {
+          "text": "God,",
+          "start_ms": 268410,
+          "end_ms": 268650,
+          "confidence": 0.9987605810165405
+        }
+      ]
+    },
+    {
+      "text": "till the",
+      "start_ms": 269250,
+      "end_ms": 269550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "till",
+          "start_ms": 269250,
+          "end_ms": 269310,
+          "confidence": 0.9990546703338623
+        },
+        {
+          "text": "the",
+          "start_ms": 269490,
+          "end_ms": 269550,
+          "confidence": 0.9999966621398926
+        }
+      ]
+    },
+    {
+      "text": "day I die.",
+      "start_ms": 270030,
+      "end_ms": 270990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "day",
+          "start_ms": 270030,
+          "end_ms": 270090,
+          "confidence": 0.9999251961708069
+        },
+        {
+          "text": "I",
+          "start_ms": 270450,
+          "end_ms": 270510,
+          "confidence": 0.9998230338096619
+        },
+        {
+          "text": "die.",
+          "start_ms": 270750,
+          "end_ms": 270990,
+          "confidence": 0.9995697736740112
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 272070,
+      "end_ms": 272130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 272070,
+          "end_ms": 272130,
+          "confidence": 0.9997931122779846
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 272670,
+      "end_ms": 272730,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 272670,
+          "end_ms": 272730,
+          "confidence": 0.9999570846557617
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 273450,
+      "end_ms": 273510,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 273450,
+          "end_ms": 273510,
+          "confidence": 0.999957263469696
+        }
+      ]
+    },
+    {
+      "text": "God.",
+      "start_ms": 274350,
+      "end_ms": 275190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God.",
+          "start_ms": 274350,
+          "end_ms": 275190,
+          "confidence": 0.9936352074146271
+        }
+      ]
+    },
+    {
+      "text": "There is nothing",
+      "start_ms": 285030,
+      "end_ms": 285930,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 285030,
+          "end_ms": 285090,
+          "confidence": 0.9997831583023071
+        },
+        {
+          "text": "is",
+          "start_ms": 285210,
+          "end_ms": 285270,
+          "confidence": 0.9998931884765625
+        },
+        {
+          "text": "nothing",
+          "start_ms": 285570,
+          "end_ms": 285930,
+          "confidence": 0.9999688466389974
+        }
+      ]
+    },
+    {
+      "text": "like",
+      "start_ms": 286530,
+      "end_ms": 286770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "like",
+          "start_ms": 286530,
+          "end_ms": 286770,
+          "confidence": 0.9999876022338867
+        }
+      ]
+    },
+    {
+      "text": "the",
+      "start_ms": 287250,
+      "end_ms": 287310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "the",
+          "start_ms": 287250,
+          "end_ms": 287310,
+          "confidence": 0.9984791278839111
+        }
+      ]
+    },
+    {
+      "text": "name of",
+      "start_ms": 287970,
+      "end_ms": 288210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 287970,
+          "end_ms": 288030,
+          "confidence": 0.9996854662895203
+        },
+        {
+          "text": "of",
+          "start_ms": 288150,
+          "end_ms": 288210,
+          "confidence": 0.9578870534896851
+        }
+      ]
+    },
+    {
+      "text": "Jesus Christ.",
+      "start_ms": 288750,
+      "end_ms": 290010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 288750,
+          "end_ms": 289170,
+          "confidence": 0.9992473721504211
+        },
+        {
+          "text": "Christ.",
+          "start_ms": 289410,
+          "end_ms": 290010,
+          "confidence": 0.9519586265087128
+        }
+      ]
+    },
+    {
+      "text": "Your",
+      "start_ms": 290790,
+      "end_ms": 290850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 290790,
+          "end_ms": 290850,
+          "confidence": 0.9998475313186646
+        }
+      ]
+    },
+    {
+      "text": "name",
+      "start_ms": 291510,
+      "end_ms": 291570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "name",
+          "start_ms": 291510,
+          "end_ms": 291570,
+          "confidence": 0.9999678730964661
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 292110,
+      "end_ms": 292170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 292110,
+          "end_ms": 292170,
+          "confidence": 0.9999634623527527
+        }
+      ]
+    },
+    {
+      "text": "God.",
+      "start_ms": 292950,
+      "end_ms": 293430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God.",
+          "start_ms": 292950,
+          "end_ms": 293430,
+          "confidence": 0.9995118379592896
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9711196631193161,
+  "metadata": {
+    "model": "stt-async-v5",
+    "transcription_id": "f73c5d60-84f9-4db8-9448-bbfcc0295953",
+    "elapsed_s": 29.0,
+    "token_count": 1439,
+    "source_token_count": 620,
+    "line_count": 204,
+    "target_language": "sk",
+    "languages_seen": [
+      "en",
+      "sk"
+    ],
+    "line_gap_ms": 400,
+    "translation_alignment": {
+      "n_runs": 116,
+      "n_translation_runs": 58,
+      "n_lines_aligned_1to1": 4,
+      "n_segments_unaligned_multi_line": 54,
+      "n_orphan_translation_segments": 0,
+      "unaligned_translation_segments": [
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            0,
+            1,
+            2
+          ],
+          "text_sk": "Tvojou milosťou som nažive,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            3,
+            4
+          ],
+          "text_sk": "a som tu, aby som vydal svedectvo, môj Bože."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ],
+          "text_sk": "Žijem, aby som ťa chválil, mojou obranou vo dne i v noci."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            10,
+            11,
+            12
+          ],
+          "text_sk": "V mene Ježiša Krista, môjho Boha,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            13,
+            14,
+            15,
+            16
+          ],
+          "text_sk": "žijem, aby som ťa chválil."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            17,
+            18,
+            19,
+            20
+          ],
+          "text_sk": "Čo iné môžem robiť, len ťa chváliť?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            22,
+            23,
+            24,
+            25,
+            26,
+            27
+          ],
+          "text_sk": "Tvoje meno je Boh, nikto iný okrem neho."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            28,
+            29,
+            30
+          ],
+          "text_sk": "Iný by mal zomrieť, ak sa ty nestaráš, prečo by som mal?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "text_sk": "Tvoje meno je Boh, autor môjho života."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            37,
+            38
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            39,
+            40,
+            41
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            42,
+            43,
+            44,
+            45
+          ],
+          "text_sk": "Tvoje meno je Boh."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            46,
+            47,
+            48,
+            49,
+            50,
+            51
+          ],
+          "text_sk": "Kameň základný, pevná skala, verný aj keď nie som svoj kráľ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            52,
+            53,
+            54
+          ],
+          "text_sk": "Žijem, aby som ťa chválil."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            55,
+            56,
+            57,
+            58
+          ],
+          "text_sk": "Stojí len jedno meno:"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            59,
+            60,
+            61,
+            62,
+            63
+          ],
+          "text_sk": "Ježiš Veľký, ja som svoj kráľ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70
+          ],
+          "text_sk": "Žijem, aby som ťa chválil, tvoje meno je Boh,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            72,
+            73,
+            74,
+            75
+          ],
+          "text_sk": "Iný by mal zomrieť, ak sa ty nestaráš, prečo by som mal?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "text_sk": "Tvoje meno je Boh, autor môjho života."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            82,
+            83,
+            84
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            85,
+            86
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            87,
+            88,
+            89,
+            90,
+            91
+          ],
+          "text_sk": "Tvoje meno je Boh, nikto iný okrem neho."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            92,
+            93,
+            94,
+            95
+          ],
+          "text_sk": "Ach, iný by mal zomrieť, ak sa ty nestaráš, prečo by som mal?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            96,
+            97,
+            98,
+            99,
+            100,
+            101
+          ],
+          "text_sk": "Tvoje meno je Boh, autor môjho života."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            102,
+            103,
+            104
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            105,
+            106,
+            107
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            108,
+            109,
+            110,
+            111,
+            112
+          ],
+          "text_sk": "Tvoje meno je Knieža Pokoja, Kráľ kráľov,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            113,
+            114
+          ],
+          "text_sk": "Pán pánov, Alfa a Omega."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            115,
+            116,
+            117,
+            118,
+            119
+          ],
+          "text_sk": "Môj Spasiteľ, ó, aj cez búrku je to dobré"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            120,
+            121
+          ],
+          "text_sk": "pre moju dušu."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            122,
+            123,
+            124,
+            125,
+            126
+          ],
+          "text_sk": "Viem, že si verný, môj Spasiteľ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            128,
+            129
+          ],
+          "text_sk": "A Knieža Pokoja, Kráľ kráľov,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            130,
+            131,
+            132
+          ],
+          "text_sk": "Pán pánov, Alfa a Omega,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            133,
+            134
+          ],
+          "text_sk": "môj Spasiteľ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            136,
+            137,
+            138
+          ],
+          "text_sk": "Aj cez búrku je to dobré pre moju dušu."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            139,
+            140,
+            141,
+            142
+          ],
+          "text_sk": "Viem, že si verný, môj Spasiteľ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            143,
+            144,
+            145
+          ],
+          "text_sk": "Ó, ty si verný, môj Spasiteľ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            146,
+            147,
+            148,
+            149,
+            150
+          ],
+          "text_sk": "Tvoje meno je Boh, nikto iný okrem neho."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            151,
+            152,
+            153
+          ],
+          "text_sk": "Iný by mal zomrieť, ak sa ty nestaráš, prečo by som mal?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            154,
+            155,
+            156,
+            157,
+            158
+          ],
+          "text_sk": "Tvoje meno je Boh, autor môjho života."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            159,
+            160
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            161,
+            162
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            163,
+            164,
+            165,
+            166,
+            167
+          ],
+          "text_sk": "Tvoje meno je Boh, nikto iný okrem neho."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            168,
+            169,
+            170
+          ],
+          "text_sk": "Iný by mal zomrieť, ak sa ty nestaráš, prečo by som mal?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            171,
+            172,
+            173,
+            174,
+            175,
+            176
+          ],
+          "text_sk": "Ó, tvoje meno je Boh, autor môjho života."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            177,
+            178
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            179,
+            180,
+            181
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            182,
+            183,
+            184
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            185,
+            186
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            187,
+            188
+          ],
+          "text_sk": "Dôverujem tvojmu menu, Bože,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            189,
+            190
+          ],
+          "text_sk": "až do dňa, keď zomriem."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            191,
+            192,
+            193,
+            194
+          ],
+          "text_sk": "Tvoje meno je Boh."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            195,
+            196,
+            197,
+            198,
+            199
+          ],
+          "text_sk": "Nič sa nevyrovná menu Ježiša Krista."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            200,
+            201,
+            202,
+            203
+          ],
+          "text_sk": "Tvoje meno je Boh."
+        }
+      ]
+    }
+  }
+}

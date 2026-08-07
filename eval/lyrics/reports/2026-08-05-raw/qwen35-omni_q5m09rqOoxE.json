@@ -1,0 +1,1519 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\q5m09rqOoxE_vocal16k.wav",
+  "duration_ms": 591372,
+  "lines": [
+    {
+      "text": "Faithful through the ages",
+      "start_ms": 16572,
+      "end_ms": 18492,
+      "text_sk": "Verný cez veky",
+      "words": null
+    },
+    {
+      "text": "God of Abraham",
+      "start_ms": 29052,
+      "end_ms": 31812,
+      "text_sk": "Boh Abrahámov",
+      "words": null
+    },
+    {
+      "text": "You're the God of covenants and faithful promises",
+      "start_ms": 31812,
+      "end_ms": 34092,
+      "text_sk": "Si Boh zmlúv a verných sľubov",
+      "words": null
+    },
+    {
+      "text": "Time and time again",
+      "start_ms": 37292,
+      "end_ms": 39372,
+      "text_sk": "Znovu a znovu",
+      "words": null
+    },
+    {
+      "text": "You have proven You'll do just what You said",
+      "start_ms": 39372,
+      "end_ms": 41932,
+      "text_sk": "Dokázal si, že urobíš presne to, čo si povedal",
+      "words": null
+    },
+    {
+      "text": "Though the storms may come and the winds may blow",
+      "start_ms": 42892,
+      "end_ms": 46372,
+      "text_sk": "Hoci búrky môžu prísť a vetry fúkať",
+      "words": null
+    },
+    {
+      "text": "I'll remain steadfast",
+      "start_ms": 46372,
+      "end_ms": 49212,
+      "text_sk": "Zostanem pevný",
+      "words": null
+    },
+    {
+      "text": "And let my heart learn",
+      "start_ms": 49212,
+      "end_ms": 51692,
+      "text_sk": "A nech sa moje srdce učí",
+      "words": null
+    },
+    {
+      "text": "When You speak a word it will come to pass",
+      "start_ms": 51692,
+      "end_ms": 54732,
+      "text_sk": "Keď prehovoríš slovo, stane sa",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 54732,
+      "end_ms": 57372,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 59452,
+      "end_ms": 66332,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "From the rising sun to the setting same I will praise Your name",
+      "start_ms": 67692,
+      "end_ms": 73772,
+      "text_sk": "Od východu slnka po západ budem chváliť Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 74572,
+      "end_ms": 81612,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Oh oh oh",
+      "start_ms": 81612,
+      "end_ms": 84092,
+      "text_sk": "Oh oh oh",
+      "words": null
+    },
+    {
+      "text": "Mmm mmm mmm",
+      "start_ms": 84092,
+      "end_ms": 86092,
+      "text_sk": "Mmm mmm mmm",
+      "words": null
+    },
+    {
+      "text": "The seasons change",
+      "start_ms": 86092,
+      "end_ms": 90572,
+      "text_sk": "Ročné obdobia sa menia",
+      "words": null
+    },
+    {
+      "text": "You remain the same",
+      "start_ms": 90572,
+      "end_ms": 95052,
+      "text_sk": "Ty zostávaš rovnaký",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 95052,
+      "end_ms": 99532,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "God from age to age",
+      "start_ms": 99532,
+      "end_ms": 102412,
+      "text_sk": "Boh z veku na vek",
+      "words": null
+    },
+    {
+      "text": "Though the earth may pass away",
+      "start_ms": 102412,
+      "end_ms": 104892,
+      "text_sk": "Hoci zem môže pominúť",
+      "words": null
+    },
+    {
+      "text": "Your Word remains the same",
+      "start_ms": 104892,
+      "end_ms": 107212,
+      "text_sk": "Tvoje Slovo zostáva rovnaké",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 107212,
+      "end_ms": 107532,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "Your history can prove there's nothing You can't do",
+      "start_ms": 107532,
+      "end_ms": 111052,
+      "text_sk": "Tvoja história dokazuje, že nie je nič, čo by si nemohol urobiť",
+      "words": null
+    },
+    {
+      "text": "You're faithful and true",
+      "start_ms": 111052,
+      "end_ms": 115692,
+      "text_sk": "Si verný a pravdivý",
+      "words": null
+    },
+    {
+      "text": "Though the storms may come and the winds may blow",
+      "start_ms": 115692,
+      "end_ms": 120012,
+      "text_sk": "Hoci búrky môžu prísť a vetry fúkať",
+      "words": null
+    },
+    {
+      "text": "I'll remain steadfast",
+      "start_ms": 120012,
+      "end_ms": 122492,
+      "text_sk": "Zostanem pevný",
+      "words": null
+    },
+    {
+      "text": "And let my heart learn",
+      "start_ms": 122492,
+      "end_ms": 125932,
+      "text_sk": "A nech sa moje srdce učí",
+      "words": null
+    },
+    {
+      "text": "When You speak a word it will come to pass",
+      "start_ms": 125932,
+      "end_ms": 128972,
+      "text_sk": "Keď prehovoríš slovo, stane sa",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 128972,
+      "end_ms": 131532,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Whoa",
+      "start_ms": 131532,
+      "end_ms": 134012,
+      "text_sk": "Whoa",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness",
+      "start_ms": 134012,
+      "end_ms": 136492,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 136492,
+      "end_ms": 140012,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "To the setting same",
+      "start_ms": 140012,
+      "end_ms": 142492,
+      "text_sk": "Po západ slnka",
+      "words": null
+    },
+    {
+      "text": "I will praise Your name",
+      "start_ms": 142492,
+      "end_ms": 144972,
+      "text_sk": "Budem chváliť Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 144972,
+      "end_ms": 147452,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Oh yeah",
+      "start_ms": 147452,
+      "end_ms": 149932,
+      "text_sk": "Oh áno",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness",
+      "start_ms": 149932,
+      "end_ms": 152412,
+      "text_sk": "Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "It never runs out",
+      "start_ms": 152412,
+      "end_ms": 154892,
+      "text_sk": "Nikdy nevyprchá",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 154892,
+      "end_ms": 157372,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "It never runs out",
+      "start_ms": 157372,
+      "end_ms": 159852,
+      "text_sk": "Nikdy nevyprchá",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 159852,
+      "end_ms": 162332,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "Your faithfulness",
+      "start_ms": 162332,
+      "end_ms": 164812,
+      "text_sk": "Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 164812,
+      "end_ms": 167292,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "It never runs out",
+      "start_ms": 167292,
+      "end_ms": 169772,
+      "text_sk": "Nikdy nevyprchá",
+      "words": null
+    },
+    {
+      "text": "Never runs out",
+      "start_ms": 169772,
+      "end_ms": 172252,
+      "text_sk": "Nikdy nevyprchá",
+      "words": null
+    },
+    {
+      "text": "It never runs out",
+      "start_ms": 172252,
+      "end_ms": 174732,
+      "text_sk": "Nikdy nevyprchá",
+      "words": null
+    },
+    {
+      "text": "It never runs out",
+      "start_ms": 174732,
+      "end_ms": 177212,
+      "text_sk": "Nikdy nevyprchá",
+      "words": null
+    },
+    {
+      "text": "I put my faith in Jesus",
+      "start_ms": 177212,
+      "end_ms": 179692,
+      "text_sk": "Vkladám svoju vieru v Ježiša",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 179692,
+      "end_ms": 182172,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 182172,
+      "end_ms": 184652,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 184652,
+      "end_ms": 187132,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 187132,
+      "end_ms": 189612,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "No",
+      "start_ms": 189612,
+      "end_ms": 192092,
+      "text_sk": "Nie",
+      "words": null
+    },
+    {
+      "text": "I put my faith in Jesus",
+      "start_ms": 192092,
+      "end_ms": 194572,
+      "text_sk": "Vkladám svoju vieru v Ježiša",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 194572,
+      "end_ms": 197052,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 197052,
+      "end_ms": 199532,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 199532,
+      "end_ms": 202012,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 202012,
+      "end_ms": 204492,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "I put my trust in Jesus",
+      "start_ms": 204492,
+      "end_ms": 206972,
+      "text_sk": "Vkladám svoju dôveru v Ježiša",
+      "words": null
+    },
+    {
+      "text": "Yes I do",
+      "start_ms": 206972,
+      "end_ms": 209452,
+      "text_sk": "Áno, robím",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 209452,
+      "end_ms": 211932,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 211932,
+      "end_ms": 214412,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 214412,
+      "end_ms": 216892,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "Never let me down",
+      "start_ms": 216892,
+      "end_ms": 219372,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "I put my faith in Jesus",
+      "start_ms": 219372,
+      "end_ms": 221852,
+      "text_sk": "Vkladám svoju vieru v Ježiša",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 221852,
+      "end_ms": 224332,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "He's my hope",
+      "start_ms": 224332,
+      "end_ms": 226812,
+      "text_sk": "On je moja nádej",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 226812,
+      "end_ms": 229292,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "My only hope",
+      "start_ms": 229292,
+      "end_ms": 231772,
+      "text_sk": "Moja jediná nádej",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 231772,
+      "end_ms": 234252,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 234252,
+      "end_ms": 236732,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 236732,
+      "end_ms": 239212,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 239212,
+      "end_ms": 241692,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "Whoa",
+      "start_ms": 241692,
+      "end_ms": 244172,
+      "text_sk": "Whoa",
+      "words": null
+    },
+    {
+      "text": "Faithful",
+      "start_ms": 244172,
+      "end_ms": 246652,
+      "text_sk": "Verný",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 246652,
+      "end_ms": 249132,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Sing it out",
+      "start_ms": 249132,
+      "end_ms": 251612,
+      "text_sk": "Spievaj to nahlas",
+      "words": null
+    },
+    {
+      "text": "Great",
+      "start_ms": 251612,
+      "end_ms": 254092,
+      "text_sk": "Veľká",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 254092,
+      "end_ms": 256572,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 256572,
+      "end_ms": 259052,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "To the setting same",
+      "start_ms": 259052,
+      "end_ms": 261532,
+      "text_sk": "Po západ slnka",
+      "words": null
+    },
+    {
+      "text": "I will praise Your name",
+      "start_ms": 261532,
+      "end_ms": 264012,
+      "text_sk": "Budem chváliť Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "In every season",
+      "start_ms": 264012,
+      "end_ms": 266492,
+      "text_sk": "V každom ročnom období",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 266492,
+      "end_ms": 268972,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Say I put my faith",
+      "start_ms": 268972,
+      "end_ms": 271452,
+      "text_sk": "Povedz: Vkladám svoju vieru",
+      "words": null
+    },
+    {
+      "text": "I put my faith in Jesus",
+      "start_ms": 271452,
+      "end_ms": 273932,
+      "text_sk": "Vkladám svoju vieru v Ježiša",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 273932,
+      "end_ms": 276412,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "He's my hope",
+      "start_ms": 276412,
+      "end_ms": 278892,
+      "text_sk": "On je moja nádej",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 278892,
+      "end_ms": 281372,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 281372,
+      "end_ms": 283852,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 283852,
+      "end_ms": 286332,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "I put my faith",
+      "start_ms": 286332,
+      "end_ms": 288812,
+      "text_sk": "Vkladám svoju vieru",
+      "words": null
+    },
+    {
+      "text": "I put",
+      "start_ms": 288812,
+      "end_ms": 291292,
+      "text_sk": "Vkladám",
+      "words": null
+    },
+    {
+      "text": "My anchor",
+      "start_ms": 291292,
+      "end_ms": 293772,
+      "text_sk": "Moja kotva",
+      "words": null
+    },
+    {
+      "text": "He's my hope",
+      "start_ms": 293772,
+      "end_ms": 296252,
+      "text_sk": "On je moja nádej",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 296252,
+      "end_ms": 298732,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "Never let me down",
+      "start_ms": 298732,
+      "end_ms": 301212,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 301212,
+      "end_ms": 303692,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "Come on sing it out",
+      "start_ms": 303692,
+      "end_ms": 306172,
+      "text_sk": "Poď, spievaj to nahlas",
+      "words": null
+    },
+    {
+      "text": "Say I put my faith",
+      "start_ms": 306172,
+      "end_ms": 308652,
+      "text_sk": "Povedz: Vkladám svoju vieru",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 308652,
+      "end_ms": 311132,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "My hope and",
+      "start_ms": 311132,
+      "end_ms": 313612,
+      "text_sk": "Moja nádej a",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 313612,
+      "end_ms": 316092,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "Never let me down",
+      "start_ms": 316092,
+      "end_ms": 318572,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "Never let me",
+      "start_ms": 318572,
+      "end_ms": 321052,
+      "text_sk": "Nikdy ma",
+      "words": null
+    },
+    {
+      "text": "I put my faith in Jesus",
+      "start_ms": 321052,
+      "end_ms": 323532,
+      "text_sk": "Vkladám svoju vieru v Ježiša",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 323532,
+      "end_ms": 326012,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "My anchor to the ground",
+      "start_ms": 326012,
+      "end_ms": 328492,
+      "text_sk": "Moja kotva k zemi",
+      "words": null
+    },
+    {
+      "text": "My hope and firm foundation",
+      "start_ms": 328492,
+      "end_ms": 330972,
+      "text_sk": "Moja nádej a pevný základ",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 330972,
+      "end_ms": 333452,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 333452,
+      "end_ms": 335932,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 335932,
+      "end_ms": 338412,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 338412,
+      "end_ms": 340892,
+      "text_sk": "Nikdy ma nesklame",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 340892,
+      "end_ms": 343372,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "Sing great",
+      "start_ms": 343372,
+      "end_ms": 345852,
+      "text_sk": "Spievaj veľká",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 345852,
+      "end_ms": 348332,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "In every season",
+      "start_ms": 348332,
+      "end_ms": 350812,
+      "text_sk": "V každom ročnom období",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness",
+      "start_ms": 350812,
+      "end_ms": 353292,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 353292,
+      "end_ms": 355772,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "Hey",
+      "start_ms": 355772,
+      "end_ms": 358252,
+      "text_sk": "Hej",
+      "words": null
+    },
+    {
+      "text": "Great",
+      "start_ms": 358252,
+      "end_ms": 360732,
+      "text_sk": "Veľká",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 360732,
+      "end_ms": 363212,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "Hey",
+      "start_ms": 363212,
+      "end_ms": 365692,
+      "text_sk": "Hej",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 365692,
+      "end_ms": 368172,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "Let it go up",
+      "start_ms": 368172,
+      "end_ms": 370652,
+      "text_sk": "Nech ide hore",
+      "words": null
+    },
+    {
+      "text": "And let it go down",
+      "start_ms": 370652,
+      "end_ms": 373132,
+      "text_sk": "A nech ide dole",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 373132,
+      "end_ms": 375612,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still praise You",
+      "start_ms": 375612,
+      "end_ms": 378092,
+      "text_sk": "Stále Ťa budem chváliť",
+      "words": null
+    },
+    {
+      "text": "Let it go up",
+      "start_ms": 378092,
+      "end_ms": 380572,
+      "text_sk": "Nech ide hore",
+      "words": null
+    },
+    {
+      "text": "Then let it go down",
+      "start_ms": 380572,
+      "end_ms": 383052,
+      "text_sk": "Potom nech ide dole",
+      "words": null
+    },
+    {
+      "text": "And I'll still bless You",
+      "start_ms": 383052,
+      "end_ms": 385532,
+      "text_sk": "A stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 385532,
+      "end_ms": 388012,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 388012,
+      "end_ms": 390492,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "Let it go up",
+      "start_ms": 390492,
+      "end_ms": 392972,
+      "text_sk": "Nech ide hore",
+      "words": null
+    },
+    {
+      "text": "Then let it come down",
+      "start_ms": 392972,
+      "end_ms": 395452,
+      "text_sk": "Potom nech príde dole",
+      "words": null
+    },
+    {
+      "text": "And I'll still bless You",
+      "start_ms": 395452,
+      "end_ms": 397932,
+      "text_sk": "A stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 397932,
+      "end_ms": 400412,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 400412,
+      "end_ms": 402892,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 402892,
+      "end_ms": 405372,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Great is",
+      "start_ms": 405372,
+      "end_ms": 407852,
+      "text_sk": "Veľká je",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 407852,
+      "end_ms": 410332,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Oh my God",
+      "start_ms": 410332,
+      "end_ms": 412812,
+      "text_sk": "Ó môj Bože",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 412812,
+      "end_ms": 415292,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Faithful",
+      "start_ms": 415292,
+      "end_ms": 417772,
+      "text_sk": "Verný",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 417772,
+      "end_ms": 420252,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 420252,
+      "end_ms": 422732,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 422732,
+      "end_ms": 425212,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 425212,
+      "end_ms": 427692,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness",
+      "start_ms": 427692,
+      "end_ms": 430172,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 430172,
+      "end_ms": 432652,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 432652,
+      "end_ms": 435132,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Yes I'll still bless You",
+      "start_ms": 435132,
+      "end_ms": 437612,
+      "text_sk": "Áno, stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "In the middle of the storm",
+      "start_ms": 437612,
+      "end_ms": 440092,
+      "text_sk": "Uprostred búrky",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 440092,
+      "end_ms": 442572,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "In the middle of my trial",
+      "start_ms": 442572,
+      "end_ms": 445052,
+      "text_sk": "Uprostred mojej skúšky",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 445052,
+      "end_ms": 447532,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 447532,
+      "end_ms": 450012,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "In the middle of the road",
+      "start_ms": 450012,
+      "end_ms": 452492,
+      "text_sk": "Uprostred cesty",
+      "words": null
+    },
+    {
+      "text": "When I don't know where to go",
+      "start_ms": 452492,
+      "end_ms": 454972,
+      "text_sk": "Keď neviem, kam ísť",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 454972,
+      "end_ms": 457452,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 457452,
+      "end_ms": 459932,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "In the middle of my storm",
+      "start_ms": 459932,
+      "end_ms": 462412,
+      "text_sk": "Uprostred mojej búrky",
+      "words": null
+    },
+    {
+      "text": "In the middle of my trial",
+      "start_ms": 462412,
+      "end_ms": 464892,
+      "text_sk": "Uprostred mojej skúšky",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 464892,
+      "end_ms": 467372,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 467372,
+      "end_ms": 469852,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "When I'm in the middle of the road",
+      "start_ms": 469852,
+      "end_ms": 472332,
+      "text_sk": "Keď som uprostred cesty",
+      "words": null
+    },
+    {
+      "text": "And I don't know which way to go",
+      "start_ms": 472332,
+      "end_ms": 474812,
+      "text_sk": "A neviem, ktorým smerom ísť",
+      "words": null
+    },
+    {
+      "text": "I'll still",
+      "start_ms": 474812,
+      "end_ms": 477292,
+      "text_sk": "Stále",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 477292,
+      "end_ms": 479772,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 479772,
+      "end_ms": 482252,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 482252,
+      "end_ms": 484732,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "I've got a reason to bless You",
+      "start_ms": 484732,
+      "end_ms": 487212,
+      "text_sk": "Mám dôvod Ťa žehnať",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 487212,
+      "end_ms": 489692,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "I've got a reason to bless You",
+      "start_ms": 489692,
+      "end_ms": 492172,
+      "text_sk": "Mám dôvod Ťa žehnať",
+      "words": null
+    },
+    {
+      "text": "I'll still",
+      "start_ms": 492172,
+      "end_ms": 494652,
+      "text_sk": "Stále",
+      "words": null
+    },
+    {
+      "text": "I've got a reason to bless Your name",
+      "start_ms": 494652,
+      "end_ms": 497132,
+      "text_sk": "Mám dôvod žehnať Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "You've been faithful",
+      "start_ms": 497132,
+      "end_ms": 499612,
+      "text_sk": "Bol si verný",
+      "words": null
+    },
+    {
+      "text": "You've been faithful",
+      "start_ms": 499612,
+      "end_ms": 502092,
+      "text_sk": "Bol si verný",
+      "words": null
+    },
+    {
+      "text": "You've been so good to me",
+      "start_ms": 502092,
+      "end_ms": 504572,
+      "text_sk": "Bol si ku mne taký dobrý",
+      "words": null
+    },
+    {
+      "text": "You've been so good",
+      "start_ms": 504572,
+      "end_ms": 507052,
+      "text_sk": "Bol si taký dobrý",
+      "words": null
+    },
+    {
+      "text": "Come on just lift up your praise",
+      "start_ms": 507052,
+      "end_ms": 509532,
+      "text_sk": "Poď, len pozdvihni svoju chválu",
+      "words": null
+    },
+    {
+      "text": "Just lift up your worship to Him",
+      "start_ms": 509532,
+      "end_ms": 512012,
+      "text_sk": "Len pozdvihni svoje uctievanie k Nemu",
+      "words": null
+    },
+    {
+      "text": "You've been so good",
+      "start_ms": 512012,
+      "end_ms": 514492,
+      "text_sk": "Bol si taký dobrý",
+      "words": null
+    },
+    {
+      "text": "You've been so good",
+      "start_ms": 514492,
+      "end_ms": 516972,
+      "text_sk": "Bol si taký dobrý",
+      "words": null
+    },
+    {
+      "text": "Let this house",
+      "start_ms": 516972,
+      "end_ms": 519452,
+      "text_sk": "Nech tento dom",
+      "words": null
+    },
+    {
+      "text": "This body be filled with Your praise",
+      "start_ms": 519452,
+      "end_ms": 521932,
+      "text_sk": "Toto telo naplnené Tvojou chválou",
+      "words": null
+    },
+    {
+      "text": "Be filled with Your praise",
+      "start_ms": 521932,
+      "end_ms": 524412,
+      "text_sk": "Naplnené Tvojou chválou",
+      "words": null
+    },
+    {
+      "text": "We bless Your name",
+      "start_ms": 524412,
+      "end_ms": 526892,
+      "text_sk": "Žehnáme Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "We bless Your name",
+      "start_ms": 526892,
+      "end_ms": 529372,
+      "text_sk": "Žehnáme Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "We bless Your name",
+      "start_ms": 529372,
+      "end_ms": 531852,
+      "text_sk": "Žehnáme Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 531852,
+      "end_ms": 534332,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 534332,
+      "end_ms": 536812,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 536812,
+      "end_ms": 539292,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 539292,
+      "end_ms": 541772,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 541772,
+      "end_ms": 544252,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 544252,
+      "end_ms": 546732,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Oh",
+      "start_ms": 546732,
+      "end_ms": 549212,
+      "text_sk": "Oh",
+      "words": null
+    },
+    {
+      "text": "I'll still bless You",
+      "start_ms": 549212,
+      "end_ms": 551692,
+      "text_sk": "Stále Ťa budem žehnať",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness",
+      "start_ms": 551692,
+      "end_ms": 554172,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 554172,
+      "end_ms": 556652,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "Come on",
+      "start_ms": 556652,
+      "end_ms": 559132,
+      "text_sk": "Poď",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 559132,
+      "end_ms": 561612,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 561612,
+      "end_ms": 564092,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 564092,
+      "end_ms": 566572,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "To the setting same I will praise Your name",
+      "start_ms": 566572,
+      "end_ms": 569052,
+      "text_sk": "Po západ slnka budem chváliť Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 569052,
+      "end_ms": 571532,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 571532,
+      "end_ms": 574012,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "Oh my God",
+      "start_ms": 574012,
+      "end_ms": 576492,
+      "text_sk": "Ó môj Bože",
+      "words": null
+    },
+    {
+      "text": "I will praise Your name",
+      "start_ms": 576492,
+      "end_ms": 578972,
+      "text_sk": "Budem chváliť Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 578972,
+      "end_ms": 581452,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "From the rising sun",
+      "start_ms": 581452,
+      "end_ms": 583932,
+      "text_sk": "Od východu slnka",
+      "words": null
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 583932,
+      "end_ms": 586412,
+      "text_sk": "Áno",
+      "words": null
+    },
+    {
+      "text": "I will praise Your name",
+      "start_ms": 586412,
+      "end_ms": 588892,
+      "text_sk": "Budem chváliť Tvoje meno",
+      "words": null
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 588892,
+      "end_ms": 591372,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 224.9,
+    "line_count": 214,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "transcoded_mp3",
+    "audio_raw_bytes": 41558972,
+    "audio_sent_bytes": 7793757,
+    "audio_sent_b64_chars": 10391676,
+    "audio_format_sent": "mp3"
+  }
+}

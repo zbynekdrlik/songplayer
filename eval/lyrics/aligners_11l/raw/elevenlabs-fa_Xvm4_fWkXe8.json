@@ -1,0 +1,2786 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\Xvm4_fWkXe8_vocal16k.wav",
+  "duration_ms": 262920,
+  "lines": [
+    {
+      "text": "You know it's crazy",
+      "text_sk": "Vieš, že je to šialené",
+      "start_ms": 12760,
+      "end_ms": 14120,
+      "mean_word_loss": 0.4696877320607503
+    },
+    {
+      "text": "I woke up this morning",
+      "text_sk": "Dnes ráno som sa zobudil",
+      "start_ms": 14180,
+      "end_ms": 15900,
+      "mean_word_loss": 0.012941488197871618
+    },
+    {
+      "text": "To grace and mercy",
+      "text_sk": "K milosti a súcitu",
+      "start_ms": 16520,
+      "end_ms": 17920,
+      "mean_word_loss": 1.07430419921875
+    },
+    {
+      "text": "That just keep on flowing",
+      "text_sk": "Ktoré stále prúdia",
+      "start_ms": 18000,
+      "end_ms": 19760,
+      "mean_word_loss": 0.9011215720857892
+    },
+    {
+      "text": "My heart is beating",
+      "text_sk": "Moje srdce bije",
+      "start_ms": 20400,
+      "end_ms": 21780,
+      "mean_word_loss": 0.20879842213221958
+    },
+    {
+      "text": "My eyes are wide open",
+      "text_sk": "Moje oči sú široko otvorené",
+      "start_ms": 21860,
+      "end_ms": 23680,
+      "mean_word_loss": 0.8121894836425781
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 24020,
+      "end_ms": 26840,
+      "mean_word_loss": 0.48565517001681857
+    },
+    {
+      "text": "It's so amazing",
+      "text_sk": "Je to také úžasné",
+      "start_ms": 28100,
+      "end_ms": 29460,
+      "mean_word_loss": 0.1887517316000802
+    },
+    {
+      "text": "That someone so perfect",
+      "text_sk": "Že niekto taký dokonalý",
+      "start_ms": 29540,
+      "end_ms": 31420,
+      "mean_word_loss": 0.32022176470075336
+    },
+    {
+      "text": "Would show me love",
+      "text_sk": "By mi ukázal lásku",
+      "start_ms": 31920,
+      "end_ms": 32920,
+      "mean_word_loss": 0.4671689748764038
+    },
+    {
+      "text": "When I didn't deserve it",
+      "text_sk": "Keď som si ju nezaslúžil",
+      "start_ms": 33000,
+      "end_ms": 35140,
+      "mean_word_loss": 0.31303111485072543
+    },
+    {
+      "text": "You gave Your life just",
+      "text_sk": "Dal si svoj život len",
+      "start_ms": 35800,
+      "end_ms": 37100,
+      "mean_word_loss": 0.4791707456111908
+    },
+    {
+      "text": "To show me I'm worth it",
+      "text_sk": "Aby si mi ukázal, že za to stojím",
+      "start_ms": 37180,
+      "end_ms": 38960,
+      "mean_word_loss": 0.5342103799184164
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 39360,
+      "end_ms": 42660,
+      "mean_word_loss": 1.0363302018907337
+    },
+    {
+      "text": "I'm living in",
+      "text_sk": "Žijem v",
+      "start_ms": 44000,
+      "end_ms": 44680,
+      "mean_word_loss": 0.7312978108723959
+    },
+    {
+      "text": "A new today",
+      "text_sk": "Novom dni",
+      "start_ms": 45880,
+      "end_ms": 46960,
+      "mean_word_loss": 1.8573854234483507
+    },
+    {
+      "text": "The old is gone",
+      "text_sk": "Staré je preč",
+      "start_ms": 47740,
+      "end_ms": 49580,
+      "mean_word_loss": 0.6035817464192708
+    },
+    {
+      "text": "It's history",
+      "text_sk": "Je to história",
+      "start_ms": 49700,
+      "end_ms": 50800,
+      "mean_word_loss": 0.7841208321707589
+    },
+    {
+      "text": "It's a miracle",
+      "text_sk": "Je to zázrak",
+      "start_ms": 51320,
+      "end_ms": 52740,
+      "mean_word_loss": 0.5677696863810221
+    },
+    {
+      "text": "What You did for me",
+      "text_sk": "Čo si pre mňa urobil",
+      "start_ms": 53240,
+      "end_ms": 54480,
+      "mean_word_loss": 0.8630425790945688
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 54740,
+      "end_ms": 57060,
+      "mean_word_loss": 0.7229622311062283
+    },
+    {
+      "text": "You made a way",
+      "text_sk": "Urobil si cestu",
+      "start_ms": 57180,
+      "end_ms": 58480,
+      "mean_word_loss": 0.32910362879435223
+    },
+    {
+      "text": "I saw a mountain",
+      "text_sk": "Videl som horu",
+      "start_ms": 66520,
+      "end_ms": 67980,
+      "mean_word_loss": 1.5903096795082092
+    },
+    {
+      "text": "And I watched You move it",
+      "text_sk": "A videl som Ťa, ako si ju posunul",
+      "start_ms": 68040,
+      "end_ms": 69740,
+      "mean_word_loss": 0.5383907121325296
+    },
+    {
+      "text": "You took my place when",
+      "text_sk": "Zaujal si moje miesto, keď",
+      "start_ms": 70340,
+      "end_ms": 71700,
+      "mean_word_loss": 0.08980457305908203
+    },
+    {
+      "text": "No one else could do it",
+      "text_sk": "To nikto iný nedokázal",
+      "start_ms": 71780,
+      "end_ms": 73500,
+      "mean_word_loss": 0.34993447197808164
+    },
+    {
+      "text": "The least I can do",
+      "text_sk": "Najmenej, čo môžem urobiť",
+      "start_ms": 74180,
+      "end_ms": 75460,
+      "mean_word_loss": 0.34256103515624997
+    },
+    {
+      "text": "Is sing hallelujah",
+      "text_sk": "Je spievať aleluja",
+      "start_ms": 75780,
+      "end_ms": 77320,
+      "mean_word_loss": 1.894081751505534
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 77760,
+      "end_ms": 80840,
+      "mean_word_loss": 0.297427495320638
+    },
+    {
+      "text": "I'm living in",
+      "text_sk": "Žijem v",
+      "start_ms": 82200,
+      "end_ms": 83540,
+      "mean_word_loss": 0.6167399088541666
+    },
+    {
+      "text": "A new today",
+      "text_sk": "Novom dni",
+      "start_ms": 84260,
+      "end_ms": 85520,
+      "mean_word_loss": 1.7114170498318142
+    },
+    {
+      "text": "The old is gone",
+      "text_sk": "Staré je preč",
+      "start_ms": 86140,
+      "end_ms": 87320,
+      "mean_word_loss": 0.6999994913736979
+    },
+    {
+      "text": "It's history",
+      "text_sk": "Je to história",
+      "start_ms": 88120,
+      "end_ms": 89220,
+      "mean_word_loss": 0.7696140834263393
+    },
+    {
+      "text": "It's a miracle",
+      "text_sk": "Je to zázrak",
+      "start_ms": 89760,
+      "end_ms": 91120,
+      "mean_word_loss": 0.5274560565040225
+    },
+    {
+      "text": "What You did for me",
+      "text_sk": "Čo si pre mňa urobil",
+      "start_ms": 91580,
+      "end_ms": 92710,
+      "mean_word_loss": 0.8331107834974925
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 94120,
+      "end_ms": 95440,
+      "mean_word_loss": 0.6696012285020617
+    },
+    {
+      "text": "You made a way",
+      "text_sk": "Urobil si cestu",
+      "start_ms": 95560,
+      "end_ms": 96680,
+      "mean_word_loss": 0.31563568115234375
+    },
+    {
+      "text": "I'm living in",
+      "text_sk": "Žijem v",
+      "start_ms": 96820,
+      "end_ms": 98450,
+      "mean_word_loss": 0.6996663411458334
+    },
+    {
+      "text": "A new today",
+      "text_sk": "Novom dni",
+      "start_ms": 98540,
+      "end_ms": 99540,
+      "mean_word_loss": 1.7035266452365452
+    },
+    {
+      "text": "The old is gone",
+      "text_sk": "Staré je preč",
+      "start_ms": 100160,
+      "end_ms": 101560,
+      "mean_word_loss": 0.7070871988932291
+    },
+    {
+      "text": "It's history",
+      "text_sk": "Je to história",
+      "start_ms": 102080,
+      "end_ms": 103400,
+      "mean_word_loss": 0.787555149623326
+    },
+    {
+      "text": "It's a miracle",
+      "text_sk": "Je to zázrak",
+      "start_ms": 103460,
+      "end_ms": 106320,
+      "mean_word_loss": 0.5102470942905971
+    },
+    {
+      "text": "What You did for me",
+      "text_sk": "Čo si pre mňa urobil",
+      "start_ms": 106340,
+      "end_ms": 107160,
+      "mean_word_loss": 0.8355208337306976
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 107220,
+      "end_ms": 110780,
+      "mean_word_loss": 0.673075442843967
+    },
+    {
+      "text": "You made a way",
+      "text_sk": "Urobil si cestu",
+      "start_ms": 110900,
+      "end_ms": 112280,
+      "mean_word_loss": 0.32079339027404785
+    },
+    {
+      "text": "Every single debt I owed",
+      "text_sk": "Každý jeden dlh, ktorý som mal",
+      "start_ms": 114040,
+      "end_ms": 122010,
+      "mean_word_loss": 2.3048602549235024
+    },
+    {
+      "text": "You cancelled it",
+      "text_sk": "Si zrušil",
+      "start_ms": 122460,
+      "end_ms": 123540,
+      "mean_word_loss": 0.9795735677083334
+    },
+    {
+      "text": "Every sin I ever chose",
+      "text_sk": "Každý hriech, ktorý som si vybral",
+      "start_ms": 124000,
+      "end_ms": 126180,
+      "mean_word_loss": 0.42678012212117516
+    },
+    {
+      "text": "You covered it",
+      "text_sk": "Si prikryl",
+      "start_ms": 126280,
+      "end_ms": 127640,
+      "mean_word_loss": 0.23603938874744235
+    },
+    {
+      "text": "When the fight was getting close",
+      "text_sk": "Keď sa boj blížil",
+      "start_ms": 127720,
+      "end_ms": 130060,
+      "mean_word_loss": 0.4195673957703605
+    },
+    {
+      "text": "You handled it",
+      "text_sk": "Si to zvládol",
+      "start_ms": 130140,
+      "end_ms": 131260,
+      "mean_word_loss": 0.223823002406529
+    },
+    {
+      "text": "You stepped right in",
+      "text_sk": "Vkročil si priamo dnu",
+      "start_ms": 132000,
+      "end_ms": 133950,
+      "mean_word_loss": 0.9370178847085862
+    },
+    {
+      "text": "And finished it",
+      "text_sk": "A dokončil to",
+      "start_ms": 133951,
+      "end_ms": 135000,
+      "mean_word_loss": 1.5155732896592884
+    },
+    {
+      "text": "Every single debt I owed",
+      "text_sk": "Každý jeden dlh, ktorý som mal",
+      "start_ms": 135380,
+      "end_ms": 137260,
+      "mean_word_loss": 1.515701166788737
+    },
+    {
+      "text": "You cancelled it",
+      "text_sk": "Si zrušil",
+      "start_ms": 137800,
+      "end_ms": 138880,
+      "mean_word_loss": 0.7820869728370949
+    },
+    {
+      "text": "Every sin I ever chose",
+      "text_sk": "Každý hriech, ktorý som si vybral",
+      "start_ms": 139320,
+      "end_ms": 141260,
+      "mean_word_loss": 0.3546228090922038
+    },
+    {
+      "text": "You covered it",
+      "text_sk": "Si prikryl",
+      "start_ms": 141640,
+      "end_ms": 142700,
+      "mean_word_loss": 0.22618981013222347
+    },
+    {
+      "text": "When the fight was getting close",
+      "text_sk": "Keď sa boj blížil",
+      "start_ms": 143020,
+      "end_ms": 145100,
+      "mean_word_loss": 0.4238385983875819
+    },
+    {
+      "text": "You handled it",
+      "text_sk": "Si to zvládol",
+      "start_ms": 145480,
+      "end_ms": 147290,
+      "mean_word_loss": 0.21205575125558038
+    },
+    {
+      "text": "You never fail",
+      "text_sk": "Nikdy nezlyháš",
+      "start_ms": 147340,
+      "end_ms": 149200,
+      "mean_word_loss": 1.0993676079644097
+    },
+    {
+      "text": "You never will",
+      "text_sk": "Nikdy nebudeš",
+      "start_ms": 149320,
+      "end_ms": 150420,
+      "mean_word_loss": 0.9250637902153862
+    },
+    {
+      "text": "Every single word You spoke",
+      "text_sk": "Každé jedno slovo, ktoré si povedal",
+      "start_ms": 150760,
+      "end_ms": 152620,
+      "mean_word_loss": 0.8780406697591147
+    },
+    {
+      "text": "Is coming true",
+      "text_sk": "Sa stáva skutočnosťou",
+      "start_ms": 153160,
+      "end_ms": 154300,
+      "mean_word_loss": 1.0729166666666667
+    },
+    {
+      "text": "Every lie the devil told",
+      "text_sk": "Každá lož, ktorú povedal diabol",
+      "start_ms": 154620,
+      "end_ms": 156460,
+      "mean_word_loss": 1.0453792317708335
+    },
+    {
+      "text": "Must bow to You",
+      "text_sk": "Sa musí pokloniť Tebe",
+      "start_ms": 156940,
+      "end_ms": 158060,
+      "mean_word_loss": 1.428942362467448
+    },
+    {
+      "text": "To me it's impossible",
+      "text_sk": "Pre mňa je to nemožné",
+      "start_ms": 158380,
+      "end_ms": 160720,
+      "mean_word_loss": 1.8142452239990234
+    },
+    {
+      "text": "But not for You",
+      "text_sk": "Ale nie pre Teba",
+      "start_ms": 160780,
+      "end_ms": 161960,
+      "mean_word_loss": 1.7127838134765625
+    },
+    {
+      "text": "It's what You do",
+      "text_sk": "To je to, čo robíš",
+      "start_ms": 162680,
+      "end_ms": 164320,
+      "mean_word_loss": 0.9804169336954752
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 164900,
+      "end_ms": 166140,
+      "mean_word_loss": 0.6180753919813368
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 168040,
+      "end_ms": 168651,
+      "mean_word_loss": 0.4268641683790419
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.44024558597140845
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.4395215352376302
+    },
+    {
+      "text": "I'm living in",
+      "text_sk": "Žijem v",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 1.5414920383029516
+    },
+    {
+      "text": "A new today",
+      "text_sk": "Novom dni",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 2.0047066582573785
+    },
+    {
+      "text": "The old is gone",
+      "text_sk": "Staré je preč",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.8011576334635416
+    },
+    {
+      "text": "It's history",
+      "text_sk": "Je to história",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.8128673008510044
+    },
+    {
+      "text": "It's a miracle",
+      "text_sk": "Je to zázrak",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.5546341850644066
+    },
+    {
+      "text": "What You did for me",
+      "text_sk": "Čo si pre mňa urobil",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.7970522840817769
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.724693637424045
+    },
+    {
+      "text": "You made a way",
+      "text_sk": "Urobil si cestu",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.3357614278793335
+    },
+    {
+      "text": "I'm living in",
+      "text_sk": "Žijem v",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.7543428209092883
+    },
+    {
+      "text": "A new today",
+      "text_sk": "Novom dni",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 1.6705806308322482
+    },
+    {
+      "text": "The old is gone",
+      "text_sk": "Staré je preč",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.782867431640625
+    },
+    {
+      "text": "It's history",
+      "text_sk": "Je to história",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.8027921404157365
+    },
+    {
+      "text": "It's a miracle",
+      "text_sk": "Je to zázrak",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.555608658563523
+    },
+    {
+      "text": "What You did for me",
+      "text_sk": "Čo si pre mňa urobil",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.8004353125890097
+    },
+    {
+      "text": "Thank You Lord",
+      "text_sk": "Ďakujem Ti, Pane",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.6823100195990669
+    },
+    {
+      "text": "You made a way",
+      "text_sk": "Urobil si cestu",
+      "start_ms": 168650,
+      "end_ms": 168651,
+      "mean_word_loss": 0.32219843069712323
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 168650,
+      "end_ms": 169120,
+      "mean_word_loss": 0.8763189527723524
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169160,
+      "end_ms": 169171,
+      "mean_word_loss": 0.4768899069892036
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.44295007917616097
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.42894168429904517
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.4300759421454536
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.4138130293952094
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.42209115558200416
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.4197734091016981
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.5552255047692194
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.5845844480726454
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.4274098608228896
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.5825738377041287
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.3585190773010254
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.5967059135437012
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.3187132676442463
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.607347657945421
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.2919104894002278
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6190560234917535
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.2655414210425482
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6284113354153104
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.2517961925930445
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6314225832621256
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.237888018290202
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6369387520684137
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.2285944090949166
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6457682821485732
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.211889452404446
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6519389682345921
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.2042370902167427
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6579266760084365
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 1.1957777871025934
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169170,
+      "end_ms": 169171,
+      "mean_word_loss": 0.6704518212212457
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169170,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1854206985897489
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6698609140184191
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1810421678755019
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6714249928792317
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1751820246378581
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6781103981865777
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1680934429168701
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6809350225660536
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1679212517208521
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6860615412394205
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.158278915617201
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6845163981119792
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.16135835647583
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6911739243401422
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1441772249009874
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6922087139553494
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1455848746829562
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7042323854234483
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.142838478088379
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.6983349270290798
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1376728216807048
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7002462916904025
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1365557246738012
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7069154421488445
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.130907376607259
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.699233881632487
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1321815649668376
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7005229420132107
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1218720277150471
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7012575997246637
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1227930916680229
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7049721823798286
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1210095882415771
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.703351804945204
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.114396095275879
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7049858093261719
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1148611704508464
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.713846566942003
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1118135187360976
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7199322912428113
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1103834576076932
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7183052804734972
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1068659623463948
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.726240709092882
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.102986388736301
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7210457589891223
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.1021077632904053
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.719023036956787
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.095718675189548
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7276055547926162
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.092043850156996
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7346385531955294
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0931588808695476
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7322303983900283
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0858636962042914
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.735934935675727
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0796904563903809
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7396050665113661
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.081555101606581
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7359890831841364
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.085942400826348
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7372824986775716
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0859004656473796
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7373446040683324
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0877662764655218
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7374461068047418
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.080027527279324
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7401193406846788
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.079707013236152
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7413914150661892
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0804912249247234
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7398964352077907
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0803029272291396
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7396036359998915
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.081089284684923
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7346033944023981
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.081439283159044
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7369684219360352
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0768409040239122
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7361044353908963
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.079205248090956
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7384218427870008
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0860149065653484
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7369926664564345
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0836700598398845
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7398450639512805
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.080175028906928
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7392520798577203
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0797435442606609
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7350643475850424
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.081515179740058
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7356798595852322
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.078418042924669
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7341132058037653
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0784532494015164
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7360053592258029
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0850519074334037
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7371401680840387
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0835209422641332
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.738401476542155
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0823494063483345
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.738963466220432
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0760497252146404
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7388208813137478
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.078975518544515
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7382879787021214
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0851722028520372
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7395997471279568
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0854752593570287
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7380728827582465
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.080774360232883
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.736900371975369
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0885353088378906
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7331329557630751
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.080358902613322
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7358102056715223
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0834042231241863
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7394334157307942
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0782407919565837
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7288116667005751
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0841126441955566
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7381587876213921
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0825240082210965
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.736065313551161
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0796676476796467
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7359143363104925
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0819366508060033
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7379456732008193
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0814899338616266
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.738875749376085
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.079322550031874
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7362678315904404
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0828291310204399
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7377133475409613
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0834870338439941
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7403867085774739
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0788478321499295
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7328732596503365
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0829258494906957
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7361564636230469
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.080975267622206
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7377163992987739
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0852044688330758
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7337113486395942
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0865379439459906
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.735432963901096
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0858715640174017
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7398995717366535
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0811642275916207
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.736395772298177
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0817009078131783
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7370006137424046
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.078916178809272
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7376947826809354
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0793674786885579
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7420723597208658
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0799574851989746
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7401870091756185
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0806604226430256
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7365110397338867
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0804368919796414
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7360684712727865
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0820250776078966
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7375317891438802
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0821306970384386
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7386524412367078
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.083409892188178
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7379985173543294
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.084301683637831
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7341225730048285
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.079298734664917
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7372816509670681
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0847391022576225
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7346969816419814
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.082232422298855
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7390659120347766
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0794629520840116
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7367140875922309
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0795740021599662
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7351924472384983
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.084595415327284
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7400211122300889
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.084454271528456
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.739565043979221
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.083736260732015
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7366421381632486
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0824717150794134
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7380573908487955
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0846738285488553
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7381592856513128
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.086938911014133
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7385027779473199
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.084393236372206
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7357695049709744
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0802241961161296
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7389839596218533
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.082435025109185
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7353320651584201
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.083501444922553
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.737869601779514
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0830538537767198
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7389115863376193
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0825040075514052
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7396106084187827
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0830478403303359
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7408497280544705
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0794147120581734
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7363463719685872
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.079146729575263
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7357864591810439
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0893599722120497
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.737263552347819
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0744161076015897
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7345542483859592
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0835573938157823
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7379090838962131
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0812557803259957
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7362189292907715
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0778323544396295
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7388439602322049
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0824146800571017
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7392140706380208
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0861221154530842
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7378370496961805
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0876204702589247
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7347684860229492
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.081477959950765
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7368365817599827
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0832136207156713
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7349327723185222
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0786966217888727
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7392596562703452
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0837930573357477
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7394774119059244
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0869423018561468
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7450022591484918
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0780193010965984
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7379094335767958
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.084585083855523
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7363051308525933
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0811913543277316
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7380935033162435
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.07746065987481
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7372514724731446
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0822077592213948
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7345026757982042
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.086927890777588
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7333674112955729
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0791081587473552
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7353446960449218
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0763929420047338
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.73829468621148
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0785885122087266
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7398043314615884
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0790145132276747
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.737019199795193
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.0801742606692843
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7356200112236871
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.086298041873508
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7357740190294053
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 1.083731942706638
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 169230,
+      "end_ms": 169231,
+      "mean_word_loss": 0.7377173953586155
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 169230,
+      "end_ms": 169340,
+      "mean_word_loss": 1.0856910811530218
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 172280,
+      "end_ms": 173920,
+      "mean_word_loss": 0.7393662982516819
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 173930,
+      "end_ms": 176431,
+      "mean_word_loss": 1.0768630239698622
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 176431,
+      "end_ms": 177011,
+      "mean_word_loss": 0.7360058466593423
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 177010,
+      "end_ms": 177011,
+      "mean_word_loss": 1.0832055674658883
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 177010,
+      "end_ms": 177011,
+      "mean_word_loss": 0.7359668519761827
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 177010,
+      "end_ms": 177080,
+      "mean_word_loss": 1.0830123954349093
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 177090,
+      "end_ms": 178400,
+      "mean_word_loss": 0.7371900452507867
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 178820,
+      "end_ms": 180971,
+      "mean_word_loss": 1.0815957917107475
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 180971,
+      "end_ms": 181251,
+      "mean_word_loss": 0.7386647754245335
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 181340,
+      "end_ms": 234700,
+      "mean_word_loss": 1.0809922218322754
+    },
+    {
+      "text": "And You keep on doing it",
+      "text_sk": "A stále to robíš",
+      "start_ms": 234740,
+      "end_ms": 239180,
+      "mean_word_loss": 0.737864261203342
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "start_ms": 239320,
+      "end_ms": 262920,
+      "mean_word_loss": 1.0820891592237685
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.737580495988623,
+  "metadata": {
+    "n_tokens_sent": 2185,
+    "n_words_returned_raw": 4369,
+    "n_words_returned_content": 2185,
+    "n_characters_returned": 9421,
+    "runtime_sec": 5.6,
+    "n_lines": 395,
+    "n_lines_timed": 395,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

@@ -1,0 +1,348 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "xPkg_vW4yE0",
+  "duration_ms": 245550,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed",
+      "start_ms": 8910,
+      "end_ms": 11790,
+      "text_sk": "Keď je moje srdce preplnené",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "When I barely trust myself",
+      "start_ms": 14730,
+      "end_ms": 18090,
+      "text_sk": "Keď si sotva verím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 18330,
+      "end_ms": 19710,
+      "text_sk": "Priveď ma k skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 22410,
+      "end_ms": 22830,
+      "text_sk": "Vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "When the night is closing in",
+      "start_ms": 26670,
+      "end_ms": 32490,
+      "text_sk": "Keď sa noc blíži",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "To remind me of my sin",
+      "start_ms": 32970,
+      "end_ms": 36210,
+      "text_sk": "Aby mi pripomenula môj hriech",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 36330,
+      "end_ms": 37950,
+      "text_sk": "Priveď ma k skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 40470,
+      "end_ms": 40890,
+      "text_sk": "Vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 44310,
+      "end_ms": 45870,
+      "text_sk": "Priveď ma k skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 48450,
+      "end_ms": 48810,
+      "text_sk": "Vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I",
+      "start_ms": 52410,
+      "end_ms": 64890,
+      "text_sk": "Vyššej než ja, vyššej než ja, vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "So much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I",
+      "start_ms": 68310,
+      "end_ms": 80850,
+      "text_sk": "Okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "When the doubt is rising up",
+      "start_ms": 84750,
+      "end_ms": 90450,
+      "text_sk": "Keď sa pochybnosť dvíha",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "When it comes and floods my love",
+      "start_ms": 90750,
+      "end_ms": 91770,
+      "text_sk": "Keď prichádza a zaplavuje moju lásku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 94350,
+      "end_ms": 96030,
+      "text_sk": "Priveď ma k skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 98370,
+      "end_ms": 98850,
+      "text_sk": "Vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 102270,
+      "end_ms": 104010,
+      "text_sk": "Priveď ma k skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 106350,
+      "end_ms": 106830,
+      "text_sk": "Vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I",
+      "start_ms": 110370,
+      "end_ms": 122790,
+      "text_sk": "Vyššej než ja, vyššej než ja, vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "So much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I",
+      "start_ms": 126330,
+      "end_ms": 138810,
+      "text_sk": "Okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 142410,
+      "end_ms": 143910,
+      "text_sk": "Kam inam by som šiel?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 146130,
+      "end_ms": 149790,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 150150,
+      "end_ms": 151710,
+      "text_sk": "Kam inam by som šiel?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 153990,
+      "end_ms": 157830,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 158190,
+      "end_ms": 159870,
+      "text_sk": "Kam inam by som šiel?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 162030,
+      "end_ms": 165810,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Where else would I go?",
+      "start_ms": 166290,
+      "end_ms": 169890,
+      "text_sk": "Kam inam by som šiel?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Who else would I run to?",
+      "start_ms": 170070,
+      "end_ms": 174630,
+      "text_sk": "Ku komu inému by som bežal?",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Lead me to the rock",
+      "start_ms": 184410,
+      "end_ms": 185910,
+      "text_sk": "Priveď ma k skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 188550,
+      "end_ms": 188970,
+      "text_sk": "Vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Higher than I, higher than I, higher than I, higher than I",
+      "start_ms": 192450,
+      "end_ms": 204870,
+      "text_sk": "Vyššej než ja, vyššej než ja, vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "So much stronger, so much greater, so much wiser, so much higher, so much stronger, so much greater, so much wiser, so much higher, so much stronger, so much greater, so much wiser, so much higher, higher than I, higher than I",
+      "start_ms": 208470,
+      "end_ms": 236910,
+      "text_sk": "Okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, okoľvek silnejšej, okoľvek väčšej, okoľvek múdrejšej, okoľvek vyššej, vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 42,
+      "n_words_aligned": 40
+    },
+    {
+      "text": "Higher than I, higher than I",
+      "start_ms": 240390,
+      "end_ms": 244950,
+      "text_sk": "Vyššej než ja, vyššej než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 33,
+    "n_lines_timed": 33,
+    "n_lines_untimed": 0,
+    "n_words_total": 247,
+    "n_words_aligned": 217,
+    "word_align_rate": 0.8785425101214575,
+    "n_monotonic_violations_clamped": 0
+  }
+}

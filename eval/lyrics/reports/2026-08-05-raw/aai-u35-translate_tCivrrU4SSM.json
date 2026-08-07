@@ -1,0 +1,1448 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\tCivrrU4SSM_vocal16k.wav",
+  "duration_ms": 209749,
+  "lines": [
+    {
+      "text": "Greater than the perfect sunrise, greater than the ocean's deep, greater than the highest mountain. Lord, I believe you are greater than the world I see. Yeah, Jesus, you're above everything, and your Spirit is alive in me. Yeah, with you I can do anything because you're greater.",
+      "start_ms": 2104,
+      "end_ms": 30971,
+      "text_sk": "Väčší ako dokonalý východ slnka, väčší ako hlboký oceán, väčší ako najvyššia hora. Pane, verím, že si väčší ako svet, ktorý vidím. Áno, Ježišu, si nad všetkým a tvoj Duch je vo mne živý. Áno, s tebou dokážem všetko, pretože si väčší.",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 2104,
+          "end_ms": 2442,
+          "confidence": 0.9906233
+        },
+        {
+          "text": "than",
+          "start_ms": 2586,
+          "end_ms": 2811,
+          "confidence": 0.99986804
+        },
+        {
+          "text": "the",
+          "start_ms": 2843,
+          "end_ms": 3036,
+          "confidence": 0.99810284
+        },
+        {
+          "text": "perfect",
+          "start_ms": 3068,
+          "end_ms": 3791,
+          "confidence": 0.99993527
+        },
+        {
+          "text": "sunrise,",
+          "start_ms": 3823,
+          "end_ms": 5302,
+          "confidence": 0.79742235
+        },
+        {
+          "text": "greater",
+          "start_ms": 5816,
+          "end_ms": 6298,
+          "confidence": 0.9959853
+        },
+        {
+          "text": "than",
+          "start_ms": 6298,
+          "end_ms": 6555,
+          "confidence": 0.9998598
+        },
+        {
+          "text": "the",
+          "start_ms": 6555,
+          "end_ms": 6796,
+          "confidence": 0.9998833
+        },
+        {
+          "text": "ocean's",
+          "start_ms": 6860,
+          "end_ms": 7776,
+          "confidence": 0.78005207
+        },
+        {
+          "text": "deep,",
+          "start_ms": 7808,
+          "end_ms": 8547,
+          "confidence": 0.9905073
+        },
+        {
+          "text": "greater",
+          "start_ms": 9591,
+          "end_ms": 9993,
+          "confidence": 0.9969561
+        },
+        {
+          "text": "than",
+          "start_ms": 10073,
+          "end_ms": 10282,
+          "confidence": 0.99980253
+        },
+        {
+          "text": "the",
+          "start_ms": 10314,
+          "end_ms": 10555,
+          "confidence": 0.9999087
+        },
+        {
+          "text": "highest",
+          "start_ms": 10555,
+          "end_ms": 11584,
+          "confidence": 0.9999459
+        },
+        {
+          "text": "mountain.",
+          "start_ms": 11584,
+          "end_ms": 12612,
+          "confidence": 0.97417086
+        },
+        {
+          "text": "Lord,",
+          "start_ms": 13431,
+          "end_ms": 13688,
+          "confidence": 0.9599573
+        },
+        {
+          "text": "I",
+          "start_ms": 13753,
+          "end_ms": 13929,
+          "confidence": 0.9998049
+        },
+        {
+          "text": "believe",
+          "start_ms": 13929,
+          "end_ms": 14861,
+          "confidence": 0.9999256
+        },
+        {
+          "text": "you",
+          "start_ms": 15359,
+          "end_ms": 15552,
+          "confidence": 0.7443832
+        },
+        {
+          "text": "are",
+          "start_ms": 15841,
+          "end_ms": 16099,
+          "confidence": 0.99660194
+        },
+        {
+          "text": "greater",
+          "start_ms": 16099,
+          "end_ms": 16661,
+          "confidence": 0.99675554
+        },
+        {
+          "text": "than",
+          "start_ms": 16661,
+          "end_ms": 16870,
+          "confidence": 0.9946578
+        },
+        {
+          "text": "the",
+          "start_ms": 16982,
+          "end_ms": 17207,
+          "confidence": 0.9976979
+        },
+        {
+          "text": "world",
+          "start_ms": 17207,
+          "end_ms": 17769,
+          "confidence": 0.9947753
+        },
+        {
+          "text": "I",
+          "start_ms": 17769,
+          "end_ms": 17946,
+          "confidence": 0.99203616
+        },
+        {
+          "text": "see.",
+          "start_ms": 18107,
+          "end_ms": 18509,
+          "confidence": 0.99692804
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 19296,
+          "end_ms": 19649,
+          "confidence": 0.99433625
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 19794,
+          "end_ms": 20372,
+          "confidence": 0.9948825
+        },
+        {
+          "text": "you're",
+          "start_ms": 20437,
+          "end_ms": 20742,
+          "confidence": 0.99629813
+        },
+        {
+          "text": "above",
+          "start_ms": 20758,
+          "end_ms": 21304,
+          "confidence": 0.9997484
+        },
+        {
+          "text": "everything,",
+          "start_ms": 21304,
+          "end_ms": 22091,
+          "confidence": 0.8998274
+        },
+        {
+          "text": "and",
+          "start_ms": 22911,
+          "end_ms": 23248,
+          "confidence": 0.99044245
+        },
+        {
+          "text": "your",
+          "start_ms": 23248,
+          "end_ms": 23570,
+          "confidence": 0.9979158
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 23570,
+          "end_ms": 24309,
+          "confidence": 0.713635
+        },
+        {
+          "text": "is",
+          "start_ms": 24309,
+          "end_ms": 24534,
+          "confidence": 0.9982498
+        },
+        {
+          "text": "alive",
+          "start_ms": 24598,
+          "end_ms": 25257,
+          "confidence": 0.99967515
+        },
+        {
+          "text": "in",
+          "start_ms": 25257,
+          "end_ms": 25498,
+          "confidence": 0.9992939
+        },
+        {
+          "text": "me.",
+          "start_ms": 25658,
+          "end_ms": 25739,
+          "confidence": 0.9878702
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 26768,
+          "end_ms": 27138,
+          "confidence": 0.7527485
+        },
+        {
+          "text": "with",
+          "start_ms": 27186,
+          "end_ms": 27670,
+          "confidence": 0.99991465
+        },
+        {
+          "text": "you",
+          "start_ms": 27670,
+          "end_ms": 27782,
+          "confidence": 0.98849237
+        },
+        {
+          "text": "I",
+          "start_ms": 27976,
+          "end_ms": 28072,
+          "confidence": 0.92895657
+        },
+        {
+          "text": "can",
+          "start_ms": 28072,
+          "end_ms": 28249,
+          "confidence": 0.99994826
+        },
+        {
+          "text": "do",
+          "start_ms": 28330,
+          "end_ms": 28523,
+          "confidence": 0.9999354
+        },
+        {
+          "text": "anything",
+          "start_ms": 28700,
+          "end_ms": 29490,
+          "confidence": 0.9999448
+        },
+        {
+          "text": "because",
+          "start_ms": 29490,
+          "end_ms": 30069,
+          "confidence": 0.41436136
+        },
+        {
+          "text": "you're",
+          "start_ms": 30069,
+          "end_ms": 30198,
+          "confidence": 0.98970306
+        },
+        {
+          "text": "greater.",
+          "start_ms": 30230,
+          "end_ms": 30971,
+          "confidence": 0.8287315
+        }
+      ]
+    },
+    {
+      "text": "Let's go! Greater than all expectation.",
+      "start_ms": 34210,
+      "end_ms": 53196,
+      "text_sk": "Poďme! Viac ako všetky očakávania.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 34210,
+          "end_ms": 34388,
+          "confidence": 0.9475046
+        },
+        {
+          "text": "go!",
+          "start_ms": 34404,
+          "end_ms": 34566,
+          "confidence": 0.96805495
+        },
+        {
+          "text": "Greater",
+          "start_ms": 50892,
+          "end_ms": 51425,
+          "confidence": 0.9982917
+        },
+        {
+          "text": "than",
+          "start_ms": 51441,
+          "end_ms": 51747,
+          "confidence": 0.9983022
+        },
+        {
+          "text": "all",
+          "start_ms": 51764,
+          "end_ms": 51812,
+          "confidence": 0.9920548
+        },
+        {
+          "text": "expectation.",
+          "start_ms": 52006,
+          "end_ms": 53196,
+          "confidence": 0.78509665
+        }
+      ]
+    },
+    {
+      "text": "Greater than my wildest dreams, far beyond my comprehension. Lord, I believe you are greater than the world. Oh yeah, Jesus, you're above everything. And your Spirit is alive in me. Yeah, with you I can do anything, 'cause you're greater.",
+      "start_ms": 54541,
+      "end_ms": 79597,
+      "text_sk": "Väčšie ako moje najdivokejšie sny, ďaleko za hranicami môjho chápania. Pane, verím, že si väčší ako svet. Áno, Ježišu, si nad všetkým. A tvoj Duch je živý vo mne. Áno, s tebou dokážem čokoľvek, pretože si väčší.",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 54541,
+          "end_ms": 55044,
+          "confidence": 0.99101967
+        },
+        {
+          "text": "than",
+          "start_ms": 55044,
+          "end_ms": 55255,
+          "confidence": 0.99989593
+        },
+        {
+          "text": "my",
+          "start_ms": 55288,
+          "end_ms": 55385,
+          "confidence": 0.99990714
+        },
+        {
+          "text": "wildest",
+          "start_ms": 55612,
+          "end_ms": 56537,
+          "confidence": 0.9999727
+        },
+        {
+          "text": "dreams,",
+          "start_ms": 56537,
+          "end_ms": 57122,
+          "confidence": 0.77690065
+        },
+        {
+          "text": "far",
+          "start_ms": 58225,
+          "end_ms": 58696,
+          "confidence": 0.9892078
+        },
+        {
+          "text": "beyond",
+          "start_ms": 58696,
+          "end_ms": 59101,
+          "confidence": 0.999899
+        },
+        {
+          "text": "my",
+          "start_ms": 59101,
+          "end_ms": 59199,
+          "confidence": 0.9997508
+        },
+        {
+          "text": "comprehension.",
+          "start_ms": 59264,
+          "end_ms": 60448,
+          "confidence": 0.9854871
+        },
+        {
+          "text": "Lord,",
+          "start_ms": 62280,
+          "end_ms": 62360,
+          "confidence": 0.9785024
+        },
+        {
+          "text": "I",
+          "start_ms": 62392,
+          "end_ms": 62554,
+          "confidence": 0.9999131
+        },
+        {
+          "text": "believe",
+          "start_ms": 62554,
+          "end_ms": 63360,
+          "confidence": 0.9999465
+        },
+        {
+          "text": "you",
+          "start_ms": 64070,
+          "end_ms": 64183,
+          "confidence": 0.7788898
+        },
+        {
+          "text": "are",
+          "start_ms": 64554,
+          "end_ms": 64812,
+          "confidence": 0.99841666
+        },
+        {
+          "text": "greater",
+          "start_ms": 64812,
+          "end_ms": 65392,
+          "confidence": 0.9994561
+        },
+        {
+          "text": "than",
+          "start_ms": 65441,
+          "end_ms": 65634,
+          "confidence": 0.99694353
+        },
+        {
+          "text": "the",
+          "start_ms": 65634,
+          "end_ms": 65924,
+          "confidence": 0.99917173
+        },
+        {
+          "text": "world.",
+          "start_ms": 65924,
+          "end_ms": 66489,
+          "confidence": 0.9763612
+        },
+        {
+          "text": "Oh",
+          "start_ms": 67134,
+          "end_ms": 67311,
+          "confidence": 0.5775794
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 67311,
+          "end_ms": 67956,
+          "confidence": 0.6064352
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 68424,
+          "end_ms": 69102,
+          "confidence": 0.9696475
+        },
+        {
+          "text": "you're",
+          "start_ms": 69247,
+          "end_ms": 69505,
+          "confidence": 0.9891398
+        },
+        {
+          "text": "above",
+          "start_ms": 69553,
+          "end_ms": 69843,
+          "confidence": 0.9992459
+        },
+        {
+          "text": "everything.",
+          "start_ms": 69957,
+          "end_ms": 70911,
+          "confidence": 0.74711347
+        },
+        {
+          "text": "And",
+          "start_ms": 71574,
+          "end_ms": 71946,
+          "confidence": 0.70934325
+        },
+        {
+          "text": "your",
+          "start_ms": 71978,
+          "end_ms": 72237,
+          "confidence": 0.99382776
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 72237,
+          "end_ms": 73030,
+          "confidence": 0.7338216
+        },
+        {
+          "text": "is",
+          "start_ms": 73030,
+          "end_ms": 73175,
+          "confidence": 0.9973201
+        },
+        {
+          "text": "alive",
+          "start_ms": 73272,
+          "end_ms": 73838,
+          "confidence": 0.9997811
+        },
+        {
+          "text": "in",
+          "start_ms": 73936,
+          "end_ms": 74227,
+          "confidence": 0.9975163
+        },
+        {
+          "text": "me.",
+          "start_ms": 74275,
+          "end_ms": 74583,
+          "confidence": 0.9778929
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 75537,
+          "end_ms": 75893,
+          "confidence": 0.83004427
+        },
+        {
+          "text": "with",
+          "start_ms": 76022,
+          "end_ms": 76475,
+          "confidence": 0.99248147
+        },
+        {
+          "text": "you",
+          "start_ms": 76507,
+          "end_ms": 76621,
+          "confidence": 0.9985833
+        },
+        {
+          "text": "I",
+          "start_ms": 76831,
+          "end_ms": 76847,
+          "confidence": 0.80370253
+        },
+        {
+          "text": "can",
+          "start_ms": 76847,
+          "end_ms": 77170,
+          "confidence": 0.9997811
+        },
+        {
+          "text": "do",
+          "start_ms": 77170,
+          "end_ms": 77348,
+          "confidence": 0.9996933
+        },
+        {
+          "text": "anything,",
+          "start_ms": 77494,
+          "end_ms": 78109,
+          "confidence": 0.5781084
+        },
+        {
+          "text": "'cause",
+          "start_ms": 78658,
+          "end_ms": 78807,
+          "confidence": 0.9570672
+        },
+        {
+          "text": "you're",
+          "start_ms": 78823,
+          "end_ms": 79004,
+          "confidence": 0.99460745
+        },
+        {
+          "text": "greater.",
+          "start_ms": 79004,
+          "end_ms": 79597,
+          "confidence": 0.9046458
+        }
+      ]
+    },
+    {
+      "text": "1, 2, 3, woo! There is no one like you, no one to compare to. Jesus, you are greater than anything. There is no one like you. No one can compare to you. Jesus, you are greater than everything.",
+      "start_ms": 81788,
+      "end_ms": 127152,
+      "text_sk": "1, 2, 3, hurá! Nikto sa ti nevyrovná, nikto sa s tebou nedá porovnať. Ježišu, si väčší ako čokoľvek. Nikto sa ti nevyrovná. Nikto sa s tebou nedá porovnať. Ježišu, si väčší ako všetko.",
+      "words": [
+        {
+          "text": "1,",
+          "start_ms": 81788,
+          "end_ms": 82670,
+          "confidence": 0.9805654
+        },
+        {
+          "text": "2,",
+          "start_ms": 82686,
+          "end_ms": 83344,
+          "confidence": 0.9979152
+        },
+        {
+          "text": "3,",
+          "start_ms": 97443,
+          "end_ms": 97463,
+          "confidence": 0.9089015
+        },
+        {
+          "text": "woo!",
+          "start_ms": 97463,
+          "end_ms": 97511,
+          "confidence": 0.81354576
+        },
+        {
+          "text": "There",
+          "start_ms": 97769,
+          "end_ms": 98043,
+          "confidence": 0.97617584
+        },
+        {
+          "text": "is",
+          "start_ms": 98043,
+          "end_ms": 98236,
+          "confidence": 0.98679775
+        },
+        {
+          "text": "no",
+          "start_ms": 98252,
+          "end_ms": 98510,
+          "confidence": 0.9994711
+        },
+        {
+          "text": "one",
+          "start_ms": 98510,
+          "end_ms": 98671,
+          "confidence": 0.99981266
+        },
+        {
+          "text": "like",
+          "start_ms": 98671,
+          "end_ms": 99235,
+          "confidence": 0.99984884
+        },
+        {
+          "text": "you,",
+          "start_ms": 99235,
+          "end_ms": 99476,
+          "confidence": 0.9070043
+        },
+        {
+          "text": "no",
+          "start_ms": 101570,
+          "end_ms": 101687,
+          "confidence": 0.9972247
+        },
+        {
+          "text": "one",
+          "start_ms": 101687,
+          "end_ms": 101940,
+          "confidence": 0.9999186
+        },
+        {
+          "text": "to",
+          "start_ms": 101940,
+          "end_ms": 102058,
+          "confidence": 0.9902776
+        },
+        {
+          "text": "compare",
+          "start_ms": 102193,
+          "end_ms": 102799,
+          "confidence": 0.9990876
+        },
+        {
+          "text": "to.",
+          "start_ms": 102867,
+          "end_ms": 103170,
+          "confidence": 0.97833675
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 105510,
+          "end_ms": 105719,
+          "confidence": 0.9991222
+        },
+        {
+          "text": "you",
+          "start_ms": 105768,
+          "end_ms": 105913,
+          "confidence": 0.9970884
+        },
+        {
+          "text": "are",
+          "start_ms": 105929,
+          "end_ms": 106123,
+          "confidence": 0.9942867
+        },
+        {
+          "text": "greater",
+          "start_ms": 106187,
+          "end_ms": 106914,
+          "confidence": 0.9962076
+        },
+        {
+          "text": "than",
+          "start_ms": 108753,
+          "end_ms": 108931,
+          "confidence": 0.9715649
+        },
+        {
+          "text": "anything.",
+          "start_ms": 109076,
+          "end_ms": 109915,
+          "confidence": 0.939134
+        },
+        {
+          "text": "There",
+          "start_ms": 112703,
+          "end_ms": 113025,
+          "confidence": 0.96850204
+        },
+        {
+          "text": "is",
+          "start_ms": 113025,
+          "end_ms": 113137,
+          "confidence": 0.98074627
+        },
+        {
+          "text": "no",
+          "start_ms": 113137,
+          "end_ms": 113427,
+          "confidence": 0.9965628
+        },
+        {
+          "text": "one",
+          "start_ms": 113427,
+          "end_ms": 113733,
+          "confidence": 0.99941564
+        },
+        {
+          "text": "like",
+          "start_ms": 113733,
+          "end_ms": 114232,
+          "confidence": 0.99957234
+        },
+        {
+          "text": "you.",
+          "start_ms": 114232,
+          "end_ms": 114473,
+          "confidence": 0.659008
+        },
+        {
+          "text": "No",
+          "start_ms": 116486,
+          "end_ms": 116808,
+          "confidence": 0.8973743
+        },
+        {
+          "text": "one",
+          "start_ms": 116872,
+          "end_ms": 116952,
+          "confidence": 0.99961567
+        },
+        {
+          "text": "can",
+          "start_ms": 116952,
+          "end_ms": 117178,
+          "confidence": 0.99730814
+        },
+        {
+          "text": "compare",
+          "start_ms": 117194,
+          "end_ms": 117790,
+          "confidence": 0.99938786
+        },
+        {
+          "text": "to",
+          "start_ms": 117790,
+          "end_ms": 118192,
+          "confidence": 0.989344
+        },
+        {
+          "text": "you.",
+          "start_ms": 118820,
+          "end_ms": 119029,
+          "confidence": 0.9214987
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 120333,
+          "end_ms": 120735,
+          "confidence": 0.97082424
+        },
+        {
+          "text": "you",
+          "start_ms": 120768,
+          "end_ms": 120945,
+          "confidence": 0.9921875
+        },
+        {
+          "text": "are",
+          "start_ms": 121073,
+          "end_ms": 121411,
+          "confidence": 0.99633247
+        },
+        {
+          "text": "greater",
+          "start_ms": 122669,
+          "end_ms": 124465,
+          "confidence": 0.9947495
+        },
+        {
+          "text": "than",
+          "start_ms": 124708,
+          "end_ms": 125647,
+          "confidence": 0.6629979
+        },
+        {
+          "text": "everything.",
+          "start_ms": 125760,
+          "end_ms": 127152,
+          "confidence": 0.7823418
+        }
+      ]
+    },
+    {
+      "text": "Greater than the world I see. Yeah, Jesus, you're above everything. And your Spirit is alive in me. Yeah, with you I can do anything. 'Cause you're greater.",
+      "start_ms": 129010,
+      "end_ms": 142168,
+      "text_sk": "Väčší ako svet, ktorý vidím. Áno, Ježiš, si nad všetkým. A tvoj Duch je živý vo mne. Áno, s tebou dokážem všetko. Pretože si väčší.",
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 129010,
+          "end_ms": 129283,
+          "confidence": 0.4991144
+        },
+        {
+          "text": "than",
+          "start_ms": 129283,
+          "end_ms": 129380,
+          "confidence": 0.9969073
+        },
+        {
+          "text": "the",
+          "start_ms": 129380,
+          "end_ms": 129590,
+          "confidence": 0.9827292
+        },
+        {
+          "text": "world",
+          "start_ms": 129590,
+          "end_ms": 130154,
+          "confidence": 0.9808353
+        },
+        {
+          "text": "I",
+          "start_ms": 130154,
+          "end_ms": 130331,
+          "confidence": 0.93058443
+        },
+        {
+          "text": "see.",
+          "start_ms": 130492,
+          "end_ms": 130895,
+          "confidence": 0.99412185
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 131765,
+          "end_ms": 131958,
+          "confidence": 0.986244
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 132184,
+          "end_ms": 132812,
+          "confidence": 0.9964087
+        },
+        {
+          "text": "you're",
+          "start_ms": 132909,
+          "end_ms": 133070,
+          "confidence": 0.9339975
+        },
+        {
+          "text": "above",
+          "start_ms": 133296,
+          "end_ms": 133715,
+          "confidence": 0.99995637
+        },
+        {
+          "text": "everything.",
+          "start_ms": 133715,
+          "end_ms": 134408,
+          "confidence": 0.8083414
+        },
+        {
+          "text": "And",
+          "start_ms": 135346,
+          "end_ms": 135652,
+          "confidence": 0.97052974
+        },
+        {
+          "text": "your",
+          "start_ms": 135749,
+          "end_ms": 136022,
+          "confidence": 0.992258
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 136022,
+          "end_ms": 136569,
+          "confidence": 0.824345
+        },
+        {
+          "text": "is",
+          "start_ms": 136569,
+          "end_ms": 136859,
+          "confidence": 0.9981489
+        },
+        {
+          "text": "alive",
+          "start_ms": 136955,
+          "end_ms": 137679,
+          "confidence": 0.9999207
+        },
+        {
+          "text": "in",
+          "start_ms": 137679,
+          "end_ms": 137824,
+          "confidence": 0.9997298
+        },
+        {
+          "text": "me.",
+          "start_ms": 138098,
+          "end_ms": 138339,
+          "confidence": 0.9982423
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 139288,
+          "end_ms": 139562,
+          "confidence": 0.9829407
+        },
+        {
+          "text": "with",
+          "start_ms": 139706,
+          "end_ms": 140205,
+          "confidence": 0.99243104
+        },
+        {
+          "text": "you",
+          "start_ms": 140205,
+          "end_ms": 140285,
+          "confidence": 0.99740607
+        },
+        {
+          "text": "I",
+          "start_ms": 140495,
+          "end_ms": 140655,
+          "confidence": 0.8365711
+        },
+        {
+          "text": "can",
+          "start_ms": 140655,
+          "end_ms": 140784,
+          "confidence": 0.99987555
+        },
+        {
+          "text": "do",
+          "start_ms": 140849,
+          "end_ms": 141026,
+          "confidence": 0.9999083
+        },
+        {
+          "text": "anything.",
+          "start_ms": 141235,
+          "end_ms": 141492,
+          "confidence": 0.7529502
+        },
+        {
+          "text": "'Cause",
+          "start_ms": 141556,
+          "end_ms": 141685,
+          "confidence": 0.9492376
+        },
+        {
+          "text": "you're",
+          "start_ms": 141685,
+          "end_ms": 141894,
+          "confidence": 0.99669975
+        },
+        {
+          "text": "greater.",
+          "start_ms": 141959,
+          "end_ms": 142168,
+          "confidence": 0.8459379
+        }
+      ]
+    },
+    {
+      "text": "Well, let's hear your name. Hallelujah.",
+      "start_ms": 149614,
+      "end_ms": 158931,
+      "text_sk": "Nože, počúvame vaše meno. Aleluja.",
+      "words": [
+        {
+          "text": "Well,",
+          "start_ms": 149614,
+          "end_ms": 149777,
+          "confidence": 0.5605009
+        },
+        {
+          "text": "let's",
+          "start_ms": 149826,
+          "end_ms": 150088,
+          "confidence": 0.8099719
+        },
+        {
+          "text": "hear",
+          "start_ms": 150088,
+          "end_ms": 150170,
+          "confidence": 0.5196257
+        },
+        {
+          "text": "your",
+          "start_ms": 150170,
+          "end_ms": 150235,
+          "confidence": 0.54493654
+        },
+        {
+          "text": "name.",
+          "start_ms": 150235,
+          "end_ms": 150693,
+          "confidence": 0.76884204
+        },
+        {
+          "text": "Hallelujah.",
+          "start_ms": 157801,
+          "end_ms": 158931,
+          "confidence": 0.87894845
+        }
+      ]
+    },
+    {
+      "text": "Heaven, 'cause there is no one like you. No one can compare to Jesus. You are greater. Than everything.",
+      "start_ms": 159011,
+      "end_ms": 173626,
+      "text_sk": "Nebesia, pretože nikto nie je ako Ty. Nikto sa nemôže porovnať s Ježišom. Si väčší. Ako všetko.",
+      "words": [
+        {
+          "text": "Heaven,",
+          "start_ms": 159011,
+          "end_ms": 159479,
+          "confidence": 0.5784459
+        },
+        {
+          "text": "'cause",
+          "start_ms": 161286,
+          "end_ms": 161496,
+          "confidence": 0.82436264
+        },
+        {
+          "text": "there",
+          "start_ms": 161528,
+          "end_ms": 161803,
+          "confidence": 0.99859744
+        },
+        {
+          "text": "is",
+          "start_ms": 161851,
+          "end_ms": 162061,
+          "confidence": 0.9725227
+        },
+        {
+          "text": "no",
+          "start_ms": 162077,
+          "end_ms": 162222,
+          "confidence": 0.9972146
+        },
+        {
+          "text": "one",
+          "start_ms": 162319,
+          "end_ms": 162529,
+          "confidence": 0.99965
+        },
+        {
+          "text": "like",
+          "start_ms": 162529,
+          "end_ms": 163045,
+          "confidence": 0.999286
+        },
+        {
+          "text": "you.",
+          "start_ms": 163045,
+          "end_ms": 163142,
+          "confidence": 0.82863224
+        },
+        {
+          "text": "No",
+          "start_ms": 165245,
+          "end_ms": 165493,
+          "confidence": 0.8021359
+        },
+        {
+          "text": "one",
+          "start_ms": 165493,
+          "end_ms": 165674,
+          "confidence": 0.997523
+        },
+        {
+          "text": "can",
+          "start_ms": 165724,
+          "end_ms": 165972,
+          "confidence": 0.99464947
+        },
+        {
+          "text": "compare",
+          "start_ms": 165972,
+          "end_ms": 166649,
+          "confidence": 0.9869327
+        },
+        {
+          "text": "to",
+          "start_ms": 166649,
+          "end_ms": 166946,
+          "confidence": 0.982586
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 167425,
+          "end_ms": 168135,
+          "confidence": 0.7252847
+        },
+        {
+          "text": "You",
+          "start_ms": 169998,
+          "end_ms": 170100,
+          "confidence": 0.9417202
+        },
+        {
+          "text": "are",
+          "start_ms": 170100,
+          "end_ms": 170340,
+          "confidence": 0.9951201
+        },
+        {
+          "text": "greater.",
+          "start_ms": 170340,
+          "end_ms": 170768,
+          "confidence": 0.6926139
+        },
+        {
+          "text": "Than",
+          "start_ms": 172470,
+          "end_ms": 172640,
+          "confidence": 0.20970847
+        },
+        {
+          "text": "everything.",
+          "start_ms": 172827,
+          "end_ms": 173626,
+          "confidence": 0.7087848
+        }
+      ]
+    },
+    {
+      "text": "Yeah!",
+      "start_ms": 178579,
+      "end_ms": 179227,
+      "text_sk": "Áno!",
+      "words": [
+        {
+          "text": "Yeah!",
+          "start_ms": 178579,
+          "end_ms": 179227,
+          "confidence": 0.7753614
+        }
+      ]
+    },
+    {
+      "text": "No one! Jesus, you are greater than everything. You are greater than what I see. Yeah, Jesus, you're above everything, and God's Spirit is alive in me. Yeah, with you I can do anything, 'cause you're greater! Yeshua!",
+      "start_ms": 179227,
+      "end_ms": 209749,
+      "text_sk": "Nikto! Ježiš, si väčší ako všetko. Si väčší ako to, čo vidím. Áno, Ježiš, si nad všetkým a Boží Duch je živý vo mne. Áno, s tebou dokážem čokoľvek, pretože si väčší! Ješua!",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 182791,
+          "end_ms": 183828,
+          "confidence": 0.65301085
+        },
+        {
+          "text": "one!",
+          "start_ms": 183828,
+          "end_ms": 183941,
+          "confidence": 0.6005946
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 184087,
+          "end_ms": 184557,
+          "confidence": 0.83467036
+        },
+        {
+          "text": "you",
+          "start_ms": 184573,
+          "end_ms": 184816,
+          "confidence": 0.9636219
+        },
+        {
+          "text": "are",
+          "start_ms": 184881,
+          "end_ms": 185253,
+          "confidence": 0.9971282
+        },
+        {
+          "text": "greater",
+          "start_ms": 185270,
+          "end_ms": 185714,
+          "confidence": 0.9995159
+        },
+        {
+          "text": "than",
+          "start_ms": 186109,
+          "end_ms": 187656,
+          "confidence": 0.9273164
+        },
+        {
+          "text": "everything.",
+          "start_ms": 187837,
+          "end_ms": 188643,
+          "confidence": 0.6619485
+        },
+        {
+          "text": "You",
+          "start_ms": 191730,
+          "end_ms": 192069,
+          "confidence": 0.68189687
+        },
+        {
+          "text": "are",
+          "start_ms": 192069,
+          "end_ms": 192328,
+          "confidence": 0.9994179
+        },
+        {
+          "text": "greater",
+          "start_ms": 192328,
+          "end_ms": 192878,
+          "confidence": 0.9998343
+        },
+        {
+          "text": "than",
+          "start_ms": 192894,
+          "end_ms": 193266,
+          "confidence": 0.99969316
+        },
+        {
+          "text": "what",
+          "start_ms": 193363,
+          "end_ms": 193929,
+          "confidence": 0.617495
+        },
+        {
+          "text": "I",
+          "start_ms": 193929,
+          "end_ms": 194107,
+          "confidence": 0.9995065
+        },
+        {
+          "text": "see.",
+          "start_ms": 194253,
+          "end_ms": 194528,
+          "confidence": 0.8326013
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 195547,
+          "end_ms": 195709,
+          "confidence": 0.98968273
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 195887,
+          "end_ms": 196631,
+          "confidence": 0.9978084
+        },
+        {
+          "text": "you're",
+          "start_ms": 196760,
+          "end_ms": 197084,
+          "confidence": 0.9945946
+        },
+        {
+          "text": "above",
+          "start_ms": 197084,
+          "end_ms": 197488,
+          "confidence": 0.9999522
+        },
+        {
+          "text": "everything,",
+          "start_ms": 197488,
+          "end_ms": 198281,
+          "confidence": 0.7193045
+        },
+        {
+          "text": "and",
+          "start_ms": 199106,
+          "end_ms": 199526,
+          "confidence": 0.9990532
+        },
+        {
+          "text": "God's",
+          "start_ms": 199526,
+          "end_ms": 200011,
+          "confidence": 0.98156846
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 200011,
+          "end_ms": 200577,
+          "confidence": 0.96331114
+        },
+        {
+          "text": "is",
+          "start_ms": 200577,
+          "end_ms": 200707,
+          "confidence": 0.99848086
+        },
+        {
+          "text": "alive",
+          "start_ms": 200982,
+          "end_ms": 201460,
+          "confidence": 0.99942833
+        },
+        {
+          "text": "in",
+          "start_ms": 201460,
+          "end_ms": 201592,
+          "confidence": 0.99797076
+        },
+        {
+          "text": "me.",
+          "start_ms": 201806,
+          "end_ms": 202053,
+          "confidence": 0.9780495
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 202958,
+          "end_ms": 203395,
+          "confidence": 0.97462475
+        },
+        {
+          "text": "with",
+          "start_ms": 203459,
+          "end_ms": 203944,
+          "confidence": 0.997509
+        },
+        {
+          "text": "you",
+          "start_ms": 203944,
+          "end_ms": 204041,
+          "confidence": 0.9995278
+        },
+        {
+          "text": "I",
+          "start_ms": 204252,
+          "end_ms": 204268,
+          "confidence": 0.878116
+        },
+        {
+          "text": "can",
+          "start_ms": 204268,
+          "end_ms": 204591,
+          "confidence": 0.99956125
+        },
+        {
+          "text": "do",
+          "start_ms": 204591,
+          "end_ms": 204785,
+          "confidence": 0.9996001
+        },
+        {
+          "text": "anything,",
+          "start_ms": 204979,
+          "end_ms": 205772,
+          "confidence": 0.81706446
+        },
+        {
+          "text": "'cause",
+          "start_ms": 206127,
+          "end_ms": 206289,
+          "confidence": 0.9861996
+        },
+        {
+          "text": "you're",
+          "start_ms": 206289,
+          "end_ms": 206451,
+          "confidence": 0.9949781
+        },
+        {
+          "text": "greater!",
+          "start_ms": 206451,
+          "end_ms": 207340,
+          "confidence": 0.7607934
+        },
+        {
+          "text": "Yeshua!",
+          "start_ms": 209345,
+          "end_ms": 209749,
+          "confidence": 0.70378405
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9215371,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "dd93d002-2457-43ce-a7a5-246d7cbbd532",
+    "elapsed_s": 17.1,
+    "word_count": 226,
+    "utterance_count": 9,
+    "line_count": 9,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 217
+  }
+}

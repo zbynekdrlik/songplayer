@@ -1,0 +1,350 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\bHCW5WMMF28_vocal16k.wav",
+  "duration_ms": 155560,
+  "lines": [
+    {
+      "text": "One You made it all You're God of all",
+      "text_sk": "Jeden Stvoril si všetko Si Bohom všetkého",
+      "start_ms": 5000,
+      "end_ms": 8780,
+      "mean_word_loss": 0.8023875907615379
+    },
+    {
+      "text": "And two I'm alive It's all because of You",
+      "text_sk": "A dva Som nažive Je to všetko kvôli Tebe",
+      "start_ms": 8820,
+      "end_ms": 13360,
+      "mean_word_loss": 0.6564428501028233
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "text_sk": "Mám toľko dôvodov chváliť",
+      "start_ms": 16940,
+      "end_ms": 20480,
+      "mean_word_loss": 0.252915244118697
+    },
+    {
+      "text": "Then there's three You're holding me",
+      "text_sk": "Potom sú tu traja Držíš ma",
+      "start_ms": 20720,
+      "end_ms": 23980,
+      "mean_word_loss": 0.21069780531383697
+    },
+    {
+      "text": "You set me free",
+      "text_sk": "Oslobodil si ma",
+      "start_ms": 24060,
+      "end_ms": 25020,
+      "mean_word_loss": 0.24390657742818198
+    },
+    {
+      "text": "And four I am not a slave to sin no more",
+      "text_sk": "A štyria Už nie som otrokom hriechu",
+      "start_ms": 25080,
+      "end_ms": 29980,
+      "mean_word_loss": 0.47558443474047113
+    },
+    {
+      "text": "I've got so many reasons to praise",
+      "text_sk": "Mám toľko dôvodov chváliť",
+      "start_ms": 33220,
+      "end_ms": 37340,
+      "mean_word_loss": 0.3116527203799916
+    },
+    {
+      "text": "In the morning in the evening",
+      "text_sk": "Ráno aj večer",
+      "start_ms": 38300,
+      "end_ms": 40060,
+      "mean_word_loss": 0.48238812931000236
+    },
+    {
+      "text": "Every time of day",
+      "text_sk": "V každom čase dňa",
+      "start_ms": 40260,
+      "end_ms": 41500,
+      "mean_word_loss": 0.20208213726679483
+    },
+    {
+      "text": "We got a reason to lift up Jesus' name",
+      "text_sk": "Máme dôvod vyvyšovať Ježišovo meno",
+      "start_ms": 42180,
+      "end_ms": 44800,
+      "mean_word_loss": 0.4754886009075024
+    },
+    {
+      "text": "Sing say",
+      "text_sk": "Spievaj povedz",
+      "start_ms": 44880,
+      "end_ms": 45500,
+      "mean_word_loss": 2.1529947916666665
+    },
+    {
+      "text": "We will lift You higher",
+      "text_sk": "Pozdvihneme Ťa vyššie",
+      "start_ms": 45660,
+      "end_ms": 48720,
+      "mean_word_loss": 0.6834896087646485
+    },
+    {
+      "text": "'Cause You are our desire",
+      "text_sk": "Lebo Ty si našou túžbou",
+      "start_ms": 49420,
+      "end_ms": 53120,
+      "mean_word_loss": 0.6352676391601563
+    },
+    {
+      "text": "Oh we will lift You higher",
+      "text_sk": "Ó pozdvihneme Ťa vyššie",
+      "start_ms": 53520,
+      "end_ms": 56880,
+      "mean_word_loss": 0.48891202608744305
+    },
+    {
+      "text": "And we won't stop at no",
+      "text_sk": "A nezastavíme sa pred ničím",
+      "start_ms": 57720,
+      "end_ms": 59760,
+      "mean_word_loss": 0.5067032549116347
+    },
+    {
+      "text": "We won't stop at no",
+      "text_sk": "Nezastavíme sa pred ničím",
+      "start_ms": 59780,
+      "end_ms": 61820,
+      "mean_word_loss": 0.6598927879333496
+    },
+    {
+      "text": "Five every need You will provide",
+      "text_sk": "Päť každú potrebu poskytneš",
+      "start_ms": 61920,
+      "end_ms": 65880,
+      "mean_word_loss": 0.4917447763776022
+    },
+    {
+      "text": "Six God You are the reason I exist",
+      "text_sk": "Šesť Bože Ty si dôvodom mojej existencie",
+      "start_ms": 65980,
+      "end_ms": 70980,
+      "mean_word_loss": 0.33755822827418647
+    },
+    {
+      "text": "Yeah I've got so many reasons to praise",
+      "text_sk": "Áno mám toľko dôvodov chváliť",
+      "start_ms": 73340,
+      "end_ms": 77680,
+      "mean_word_loss": 0.027663888321036386
+    },
+    {
+      "text": "Yeah",
+      "text_sk": "Áno",
+      "start_ms": 77720,
+      "end_ms": 78080,
+      "mean_word_loss": 0.43462371826171875
+    },
+    {
+      "text": "In the morning in the evening",
+      "text_sk": "Ráno aj večer",
+      "start_ms": 79000,
+      "end_ms": 80740,
+      "mean_word_loss": 0.1354064108833434
+    },
+    {
+      "text": "Every time of day",
+      "text_sk": "V každom čase dňa",
+      "start_ms": 80980,
+      "end_ms": 82220,
+      "mean_word_loss": 0.23153340816497803
+    },
+    {
+      "text": "We got a reason to lift up Jesus' name",
+      "text_sk": "Máme dôvod vyvyšovať Ježišovo meno",
+      "start_ms": 82900,
+      "end_ms": 85540,
+      "mean_word_loss": 0.5098298390706381
+    },
+    {
+      "text": "Let's go",
+      "text_sk": "Poďme",
+      "start_ms": 85600,
+      "end_ms": 86220,
+      "mean_word_loss": 0.4733722686767578
+    },
+    {
+      "text": "We will lift You higher",
+      "text_sk": "Pozdvihneme Ťa vyššie",
+      "start_ms": 86400,
+      "end_ms": 89540,
+      "mean_word_loss": 0.5056377410888672
+    },
+    {
+      "text": "'Cause You are our desire",
+      "text_sk": "Lebo Ty si našou túžbou",
+      "start_ms": 90120,
+      "end_ms": 93820,
+      "mean_word_loss": 0.7258102416992187
+    },
+    {
+      "text": "Oh we will lift You higher",
+      "text_sk": "Ó pozdvihneme Ťa vyššie",
+      "start_ms": 94220,
+      "end_ms": 97620,
+      "mean_word_loss": 0.4189053376515706
+    },
+    {
+      "text": "And we won't stop at no",
+      "text_sk": "A nezastavíme sa pred ničím",
+      "start_ms": 98400,
+      "end_ms": 100480,
+      "mean_word_loss": 0.5709122710757786
+    },
+    {
+      "text": "We won't stop at no",
+      "text_sk": "Nezastavíme sa pred ničím",
+      "start_ms": 100560,
+      "end_ms": 102420,
+      "mean_word_loss": 0.7020270538330078
+    },
+    {
+      "text": "Gonna use all that we got",
+      "text_sk": "Využijeme všetko čo máme",
+      "start_ms": 103360,
+      "end_ms": 104980,
+      "mean_word_loss": 1.1378030988905163
+    },
+    {
+      "text": "To praise You on and on",
+      "text_sk": "Chváliť Ťa stále dokola",
+      "start_ms": 105360,
+      "end_ms": 107120,
+      "mean_word_loss": 1.5508355034722223
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "text_sk": "Nech všetko čo má dych vzdáva Mu chválu",
+      "start_ms": 107500,
+      "end_ms": 111200,
+      "mean_word_loss": 0.44021772046883906
+    },
+    {
+      "text": "Let all the earth rejoice",
+      "text_sk": "Nech sa celá zem raduje",
+      "start_ms": 111520,
+      "end_ms": 113260,
+      "mean_word_loss": 0.35891462780180433
+    },
+    {
+      "text": "And make a joyful noise",
+      "text_sk": "A vydáva radostný zvuk",
+      "start_ms": 113540,
+      "end_ms": 115340,
+      "mean_word_loss": 0.2307956059773763
+    },
+    {
+      "text": "And give Him all the praise oh yeah",
+      "text_sk": "A vzdávať Mu všetku chválu ó áno",
+      "start_ms": 115700,
+      "end_ms": 118580,
+      "mean_word_loss": 0.5359834035237631
+    },
+    {
+      "text": "Gonna use all that we got",
+      "text_sk": "Využijeme všetko čo máme",
+      "start_ms": 119560,
+      "end_ms": 121220,
+      "mean_word_loss": 1.5666693793402777
+    },
+    {
+      "text": "To praise You on and on",
+      "text_sk": "Chváliť Ťa stále dokola",
+      "start_ms": 121640,
+      "end_ms": 123180,
+      "mean_word_loss": 1.5783454047309027
+    },
+    {
+      "text": "Let everything that has breath give Him praise",
+      "text_sk": "Nech všetko čo má dych vzdáva Mu chválu",
+      "start_ms": 123700,
+      "end_ms": 127480,
+      "mean_word_loss": 0.3898742119471232
+    },
+    {
+      "text": "Let all the earth rejoice",
+      "text_sk": "Nech sa celá zem raduje",
+      "start_ms": 127840,
+      "end_ms": 129500,
+      "mean_word_loss": 0.33927052089146204
+    },
+    {
+      "text": "And make a joyful noise",
+      "text_sk": "A vydáva radostný zvuk",
+      "start_ms": 129820,
+      "end_ms": 131660,
+      "mean_word_loss": 0.2134868049621582
+    },
+    {
+      "text": "And give Him all the praise yes",
+      "text_sk": "A vzdávať Mu všetku chválu áno",
+      "start_ms": 131840,
+      "end_ms": 135120,
+      "mean_word_loss": 0.4858518327985491
+    },
+    {
+      "text": "Say",
+      "text_sk": "Povedz",
+      "start_ms": 135740,
+      "end_ms": 138940,
+      "mean_word_loss": 2.5950520833333335
+    },
+    {
+      "text": "We will lift You higher",
+      "text_sk": "Pozdvihneme Ťa vyššie",
+      "start_ms": 139200,
+      "end_ms": 142360,
+      "mean_word_loss": 0.6307789484659831
+    },
+    {
+      "text": "'Cause You are our desire",
+      "text_sk": "Lebo Ty si našou túžbou",
+      "start_ms": 142380,
+      "end_ms": 146460,
+      "mean_word_loss": 0.8177530924479166
+    },
+    {
+      "text": "Oh we will lift You higher",
+      "text_sk": "Ó pozdvihneme Ťa vyššie",
+      "start_ms": 147120,
+      "end_ms": 150320,
+      "mean_word_loss": 0.41939155260721844
+    },
+    {
+      "text": "Oh and we won't stop at no",
+      "text_sk": "Ó a nezastavíme sa pred ničím",
+      "start_ms": 150640,
+      "end_ms": 153420,
+      "mean_word_loss": 0.756908366793678
+    },
+    {
+      "text": "We won't stop at no",
+      "text_sk": "Nezastavíme sa pred ničím",
+      "start_ms": 153520,
+      "end_ms": 155560,
+      "mean_word_loss": 0.6994118309020996
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.4172937396913767,
+  "metadata": {
+    "n_tokens_sent": 276,
+    "n_words_returned_raw": 551,
+    "n_words_returned_content": 276,
+    "n_characters_returned": 1280,
+    "runtime_sec": 3.8,
+    "n_lines": 47,
+    "n_lines_timed": 47,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

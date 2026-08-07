@@ -1,0 +1,458 @@
+{
+  "generated_at": "2026-08-05T11:14:16Z",
+  "done": true,
+  "backends": [
+    "gemini36-flash",
+    "aai-u35-translate"
+  ],
+  "fixtures_total": 24,
+  "fixtures_skipped_missing_wav": [
+    "vpwDdb8r9Bk",
+    "fHYLw-2tTx4"
+  ],
+  "pairs_total": 48,
+  "pairs_completed": 44,
+  "recitation_count": 0,
+  "pairs": [
+    {
+      "backend": "gemini36-flash",
+      "video_id": "5JW87KKDTcU",
+      "ok": true,
+      "duration_s": 0.0,
+      "n_lines": 42,
+      "error": null,
+      "outcome": "reused",
+      "reused": true
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "s8o2YuTBYk4",
+      "ok": true,
+      "duration_s": 23.9,
+      "n_lines": 29,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "YbGFYaA0SbY",
+      "ok": true,
+      "duration_s": 32.0,
+      "n_lines": 36,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "tCivrrU4SSM",
+      "ok": true,
+      "duration_s": 61.4,
+      "n_lines": 33,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "p74PDWAFk0A",
+      "ok": true,
+      "duration_s": 92.4,
+      "n_lines": 70,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "xPkg_vW4yE0",
+      "ok": true,
+      "duration_s": 65.1,
+      "n_lines": 33,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "KeZaADiRHVI",
+      "ok": true,
+      "duration_s": 76.2,
+      "n_lines": 56,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "BpyP4HR8FBQ",
+      "ok": true,
+      "duration_s": 22.3,
+      "n_lines": 36,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "hk4woCR12MM",
+      "ok": true,
+      "duration_s": 56.8,
+      "n_lines": 39,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "JRRbGCyr2Ac",
+      "ok": true,
+      "duration_s": 49.9,
+      "n_lines": 39,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "Xvm4_fWkXe8",
+      "ok": true,
+      "duration_s": 82.2,
+      "n_lines": 18,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "cej4vn4sWtE",
+      "ok": true,
+      "duration_s": 123.2,
+      "n_lines": 86,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "bHCW5WMMF28",
+      "ok": true,
+      "duration_s": 37.0,
+      "n_lines": 33,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "jUnyHptnsRo",
+      "ok": true,
+      "duration_s": 28.3,
+      "n_lines": 26,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "edZVnKxKEUU",
+      "ok": true,
+      "duration_s": 98.7,
+      "n_lines": 50,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "wAV5fk1o7u4",
+      "ok": true,
+      "duration_s": 69.5,
+      "n_lines": 13,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "q5m09rqOoxE",
+      "ok": true,
+      "duration_s": 175.8,
+      "n_lines": 63,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "h-A1Tzkjsi4",
+      "ok": true,
+      "duration_s": 37.1,
+      "n_lines": 66,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "zVpDFHJtc_U",
+      "ok": true,
+      "duration_s": 67.2,
+      "n_lines": 63,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "JjgkhHlTROQ",
+      "ok": true,
+      "duration_s": 96.4,
+      "n_lines": 54,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "5JW87KKDTcU",
+      "ok": true,
+      "duration_s": 0.0,
+      "n_lines": 27,
+      "error": null,
+      "outcome": "reused",
+      "reused": true
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "hSMJa5tImRU",
+      "ok": true,
+      "duration_s": 92.0,
+      "n_lines": 33,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "p74PDWAFk0A",
+      "ok": true,
+      "duration_s": 32.5,
+      "n_lines": 68,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "s8o2YuTBYk4",
+      "ok": true,
+      "duration_s": 17.4,
+      "n_lines": 10,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "tCivrrU4SSM",
+      "ok": true,
+      "duration_s": 17.4,
+      "n_lines": 9,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "YbGFYaA0SbY",
+      "ok": true,
+      "duration_s": 18.4,
+      "n_lines": 30,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "KeZaADiRHVI",
+      "ok": true,
+      "duration_s": 26.9,
+      "n_lines": 1,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "xPkg_vW4yE0",
+      "ok": true,
+      "duration_s": 20.2,
+      "n_lines": 6,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "gemini36-flash",
+      "video_id": "wjJ-izYndWs",
+      "ok": true,
+      "duration_s": 102.0,
+      "n_lines": 64,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "BpyP4HR8FBQ",
+      "ok": true,
+      "duration_s": 16.0,
+      "n_lines": 14,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "hk4woCR12MM",
+      "ok": true,
+      "duration_s": 17.9,
+      "n_lines": 6,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "cej4vn4sWtE",
+      "ok": true,
+      "duration_s": 23.7,
+      "n_lines": 17,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "JRRbGCyr2Ac",
+      "ok": true,
+      "duration_s": 29.6,
+      "n_lines": 1,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "Xvm4_fWkXe8",
+      "ok": true,
+      "duration_s": 43.9,
+      "n_lines": 1,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "q5m09rqOoxE",
+      "ok": true,
+      "duration_s": 34.7,
+      "n_lines": 58,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "bHCW5WMMF28",
+      "ok": true,
+      "duration_s": 16.3,
+      "n_lines": 5,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "edZVnKxKEUU",
+      "ok": true,
+      "duration_s": 18.8,
+      "n_lines": 15,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "jUnyHptnsRo",
+      "ok": true,
+      "duration_s": 18.4,
+      "n_lines": 1,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "wAV5fk1o7u4",
+      "ok": true,
+      "duration_s": 28.1,
+      "n_lines": 14,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "h-A1Tzkjsi4",
+      "ok": true,
+      "duration_s": 20.4,
+      "n_lines": 40,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "zVpDFHJtc_U",
+      "ok": true,
+      "duration_s": 15.5,
+      "n_lines": 6,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "JjgkhHlTROQ",
+      "ok": true,
+      "duration_s": 26.5,
+      "n_lines": 27,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "wjJ-izYndWs",
+      "ok": true,
+      "duration_s": 15.7,
+      "n_lines": 8,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    },
+    {
+      "backend": "aai-u35-translate",
+      "video_id": "hSMJa5tImRU",
+      "ok": true,
+      "duration_s": 26.7,
+      "n_lines": 39,
+      "error": null,
+      "outcome": "success",
+      "reused": false
+    }
+  ]
+}

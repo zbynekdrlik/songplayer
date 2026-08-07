@@ -1,0 +1,348 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "tCivrrU4SSM",
+  "duration_ms": 210930,
+  "lines": [
+    {
+      "text": "Greater than the perfect sunrise",
+      "start_ms": 2550,
+      "end_ms": 5250,
+      "text_sk": "Väčší ako dokonalý východ slnka",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Greater than the ocean's deep",
+      "start_ms": 6150,
+      "end_ms": 8730,
+      "text_sk": "Väčší ako hlbina oceánu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Greater than the highest mountain",
+      "start_ms": 9870,
+      "end_ms": 12570,
+      "text_sk": "Väčší ako najvyšší vrch",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Lord, I believe You are greater than the world I see",
+      "start_ms": 13650,
+      "end_ms": 18750,
+      "text_sk": "Pane, verím, že si väčší než svet, ktorý vidím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Yeah, Jesus, You're above everything",
+      "start_ms": 19650,
+      "end_ms": 21990,
+      "text_sk": "Áno, Ježiš, si nad všetkým",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 23130,
+      "end_ms": 26190,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 27030,
+      "end_ms": 31110,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Greater than all expectation",
+      "start_ms": 51210,
+      "end_ms": 53670,
+      "text_sk": "Väčší než všetky očakávania",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Greater than my wildest dreams",
+      "start_ms": 54870,
+      "end_ms": 57270,
+      "text_sk": "Väčší než moje najdivokejšie sny",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Far beyond my comprehension",
+      "start_ms": 58710,
+      "end_ms": 61050,
+      "text_sk": "Ďaleko za mojim chápaním",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Lord, I believe You are greater than the world (Oh yeah)",
+      "start_ms": 62370,
+      "end_ms": 67950,
+      "text_sk": "Pane, verím, že si väčší než svet (Ó áno)",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Jesus, You're above everything",
+      "start_ms": 68850,
+      "end_ms": 70710,
+      "text_sk": "Ježiš, si nad všetkým",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 71910,
+      "end_ms": 74970,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 75870,
+      "end_ms": 79890,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "There is no one like You",
+      "start_ms": 98130,
+      "end_ms": 99810,
+      "text_sk": "Nikoho nie je ako Ty",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 101790,
+      "end_ms": 103590,
+      "text_sk": "Nikto sa Ti nevyrovná",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Jesus, You are greater, everyone say",
+      "start_ms": 105570,
+      "end_ms": 107190,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "There is no one like You",
+      "start_ms": 113070,
+      "end_ms": 114690,
+      "text_sk": "Nikoho nie je ako Ty",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 116790,
+      "end_ms": 118470,
+      "text_sk": "Nikto sa Ti nevyrovná",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Jesus, You are greater, everyone say",
+      "start_ms": 120450,
+      "end_ms": 122070,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Greater than the world I see",
+      "start_ms": 129030,
+      "end_ms": 131190,
+      "text_sk": "Väčší než svet, ktorý vidím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Yeah, Jesus, You're above everything",
+      "start_ms": 132150,
+      "end_ms": 134490,
+      "text_sk": "Áno, Ježiš, si nad všetkým",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 135630,
+      "end_ms": 138690,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 139530,
+      "end_ms": 143730,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "'Cause there is no one like You",
+      "start_ms": 161910,
+      "end_ms": 163590,
+      "text_sk": "Lebo nikoho nie je ako Ty",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "No one can compare to",
+      "start_ms": 165570,
+      "end_ms": 167370,
+      "text_sk": "Nikto sa Ti nevyrovná",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Jesus, You are greater, everyone say, yeah!",
+      "start_ms": 169290,
+      "end_ms": 176790,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie, jéj!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "No one",
+      "start_ms": 179190,
+      "end_ms": 179910,
+      "text_sk": "Nikto",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Jesus, You are greater, everyone say",
+      "start_ms": 184350,
+      "end_ms": 185850,
+      "text_sk": "Ježiš, Ty si väčší, nech každý povie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "You are greater than the world I see",
+      "start_ms": 191970,
+      "end_ms": 194970,
+      "text_sk": "Si väčší než svet, ktorý vidím",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Yeah, Jesus, You're above everything",
+      "start_ms": 195870,
+      "end_ms": 198270,
+      "text_sk": "Áno, Ježiš, si nad všetkým",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And Your Spirit is alive in me",
+      "start_ms": 199470,
+      "end_ms": 202470,
+      "text_sk": "A Tvoj Duch vo mne žije",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Yeah, with You I can do anything 'cause You're greater",
+      "start_ms": 203310,
+      "end_ms": 207570,
+      "text_sk": "Áno, s Tebou dokážem všetko, lebo si väčší",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 33,
+    "n_lines_timed": 33,
+    "n_lines_untimed": 0,
+    "n_words_total": 212,
+    "n_words_aligned": 200,
+    "word_align_rate": 0.9433962264150944,
+    "n_monotonic_violations_clamped": 0
+  }
+}

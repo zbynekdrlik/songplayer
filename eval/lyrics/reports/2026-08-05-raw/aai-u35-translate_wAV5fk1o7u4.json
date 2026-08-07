@@ -1,0 +1,1848 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wAV5fk1o7u4_vocal16k.wav",
+  "duration_ms": 210686,
+  "lines": [
+    {
+      "text": "In our darkest days, through the fear and pain, you were always there with us. It's only by your grace that we are here today. We're the evidence of love.",
+      "start_ms": 17353,
+      "end_ms": 40147,
+      "text_sk": "V našich najtemnejších dňoch, cez strach a bolesť, ste boli vždy s nami. Len Vašou milosťou sme tu dnes. Sme dôkazom lásky.",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 17353,
+          "end_ms": 17883,
+          "confidence": 0.713057
+        },
+        {
+          "text": "our",
+          "start_ms": 17995,
+          "end_ms": 18204,
+          "confidence": 0.9955727
+        },
+        {
+          "text": "darkest",
+          "start_ms": 18204,
+          "end_ms": 18990,
+          "confidence": 0.9994923
+        },
+        {
+          "text": "days,",
+          "start_ms": 19087,
+          "end_ms": 19793,
+          "confidence": 0.96334594
+        },
+        {
+          "text": "through",
+          "start_ms": 20564,
+          "end_ms": 20676,
+          "confidence": 0.97170234
+        },
+        {
+          "text": "the",
+          "start_ms": 21141,
+          "end_ms": 21302,
+          "confidence": 0.9976566
+        },
+        {
+          "text": "fear",
+          "start_ms": 21302,
+          "end_ms": 22024,
+          "confidence": 0.9995927
+        },
+        {
+          "text": "and",
+          "start_ms": 22024,
+          "end_ms": 22153,
+          "confidence": 0.9989396
+        },
+        {
+          "text": "pain,",
+          "start_ms": 22249,
+          "end_ms": 22955,
+          "confidence": 0.9733351
+        },
+        {
+          "text": "you",
+          "start_ms": 24111,
+          "end_ms": 24384,
+          "confidence": 0.94421947
+        },
+        {
+          "text": "were",
+          "start_ms": 24497,
+          "end_ms": 24545,
+          "confidence": 0.9987715
+        },
+        {
+          "text": "always",
+          "start_ms": 24818,
+          "end_ms": 25524,
+          "confidence": 0.99885035
+        },
+        {
+          "text": "there",
+          "start_ms": 25620,
+          "end_ms": 25893,
+          "confidence": 0.99902546
+        },
+        {
+          "text": "with",
+          "start_ms": 26118,
+          "end_ms": 26824,
+          "confidence": 0.9981225
+        },
+        {
+          "text": "us.",
+          "start_ms": 26824,
+          "end_ms": 26888,
+          "confidence": 0.97742516
+        },
+        {
+          "text": "It's",
+          "start_ms": 30209,
+          "end_ms": 30484,
+          "confidence": 0.97323173
+        },
+        {
+          "text": "only",
+          "start_ms": 30516,
+          "end_ms": 31146,
+          "confidence": 0.99948186
+        },
+        {
+          "text": "by",
+          "start_ms": 31259,
+          "end_ms": 31356,
+          "confidence": 0.9996499
+        },
+        {
+          "text": "your",
+          "start_ms": 31889,
+          "end_ms": 31970,
+          "confidence": 0.9141212
+        },
+        {
+          "text": "grace",
+          "start_ms": 32051,
+          "end_ms": 32923,
+          "confidence": 0.999915
+        },
+        {
+          "text": "that",
+          "start_ms": 33504,
+          "end_ms": 33682,
+          "confidence": 0.9963844
+        },
+        {
+          "text": "we",
+          "start_ms": 33682,
+          "end_ms": 34005,
+          "confidence": 0.9999037
+        },
+        {
+          "text": "are",
+          "start_ms": 34409,
+          "end_ms": 34506,
+          "confidence": 0.9984633
+        },
+        {
+          "text": "here",
+          "start_ms": 34554,
+          "end_ms": 35119,
+          "confidence": 0.99992657
+        },
+        {
+          "text": "today.",
+          "start_ms": 35119,
+          "end_ms": 35636,
+          "confidence": 0.6421104
+        },
+        {
+          "text": "We're",
+          "start_ms": 37380,
+          "end_ms": 37623,
+          "confidence": 0.9733839
+        },
+        {
+          "text": "the",
+          "start_ms": 37639,
+          "end_ms": 37833,
+          "confidence": 0.99904495
+        },
+        {
+          "text": "evidence",
+          "start_ms": 37962,
+          "end_ms": 38964,
+          "confidence": 0.99841905
+        },
+        {
+          "text": "of",
+          "start_ms": 39112,
+          "end_ms": 39818,
+          "confidence": 0.999603
+        },
+        {
+          "text": "love.",
+          "start_ms": 39917,
+          "end_ms": 40147,
+          "confidence": 0.9926968
+        }
+      ]
+    },
+    {
+      "text": "Over and over you have proved that you are the rock that'll never move. You are the rock that'll never move.",
+      "start_ms": 43486,
+      "end_ms": 52397,
+      "text_sk": "Znova a znova ste dokázali, že ste skala, ktorá sa nikdy nepohne. Ste skala, ktorá sa nikdy nepohne.",
+      "words": [
+        {
+          "text": "Over",
+          "start_ms": 43486,
+          "end_ms": 43969,
+          "confidence": 0.7083574
+        },
+        {
+          "text": "and",
+          "start_ms": 44049,
+          "end_ms": 44291,
+          "confidence": 0.99981564
+        },
+        {
+          "text": "over",
+          "start_ms": 44291,
+          "end_ms": 44870,
+          "confidence": 0.9999335
+        },
+        {
+          "text": "you",
+          "start_ms": 45014,
+          "end_ms": 45127,
+          "confidence": 0.58098614
+        },
+        {
+          "text": "have",
+          "start_ms": 45336,
+          "end_ms": 45819,
+          "confidence": 0.9994548
+        },
+        {
+          "text": "proved",
+          "start_ms": 45835,
+          "end_ms": 46478,
+          "confidence": 0.9993845
+        },
+        {
+          "text": "that",
+          "start_ms": 46623,
+          "end_ms": 46816,
+          "confidence": 0.9912373
+        },
+        {
+          "text": "you",
+          "start_ms": 46864,
+          "end_ms": 46993,
+          "confidence": 0.9985661
+        },
+        {
+          "text": "are",
+          "start_ms": 47121,
+          "end_ms": 47202,
+          "confidence": 0.99926704
+        },
+        {
+          "text": "the",
+          "start_ms": 47202,
+          "end_ms": 47443,
+          "confidence": 0.9992175
+        },
+        {
+          "text": "rock",
+          "start_ms": 47443,
+          "end_ms": 48070,
+          "confidence": 0.9786568
+        },
+        {
+          "text": "that'll",
+          "start_ms": 48086,
+          "end_ms": 48408,
+          "confidence": 0.98775744
+        },
+        {
+          "text": "never",
+          "start_ms": 48408,
+          "end_ms": 48810,
+          "confidence": 0.999871
+        },
+        {
+          "text": "move.",
+          "start_ms": 48810,
+          "end_ms": 49550,
+          "confidence": 0.9944793
+        },
+        {
+          "text": "You",
+          "start_ms": 50161,
+          "end_ms": 50274,
+          "confidence": 0.92414314
+        },
+        {
+          "text": "are",
+          "start_ms": 50418,
+          "end_ms": 50579,
+          "confidence": 0.99973994
+        },
+        {
+          "text": "the",
+          "start_ms": 50579,
+          "end_ms": 50804,
+          "confidence": 0.9996568
+        },
+        {
+          "text": "rock",
+          "start_ms": 50804,
+          "end_ms": 51367,
+          "confidence": 0.9992085
+        },
+        {
+          "text": "that'll",
+          "start_ms": 51367,
+          "end_ms": 51721,
+          "confidence": 0.99791414
+        },
+        {
+          "text": "never",
+          "start_ms": 51721,
+          "end_ms": 52123,
+          "confidence": 0.99941254
+        },
+        {
+          "text": "move.",
+          "start_ms": 52123,
+          "end_ms": 52397,
+          "confidence": 0.99487215
+        }
+      ]
+    },
+    {
+      "text": "Again and again, you come through.",
+      "start_ms": 56549,
+      "end_ms": 59195,
+      "text_sk": "Znova a znova to zvládneš.",
+      "words": [
+        {
+          "text": "Again",
+          "start_ms": 56549,
+          "end_ms": 56918,
+          "confidence": 0.92426056
+        },
+        {
+          "text": "and",
+          "start_ms": 57014,
+          "end_ms": 57143,
+          "confidence": 0.99666315
+        },
+        {
+          "text": "again,",
+          "start_ms": 57175,
+          "end_ms": 57880,
+          "confidence": 0.9277241
+        },
+        {
+          "text": "you",
+          "start_ms": 58153,
+          "end_ms": 58329,
+          "confidence": 0.8439173
+        },
+        {
+          "text": "come",
+          "start_ms": 58538,
+          "end_ms": 58955,
+          "confidence": 0.6569003
+        },
+        {
+          "text": "through.",
+          "start_ms": 58955,
+          "end_ms": 59195,
+          "confidence": 0.92584443
+        }
+      ]
+    },
+    {
+      "text": "Always faithful, forever true. 'Cause you are the rock that'll never move. You are the rock that'll never move.",
+      "start_ms": 59917,
+      "end_ms": 68785,
+      "text_sk": "Navždy verný, navždy pravdivý. Pretože si skala, ktorá sa nikdy nepohne. Si skala, ktorá sa nikdy nepohne.",
+      "words": [
+        {
+          "text": "Always",
+          "start_ms": 59917,
+          "end_ms": 60446,
+          "confidence": 0.98881257
+        },
+        {
+          "text": "faithful,",
+          "start_ms": 60622,
+          "end_ms": 61248,
+          "confidence": 0.99571806
+        },
+        {
+          "text": "forever",
+          "start_ms": 61376,
+          "end_ms": 62001,
+          "confidence": 0.9997775
+        },
+        {
+          "text": "true.",
+          "start_ms": 62001,
+          "end_ms": 62338,
+          "confidence": 0.97467524
+        },
+        {
+          "text": "'Cause",
+          "start_ms": 63044,
+          "end_ms": 63252,
+          "confidence": 0.9507961
+        },
+        {
+          "text": "you",
+          "start_ms": 63284,
+          "end_ms": 63509,
+          "confidence": 0.9936505
+        },
+        {
+          "text": "are",
+          "start_ms": 63589,
+          "end_ms": 63685,
+          "confidence": 0.9996358
+        },
+        {
+          "text": "the",
+          "start_ms": 63685,
+          "end_ms": 63926,
+          "confidence": 0.9994542
+        },
+        {
+          "text": "rock",
+          "start_ms": 63926,
+          "end_ms": 64423,
+          "confidence": 0.97335285
+        },
+        {
+          "text": "that'll",
+          "start_ms": 64551,
+          "end_ms": 64888,
+          "confidence": 0.99792343
+        },
+        {
+          "text": "never",
+          "start_ms": 64888,
+          "end_ms": 65273,
+          "confidence": 0.99994564
+        },
+        {
+          "text": "move.",
+          "start_ms": 65273,
+          "end_ms": 65481,
+          "confidence": 0.99518377
+        },
+        {
+          "text": "You",
+          "start_ms": 66572,
+          "end_ms": 66764,
+          "confidence": 0.88802546
+        },
+        {
+          "text": "are",
+          "start_ms": 66876,
+          "end_ms": 67053,
+          "confidence": 0.99988806
+        },
+        {
+          "text": "the",
+          "start_ms": 67053,
+          "end_ms": 67133,
+          "confidence": 0.99990976
+        },
+        {
+          "text": "rock",
+          "start_ms": 67133,
+          "end_ms": 67678,
+          "confidence": 0.9998702
+        },
+        {
+          "text": "that'll",
+          "start_ms": 67774,
+          "end_ms": 68255,
+          "confidence": 0.99925727
+        },
+        {
+          "text": "never",
+          "start_ms": 68255,
+          "end_ms": 68624,
+          "confidence": 0.9999708
+        },
+        {
+          "text": "move.",
+          "start_ms": 68656,
+          "end_ms": 68785,
+          "confidence": 0.9992688
+        }
+      ]
+    },
+    {
+      "text": "Whatever we will face in the coming days, we will never walk alone. And through it all, we praise.",
+      "start_ms": 68785,
+      "end_ms": 85507,
+      "text_sk": "Čokoľvek nás čaká v nasledujúcich dňoch, nikdy nepôjdeme sami. A cez to všetko chválime.",
+      "words": [
+        {
+          "text": "Whatever",
+          "start_ms": 69683,
+          "end_ms": 70741,
+          "confidence": 0.98900247
+        },
+        {
+          "text": "we",
+          "start_ms": 70741,
+          "end_ms": 70853,
+          "confidence": 0.9997583
+        },
+        {
+          "text": "will",
+          "start_ms": 71366,
+          "end_ms": 71511,
+          "confidence": 0.99538064
+        },
+        {
+          "text": "face",
+          "start_ms": 71607,
+          "end_ms": 72152,
+          "confidence": 0.9999578
+        },
+        {
+          "text": "in",
+          "start_ms": 73291,
+          "end_ms": 73756,
+          "confidence": 0.97397715
+        },
+        {
+          "text": "the",
+          "start_ms": 73852,
+          "end_ms": 74012,
+          "confidence": 0.9999311
+        },
+        {
+          "text": "coming",
+          "start_ms": 74012,
+          "end_ms": 74798,
+          "confidence": 0.9997683
+        },
+        {
+          "text": "days,",
+          "start_ms": 74830,
+          "end_ms": 75680,
+          "confidence": 0.99684393
+        },
+        {
+          "text": "we",
+          "start_ms": 76899,
+          "end_ms": 77107,
+          "confidence": 0.9873073
+        },
+        {
+          "text": "will",
+          "start_ms": 77139,
+          "end_ms": 77235,
+          "confidence": 0.99789184
+        },
+        {
+          "text": "never",
+          "start_ms": 77235,
+          "end_ms": 78117,
+          "confidence": 0.99996185
+        },
+        {
+          "text": "walk",
+          "start_ms": 78117,
+          "end_ms": 78663,
+          "confidence": 0.9999201
+        },
+        {
+          "text": "alone.",
+          "start_ms": 78663,
+          "end_ms": 79769,
+          "confidence": 0.99530905
+        },
+        {
+          "text": "And",
+          "start_ms": 82732,
+          "end_ms": 82797,
+          "confidence": 0.53740937
+        },
+        {
+          "text": "through",
+          "start_ms": 83041,
+          "end_ms": 83268,
+          "confidence": 0.99994206
+        },
+        {
+          "text": "it",
+          "start_ms": 83690,
+          "end_ms": 83949,
+          "confidence": 0.9999075
+        },
+        {
+          "text": "all,",
+          "start_ms": 84014,
+          "end_ms": 84420,
+          "confidence": 0.8081244
+        },
+        {
+          "text": "we",
+          "start_ms": 84501,
+          "end_ms": 84696,
+          "confidence": 0.9994856
+        },
+        {
+          "text": "praise.",
+          "start_ms": 84744,
+          "end_ms": 85507,
+          "confidence": 0.8186212
+        }
+      ]
+    },
+    {
+      "text": "Our hope will never change. Where your presence is, where home is. Over and over, you have proved that you are the rock that'll never move.",
+      "start_ms": 86205,
+      "end_ms": 102066,
+      "text_sk": "Naša nádej sa nikdy nezmení. Tam, kde je tvoja prítomnosť, tam je domov. Znova a znova si dokázal, že si skala, ktorá sa nikdy nepohne.",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 86205,
+          "end_ms": 86367,
+          "confidence": 0.9574105
+        },
+        {
+          "text": "hope",
+          "start_ms": 86383,
+          "end_ms": 86967,
+          "confidence": 0.99959403
+        },
+        {
+          "text": "will",
+          "start_ms": 87016,
+          "end_ms": 87195,
+          "confidence": 0.99879456
+        },
+        {
+          "text": "never",
+          "start_ms": 87195,
+          "end_ms": 88006,
+          "confidence": 0.99998677
+        },
+        {
+          "text": "change.",
+          "start_ms": 88006,
+          "end_ms": 88899,
+          "confidence": 0.98283446
+        },
+        {
+          "text": "Where",
+          "start_ms": 90090,
+          "end_ms": 90202,
+          "confidence": 0.99922085
+        },
+        {
+          "text": "your",
+          "start_ms": 90202,
+          "end_ms": 90491,
+          "confidence": 0.9095733
+        },
+        {
+          "text": "presence",
+          "start_ms": 90507,
+          "end_ms": 91391,
+          "confidence": 0.9994174
+        },
+        {
+          "text": "is,",
+          "start_ms": 91391,
+          "end_ms": 91536,
+          "confidence": 0.9398457
+        },
+        {
+          "text": "where",
+          "start_ms": 91712,
+          "end_ms": 92066,
+          "confidence": 0.8495776
+        },
+        {
+          "text": "home",
+          "start_ms": 92435,
+          "end_ms": 94990,
+          "confidence": 0.990239
+        },
+        {
+          "text": "is.",
+          "start_ms": 96050,
+          "end_ms": 96083,
+          "confidence": 0.84381336
+        },
+        {
+          "text": "Over",
+          "start_ms": 96291,
+          "end_ms": 96613,
+          "confidence": 0.9991178
+        },
+        {
+          "text": "and",
+          "start_ms": 96629,
+          "end_ms": 96854,
+          "confidence": 0.99982363
+        },
+        {
+          "text": "over,",
+          "start_ms": 96854,
+          "end_ms": 97448,
+          "confidence": 0.933175
+        },
+        {
+          "text": "you",
+          "start_ms": 97657,
+          "end_ms": 97770,
+          "confidence": 0.99242365
+        },
+        {
+          "text": "have",
+          "start_ms": 98059,
+          "end_ms": 98461,
+          "confidence": 0.99984324
+        },
+        {
+          "text": "proved",
+          "start_ms": 98461,
+          "end_ms": 98959,
+          "confidence": 0.9999454
+        },
+        {
+          "text": "that",
+          "start_ms": 99264,
+          "end_ms": 99441,
+          "confidence": 0.9986059
+        },
+        {
+          "text": "you",
+          "start_ms": 99441,
+          "end_ms": 99553,
+          "confidence": 0.9965102
+        },
+        {
+          "text": "are",
+          "start_ms": 99682,
+          "end_ms": 99843,
+          "confidence": 0.99994767
+        },
+        {
+          "text": "the",
+          "start_ms": 99843,
+          "end_ms": 99923,
+          "confidence": 0.99994564
+        },
+        {
+          "text": "rock",
+          "start_ms": 99923,
+          "end_ms": 100648,
+          "confidence": 0.95418805
+        },
+        {
+          "text": "that'll",
+          "start_ms": 100648,
+          "end_ms": 101051,
+          "confidence": 0.9581568
+        },
+        {
+          "text": "never",
+          "start_ms": 101051,
+          "end_ms": 101389,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "move.",
+          "start_ms": 101389,
+          "end_ms": 102066,
+          "confidence": 0.99963003
+        }
+      ]
+    },
+    {
+      "text": "You are the rock that'll never move.",
+      "start_ms": 102743,
+      "end_ms": 104966,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 102743,
+          "end_ms": 102823,
+          "confidence": 0.9991461
+        },
+        {
+          "text": "are",
+          "start_ms": 103049,
+          "end_ms": 103145,
+          "confidence": 0.999944
+        },
+        {
+          "text": "the",
+          "start_ms": 103145,
+          "end_ms": 103451,
+          "confidence": 0.9999845
+        },
+        {
+          "text": "rock",
+          "start_ms": 103451,
+          "end_ms": 103886,
+          "confidence": 0.99979943
+        },
+        {
+          "text": "that'll",
+          "start_ms": 103886,
+          "end_ms": 104354,
+          "confidence": 0.9999368
+        },
+        {
+          "text": "never",
+          "start_ms": 104354,
+          "end_ms": 104756,
+          "confidence": 0.9999672
+        },
+        {
+          "text": "move.",
+          "start_ms": 104756,
+          "end_ms": 104966,
+          "confidence": 0.9992793
+        }
+      ]
+    },
+    {
+      "text": "Again and again you come through, always faithful, forever true. 'Cause you are the rock that'll never move. You are the rock that'll never move.",
+      "start_ms": 109067,
+      "end_ms": 121508,
+      "text_sk": "Znova a znova sa naplníš, vždy verný, navždy pravdivý. Pretože si skala, ktorá sa nikdy nepohne. Si skala, ktorá sa nikdy nepohne.",
+      "words": [
+        {
+          "text": "Again",
+          "start_ms": 109067,
+          "end_ms": 109615,
+          "confidence": 0.59770226
+        },
+        {
+          "text": "and",
+          "start_ms": 109615,
+          "end_ms": 109776,
+          "confidence": 0.99592197
+        },
+        {
+          "text": "again",
+          "start_ms": 109776,
+          "end_ms": 110630,
+          "confidence": 0.9999416
+        },
+        {
+          "text": "you",
+          "start_ms": 110759,
+          "end_ms": 110936,
+          "confidence": 0.5353963
+        },
+        {
+          "text": "come",
+          "start_ms": 111146,
+          "end_ms": 111533,
+          "confidence": 0.9816684
+        },
+        {
+          "text": "through,",
+          "start_ms": 111565,
+          "end_ms": 111662,
+          "confidence": 0.7664909
+        },
+        {
+          "text": "always",
+          "start_ms": 112596,
+          "end_ms": 113144,
+          "confidence": 0.9997048
+        },
+        {
+          "text": "faithful,",
+          "start_ms": 113257,
+          "end_ms": 113773,
+          "confidence": 0.996584
+        },
+        {
+          "text": "forever",
+          "start_ms": 113982,
+          "end_ms": 114562,
+          "confidence": 0.99998057
+        },
+        {
+          "text": "true.",
+          "start_ms": 114562,
+          "end_ms": 114885,
+          "confidence": 0.81266606
+        },
+        {
+          "text": "'Cause",
+          "start_ms": 115271,
+          "end_ms": 115852,
+          "confidence": 0.8659789
+        },
+        {
+          "text": "you",
+          "start_ms": 115916,
+          "end_ms": 116013,
+          "confidence": 0.9979842
+        },
+        {
+          "text": "are",
+          "start_ms": 116222,
+          "end_ms": 116319,
+          "confidence": 0.9997123
+        },
+        {
+          "text": "the",
+          "start_ms": 116319,
+          "end_ms": 116690,
+          "confidence": 0.99995196
+        },
+        {
+          "text": "rock",
+          "start_ms": 116690,
+          "end_ms": 117065,
+          "confidence": 0.98653096
+        },
+        {
+          "text": "that'll",
+          "start_ms": 117065,
+          "end_ms": 117473,
+          "confidence": 0.9847776
+        },
+        {
+          "text": "never",
+          "start_ms": 117473,
+          "end_ms": 117866,
+          "confidence": 0.9999932
+        },
+        {
+          "text": "move.",
+          "start_ms": 117882,
+          "end_ms": 118649,
+          "confidence": 0.94233537
+        },
+        {
+          "text": "You",
+          "start_ms": 119237,
+          "end_ms": 119352,
+          "confidence": 0.9810539
+        },
+        {
+          "text": "are",
+          "start_ms": 119482,
+          "end_ms": 119580,
+          "confidence": 0.9999355
+        },
+        {
+          "text": "the",
+          "start_ms": 119580,
+          "end_ms": 119744,
+          "confidence": 0.9999902
+        },
+        {
+          "text": "rock",
+          "start_ms": 119744,
+          "end_ms": 120413,
+          "confidence": 0.999946
+        },
+        {
+          "text": "that'll",
+          "start_ms": 120462,
+          "end_ms": 120903,
+          "confidence": 0.9999642
+        },
+        {
+          "text": "never",
+          "start_ms": 120903,
+          "end_ms": 121230,
+          "confidence": 0.9999888
+        },
+        {
+          "text": "move.",
+          "start_ms": 121230,
+          "end_ms": 121508,
+          "confidence": 0.99889994
+        }
+      ]
+    },
+    {
+      "text": "There's no one like you, God. Yeah.",
+      "start_ms": 127710,
+      "end_ms": 132123,
+      "text_sk": "Niet nikoho ako Ty, Bože. Áno.",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 127710,
+          "end_ms": 128016,
+          "confidence": 0.9982498
+        },
+        {
+          "text": "no",
+          "start_ms": 128097,
+          "end_ms": 128355,
+          "confidence": 0.9999776
+        },
+        {
+          "text": "one",
+          "start_ms": 128499,
+          "end_ms": 128644,
+          "confidence": 0.9999747
+        },
+        {
+          "text": "like",
+          "start_ms": 128677,
+          "end_ms": 129240,
+          "confidence": 0.9999827
+        },
+        {
+          "text": "you,",
+          "start_ms": 129240,
+          "end_ms": 129450,
+          "confidence": 0.9981401
+        },
+        {
+          "text": "God.",
+          "start_ms": 129627,
+          "end_ms": 130303,
+          "confidence": 0.99179804
+        },
+        {
+          "text": "Yeah.",
+          "start_ms": 131334,
+          "end_ms": 132123,
+          "confidence": 0.9857608
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith. No matter what the world may say, we know your word will never change. We stand on better promises.",
+      "start_ms": 135369,
+      "end_ms": 147894,
+      "text_sk": "Naša viera sa nezlomí. Nech hovorí svet čokoľvek, vieme, že Tvoje slovo sa nikdy nezmení. Stojíme na lepších prísľuboch.",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 135369,
+          "end_ms": 135963,
+          "confidence": 0.9971138
+        },
+        {
+          "text": "gonna",
+          "start_ms": 135995,
+          "end_ms": 136316,
+          "confidence": 0.9849473
+        },
+        {
+          "text": "shake",
+          "start_ms": 136316,
+          "end_ms": 136861,
+          "confidence": 0.99996805
+        },
+        {
+          "text": "our",
+          "start_ms": 136941,
+          "end_ms": 137085,
+          "confidence": 0.99992967
+        },
+        {
+          "text": "faith.",
+          "start_ms": 137117,
+          "end_ms": 137727,
+          "confidence": 0.8362649
+        },
+        {
+          "text": "No",
+          "start_ms": 138481,
+          "end_ms": 138577,
+          "confidence": 0.99254405
+        },
+        {
+          "text": "matter",
+          "start_ms": 138577,
+          "end_ms": 139347,
+          "confidence": 0.9999871
+        },
+        {
+          "text": "what",
+          "start_ms": 139347,
+          "end_ms": 139523,
+          "confidence": 0.99995804
+        },
+        {
+          "text": "the",
+          "start_ms": 139523,
+          "end_ms": 139747,
+          "confidence": 0.9998659
+        },
+        {
+          "text": "world",
+          "start_ms": 139747,
+          "end_ms": 140100,
+          "confidence": 0.9999323
+        },
+        {
+          "text": "may",
+          "start_ms": 140148,
+          "end_ms": 140405,
+          "confidence": 0.99958974
+        },
+        {
+          "text": "say,",
+          "start_ms": 140405,
+          "end_ms": 140806,
+          "confidence": 0.9253594
+        },
+        {
+          "text": "we",
+          "start_ms": 141768,
+          "end_ms": 141928,
+          "confidence": 0.9979792
+        },
+        {
+          "text": "know",
+          "start_ms": 141928,
+          "end_ms": 142249,
+          "confidence": 0.99996376
+        },
+        {
+          "text": "your",
+          "start_ms": 142394,
+          "end_ms": 142634,
+          "confidence": 0.7225307
+        },
+        {
+          "text": "word",
+          "start_ms": 142634,
+          "end_ms": 142810,
+          "confidence": 0.88885546
+        },
+        {
+          "text": "will",
+          "start_ms": 142810,
+          "end_ms": 142891,
+          "confidence": 0.9974868
+        },
+        {
+          "text": "never",
+          "start_ms": 142891,
+          "end_ms": 143692,
+          "confidence": 0.99987924
+        },
+        {
+          "text": "change.",
+          "start_ms": 143757,
+          "end_ms": 144061,
+          "confidence": 0.99898046
+        },
+        {
+          "text": "We",
+          "start_ms": 144430,
+          "end_ms": 144575,
+          "confidence": 0.94746804
+        },
+        {
+          "text": "stand",
+          "start_ms": 144575,
+          "end_ms": 145312,
+          "confidence": 0.9998684
+        },
+        {
+          "text": "on",
+          "start_ms": 145360,
+          "end_ms": 145505,
+          "confidence": 0.9999342
+        },
+        {
+          "text": "better",
+          "start_ms": 145537,
+          "end_ms": 146306,
+          "confidence": 0.9992773
+        },
+        {
+          "text": "promises.",
+          "start_ms": 146339,
+          "end_ms": 147894,
+          "confidence": 0.9963785
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna shake our faith. No matter what the world may say, we know your word will never change. We stand on better promises. We stand on better promises. We stand on better promises. We stand on better promises.",
+      "start_ms": 147894,
+      "end_ms": 171036,
+      "text_sk": "Naša viera sa nezmení. Nech hovorí svet čokoľvek, vieme, že Tvoje slovo sa nikdy nezmení. Stojíme na lepších zasľúbeniach. Stojíme na lepších zasľúbeniach. Stojíme na lepších zasľúbeniach. Stojíme na lepších zasľúbeniach.",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 148568,
+          "end_ms": 149209,
+          "confidence": 0.99919534
+        },
+        {
+          "text": "gonna",
+          "start_ms": 149209,
+          "end_ms": 149482,
+          "confidence": 0.99890924
+        },
+        {
+          "text": "shake",
+          "start_ms": 149482,
+          "end_ms": 150091,
+          "confidence": 0.99998164
+        },
+        {
+          "text": "our",
+          "start_ms": 150091,
+          "end_ms": 150300,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "faith.",
+          "start_ms": 150332,
+          "end_ms": 150877,
+          "confidence": 0.9968545
+        },
+        {
+          "text": "No",
+          "start_ms": 151631,
+          "end_ms": 151759,
+          "confidence": 0.9998431
+        },
+        {
+          "text": "matter",
+          "start_ms": 151775,
+          "end_ms": 152449,
+          "confidence": 0.9999938
+        },
+        {
+          "text": "what",
+          "start_ms": 152497,
+          "end_ms": 152673,
+          "confidence": 0.99998045
+        },
+        {
+          "text": "the",
+          "start_ms": 152673,
+          "end_ms": 152898,
+          "confidence": 0.99998426
+        },
+        {
+          "text": "world",
+          "start_ms": 152898,
+          "end_ms": 153282,
+          "confidence": 0.99997854
+        },
+        {
+          "text": "may",
+          "start_ms": 153298,
+          "end_ms": 153555,
+          "confidence": 0.9998385
+        },
+        {
+          "text": "say,",
+          "start_ms": 153555,
+          "end_ms": 153956,
+          "confidence": 0.9999177
+        },
+        {
+          "text": "we",
+          "start_ms": 154918,
+          "end_ms": 155014,
+          "confidence": 0.9999485
+        },
+        {
+          "text": "know",
+          "start_ms": 155014,
+          "end_ms": 155239,
+          "confidence": 0.99998796
+        },
+        {
+          "text": "your",
+          "start_ms": 155560,
+          "end_ms": 155784,
+          "confidence": 0.9999478
+        },
+        {
+          "text": "word",
+          "start_ms": 155784,
+          "end_ms": 156025,
+          "confidence": 0.9999527
+        },
+        {
+          "text": "will",
+          "start_ms": 156025,
+          "end_ms": 156201,
+          "confidence": 0.9999176
+        },
+        {
+          "text": "never",
+          "start_ms": 156201,
+          "end_ms": 156843,
+          "confidence": 0.99998975
+        },
+        {
+          "text": "change.",
+          "start_ms": 156923,
+          "end_ms": 157404,
+          "confidence": 0.9998038
+        },
+        {
+          "text": "We",
+          "start_ms": 157564,
+          "end_ms": 157644,
+          "confidence": 0.99799514
+        },
+        {
+          "text": "stand",
+          "start_ms": 157741,
+          "end_ms": 158510,
+          "confidence": 0.9999572
+        },
+        {
+          "text": "on",
+          "start_ms": 158510,
+          "end_ms": 158687,
+          "confidence": 0.99991
+        },
+        {
+          "text": "better",
+          "start_ms": 158687,
+          "end_ms": 159473,
+          "confidence": 0.99990916
+        },
+        {
+          "text": "promises.",
+          "start_ms": 159473,
+          "end_ms": 160579,
+          "confidence": 0.99673635
+        },
+        {
+          "text": "We",
+          "start_ms": 160837,
+          "end_ms": 160934,
+          "confidence": 0.99638736
+        },
+        {
+          "text": "stand",
+          "start_ms": 160950,
+          "end_ms": 161695,
+          "confidence": 0.99978536
+        },
+        {
+          "text": "on",
+          "start_ms": 161808,
+          "end_ms": 161986,
+          "confidence": 0.9998115
+        },
+        {
+          "text": "better",
+          "start_ms": 161986,
+          "end_ms": 162650,
+          "confidence": 0.99326515
+        },
+        {
+          "text": "promises.",
+          "start_ms": 162650,
+          "end_ms": 163816,
+          "confidence": 0.98300606
+        },
+        {
+          "text": "We",
+          "start_ms": 164156,
+          "end_ms": 164253,
+          "confidence": 0.97040796
+        },
+        {
+          "text": "stand",
+          "start_ms": 164334,
+          "end_ms": 165128,
+          "confidence": 0.9999907
+        },
+        {
+          "text": "on",
+          "start_ms": 165128,
+          "end_ms": 165273,
+          "confidence": 0.99986255
+        },
+        {
+          "text": "better",
+          "start_ms": 165306,
+          "end_ms": 166099,
+          "confidence": 0.99996173
+        },
+        {
+          "text": "promises.",
+          "start_ms": 166099,
+          "end_ms": 167055,
+          "confidence": 0.99929297
+        },
+        {
+          "text": "We",
+          "start_ms": 167411,
+          "end_ms": 167492,
+          "confidence": 0.99651754
+        },
+        {
+          "text": "stand",
+          "start_ms": 167670,
+          "end_ms": 168382,
+          "confidence": 0.9999733
+        },
+        {
+          "text": "on",
+          "start_ms": 168447,
+          "end_ms": 168609,
+          "confidence": 0.99992263
+        },
+        {
+          "text": "better",
+          "start_ms": 169160,
+          "end_ms": 169421,
+          "confidence": 0.9999113
+        },
+        {
+          "text": "promises.",
+          "start_ms": 169421,
+          "end_ms": 171036,
+          "confidence": 0.98394036
+        }
+      ]
+    },
+    {
+      "text": "Over and over you have proved that you are the rock that'll never move. You are the rock that'll never move.",
+      "start_ms": 171036,
+      "end_ms": 183973,
+      "text_sk": "Znova a znova ste dokázali, že ste skala, ktorá sa nikdy nepohne. Ste skala, ktorá sa nikdy nepohne.",
+      "words": [
+        {
+          "text": "Over",
+          "start_ms": 175120,
+          "end_ms": 175475,
+          "confidence": 0.9986607
+        },
+        {
+          "text": "and",
+          "start_ms": 175540,
+          "end_ms": 175782,
+          "confidence": 0.99981076
+        },
+        {
+          "text": "over",
+          "start_ms": 175782,
+          "end_ms": 176267,
+          "confidence": 0.99998784
+        },
+        {
+          "text": "you",
+          "start_ms": 176525,
+          "end_ms": 176735,
+          "confidence": 0.549828
+        },
+        {
+          "text": "have",
+          "start_ms": 176994,
+          "end_ms": 177301,
+          "confidence": 0.9996729
+        },
+        {
+          "text": "proved",
+          "start_ms": 177414,
+          "end_ms": 177947,
+          "confidence": 0.9999051
+        },
+        {
+          "text": "that",
+          "start_ms": 178205,
+          "end_ms": 178367,
+          "confidence": 0.98497456
+        },
+        {
+          "text": "you",
+          "start_ms": 178367,
+          "end_ms": 178496,
+          "confidence": 0.99425006
+        },
+        {
+          "text": "are",
+          "start_ms": 178690,
+          "end_ms": 178787,
+          "confidence": 0.99981886
+        },
+        {
+          "text": "the",
+          "start_ms": 178787,
+          "end_ms": 179013,
+          "confidence": 0.99975854
+        },
+        {
+          "text": "rock",
+          "start_ms": 179013,
+          "end_ms": 179417,
+          "confidence": 0.93849677
+        },
+        {
+          "text": "that'll",
+          "start_ms": 179530,
+          "end_ms": 179999,
+          "confidence": 0.9864634
+        },
+        {
+          "text": "never",
+          "start_ms": 179999,
+          "end_ms": 180483,
+          "confidence": 0.9999819
+        },
+        {
+          "text": "move.",
+          "start_ms": 180483,
+          "end_ms": 181049,
+          "confidence": 0.9981305
+        },
+        {
+          "text": "You",
+          "start_ms": 181679,
+          "end_ms": 181792,
+          "confidence": 0.98555225
+        },
+        {
+          "text": "are",
+          "start_ms": 182002,
+          "end_ms": 182099,
+          "confidence": 0.9998895
+        },
+        {
+          "text": "the",
+          "start_ms": 182099,
+          "end_ms": 182325,
+          "confidence": 0.99997115
+        },
+        {
+          "text": "rock",
+          "start_ms": 182325,
+          "end_ms": 182891,
+          "confidence": 0.9997428
+        },
+        {
+          "text": "that'll",
+          "start_ms": 182907,
+          "end_ms": 183246,
+          "confidence": 0.999804
+        },
+        {
+          "text": "never",
+          "start_ms": 183246,
+          "end_ms": 183715,
+          "confidence": 0.99998295
+        },
+        {
+          "text": "move.",
+          "start_ms": 183715,
+          "end_ms": 183973,
+          "confidence": 0.99872017
+        }
+      ]
+    },
+    {
+      "text": "Again and again, you come through. You're always faithful, forever true. 'Cause you are the rocks that'll never move. You are the rocks that'll never move. Nothing's gonna shake our faith. Nothing's gonna shake our faith. Nothing's gonna shake our faith.",
+      "start_ms": 188034,
+      "end_ms": 210136,
+      "text_sk": "Znova a znova sa osvedčíte. Ste vždy verní, navždy pravdiví. Pretože ste skaly, ktoré sa nikdy nepohnú. Ste skaly, ktoré sa nikdy nepohnú. Nič nezotrasie našou vierou. Nič nezotrasie našou vierou. Nič nezotrasie našou vierou.",
+      "words": [
+        {
+          "text": "Again",
+          "start_ms": 188034,
+          "end_ms": 188486,
+          "confidence": 0.6791038
+        },
+        {
+          "text": "and",
+          "start_ms": 188486,
+          "end_ms": 188728,
+          "confidence": 0.99641967
+        },
+        {
+          "text": "again,",
+          "start_ms": 188728,
+          "end_ms": 189438,
+          "confidence": 0.8548903
+        },
+        {
+          "text": "you",
+          "start_ms": 189631,
+          "end_ms": 189809,
+          "confidence": 0.98111814
+        },
+        {
+          "text": "come",
+          "start_ms": 190035,
+          "end_ms": 190503,
+          "confidence": 0.5744588
+        },
+        {
+          "text": "through.",
+          "start_ms": 190503,
+          "end_ms": 190777,
+          "confidence": 0.9967069
+        },
+        {
+          "text": "You're",
+          "start_ms": 191390,
+          "end_ms": 191632,
+          "confidence": 0.9982573
+        },
+        {
+          "text": "always",
+          "start_ms": 191632,
+          "end_ms": 192020,
+          "confidence": 0.9999888
+        },
+        {
+          "text": "faithful,",
+          "start_ms": 192197,
+          "end_ms": 192810,
+          "confidence": 0.9705234
+        },
+        {
+          "text": "forever",
+          "start_ms": 192939,
+          "end_ms": 193553,
+          "confidence": 0.999944
+        },
+        {
+          "text": "true.",
+          "start_ms": 193569,
+          "end_ms": 193843,
+          "confidence": 0.8900927
+        },
+        {
+          "text": "'Cause",
+          "start_ms": 194634,
+          "end_ms": 194763,
+          "confidence": 0.6972292
+        },
+        {
+          "text": "you",
+          "start_ms": 194860,
+          "end_ms": 194972,
+          "confidence": 0.97604
+        },
+        {
+          "text": "are",
+          "start_ms": 195102,
+          "end_ms": 195263,
+          "confidence": 0.99925
+        },
+        {
+          "text": "the",
+          "start_ms": 195279,
+          "end_ms": 195457,
+          "confidence": 0.99978775
+        },
+        {
+          "text": "rocks",
+          "start_ms": 195570,
+          "end_ms": 195958,
+          "confidence": 0.56903744
+        },
+        {
+          "text": "that'll",
+          "start_ms": 196006,
+          "end_ms": 196411,
+          "confidence": 0.93430644
+        },
+        {
+          "text": "never",
+          "start_ms": 196411,
+          "end_ms": 196751,
+          "confidence": 0.99997187
+        },
+        {
+          "text": "move.",
+          "start_ms": 196751,
+          "end_ms": 197512,
+          "confidence": 0.9981561
+        },
+        {
+          "text": "You",
+          "start_ms": 198094,
+          "end_ms": 198224,
+          "confidence": 0.9997062
+        },
+        {
+          "text": "are",
+          "start_ms": 198418,
+          "end_ms": 198515,
+          "confidence": 0.9998462
+        },
+        {
+          "text": "the",
+          "start_ms": 198515,
+          "end_ms": 198742,
+          "confidence": 0.9999833
+        },
+        {
+          "text": "rocks",
+          "start_ms": 198742,
+          "end_ms": 199276,
+          "confidence": 0.9999329
+        },
+        {
+          "text": "that'll",
+          "start_ms": 199324,
+          "end_ms": 199713,
+          "confidence": 0.9997754
+        },
+        {
+          "text": "never",
+          "start_ms": 199713,
+          "end_ms": 200069,
+          "confidence": 0.99997413
+        },
+        {
+          "text": "move.",
+          "start_ms": 200069,
+          "end_ms": 200344,
+          "confidence": 0.9866183
+        },
+        {
+          "text": "Nothing's",
+          "start_ms": 201250,
+          "end_ms": 201816,
+          "confidence": 0.99900883
+        },
+        {
+          "text": "gonna",
+          "start_ms": 201833,
+          "end_ms": 202156,
+          "confidence": 0.9962237
+        },
+        {
+          "text": "shake",
+          "start_ms": 202156,
+          "end_ms": 202690,
+          "confidence": 0.9999063
+        },
+        {
+          "text": "our",
+          "start_ms": 202707,
+          "end_ms": 202885,
+          "confidence": 0.99251187
+        },
+        {
+          "text": "faith.",
+          "start_ms": 202885,
+          "end_ms": 203500,
+          "confidence": 0.9972706
+        },
+        {
+          "text": "Nothing's",
+          "start_ms": 204422,
+          "end_ms": 205070,
+          "confidence": 0.9789529
+        },
+        {
+          "text": "gonna",
+          "start_ms": 205070,
+          "end_ms": 205393,
+          "confidence": 0.9997881
+        },
+        {
+          "text": "shake",
+          "start_ms": 205393,
+          "end_ms": 206025,
+          "confidence": 0.99998164
+        },
+        {
+          "text": "our",
+          "start_ms": 206025,
+          "end_ms": 206203,
+          "confidence": 0.9999776
+        },
+        {
+          "text": "faith.",
+          "start_ms": 206203,
+          "end_ms": 206818,
+          "confidence": 0.99994475
+        },
+        {
+          "text": "Nothing's",
+          "start_ms": 207740,
+          "end_ms": 208388,
+          "confidence": 0.9995562
+        },
+        {
+          "text": "gonna",
+          "start_ms": 208388,
+          "end_ms": 208711,
+          "confidence": 0.99958473
+        },
+        {
+          "text": "shake",
+          "start_ms": 208711,
+          "end_ms": 209310,
+          "confidence": 0.99996865
+        },
+        {
+          "text": "our",
+          "start_ms": 209343,
+          "end_ms": 209521,
+          "confidence": 0.9999472
+        },
+        {
+          "text": "faith.",
+          "start_ms": 209521,
+          "end_ms": 210136,
+          "confidence": 0.992323
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 210556,
+      "end_ms": 210686,
+      "text_sk": "Áno.",
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 210556,
+          "end_ms": 210686,
+          "confidence": 0.8790394
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9670492,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "8ebc0e17-3c78-4050-8bd9-e799e1d2acf3",
+    "elapsed_s": 27.8,
+    "word_count": 286,
+    "utterance_count": 14,
+    "line_count": 14,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 229
+  }
+}

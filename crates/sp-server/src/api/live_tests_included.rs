@@ -259,11 +259,12 @@ async fn play_video_with_position_ms_forwards_to_engine() {
     }
 }
 
-/// play-video against a youtube-kind playlist must return 409, not silently
-/// dispatch an engine command. Protects the 404/409 status-code discipline
-/// of the sibling handlers.
+/// play-video against a youtube-kind playlist for a normalized video that
+/// belongs to it must succeed (#134) — regular playlists have no set-list
+/// concept, so membership is via videos.playlist_id + normalized, not
+/// playlist_items.
 #[tokio::test]
-async fn play_video_on_youtube_playlist_returns_409() {
+async fn play_video_on_youtube_playlist_succeeds() {
     let (pool, _, v1, _) = setup().await;
     let yt_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='src'")
         .fetch_one(&pool)
@@ -282,8 +283,91 @@ async fn play_video_on_youtube_playlist_returns_409() {
         )
         .await
         .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let cmd = engine_rx.recv().await.expect("engine command");
+    match cmd {
+        crate::EngineCommand::PlayVideo {
+            playlist_id,
+            video_id,
+            position_ms,
+        } => {
+            assert_eq!(playlist_id, yt_id);
+            assert_eq!(video_id, v1);
+            assert_eq!(position_ms, None);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+/// play-video on a youtube-kind playlist with a video_id that belongs to a
+/// DIFFERENT playlist must 404, not dispatch the engine command — prevents
+/// triggering playback of an arbitrary video via another playlist's URL.
+#[tokio::test]
+async fn play_video_on_youtube_playlist_with_video_from_other_playlist_returns_404() {
+    let (pool, ytlive_id, _, _) = setup().await;
+    let yt_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='src'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // A video that exists but belongs to ytlive_id, not yt_id.
+    let foreign_video = crate::db::models::upsert_video(&pool, ytlive_id, "foreign", Some("F"))
+        .await
+        .unwrap()
+        .id;
+    sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+        .bind(foreign_video)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let body = format!(r#"{{"video_id": {foreign_video}}}"#);
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{yt_id}/play-video"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    assert!(engine_rx.try_recv().is_err());
+}
+
+/// play-video on a youtube-kind playlist for a video that belongs to it but
+/// is NOT yet normalized (no sidecar files) must 409, not dispatch the
+/// engine command — mirrors get_song_paths's own normalized=1 gate.
+#[tokio::test]
+async fn play_video_on_youtube_playlist_with_unnormalized_video_returns_409() {
+    let (pool, _, _, _) = setup().await;
+    let yt_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='src'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // upsert_video defaults normalized=0 — do not mark it normalized.
+    let not_ready = crate::db::models::upsert_video(&pool, yt_id, "c", Some("C"))
+        .await
+        .unwrap()
+        .id;
+
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+
+    let body = format!(r#"{{"video_id": {not_ready}}}"#);
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{yt_id}/play-video"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
-    // No engine command should have been dispatched.
     assert!(engine_rx.try_recv().is_err());
 }
 

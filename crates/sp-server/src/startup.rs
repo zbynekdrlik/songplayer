@@ -115,6 +115,138 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     Ok(())
 }
 
+/// Re-run the emoji sanitizer (`metadata::sanitize::strip_emoji`) over every
+/// stored `song` / `artist` value and UPDATE only the rows whose sanitized
+/// text differs from what is stored (#135).
+///
+/// `metadata::get_metadata` sanitizes every NEW write, but a row written
+/// before that choke point existed stays dirty forever unless something
+/// re-visits it — and a row whose provider(s) keep failing (`gemini_failed
+/// = 1` with no working provider) can NEVER be healed by
+/// `ReprocessWorker`'s provider retry, since that path never falls back to
+/// the regex parser. This pass fixes the DB directly, independent of
+/// `gemini_failed` state, so it also cleans a `gemini_failed = 0` row that
+/// simply has a dirty stored value from before the fix.
+///
+/// Idempotent: a row whose sanitized song/artist already matches the
+/// stored value is left untouched (and NULL stays NULL — an absent value
+/// is not "dirty"). Returns the number of rows healed.
+pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+    let rows = sqlx::query("SELECT id, song, artist FROM videos")
+        .fetch_all(pool)
+        .await?;
+
+    let mut healed = 0usize;
+    for row in rows {
+        let id: i64 = row.get("id");
+        let song: Option<String> = row.get("song");
+        let artist: Option<String> = row.get("artist");
+
+        let clean_song = song.as_deref().map(crate::metadata::sanitize::strip_emoji);
+        let clean_artist = artist
+            .as_deref()
+            .map(crate::metadata::sanitize::strip_emoji);
+
+        if clean_song == song && clean_artist == artist {
+            continue;
+        }
+
+        sqlx::query("UPDATE videos SET song = ?, artist = ? WHERE id = ?")
+            .bind(clean_song)
+            .bind(clean_artist)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        healed += 1;
+    }
+
+    tracing::info!(
+        healed,
+        "self-heal: sanitized emoji from stored song/artist metadata"
+    );
+
+    Ok(healed)
+}
+
+/// Repair stored rows whose `song` was written empty/whitespace-only, or
+/// left NULL despite processing having finished — re-derive song+artist
+/// from the stored `title` via the regex title parser
+/// (`metadata::parser::parse_title`).
+///
+/// Two distinct broken shapes are repaired:
+///
+/// * `song` is an empty/whitespace string (#136: five ytalex rows
+///   shipped `song=""`, `artist=""`, `gemini_failed=false`).
+/// * `song IS NULL` **and** `normalized = 1` — the download/metadata
+///   pipeline ran to completion but never wrote a song value at all
+///   (observed live post-#136: five catalog rows stuck with
+///   `song=NULL`, `artist=NULL`, `normalized=1`, `gemini_failed=false`,
+///   which the E2E gate's `gemini_failed=false but empty song` check
+///   correctly flags).
+///
+/// A `song IS NULL` row with `normalized = 0` is deliberately NOT
+/// touched — that row simply hasn't been processed yet, it is not
+/// broken, and repairing it would race the download worker that is
+/// about to write real metadata for it.
+///
+/// `metadata::get_metadata`'s provider-success path now re-checks for an
+/// empty song after sanitization and falls back to the title parser
+/// itself, and `db::models::mark_video_processed_pair` refuses to WRITE
+/// an empty song — but a row already stored before those guards existed
+/// stays broken forever unless something re-visits it. This pass fixes
+/// the DB directly.
+///
+/// Every repaired row is stamped `gemini_failed = 1` — mirrors the
+/// `get_metadata` fallback contract: a repaired row always means the
+/// title parser produced the value, never a real provider result. If
+/// the title parser ALSO yields an empty song for a row (e.g. an
+/// empty/NULL title), the row is left untouched and logged at `warn!`
+/// — this pass never writes an empty value, same invariant as the
+/// write choke point.
+///
+/// Idempotent: a row whose `song` is already non-empty, or whose `song`
+/// is NULL with `normalized = 0` (not yet processed, not "dirty"), is
+/// left alone. Returns the number of rows healed.
+pub async fn self_heal_empty_song_metadata(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, youtube_id, title FROM videos
+         WHERE (song IS NOT NULL AND TRIM(song) = '')
+            OR (song IS NULL AND normalized = 1)",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut healed = 0usize;
+    for row in rows {
+        let id: i64 = row.get("id");
+        let youtube_id: String = row.get("youtube_id");
+        let title: Option<String> = row.get("title");
+        let title = title.unwrap_or_default();
+
+        let parsed = crate::metadata::parser::parse_title(&title);
+        if parsed.song.trim().is_empty() {
+            tracing::warn!(
+                video_id = id,
+                youtube_id = %youtube_id,
+                title = %title,
+                "self-heal: title parser also produced an empty song; leaving row untouched"
+            );
+            continue;
+        }
+
+        sqlx::query("UPDATE videos SET song = ?, artist = ?, gemini_failed = 1 WHERE id = ?")
+            .bind(&parsed.song)
+            .bind(&parsed.artist)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        healed += 1;
+    }
+
+    tracing::info!(healed, "self-heal: repaired stored rows with empty song");
+    Ok(healed)
+}
+
 /// Probe sample rates of every `normalized = 1` row's `audio_file_path`
 /// and flip any row whose audio is not at 48 kHz back to `normalized = 0`
 /// so the download worker re-normalizes it.
@@ -236,6 +368,233 @@ pub async fn startup_sync_active_playlists(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod empty_song_self_heal_tests {
+    use super::*;
+    use crate::db;
+
+    async fn seed_pool() -> SqlitePool {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name)
+             VALUES (1, 'p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    /// RED: mirrors the live #136 production defect — a stored row whose
+    /// `song` was written empty (`gemini_failed = 0`, so the provider
+    /// retry worker never revisits it) must be repaired from its stored
+    /// `title` via the regex parser, and flagged `gemini_failed = 1` so
+    /// it is visibly not a real provider result.
+    #[tokio::test]
+    async fn heals_dirty_row_with_empty_song_from_title() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'q_T_-Lh8AFI', 'Elevation Worship - The Blessing', '', '', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 1, "exactly the dirty row should be healed");
+
+        let row = sqlx::query(
+            "SELECT song, artist, gemini_failed FROM videos WHERE youtube_id = 'q_T_-Lh8AFI'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "The Blessing");
+        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
+        assert_eq!(
+            row.get::<i64, _>("gemini_failed"),
+            1,
+            "a repaired row must be flagged gemini_failed so it reads as parser-derived"
+        );
+    }
+
+    /// A whitespace-only stored song is just as dirty as `""`.
+    #[tokio::test]
+    async fn heals_whitespace_only_song() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'whitespace1', 'Pat Barrett - Count On You', '   ', NULL, 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 1);
+
+        let row = sqlx::query("SELECT song FROM videos WHERE youtube_id = 'whitespace1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "Count On You");
+    }
+
+    /// When the title parser ALSO produces an empty song (e.g. an empty
+    /// or NULL title), the row must be left completely untouched — never
+    /// write an empty value, per the same invariant as the write choke
+    /// point in `db::models::mark_video_processed_pair`.
+    #[tokio::test]
+    async fn leaves_row_untouched_when_parser_also_yields_empty_song() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'notitle', NULL, '', '', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(
+            healed, 0,
+            "a row the parser also can't derive a song for must not count as healed"
+        );
+
+        let row = sqlx::query("SELECT song FROM videos WHERE youtube_id = 'notitle'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: String = row.get("song");
+        assert_eq!(song, "", "row must stay untouched, never coerced further");
+    }
+
+    /// A row that already has a real song must never be touched.
+    #[tokio::test]
+    async fn skips_already_populated_rows() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'clean1', 'irrelevant', 'The Blessing', 'Elevation Worship', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "no row should be touched when already populated");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'clean1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "The Blessing");
+        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
+    }
+
+    /// A row with NULL song AND `normalized = 0` is genuinely unprocessed
+    /// (the download worker hasn't run yet), not "dirty" — it must never
+    /// be touched by this pass. This is the narrower half of what used to
+    /// be a single blanket "NULL song is always untouched" rule: see
+    /// `heals_null_song_row_when_already_normalized` for the other half,
+    /// where `normalized = 1` means processing already finished and the
+    /// row IS broken.
+    #[tokio::test]
+    async fn skips_null_song_rows_when_unprocessed() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized)
+             VALUES (1, 'unprocessed', 'Some Title', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "a NULL song row is unprocessed, not dirty");
+
+        let row = sqlx::query("SELECT song FROM videos WHERE youtube_id = 'unprocessed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: Option<String> = row.get("song");
+        assert_eq!(song, None, "song must stay NULL, never coerced to \"\"");
+    }
+
+    /// RED: mirrors the live post-deploy E2E production defect — a stored
+    /// row whose `song` is NULL but `normalized = 1` (processing finished
+    /// and produced nothing) must be repaired from its stored `title` via
+    /// the regex title parser, exactly like the empty-string case. This
+    /// is distinct from `skips_null_song_rows_when_unprocessed`: a NULL
+    /// song with `normalized = 0` merely hasn't been processed yet, but
+    /// NULL + `normalized = 1` means the pipeline ran and left the row
+    /// broken — five real catalog rows (e.g. `q_T_-Lh8AFI`, "WELCOME
+    /// HOME | ELEVATION RHYTHM & SEU Worship") were observed live in
+    /// exactly this state.
+    #[tokio::test]
+    async fn heals_null_song_row_when_already_normalized() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, gemini_failed, normalized)
+             VALUES (1, 'q_T_-Lh8AFI',
+                     'WELCOME HOME | ELEVATION RHYTHM & SEU Worship', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(
+            healed, 1,
+            "a NULL song row that already finished processing (normalized=1) must be repaired"
+        );
+
+        let row = sqlx::query(
+            "SELECT song, artist, gemini_failed FROM videos WHERE youtube_id = 'q_T_-Lh8AFI'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "WELCOME HOME");
+        assert_eq!(
+            row.get::<String, _>("artist"),
+            "ELEVATION RHYTHM & SEU Worship"
+        );
+        assert_eq!(
+            row.get::<i64, _>("gemini_failed"),
+            1,
+            "a repaired row must be flagged gemini_failed so it reads as parser-derived"
+        );
+    }
+
+    /// Idempotent: a second run over an already-repaired catalog heals
+    /// nothing.
+    #[tokio::test]
+    async fn is_idempotent() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'dirty1', 'Elevation Worship - The Blessing', '', '', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let first = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(first, 1);
+        let second = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(second, 0, "second run must find nothing left to repair");
+    }
 }
 
 #[cfg(test)]
@@ -426,5 +785,109 @@ mod sync_filter_tests {
         assert_eq!(row.get::<String, _>("kind"), "custom");
         assert_eq!(row.get::<String, _>("ndi_output_name"), "SP-live");
         assert_eq!(row.get::<String, _>("playback_mode"), "continuous");
+    }
+}
+
+#[cfg(test)]
+mod emoji_self_heal_tests {
+    use super::*;
+    use crate::db;
+
+    async fn seed_pool() -> SqlitePool {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name)
+             VALUES (1, 'p', 'u', 'n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    /// RED: mirrors the live #135 E2E failure — a stored row whose
+    /// `gemini_failed = 1` (every provider keeps failing on this video, so
+    /// it can never be healed by a provider retry) carries an emoji in
+    /// `artist` written before the sanitizer choke point existed. The
+    /// startup self-heal pass must clean it in place.
+    #[tokio::test]
+    async fn heals_dirty_stored_row_with_emoji() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, '0HQOYVf6-Yg', 't', 'Our God + The Blessing',
+                     'Christian Afro House 2025 \u{1F525}', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 1, "exactly the dirty row should be healed");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = '0HQOYVf6-Yg'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: String = row.get("song");
+        let artist: String = row.get("artist");
+        assert_eq!(song, "Our God + The Blessing");
+        assert_eq!(
+            artist, "Christian Afro House 2025",
+            "self-heal must strip emoji from the stored artist"
+        );
+    }
+
+    /// A row already clean (no emoji, `gemini_failed = 0`) must be left
+    /// untouched — proves the pass doesn't rewrite every row on every boot.
+    #[tokio::test]
+    async fn skips_already_clean_rows() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
+             VALUES (1, 'clean1', 't', 'The Blessing', 'Elevation Worship', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "no row should be touched when already clean");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'clean1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "The Blessing");
+        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
+    }
+
+    /// A row with NULL song/artist (never processed yet) must stay NULL —
+    /// the sanitizer must never turn an absent value into `""`.
+    #[tokio::test]
+    async fn preserves_null_song_and_artist() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized)
+             VALUES (1, 'unprocessed', 't', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
+        assert_eq!(healed, 0, "a NULL song/artist row is not dirty");
+
+        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'unprocessed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let song: Option<String> = row.get("song");
+        let artist: Option<String> = row.get("artist");
+        assert_eq!(song, None, "song must stay NULL, never coerced to \"\"");
+        assert_eq!(artist, None, "artist must stay NULL, never coerced to \"\"");
     }
 }

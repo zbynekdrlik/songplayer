@@ -1,0 +1,648 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "q5m09rqOoxE",
+  "duration_ms": 641190,
+  "lines": [
+    {
+      "text": "Faithful through the ages",
+      "start_ms": 17370,
+      "end_ms": 18570,
+      "text_sk": "Verný naprieč vekmi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "God of Abraham, You're the God of covenant and faithful promises",
+      "start_ms": 27510,
+      "end_ms": 32790,
+      "text_sk": "Boh Abraháma, si Bohom zmluvy a verných zasľúbení",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Time and time again You have proven You do just what You say",
+      "start_ms": 35790,
+      "end_ms": 41310,
+      "text_sk": "Znova a znova si dokázal, že robíš presne to, čo povieš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "Though the storms may come and the winds may blow, I'll remain steadfast. And let my heart learn when You speak a word, it will come to pass",
+      "start_ms": 42330,
+      "end_ms": 58590,
+      "text_sk": "Hoci by prišli búrky a fúkal vietor, zostanem pevný. A nech sa moje srdce naučí, že keď povieš slovo, stane sa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 28
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 60090,
+      "end_ms": 66870,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 68490,
+      "end_ms": 74910,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "From the rising sun to the setting same, I will praise Your name",
+      "start_ms": 75810,
+      "end_ms": 83490,
+      "text_sk": "Od východu slnka až po jeho západ budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 85350,
+      "end_ms": 91950,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The seasons change, You remain the same",
+      "start_ms": 102270,
+      "end_ms": 105330,
+      "text_sk": "Ročné obdobia sa menia, Ty zostávaš rovnaký",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "God from age to age, though the earth may pass away, Your word remains the same, yeah",
+      "start_ms": 111090,
+      "end_ms": 116850,
+      "text_sk": "Boh z veku na vek, hoci by sa zem pominula, Tvoje slovo zostáva rovnaké, áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "Your history can prove there's nothing You can't do, You're faithful and true",
+      "start_ms": 119130,
+      "end_ms": 125490,
+      "text_sk": "Tvoja história dokazuje, že nie je nič, čo by si nedokázal, si verný a pravdivý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "Though the storms may come and the winds may blow, I'll remain steadfast. And let my heart learn when You speak a word, it will come to pass",
+      "start_ms": 126090,
+      "end_ms": 143010,
+      "text_sk": "Hoci by prišli búrky a fúkal vietor, zostanem pevný. A nech sa moje srdce naučí, že keď povieš slovo, stane sa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 28,
+      "n_words_aligned": 28
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 144030,
+      "end_ms": 150390,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Great is Your faithfulness. From the rising sun to the setting same, I will praise Your name",
+      "start_ms": 152250,
+      "end_ms": 167070,
+      "text_sk": "Veľká je Tvoja vernosť. Od východu slnka až po jeho západ budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 169110,
+      "end_ms": 175710,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Your faithfulness, it never runs out",
+      "start_ms": 180750,
+      "end_ms": 187170,
+      "text_sk": "Tvoja vernosť sa nikdy nevyčerpá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "It never runs out, oh",
+      "start_ms": 188310,
+      "end_ms": 192990,
+      "text_sk": "Nikdy sa nevyčerpá, oh",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Your faithfulness, it never runs out",
+      "start_ms": 196770,
+      "end_ms": 204630,
+      "text_sk": "Tvoja vernosť sa nikdy nevyčerpá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "It never runs out, it never runs out",
+      "start_ms": 205110,
+      "end_ms": 210030,
+      "text_sk": "Nikdy sa nevyčerpá, nikdy sa nevyčerpá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 210450,
+      "end_ms": 217290,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": 218670,
+      "end_ms": 225810,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 227190,
+      "end_ms": 234090,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": 235530,
+      "end_ms": 258390,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 258450,
+      "end_ms": 265050,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": 265170,
+      "end_ms": 275310,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 317130,
+      "end_ms": 323850,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": 325530,
+      "end_ms": 329850,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "He'll never let me down",
+      "start_ms": 329970,
+      "end_ms": 332010,
+      "text_sk": "On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "From the rising sun to the setting same, I will praise Your name",
+      "start_ms": 338070,
+      "end_ms": 338370,
+      "text_sk": "Od východu slnka až po jeho západ budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 345210,
+      "end_ms": 345270,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 348510,
+      "end_ms": 355590,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": 356910,
+      "end_ms": 365010,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 365310,
+      "end_ms": 371490,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 11,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": 371730,
+      "end_ms": 374430,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": 375810,
+      "end_ms": 379890,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "He'll never let me down, He'll never let me down",
+      "start_ms": 380070,
+      "end_ms": 384030,
+      "text_sk": "On ma nikdy nesklame, On ma nikdy nesklame",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 389430,
+      "end_ms": 396450,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Great is Your faithfulness",
+      "start_ms": 399330,
+      "end_ms": 403710,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "From the rising sun to the setting same, I will praise Your name",
+      "start_ms": 404490,
+      "end_ms": 414330,
+      "text_sk": "Od východu slnka až po jeho západ budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let it go up! Let it come down! I'll still bless You, I'll still praise You! Let it go up, let it come down, and I'll still bless You, I'll still bless You!",
+      "start_ms": 424470,
+      "end_ms": 440190,
+      "text_sk": "Nech to stúpa hore! Nech to ide dole! Stále Ťa budem žehnať, stále Ťa budem chváliť! Nech to stúpa hore, nech to ide dole, a ja Ťa stále budem žehnať, stále Ťa budem žehnať!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 33,
+      "n_words_aligned": 31
+    },
+    {
+      "text": "From the rising sun to the setting same, and I'll still bless You, I'll still bless You, I'll still bless You, I'll still bless You, I'll still bless You!",
+      "start_ms": 445230,
+      "end_ms": 454950,
+      "text_sk": "Od východu slnka až po jeho západ, a ja Ťa stále budem žehnať, stále Ťa budem žehnať, stále Ťa budem žehnať, stále Ťa budem žehnať, stále Ťa budem žehnať!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 29,
+      "n_words_aligned": 21
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 456210,
+      "end_ms": 605490,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "From the rising sun to the setting same, I will praise Your name",
+      "start_ms": 605610,
+      "end_ms": 607650,
+      "text_sk": "Od východu slnka až po jeho západ budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 11,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 11,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 11,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu v zemi",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 11,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "My hope and firm foundation, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Moja nádej a pevný základ, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "He'll never let me down, He'll never let me down",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "On ma nikdy nesklame, On ma nikdy nesklame",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 10,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Great is Your faithfulness",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "From the rising sun to the setting same",
+      "start_ms": 607890,
+      "end_ms": 611130,
+      "text_sk": "Od východu slnka až po jeho západ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "From the rising sun, I will praise Your name",
+      "start_ms": 614130,
+      "end_ms": 623610,
+      "text_sk": "Od východu slnka budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "From the rising sun, I will praise Your name",
+      "start_ms": 624630,
+      "end_ms": 632130,
+      "text_sk": "Od východu slnka budem chváliť Tvoje meno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Great is Your faithfulness to me",
+      "start_ms": 634170,
+      "end_ms": 641190,
+      "text_sk": "Veľká je Tvoja vernosť ku mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 63,
+    "n_lines_timed": 47,
+    "n_lines_untimed": 16,
+    "n_words_total": 660,
+    "n_words_aligned": 459,
+    "word_align_rate": 0.6954545454545454,
+    "n_monotonic_violations_clamped": 0
+  }
+}

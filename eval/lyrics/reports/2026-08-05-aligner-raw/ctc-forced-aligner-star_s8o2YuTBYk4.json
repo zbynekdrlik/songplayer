@@ -1,0 +1,1699 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\s8o2YuTBYk4_vocal16k.wav",
+  "duration_ms": 238690,
+  "lines": [
+    {
+      "text": "Got a feeling that I really need to let go",
+      "start_ms": 2580,
+      "end_ms": 5260,
+      "text_sk": "Mám pocit, že sa naozaj musím pustiť",
+      "words": [
+        {
+          "text": "Got",
+          "start_ms": 2580,
+          "end_ms": 2720
+        },
+        {
+          "text": "a",
+          "start_ms": 2740,
+          "end_ms": 2760
+        },
+        {
+          "text": "feeling",
+          "start_ms": 2820,
+          "end_ms": 3260
+        },
+        {
+          "text": "that",
+          "start_ms": 3300,
+          "end_ms": 3560
+        },
+        {
+          "text": "I",
+          "start_ms": 3620,
+          "end_ms": 3640
+        },
+        {
+          "text": "really",
+          "start_ms": 3780,
+          "end_ms": 4120
+        },
+        {
+          "text": "need",
+          "start_ms": 4200,
+          "end_ms": 4380
+        },
+        {
+          "text": "to",
+          "start_ms": 4420,
+          "end_ms": 4540
+        },
+        {
+          "text": "let",
+          "start_ms": 4700,
+          "end_ms": 4960
+        },
+        {
+          "text": "go",
+          "start_ms": 5120,
+          "end_ms": 5260
+        }
+      ]
+    },
+    {
+      "text": "Of everything that's weighing me down",
+      "start_ms": 6340,
+      "end_ms": 9780,
+      "text_sk": "Všetkého, čo ma ťaží",
+      "words": [
+        {
+          "text": "Of",
+          "start_ms": 6340,
+          "end_ms": 6440
+        },
+        {
+          "text": "everything",
+          "start_ms": 6640,
+          "end_ms": 7600
+        },
+        {
+          "text": "that's",
+          "start_ms": 8180,
+          "end_ms": 8320
+        },
+        {
+          "text": "weighing",
+          "start_ms": 8440,
+          "end_ms": 8860
+        },
+        {
+          "text": "me",
+          "start_ms": 8960,
+          "end_ms": 9140
+        },
+        {
+          "text": "down",
+          "start_ms": 9360,
+          "end_ms": 9780
+        }
+      ]
+    },
+    {
+      "text": "Gotta listen to the voice that I know",
+      "start_ms": 10100,
+      "end_ms": 13140,
+      "text_sk": "Musím počúvať hlas, ktorý poznám",
+      "words": [
+        {
+          "text": "Gotta",
+          "start_ms": 10100,
+          "end_ms": 10300
+        },
+        {
+          "text": "listen",
+          "start_ms": 10360,
+          "end_ms": 10680
+        },
+        {
+          "text": "to",
+          "start_ms": 10780,
+          "end_ms": 10900
+        },
+        {
+          "text": "the",
+          "start_ms": 11020,
+          "end_ms": 11100
+        },
+        {
+          "text": "voice",
+          "start_ms": 11240,
+          "end_ms": 11620
+        },
+        {
+          "text": "that",
+          "start_ms": 11740,
+          "end_ms": 12060
+        },
+        {
+          "text": "I",
+          "start_ms": 12280,
+          "end_ms": 12300
+        },
+        {
+          "text": "know",
+          "start_ms": 12560,
+          "end_ms": 13140
+        }
+      ]
+    },
+    {
+      "text": "You speak to me and say I'm free",
+      "start_ms": 13820,
+      "end_ms": 17300,
+      "text_sk": "Hovoríš ku mne a hovoríš, že som voľný",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 13820,
+          "end_ms": 13900
+        },
+        {
+          "text": "speak",
+          "start_ms": 13960,
+          "end_ms": 14240
+        },
+        {
+          "text": "to",
+          "start_ms": 14300,
+          "end_ms": 14380
+        },
+        {
+          "text": "me",
+          "start_ms": 14540,
+          "end_ms": 14660
+        },
+        {
+          "text": "and",
+          "start_ms": 15740,
+          "end_ms": 15860
+        },
+        {
+          "text": "say",
+          "start_ms": 15940,
+          "end_ms": 16160
+        },
+        {
+          "text": "I'm",
+          "start_ms": 16300,
+          "end_ms": 16720
+        },
+        {
+          "text": "free",
+          "start_ms": 16860,
+          "end_ms": 17300
+        }
+      ]
+    },
+    {
+      "text": "Come on hands high hands up",
+      "start_ms": 18260,
+      "end_ms": 21060,
+      "text_sk": "No tak ruky hore, ruky hore",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 18260,
+          "end_ms": 18440
+        },
+        {
+          "text": "on",
+          "start_ms": 18500,
+          "end_ms": 18580
+        },
+        {
+          "text": "hands",
+          "start_ms": 18600,
+          "end_ms": 18800
+        },
+        {
+          "text": "high",
+          "start_ms": 18960,
+          "end_ms": 19040
+        },
+        {
+          "text": "hands",
+          "start_ms": 19060,
+          "end_ms": 19220
+        },
+        {
+          "text": "up",
+          "start_ms": 21020,
+          "end_ms": 21060
+        }
+      ]
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "start_ms": 21100,
+      "end_ms": 24780,
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "words": [
+        {
+          "text": "Nothing",
+          "start_ms": 21100,
+          "end_ms": 21340
+        },
+        {
+          "text": "gonna",
+          "start_ms": 21360,
+          "end_ms": 21480
+        },
+        {
+          "text": "hold",
+          "start_ms": 21560,
+          "end_ms": 21780
+        },
+        {
+          "text": "me",
+          "start_ms": 21820,
+          "end_ms": 21900
+        },
+        {
+          "text": "down",
+          "start_ms": 22020,
+          "end_ms": 22480
+        },
+        {
+          "text": "'cause",
+          "start_ms": 22760,
+          "end_ms": 23080
+        },
+        {
+          "text": "you",
+          "start_ms": 23140,
+          "end_ms": 23200
+        },
+        {
+          "text": "keep",
+          "start_ms": 23220,
+          "end_ms": 23400
+        },
+        {
+          "text": "setting",
+          "start_ms": 23460,
+          "end_ms": 23880
+        },
+        {
+          "text": "me",
+          "start_ms": 23940,
+          "end_ms": 24060
+        },
+        {
+          "text": "free",
+          "start_ms": 24300,
+          "end_ms": 24780
+        }
+      ]
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "start_ms": 28440,
+      "end_ms": 32220,
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 28440,
+          "end_ms": 28460
+        },
+        {
+          "text": "can",
+          "start_ms": 28500,
+          "end_ms": 28700
+        },
+        {
+          "text": "feel",
+          "start_ms": 28800,
+          "end_ms": 29000
+        },
+        {
+          "text": "it",
+          "start_ms": 29040,
+          "end_ms": 29080
+        },
+        {
+          "text": "all",
+          "start_ms": 29160,
+          "end_ms": 29300
+        },
+        {
+          "text": "around",
+          "start_ms": 29320,
+          "end_ms": 29540
+        },
+        {
+          "text": "'cause",
+          "start_ms": 30020,
+          "end_ms": 30480
+        },
+        {
+          "text": "in",
+          "start_ms": 30540,
+          "end_ms": 30640
+        },
+        {
+          "text": "your",
+          "start_ms": 30660,
+          "end_ms": 30840
+        },
+        {
+          "text": "presence",
+          "start_ms": 30900,
+          "end_ms": 31440
+        },
+        {
+          "text": "I'm",
+          "start_ms": 31520,
+          "end_ms": 31720
+        },
+        {
+          "text": "free",
+          "start_ms": 31840,
+          "end_ms": 32220
+        }
+      ]
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 34800,
+      "end_ms": 36160,
+      "text_sk": "Som voľný",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 34800,
+          "end_ms": 34960
+        },
+        {
+          "text": "free",
+          "start_ms": 35420,
+          "end_ms": 36160
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 36460,
+      "end_ms": 39640,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 36460,
+          "end_ms": 39640
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 50480,
+      "end_ms": 50660,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 50480,
+          "end_ms": 50660
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 54220,
+      "end_ms": 57940,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 54220,
+          "end_ms": 57940
+        }
+      ]
+    },
+    {
+      "text": "When I think of how my life has been changed",
+      "start_ms": 62580,
+      "end_ms": 65940,
+      "text_sk": "Keď pomyslím na to, ako sa môj život zmenil",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 62580,
+          "end_ms": 62700
+        },
+        {
+          "text": "I",
+          "start_ms": 62800,
+          "end_ms": 62820
+        },
+        {
+          "text": "think",
+          "start_ms": 62840,
+          "end_ms": 63040
+        },
+        {
+          "text": "of",
+          "start_ms": 63120,
+          "end_ms": 63240
+        },
+        {
+          "text": "how",
+          "start_ms": 63280,
+          "end_ms": 63480
+        },
+        {
+          "text": "my",
+          "start_ms": 63540,
+          "end_ms": 63680
+        },
+        {
+          "text": "life",
+          "start_ms": 63760,
+          "end_ms": 64140
+        },
+        {
+          "text": "has",
+          "start_ms": 64220,
+          "end_ms": 64560
+        },
+        {
+          "text": "been",
+          "start_ms": 64680,
+          "end_ms": 64960
+        },
+        {
+          "text": "changed",
+          "start_ms": 65160,
+          "end_ms": 65940
+        }
+      ]
+    },
+    {
+      "text": "It all comes down to being with you",
+      "start_ms": 66400,
+      "end_ms": 69540,
+      "text_sk": "Všetko sa scvrkáva na to byť s tebou",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 66400,
+          "end_ms": 66480
+        },
+        {
+          "text": "all",
+          "start_ms": 66620,
+          "end_ms": 66740
+        },
+        {
+          "text": "comes",
+          "start_ms": 66800,
+          "end_ms": 67060
+        },
+        {
+          "text": "down",
+          "start_ms": 67100,
+          "end_ms": 67640
+        },
+        {
+          "text": "to",
+          "start_ms": 68180,
+          "end_ms": 68280
+        },
+        {
+          "text": "being",
+          "start_ms": 68420,
+          "end_ms": 68820
+        },
+        {
+          "text": "with",
+          "start_ms": 68900,
+          "end_ms": 69300
+        },
+        {
+          "text": "you",
+          "start_ms": 69380,
+          "end_ms": 69540
+        }
+      ]
+    },
+    {
+      "text": "And I know that you are always with me",
+      "start_ms": 70100,
+      "end_ms": 72820,
+      "text_sk": "A viem, že si vždy so mnou",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 70100,
+          "end_ms": 70200
+        },
+        {
+          "text": "I",
+          "start_ms": 70260,
+          "end_ms": 70280
+        },
+        {
+          "text": "know",
+          "start_ms": 70300,
+          "end_ms": 70500
+        },
+        {
+          "text": "that",
+          "start_ms": 70560,
+          "end_ms": 70720
+        },
+        {
+          "text": "you",
+          "start_ms": 70820,
+          "end_ms": 70920
+        },
+        {
+          "text": "are",
+          "start_ms": 71100,
+          "end_ms": 71280
+        },
+        {
+          "text": "always",
+          "start_ms": 71440,
+          "end_ms": 72140
+        },
+        {
+          "text": "with",
+          "start_ms": 72220,
+          "end_ms": 72500
+        },
+        {
+          "text": "me",
+          "start_ms": 72680,
+          "end_ms": 72820
+        }
+      ]
+    },
+    {
+      "text": "Lord I believe with you I'm free",
+      "start_ms": 73820,
+      "end_ms": 77260,
+      "text_sk": "Pane, verím, že s tebou som voľný",
+      "words": [
+        {
+          "text": "Lord",
+          "start_ms": 73820,
+          "end_ms": 74080
+        },
+        {
+          "text": "I",
+          "start_ms": 74240,
+          "end_ms": 74260
+        },
+        {
+          "text": "believe",
+          "start_ms": 74320,
+          "end_ms": 75160
+        },
+        {
+          "text": "with",
+          "start_ms": 75740,
+          "end_ms": 75940
+        },
+        {
+          "text": "you",
+          "start_ms": 76000,
+          "end_ms": 76120
+        },
+        {
+          "text": "I'm",
+          "start_ms": 76520,
+          "end_ms": 76680
+        },
+        {
+          "text": "free",
+          "start_ms": 76800,
+          "end_ms": 77260
+        }
+      ]
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "start_ms": 77420,
+      "end_ms": 84860,
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "words": [
+        {
+          "text": "Nothing",
+          "start_ms": 77420,
+          "end_ms": 81320
+        },
+        {
+          "text": "gonna",
+          "start_ms": 81340,
+          "end_ms": 81480
+        },
+        {
+          "text": "hold",
+          "start_ms": 81560,
+          "end_ms": 81760
+        },
+        {
+          "text": "me",
+          "start_ms": 81820,
+          "end_ms": 81920
+        },
+        {
+          "text": "down",
+          "start_ms": 82020,
+          "end_ms": 82480
+        },
+        {
+          "text": "'cause",
+          "start_ms": 82500,
+          "end_ms": 82960
+        },
+        {
+          "text": "you",
+          "start_ms": 83000,
+          "end_ms": 83100
+        },
+        {
+          "text": "keep",
+          "start_ms": 83180,
+          "end_ms": 83340
+        },
+        {
+          "text": "setting",
+          "start_ms": 83420,
+          "end_ms": 83840
+        },
+        {
+          "text": "me",
+          "start_ms": 83900,
+          "end_ms": 84020
+        },
+        {
+          "text": "free",
+          "start_ms": 84300,
+          "end_ms": 84860
+        }
+      ]
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "start_ms": 88620,
+      "end_ms": 92240,
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 88620,
+          "end_ms": 88640
+        },
+        {
+          "text": "can",
+          "start_ms": 88680,
+          "end_ms": 88780
+        },
+        {
+          "text": "feel",
+          "start_ms": 88820,
+          "end_ms": 89000
+        },
+        {
+          "text": "it",
+          "start_ms": 89020,
+          "end_ms": 89100
+        },
+        {
+          "text": "all",
+          "start_ms": 89200,
+          "end_ms": 89280
+        },
+        {
+          "text": "around",
+          "start_ms": 89380,
+          "end_ms": 89980
+        },
+        {
+          "text": "'cause",
+          "start_ms": 90240,
+          "end_ms": 90520
+        },
+        {
+          "text": "in",
+          "start_ms": 90580,
+          "end_ms": 90740
+        },
+        {
+          "text": "your",
+          "start_ms": 90760,
+          "end_ms": 90880
+        },
+        {
+          "text": "presence",
+          "start_ms": 90920,
+          "end_ms": 91480
+        },
+        {
+          "text": "I'm",
+          "start_ms": 91560,
+          "end_ms": 91700
+        },
+        {
+          "text": "free",
+          "start_ms": 91800,
+          "end_ms": 92240
+        }
+      ]
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 98980,
+      "end_ms": 99920,
+      "text_sk": "Som voľný",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 98980,
+          "end_ms": 99380
+        },
+        {
+          "text": "free",
+          "start_ms": 99540,
+          "end_ms": 99920
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 105060,
+      "end_ms": 105280,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 105060,
+          "end_ms": 105280
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 110380,
+      "end_ms": 110560,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 110380,
+          "end_ms": 110560
+        }
+      ]
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 110580,
+      "end_ms": 110660,
+      "text_sk": "Áno",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 110580,
+          "end_ms": 110660
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 110700,
+      "end_ms": 124740,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 110700,
+          "end_ms": 110760
+        },
+        {
+          "text": "gonna",
+          "start_ms": 114200,
+          "end_ms": 114520
+        },
+        {
+          "text": "praise",
+          "start_ms": 117940,
+          "end_ms": 118060
+        },
+        {
+          "text": "you",
+          "start_ms": 118080,
+          "end_ms": 118160
+        },
+        {
+          "text": "with",
+          "start_ms": 118200,
+          "end_ms": 118280
+        },
+        {
+          "text": "my",
+          "start_ms": 119600,
+          "end_ms": 119640
+        },
+        {
+          "text": "hands",
+          "start_ms": 122000,
+          "end_ms": 122620
+        },
+        {
+          "text": "raised",
+          "start_ms": 122860,
+          "end_ms": 123440
+        },
+        {
+          "text": "high",
+          "start_ms": 123800,
+          "end_ms": 124740
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 125660,
+      "end_ms": 128760,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 125660,
+          "end_ms": 126000
+        },
+        {
+          "text": "gonna",
+          "start_ms": 126100,
+          "end_ms": 126420
+        },
+        {
+          "text": "praise",
+          "start_ms": 126560,
+          "end_ms": 126860
+        },
+        {
+          "text": "you",
+          "start_ms": 126880,
+          "end_ms": 126980
+        },
+        {
+          "text": "with",
+          "start_ms": 127060,
+          "end_ms": 127260
+        },
+        {
+          "text": "my",
+          "start_ms": 127300,
+          "end_ms": 127440
+        },
+        {
+          "text": "hands",
+          "start_ms": 127540,
+          "end_ms": 127940
+        },
+        {
+          "text": "raised",
+          "start_ms": 127980,
+          "end_ms": 128420
+        },
+        {
+          "text": "high",
+          "start_ms": 128440,
+          "end_ms": 128760
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 129020,
+      "end_ms": 132500,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 129020,
+          "end_ms": 129080
+        },
+        {
+          "text": "gonna",
+          "start_ms": 129840,
+          "end_ms": 130180
+        },
+        {
+          "text": "praise",
+          "start_ms": 130280,
+          "end_ms": 130600
+        },
+        {
+          "text": "you",
+          "start_ms": 130640,
+          "end_ms": 130720
+        },
+        {
+          "text": "with",
+          "start_ms": 130800,
+          "end_ms": 130980
+        },
+        {
+          "text": "my",
+          "start_ms": 131020,
+          "end_ms": 131180
+        },
+        {
+          "text": "hands",
+          "start_ms": 131300,
+          "end_ms": 131700
+        },
+        {
+          "text": "raised",
+          "start_ms": 131760,
+          "end_ms": 132160
+        },
+        {
+          "text": "high",
+          "start_ms": 132200,
+          "end_ms": 132500
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 132540,
+      "end_ms": 136940,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 132540,
+          "end_ms": 132600
+        },
+        {
+          "text": "gonna",
+          "start_ms": 133600,
+          "end_ms": 133960
+        },
+        {
+          "text": "praise",
+          "start_ms": 134060,
+          "end_ms": 134360
+        },
+        {
+          "text": "you",
+          "start_ms": 134380,
+          "end_ms": 134480
+        },
+        {
+          "text": "with",
+          "start_ms": 134560,
+          "end_ms": 134740
+        },
+        {
+          "text": "my",
+          "start_ms": 134780,
+          "end_ms": 134920
+        },
+        {
+          "text": "hands",
+          "start_ms": 135020,
+          "end_ms": 135440
+        },
+        {
+          "text": "raised",
+          "start_ms": 135520,
+          "end_ms": 135940
+        },
+        {
+          "text": "high",
+          "start_ms": 135960,
+          "end_ms": 136940
+        }
+      ]
+    },
+    {
+      "text": "Go",
+      "start_ms": 151600,
+      "end_ms": 151680,
+      "text_sk": "Choď",
+      "words": [
+        {
+          "text": "Go",
+          "start_ms": 151600,
+          "end_ms": 151680
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 151960,
+      "end_ms": 156100,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 151960,
+          "end_ms": 152300
+        },
+        {
+          "text": "gonna",
+          "start_ms": 152360,
+          "end_ms": 152620
+        },
+        {
+          "text": "praise",
+          "start_ms": 152800,
+          "end_ms": 153180
+        },
+        {
+          "text": "you",
+          "start_ms": 153200,
+          "end_ms": 153260
+        },
+        {
+          "text": "with",
+          "start_ms": 153300,
+          "end_ms": 153500
+        },
+        {
+          "text": "my",
+          "start_ms": 153560,
+          "end_ms": 153600
+        },
+        {
+          "text": "hands",
+          "start_ms": 153760,
+          "end_ms": 154200
+        },
+        {
+          "text": "raised",
+          "start_ms": 154260,
+          "end_ms": 155880
+        },
+        {
+          "text": "high",
+          "start_ms": 155940,
+          "end_ms": 156100
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "start_ms": 156140,
+      "end_ms": 158360,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 156140,
+          "end_ms": 156220
+        },
+        {
+          "text": "gonna",
+          "start_ms": 156240,
+          "end_ms": 156520
+        },
+        {
+          "text": "praise",
+          "start_ms": 156540,
+          "end_ms": 156860
+        },
+        {
+          "text": "you",
+          "start_ms": 156880,
+          "end_ms": 157000
+        },
+        {
+          "text": "with",
+          "start_ms": 157040,
+          "end_ms": 157200
+        },
+        {
+          "text": "my",
+          "start_ms": 157260,
+          "end_ms": 157300
+        },
+        {
+          "text": "hands",
+          "start_ms": 157520,
+          "end_ms": 158000
+        },
+        {
+          "text": "raised",
+          "start_ms": 158060,
+          "end_ms": 158360
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 159320,
+      "end_ms": 162240,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 159320,
+          "end_ms": 159780
+        },
+        {
+          "text": "gonna",
+          "start_ms": 159820,
+          "end_ms": 160140
+        },
+        {
+          "text": "praise",
+          "start_ms": 160280,
+          "end_ms": 160680
+        },
+        {
+          "text": "you",
+          "start_ms": 160700,
+          "end_ms": 160760
+        },
+        {
+          "text": "with",
+          "start_ms": 160780,
+          "end_ms": 160940
+        },
+        {
+          "text": "my",
+          "start_ms": 160960,
+          "end_ms": 161020
+        },
+        {
+          "text": "hands",
+          "start_ms": 161300,
+          "end_ms": 161680
+        },
+        {
+          "text": "raised",
+          "start_ms": 161760,
+          "end_ms": 162000
+        },
+        {
+          "text": "high",
+          "start_ms": 162020,
+          "end_ms": 162240
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 162600,
+      "end_ms": 167540,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 162600,
+          "end_ms": 163520
+        },
+        {
+          "text": "gonna",
+          "start_ms": 163580,
+          "end_ms": 163920
+        },
+        {
+          "text": "praise",
+          "start_ms": 164020,
+          "end_ms": 164400
+        },
+        {
+          "text": "you",
+          "start_ms": 164420,
+          "end_ms": 164520
+        },
+        {
+          "text": "with",
+          "start_ms": 164540,
+          "end_ms": 164740
+        },
+        {
+          "text": "my",
+          "start_ms": 164760,
+          "end_ms": 164800
+        },
+        {
+          "text": "hands",
+          "start_ms": 165040,
+          "end_ms": 165460
+        },
+        {
+          "text": "raised",
+          "start_ms": 165520,
+          "end_ms": 167380
+        },
+        {
+          "text": "high",
+          "start_ms": 167400,
+          "end_ms": 167540
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "start_ms": 167560,
+      "end_ms": 169760,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 167560,
+          "end_ms": 167620
+        },
+        {
+          "text": "gonna",
+          "start_ms": 167640,
+          "end_ms": 167760
+        },
+        {
+          "text": "praise",
+          "start_ms": 167780,
+          "end_ms": 168180
+        },
+        {
+          "text": "you",
+          "start_ms": 168200,
+          "end_ms": 168260
+        },
+        {
+          "text": "with",
+          "start_ms": 168300,
+          "end_ms": 168480
+        },
+        {
+          "text": "my",
+          "start_ms": 168520,
+          "end_ms": 168700
+        },
+        {
+          "text": "hands",
+          "start_ms": 168780,
+          "end_ms": 169220
+        },
+        {
+          "text": "raised",
+          "start_ms": 169300,
+          "end_ms": 169760
+        }
+      ]
+    },
+    {
+      "text": "Oh yes we are",
+      "start_ms": 173760,
+      "end_ms": 177960,
+      "text_sk": "Ó áno, sme",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 173760,
+          "end_ms": 174020
+        },
+        {
+          "text": "yes",
+          "start_ms": 174040,
+          "end_ms": 174220
+        },
+        {
+          "text": "we",
+          "start_ms": 174340,
+          "end_ms": 174440
+        },
+        {
+          "text": "are",
+          "start_ms": 174660,
+          "end_ms": 177960
+        }
+      ]
+    },
+    {
+      "text": "Hey",
+      "start_ms": 181800,
+      "end_ms": 182040,
+      "text_sk": "Hej",
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 181800,
+          "end_ms": 182040
+        }
+      ]
+    },
+    {
+      "text": "Oh",
+      "start_ms": 182120,
+      "end_ms": 182340,
+      "text_sk": "Ó",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 182120,
+          "end_ms": 182340
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 182500,
+      "end_ms": 185440,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 182500,
+          "end_ms": 182580
+        },
+        {
+          "text": "gonna",
+          "start_ms": 182600,
+          "end_ms": 182920
+        },
+        {
+          "text": "praise",
+          "start_ms": 183040,
+          "end_ms": 183360
+        },
+        {
+          "text": "you",
+          "start_ms": 183380,
+          "end_ms": 183480
+        },
+        {
+          "text": "with",
+          "start_ms": 183580,
+          "end_ms": 183740
+        },
+        {
+          "text": "my",
+          "start_ms": 183780,
+          "end_ms": 183960
+        },
+        {
+          "text": "hands",
+          "start_ms": 184040,
+          "end_ms": 184460
+        },
+        {
+          "text": "raised",
+          "start_ms": 184500,
+          "end_ms": 185000
+        },
+        {
+          "text": "high",
+          "start_ms": 185220,
+          "end_ms": 185440
+        }
+      ]
+    },
+    {
+      "text": "Hey",
+      "start_ms": 188920,
+      "end_ms": 188980,
+      "text_sk": "Hej",
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 188920,
+          "end_ms": 188980
+        }
+      ]
+    },
+    {
+      "text": "Yeah hey",
+      "start_ms": 189000,
+      "end_ms": 189800,
+      "text_sk": "Áno hej",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 189000,
+          "end_ms": 189260
+        },
+        {
+          "text": "hey",
+          "start_ms": 189280,
+          "end_ms": 189800
+        }
+      ]
+    },
+    {
+      "text": "One two",
+      "start_ms": 193200,
+      "end_ms": 193380,
+      "text_sk": "Jeden dva",
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 193200,
+          "end_ms": 193260
+        },
+        {
+          "text": "two",
+          "start_ms": 193280,
+          "end_ms": 193380
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise",
+      "start_ms": 193480,
+      "end_ms": 196080,
+      "text_sk": "Budem chváliť",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 193480,
+          "end_ms": 193560
+        },
+        {
+          "text": "gonna",
+          "start_ms": 195160,
+          "end_ms": 195460
+        },
+        {
+          "text": "praise",
+          "start_ms": 195620,
+          "end_ms": 196080
+        }
+      ]
+    },
+    {
+      "text": "Hey hey",
+      "start_ms": 196140,
+      "end_ms": 196780,
+      "text_sk": "Hej hej",
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 196140,
+          "end_ms": 196240
+        },
+        {
+          "text": "hey",
+          "start_ms": 196560,
+          "end_ms": 196780
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 197360,
+      "end_ms": 200400,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 197360,
+          "end_ms": 197460
+        },
+        {
+          "text": "gonna",
+          "start_ms": 197520,
+          "end_ms": 197840
+        },
+        {
+          "text": "praise",
+          "start_ms": 197960,
+          "end_ms": 198340
+        },
+        {
+          "text": "you",
+          "start_ms": 198360,
+          "end_ms": 198460
+        },
+        {
+          "text": "with",
+          "start_ms": 198520,
+          "end_ms": 198700
+        },
+        {
+          "text": "my",
+          "start_ms": 198760,
+          "end_ms": 198800
+        },
+        {
+          "text": "hands",
+          "start_ms": 199000,
+          "end_ms": 199460
+        },
+        {
+          "text": "raised",
+          "start_ms": 199500,
+          "end_ms": 200200
+        },
+        {
+          "text": "high",
+          "start_ms": 200320,
+          "end_ms": 200400
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 201260,
+      "end_ms": 208720,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 201260,
+          "end_ms": 201320
+        },
+        {
+          "text": "gonna",
+          "start_ms": 201340,
+          "end_ms": 201580
+        },
+        {
+          "text": "praise",
+          "start_ms": 201760,
+          "end_ms": 202140
+        },
+        {
+          "text": "you",
+          "start_ms": 202160,
+          "end_ms": 202220
+        },
+        {
+          "text": "with",
+          "start_ms": 202300,
+          "end_ms": 202480
+        },
+        {
+          "text": "my",
+          "start_ms": 202500,
+          "end_ms": 202560
+        },
+        {
+          "text": "hands",
+          "start_ms": 202760,
+          "end_ms": 203180
+        },
+        {
+          "text": "raised",
+          "start_ms": 203320,
+          "end_ms": 203920
+        },
+        {
+          "text": "high",
+          "start_ms": 208500,
+          "end_ms": 208720
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 208840,
+      "end_ms": 212060,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 208840,
+          "end_ms": 208900
+        },
+        {
+          "text": "gonna",
+          "start_ms": 208920,
+          "end_ms": 209220
+        },
+        {
+          "text": "praise",
+          "start_ms": 209360,
+          "end_ms": 209720
+        },
+        {
+          "text": "you",
+          "start_ms": 209740,
+          "end_ms": 209800
+        },
+        {
+          "text": "with",
+          "start_ms": 209840,
+          "end_ms": 210040
+        },
+        {
+          "text": "my",
+          "start_ms": 210060,
+          "end_ms": 210160
+        },
+        {
+          "text": "hands",
+          "start_ms": 210340,
+          "end_ms": 210900
+        },
+        {
+          "text": "raised",
+          "start_ms": 210980,
+          "end_ms": 211500
+        },
+        {
+          "text": "high",
+          "start_ms": 211520,
+          "end_ms": 212060
+        }
+      ]
+    },
+    {
+      "text": "Come on lift him up tonight",
+      "start_ms": 213300,
+      "end_ms": 238700,
+      "text_sk": "Poďme ho dnes večer pozdvihnúť",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 213300,
+          "end_ms": 213540
+        },
+        {
+          "text": "on",
+          "start_ms": 213560,
+          "end_ms": 213620
+        },
+        {
+          "text": "lift",
+          "start_ms": 213680,
+          "end_ms": 213900
+        },
+        {
+          "text": "him",
+          "start_ms": 213920,
+          "end_ms": 214020
+        },
+        {
+          "text": "up",
+          "start_ms": 214080,
+          "end_ms": 214200
+        },
+        {
+          "text": "tonight",
+          "start_ms": 214260,
+          "end_ms": 238700
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.21,
+    "model_load_sec": null,
+    "error": null
+  }
+}

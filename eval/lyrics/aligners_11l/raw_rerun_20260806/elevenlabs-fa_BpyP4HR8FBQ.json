@@ -1,0 +1,1731 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\BpyP4HR8FBQ_vocal16k.wav",
+  "duration_ms": null,
+  "lines": [
+    {
+      "text": "In the quiet of the morning",
+      "text_sk": "V tichu rána",
+      "start_ms": 14640,
+      "end_ms": 17780,
+      "mean_word_loss": 0.4162829073648604,
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 14640,
+          "end_ms": 14960,
+          "loss": 1.291015625
+        },
+        {
+          "text": "the",
+          "start_ms": 15000,
+          "end_ms": 15070,
+          "loss": 0.008076985677083334
+        },
+        {
+          "text": "quiet",
+          "start_ms": 15180,
+          "end_ms": 16040,
+          "loss": 0.010542869567871094
+        },
+        {
+          "text": "of",
+          "start_ms": 16120,
+          "end_ms": 16700,
+          "loss": 0.19635009765625
+        },
+        {
+          "text": "the",
+          "start_ms": 16720,
+          "end_ms": 16880,
+          "loss": 0.9673207600911459
+        },
+        {
+          "text": "morning",
+          "start_ms": 16920,
+          "end_ms": 17780,
+          "loss": 0.024391106196812222
+        }
+      ]
+    },
+    {
+      "text": "When no one knows and no one needs to know",
+      "text_sk": "Keď nikto nevie a nikto nepotrebuje vedieť",
+      "start_ms": 21020,
+      "end_ms": 24800,
+      "mean_word_loss": 0.16582752943038942,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 21020,
+          "end_ms": 21300,
+          "loss": 1.2509765625
+        },
+        {
+          "text": "no",
+          "start_ms": 21370,
+          "end_ms": 21540,
+          "loss": 0.0313720703125
+        },
+        {
+          "text": "one",
+          "start_ms": 21720,
+          "end_ms": 21960,
+          "loss": 0.021474202473958332
+        },
+        {
+          "text": "knows",
+          "start_ms": 22020,
+          "end_ms": 22640,
+          "loss": 0.2958892822265625
+        },
+        {
+          "text": "and",
+          "start_ms": 22660,
+          "end_ms": 22820,
+          "loss": 0.0440673828125
+        },
+        {
+          "text": "no",
+          "start_ms": 22880,
+          "end_ms": 23080,
+          "loss": 0.004730224609375
+        },
+        {
+          "text": "one",
+          "start_ms": 23320,
+          "end_ms": 23580,
+          "loss": 0.004015604654947917
+        },
+        {
+          "text": "needs",
+          "start_ms": 23700,
+          "end_ms": 24080,
+          "loss": 0.0011689901351928712
+        },
+        {
+          "text": "to",
+          "start_ms": 24120,
+          "end_ms": 24220,
+          "loss": 0.0035247802734375
+        },
+        {
+          "text": "know",
+          "start_ms": 24300,
+          "end_ms": 24800,
+          "loss": 0.0010561943054199219
+        }
+      ]
+    },
+    {
+      "text": "You speak to me You give me strength",
+      "text_sk": "Hovoríš ku mne dávaš mi silu",
+      "start_ms": 27880,
+      "end_ms": 34540,
+      "mean_word_loss": 0.22525669336318968,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 27880,
+          "end_ms": 27960,
+          "loss": 0.6846644083658854
+        },
+        {
+          "text": "speak",
+          "start_ms": 28100,
+          "end_ms": 28460,
+          "loss": 0.0250946044921875
+        },
+        {
+          "text": "to",
+          "start_ms": 28500,
+          "end_ms": 28640,
+          "loss": 0.00290679931640625
+        },
+        {
+          "text": "me",
+          "start_ms": 28740,
+          "end_ms": 29160,
+          "loss": 0.032012939453125
+        },
+        {
+          "text": "You",
+          "start_ms": 29320,
+          "end_ms": 29440,
+          "loss": 1.0160725911458333
+        },
+        {
+          "text": "give",
+          "start_ms": 29600,
+          "end_ms": 29960,
+          "loss": 0.021199941635131836
+        },
+        {
+          "text": "me",
+          "start_ms": 30020,
+          "end_ms": 30160,
+          "loss": 0.0008711814880371094
+        },
+        {
+          "text": "strength",
+          "start_ms": 30300,
+          "end_ms": 34540,
+          "loss": 0.019231081008911133
+        }
+      ]
+    },
+    {
+      "text": "There's nothing like the secret place",
+      "text_sk": "Nie je nič ako tajné miesto",
+      "start_ms": 34620,
+      "end_ms": 38720,
+      "mean_word_loss": 0.21220477573455324,
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 34620,
+          "end_ms": 34840,
+          "loss": 0.3603793552943638
+        },
+        {
+          "text": "nothing",
+          "start_ms": 34850,
+          "end_ms": 35520,
+          "loss": 0.021205902099609375
+        },
+        {
+          "text": "like",
+          "start_ms": 35580,
+          "end_ms": 36220,
+          "loss": 0.028071880340576172
+        },
+        {
+          "text": "the",
+          "start_ms": 36300,
+          "end_ms": 36310,
+          "loss": 0.8354899088541666
+        },
+        {
+          "text": "secret",
+          "start_ms": 36420,
+          "end_ms": 37620,
+          "loss": 0.02692413330078125
+        },
+        {
+          "text": "place",
+          "start_ms": 37780,
+          "end_ms": 38720,
+          "loss": 0.0011574745178222657
+        }
+      ]
+    },
+    {
+      "text": "Underground is where life begins",
+      "text_sk": "Pod zemou začína život",
+      "start_ms": 41700,
+      "end_ms": 46320,
+      "mean_word_loss": 0.2807057952880859,
+      "words": [
+        {
+          "text": "Underground",
+          "start_ms": 41700,
+          "end_ms": 43300,
+          "loss": 0.32895851135253906
+        },
+        {
+          "text": "is",
+          "start_ms": 43360,
+          "end_ms": 43620,
+          "loss": 0.2444610595703125
+        },
+        {
+          "text": "where",
+          "start_ms": 43700,
+          "end_ms": 44100,
+          "loss": 0.2741706848144531
+        },
+        {
+          "text": "life",
+          "start_ms": 44200,
+          "end_ms": 44520,
+          "loss": 0.4459228515625
+        },
+        {
+          "text": "begins",
+          "start_ms": 44620,
+          "end_ms": 46320,
+          "loss": 0.110015869140625
+        }
+      ]
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "text_sk": "Moje srdce sa bude radovať v skrytosti",
+      "start_ms": 47960,
+      "end_ms": 53140,
+      "mean_word_loss": 0.4293191520535216,
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 47960,
+          "end_ms": 48340,
+          "loss": 1.654296875
+        },
+        {
+          "text": "heart",
+          "start_ms": 48400,
+          "end_ms": 49000,
+          "loss": 0.0151519775390625
+        },
+        {
+          "text": "will",
+          "start_ms": 49200,
+          "end_ms": 49540,
+          "loss": 0.01862335205078125
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 49640,
+          "end_ms": 50500,
+          "loss": 0.06862899235316686
+        },
+        {
+          "text": "in",
+          "start_ms": 50520,
+          "end_ms": 50680,
+          "loss": 0.195587158203125
+        },
+        {
+          "text": "the",
+          "start_ms": 50690,
+          "end_ms": 50920,
+          "loss": 0.0760498046875
+        },
+        {
+          "text": "hiddenness",
+          "start_ms": 51040,
+          "end_ms": 53140,
+          "loss": 0.9768959045410156
+        }
+      ]
+    },
+    {
+      "text": "Beyond the burial there's a resurrection",
+      "text_sk": "Za pohrebom je vzkriesenie",
+      "start_ms": 54920,
+      "end_ms": 59980,
+      "mean_word_loss": 0.28687466136992923,
+      "words": [
+        {
+          "text": "Beyond",
+          "start_ms": 54920,
+          "end_ms": 55560,
+          "loss": 0.7596232096354166
+        },
+        {
+          "text": "the",
+          "start_ms": 55600,
+          "end_ms": 55680,
+          "loss": 0.12386067708333333
+        },
+        {
+          "text": "burial",
+          "start_ms": 55740,
+          "end_ms": 57160,
+          "loss": 0.7646687825520834
+        },
+        {
+          "text": "there's",
+          "start_ms": 57240,
+          "end_ms": 57780,
+          "loss": 0.05936540876116071
+        },
+        {
+          "text": "a",
+          "start_ms": 58140,
+          "end_ms": 58460,
+          "loss": 0.0076904296875
+        },
+        {
+          "text": "resurrection",
+          "start_ms": 58540,
+          "end_ms": 59980,
+          "loss": 0.00603946050008138
+        }
+      ]
+    },
+    {
+      "text": "Your will be done in me",
+      "text_sk": "Nech sa stane Tvoja vôľa vo mne",
+      "start_ms": 60680,
+      "end_ms": 64460,
+      "mean_word_loss": 0.08742423852284749,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 60680,
+          "end_ms": 60960,
+          "loss": 0.45428466796875
+        },
+        {
+          "text": "will",
+          "start_ms": 61080,
+          "end_ms": 61780,
+          "loss": 0.026182174682617188
+        },
+        {
+          "text": "be",
+          "start_ms": 61920,
+          "end_ms": 62680,
+          "loss": 0.00455474853515625
+        },
+        {
+          "text": "done",
+          "start_ms": 62760,
+          "end_ms": 63220,
+          "loss": 0.002782583236694336
+        },
+        {
+          "text": "in",
+          "start_ms": 63360,
+          "end_ms": 63920,
+          "loss": 0.00771331787109375
+        },
+        {
+          "text": "me",
+          "start_ms": 64019,
+          "end_ms": 64460,
+          "loss": 0.029027938842773438
+        }
+      ]
+    },
+    {
+      "text": "In the stillness all around",
+      "text_sk": "V tichu všade okolo",
+      "start_ms": 68560,
+      "end_ms": 71820,
+      "mean_word_loss": 0.886359977722168,
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 68560,
+          "end_ms": 69060,
+          "loss": 3.015625
+        },
+        {
+          "text": "the",
+          "start_ms": 69100,
+          "end_ms": 69200,
+          "loss": 1.01806640625
+        },
+        {
+          "text": "stillness",
+          "start_ms": 69320,
+          "end_ms": 70160,
+          "loss": 0.36098480224609375
+        },
+        {
+          "text": "all",
+          "start_ms": 70220,
+          "end_ms": 70880,
+          "loss": 0.013234456380208334
+        },
+        {
+          "text": "around",
+          "start_ms": 71000,
+          "end_ms": 71820,
+          "loss": 0.02388922373453776
+        }
+      ]
+    },
+    {
+      "text": "You are working all the details out",
+      "text_sk": "Pracuješ na všetkých detailoch",
+      "start_ms": 75460,
+      "end_ms": 79250,
+      "mean_word_loss": 0.09622134967726104,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 75460,
+          "end_ms": 75720,
+          "loss": 0.5505167643229166
+        },
+        {
+          "text": "are",
+          "start_ms": 75820,
+          "end_ms": 76100,
+          "loss": 0.004144032796223958
+        },
+        {
+          "text": "working",
+          "start_ms": 76140,
+          "end_ms": 76970,
+          "loss": 0.04029532841273716
+        },
+        {
+          "text": "all",
+          "start_ms": 77140,
+          "end_ms": 77540,
+          "loss": 0.00274658203125
+        },
+        {
+          "text": "the",
+          "start_ms": 77580,
+          "end_ms": 77720,
+          "loss": 0.009472529093424479
+        },
+        {
+          "text": "details",
+          "start_ms": 77800,
+          "end_ms": 78840,
+          "loss": 0.0017023767743791854
+        },
+        {
+          "text": "out",
+          "start_ms": 78960,
+          "end_ms": 79250,
+          "loss": 0.06467183430989583
+        }
+      ]
+    },
+    {
+      "text": "What's in me will grow someday",
+      "text_sk": "To čo je vo mne raz vyrastie",
+      "start_ms": 82100,
+      "end_ms": 85180,
+      "mean_word_loss": 0.07554775192624047,
+      "words": [
+        {
+          "text": "What's",
+          "start_ms": 82100,
+          "end_ms": 82460,
+          "loss": 0.37524938583374023
+        },
+        {
+          "text": "in",
+          "start_ms": 82540,
+          "end_ms": 82760,
+          "loss": 0.0038547515869140625
+        },
+        {
+          "text": "me",
+          "start_ms": 82860,
+          "end_ms": 83140,
+          "loss": 0.012298583984375
+        },
+        {
+          "text": "will",
+          "start_ms": 83420,
+          "end_ms": 83570,
+          "loss": 0.0341796875
+        },
+        {
+          "text": "grow",
+          "start_ms": 83640,
+          "end_ms": 83960,
+          "loss": 0.016132354736328125
+        },
+        {
+          "text": "someday",
+          "start_ms": 84120,
+          "end_ms": 85180,
+          "loss": 0.01157174791608538
+        }
+      ]
+    },
+    {
+      "text": "I trust Your timing and Your ways",
+      "text_sk": "Verím Tvojmu času a Tvojim cestám",
+      "start_ms": 88220,
+      "end_ms": 92920,
+      "mean_word_loss": 0.3305763426281157,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 88220,
+          "end_ms": 88820,
+          "loss": 0.7265625
+        },
+        {
+          "text": "trust",
+          "start_ms": 88900,
+          "end_ms": 89300,
+          "loss": 0.131005859375
+        },
+        {
+          "text": "Your",
+          "start_ms": 89360,
+          "end_ms": 89540,
+          "loss": 0.643310546875
+        },
+        {
+          "text": "timing",
+          "start_ms": 89680,
+          "end_ms": 90480,
+          "loss": 0.20931434631347656
+        },
+        {
+          "text": "and",
+          "start_ms": 90520,
+          "end_ms": 90800,
+          "loss": 0.010640462239583334
+        },
+        {
+          "text": "Your",
+          "start_ms": 90900,
+          "end_ms": 91820,
+          "loss": 0.41595458984375
+        },
+        {
+          "text": "ways",
+          "start_ms": 91940,
+          "end_ms": 92920,
+          "loss": 0.17724609375
+        }
+      ]
+    },
+    {
+      "text": "Underground is where life begins",
+      "text_sk": "Pod zemou začína život",
+      "start_ms": 95660,
+      "end_ms": 100380,
+      "mean_word_loss": 0.5063896687825521,
+      "words": [
+        {
+          "text": "Underground",
+          "start_ms": 95660,
+          "end_ms": 97420,
+          "loss": 0.18648529052734375
+        },
+        {
+          "text": "is",
+          "start_ms": 97500,
+          "end_ms": 97760,
+          "loss": 0.316162109375
+        },
+        {
+          "text": "where",
+          "start_ms": 97840,
+          "end_ms": 98210,
+          "loss": 0.6344085693359375
+        },
+        {
+          "text": "life",
+          "start_ms": 98380,
+          "end_ms": 98630,
+          "loss": 1.0693359375
+        },
+        {
+          "text": "begins",
+          "start_ms": 98700,
+          "end_ms": 100380,
+          "loss": 0.3255564371744792
+        }
+      ]
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "text_sk": "Moje srdce sa bude radovať v skrytosti",
+      "start_ms": 102040,
+      "end_ms": 107160,
+      "mean_word_loss": 0.4106138579699458,
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 102040,
+          "end_ms": 102460,
+          "loss": 1.384765625
+        },
+        {
+          "text": "heart",
+          "start_ms": 102500,
+          "end_ms": 103220,
+          "loss": 0.01563873291015625
+        },
+        {
+          "text": "will",
+          "start_ms": 103300,
+          "end_ms": 103580,
+          "loss": 0.032138824462890625
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 103740,
+          "end_ms": 104600,
+          "loss": 0.11671338762555804
+        },
+        {
+          "text": "in",
+          "start_ms": 104640,
+          "end_ms": 104760,
+          "loss": 0.21697998046875
+        },
+        {
+          "text": "the",
+          "start_ms": 104800,
+          "end_ms": 104940,
+          "loss": 0.0819091796875
+        },
+        {
+          "text": "hiddenness",
+          "start_ms": 105080,
+          "end_ms": 107160,
+          "loss": 1.0261512756347657
+        }
+      ]
+    },
+    {
+      "text": "Beyond the burial there's a resurrection",
+      "text_sk": "Za pohrebom je vzkriesenie",
+      "start_ms": 109000,
+      "end_ms": 114110,
+      "mean_word_loss": 0.3126054264250256,
+      "words": [
+        {
+          "text": "Beyond",
+          "start_ms": 109000,
+          "end_ms": 109640,
+          "loss": 0.7325439453125
+        },
+        {
+          "text": "the",
+          "start_ms": 109680,
+          "end_ms": 109730,
+          "loss": 0.16748046875
+        },
+        {
+          "text": "burial",
+          "start_ms": 109840,
+          "end_ms": 111240,
+          "loss": 0.8829142252604166
+        },
+        {
+          "text": "there's",
+          "start_ms": 111360,
+          "end_ms": 112160,
+          "loss": 0.07750156947544642
+        },
+        {
+          "text": "a",
+          "start_ms": 112240,
+          "end_ms": 112560,
+          "loss": 0.0101318359375
+        },
+        {
+          "text": "resurrection",
+          "start_ms": 112640,
+          "end_ms": 114110,
+          "loss": 0.005060513814290364
+        }
+      ]
+    },
+    {
+      "text": "Your will be done in me",
+      "text_sk": "Nech sa stane Tvoja vôľa vo mne",
+      "start_ms": 114720,
+      "end_ms": 118580,
+      "mean_word_loss": 0.05380729834238688,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 114720,
+          "end_ms": 115020,
+          "loss": 0.23028564453125
+        },
+        {
+          "text": "will",
+          "start_ms": 115180,
+          "end_ms": 115960,
+          "loss": 0.03171825408935547
+        },
+        {
+          "text": "be",
+          "start_ms": 116040,
+          "end_ms": 116840,
+          "loss": 0.005333900451660156
+        },
+        {
+          "text": "done",
+          "start_ms": 116900,
+          "end_ms": 117340,
+          "loss": 0.003267526626586914
+        },
+        {
+          "text": "in",
+          "start_ms": 117500,
+          "end_ms": 118040,
+          "loss": 0.008563995361328125
+        },
+        {
+          "text": "me",
+          "start_ms": 118120,
+          "end_ms": 118580,
+          "loss": 0.043674468994140625
+        }
+      ]
+    },
+    {
+      "text": "Oh let my roots go deep",
+      "text_sk": "Ó nech moje korene idú hlboko",
+      "start_ms": 121080,
+      "end_ms": 125860,
+      "mean_word_loss": 0.41651578479342993,
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 121080,
+          "end_ms": 121820,
+          "loss": 2.1015625
+        },
+        {
+          "text": "let",
+          "start_ms": 121960,
+          "end_ms": 122600,
+          "loss": 0.07059987386067708
+        },
+        {
+          "text": "my",
+          "start_ms": 122760,
+          "end_ms": 123440,
+          "loss": 0.13037109375
+        },
+        {
+          "text": "roots",
+          "start_ms": 123640,
+          "end_ms": 124000,
+          "loss": 0.024774932861328126
+        },
+        {
+          "text": "go",
+          "start_ms": 124060,
+          "end_ms": 124740,
+          "loss": 0.0010709762573242188
+        },
+        {
+          "text": "deep",
+          "start_ms": 124840,
+          "end_ms": 125860,
+          "loss": 0.17071533203125
+        }
+      ]
+    },
+    {
+      "text": "And I will rise I will rise",
+      "text_sk": "A povstanem povstanem",
+      "start_ms": 127740,
+      "end_ms": 136920,
+      "mean_word_loss": 0.7530226480393184,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 127740,
+          "end_ms": 131170,
+          "loss": 2.1927083333333335
+        },
+        {
+          "text": "I",
+          "start_ms": 131320,
+          "end_ms": 131600,
+          "loss": 1.5
+        },
+        {
+          "text": "will",
+          "start_ms": 131660,
+          "end_ms": 131900,
+          "loss": 0.06120109558105469
+        },
+        {
+          "text": "rise",
+          "start_ms": 132040,
+          "end_ms": 133480,
+          "loss": 0.1548023223876953
+        },
+        {
+          "text": "I",
+          "start_ms": 134700,
+          "end_ms": 134880,
+          "loss": 1.3515625
+        },
+        {
+          "text": "will",
+          "start_ms": 135020,
+          "end_ms": 135360,
+          "loss": 0.005322456359863281
+        },
+        {
+          "text": "rise",
+          "start_ms": 135420,
+          "end_ms": 136920,
+          "loss": 0.00556182861328125
+        }
+      ]
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "text_sk": "On drží čas keď povstanem",
+      "start_ms": 137500,
+      "end_ms": 143860,
+      "mean_word_loss": 0.32728785822788875,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 137500,
+          "end_ms": 137920,
+          "loss": 2.54833984375
+        },
+        {
+          "text": "holds",
+          "start_ms": 137980,
+          "end_ms": 138600,
+          "loss": 0.010523223876953125
+        },
+        {
+          "text": "the",
+          "start_ms": 138660,
+          "end_ms": 138940,
+          "loss": 0.005071004231770833
+        },
+        {
+          "text": "time",
+          "start_ms": 139080,
+          "end_ms": 140240,
+          "loss": 0.013013362884521484
+        },
+        {
+          "text": "that",
+          "start_ms": 141120,
+          "end_ms": 141340,
+          "loss": 0.020999133586883545
+        },
+        {
+          "text": "I",
+          "start_ms": 141460,
+          "end_ms": 141620,
+          "loss": 0.00238037109375
+        },
+        {
+          "text": "will",
+          "start_ms": 141780,
+          "end_ms": 142020,
+          "loss": 0.0016423463821411133
+        },
+        {
+          "text": "rise",
+          "start_ms": 142260,
+          "end_ms": 143860,
+          "loss": 0.016333580017089844
+        }
+      ]
+    },
+    {
+      "text": "I will rise I will rise",
+      "text_sk": "Povstanem povstanem",
+      "start_ms": 144860,
+      "end_ms": 150580,
+      "mean_word_loss": 0.16581412156422934,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 144860,
+          "end_ms": 145020,
+          "loss": 0.41015625
+        },
+        {
+          "text": "will",
+          "start_ms": 145200,
+          "end_ms": 145540,
+          "loss": 0.0021767616271972656
+        },
+        {
+          "text": "rise",
+          "start_ms": 145640,
+          "end_ms": 147440,
+          "loss": 0.005764961242675781
+        },
+        {
+          "text": "I",
+          "start_ms": 148240,
+          "end_ms": 148440,
+          "loss": 0.5703125
+        },
+        {
+          "text": "will",
+          "start_ms": 148540,
+          "end_ms": 148860,
+          "loss": 0.0018799304962158203
+        },
+        {
+          "text": "rise",
+          "start_ms": 148960,
+          "end_ms": 150580,
+          "loss": 0.004594326019287109
+        }
+      ]
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "text_sk": "On drží čas keď povstanem",
+      "start_ms": 151000,
+      "end_ms": 157640,
+      "mean_word_loss": 0.29847688525915145,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 151000,
+          "end_ms": 151440,
+          "loss": 2.322265625
+        },
+        {
+          "text": "holds",
+          "start_ms": 151500,
+          "end_ms": 152140,
+          "loss": 0.009778404235839843
+        },
+        {
+          "text": "the",
+          "start_ms": 152180,
+          "end_ms": 152460,
+          "loss": 0.00246429443359375
+        },
+        {
+          "text": "time",
+          "start_ms": 152600,
+          "end_ms": 153800,
+          "loss": 0.012013912200927734
+        },
+        {
+          "text": "that",
+          "start_ms": 154660,
+          "end_ms": 154860,
+          "loss": 0.02272874116897583
+        },
+        {
+          "text": "I",
+          "start_ms": 155000,
+          "end_ms": 155160,
+          "loss": 0.00176239013671875
+        },
+        {
+          "text": "will",
+          "start_ms": 155340,
+          "end_ms": 155600,
+          "loss": 0.001398921012878418
+        },
+        {
+          "text": "rise",
+          "start_ms": 155780,
+          "end_ms": 157640,
+          "loss": 0.015402793884277344
+        }
+      ]
+    },
+    {
+      "text": "I will rise I will rise",
+      "text_sk": "Povstanem povstanem",
+      "start_ms": 158360,
+      "end_ms": 164220,
+      "mean_word_loss": 0.13717591762542725,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 158360,
+          "end_ms": 158560,
+          "loss": 0.314453125
+        },
+        {
+          "text": "will",
+          "start_ms": 158680,
+          "end_ms": 159060,
+          "loss": 0.0021402835845947266
+        },
+        {
+          "text": "rise",
+          "start_ms": 159160,
+          "end_ms": 161200,
+          "loss": 0.006142139434814453
+        },
+        {
+          "text": "I",
+          "start_ms": 161680,
+          "end_ms": 161940,
+          "loss": 0.494140625
+        },
+        {
+          "text": "will",
+          "start_ms": 162080,
+          "end_ms": 162380,
+          "loss": 0.0017943382263183594
+        },
+        {
+          "text": "rise",
+          "start_ms": 162540,
+          "end_ms": 164220,
+          "loss": 0.0043849945068359375
+        }
+      ]
+    },
+    {
+      "text": "God through my life be lifted high",
+      "text_sk": "Boh cez môj život buď vyvýšený vysoko",
+      "start_ms": 164580,
+      "end_ms": 170340,
+      "mean_word_loss": 0.1976931151889619,
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 164580,
+          "end_ms": 164960,
+          "loss": 1.2679036458333333
+        },
+        {
+          "text": "through",
+          "start_ms": 165020,
+          "end_ms": 165380,
+          "loss": 0.0013742446899414062
+        },
+        {
+          "text": "my",
+          "start_ms": 165500,
+          "end_ms": 165740,
+          "loss": 0.006016731262207031
+        },
+        {
+          "text": "life",
+          "start_ms": 165860,
+          "end_ms": 167520,
+          "loss": 0.0009543895721435547
+        },
+        {
+          "text": "be",
+          "start_ms": 167980,
+          "end_ms": 168300,
+          "loss": 0.08843994140625
+        },
+        {
+          "text": "lifted",
+          "start_ms": 168400,
+          "end_ms": 169140,
+          "loss": 0.0032747586568196616
+        },
+        {
+          "text": "high",
+          "start_ms": 169260,
+          "end_ms": 170340,
+          "loss": 0.015888094902038574
+        }
+      ]
+    },
+    {
+      "text": "I will rise I will rise",
+      "text_sk": "Povstanem povstanem",
+      "start_ms": 171880,
+      "end_ms": 177780,
+      "mean_word_loss": 0.09612504641215007,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 171880,
+          "end_ms": 172040,
+          "loss": 0.17578125
+        },
+        {
+          "text": "will",
+          "start_ms": 172180,
+          "end_ms": 172520,
+          "loss": 0.0040740966796875
+        },
+        {
+          "text": "rise",
+          "start_ms": 172660,
+          "end_ms": 174800,
+          "loss": 0.005295753479003906
+        },
+        {
+          "text": "I",
+          "start_ms": 175260,
+          "end_ms": 175500,
+          "loss": 0.38671875
+        },
+        {
+          "text": "will",
+          "start_ms": 175600,
+          "end_ms": 175860,
+          "loss": 0.0013356208801269531
+        },
+        {
+          "text": "rise",
+          "start_ms": 176000,
+          "end_ms": 177780,
+          "loss": 0.0035448074340820312
+        }
+      ]
+    },
+    {
+      "text": "God through my life be lifted high",
+      "text_sk": "Boh cez môj život buď vyvýšený vysoko",
+      "start_ms": 178080,
+      "end_ms": 184500,
+      "mean_word_loss": 0.15004171076275052,
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 178080,
+          "end_ms": 178400,
+          "loss": 0.9315592447916666
+        },
+        {
+          "text": "through",
+          "start_ms": 178520,
+          "end_ms": 178860,
+          "loss": 0.00237274169921875
+        },
+        {
+          "text": "my",
+          "start_ms": 178980,
+          "end_ms": 179200,
+          "loss": 0.006591796875
+        },
+        {
+          "text": "life",
+          "start_ms": 179360,
+          "end_ms": 181360,
+          "loss": 0.001478433609008789
+        },
+        {
+          "text": "be",
+          "start_ms": 181480,
+          "end_ms": 181740,
+          "loss": 0.0887451171875
+        },
+        {
+          "text": "lifted",
+          "start_ms": 181820,
+          "end_ms": 182660,
+          "loss": 0.004220167795817058
+        },
+        {
+          "text": "high",
+          "start_ms": 182760,
+          "end_ms": 184500,
+          "loss": 0.01532447338104248
+        }
+      ]
+    },
+    {
+      "text": "Let Jesus rise",
+      "text_sk": "Nech Ježiš povstane",
+      "start_ms": 184860,
+      "end_ms": 187060,
+      "mean_word_loss": 0.7782589170667861,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 184860,
+          "end_ms": 185140,
+          "loss": 2.2896525065104165
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 185320,
+          "end_ms": 186020,
+          "loss": 0.002689552307128906
+        },
+        {
+          "text": "rise",
+          "start_ms": 186120,
+          "end_ms": 187060,
+          "loss": 0.0424346923828125
+        }
+      ]
+    },
+    {
+      "text": "Let Jesus rise",
+      "text_sk": "Nech Ježiš povstane",
+      "start_ms": 187070,
+      "end_ms": 191240,
+      "mean_word_loss": 1.4358492533365885,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 187070,
+          "end_ms": 187071,
+          "loss": 3.921875
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 188760,
+          "end_ms": 189480,
+          "loss": 0.18056411743164064
+        },
+        {
+          "text": "rise",
+          "start_ms": 189560,
+          "end_ms": 191240,
+          "loss": 0.205108642578125
+        }
+      ]
+    },
+    {
+      "text": "God through my life be glorified",
+      "text_sk": "Boh cez môj život buď oslávený",
+      "start_ms": 191600,
+      "end_ms": 196329,
+      "mean_word_loss": 0.49270201486254495,
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 191600,
+          "end_ms": 191960,
+          "loss": 2.4032389322916665
+        },
+        {
+          "text": "through",
+          "start_ms": 192040,
+          "end_ms": 192380,
+          "loss": 0.006624902997698102
+        },
+        {
+          "text": "my",
+          "start_ms": 192500,
+          "end_ms": 192760,
+          "loss": 0.026317596435546875
+        },
+        {
+          "text": "life",
+          "start_ms": 192860,
+          "end_ms": 194540,
+          "loss": 0.009583473205566406
+        },
+        {
+          "text": "be",
+          "start_ms": 194980,
+          "end_ms": 195260,
+          "loss": 0.38311767578125
+        },
+        {
+          "text": "glorified",
+          "start_ms": 195340,
+          "end_ms": 196329,
+          "loss": 0.12732950846354166
+        }
+      ]
+    },
+    {
+      "text": "Let Jesus rise",
+      "text_sk": "Nech Ježiš povstane",
+      "start_ms": 196340,
+      "end_ms": 201680,
+      "mean_word_loss": 0.3971904224819607,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 196340,
+          "end_ms": 196640,
+          "loss": 1.0462239583333333
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 198820,
+          "end_ms": 199580,
+          "loss": 0.01772279739379883
+        },
+        {
+          "text": "rise",
+          "start_ms": 199620,
+          "end_ms": 201680,
+          "loss": 0.12762451171875
+        }
+      ]
+    },
+    {
+      "text": "Jesus rise",
+      "text_sk": "Ježiš povstaň",
+      "start_ms": 202200,
+      "end_ms": 204700,
+      "mean_word_loss": 0.7818241119384766,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 202200,
+          "end_ms": 202980,
+          "loss": 1.1920661926269531
+        },
+        {
+          "text": "rise",
+          "start_ms": 203040,
+          "end_ms": 204700,
+          "loss": 0.37158203125
+        }
+      ]
+    },
+    {
+      "text": "God through my life be glorified",
+      "text_sk": "Boh cez môj život buď oslávený",
+      "start_ms": 205120,
+      "end_ms": 210500,
+      "mean_word_loss": 0.29925072130072056,
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 205120,
+          "end_ms": 205800,
+          "loss": 1.2271321614583333
+        },
+        {
+          "text": "through",
+          "start_ms": 205860,
+          "end_ms": 206220,
+          "loss": 0.0061997004917689735
+        },
+        {
+          "text": "my",
+          "start_ms": 206280,
+          "end_ms": 206560,
+          "loss": 0.024311065673828125
+        },
+        {
+          "text": "life",
+          "start_ms": 206680,
+          "end_ms": 208040,
+          "loss": 0.014954566955566406
+        },
+        {
+          "text": "be",
+          "start_ms": 208540,
+          "end_ms": 208800,
+          "loss": 0.398651123046875
+        },
+        {
+          "text": "glorified",
+          "start_ms": 208820,
+          "end_ms": 210500,
+          "loss": 0.1242557101779514
+        }
+      ]
+    },
+    {
+      "text": "Let Jesus rise",
+      "text_sk": "Nech Ježiš povstane",
+      "start_ms": 211940,
+      "end_ms": 214960,
+      "mean_word_loss": 0.38099332385592993,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 211940,
+          "end_ms": 212240,
+          "loss": 0.9967447916666666
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 212340,
+          "end_ms": 212960,
+          "loss": 0.010279369354248048
+        },
+        {
+          "text": "rise",
+          "start_ms": 213000,
+          "end_ms": 214960,
+          "loss": 0.135955810546875
+        }
+      ]
+    },
+    {
+      "text": "Jesus rise",
+      "text_sk": "Ježiš povstaň",
+      "start_ms": 215700,
+      "end_ms": 218200,
+      "mean_word_loss": 0.715830659866333,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 215700,
+          "end_ms": 216440,
+          "loss": 1.054189395904541
+        },
+        {
+          "text": "rise",
+          "start_ms": 216520,
+          "end_ms": 218200,
+          "loss": 0.377471923828125
+        }
+      ]
+    },
+    {
+      "text": "God through my life be glorified",
+      "text_sk": "Boh cez môj život buď oslávený",
+      "start_ms": 218600,
+      "end_ms": 225000,
+      "mean_word_loss": 0.3125971451638237,
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 218600,
+          "end_ms": 219000,
+          "loss": 1.273681640625
+        },
+        {
+          "text": "through",
+          "start_ms": 219120,
+          "end_ms": 219380,
+          "loss": 0.0071402958461216515
+        },
+        {
+          "text": "my",
+          "start_ms": 219540,
+          "end_ms": 219800,
+          "loss": 0.028690338134765625
+        },
+        {
+          "text": "life",
+          "start_ms": 220020,
+          "end_ms": 221560,
+          "loss": 0.017232298851013184
+        },
+        {
+          "text": "be",
+          "start_ms": 222000,
+          "end_ms": 222300,
+          "loss": 0.420196533203125
+        },
+        {
+          "text": "glorified",
+          "start_ms": 222340,
+          "end_ms": 225000,
+          "loss": 0.12864176432291666
+        }
+      ]
+    },
+    {
+      "text": "Let Jesus rise",
+      "text_sk": "Nech Ježiš povstane",
+      "start_ms": 225420,
+      "end_ms": 228740,
+      "mean_word_loss": 0.3595405790540907,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 225420,
+          "end_ms": 225720,
+          "loss": 0.9391276041666666
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 225860,
+          "end_ms": 226540,
+          "loss": 0.006803703308105469
+        },
+        {
+          "text": "rise",
+          "start_ms": 226680,
+          "end_ms": 228740,
+          "loss": 0.1326904296875
+        }
+      ]
+    },
+    {
+      "text": "Jesus rise",
+      "text_sk": "Ježiš povstaň",
+      "start_ms": 229220,
+      "end_ms": 231740,
+      "mean_word_loss": 0.6560959815979004,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 229220,
+          "end_ms": 229980,
+          "loss": 0.9520540237426758
+        },
+        {
+          "text": "rise",
+          "start_ms": 230040,
+          "end_ms": 231740,
+          "loss": 0.360137939453125
+        }
+      ]
+    },
+    {
+      "text": "God through my life be glorified",
+      "text_sk": "Boh cez môj život buď oslávený",
+      "start_ms": 232140,
+      "end_ms": 237660,
+      "mean_word_loss": 0.3218995127728376,
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 232140,
+          "end_ms": 232480,
+          "loss": 1.34033203125
+        },
+        {
+          "text": "through",
+          "start_ms": 232640,
+          "end_ms": 233040,
+          "loss": 0.006690842764718192
+        },
+        {
+          "text": "my",
+          "start_ms": 233100,
+          "end_ms": 233260,
+          "loss": 0.027645111083984375
+        },
+        {
+          "text": "life",
+          "start_ms": 233420,
+          "end_ms": 235060,
+          "loss": 0.017520785331726074
+        },
+        {
+          "text": "be",
+          "start_ms": 235560,
+          "end_ms": 235860,
+          "loss": 0.414703369140625
+        },
+        {
+          "text": "glorified",
+          "start_ms": 235940,
+          "end_ms": 237660,
+          "loss": 0.12450493706597222
+        }
+      ]
+    },
+    {
+      "text": "Sing it out rise rise rise rise",
+      "text_sk": "Spievaj to povstaň povstaň povstaň povstaň",
+      "start_ms": 237800,
+      "end_ms": 242109,
+      "mean_word_loss": 1.510285877046131,
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 237800,
+          "end_ms": 237980,
+          "loss": 1.607421875
+        },
+        {
+          "text": "it",
+          "start_ms": 238000,
+          "end_ms": 238100,
+          "loss": 0.29638671875
+        },
+        {
+          "text": "out",
+          "start_ms": 238160,
+          "end_ms": 238500,
+          "loss": 1.5553385416666667
+        },
+        {
+          "text": "rise",
+          "start_ms": 238580,
+          "end_ms": 238800,
+          "loss": 2.29150390625
+        },
+        {
+          "text": "rise",
+          "start_ms": 240240,
+          "end_ms": 240490,
+          "loss": 1.63330078125
+        },
+        {
+          "text": "rise",
+          "start_ms": 240491,
+          "end_ms": 241490,
+          "loss": 1.5592041015625
+        },
+        {
+          "text": "rise",
+          "start_ms": 241800,
+          "end_ms": 242109,
+          "loss": 1.62884521484375
+        }
+      ]
+    },
+    {
+      "text": "Rise rise come on",
+      "text_sk": "Povstaň povstaň poď",
+      "start_ms": 242109,
+      "end_ms": 242451,
+      "mean_word_loss": 2.417633056640625,
+      "words": [
+        {
+          "text": "Rise",
+          "start_ms": 242109,
+          "end_ms": 242110,
+          "loss": 2.22918701171875
+        },
+        {
+          "text": "rise",
+          "start_ms": 242110,
+          "end_ms": 242400,
+          "loss": 1.78900146484375
+        },
+        {
+          "text": "come",
+          "start_ms": 242410,
+          "end_ms": 242450,
+          "loss": 1.51953125
+        },
+        {
+          "text": "on",
+          "start_ms": 242450,
+          "end_ms": 242451,
+          "loss": 4.1328125
+        }
+      ]
+    },
+    {
+      "text": "Rise Jesus Jesus Jesus Jesus",
+      "text_sk": "Povstaň Ježiš Ježiš Ježiš Ježiš",
+      "start_ms": 242451,
+      "end_ms": 265740,
+      "mean_word_loss": 1.1844825744628906,
+      "words": [
+        {
+          "text": "Rise",
+          "start_ms": 242451,
+          "end_ms": 242510,
+          "loss": 3.114990234375
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 242720,
+          "end_ms": 243480,
+          "loss": 0.6800864219665528
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 250640,
+          "end_ms": 262860,
+          "loss": 0.8353191375732422
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 262940,
+          "end_ms": 263660,
+          "loss": 0.7650692939758301
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 263740,
+          "end_ms": 265740,
+          "loss": 0.5269477844238282
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.32242986604584495,
+  "metadata": {
+    "n_tokens_sent": 225,
+    "n_words_returned_raw": 449,
+    "n_words_returned_content": 225,
+    "n_characters_returned": 1133,
+    "runtime_sec": 5.5,
+    "n_lines": 40,
+    "n_lines_timed": 40,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

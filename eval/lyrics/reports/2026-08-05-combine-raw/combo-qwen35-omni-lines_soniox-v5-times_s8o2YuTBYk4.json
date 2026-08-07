@@ -1,0 +1,458 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_soniox-v5-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "soniox-v5",
+  "video_id": "s8o2YuTBYk4",
+  "duration_ms": 214950,
+  "lines": [
+    {
+      "text": "Got a feeling that I really need to let go",
+      "start_ms": 2970,
+      "end_ms": 5550,
+      "text_sk": "Mám pocit, že sa naozaj musím pustiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Of everything that's weighing me down",
+      "start_ms": 6570,
+      "end_ms": 10110,
+      "text_sk": "Všetkého, čo ma ťaží",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Gotta listen to the voice that I know",
+      "start_ms": 10350,
+      "end_ms": 13770,
+      "text_sk": "Musím počúvať hlas, ktorý poznám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "You speak to me and say I'm free",
+      "start_ms": 13950,
+      "end_ms": 17850,
+      "text_sk": "Hovoríš ku mne a hovoríš, že som voľný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Come on hands high hands up",
+      "start_ms": 18450,
+      "end_ms": 19830,
+      "text_sk": "No tak ruky hore, ruky hore",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "start_ms": 21210,
+      "end_ms": 25350,
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "start_ms": 28710,
+      "end_ms": 32790,
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 39510,
+      "end_ms": 40890,
+      "text_sk": "Som voľný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 50790,
+      "end_ms": 51150,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 54390,
+      "end_ms": 54750,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Yeah",
+      "start_ms": 62010,
+      "end_ms": 62310,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "When I think of how my life has been changed",
+      "start_ms": 62730,
+      "end_ms": 65970,
+      "text_sk": "Keď pomyslím na to, ako sa môj život zmenil",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "It all comes down to being with you",
+      "start_ms": 66450,
+      "end_ms": 69810,
+      "text_sk": "Všetko sa scvrkáva na to byť s tebou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "And I know that you are always with me",
+      "start_ms": 70170,
+      "end_ms": 73350,
+      "text_sk": "A viem, že si vždy so mnou",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Lord I believe with you I'm free",
+      "start_ms": 74430,
+      "end_ms": 77730,
+      "text_sk": "Pane, verím, že s tebou som voľný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Nothing gonna hold me down 'cause you keep setting me free",
+      "start_ms": 81270,
+      "end_ms": 85350,
+      "text_sk": "Nič ma nezdrží, pretože ma stále oslobodzuješ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free",
+      "start_ms": 88590,
+      "end_ms": 92790,
+      "text_sk": "Cítim to všade okolo, pretože v tvojej prítomnosti som voľný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "I'm free",
+      "start_ms": 99390,
+      "end_ms": 100710,
+      "text_sk": "Som voľný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Yeah",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 1,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Yeah",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 1,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Yeah",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Áno",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 1,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 122250,
+      "end_ms": 125190,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 125850,
+      "end_ms": 129150,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 129630,
+      "end_ms": 132630,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 133350,
+      "end_ms": 137130,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Go",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Choď",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 1,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 9,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 8,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 152490,
+      "end_ms": 155310,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 156090,
+      "end_ms": 159630,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised",
+      "start_ms": 159810,
+      "end_ms": 162270,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Oh yes we are",
+      "start_ms": 174030,
+      "end_ms": 175050,
+      "text_sk": "Ó áno, sme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Hey",
+      "start_ms": 178170,
+      "end_ms": 178470,
+      "text_sk": "Hej",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Oh",
+      "start_ms": 181830,
+      "end_ms": 182430,
+      "text_sk": "Ó",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 182490,
+      "end_ms": 185490,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Hey",
+      "start_ms": 185910,
+      "end_ms": 186090,
+      "text_sk": "Hej",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 1,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Yeah hey",
+      "start_ms": 189390,
+      "end_ms": 189570,
+      "text_sk": "Áno hej",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "One two",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Jeden dva",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I'm gonna praise",
+      "start_ms": 195030,
+      "end_ms": 196230,
+      "text_sk": "Budem chváliť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Hey hey",
+      "start_ms": 196470,
+      "end_ms": 197070,
+      "text_sk": "Hej hej",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 197430,
+      "end_ms": 200430,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 201270,
+      "end_ms": 204150,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high",
+      "start_ms": 208890,
+      "end_ms": 212430,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Come on lift him up tonight",
+      "start_ms": 213450,
+      "end_ms": 214950,
+      "text_sk": "Poďme ho dnes večer pozdvihnúť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 44,
+    "n_lines_timed": 37,
+    "n_lines_untimed": 7,
+    "n_words_total": 266,
+    "n_words_aligned": 241,
+    "word_align_rate": 0.9060150375939849,
+    "n_monotonic_violations_clamped": 0
+  }
+}

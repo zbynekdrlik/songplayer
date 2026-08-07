@@ -1,0 +1,1806 @@
+{
+  "backend_id": "ctc-forced-aligner",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\h-A1Tzkjsi4_vocal16k.wav",
+  "duration_ms": 386485,
+  "lines": [
+    {
+      "text": "Our Father in heaven",
+      "start_ms": 27940,
+      "end_ms": 34300,
+      "text_sk": "Otče náš, ktorý si na nebesiach",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 27940,
+          "end_ms": 28100
+        },
+        {
+          "text": "Father",
+          "start_ms": 28100,
+          "end_ms": 30200
+        },
+        {
+          "text": "in",
+          "start_ms": 30200,
+          "end_ms": 31560
+        },
+        {
+          "text": "heaven",
+          "start_ms": 31560,
+          "end_ms": 34300
+        }
+      ]
+    },
+    {
+      "text": "Holy is Your name",
+      "start_ms": 34300,
+      "end_ms": 40040,
+      "text_sk": "Posväť sa meno Tvoje",
+      "words": [
+        {
+          "text": "Holy",
+          "start_ms": 34300,
+          "end_ms": 36100
+        },
+        {
+          "text": "is",
+          "start_ms": 36100,
+          "end_ms": 37500
+        },
+        {
+          "text": "Your",
+          "start_ms": 37500,
+          "end_ms": 38100
+        },
+        {
+          "text": "name",
+          "start_ms": 38100,
+          "end_ms": 40040
+        }
+      ]
+    },
+    {
+      "text": "Your kingdom is coming",
+      "start_ms": 40040,
+      "end_ms": 47500,
+      "text_sk": "Príď kráľovstvo Tvoje",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 40040,
+          "end_ms": 41720
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 41720,
+          "end_ms": 44120
+        },
+        {
+          "text": "is",
+          "start_ms": 44120,
+          "end_ms": 45280
+        },
+        {
+          "text": "coming",
+          "start_ms": 45280,
+          "end_ms": 47500
+        }
+      ]
+    },
+    {
+      "text": "Let Your will be done today",
+      "start_ms": 47500,
+      "end_ms": 53700,
+      "text_sk": "Buď vôľa Tvoja dnes",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 47500,
+          "end_ms": 48280
+        },
+        {
+          "text": "Your",
+          "start_ms": 48280,
+          "end_ms": 48720
+        },
+        {
+          "text": "will",
+          "start_ms": 48720,
+          "end_ms": 49600
+        },
+        {
+          "text": "be",
+          "start_ms": 49600,
+          "end_ms": 49980
+        },
+        {
+          "text": "done",
+          "start_ms": 49980,
+          "end_ms": 51220
+        },
+        {
+          "text": "today",
+          "start_ms": 51220,
+          "end_ms": 53700
+        }
+      ]
+    },
+    {
+      "text": "Providing protecting",
+      "start_ms": 53700,
+      "end_ms": 61280,
+      "text_sk": "Opatrujúci a ochraňujúci",
+      "words": [
+        {
+          "text": "Providing",
+          "start_ms": 53700,
+          "end_ms": 57800
+        },
+        {
+          "text": "protecting",
+          "start_ms": 57800,
+          "end_ms": 61280
+        }
+      ]
+    },
+    {
+      "text": "And forgiving us our sins",
+      "start_ms": 61280,
+      "end_ms": 67760,
+      "text_sk": "A odpúšťajúci nám naše hriechy",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 61280,
+          "end_ms": 62020
+        },
+        {
+          "text": "forgiving",
+          "start_ms": 62020,
+          "end_ms": 63900
+        },
+        {
+          "text": "us",
+          "start_ms": 63900,
+          "end_ms": 64720
+        },
+        {
+          "text": "our",
+          "start_ms": 64720,
+          "end_ms": 65400
+        },
+        {
+          "text": "sins",
+          "start_ms": 65400,
+          "end_ms": 67760
+        }
+      ]
+    },
+    {
+      "text": "As we humbly come before You",
+      "start_ms": 67760,
+      "end_ms": 74960,
+      "text_sk": "Keď pokorne prichádzame pred Teba",
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 67760,
+          "end_ms": 68980
+        },
+        {
+          "text": "we",
+          "start_ms": 68980,
+          "end_ms": 69280
+        },
+        {
+          "text": "humbly",
+          "start_ms": 69280,
+          "end_ms": 71260
+        },
+        {
+          "text": "come",
+          "start_ms": 71260,
+          "end_ms": 72400
+        },
+        {
+          "text": "before",
+          "start_ms": 72400,
+          "end_ms": 73620
+        },
+        {
+          "text": "You",
+          "start_ms": 73620,
+          "end_ms": 74960
+        }
+      ]
+    },
+    {
+      "text": "As we worship You and sing",
+      "start_ms": 74960,
+      "end_ms": 80860,
+      "text_sk": "Keď Ťa uctievame a spievame",
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 74960,
+          "end_ms": 75800
+        },
+        {
+          "text": "we",
+          "start_ms": 75800,
+          "end_ms": 76140
+        },
+        {
+          "text": "worship",
+          "start_ms": 76140,
+          "end_ms": 77480
+        },
+        {
+          "text": "You",
+          "start_ms": 77480,
+          "end_ms": 78420
+        },
+        {
+          "text": "and",
+          "start_ms": 78420,
+          "end_ms": 79180
+        },
+        {
+          "text": "sing",
+          "start_ms": 79180,
+          "end_ms": 80860
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom",
+      "start_ms": 80860,
+      "end_ms": 84320,
+      "text_sk": "Tvoje je kráľovstvo",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 80860,
+          "end_ms": 81940
+        },
+        {
+          "text": "is",
+          "start_ms": 81940,
+          "end_ms": 82260
+        },
+        {
+          "text": "the",
+          "start_ms": 82260,
+          "end_ms": 82540
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 82540,
+          "end_ms": 84320
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power",
+      "start_ms": 84320,
+      "end_ms": 88020,
+      "text_sk": "Tvoja je moc",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 84320,
+          "end_ms": 85360
+        },
+        {
+          "text": "is",
+          "start_ms": 85360,
+          "end_ms": 85640
+        },
+        {
+          "text": "the",
+          "start_ms": 85640,
+          "end_ms": 85960
+        },
+        {
+          "text": "power",
+          "start_ms": 85960,
+          "end_ms": 88020
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory forever",
+      "start_ms": 88020,
+      "end_ms": 94560,
+      "text_sk": "Tvoja je sláva naveky",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 88020,
+          "end_ms": 88780
+        },
+        {
+          "text": "is",
+          "start_ms": 88780,
+          "end_ms": 89080
+        },
+        {
+          "text": "the",
+          "start_ms": 89080,
+          "end_ms": 89340
+        },
+        {
+          "text": "glory",
+          "start_ms": 89340,
+          "end_ms": 91560
+        },
+        {
+          "text": "forever",
+          "start_ms": 91560,
+          "end_ms": 94560
+        }
+      ]
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "start_ms": 94560,
+      "end_ms": 104180,
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 94560,
+          "end_ms": 95540
+        },
+        {
+          "text": "Holy",
+          "start_ms": 95540,
+          "end_ms": 96220
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 96220,
+          "end_ms": 98020
+        },
+        {
+          "text": "pour",
+          "start_ms": 98020,
+          "end_ms": 99060
+        },
+        {
+          "text": "out",
+          "start_ms": 99060,
+          "end_ms": 99380
+        },
+        {
+          "text": "Your",
+          "start_ms": 99380,
+          "end_ms": 99740
+        },
+        {
+          "text": "fire",
+          "start_ms": 99740,
+          "end_ms": 104180
+        }
+      ]
+    },
+    {
+      "text": "This is revival this is revival",
+      "start_ms": 104180,
+      "end_ms": 126500,
+      "text_sk": "Toto je prebudenie, toto je prebudenie",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 104180,
+          "end_ms": 105800
+        },
+        {
+          "text": "is",
+          "start_ms": 105800,
+          "end_ms": 106180
+        },
+        {
+          "text": "revival",
+          "start_ms": 106180,
+          "end_ms": 113720
+        },
+        {
+          "text": "this",
+          "start_ms": 113720,
+          "end_ms": 117860
+        },
+        {
+          "text": "is",
+          "start_ms": 117860,
+          "end_ms": 121760
+        },
+        {
+          "text": "revival",
+          "start_ms": 121760,
+          "end_ms": 126500
+        }
+      ]
+    },
+    {
+      "text": "Our Father in heaven",
+      "start_ms": 126500,
+      "end_ms": 143960,
+      "text_sk": "Otče náš, ktorý si na nebesiach",
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 126500,
+          "end_ms": 132800
+        },
+        {
+          "text": "Father",
+          "start_ms": 132800,
+          "end_ms": 139900
+        },
+        {
+          "text": "in",
+          "start_ms": 139900,
+          "end_ms": 141280
+        },
+        {
+          "text": "heaven",
+          "start_ms": 141280,
+          "end_ms": 143960
+        }
+      ]
+    },
+    {
+      "text": "Holy is Your name",
+      "start_ms": 143960,
+      "end_ms": 150780,
+      "text_sk": "Posväť sa meno Tvoje",
+      "words": [
+        {
+          "text": "Holy",
+          "start_ms": 143960,
+          "end_ms": 145780
+        },
+        {
+          "text": "is",
+          "start_ms": 145780,
+          "end_ms": 147160
+        },
+        {
+          "text": "Your",
+          "start_ms": 147160,
+          "end_ms": 147760
+        },
+        {
+          "text": "name",
+          "start_ms": 147760,
+          "end_ms": 150780
+        }
+      ]
+    },
+    {
+      "text": "Your kingdom is coming",
+      "start_ms": 150780,
+      "end_ms": 157220,
+      "text_sk": "Príď kráľovstvo Tvoje",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 150780,
+          "end_ms": 151500
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 151500,
+          "end_ms": 153940
+        },
+        {
+          "text": "is",
+          "start_ms": 153940,
+          "end_ms": 154980
+        },
+        {
+          "text": "coming",
+          "start_ms": 154980,
+          "end_ms": 157220
+        }
+      ]
+    },
+    {
+      "text": "Let Your will be done today",
+      "start_ms": 157220,
+      "end_ms": 163540,
+      "text_sk": "Buď vôľa Tvoja dnes",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 157220,
+          "end_ms": 158020
+        },
+        {
+          "text": "Your",
+          "start_ms": 158020,
+          "end_ms": 158480
+        },
+        {
+          "text": "will",
+          "start_ms": 158480,
+          "end_ms": 159340
+        },
+        {
+          "text": "be",
+          "start_ms": 159340,
+          "end_ms": 159660
+        },
+        {
+          "text": "done",
+          "start_ms": 159660,
+          "end_ms": 160980
+        },
+        {
+          "text": "today",
+          "start_ms": 160980,
+          "end_ms": 163540
+        }
+      ]
+    },
+    {
+      "text": "Providing protecting",
+      "start_ms": 163540,
+      "end_ms": 171020,
+      "text_sk": "Opatrujúci a ochraňujúci",
+      "words": [
+        {
+          "text": "Providing",
+          "start_ms": 163540,
+          "end_ms": 167540
+        },
+        {
+          "text": "protecting",
+          "start_ms": 167540,
+          "end_ms": 171020
+        }
+      ]
+    },
+    {
+      "text": "And forgiving us our sins",
+      "start_ms": 171020,
+      "end_ms": 177640,
+      "text_sk": "A odpúšťajeuci nám naše hriechy",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 171020,
+          "end_ms": 171720
+        },
+        {
+          "text": "forgiving",
+          "start_ms": 171720,
+          "end_ms": 173640
+        },
+        {
+          "text": "us",
+          "start_ms": 173640,
+          "end_ms": 174440
+        },
+        {
+          "text": "our",
+          "start_ms": 174440,
+          "end_ms": 175180
+        },
+        {
+          "text": "sins",
+          "start_ms": 175180,
+          "end_ms": 177640
+        }
+      ]
+    },
+    {
+      "text": "As we humbly come before You",
+      "start_ms": 177640,
+      "end_ms": 184420,
+      "text_sk": "Keď pokorne prichádzame pred Teba",
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 177640,
+          "end_ms": 178640
+        },
+        {
+          "text": "we",
+          "start_ms": 178640,
+          "end_ms": 178940
+        },
+        {
+          "text": "humbly",
+          "start_ms": 178940,
+          "end_ms": 180880
+        },
+        {
+          "text": "come",
+          "start_ms": 180880,
+          "end_ms": 182080
+        },
+        {
+          "text": "before",
+          "start_ms": 182080,
+          "end_ms": 183320
+        },
+        {
+          "text": "You",
+          "start_ms": 183320,
+          "end_ms": 184420
+        }
+      ]
+    },
+    {
+      "text": "As we worship You and sing",
+      "start_ms": 184420,
+      "end_ms": 191120,
+      "text_sk": "Keď Ťa uctievame a spievame",
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 184420,
+          "end_ms": 185480
+        },
+        {
+          "text": "we",
+          "start_ms": 185480,
+          "end_ms": 185820
+        },
+        {
+          "text": "worship",
+          "start_ms": 185820,
+          "end_ms": 187120
+        },
+        {
+          "text": "You",
+          "start_ms": 187120,
+          "end_ms": 188140
+        },
+        {
+          "text": "and",
+          "start_ms": 188140,
+          "end_ms": 188840
+        },
+        {
+          "text": "sing",
+          "start_ms": 188840,
+          "end_ms": 191120
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom",
+      "start_ms": 191120,
+      "end_ms": 194040,
+      "text_sk": "Tvoje je kráľovstvo",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 191120,
+          "end_ms": 191620
+        },
+        {
+          "text": "is",
+          "start_ms": 191620,
+          "end_ms": 191940
+        },
+        {
+          "text": "the",
+          "start_ms": 191940,
+          "end_ms": 192220
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 192220,
+          "end_ms": 194040
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power",
+      "start_ms": 194040,
+      "end_ms": 197700,
+      "text_sk": "Tvoja je moc",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 194040,
+          "end_ms": 195060
+        },
+        {
+          "text": "is",
+          "start_ms": 195060,
+          "end_ms": 195360
+        },
+        {
+          "text": "the",
+          "start_ms": 195360,
+          "end_ms": 195640
+        },
+        {
+          "text": "power",
+          "start_ms": 195640,
+          "end_ms": 197700
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory forever",
+      "start_ms": 197700,
+      "end_ms": 203740,
+      "text_sk": "Tvoja je sláva naveky",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 197700,
+          "end_ms": 198500
+        },
+        {
+          "text": "is",
+          "start_ms": 198500,
+          "end_ms": 198820
+        },
+        {
+          "text": "the",
+          "start_ms": 198820,
+          "end_ms": 199080
+        },
+        {
+          "text": "glory",
+          "start_ms": 199080,
+          "end_ms": 200460
+        },
+        {
+          "text": "forever",
+          "start_ms": 200460,
+          "end_ms": 203740
+        }
+      ]
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "start_ms": 203740,
+      "end_ms": 210980,
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 203740,
+          "end_ms": 205240
+        },
+        {
+          "text": "Holy",
+          "start_ms": 205240,
+          "end_ms": 205900
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 205900,
+          "end_ms": 207700
+        },
+        {
+          "text": "pour",
+          "start_ms": 207700,
+          "end_ms": 208720
+        },
+        {
+          "text": "out",
+          "start_ms": 208720,
+          "end_ms": 209040
+        },
+        {
+          "text": "Your",
+          "start_ms": 209040,
+          "end_ms": 209420
+        },
+        {
+          "text": "fire",
+          "start_ms": 209420,
+          "end_ms": 210980
+        }
+      ]
+    },
+    {
+      "text": "This is revival this is revival",
+      "start_ms": 210980,
+      "end_ms": 218000,
+      "text_sk": "Toto je prebudenie, toto je prebudenie",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 210980,
+          "end_ms": 212140
+        },
+        {
+          "text": "is",
+          "start_ms": 212140,
+          "end_ms": 212480
+        },
+        {
+          "text": "revival",
+          "start_ms": 212480,
+          "end_ms": 214520
+        },
+        {
+          "text": "this",
+          "start_ms": 214520,
+          "end_ms": 215540
+        },
+        {
+          "text": "is",
+          "start_ms": 215540,
+          "end_ms": 215920
+        },
+        {
+          "text": "revival",
+          "start_ms": 215920,
+          "end_ms": 218000
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom",
+      "start_ms": 218000,
+      "end_ms": 221980,
+      "text_sk": "Tvoje je kráľovstvo",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 218000,
+          "end_ms": 219020
+        },
+        {
+          "text": "is",
+          "start_ms": 219020,
+          "end_ms": 219360
+        },
+        {
+          "text": "the",
+          "start_ms": 219360,
+          "end_ms": 219640
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 219640,
+          "end_ms": 221980
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power",
+      "start_ms": 221980,
+      "end_ms": 224860,
+      "text_sk": "Tvoja je moc",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 221980,
+          "end_ms": 222480
+        },
+        {
+          "text": "is",
+          "start_ms": 222480,
+          "end_ms": 222800
+        },
+        {
+          "text": "the",
+          "start_ms": 222800,
+          "end_ms": 223080
+        },
+        {
+          "text": "power",
+          "start_ms": 223080,
+          "end_ms": 224860
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory forever",
+      "start_ms": 224860,
+      "end_ms": 232000,
+      "text_sk": "Tvoja je sláva naveky",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 224860,
+          "end_ms": 225920
+        },
+        {
+          "text": "is",
+          "start_ms": 225920,
+          "end_ms": 226220
+        },
+        {
+          "text": "the",
+          "start_ms": 226220,
+          "end_ms": 226480
+        },
+        {
+          "text": "glory",
+          "start_ms": 226480,
+          "end_ms": 228660
+        },
+        {
+          "text": "forever",
+          "start_ms": 228660,
+          "end_ms": 232000
+        }
+      ]
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "start_ms": 232000,
+      "end_ms": 238560,
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 232000,
+          "end_ms": 232660
+        },
+        {
+          "text": "Holy",
+          "start_ms": 232660,
+          "end_ms": 233380
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 233380,
+          "end_ms": 235180
+        },
+        {
+          "text": "pour",
+          "start_ms": 235180,
+          "end_ms": 236080
+        },
+        {
+          "text": "out",
+          "start_ms": 236080,
+          "end_ms": 236500
+        },
+        {
+          "text": "Your",
+          "start_ms": 236500,
+          "end_ms": 236880
+        },
+        {
+          "text": "fire",
+          "start_ms": 236880,
+          "end_ms": 238560
+        }
+      ]
+    },
+    {
+      "text": "This is revival this is revival",
+      "start_ms": 238560,
+      "end_ms": 258920,
+      "text_sk": "Toto je prebudenie, toto je prebudenie",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 238560,
+          "end_ms": 239560
+        },
+        {
+          "text": "is",
+          "start_ms": 239560,
+          "end_ms": 239940
+        },
+        {
+          "text": "revival",
+          "start_ms": 239940,
+          "end_ms": 242000
+        },
+        {
+          "text": "this",
+          "start_ms": 242000,
+          "end_ms": 243000
+        },
+        {
+          "text": "is",
+          "start_ms": 243000,
+          "end_ms": 243320
+        },
+        {
+          "text": "revival",
+          "start_ms": 243320,
+          "end_ms": 258920
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing blowing blowing",
+      "start_ms": 258920,
+      "end_ms": 266500,
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 258920,
+          "end_ms": 260280
+        },
+        {
+          "text": "can",
+          "start_ms": 260280,
+          "end_ms": 260500
+        },
+        {
+          "text": "hear",
+          "start_ms": 260500,
+          "end_ms": 260740
+        },
+        {
+          "text": "the",
+          "start_ms": 260740,
+          "end_ms": 260920
+        },
+        {
+          "text": "wind",
+          "start_ms": 260920,
+          "end_ms": 261300
+        },
+        {
+          "text": "blowing",
+          "start_ms": 261300,
+          "end_ms": 262680
+        },
+        {
+          "text": "blowing",
+          "start_ms": 262680,
+          "end_ms": 264420
+        },
+        {
+          "text": "blowing",
+          "start_ms": 264420,
+          "end_ms": 266500
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "start_ms": 266500,
+      "end_ms": 273360,
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 266500,
+          "end_ms": 267080
+        },
+        {
+          "text": "can",
+          "start_ms": 267080,
+          "end_ms": 267300
+        },
+        {
+          "text": "feel",
+          "start_ms": 267300,
+          "end_ms": 267620
+        },
+        {
+          "text": "the",
+          "start_ms": 267620,
+          "end_ms": 267760
+        },
+        {
+          "text": "ground",
+          "start_ms": 267760,
+          "end_ms": 268180
+        },
+        {
+          "text": "shaking",
+          "start_ms": 268180,
+          "end_ms": 269640
+        },
+        {
+          "text": "shaking",
+          "start_ms": 269640,
+          "end_ms": 271360
+        },
+        {
+          "text": "shaking",
+          "start_ms": 271360,
+          "end_ms": 273360
+        }
+      ]
+    },
+    {
+      "text": "I can see Your fire falling falling falling",
+      "start_ms": 273360,
+      "end_ms": 280220,
+      "text_sk": "Vidím Tvoj oheň zostupovať, zostupovať, zostupovať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 273360,
+          "end_ms": 273980
+        },
+        {
+          "text": "can",
+          "start_ms": 273980,
+          "end_ms": 274180
+        },
+        {
+          "text": "see",
+          "start_ms": 274180,
+          "end_ms": 274440
+        },
+        {
+          "text": "Your",
+          "start_ms": 274440,
+          "end_ms": 274620
+        },
+        {
+          "text": "fire",
+          "start_ms": 274620,
+          "end_ms": 275060
+        },
+        {
+          "text": "falling",
+          "start_ms": 275060,
+          "end_ms": 276480
+        },
+        {
+          "text": "falling",
+          "start_ms": 276480,
+          "end_ms": 278240
+        },
+        {
+          "text": "falling",
+          "start_ms": 278240,
+          "end_ms": 280220
+        }
+      ]
+    },
+    {
+      "text": "So let Your kingdom come let Your will be done",
+      "start_ms": 280220,
+      "end_ms": 287660,
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 280220,
+          "end_ms": 280940
+        },
+        {
+          "text": "let",
+          "start_ms": 280940,
+          "end_ms": 281500
+        },
+        {
+          "text": "Your",
+          "start_ms": 281500,
+          "end_ms": 281840
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 281840,
+          "end_ms": 283600
+        },
+        {
+          "text": "come",
+          "start_ms": 283600,
+          "end_ms": 284360
+        },
+        {
+          "text": "let",
+          "start_ms": 284360,
+          "end_ms": 284900
+        },
+        {
+          "text": "Your",
+          "start_ms": 284900,
+          "end_ms": 285340
+        },
+        {
+          "text": "will",
+          "start_ms": 285340,
+          "end_ms": 286200
+        },
+        {
+          "text": "be",
+          "start_ms": 286200,
+          "end_ms": 287020
+        },
+        {
+          "text": "done",
+          "start_ms": 287020,
+          "end_ms": 287660
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing blowing blowing",
+      "start_ms": 287660,
+      "end_ms": 294200,
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 287660,
+          "end_ms": 287720
+        },
+        {
+          "text": "can",
+          "start_ms": 287720,
+          "end_ms": 287940
+        },
+        {
+          "text": "hear",
+          "start_ms": 287940,
+          "end_ms": 288180
+        },
+        {
+          "text": "the",
+          "start_ms": 288180,
+          "end_ms": 288320
+        },
+        {
+          "text": "wind",
+          "start_ms": 288320,
+          "end_ms": 288740
+        },
+        {
+          "text": "blowing",
+          "start_ms": 288740,
+          "end_ms": 290100
+        },
+        {
+          "text": "blowing",
+          "start_ms": 290100,
+          "end_ms": 291820
+        },
+        {
+          "text": "blowing",
+          "start_ms": 291820,
+          "end_ms": 294200
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "start_ms": 294200,
+      "end_ms": 299320,
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 294200,
+          "end_ms": 294520
+        },
+        {
+          "text": "can",
+          "start_ms": 294520,
+          "end_ms": 294740
+        },
+        {
+          "text": "feel",
+          "start_ms": 294740,
+          "end_ms": 295040
+        },
+        {
+          "text": "the",
+          "start_ms": 295040,
+          "end_ms": 295180
+        },
+        {
+          "text": "ground",
+          "start_ms": 295180,
+          "end_ms": 295620
+        },
+        {
+          "text": "shaking",
+          "start_ms": 295620,
+          "end_ms": 297080
+        },
+        {
+          "text": "shaking",
+          "start_ms": 297080,
+          "end_ms": 298780
+        },
+        {
+          "text": "shaking",
+          "start_ms": 298780,
+          "end_ms": 299320
+        }
+      ]
+    },
+    {
+      "text": "I can see Your fire falling falling falling",
+      "start_ms": 299320,
+      "end_ms": 307700,
+      "text_sk": "Vidím Tvoj oheň zostupovať, zostupovať, zostupovať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 299320,
+          "end_ms": 299340
+        },
+        {
+          "text": "can",
+          "start_ms": 299340,
+          "end_ms": 299440
+        },
+        {
+          "text": "see",
+          "start_ms": 299440,
+          "end_ms": 301120
+        },
+        {
+          "text": "Your",
+          "start_ms": 301120,
+          "end_ms": 303840
+        },
+        {
+          "text": "fire",
+          "start_ms": 303840,
+          "end_ms": 304080
+        },
+        {
+          "text": "falling",
+          "start_ms": 304080,
+          "end_ms": 304520
+        },
+        {
+          "text": "falling",
+          "start_ms": 304520,
+          "end_ms": 305580
+        },
+        {
+          "text": "falling",
+          "start_ms": 305580,
+          "end_ms": 307700
+        }
+      ]
+    },
+    {
+      "text": "So let Your kingdom come let Your will be done",
+      "start_ms": 307700,
+      "end_ms": 315040,
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 307700,
+          "end_ms": 308380
+        },
+        {
+          "text": "let",
+          "start_ms": 308380,
+          "end_ms": 308900
+        },
+        {
+          "text": "Your",
+          "start_ms": 308900,
+          "end_ms": 309280
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 309280,
+          "end_ms": 311040
+        },
+        {
+          "text": "come",
+          "start_ms": 311040,
+          "end_ms": 311780
+        },
+        {
+          "text": "let",
+          "start_ms": 311780,
+          "end_ms": 312300
+        },
+        {
+          "text": "Your",
+          "start_ms": 312300,
+          "end_ms": 312740
+        },
+        {
+          "text": "will",
+          "start_ms": 312740,
+          "end_ms": 313620
+        },
+        {
+          "text": "be",
+          "start_ms": 313620,
+          "end_ms": 314500
+        },
+        {
+          "text": "done",
+          "start_ms": 314500,
+          "end_ms": 315040
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing blowing blowing",
+      "start_ms": 315040,
+      "end_ms": 321500,
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 315040,
+          "end_ms": 315140
+        },
+        {
+          "text": "can",
+          "start_ms": 315140,
+          "end_ms": 315400
+        },
+        {
+          "text": "hear",
+          "start_ms": 315400,
+          "end_ms": 315620
+        },
+        {
+          "text": "the",
+          "start_ms": 315620,
+          "end_ms": 315800
+        },
+        {
+          "text": "wind",
+          "start_ms": 315800,
+          "end_ms": 316160
+        },
+        {
+          "text": "blowing",
+          "start_ms": 316160,
+          "end_ms": 317580
+        },
+        {
+          "text": "blowing",
+          "start_ms": 317580,
+          "end_ms": 319340
+        },
+        {
+          "text": "blowing",
+          "start_ms": 319340,
+          "end_ms": 321500
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "start_ms": 321500,
+      "end_ms": 328300,
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 321500,
+          "end_ms": 322000
+        },
+        {
+          "text": "can",
+          "start_ms": 322000,
+          "end_ms": 322200
+        },
+        {
+          "text": "feel",
+          "start_ms": 322200,
+          "end_ms": 322480
+        },
+        {
+          "text": "the",
+          "start_ms": 322480,
+          "end_ms": 322600
+        },
+        {
+          "text": "ground",
+          "start_ms": 322600,
+          "end_ms": 323040
+        },
+        {
+          "text": "shaking",
+          "start_ms": 323040,
+          "end_ms": 324540
+        },
+        {
+          "text": "shaking",
+          "start_ms": 324540,
+          "end_ms": 326420
+        },
+        {
+          "text": "shaking",
+          "start_ms": 326420,
+          "end_ms": 328300
+        }
+      ]
+    },
+    {
+      "text": "I can see Your fire falling falling falling",
+      "start_ms": 328300,
+      "end_ms": 335060,
+      "text_sk": "Vidím Tvoj oheň zostupovať, zostupovať, zostupovať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 328300,
+          "end_ms": 328820
+        },
+        {
+          "text": "can",
+          "start_ms": 328820,
+          "end_ms": 329060
+        },
+        {
+          "text": "see",
+          "start_ms": 329060,
+          "end_ms": 329300
+        },
+        {
+          "text": "Your",
+          "start_ms": 329300,
+          "end_ms": 329480
+        },
+        {
+          "text": "fire",
+          "start_ms": 329480,
+          "end_ms": 329920
+        },
+        {
+          "text": "falling",
+          "start_ms": 329920,
+          "end_ms": 331620
+        },
+        {
+          "text": "falling",
+          "start_ms": 331620,
+          "end_ms": 333100
+        },
+        {
+          "text": "falling",
+          "start_ms": 333100,
+          "end_ms": 335060
+        }
+      ]
+    },
+    {
+      "text": "So let Your kingdom come let Your will be done",
+      "start_ms": 335060,
+      "end_ms": 343660,
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 335060,
+          "end_ms": 335800
+        },
+        {
+          "text": "let",
+          "start_ms": 335800,
+          "end_ms": 336340
+        },
+        {
+          "text": "Your",
+          "start_ms": 336340,
+          "end_ms": 336680
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 336680,
+          "end_ms": 338460
+        },
+        {
+          "text": "come",
+          "start_ms": 338460,
+          "end_ms": 339400
+        },
+        {
+          "text": "let",
+          "start_ms": 339400,
+          "end_ms": 339740
+        },
+        {
+          "text": "Your",
+          "start_ms": 339740,
+          "end_ms": 340180
+        },
+        {
+          "text": "will",
+          "start_ms": 340180,
+          "end_ms": 341040
+        },
+        {
+          "text": "be",
+          "start_ms": 341040,
+          "end_ms": 341580
+        },
+        {
+          "text": "done",
+          "start_ms": 341580,
+          "end_ms": 343660
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom",
+      "start_ms": 343660,
+      "end_ms": 346660,
+      "text_sk": "Tvoje je kráľovstvo",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 343660,
+          "end_ms": 344160
+        },
+        {
+          "text": "is",
+          "start_ms": 344160,
+          "end_ms": 344520
+        },
+        {
+          "text": "the",
+          "start_ms": 344520,
+          "end_ms": 344760
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 344760,
+          "end_ms": 346660
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power",
+      "start_ms": 346660,
+      "end_ms": 350200,
+      "text_sk": "Tvoja je moc",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 346660,
+          "end_ms": 347620
+        },
+        {
+          "text": "is",
+          "start_ms": 347620,
+          "end_ms": 347920
+        },
+        {
+          "text": "the",
+          "start_ms": 347920,
+          "end_ms": 348220
+        },
+        {
+          "text": "power",
+          "start_ms": 348220,
+          "end_ms": 350200
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory forever",
+      "start_ms": 350200,
+      "end_ms": 357060,
+      "text_sk": "Tvoja je sláva naveky",
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 350200,
+          "end_ms": 351060
+        },
+        {
+          "text": "is",
+          "start_ms": 351060,
+          "end_ms": 351360
+        },
+        {
+          "text": "the",
+          "start_ms": 351360,
+          "end_ms": 351620
+        },
+        {
+          "text": "glory",
+          "start_ms": 351620,
+          "end_ms": 353780
+        },
+        {
+          "text": "forever",
+          "start_ms": 353780,
+          "end_ms": 357060
+        }
+      ]
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "start_ms": 357060,
+      "end_ms": 363500,
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 357060,
+          "end_ms": 357820
+        },
+        {
+          "text": "Holy",
+          "start_ms": 357820,
+          "end_ms": 358500
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 358500,
+          "end_ms": 360300
+        },
+        {
+          "text": "pour",
+          "start_ms": 360300,
+          "end_ms": 361360
+        },
+        {
+          "text": "out",
+          "start_ms": 361360,
+          "end_ms": 361700
+        },
+        {
+          "text": "Your",
+          "start_ms": 361700,
+          "end_ms": 362040
+        },
+        {
+          "text": "fire",
+          "start_ms": 362040,
+          "end_ms": 363500
+        }
+      ]
+    },
+    {
+      "text": "Oh this is revival this is revival",
+      "start_ms": 363500,
+      "end_ms": 369440,
+      "text_sk": "Ó, toto je prebudenie, toto je prebudenie",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 363500,
+          "end_ms": 364200
+        },
+        {
+          "text": "this",
+          "start_ms": 364200,
+          "end_ms": 364680
+        },
+        {
+          "text": "is",
+          "start_ms": 364680,
+          "end_ms": 365040
+        },
+        {
+          "text": "revival",
+          "start_ms": 365040,
+          "end_ms": 365760
+        },
+        {
+          "text": "this",
+          "start_ms": 365760,
+          "end_ms": 366180
+        },
+        {
+          "text": "is",
+          "start_ms": 366180,
+          "end_ms": 366320
+        },
+        {
+          "text": "revival",
+          "start_ms": 366320,
+          "end_ms": 369440
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "edges",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.39,
+    "model_load_sec": null,
+    "error": null
+  }
+}

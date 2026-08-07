@@ -1,0 +1,2674 @@
+{
+  "backend_id": "ctc-forced-aligner",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wjJ-izYndWs_vocal16k.wav",
+  "duration_ms": 301546,
+  "lines": [
+    {
+      "text": "By your grace I'm alive",
+      "start_ms": 12500,
+      "end_ms": 15800,
+      "text_sk": "Z tvojej milosti som nažive",
+      "words": [
+        {
+          "text": "By",
+          "start_ms": 12500,
+          "end_ms": 12900
+        },
+        {
+          "text": "your",
+          "start_ms": 12900,
+          "end_ms": 13260
+        },
+        {
+          "text": "grace",
+          "start_ms": 13260,
+          "end_ms": 14060
+        },
+        {
+          "text": "I'm",
+          "start_ms": 14060,
+          "end_ms": 14460
+        },
+        {
+          "text": "alive",
+          "start_ms": 14460,
+          "end_ms": 15800
+        }
+      ]
+    },
+    {
+      "text": "And I'm here to testify",
+      "start_ms": 15800,
+      "end_ms": 18580,
+      "text_sk": "A som tu, aby som dosvedčil",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 15800,
+          "end_ms": 16020
+        },
+        {
+          "text": "I'm",
+          "start_ms": 16020,
+          "end_ms": 16320
+        },
+        {
+          "text": "here",
+          "start_ms": 16320,
+          "end_ms": 16940
+        },
+        {
+          "text": "to",
+          "start_ms": 16940,
+          "end_ms": 17060
+        },
+        {
+          "text": "testify",
+          "start_ms": 17060,
+          "end_ms": 18580
+        }
+      ]
+    },
+    {
+      "text": "My God",
+      "start_ms": 18580,
+      "end_ms": 20160,
+      "text_sk": "Môj Boh",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 18580,
+          "end_ms": 19060
+        },
+        {
+          "text": "God",
+          "start_ms": 19060,
+          "end_ms": 20160
+        }
+      ]
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 20160,
+      "end_ms": 24180,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 20160,
+          "end_ms": 20940
+        },
+        {
+          "text": "live",
+          "start_ms": 20940,
+          "end_ms": 21800
+        },
+        {
+          "text": "to",
+          "start_ms": 21800,
+          "end_ms": 22040
+        },
+        {
+          "text": "praise",
+          "start_ms": 22040,
+          "end_ms": 23080
+        },
+        {
+          "text": "You",
+          "start_ms": 23080,
+          "end_ms": 24180
+        }
+      ]
+    },
+    {
+      "text": "My defense day and night",
+      "start_ms": 24180,
+      "end_ms": 28100,
+      "text_sk": "Moja obrana dňom i nocou",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 24180,
+          "end_ms": 25280
+        },
+        {
+          "text": "defense",
+          "start_ms": 25280,
+          "end_ms": 26480
+        },
+        {
+          "text": "day",
+          "start_ms": 26480,
+          "end_ms": 27000
+        },
+        {
+          "text": "and",
+          "start_ms": 27000,
+          "end_ms": 27320
+        },
+        {
+          "text": "night",
+          "start_ms": 27320,
+          "end_ms": 28100
+        }
+      ]
+    },
+    {
+      "text": "The name of Jesus Christ",
+      "start_ms": 28100,
+      "end_ms": 31220,
+      "text_sk": "Meno Ježiša Krista",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 28100,
+          "end_ms": 28700
+        },
+        {
+          "text": "name",
+          "start_ms": 28700,
+          "end_ms": 29340
+        },
+        {
+          "text": "of",
+          "start_ms": 29340,
+          "end_ms": 29520
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 29520,
+          "end_ms": 30260
+        },
+        {
+          "text": "Christ",
+          "start_ms": 30260,
+          "end_ms": 31220
+        }
+      ]
+    },
+    {
+      "text": "My God",
+      "start_ms": 31220,
+      "end_ms": 32840,
+      "text_sk": "Môj Boh",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 31220,
+          "end_ms": 31520
+        },
+        {
+          "text": "God",
+          "start_ms": 31520,
+          "end_ms": 32840
+        }
+      ]
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 32840,
+      "end_ms": 37020,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 32840,
+          "end_ms": 33420
+        },
+        {
+          "text": "live",
+          "start_ms": 33420,
+          "end_ms": 34240
+        },
+        {
+          "text": "to",
+          "start_ms": 34240,
+          "end_ms": 34500
+        },
+        {
+          "text": "praise",
+          "start_ms": 34500,
+          "end_ms": 35580
+        },
+        {
+          "text": "You",
+          "start_ms": 35580,
+          "end_ms": 37020
+        }
+      ]
+    },
+    {
+      "text": "What else can I do",
+      "start_ms": 37020,
+      "end_ms": 40220,
+      "text_sk": "Čo iné môžem robiť",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 37020,
+          "end_ms": 38700
+        },
+        {
+          "text": "else",
+          "start_ms": 38700,
+          "end_ms": 39000
+        },
+        {
+          "text": "can",
+          "start_ms": 39000,
+          "end_ms": 39460
+        },
+        {
+          "text": "I",
+          "start_ms": 39460,
+          "end_ms": 39640
+        },
+        {
+          "text": "do",
+          "start_ms": 39640,
+          "end_ms": 40220
+        }
+      ]
+    },
+    {
+      "text": "But praise You",
+      "start_ms": 40220,
+      "end_ms": 45280,
+      "text_sk": "Len Ťa chváliť",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 40220,
+          "end_ms": 41000
+        },
+        {
+          "text": "praise",
+          "start_ms": 41000,
+          "end_ms": 42940
+        },
+        {
+          "text": "You",
+          "start_ms": 42940,
+          "end_ms": 45280
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 45280,
+      "end_ms": 50240,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 45280,
+          "end_ms": 47500
+        },
+        {
+          "text": "name",
+          "start_ms": 47500,
+          "end_ms": 48680
+        },
+        {
+          "text": "is",
+          "start_ms": 48680,
+          "end_ms": 49120
+        },
+        {
+          "text": "God",
+          "start_ms": 49120,
+          "end_ms": 50240
+        }
+      ]
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 50240,
+      "end_ms": 53340,
+      "text_sk": "Nikto iný vedľa",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 50240,
+          "end_ms": 51020
+        },
+        {
+          "text": "one",
+          "start_ms": 51020,
+          "end_ms": 51540
+        },
+        {
+          "text": "else",
+          "start_ms": 51540,
+          "end_ms": 51860
+        },
+        {
+          "text": "beside",
+          "start_ms": 51860,
+          "end_ms": 53340
+        }
+      ]
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": 53340,
+      "end_ms": 55160,
+      "text_sk": "El Shaddai",
+      "words": [
+        {
+          "text": "El",
+          "start_ms": 53340,
+          "end_ms": 54100
+        },
+        {
+          "text": "Shaddai",
+          "start_ms": 54100,
+          "end_ms": 55160
+        }
+      ]
+    },
+    {
+      "text": "If You don't worry",
+      "start_ms": 55160,
+      "end_ms": 57640,
+      "text_sk": "Ak sa Ty netrápiš",
+      "words": [
+        {
+          "text": "If",
+          "start_ms": 55160,
+          "end_ms": 55400
+        },
+        {
+          "text": "You",
+          "start_ms": 55400,
+          "end_ms": 55980
+        },
+        {
+          "text": "don't",
+          "start_ms": 55980,
+          "end_ms": 56740
+        },
+        {
+          "text": "worry",
+          "start_ms": 56740,
+          "end_ms": 57640
+        }
+      ]
+    },
+    {
+      "text": "Why should I",
+      "start_ms": 57640,
+      "end_ms": 59140,
+      "text_sk": "Prečo by som mal ja",
+      "words": [
+        {
+          "text": "Why",
+          "start_ms": 57640,
+          "end_ms": 58020
+        },
+        {
+          "text": "should",
+          "start_ms": 58020,
+          "end_ms": 58620
+        },
+        {
+          "text": "I",
+          "start_ms": 58620,
+          "end_ms": 59140
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 59140,
+      "end_ms": 63380,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 59140,
+          "end_ms": 60000
+        },
+        {
+          "text": "name",
+          "start_ms": 60000,
+          "end_ms": 61140
+        },
+        {
+          "text": "is",
+          "start_ms": 61140,
+          "end_ms": 61960
+        },
+        {
+          "text": "God",
+          "start_ms": 61960,
+          "end_ms": 63380
+        }
+      ]
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 63380,
+      "end_ms": 65060,
+      "text_sk": "Autor môjho života",
+      "words": [
+        {
+          "text": "Author",
+          "start_ms": 63380,
+          "end_ms": 64000
+        },
+        {
+          "text": "of",
+          "start_ms": 64000,
+          "end_ms": 64280
+        },
+        {
+          "text": "my",
+          "start_ms": 64280,
+          "end_ms": 64500
+        },
+        {
+          "text": "life",
+          "start_ms": 64500,
+          "end_ms": 65060
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 65060,
+      "end_ms": 68580,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 65060,
+          "end_ms": 66140
+        },
+        {
+          "text": "trusting",
+          "start_ms": 66140,
+          "end_ms": 67140
+        },
+        {
+          "text": "in",
+          "start_ms": 67140,
+          "end_ms": 67360
+        },
+        {
+          "text": "Your",
+          "start_ms": 67360,
+          "end_ms": 67800
+        },
+        {
+          "text": "name",
+          "start_ms": 67800,
+          "end_ms": 68580
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 68580,
+      "end_ms": 69000,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 68580,
+          "end_ms": 69000
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 69000,
+      "end_ms": 72020,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 69000,
+          "end_ms": 69740
+        },
+        {
+          "text": "the",
+          "start_ms": 69740,
+          "end_ms": 70020
+        },
+        {
+          "text": "day",
+          "start_ms": 70020,
+          "end_ms": 70640
+        },
+        {
+          "text": "I",
+          "start_ms": 70640,
+          "end_ms": 70840
+        },
+        {
+          "text": "die",
+          "start_ms": 70840,
+          "end_ms": 72020
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 72020,
+      "end_ms": 77140,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 72020,
+          "end_ms": 72460
+        },
+        {
+          "text": "name",
+          "start_ms": 72460,
+          "end_ms": 73520
+        },
+        {
+          "text": "is",
+          "start_ms": 73520,
+          "end_ms": 74060
+        },
+        {
+          "text": "God",
+          "start_ms": 74060,
+          "end_ms": 77140
+        }
+      ]
+    },
+    {
+      "text": "Corner stone solid rock",
+      "start_ms": 77140,
+      "end_ms": 82420,
+      "text_sk": "Uhelný kameň pevná skala",
+      "words": [
+        {
+          "text": "Corner",
+          "start_ms": 77140,
+          "end_ms": 80120
+        },
+        {
+          "text": "stone",
+          "start_ms": 80120,
+          "end_ms": 80940
+        },
+        {
+          "text": "solid",
+          "start_ms": 80940,
+          "end_ms": 81820
+        },
+        {
+          "text": "rock",
+          "start_ms": 81820,
+          "end_ms": 82420
+        }
+      ]
+    },
+    {
+      "text": "Faithful even when I'm not",
+      "start_ms": 82420,
+      "end_ms": 85600,
+      "text_sk": "Verný aj keď ja nie som",
+      "words": [
+        {
+          "text": "Faithful",
+          "start_ms": 82420,
+          "end_ms": 83420
+        },
+        {
+          "text": "even",
+          "start_ms": 83420,
+          "end_ms": 84120
+        },
+        {
+          "text": "when",
+          "start_ms": 84120,
+          "end_ms": 84620
+        },
+        {
+          "text": "I'm",
+          "start_ms": 84620,
+          "end_ms": 84900
+        },
+        {
+          "text": "not",
+          "start_ms": 84900,
+          "end_ms": 85600
+        }
+      ]
+    },
+    {
+      "text": "My King",
+      "start_ms": 85600,
+      "end_ms": 87200,
+      "text_sk": "Môj Kráľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 85600,
+          "end_ms": 85960
+        },
+        {
+          "text": "King",
+          "start_ms": 85960,
+          "end_ms": 87200
+        }
+      ]
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 87200,
+      "end_ms": 91240,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 87200,
+          "end_ms": 87940
+        },
+        {
+          "text": "live",
+          "start_ms": 87940,
+          "end_ms": 88800
+        },
+        {
+          "text": "to",
+          "start_ms": 88800,
+          "end_ms": 89040
+        },
+        {
+          "text": "praise",
+          "start_ms": 89040,
+          "end_ms": 90100
+        },
+        {
+          "text": "You",
+          "start_ms": 90100,
+          "end_ms": 91240
+        }
+      ]
+    },
+    {
+      "text": "Only one name will stand",
+      "start_ms": 91240,
+      "end_ms": 95220,
+      "text_sk": "Len jedno meno obstojí",
+      "words": [
+        {
+          "text": "Only",
+          "start_ms": 91240,
+          "end_ms": 92720
+        },
+        {
+          "text": "one",
+          "start_ms": 92720,
+          "end_ms": 93540
+        },
+        {
+          "text": "name",
+          "start_ms": 93540,
+          "end_ms": 93920
+        },
+        {
+          "text": "will",
+          "start_ms": 93920,
+          "end_ms": 94220
+        },
+        {
+          "text": "stand",
+          "start_ms": 94220,
+          "end_ms": 95220
+        }
+      ]
+    },
+    {
+      "text": "Jesus the great I Am",
+      "start_ms": 95220,
+      "end_ms": 98200,
+      "text_sk": "Ježiš veľký Ja Som",
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 95220,
+          "end_ms": 96280
+        },
+        {
+          "text": "the",
+          "start_ms": 96280,
+          "end_ms": 96520
+        },
+        {
+          "text": "great",
+          "start_ms": 96520,
+          "end_ms": 97160
+        },
+        {
+          "text": "I",
+          "start_ms": 97160,
+          "end_ms": 97400
+        },
+        {
+          "text": "Am",
+          "start_ms": 97400,
+          "end_ms": 98200
+        }
+      ]
+    },
+    {
+      "text": "My King",
+      "start_ms": 98200,
+      "end_ms": 100180,
+      "text_sk": "Môj Kráľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 98200,
+          "end_ms": 98540
+        },
+        {
+          "text": "King",
+          "start_ms": 98540,
+          "end_ms": 100180
+        }
+      ]
+    },
+    {
+      "text": "I live to praise You",
+      "start_ms": 100180,
+      "end_ms": 103080,
+      "text_sk": "Žijem, aby som Ťa chválil",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 100180,
+          "end_ms": 100420
+        },
+        {
+          "text": "live",
+          "start_ms": 100420,
+          "end_ms": 101340
+        },
+        {
+          "text": "to",
+          "start_ms": 101340,
+          "end_ms": 101560
+        },
+        {
+          "text": "praise",
+          "start_ms": 101560,
+          "end_ms": 102640
+        },
+        {
+          "text": "You",
+          "start_ms": 102640,
+          "end_ms": 103080
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 103080,
+      "end_ms": 106420,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 103080,
+          "end_ms": 103660
+        },
+        {
+          "text": "name",
+          "start_ms": 103660,
+          "end_ms": 104820
+        },
+        {
+          "text": "is",
+          "start_ms": 104820,
+          "end_ms": 105280
+        },
+        {
+          "text": "God",
+          "start_ms": 105280,
+          "end_ms": 106420
+        }
+      ]
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 106420,
+      "end_ms": 109620,
+      "text_sk": "Nikto iný vedľa",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 106420,
+          "end_ms": 107100
+        },
+        {
+          "text": "one",
+          "start_ms": 107100,
+          "end_ms": 107640
+        },
+        {
+          "text": "else",
+          "start_ms": 107640,
+          "end_ms": 107960
+        },
+        {
+          "text": "beside",
+          "start_ms": 107960,
+          "end_ms": 109620
+        }
+      ]
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": 109620,
+      "end_ms": 111260,
+      "text_sk": "El Shaddai",
+      "words": [
+        {
+          "text": "El",
+          "start_ms": 109620,
+          "end_ms": 110200
+        },
+        {
+          "text": "Shaddai",
+          "start_ms": 110200,
+          "end_ms": 111260
+        }
+      ]
+    },
+    {
+      "text": "If You don't worry",
+      "start_ms": 111260,
+      "end_ms": 113680,
+      "text_sk": "Ak sa Ty netrápiš",
+      "words": [
+        {
+          "text": "If",
+          "start_ms": 111260,
+          "end_ms": 111560
+        },
+        {
+          "text": "You",
+          "start_ms": 111560,
+          "end_ms": 111900
+        },
+        {
+          "text": "don't",
+          "start_ms": 111900,
+          "end_ms": 112640
+        },
+        {
+          "text": "worry",
+          "start_ms": 112640,
+          "end_ms": 113680
+        }
+      ]
+    },
+    {
+      "text": "Why should I",
+      "start_ms": 113680,
+      "end_ms": 115500,
+      "text_sk": "Prečo by som mal ja",
+      "words": [
+        {
+          "text": "Why",
+          "start_ms": 113680,
+          "end_ms": 114120
+        },
+        {
+          "text": "should",
+          "start_ms": 114120,
+          "end_ms": 115220
+        },
+        {
+          "text": "I",
+          "start_ms": 115220,
+          "end_ms": 115500
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 115500,
+      "end_ms": 118920,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 115500,
+          "end_ms": 116380
+        },
+        {
+          "text": "name",
+          "start_ms": 116380,
+          "end_ms": 117240
+        },
+        {
+          "text": "is",
+          "start_ms": 117240,
+          "end_ms": 117680
+        },
+        {
+          "text": "God",
+          "start_ms": 117680,
+          "end_ms": 118920
+        }
+      ]
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 118920,
+      "end_ms": 121880,
+      "text_sk": "Autor môjho života",
+      "words": [
+        {
+          "text": "Author",
+          "start_ms": 118920,
+          "end_ms": 120120
+        },
+        {
+          "text": "of",
+          "start_ms": 120120,
+          "end_ms": 120400
+        },
+        {
+          "text": "my",
+          "start_ms": 120400,
+          "end_ms": 120820
+        },
+        {
+          "text": "life",
+          "start_ms": 120820,
+          "end_ms": 121880
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 121880,
+      "end_ms": 124720,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 121880,
+          "end_ms": 122280
+        },
+        {
+          "text": "trusting",
+          "start_ms": 122280,
+          "end_ms": 123260
+        },
+        {
+          "text": "in",
+          "start_ms": 123260,
+          "end_ms": 123460
+        },
+        {
+          "text": "Your",
+          "start_ms": 123460,
+          "end_ms": 123900
+        },
+        {
+          "text": "name",
+          "start_ms": 123900,
+          "end_ms": 124720
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 124720,
+      "end_ms": 125080,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 124720,
+          "end_ms": 125080
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 125080,
+      "end_ms": 128100,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 125080,
+          "end_ms": 126200
+        },
+        {
+          "text": "the",
+          "start_ms": 126200,
+          "end_ms": 126720
+        },
+        {
+          "text": "day",
+          "start_ms": 126720,
+          "end_ms": 127660
+        },
+        {
+          "text": "I",
+          "start_ms": 127660,
+          "end_ms": 127720
+        },
+        {
+          "text": "die",
+          "start_ms": 127720,
+          "end_ms": 128100
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 128100,
+      "end_ms": 131500,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 128100,
+          "end_ms": 128580
+        },
+        {
+          "text": "name",
+          "start_ms": 128580,
+          "end_ms": 129680
+        },
+        {
+          "text": "is",
+          "start_ms": 129680,
+          "end_ms": 130160
+        },
+        {
+          "text": "God",
+          "start_ms": 130160,
+          "end_ms": 131500
+        }
+      ]
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 131500,
+      "end_ms": 134480,
+      "text_sk": "Nikto iný vedľa",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 131500,
+          "end_ms": 132040
+        },
+        {
+          "text": "one",
+          "start_ms": 132040,
+          "end_ms": 132560
+        },
+        {
+          "text": "else",
+          "start_ms": 132560,
+          "end_ms": 132880
+        },
+        {
+          "text": "beside",
+          "start_ms": 132880,
+          "end_ms": 134480
+        }
+      ]
+    },
+    {
+      "text": "Oh El Shaddai",
+      "start_ms": 134480,
+      "end_ms": 136100,
+      "text_sk": "Ó El Shaddai",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 134480,
+          "end_ms": 134860
+        },
+        {
+          "text": "El",
+          "start_ms": 134860,
+          "end_ms": 135120
+        },
+        {
+          "text": "Shaddai",
+          "start_ms": 135120,
+          "end_ms": 136100
+        }
+      ]
+    },
+    {
+      "text": "If You don't worry",
+      "start_ms": 136100,
+      "end_ms": 138620,
+      "text_sk": "Ak sa Ty netrápiš",
+      "words": [
+        {
+          "text": "If",
+          "start_ms": 136100,
+          "end_ms": 136460
+        },
+        {
+          "text": "You",
+          "start_ms": 136460,
+          "end_ms": 137040
+        },
+        {
+          "text": "don't",
+          "start_ms": 137040,
+          "end_ms": 137900
+        },
+        {
+          "text": "worry",
+          "start_ms": 137900,
+          "end_ms": 138620
+        }
+      ]
+    },
+    {
+      "text": "Why should I",
+      "start_ms": 138620,
+      "end_ms": 140400,
+      "text_sk": "Prečo by som mal ja",
+      "words": [
+        {
+          "text": "Why",
+          "start_ms": 138620,
+          "end_ms": 139080
+        },
+        {
+          "text": "should",
+          "start_ms": 139080,
+          "end_ms": 139840
+        },
+        {
+          "text": "I",
+          "start_ms": 139840,
+          "end_ms": 140400
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 140400,
+      "end_ms": 144040,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 140400,
+          "end_ms": 141080
+        },
+        {
+          "text": "name",
+          "start_ms": 141080,
+          "end_ms": 142200
+        },
+        {
+          "text": "is",
+          "start_ms": 142200,
+          "end_ms": 142660
+        },
+        {
+          "text": "God",
+          "start_ms": 142660,
+          "end_ms": 144040
+        }
+      ]
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 144040,
+      "end_ms": 146840,
+      "text_sk": "Autor môjho života",
+      "words": [
+        {
+          "text": "Author",
+          "start_ms": 144040,
+          "end_ms": 145060
+        },
+        {
+          "text": "of",
+          "start_ms": 145060,
+          "end_ms": 145240
+        },
+        {
+          "text": "my",
+          "start_ms": 145240,
+          "end_ms": 145740
+        },
+        {
+          "text": "life",
+          "start_ms": 145740,
+          "end_ms": 146840
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 146840,
+      "end_ms": 149680,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 146840,
+          "end_ms": 147180
+        },
+        {
+          "text": "trusting",
+          "start_ms": 147180,
+          "end_ms": 148180
+        },
+        {
+          "text": "in",
+          "start_ms": 148180,
+          "end_ms": 148400
+        },
+        {
+          "text": "Your",
+          "start_ms": 148400,
+          "end_ms": 148860
+        },
+        {
+          "text": "name",
+          "start_ms": 148860,
+          "end_ms": 149680
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 149680,
+      "end_ms": 150100,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 149680,
+          "end_ms": 150100
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 150100,
+      "end_ms": 153740,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 150100,
+          "end_ms": 151020
+        },
+        {
+          "text": "the",
+          "start_ms": 151020,
+          "end_ms": 151640
+        },
+        {
+          "text": "day",
+          "start_ms": 151640,
+          "end_ms": 152580
+        },
+        {
+          "text": "I",
+          "start_ms": 152580,
+          "end_ms": 152880
+        },
+        {
+          "text": "die",
+          "start_ms": 152880,
+          "end_ms": 153740
+        }
+      ]
+    },
+    {
+      "text": "Your name is",
+      "start_ms": 153740,
+      "end_ms": 154880,
+      "text_sk": "Tvoje meno je",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 153740,
+          "end_ms": 154140
+        },
+        {
+          "text": "name",
+          "start_ms": 154140,
+          "end_ms": 154420
+        },
+        {
+          "text": "is",
+          "start_ms": 154420,
+          "end_ms": 154880
+        }
+      ]
+    },
+    {
+      "text": "Prince of Peace",
+      "start_ms": 154880,
+      "end_ms": 156580,
+      "text_sk": "Knieža pokoja",
+      "words": [
+        {
+          "text": "Prince",
+          "start_ms": 154880,
+          "end_ms": 155660
+        },
+        {
+          "text": "of",
+          "start_ms": 155660,
+          "end_ms": 155820
+        },
+        {
+          "text": "Peace",
+          "start_ms": 155820,
+          "end_ms": 156580
+        }
+      ]
+    },
+    {
+      "text": "King of Kings",
+      "start_ms": 156580,
+      "end_ms": 158060,
+      "text_sk": "Kráľ kráľov",
+      "words": [
+        {
+          "text": "King",
+          "start_ms": 156580,
+          "end_ms": 157080
+        },
+        {
+          "text": "of",
+          "start_ms": 157080,
+          "end_ms": 157360
+        },
+        {
+          "text": "Kings",
+          "start_ms": 157360,
+          "end_ms": 158060
+        }
+      ]
+    },
+    {
+      "text": "Lord of Lords",
+      "start_ms": 158060,
+      "end_ms": 159700,
+      "text_sk": "Pán pánov",
+      "words": [
+        {
+          "text": "Lord",
+          "start_ms": 158060,
+          "end_ms": 158700
+        },
+        {
+          "text": "of",
+          "start_ms": 158700,
+          "end_ms": 158960
+        },
+        {
+          "text": "Lords",
+          "start_ms": 158960,
+          "end_ms": 159700
+        }
+      ]
+    },
+    {
+      "text": "Alpha and Omega",
+      "start_ms": 159700,
+      "end_ms": 163480,
+      "text_sk": "Alfa a Omega",
+      "words": [
+        {
+          "text": "Alpha",
+          "start_ms": 159700,
+          "end_ms": 160500
+        },
+        {
+          "text": "and",
+          "start_ms": 160500,
+          "end_ms": 161020
+        },
+        {
+          "text": "Omega",
+          "start_ms": 161020,
+          "end_ms": 163480
+        }
+      ]
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 163480,
+      "end_ms": 166600,
+      "text_sk": "Môj Spasiteľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 163480,
+          "end_ms": 164300
+        },
+        {
+          "text": "Savior",
+          "start_ms": 164300,
+          "end_ms": 166600
+        }
+      ]
+    },
+    {
+      "text": "Oh through the storm",
+      "start_ms": 166600,
+      "end_ms": 169160,
+      "text_sk": "Ó cez búrku",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 166600,
+          "end_ms": 167400
+        },
+        {
+          "text": "through",
+          "start_ms": 167400,
+          "end_ms": 167940
+        },
+        {
+          "text": "the",
+          "start_ms": 167940,
+          "end_ms": 168180
+        },
+        {
+          "text": "storm",
+          "start_ms": 168180,
+          "end_ms": 169160
+        }
+      ]
+    },
+    {
+      "text": "It is well with my soul",
+      "start_ms": 169160,
+      "end_ms": 172280,
+      "text_sk": "Je dobre s mojou dušou",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 169160,
+          "end_ms": 169620
+        },
+        {
+          "text": "is",
+          "start_ms": 169620,
+          "end_ms": 169920
+        },
+        {
+          "text": "well",
+          "start_ms": 169920,
+          "end_ms": 170520
+        },
+        {
+          "text": "with",
+          "start_ms": 170520,
+          "end_ms": 171020
+        },
+        {
+          "text": "my",
+          "start_ms": 171020,
+          "end_ms": 171320
+        },
+        {
+          "text": "soul",
+          "start_ms": 171320,
+          "end_ms": 172280
+        }
+      ]
+    },
+    {
+      "text": "I know You are faithful",
+      "start_ms": 172280,
+      "end_ms": 176080,
+      "text_sk": "Vieme, že si verný",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 172280,
+          "end_ms": 172420
+        },
+        {
+          "text": "know",
+          "start_ms": 172420,
+          "end_ms": 173040
+        },
+        {
+          "text": "You",
+          "start_ms": 173040,
+          "end_ms": 173460
+        },
+        {
+          "text": "are",
+          "start_ms": 173460,
+          "end_ms": 173780
+        },
+        {
+          "text": "faithful",
+          "start_ms": 173780,
+          "end_ms": 176080
+        }
+      ]
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 176080,
+      "end_ms": 178920,
+      "text_sk": "Môj Spasiteľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 176080,
+          "end_ms": 176860
+        },
+        {
+          "text": "Savior",
+          "start_ms": 176860,
+          "end_ms": 178920
+        }
+      ]
+    },
+    {
+      "text": "Hey and Prince of Peace",
+      "start_ms": 178920,
+      "end_ms": 181520,
+      "text_sk": "Hej a Knieža pokoja",
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 178920,
+          "end_ms": 179900
+        },
+        {
+          "text": "and",
+          "start_ms": 179900,
+          "end_ms": 180020
+        },
+        {
+          "text": "Prince",
+          "start_ms": 180020,
+          "end_ms": 180580
+        },
+        {
+          "text": "of",
+          "start_ms": 180580,
+          "end_ms": 180840
+        },
+        {
+          "text": "Peace",
+          "start_ms": 180840,
+          "end_ms": 181520
+        }
+      ]
+    },
+    {
+      "text": "King of Kings",
+      "start_ms": 181520,
+      "end_ms": 183060,
+      "text_sk": "Kráľ kráľov",
+      "words": [
+        {
+          "text": "King",
+          "start_ms": 181520,
+          "end_ms": 182060
+        },
+        {
+          "text": "of",
+          "start_ms": 182060,
+          "end_ms": 182360
+        },
+        {
+          "text": "Kings",
+          "start_ms": 182360,
+          "end_ms": 183060
+        }
+      ]
+    },
+    {
+      "text": "Lord of Lords",
+      "start_ms": 183060,
+      "end_ms": 184780,
+      "text_sk": "Pán pánov",
+      "words": [
+        {
+          "text": "Lord",
+          "start_ms": 183060,
+          "end_ms": 183680
+        },
+        {
+          "text": "of",
+          "start_ms": 183680,
+          "end_ms": 183880
+        },
+        {
+          "text": "Lords",
+          "start_ms": 183880,
+          "end_ms": 184780
+        }
+      ]
+    },
+    {
+      "text": "Alpha and Omega",
+      "start_ms": 184780,
+      "end_ms": 188140,
+      "text_sk": "Alfa a Omega",
+      "words": [
+        {
+          "text": "Alpha",
+          "start_ms": 184780,
+          "end_ms": 185360
+        },
+        {
+          "text": "and",
+          "start_ms": 185360,
+          "end_ms": 185980
+        },
+        {
+          "text": "Omega",
+          "start_ms": 185980,
+          "end_ms": 188140
+        }
+      ]
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 188140,
+      "end_ms": 191640,
+      "text_sk": "Môj Spasiteľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 188140,
+          "end_ms": 189260
+        },
+        {
+          "text": "Savior",
+          "start_ms": 189260,
+          "end_ms": 191640
+        }
+      ]
+    },
+    {
+      "text": "Hey through the storm",
+      "start_ms": 191640,
+      "end_ms": 194080,
+      "text_sk": "Hej cez búrku",
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 191640,
+          "end_ms": 192460
+        },
+        {
+          "text": "through",
+          "start_ms": 192460,
+          "end_ms": 192900
+        },
+        {
+          "text": "the",
+          "start_ms": 192900,
+          "end_ms": 193140
+        },
+        {
+          "text": "storm",
+          "start_ms": 193140,
+          "end_ms": 194080
+        }
+      ]
+    },
+    {
+      "text": "It is well with my soul",
+      "start_ms": 194080,
+      "end_ms": 197040,
+      "text_sk": "Je dobre s mojou dušou",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 194080,
+          "end_ms": 194540
+        },
+        {
+          "text": "is",
+          "start_ms": 194540,
+          "end_ms": 194840
+        },
+        {
+          "text": "well",
+          "start_ms": 194840,
+          "end_ms": 195440
+        },
+        {
+          "text": "with",
+          "start_ms": 195440,
+          "end_ms": 195960
+        },
+        {
+          "text": "my",
+          "start_ms": 195960,
+          "end_ms": 196260
+        },
+        {
+          "text": "soul",
+          "start_ms": 196260,
+          "end_ms": 197040
+        }
+      ]
+    },
+    {
+      "text": "I know You are faithful",
+      "start_ms": 197040,
+      "end_ms": 200720,
+      "text_sk": "Vieme, že si verný",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 197040,
+          "end_ms": 197420
+        },
+        {
+          "text": "know",
+          "start_ms": 197420,
+          "end_ms": 197940
+        },
+        {
+          "text": "You",
+          "start_ms": 197940,
+          "end_ms": 198420
+        },
+        {
+          "text": "are",
+          "start_ms": 198420,
+          "end_ms": 198720
+        },
+        {
+          "text": "faithful",
+          "start_ms": 198720,
+          "end_ms": 200720
+        }
+      ]
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 200720,
+      "end_ms": 203860,
+      "text_sk": "Môj Spasiteľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 200720,
+          "end_ms": 201720
+        },
+        {
+          "text": "Savior",
+          "start_ms": 201720,
+          "end_ms": 203860
+        }
+      ]
+    },
+    {
+      "text": "Oh You are faithful",
+      "start_ms": 203860,
+      "end_ms": 207500,
+      "text_sk": "Ó Si verný",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 203860,
+          "end_ms": 204180
+        },
+        {
+          "text": "You",
+          "start_ms": 204180,
+          "end_ms": 204520
+        },
+        {
+          "text": "are",
+          "start_ms": 204520,
+          "end_ms": 204980
+        },
+        {
+          "text": "faithful",
+          "start_ms": 204980,
+          "end_ms": 207500
+        }
+      ]
+    },
+    {
+      "text": "My Savior",
+      "start_ms": 207500,
+      "end_ms": 209220,
+      "text_sk": "Môj Spasiteľ",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 207500,
+          "end_ms": 207940
+        },
+        {
+          "text": "Savior",
+          "start_ms": 207940,
+          "end_ms": 209220
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 209220,
+      "end_ms": 212460,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 209220,
+          "end_ms": 209620
+        },
+        {
+          "text": "name",
+          "start_ms": 209620,
+          "end_ms": 210760
+        },
+        {
+          "text": "is",
+          "start_ms": 210760,
+          "end_ms": 211200
+        },
+        {
+          "text": "God",
+          "start_ms": 211200,
+          "end_ms": 212460
+        }
+      ]
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 212460,
+      "end_ms": 216020,
+      "text_sk": "Nikto iný vedľa",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 212460,
+          "end_ms": 213080
+        },
+        {
+          "text": "one",
+          "start_ms": 213080,
+          "end_ms": 213600
+        },
+        {
+          "text": "else",
+          "start_ms": 213600,
+          "end_ms": 213900
+        },
+        {
+          "text": "beside",
+          "start_ms": 213900,
+          "end_ms": 216020
+        }
+      ]
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": 216020,
+      "end_ms": 216920,
+      "text_sk": "El Shaddai",
+      "words": [
+        {
+          "text": "El",
+          "start_ms": 216020,
+          "end_ms": 216180
+        },
+        {
+          "text": "Shaddai",
+          "start_ms": 216180,
+          "end_ms": 216920
+        }
+      ]
+    },
+    {
+      "text": "If You don't",
+      "start_ms": 216920,
+      "end_ms": 218960,
+      "text_sk": "Ak sa Ty",
+      "words": [
+        {
+          "text": "If",
+          "start_ms": 216920,
+          "end_ms": 217080
+        },
+        {
+          "text": "You",
+          "start_ms": 217080,
+          "end_ms": 217760
+        },
+        {
+          "text": "don't",
+          "start_ms": 217760,
+          "end_ms": 218960
+        }
+      ]
+    },
+    {
+      "text": "Worry why should I",
+      "start_ms": 218960,
+      "end_ms": 221240,
+      "text_sk": "Netrápiš, prečo by som mal ja",
+      "words": [
+        {
+          "text": "Worry",
+          "start_ms": 218960,
+          "end_ms": 219660
+        },
+        {
+          "text": "why",
+          "start_ms": 219660,
+          "end_ms": 220120
+        },
+        {
+          "text": "should",
+          "start_ms": 220120,
+          "end_ms": 220700
+        },
+        {
+          "text": "I",
+          "start_ms": 220700,
+          "end_ms": 221240
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 221240,
+      "end_ms": 224920,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 221240,
+          "end_ms": 222080
+        },
+        {
+          "text": "name",
+          "start_ms": 222080,
+          "end_ms": 222720
+        },
+        {
+          "text": "is",
+          "start_ms": 222720,
+          "end_ms": 223660
+        },
+        {
+          "text": "God",
+          "start_ms": 223660,
+          "end_ms": 224920
+        }
+      ]
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 224920,
+      "end_ms": 228100,
+      "text_sk": "Autor môjho života",
+      "words": [
+        {
+          "text": "Author",
+          "start_ms": 224920,
+          "end_ms": 225880
+        },
+        {
+          "text": "of",
+          "start_ms": 225880,
+          "end_ms": 226200
+        },
+        {
+          "text": "my",
+          "start_ms": 226200,
+          "end_ms": 226420
+        },
+        {
+          "text": "life",
+          "start_ms": 226420,
+          "end_ms": 228100
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 228100,
+      "end_ms": 230720,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 228100,
+          "end_ms": 228260
+        },
+        {
+          "text": "trusting",
+          "start_ms": 228260,
+          "end_ms": 229220
+        },
+        {
+          "text": "in",
+          "start_ms": 229220,
+          "end_ms": 229480
+        },
+        {
+          "text": "Your",
+          "start_ms": 229480,
+          "end_ms": 229860
+        },
+        {
+          "text": "name",
+          "start_ms": 229860,
+          "end_ms": 230720
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 230720,
+      "end_ms": 231280,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 230720,
+          "end_ms": 231280
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 231280,
+      "end_ms": 233680,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 231280,
+          "end_ms": 231840
+        },
+        {
+          "text": "the",
+          "start_ms": 231840,
+          "end_ms": 232120
+        },
+        {
+          "text": "day",
+          "start_ms": 232120,
+          "end_ms": 232720
+        },
+        {
+          "text": "I",
+          "start_ms": 232720,
+          "end_ms": 232940
+        },
+        {
+          "text": "die",
+          "start_ms": 232940,
+          "end_ms": 233680
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 233680,
+      "end_ms": 237340,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 233680,
+          "end_ms": 234580
+        },
+        {
+          "text": "name",
+          "start_ms": 234580,
+          "end_ms": 235700
+        },
+        {
+          "text": "is",
+          "start_ms": 235700,
+          "end_ms": 236160
+        },
+        {
+          "text": "God",
+          "start_ms": 236160,
+          "end_ms": 237340
+        }
+      ]
+    },
+    {
+      "text": "No one else beside",
+      "start_ms": 237340,
+      "end_ms": 240580,
+      "text_sk": "Nikto iný vedľa",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 237340,
+          "end_ms": 238020
+        },
+        {
+          "text": "one",
+          "start_ms": 238020,
+          "end_ms": 238560
+        },
+        {
+          "text": "else",
+          "start_ms": 238560,
+          "end_ms": 238860
+        },
+        {
+          "text": "beside",
+          "start_ms": 238860,
+          "end_ms": 240580
+        }
+      ]
+    },
+    {
+      "text": "El Shaddai",
+      "start_ms": 240580,
+      "end_ms": 242140,
+      "text_sk": "El Shaddai",
+      "words": [
+        {
+          "text": "El",
+          "start_ms": 240580,
+          "end_ms": 241140
+        },
+        {
+          "text": "Shaddai",
+          "start_ms": 241140,
+          "end_ms": 242140
+        }
+      ]
+    },
+    {
+      "text": "If You don't",
+      "start_ms": 242140,
+      "end_ms": 243940,
+      "text_sk": "Ak sa Ty",
+      "words": [
+        {
+          "text": "If",
+          "start_ms": 242140,
+          "end_ms": 242420
+        },
+        {
+          "text": "You",
+          "start_ms": 242420,
+          "end_ms": 242940
+        },
+        {
+          "text": "don't",
+          "start_ms": 242940,
+          "end_ms": 243940
+        }
+      ]
+    },
+    {
+      "text": "Worry why should I",
+      "start_ms": 243940,
+      "end_ms": 246220,
+      "text_sk": "Netrápiš, prečo by som mal ja",
+      "words": [
+        {
+          "text": "Worry",
+          "start_ms": 243940,
+          "end_ms": 245060
+        },
+        {
+          "text": "why",
+          "start_ms": 245060,
+          "end_ms": 245840
+        },
+        {
+          "text": "should",
+          "start_ms": 245840,
+          "end_ms": 246180
+        },
+        {
+          "text": "I",
+          "start_ms": 246180,
+          "end_ms": 246220
+        }
+      ]
+    },
+    {
+      "text": "Oh Your name is God",
+      "start_ms": 246220,
+      "end_ms": 249920,
+      "text_sk": "Ó Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 246220,
+          "end_ms": 246540
+        },
+        {
+          "text": "Your",
+          "start_ms": 246540,
+          "end_ms": 247060
+        },
+        {
+          "text": "name",
+          "start_ms": 247060,
+          "end_ms": 248200
+        },
+        {
+          "text": "is",
+          "start_ms": 248200,
+          "end_ms": 248640
+        },
+        {
+          "text": "God",
+          "start_ms": 248640,
+          "end_ms": 249920
+        }
+      ]
+    },
+    {
+      "text": "Author of my life",
+      "start_ms": 249920,
+      "end_ms": 252120,
+      "text_sk": "Autor môjho života",
+      "words": [
+        {
+          "text": "Author",
+          "start_ms": 249920,
+          "end_ms": 251040
+        },
+        {
+          "text": "of",
+          "start_ms": 251040,
+          "end_ms": 251300
+        },
+        {
+          "text": "my",
+          "start_ms": 251300,
+          "end_ms": 251540
+        },
+        {
+          "text": "life",
+          "start_ms": 251540,
+          "end_ms": 252120
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 252120,
+      "end_ms": 255600,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 252120,
+          "end_ms": 253160
+        },
+        {
+          "text": "trusting",
+          "start_ms": 253160,
+          "end_ms": 254160
+        },
+        {
+          "text": "in",
+          "start_ms": 254160,
+          "end_ms": 254380
+        },
+        {
+          "text": "Your",
+          "start_ms": 254380,
+          "end_ms": 254820
+        },
+        {
+          "text": "name",
+          "start_ms": 254820,
+          "end_ms": 255600
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 255600,
+      "end_ms": 256020,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 255600,
+          "end_ms": 256020
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 256020,
+      "end_ms": 258560,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 256020,
+          "end_ms": 256780
+        },
+        {
+          "text": "the",
+          "start_ms": 256780,
+          "end_ms": 257060
+        },
+        {
+          "text": "day",
+          "start_ms": 257060,
+          "end_ms": 257680
+        },
+        {
+          "text": "I",
+          "start_ms": 257680,
+          "end_ms": 257860
+        },
+        {
+          "text": "die",
+          "start_ms": 257860,
+          "end_ms": 258560
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 258560,
+      "end_ms": 261860,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 258560,
+          "end_ms": 259400
+        },
+        {
+          "text": "trusting",
+          "start_ms": 259400,
+          "end_ms": 260360
+        },
+        {
+          "text": "in",
+          "start_ms": 260360,
+          "end_ms": 260620
+        },
+        {
+          "text": "Your",
+          "start_ms": 260620,
+          "end_ms": 261080
+        },
+        {
+          "text": "name",
+          "start_ms": 261080,
+          "end_ms": 261860
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 261860,
+      "end_ms": 262460,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 261860,
+          "end_ms": 262460
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 262460,
+      "end_ms": 264780,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 262460,
+          "end_ms": 263020
+        },
+        {
+          "text": "the",
+          "start_ms": 263020,
+          "end_ms": 263280
+        },
+        {
+          "text": "day",
+          "start_ms": 263280,
+          "end_ms": 263920
+        },
+        {
+          "text": "I",
+          "start_ms": 263920,
+          "end_ms": 264080
+        },
+        {
+          "text": "die",
+          "start_ms": 264080,
+          "end_ms": 264780
+        }
+      ]
+    },
+    {
+      "text": "I'm trusting in Your name",
+      "start_ms": 264780,
+      "end_ms": 269700,
+      "text_sk": "Dôverujem v Tvoje meno",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 264780,
+          "end_ms": 265620
+        },
+        {
+          "text": "trusting",
+          "start_ms": 265620,
+          "end_ms": 266600
+        },
+        {
+          "text": "in",
+          "start_ms": 266600,
+          "end_ms": 266840
+        },
+        {
+          "text": "Your",
+          "start_ms": 266840,
+          "end_ms": 267240
+        },
+        {
+          "text": "name",
+          "start_ms": 267240,
+          "end_ms": 269700
+        }
+      ]
+    },
+    {
+      "text": "God",
+      "start_ms": 269700,
+      "end_ms": 270100,
+      "text_sk": "Bože",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 269700,
+          "end_ms": 270100
+        }
+      ]
+    },
+    {
+      "text": "'Til the day I die",
+      "start_ms": 270100,
+      "end_ms": 271200,
+      "text_sk": "Až do dňa, keď zomriem",
+      "words": [
+        {
+          "text": "'Til",
+          "start_ms": 270100,
+          "end_ms": 270340
+        },
+        {
+          "text": "the",
+          "start_ms": 270340,
+          "end_ms": 270400
+        },
+        {
+          "text": "day",
+          "start_ms": 270400,
+          "end_ms": 270640
+        },
+        {
+          "text": "I",
+          "start_ms": 270640,
+          "end_ms": 270700
+        },
+        {
+          "text": "die",
+          "start_ms": 270700,
+          "end_ms": 271200
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 271200,
+      "end_ms": 284460,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 271200,
+          "end_ms": 271940
+        },
+        {
+          "text": "name",
+          "start_ms": 271940,
+          "end_ms": 273000
+        },
+        {
+          "text": "is",
+          "start_ms": 273000,
+          "end_ms": 273540
+        },
+        {
+          "text": "God",
+          "start_ms": 273540,
+          "end_ms": 284460
+        }
+      ]
+    },
+    {
+      "text": "There is nothing like the name of Jesus Christ",
+      "start_ms": 284460,
+      "end_ms": 290080,
+      "text_sk": "Nie je nič ako meno Ježiša Krista",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 284460,
+          "end_ms": 284940
+        },
+        {
+          "text": "is",
+          "start_ms": 284940,
+          "end_ms": 285180
+        },
+        {
+          "text": "nothing",
+          "start_ms": 285180,
+          "end_ms": 285980
+        },
+        {
+          "text": "like",
+          "start_ms": 285980,
+          "end_ms": 286740
+        },
+        {
+          "text": "the",
+          "start_ms": 286740,
+          "end_ms": 287240
+        },
+        {
+          "text": "name",
+          "start_ms": 287240,
+          "end_ms": 288040
+        },
+        {
+          "text": "of",
+          "start_ms": 288040,
+          "end_ms": 288260
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 288260,
+          "end_ms": 289160
+        },
+        {
+          "text": "Christ",
+          "start_ms": 289160,
+          "end_ms": 290080
+        }
+      ]
+    },
+    {
+      "text": "Your name is God",
+      "start_ms": 290080,
+      "end_ms": 293460,
+      "text_sk": "Tvoje meno je Boh",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 290080,
+          "end_ms": 290660
+        },
+        {
+          "text": "name",
+          "start_ms": 290660,
+          "end_ms": 291620
+        },
+        {
+          "text": "is",
+          "start_ms": 291620,
+          "end_ms": 292260
+        },
+        {
+          "text": "God",
+          "start_ms": 292260,
+          "end_ms": 293460
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "edges",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.26,
+    "model_load_sec": null,
+    "error": null
+  }
+}

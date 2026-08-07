@@ -1,0 +1,600 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\xPkg_vW4yE0_vocal16k.wav",
+  "duration_ms": null,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed",
+      "text_sk": "Keď je moje srdce preťažené",
+      "start_ms": 8420,
+      "end_ms": 12100,
+      "mean_word_loss": 0.2180858126553622,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 8420,
+          "end_ms": 8680,
+          "loss": 0.883026123046875
+        },
+        {
+          "text": "my",
+          "start_ms": 8800,
+          "end_ms": 8980,
+          "loss": 0.09949493408203125
+        },
+        {
+          "text": "heart",
+          "start_ms": 9060,
+          "end_ms": 9820,
+          "loss": 0.004210662841796875
+        },
+        {
+          "text": "is",
+          "start_ms": 9980,
+          "end_ms": 10120,
+          "loss": 0.0055694580078125
+        },
+        {
+          "text": "overwhelmed",
+          "start_ms": 10200,
+          "end_ms": 12100,
+          "loss": 0.09812788529829546
+        }
+      ]
+    },
+    {
+      "text": "When I barely trust myself lead me to the rock",
+      "text_sk": "Keď si sotva verím, veď ma ku skale",
+      "start_ms": 14540,
+      "end_ms": 20080,
+      "mean_word_loss": 0.14736195882161457,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 14540,
+          "end_ms": 14780,
+          "loss": 0.6285400390625
+        },
+        {
+          "text": "I",
+          "start_ms": 14880,
+          "end_ms": 14980,
+          "loss": 0.037841796875
+        },
+        {
+          "text": "barely",
+          "start_ms": 15080,
+          "end_ms": 15900,
+          "loss": 0.07366053263346355
+        },
+        {
+          "text": "trust",
+          "start_ms": 16040,
+          "end_ms": 16680,
+          "loss": 0.0209014892578125
+        },
+        {
+          "text": "myself",
+          "start_ms": 16800,
+          "end_ms": 17580,
+          "loss": 0.003398895263671875
+        },
+        {
+          "text": "lead",
+          "start_ms": 18020,
+          "end_ms": 18240,
+          "loss": 0.194549560546875
+        },
+        {
+          "text": "me",
+          "start_ms": 18300,
+          "end_ms": 18400,
+          "loss": 0.007080078125
+        },
+        {
+          "text": "to",
+          "start_ms": 18540,
+          "end_ms": 18740,
+          "loss": 0.32086944580078125
+        },
+        {
+          "text": "the",
+          "start_ms": 18780,
+          "end_ms": 19000,
+          "loss": 0.006724039713541667
+        },
+        {
+          "text": "rock",
+          "start_ms": 19080,
+          "end_ms": 20080,
+          "loss": 0.1800537109375
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "text_sk": "Vyššie než ja",
+      "start_ms": 22020,
+      "end_ms": 23220,
+      "mean_word_loss": 0.2501983642578125,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 22020,
+          "end_ms": 22520,
+          "loss": 0.6874237060546875
+        },
+        {
+          "text": "than",
+          "start_ms": 22620,
+          "end_ms": 22760,
+          "loss": 0.01092529296875
+        },
+        {
+          "text": "I",
+          "start_ms": 22920,
+          "end_ms": 23220,
+          "loss": 0.05224609375
+        }
+      ]
+    },
+    {
+      "text": "When the night is closing in",
+      "text_sk": "Keď sa noc blíži",
+      "start_ms": 26260,
+      "end_ms": 30060,
+      "mean_word_loss": 0.25428992377387155,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 26260,
+          "end_ms": 26740,
+          "loss": 1.2246246337890625
+        },
+        {
+          "text": "the",
+          "start_ms": 26800,
+          "end_ms": 26870,
+          "loss": 0.0028254191080729165
+        },
+        {
+          "text": "night",
+          "start_ms": 27040,
+          "end_ms": 27800,
+          "loss": 0.067950439453125
+        },
+        {
+          "text": "is",
+          "start_ms": 27840,
+          "end_ms": 27980,
+          "loss": 0.1087646484375
+        },
+        {
+          "text": "closing",
+          "start_ms": 28020,
+          "end_ms": 29060,
+          "loss": 0.03118133544921875
+        },
+        {
+          "text": "in",
+          "start_ms": 29140,
+          "end_ms": 30060,
+          "loss": 0.09039306640625
+        }
+      ]
+    },
+    {
+      "text": "To remind me of my sin lead me to the rock",
+      "text_sk": "Aby mi pripomenula môj hriech, veď ma ku skale",
+      "start_ms": 31640,
+      "end_ms": 38580,
+      "mean_word_loss": 0.2339446327903054,
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 31640,
+          "end_ms": 32740,
+          "loss": 1.6798095703125
+        },
+        {
+          "text": "remind",
+          "start_ms": 32820,
+          "end_ms": 33780,
+          "loss": 0.010578155517578125
+        },
+        {
+          "text": "me",
+          "start_ms": 33840,
+          "end_ms": 34060,
+          "loss": 0.0079193115234375
+        },
+        {
+          "text": "of",
+          "start_ms": 34140,
+          "end_ms": 34720,
+          "loss": 0.0123748779296875
+        },
+        {
+          "text": "my",
+          "start_ms": 34840,
+          "end_ms": 35040,
+          "loss": 0.015472412109375
+        },
+        {
+          "text": "sin",
+          "start_ms": 35140,
+          "end_ms": 35900,
+          "loss": 0.5252278645833334
+        },
+        {
+          "text": "lead",
+          "start_ms": 36000,
+          "end_ms": 36260,
+          "loss": 0.0914306640625
+        },
+        {
+          "text": "me",
+          "start_ms": 36320,
+          "end_ms": 36500,
+          "loss": 0.006103515625
+        },
+        {
+          "text": "to",
+          "start_ms": 36580,
+          "end_ms": 36800,
+          "loss": 0.032733917236328125
+        },
+        {
+          "text": "the",
+          "start_ms": 36840,
+          "end_ms": 37020,
+          "loss": 0.003966013590494792
+        },
+        {
+          "text": "rock",
+          "start_ms": 37220,
+          "end_ms": 38580,
+          "loss": 0.187774658203125
+        }
+      ]
+    },
+    {
+      "text": "Higher than I lead me to the rock",
+      "text_sk": "Vyššie než ja, veď ma ku skale",
+      "start_ms": 40060,
+      "end_ms": 95900,
+      "mean_word_loss": 0.23076534271240234,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 40060,
+          "end_ms": 40550,
+          "loss": 0.705352783203125
+        },
+        {
+          "text": "than",
+          "start_ms": 40620,
+          "end_ms": 40780,
+          "loss": 0.020687103271484375
+        },
+        {
+          "text": "I",
+          "start_ms": 41040,
+          "end_ms": 41720,
+          "loss": 0.036865234375
+        },
+        {
+          "text": "lead",
+          "start_ms": 42720,
+          "end_ms": 44260,
+          "loss": 0.8044891357421875
+        },
+        {
+          "text": "me",
+          "start_ms": 44320,
+          "end_ms": 44420,
+          "loss": 0.0626220703125
+        },
+        {
+          "text": "to",
+          "start_ms": 47280,
+          "end_ms": 93920,
+          "loss": 0.0455322265625
+        },
+        {
+          "text": "the",
+          "start_ms": 94740,
+          "end_ms": 94820,
+          "loss": 0.003276824951171875
+        },
+        {
+          "text": "rock",
+          "start_ms": 94920,
+          "end_ms": 95900,
+          "loss": 0.16729736328125
+        }
+      ]
+    },
+    {
+      "text": "Higher than I higher than I",
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "start_ms": 99640,
+      "end_ms": 108440,
+      "mean_word_loss": 0.2662586636013455,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 99640,
+          "end_ms": 106460,
+          "loss": 0.9129130045572916
+        },
+        {
+          "text": "than",
+          "start_ms": 106540,
+          "end_ms": 106550,
+          "loss": 0.023712158203125
+        },
+        {
+          "text": "I",
+          "start_ms": 106550,
+          "end_ms": 106551,
+          "loss": 0.03857421875
+        },
+        {
+          "text": "higher",
+          "start_ms": 106550,
+          "end_ms": 106551,
+          "loss": 0.56268310546875
+        },
+        {
+          "text": "than",
+          "start_ms": 106551,
+          "end_ms": 106840,
+          "loss": 0.01963043212890625
+        },
+        {
+          "text": "I",
+          "start_ms": 107000,
+          "end_ms": 108440,
+          "loss": 0.0400390625
+        }
+      ]
+    },
+    {
+      "text": "Higher than I higher than I",
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "start_ms": 109920,
+      "end_ms": 120260,
+      "mean_word_loss": 0.24783028496636286,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 109920,
+          "end_ms": 110490,
+          "loss": 0.7941487630208334
+        },
+        {
+          "text": "than",
+          "start_ms": 110580,
+          "end_ms": 114720,
+          "loss": 0.0465240478515625
+        },
+        {
+          "text": "I",
+          "start_ms": 115020,
+          "end_ms": 115480,
+          "loss": 0.0274658203125
+        },
+        {
+          "text": "higher",
+          "start_ms": 117520,
+          "end_ms": 118530,
+          "loss": 0.559326171875
+        },
+        {
+          "text": "than",
+          "start_ms": 118600,
+          "end_ms": 118800,
+          "loss": 0.03437042236328125
+        },
+        {
+          "text": "I",
+          "start_ms": 118960,
+          "end_ms": 120260,
+          "loss": 0.025146484375
+        }
+      ]
+    },
+    {
+      "text": "Higher than I",
+      "text_sk": "Vyššie než ja",
+      "start_ms": 122000,
+      "end_ms": 123660,
+      "mean_word_loss": 0.3126737806532118,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 122000,
+          "end_ms": 122470,
+          "loss": 0.8425699869791666
+        },
+        {
+          "text": "than",
+          "start_ms": 122560,
+          "end_ms": 122840,
+          "loss": 0.07262420654296875
+        },
+        {
+          "text": "I",
+          "start_ms": 123000,
+          "end_ms": 123660,
+          "loss": 0.0228271484375
+        }
+      ]
+    },
+    {
+      "text": "So much stronger so much greater",
+      "text_sk": "Oveľa silnejší, oveľa väčší",
+      "start_ms": 125740,
+      "end_ms": 129360,
+      "mean_word_loss": 0.7800815403461456,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 125740,
+          "end_ms": 126160,
+          "loss": 3.279296875
+        },
+        {
+          "text": "much",
+          "start_ms": 126280,
+          "end_ms": 126680,
+          "loss": 0.05373513698577881
+        },
+        {
+          "text": "stronger",
+          "start_ms": 126700,
+          "end_ms": 127420,
+          "loss": 0.04756426811218262
+        },
+        {
+          "text": "so",
+          "start_ms": 127720,
+          "end_ms": 128199,
+          "loss": 1.15966796875
+        },
+        {
+          "text": "much",
+          "start_ms": 128320,
+          "end_ms": 128640,
+          "loss": 0.022586405277252197
+        },
+        {
+          "text": "greater",
+          "start_ms": 128740,
+          "end_ms": 129360,
+          "loss": 0.11763858795166016
+        }
+      ]
+    },
+    {
+      "text": "So much wiser so much higher",
+      "text_sk": "Oveľa múdrejší, oveľa vyšší",
+      "start_ms": 129740,
+      "end_ms": 232460,
+      "mean_word_loss": 0.33512830899821383,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 129740,
+          "end_ms": 130160,
+          "loss": 0.77783203125
+        },
+        {
+          "text": "much",
+          "start_ms": 130259,
+          "end_ms": 130640,
+          "loss": 0.012660741806030273
+        },
+        {
+          "text": "wiser",
+          "start_ms": 130780,
+          "end_ms": 218100,
+          "loss": 0.1956787109375
+        },
+        {
+          "text": "so",
+          "start_ms": 218680,
+          "end_ms": 220020,
+          "loss": 0.664306640625
+        },
+        {
+          "text": "much",
+          "start_ms": 228340,
+          "end_ms": 228640,
+          "loss": 0.005819886922836304
+        },
+        {
+          "text": "higher",
+          "start_ms": 228740,
+          "end_ms": 232460,
+          "loss": 0.3544718424479167
+        }
+      ]
+    },
+    {
+      "text": "Higher than I higher than I",
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "start_ms": 232480,
+      "end_ms": 237220,
+      "mean_word_loss": 0.37638388739691836,
+      "words": [
+        {
+          "text": "Higher",
+          "start_ms": 232480,
+          "end_ms": 232540,
+          "loss": 1.743896484375
+        },
+        {
+          "text": "than",
+          "start_ms": 232560,
+          "end_ms": 232810,
+          "loss": 0.04267120361328125
+        },
+        {
+          "text": "I",
+          "start_ms": 233020,
+          "end_ms": 233260,
+          "loss": 0.035888671875
+        },
+        {
+          "text": "higher",
+          "start_ms": 235400,
+          "end_ms": 236480,
+          "loss": 0.3906656901041667
+        },
+        {
+          "text": "than",
+          "start_ms": 236560,
+          "end_ms": 236820,
+          "loss": 0.0117340087890625
+        },
+        {
+          "text": "I",
+          "start_ms": 236980,
+          "end_ms": 237220,
+          "loss": 0.033447265625
+        }
+      ]
+    },
+    {
+      "text": "[Instrumental]",
+      "text_sk": "[Inštrumentálna časť]",
+      "start_ms": 238920,
+      "end_ms": 257820,
+      "mean_word_loss": 1.120743887765067,
+      "words": [
+        {
+          "text": "[Instrumental]",
+          "start_ms": 238920,
+          "end_ms": 257820,
+          "loss": 1.120743887765067
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.3429360573356216,
+  "metadata": {
+    "n_tokens_sent": 77,
+    "n_words_returned_raw": 153,
+    "n_words_returned_content": 77,
+    "n_characters_returned": 370,
+    "runtime_sec": 5.8,
+    "n_lines": 13,
+    "n_lines_timed": 13,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

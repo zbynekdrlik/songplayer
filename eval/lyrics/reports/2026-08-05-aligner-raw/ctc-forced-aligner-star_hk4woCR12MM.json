@@ -1,0 +1,1533 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\hk4woCR12MM_vocal16k.wav",
+  "duration_ms": 203499,
+  "lines": [
+    {
+      "text": "How could I thank the one who saved my life",
+      "start_ms": 4040,
+      "end_ms": 9420,
+      "text_sk": "Ako by som mohol poďakovať tomu, kto mi zachránil život",
+      "words": [
+        {
+          "text": "How",
+          "start_ms": 4040,
+          "end_ms": 4380
+        },
+        {
+          "text": "could",
+          "start_ms": 4520,
+          "end_ms": 5020
+        },
+        {
+          "text": "I",
+          "start_ms": 5480,
+          "end_ms": 5500
+        },
+        {
+          "text": "thank",
+          "start_ms": 6820,
+          "end_ms": 7040
+        },
+        {
+          "text": "the",
+          "start_ms": 7080,
+          "end_ms": 7180
+        },
+        {
+          "text": "one",
+          "start_ms": 7420,
+          "end_ms": 7560
+        },
+        {
+          "text": "who",
+          "start_ms": 7600,
+          "end_ms": 7680
+        },
+        {
+          "text": "saved",
+          "start_ms": 7880,
+          "end_ms": 8280
+        },
+        {
+          "text": "my",
+          "start_ms": 8380,
+          "end_ms": 8520
+        },
+        {
+          "text": "life",
+          "start_ms": 8880,
+          "end_ms": 9420
+        }
+      ]
+    },
+    {
+      "text": "When there is no words to express what you deserve",
+      "start_ms": 11300,
+      "end_ms": 19420,
+      "text_sk": "Keď neexistujú slová na vyjadrenie toho, čo si zaslúžiš",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 11300,
+          "end_ms": 11520
+        },
+        {
+          "text": "there",
+          "start_ms": 11680,
+          "end_ms": 11840
+        },
+        {
+          "text": "is",
+          "start_ms": 11900,
+          "end_ms": 12180
+        },
+        {
+          "text": "no",
+          "start_ms": 12280,
+          "end_ms": 12400
+        },
+        {
+          "text": "words",
+          "start_ms": 12760,
+          "end_ms": 13420
+        },
+        {
+          "text": "to",
+          "start_ms": 14540,
+          "end_ms": 14660
+        },
+        {
+          "text": "express",
+          "start_ms": 14880,
+          "end_ms": 15280
+        },
+        {
+          "text": "what",
+          "start_ms": 15340,
+          "end_ms": 15560
+        },
+        {
+          "text": "you",
+          "start_ms": 15700,
+          "end_ms": 15800
+        },
+        {
+          "text": "deserve",
+          "start_ms": 16140,
+          "end_ms": 19420
+        }
+      ]
+    },
+    {
+      "text": "You deserve the greatest",
+      "start_ms": 19540,
+      "end_ms": 21120,
+      "text_sk": "Zaslúžiš si to najväčšie",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 19540,
+          "end_ms": 19640
+        },
+        {
+          "text": "deserve",
+          "start_ms": 19780,
+          "end_ms": 20220
+        },
+        {
+          "text": "the",
+          "start_ms": 20240,
+          "end_ms": 20340
+        },
+        {
+          "text": "greatest",
+          "start_ms": 20440,
+          "end_ms": 21120
+        }
+      ]
+    },
+    {
+      "text": "To be lifted up the highest",
+      "start_ms": 21140,
+      "end_ms": 23060,
+      "text_sk": "Byť vyzdvihnutý najvyššie",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 21140,
+          "end_ms": 21180
+        },
+        {
+          "text": "be",
+          "start_ms": 21220,
+          "end_ms": 21320
+        },
+        {
+          "text": "lifted",
+          "start_ms": 21440,
+          "end_ms": 21980
+        },
+        {
+          "text": "up",
+          "start_ms": 22040,
+          "end_ms": 22120
+        },
+        {
+          "text": "the",
+          "start_ms": 22200,
+          "end_ms": 22300
+        },
+        {
+          "text": "highest",
+          "start_ms": 22420,
+          "end_ms": 23060
+        }
+      ]
+    },
+    {
+      "text": "Worthy of my everything",
+      "start_ms": 23400,
+      "end_ms": 26480,
+      "text_sk": "Hodný môjho všetkého",
+      "words": [
+        {
+          "text": "Worthy",
+          "start_ms": 23400,
+          "end_ms": 23780
+        },
+        {
+          "text": "of",
+          "start_ms": 23960,
+          "end_ms": 24020
+        },
+        {
+          "text": "my",
+          "start_ms": 24100,
+          "end_ms": 24260
+        },
+        {
+          "text": "everything",
+          "start_ms": 24460,
+          "end_ms": 26480
+        }
+      ]
+    },
+    {
+      "text": "This is why I praise",
+      "start_ms": 27220,
+      "end_ms": 29600,
+      "text_sk": "Preto chválim",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 27220,
+          "end_ms": 27580
+        },
+        {
+          "text": "is",
+          "start_ms": 27780,
+          "end_ms": 28140
+        },
+        {
+          "text": "why",
+          "start_ms": 28240,
+          "end_ms": 28640
+        },
+        {
+          "text": "I",
+          "start_ms": 28940,
+          "end_ms": 28960
+        },
+        {
+          "text": "praise",
+          "start_ms": 29080,
+          "end_ms": 29600
+        }
+      ]
+    },
+    {
+      "text": "'Cause you're worthy of all my praise",
+      "start_ms": 29620,
+      "end_ms": 32840,
+      "text_sk": "Pretože si hodný všetkej mojej chvály",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 29620,
+          "end_ms": 30920
+        },
+        {
+          "text": "you're",
+          "start_ms": 30940,
+          "end_ms": 31060
+        },
+        {
+          "text": "worthy",
+          "start_ms": 31120,
+          "end_ms": 31500
+        },
+        {
+          "text": "of",
+          "start_ms": 31580,
+          "end_ms": 31660
+        },
+        {
+          "text": "all",
+          "start_ms": 31700,
+          "end_ms": 31900
+        },
+        {
+          "text": "my",
+          "start_ms": 31980,
+          "end_ms": 32180
+        },
+        {
+          "text": "praise",
+          "start_ms": 32380,
+          "end_ms": 32840
+        }
+      ]
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 34900,
+      "end_ms": 36100,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 34900,
+          "end_ms": 34960
+        },
+        {
+          "text": "everything",
+          "start_ms": 35060,
+          "end_ms": 35720
+        },
+        {
+          "text": "I",
+          "start_ms": 35780,
+          "end_ms": 35800
+        },
+        {
+          "text": "do",
+          "start_ms": 35980,
+          "end_ms": 36100
+        }
+      ]
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 36820,
+      "end_ms": 38420,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 36820,
+          "end_ms": 36940
+        },
+        {
+          "text": "all",
+          "start_ms": 37000,
+          "end_ms": 37140
+        },
+        {
+          "text": "that",
+          "start_ms": 37180,
+          "end_ms": 37440
+        },
+        {
+          "text": "I",
+          "start_ms": 37560,
+          "end_ms": 37580
+        },
+        {
+          "text": "go",
+          "start_ms": 37660,
+          "end_ms": 37760
+        },
+        {
+          "text": "through",
+          "start_ms": 37880,
+          "end_ms": 38420
+        }
+      ]
+    },
+    {
+      "text": "I give You all my praise",
+      "start_ms": 38780,
+      "end_ms": 41260,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 38780,
+          "end_ms": 38800
+        },
+        {
+          "text": "give",
+          "start_ms": 38860,
+          "end_ms": 39340
+        },
+        {
+          "text": "You",
+          "start_ms": 39420,
+          "end_ms": 39540
+        },
+        {
+          "text": "all",
+          "start_ms": 39960,
+          "end_ms": 40280
+        },
+        {
+          "text": "my",
+          "start_ms": 40360,
+          "end_ms": 40580
+        },
+        {
+          "text": "praise",
+          "start_ms": 40720,
+          "end_ms": 41260
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 41560,
+      "end_ms": 43260,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 41560,
+          "end_ms": 41580
+        },
+        {
+          "text": "gotta",
+          "start_ms": 41760,
+          "end_ms": 42060
+        },
+        {
+          "text": "praise",
+          "start_ms": 42600,
+          "end_ms": 43260
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 45920,
+      "end_ms": 47180,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 45920,
+          "end_ms": 45940
+        },
+        {
+          "text": "gotta",
+          "start_ms": 46120,
+          "end_ms": 46420
+        },
+        {
+          "text": "praise",
+          "start_ms": 46520,
+          "end_ms": 47180
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 49900,
+      "end_ms": 51040,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 49900,
+          "end_ms": 49920
+        },
+        {
+          "text": "gotta",
+          "start_ms": 49980,
+          "end_ms": 50280
+        },
+        {
+          "text": "praise",
+          "start_ms": 50360,
+          "end_ms": 51040
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 53500,
+      "end_ms": 54860,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 53500,
+          "end_ms": 53520
+        },
+        {
+          "text": "gotta",
+          "start_ms": 53560,
+          "end_ms": 53900
+        },
+        {
+          "text": "praise",
+          "start_ms": 54220,
+          "end_ms": 54860
+        }
+      ]
+    },
+    {
+      "text": "I lift my voice to You I make a joyful noise",
+      "start_ms": 55860,
+      "end_ms": 63600,
+      "text_sk": "Pozdvihujem svoj hlas k Tebe, vydávam radostný zvuk",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 55860,
+          "end_ms": 55880
+        },
+        {
+          "text": "lift",
+          "start_ms": 58260,
+          "end_ms": 58680
+        },
+        {
+          "text": "my",
+          "start_ms": 58760,
+          "end_ms": 59060
+        },
+        {
+          "text": "voice",
+          "start_ms": 59200,
+          "end_ms": 59920
+        },
+        {
+          "text": "to",
+          "start_ms": 60860,
+          "end_ms": 60940
+        },
+        {
+          "text": "You",
+          "start_ms": 61020,
+          "end_ms": 61160
+        },
+        {
+          "text": "I",
+          "start_ms": 61340,
+          "end_ms": 61360
+        },
+        {
+          "text": "make",
+          "start_ms": 61520,
+          "end_ms": 61780
+        },
+        {
+          "text": "a",
+          "start_ms": 61840,
+          "end_ms": 61860
+        },
+        {
+          "text": "joyful",
+          "start_ms": 62060,
+          "end_ms": 62920
+        },
+        {
+          "text": "noise",
+          "start_ms": 63060,
+          "end_ms": 63600
+        }
+      ]
+    },
+    {
+      "text": "For You've been so good",
+      "start_ms": 65460,
+      "end_ms": 67160,
+      "text_sk": "Pretože si bol taký dobrý",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 65460,
+          "end_ms": 65760
+        },
+        {
+          "text": "You've",
+          "start_ms": 65780,
+          "end_ms": 65920
+        },
+        {
+          "text": "been",
+          "start_ms": 65980,
+          "end_ms": 66280
+        },
+        {
+          "text": "so",
+          "start_ms": 66440,
+          "end_ms": 66600
+        },
+        {
+          "text": "good",
+          "start_ms": 66960,
+          "end_ms": 67160
+        }
+      ]
+    },
+    {
+      "text": "I'd give You the whole world if I could",
+      "start_ms": 67200,
+      "end_ms": 71180,
+      "text_sk": "Dal by som Ti celý svet, keby som mohol",
+      "words": [
+        {
+          "text": "I'd",
+          "start_ms": 67200,
+          "end_ms": 67800
+        },
+        {
+          "text": "give",
+          "start_ms": 68740,
+          "end_ms": 69020
+        },
+        {
+          "text": "You",
+          "start_ms": 69060,
+          "end_ms": 69160
+        },
+        {
+          "text": "the",
+          "start_ms": 69260,
+          "end_ms": 69360
+        },
+        {
+          "text": "whole",
+          "start_ms": 69480,
+          "end_ms": 69780
+        },
+        {
+          "text": "world",
+          "start_ms": 69860,
+          "end_ms": 70140
+        },
+        {
+          "text": "if",
+          "start_ms": 70180,
+          "end_ms": 70340
+        },
+        {
+          "text": "I",
+          "start_ms": 70660,
+          "end_ms": 70680
+        },
+        {
+          "text": "could",
+          "start_ms": 70820,
+          "end_ms": 71180
+        }
+      ]
+    },
+    {
+      "text": "You deserve the greatest",
+      "start_ms": 73720,
+      "end_ms": 75280,
+      "text_sk": "Zaslúžiš si to najväčšie",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 73720,
+          "end_ms": 73840
+        },
+        {
+          "text": "deserve",
+          "start_ms": 73940,
+          "end_ms": 74440
+        },
+        {
+          "text": "the",
+          "start_ms": 74460,
+          "end_ms": 74520
+        },
+        {
+          "text": "greatest",
+          "start_ms": 74620,
+          "end_ms": 75280
+        }
+      ]
+    },
+    {
+      "text": "To be lifted up the highest",
+      "start_ms": 75320,
+      "end_ms": 77200,
+      "text_sk": "Byť vyzdvihnutý najvyššie",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 75320,
+          "end_ms": 75400
+        },
+        {
+          "text": "be",
+          "start_ms": 75420,
+          "end_ms": 75500
+        },
+        {
+          "text": "lifted",
+          "start_ms": 75640,
+          "end_ms": 76160
+        },
+        {
+          "text": "up",
+          "start_ms": 76200,
+          "end_ms": 76240
+        },
+        {
+          "text": "the",
+          "start_ms": 76360,
+          "end_ms": 76480
+        },
+        {
+          "text": "highest",
+          "start_ms": 76620,
+          "end_ms": 77200
+        }
+      ]
+    },
+    {
+      "text": "Worthy of my everything",
+      "start_ms": 77580,
+      "end_ms": 79820,
+      "text_sk": "Hodný môjho všetkého",
+      "words": [
+        {
+          "text": "Worthy",
+          "start_ms": 77580,
+          "end_ms": 77940
+        },
+        {
+          "text": "of",
+          "start_ms": 78040,
+          "end_ms": 78100
+        },
+        {
+          "text": "my",
+          "start_ms": 78260,
+          "end_ms": 78440
+        },
+        {
+          "text": "everything",
+          "start_ms": 78600,
+          "end_ms": 79820
+        }
+      ]
+    },
+    {
+      "text": "This is why",
+      "start_ms": 80580,
+      "end_ms": 81380,
+      "text_sk": "Toto je dôvod",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 80580,
+          "end_ms": 80760
+        },
+        {
+          "text": "is",
+          "start_ms": 80800,
+          "end_ms": 80900
+        },
+        {
+          "text": "why",
+          "start_ms": 80980,
+          "end_ms": 81380
+        }
+      ]
+    },
+    {
+      "text": "'Cause you are worthy Lord",
+      "start_ms": 83520,
+      "end_ms": 84920,
+      "text_sk": "Pretože si hodný, Pane",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 83520,
+          "end_ms": 83720
+        },
+        {
+          "text": "you",
+          "start_ms": 83740,
+          "end_ms": 83820
+        },
+        {
+          "text": "are",
+          "start_ms": 83920,
+          "end_ms": 84040
+        },
+        {
+          "text": "worthy",
+          "start_ms": 84080,
+          "end_ms": 84460
+        },
+        {
+          "text": "Lord",
+          "start_ms": 84560,
+          "end_ms": 84920
+        }
+      ]
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 89120,
+      "end_ms": 90300,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 89120,
+          "end_ms": 89200
+        },
+        {
+          "text": "everything",
+          "start_ms": 89280,
+          "end_ms": 89640
+        },
+        {
+          "text": "I",
+          "start_ms": 89760,
+          "end_ms": 89780
+        },
+        {
+          "text": "do",
+          "start_ms": 90160,
+          "end_ms": 90300
+        }
+      ]
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 91060,
+      "end_ms": 92540,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 91060,
+          "end_ms": 91160
+        },
+        {
+          "text": "all",
+          "start_ms": 91220,
+          "end_ms": 91380
+        },
+        {
+          "text": "that",
+          "start_ms": 91600,
+          "end_ms": 91740
+        },
+        {
+          "text": "I",
+          "start_ms": 91760,
+          "end_ms": 91780
+        },
+        {
+          "text": "go",
+          "start_ms": 91840,
+          "end_ms": 91920
+        },
+        {
+          "text": "through",
+          "start_ms": 92080,
+          "end_ms": 92540
+        }
+      ]
+    },
+    {
+      "text": "Give You all my praise",
+      "start_ms": 93060,
+      "end_ms": 95460,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": [
+        {
+          "text": "Give",
+          "start_ms": 93060,
+          "end_ms": 93560
+        },
+        {
+          "text": "You",
+          "start_ms": 93600,
+          "end_ms": 93800
+        },
+        {
+          "text": "all",
+          "start_ms": 94200,
+          "end_ms": 94420
+        },
+        {
+          "text": "my",
+          "start_ms": 94520,
+          "end_ms": 94580
+        },
+        {
+          "text": "praise",
+          "start_ms": 94900,
+          "end_ms": 95460
+        }
+      ]
+    },
+    {
+      "text": "Yeah I gotta praise",
+      "start_ms": 95700,
+      "end_ms": 98480,
+      "text_sk": "Áno, musím chváliť",
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 95700,
+          "end_ms": 96220
+        },
+        {
+          "text": "I",
+          "start_ms": 96320,
+          "end_ms": 96340
+        },
+        {
+          "text": "gotta",
+          "start_ms": 96440,
+          "end_ms": 96640
+        },
+        {
+          "text": "praise",
+          "start_ms": 96800,
+          "end_ms": 98480
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 98720,
+      "end_ms": 101320,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 98720,
+          "end_ms": 98740
+        },
+        {
+          "text": "gotta",
+          "start_ms": 100320,
+          "end_ms": 100540
+        },
+        {
+          "text": "praise",
+          "start_ms": 100680,
+          "end_ms": 101320
+        }
+      ]
+    },
+    {
+      "text": "I gotta 'cause you've been good to me",
+      "start_ms": 104100,
+      "end_ms": 106340,
+      "text_sk": "Musím, pretože si bol ku mne dobrý",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 104100,
+          "end_ms": 104120
+        },
+        {
+          "text": "gotta",
+          "start_ms": 104200,
+          "end_ms": 104560
+        },
+        {
+          "text": "'cause",
+          "start_ms": 104580,
+          "end_ms": 105300
+        },
+        {
+          "text": "you've",
+          "start_ms": 105360,
+          "end_ms": 105480
+        },
+        {
+          "text": "been",
+          "start_ms": 105500,
+          "end_ms": 105700
+        },
+        {
+          "text": "good",
+          "start_ms": 105760,
+          "end_ms": 105980
+        },
+        {
+          "text": "to",
+          "start_ms": 106020,
+          "end_ms": 106140
+        },
+        {
+          "text": "me",
+          "start_ms": 106240,
+          "end_ms": 106340
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 107720,
+      "end_ms": 109120,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 107720,
+          "end_ms": 107740
+        },
+        {
+          "text": "gotta",
+          "start_ms": 108020,
+          "end_ms": 108320
+        },
+        {
+          "text": "praise",
+          "start_ms": 108420,
+          "end_ms": 109120
+        }
+      ]
+    },
+    {
+      "text": "For setting me free",
+      "start_ms": 112180,
+      "end_ms": 113780,
+      "text_sk": "Za to, že si ma oslobodil",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 112180,
+          "end_ms": 112300
+        },
+        {
+          "text": "setting",
+          "start_ms": 112400,
+          "end_ms": 112920
+        },
+        {
+          "text": "me",
+          "start_ms": 112960,
+          "end_ms": 113040
+        },
+        {
+          "text": "free",
+          "start_ms": 113340,
+          "end_ms": 113780
+        }
+      ]
+    },
+    {
+      "text": "For meeting my needs",
+      "start_ms": 116040,
+      "end_ms": 117960,
+      "text_sk": "Za naplnenie mojich potrieb",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 116040,
+          "end_ms": 116160
+        },
+        {
+          "text": "meeting",
+          "start_ms": 116280,
+          "end_ms": 116700
+        },
+        {
+          "text": "my",
+          "start_ms": 116720,
+          "end_ms": 116780
+        },
+        {
+          "text": "needs",
+          "start_ms": 117260,
+          "end_ms": 117960
+        }
+      ]
+    },
+    {
+      "text": "For healing me",
+      "start_ms": 119860,
+      "end_ms": 121260,
+      "text_sk": "Za uzdravenie",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 119860,
+          "end_ms": 120100
+        },
+        {
+          "text": "healing",
+          "start_ms": 120200,
+          "end_ms": 121080
+        },
+        {
+          "text": "me",
+          "start_ms": 121140,
+          "end_ms": 121260
+        }
+      ]
+    },
+    {
+      "text": "For loving me",
+      "start_ms": 123760,
+      "end_ms": 125100,
+      "text_sk": "Za lásku ku mne",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 123760,
+          "end_ms": 124000
+        },
+        {
+          "text": "loving",
+          "start_ms": 124040,
+          "end_ms": 124960
+        },
+        {
+          "text": "me",
+          "start_ms": 124980,
+          "end_ms": 125100
+        }
+      ]
+    },
+    {
+      "text": "This is why",
+      "start_ms": 141540,
+      "end_ms": 142280,
+      "text_sk": "Toto je dôvod",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 141540,
+          "end_ms": 141720
+        },
+        {
+          "text": "is",
+          "start_ms": 141760,
+          "end_ms": 141860
+        },
+        {
+          "text": "why",
+          "start_ms": 141900,
+          "end_ms": 142280
+        }
+      ]
+    },
+    {
+      "text": "This is why I praise",
+      "start_ms": 143400,
+      "end_ms": 145640,
+      "text_sk": "Preto chválim",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 143400,
+          "end_ms": 143720
+        },
+        {
+          "text": "is",
+          "start_ms": 144180,
+          "end_ms": 144300
+        },
+        {
+          "text": "why",
+          "start_ms": 144420,
+          "end_ms": 144740
+        },
+        {
+          "text": "I",
+          "start_ms": 144760,
+          "end_ms": 144780
+        },
+        {
+          "text": "praise",
+          "start_ms": 145200,
+          "end_ms": 145640
+        }
+      ]
+    },
+    {
+      "text": "'Cause you're worthy of all my praise",
+      "start_ms": 145660,
+      "end_ms": 149640,
+      "text_sk": "Pretože si hodný všetkej mojej chvály",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 145660,
+          "end_ms": 146960
+        },
+        {
+          "text": "you're",
+          "start_ms": 147000,
+          "end_ms": 147600
+        },
+        {
+          "text": "worthy",
+          "start_ms": 147740,
+          "end_ms": 148260
+        },
+        {
+          "text": "of",
+          "start_ms": 148280,
+          "end_ms": 148420
+        },
+        {
+          "text": "all",
+          "start_ms": 148440,
+          "end_ms": 148640
+        },
+        {
+          "text": "my",
+          "start_ms": 148720,
+          "end_ms": 148960
+        },
+        {
+          "text": "praise",
+          "start_ms": 149060,
+          "end_ms": 149640
+        }
+      ]
+    },
+    {
+      "text": "In everything I do",
+      "start_ms": 151040,
+      "end_ms": 152220,
+      "text_sk": "Vo všetkom, čo robím",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 151040,
+          "end_ms": 151120
+        },
+        {
+          "text": "everything",
+          "start_ms": 151220,
+          "end_ms": 151900
+        },
+        {
+          "text": "I",
+          "start_ms": 151940,
+          "end_ms": 151960
+        },
+        {
+          "text": "do",
+          "start_ms": 152100,
+          "end_ms": 152220
+        }
+      ]
+    },
+    {
+      "text": "And all that I go through",
+      "start_ms": 152960,
+      "end_ms": 154880,
+      "text_sk": "A vo všetkom, čím prechádzam",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 152960,
+          "end_ms": 153060
+        },
+        {
+          "text": "all",
+          "start_ms": 153160,
+          "end_ms": 153260
+        },
+        {
+          "text": "that",
+          "start_ms": 153300,
+          "end_ms": 153540
+        },
+        {
+          "text": "I",
+          "start_ms": 153600,
+          "end_ms": 153620
+        },
+        {
+          "text": "go",
+          "start_ms": 153780,
+          "end_ms": 153880
+        },
+        {
+          "text": "through",
+          "start_ms": 154060,
+          "end_ms": 154880
+        }
+      ]
+    },
+    {
+      "text": "I give You all my praise",
+      "start_ms": 154900,
+      "end_ms": 157580,
+      "text_sk": "Dávam Ti všetku svoju chválu",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 154900,
+          "end_ms": 154920
+        },
+        {
+          "text": "give",
+          "start_ms": 155000,
+          "end_ms": 155260
+        },
+        {
+          "text": "You",
+          "start_ms": 155560,
+          "end_ms": 155700
+        },
+        {
+          "text": "all",
+          "start_ms": 156080,
+          "end_ms": 156340
+        },
+        {
+          "text": "my",
+          "start_ms": 156440,
+          "end_ms": 156540
+        },
+        {
+          "text": "praise",
+          "start_ms": 156820,
+          "end_ms": 157580
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 157600,
+      "end_ms": 159500,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 157600,
+          "end_ms": 157620
+        },
+        {
+          "text": "gotta",
+          "start_ms": 158140,
+          "end_ms": 158480
+        },
+        {
+          "text": "praise",
+          "start_ms": 158760,
+          "end_ms": 159500
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 163120,
+      "end_ms": 167280,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 163120,
+          "end_ms": 163140
+        },
+        {
+          "text": "gotta",
+          "start_ms": 165900,
+          "end_ms": 166200
+        },
+        {
+          "text": "praise",
+          "start_ms": 166500,
+          "end_ms": 167280
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise yeah",
+      "start_ms": 167440,
+      "end_ms": 172360,
+      "text_sk": "Musím chváliť, áno",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 167440,
+          "end_ms": 167460
+        },
+        {
+          "text": "gotta",
+          "start_ms": 169720,
+          "end_ms": 170080
+        },
+        {
+          "text": "praise",
+          "start_ms": 170360,
+          "end_ms": 171080
+        },
+        {
+          "text": "yeah",
+          "start_ms": 172180,
+          "end_ms": 172360
+        }
+      ]
+    },
+    {
+      "text": "I gotta praise",
+      "start_ms": 172740,
+      "end_ms": 173360,
+      "text_sk": "Musím chváliť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 172740,
+          "end_ms": 172760
+        },
+        {
+          "text": "gotta",
+          "start_ms": 172820,
+          "end_ms": 173020
+        },
+        {
+          "text": "praise",
+          "start_ms": 173120,
+          "end_ms": 173360
+        }
+      ]
+    },
+    {
+      "text": "For setting me free",
+      "start_ms": 174100,
+      "end_ms": 175800,
+      "text_sk": "Za to, že si ma oslobodil",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 174100,
+          "end_ms": 174200
+        },
+        {
+          "text": "setting",
+          "start_ms": 174340,
+          "end_ms": 174820
+        },
+        {
+          "text": "me",
+          "start_ms": 174860,
+          "end_ms": 174960
+        },
+        {
+          "text": "free",
+          "start_ms": 175300,
+          "end_ms": 175800
+        }
+      ]
+    },
+    {
+      "text": "For meeting my needs",
+      "start_ms": 177980,
+      "end_ms": 179880,
+      "text_sk": "Za naplnenie mojich potrieb",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 177980,
+          "end_ms": 178060
+        },
+        {
+          "text": "meeting",
+          "start_ms": 178200,
+          "end_ms": 178640
+        },
+        {
+          "text": "my",
+          "start_ms": 178660,
+          "end_ms": 179000
+        },
+        {
+          "text": "needs",
+          "start_ms": 179180,
+          "end_ms": 179880
+        }
+      ]
+    },
+    {
+      "text": "Oh for healing me yeah",
+      "start_ms": 181400,
+      "end_ms": 184160,
+      "text_sk": "Ó, za uzdravenie, áno",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 181400,
+          "end_ms": 181520
+        },
+        {
+          "text": "for",
+          "start_ms": 181800,
+          "end_ms": 182020
+        },
+        {
+          "text": "healing",
+          "start_ms": 182120,
+          "end_ms": 182940
+        },
+        {
+          "text": "me",
+          "start_ms": 183060,
+          "end_ms": 183180
+        },
+        {
+          "text": "yeah",
+          "start_ms": 183600,
+          "end_ms": 184160
+        }
+      ]
+    },
+    {
+      "text": "For loving me",
+      "start_ms": 185680,
+      "end_ms": 203500,
+      "text_sk": "Za lásku ku mne",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 185680,
+          "end_ms": 185820
+        },
+        {
+          "text": "loving",
+          "start_ms": 185920,
+          "end_ms": 187500
+        },
+        {
+          "text": "me",
+          "start_ms": 203460,
+          "end_ms": 203500
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 0.72,
+    "model_load_sec": null,
+    "error": null
+  }
+}

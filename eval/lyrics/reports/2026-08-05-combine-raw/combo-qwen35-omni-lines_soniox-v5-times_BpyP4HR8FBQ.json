@@ -1,0 +1,418 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_soniox-v5-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "soniox-v5",
+  "video_id": "BpyP4HR8FBQ",
+  "duration_ms": 265410,
+  "lines": [
+    {
+      "text": "In the quiet of the morning",
+      "start_ms": 15210,
+      "end_ms": 17730,
+      "text_sk": "V tichu rána",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "When no one knows and no one needs to know",
+      "start_ms": 21450,
+      "end_ms": 24690,
+      "text_sk": "Keď nikto nevie a nikto nepotrebuje vedieť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "You speak to me You give me strength",
+      "start_ms": 28110,
+      "end_ms": 34530,
+      "text_sk": "Hovoríš ku mne dávaš mi silu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "There's nothing like the secret place",
+      "start_ms": 34770,
+      "end_ms": 38430,
+      "text_sk": "Nie je nič ako tajné miesto",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Underground is where life begins",
+      "start_ms": 42150,
+      "end_ms": 45930,
+      "text_sk": "Pod zemou začína život",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "start_ms": 48510,
+      "end_ms": 53070,
+      "text_sk": "Moje srdce sa bude radovať v skrytosti",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Beyond the burial there's a resurrection",
+      "start_ms": 55350,
+      "end_ms": 60750,
+      "text_sk": "Za pohrebom je vzkriesenie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Your will be done in me",
+      "start_ms": 61110,
+      "end_ms": 64770,
+      "text_sk": "Nech sa stane Tvoja vôľa vo mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "In the stillness all around",
+      "start_ms": 69150,
+      "end_ms": 71910,
+      "text_sk": "V tichu všade okolo",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You are working all the details out",
+      "start_ms": 75750,
+      "end_ms": 82110,
+      "text_sk": "Pracuješ na všetkých detailoch",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "What's in me will grow someday",
+      "start_ms": 82410,
+      "end_ms": 85050,
+      "text_sk": "To čo je vo mne raz vyrastie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "I trust Your timing and Your ways",
+      "start_ms": 89010,
+      "end_ms": 92730,
+      "text_sk": "Verím Tvojmu času a Tvojim cestám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Underground is where life begins",
+      "start_ms": 96270,
+      "end_ms": 99990,
+      "text_sk": "Pod zemou začína život",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My heart will rejoice in the hiddenness",
+      "start_ms": 102570,
+      "end_ms": 107190,
+      "text_sk": "Moje srdce sa bude radovať v skrytosti",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Beyond the burial there's a resurrection",
+      "start_ms": 109470,
+      "end_ms": 114810,
+      "text_sk": "Za pohrebom je vzkriesenie",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Your will be done in me",
+      "start_ms": 115170,
+      "end_ms": 118830,
+      "text_sk": "Nech sa stane Tvoja vôľa vo mne",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh let my roots go deep",
+      "start_ms": 122070,
+      "end_ms": 127950,
+      "text_sk": "Ó nech moje korene idú hlboko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And I will rise I will rise",
+      "start_ms": 131430,
+      "end_ms": 136350,
+      "text_sk": "A povstanem povstanem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "start_ms": 138150,
+      "end_ms": 143190,
+      "text_sk": "On drží čas keď povstanem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I will rise I will rise",
+      "start_ms": 145110,
+      "end_ms": 150450,
+      "text_sk": "Povstanem povstanem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "He holds the time that I will rise",
+      "start_ms": 151470,
+      "end_ms": 156750,
+      "text_sk": "On drží čas keď povstanem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "I will rise I will rise",
+      "start_ms": 158670,
+      "end_ms": 164070,
+      "text_sk": "Povstanem povstanem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "God through my life be lifted high",
+      "start_ms": 164910,
+      "end_ms": 171870,
+      "text_sk": "Boh cez môj život buď vyvýšený vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "I will rise I will rise",
+      "start_ms": 172110,
+      "end_ms": 177630,
+      "text_sk": "Povstanem povstanem",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "God through my life be lifted high",
+      "start_ms": 178470,
+      "end_ms": 184950,
+      "text_sk": "Boh cez môj život buď vyvýšený vysoko",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Let Jesus rise",
+      "start_ms": 185370,
+      "end_ms": 187050,
+      "text_sk": "Nech Ježiš povstane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Let Jesus rise",
+      "start_ms": 188730,
+      "end_ms": 191130,
+      "text_sk": "Nech Ježiš povstane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "God through my life be glorified",
+      "start_ms": 191970,
+      "end_ms": 196950,
+      "text_sk": "Boh cez môj život buď oslávený",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let Jesus rise",
+      "start_ms": 198810,
+      "end_ms": 200730,
+      "text_sk": "Nech Ježiš povstane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Jesus rise",
+      "start_ms": 202530,
+      "end_ms": 204570,
+      "text_sk": "Ježiš povstaň",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "God through my life be glorified",
+      "start_ms": 205830,
+      "end_ms": 211050,
+      "text_sk": "Boh cez môj život buď oslávený",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let Jesus rise",
+      "start_ms": 212490,
+      "end_ms": 214710,
+      "text_sk": "Nech Ježiš povstane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Jesus rise",
+      "start_ms": 216090,
+      "end_ms": 218250,
+      "text_sk": "Ježiš povstaň",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "God through my life be glorified",
+      "start_ms": 219210,
+      "end_ms": 225030,
+      "text_sk": "Boh cez môj život buď oslávený",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let Jesus rise",
+      "start_ms": 226050,
+      "end_ms": 228510,
+      "text_sk": "Nech Ježiš povstane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Jesus rise",
+      "start_ms": 229650,
+      "end_ms": 231690,
+      "text_sk": "Ježiš povstaň",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "God through my life be glorified",
+      "start_ms": 232830,
+      "end_ms": 237870,
+      "text_sk": "Boh cez môj život buď oslávený",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Sing it out rise rise rise rise",
+      "start_ms": 238110,
+      "end_ms": 256830,
+      "text_sk": "Spievaj to povstaň povstaň povstaň povstaň",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Rise rise come on",
+      "start_ms": 257970,
+      "end_ms": 259770,
+      "text_sk": "Povstaň povstaň poď",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Rise Jesus Jesus Jesus Jesus",
+      "start_ms": 261390,
+      "end_ms": 265410,
+      "text_sk": "Povstaň Ježiš Ježiš Ježiš Ježiš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 40,
+    "n_lines_timed": 40,
+    "n_lines_untimed": 0,
+    "n_words_total": 225,
+    "n_words_aligned": 222,
+    "word_align_rate": 0.9866666666666667,
+    "n_monotonic_violations_clamped": 0
+  }
+}

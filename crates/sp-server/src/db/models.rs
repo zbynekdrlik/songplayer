@@ -258,6 +258,13 @@ pub async fn get_video_file_path(
 }
 
 /// Update a video row with both sidecar paths after a successful download.
+///
+/// Rejects an empty (post-trim) `song` with `Err(sqlx::Error::InvalidArgument)`
+/// and leaves the row completely untouched — this is the last-line write
+/// choke point, so no upstream mistake can ever persist an empty song
+/// (#136: a live defect shipped five rows with `song=""`, `gemini_failed
+/// = false` because nothing here re-validated the caller's metadata). An
+/// empty `artist` stays legal — `playback/title.rs` handles it.
 #[allow(clippy::too_many_arguments)]
 pub async fn mark_video_processed_pair(
     pool: &SqlitePool,
@@ -269,6 +276,12 @@ pub async fn mark_video_processed_pair(
     video_path: &str,
     audio_path: &str,
 ) -> Result<(), sqlx::Error> {
+    if song.trim().is_empty() {
+        return Err(sqlx::Error::InvalidArgument(format!(
+            "mark_video_processed_pair: refusing to write an empty song for video_db_id={video_db_id}"
+        )));
+    }
+
     let result = sqlx::query(
         "UPDATE videos
          SET song = ?, artist = ?, metadata_source = ?,
@@ -788,6 +801,26 @@ pub async fn position_for_playlist_item(
     .await
 }
 
+/// Membership + readiness check for the `videos.playlist_id` model used by
+/// youtube-kind playlists (issue #134) — the direct-link counterpart of
+/// `position_for_playlist_item`'s `playlist_items` set-list model that only
+/// custom-kind playlists use. Returns `Some(normalized)` when `video_id`
+/// belongs to `playlist_id`, `None` when it doesn't exist or belongs to a
+/// different playlist (prevents a client from triggering playback of an
+/// arbitrary video via another playlist's URL — same protection
+/// `position_for_playlist_item` gives the custom-playlist path).
+pub async fn video_playlist_membership(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar("SELECT normalized FROM videos WHERE id = ? AND playlist_id = ?")
+        .bind(video_id)
+        .bind(playlist_id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Outcome of a successful `quarantine_video_lyrics` call. Surfaced through
 /// the HTTP layer so operators can confirm what was changed.
 #[derive(Debug)]
@@ -916,6 +949,21 @@ pub async fn mark_unsupported_source(
 // Tests
 // ---------------------------------------------------------------------------
 
-#[path = "models_tests.rs"]
+// Split into focused sibling files (#137) to keep every file under the
+// 1000-line airuleset cap. `tests_helpers` holds the shared fixture; the
+// other three group tests by subject under test.
+#[path = "models_tests_helpers.rs"]
 #[cfg(test)]
-mod tests;
+mod tests_helpers;
+
+#[path = "models_tests_playlist.rs"]
+#[cfg(test)]
+mod tests_playlist;
+
+#[path = "models_tests_video.rs"]
+#[cfg(test)]
+mod tests_video;
+
+#[path = "models_tests_lyrics.rs"]
+#[cfg(test)]
+mod tests_lyrics;

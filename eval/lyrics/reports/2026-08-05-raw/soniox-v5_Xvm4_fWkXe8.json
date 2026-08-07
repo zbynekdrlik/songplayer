@@ -1,0 +1,4608 @@
+{
+  "backend_id": "soniox-v5",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\Xvm4_fWkXe8_vocal16k.wav",
+  "duration_ms": 273090,
+  "lines": [
+    {
+      "text": "Let's go.",
+      "start_ms": 4530,
+      "end_ms": 5010,
+      "text_sk": "Poďme.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 4530,
+          "end_ms": 4710,
+          "confidence": 0.9530419111251831
+        },
+        {
+          "text": "go.",
+          "start_ms": 4770,
+          "end_ms": 5010,
+          "confidence": 0.9031091630458832
+        }
+      ]
+    },
+    {
+      "text": "You know what's crazy?",
+      "start_ms": 12990,
+      "end_ms": 14310,
+      "text_sk": "Vieš, čo je šialené?",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 12990,
+          "end_ms": 13050,
+          "confidence": 0.96494460105896
+        },
+        {
+          "text": "know",
+          "start_ms": 13170,
+          "end_ms": 13290,
+          "confidence": 0.99985271692276
+        },
+        {
+          "text": "what's",
+          "start_ms": 13410,
+          "end_ms": 13590,
+          "confidence": 0.9019032716751099
+        },
+        {
+          "text": "crazy?",
+          "start_ms": 13710,
+          "end_ms": 14310,
+          "confidence": 0.9730565398931503
+        }
+      ]
+    },
+    {
+      "text": "I woke up this morning",
+      "start_ms": 14490,
+      "end_ms": 15990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 14490,
+          "end_ms": 14550,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "woke",
+          "start_ms": 14730,
+          "end_ms": 14850,
+          "confidence": 0.9999189376831055
+        },
+        {
+          "text": "up",
+          "start_ms": 14970,
+          "end_ms": 15030,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "this",
+          "start_ms": 15330,
+          "end_ms": 15390,
+          "confidence": 0.9999713897705078
+        },
+        {
+          "text": "morning",
+          "start_ms": 15570,
+          "end_ms": 15990,
+          "confidence": 0.9288671314716339
+        }
+      ]
+    },
+    {
+      "text": "to grace and mercy,",
+      "start_ms": 16830,
+      "end_ms": 17970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 16830,
+          "end_ms": 16890,
+          "confidence": 0.8318169116973877
+        },
+        {
+          "text": "grace",
+          "start_ms": 17010,
+          "end_ms": 17250,
+          "confidence": 0.8636963963508606
+        },
+        {
+          "text": "and",
+          "start_ms": 17370,
+          "end_ms": 17430,
+          "confidence": 0.9932518005371094
+        },
+        {
+          "text": "mercy,",
+          "start_ms": 17610,
+          "end_ms": 17970,
+          "confidence": 0.8578884303569794
+        }
+      ]
+    },
+    {
+      "text": "they just keep on going.",
+      "start_ms": 18270,
+      "end_ms": 19830,
+      "text_sk": "len stále pokračujú.",
+      "words": [
+        {
+          "text": "they",
+          "start_ms": 18270,
+          "end_ms": 18330,
+          "confidence": 0.9604715704917908
+        },
+        {
+          "text": "just",
+          "start_ms": 18510,
+          "end_ms": 18570,
+          "confidence": 0.9999580383300781
+        },
+        {
+          "text": "keep",
+          "start_ms": 18690,
+          "end_ms": 18870,
+          "confidence": 0.9999933540821075
+        },
+        {
+          "text": "on",
+          "start_ms": 19230,
+          "end_ms": 19290,
+          "confidence": 0.9999867677688599
+        },
+        {
+          "text": "going.",
+          "start_ms": 19530,
+          "end_ms": 19830,
+          "confidence": 0.9983169138431549
+        }
+      ]
+    },
+    {
+      "text": "My heart is beating, my eyes are wide open.",
+      "start_ms": 20670,
+      "end_ms": 23790,
+      "text_sk": "Srdce mi bije, oči mám dokorán otvorené.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 20670,
+          "end_ms": 20730,
+          "confidence": 0.9999523162841797
+        },
+        {
+          "text": "heart",
+          "start_ms": 20790,
+          "end_ms": 20970,
+          "confidence": 0.9999561309814453
+        },
+        {
+          "text": "is",
+          "start_ms": 21090,
+          "end_ms": 21150,
+          "confidence": 0.9999752044677734
+        },
+        {
+          "text": "beating,",
+          "start_ms": 21510,
+          "end_ms": 21810,
+          "confidence": 0.9994458556175232
+        },
+        {
+          "text": "my",
+          "start_ms": 22110,
+          "end_ms": 22170,
+          "confidence": 0.7772278785705566
+        },
+        {
+          "text": "eyes",
+          "start_ms": 22410,
+          "end_ms": 22650,
+          "confidence": 0.9906979203224182
+        },
+        {
+          "text": "are",
+          "start_ms": 22830,
+          "end_ms": 22890,
+          "confidence": 0.9874621629714966
+        },
+        {
+          "text": "wide",
+          "start_ms": 23130,
+          "end_ms": 23310,
+          "confidence": 0.9999666213989258
+        },
+        {
+          "text": "open.",
+          "start_ms": 23490,
+          "end_ms": 23790,
+          "confidence": 0.9980779886245728
+        }
+      ]
+    },
+    {
+      "text": "Thank you,",
+      "start_ms": 24990,
+      "end_ms": 25710,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 24990,
+          "end_ms": 25170,
+          "confidence": 0.9997848868370056
+        },
+        {
+          "text": "you,",
+          "start_ms": 25470,
+          "end_ms": 25710,
+          "confidence": 0.9761654436588287
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 26610,
+      "end_ms": 26970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 26610,
+          "end_ms": 26970,
+          "confidence": 0.9995061457157135
+        }
+      ]
+    },
+    {
+      "text": "It's so amazing that someone",
+      "start_ms": 28410,
+      "end_ms": 30330,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 28410,
+          "end_ms": 28590,
+          "confidence": 0.9999284744262695
+        },
+        {
+          "text": "so",
+          "start_ms": 28770,
+          "end_ms": 28830,
+          "confidence": 0.9999713897705078
+        },
+        {
+          "text": "amazing",
+          "start_ms": 28890,
+          "end_ms": 29430,
+          "confidence": 0.9999821980794271
+        },
+        {
+          "text": "that",
+          "start_ms": 29610,
+          "end_ms": 29670,
+          "confidence": 0.9995614886283875
+        },
+        {
+          "text": "someone",
+          "start_ms": 30030,
+          "end_ms": 30330,
+          "confidence": 0.9969498813152313
+        }
+      ]
+    },
+    {
+      "text": "so perfect",
+      "start_ms": 30870,
+      "end_ms": 31410,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "so",
+          "start_ms": 30870,
+          "end_ms": 30930,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "perfect",
+          "start_ms": 31050,
+          "end_ms": 31410,
+          "confidence": 0.9997878273328146
+        }
+      ]
+    },
+    {
+      "text": "would show me love when I didn't",
+      "start_ms": 32250,
+      "end_ms": 34290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "would",
+          "start_ms": 32250,
+          "end_ms": 32310,
+          "confidence": 0.9461689591407776
+        },
+        {
+          "text": "show",
+          "start_ms": 32490,
+          "end_ms": 32550,
+          "confidence": 0.9998302459716797
+        },
+        {
+          "text": "me",
+          "start_ms": 32670,
+          "end_ms": 32730,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "love",
+          "start_ms": 32910,
+          "end_ms": 33090,
+          "confidence": 0.9999723434448242
+        },
+        {
+          "text": "when",
+          "start_ms": 33330,
+          "end_ms": 33390,
+          "confidence": 0.9989514946937561
+        },
+        {
+          "text": "I",
+          "start_ms": 33690,
+          "end_ms": 33750,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "didn't",
+          "start_ms": 33930,
+          "end_ms": 34290,
+          "confidence": 0.9999904632568359
+        }
+      ]
+    },
+    {
+      "text": "deserve it.",
+      "start_ms": 34710,
+      "end_ms": 35430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "deserve",
+          "start_ms": 34710,
+          "end_ms": 35070,
+          "confidence": 0.9999014735221863
+        },
+        {
+          "text": "it.",
+          "start_ms": 35130,
+          "end_ms": 35430,
+          "confidence": 0.9999961853027344
+        }
+      ]
+    },
+    {
+      "text": "You gave your life just to show me I'm worth it.",
+      "start_ms": 35970,
+      "end_ms": 39210,
+      "text_sk": "Dal si svoj život, len aby si mi ukázal, že to stojím za to.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 35970,
+          "end_ms": 36030,
+          "confidence": 0.9999332427978516
+        },
+        {
+          "text": "gave",
+          "start_ms": 36270,
+          "end_ms": 36450,
+          "confidence": 0.9972938597202301
+        },
+        {
+          "text": "your",
+          "start_ms": 36510,
+          "end_ms": 36630,
+          "confidence": 0.897933691740036
+        },
+        {
+          "text": "life",
+          "start_ms": 36810,
+          "end_ms": 36870,
+          "confidence": 0.9994470477104187
+        },
+        {
+          "text": "just",
+          "start_ms": 37050,
+          "end_ms": 37110,
+          "confidence": 0.9932879209518433
+        },
+        {
+          "text": "to",
+          "start_ms": 37410,
+          "end_ms": 37470,
+          "confidence": 0.9999391436576843
+        },
+        {
+          "text": "show",
+          "start_ms": 37650,
+          "end_ms": 37710,
+          "confidence": 0.9999663233757019
+        },
+        {
+          "text": "me",
+          "start_ms": 38070,
+          "end_ms": 38130,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "I'm",
+          "start_ms": 38430,
+          "end_ms": 38610,
+          "confidence": 0.9326834678649902
+        },
+        {
+          "text": "worth",
+          "start_ms": 38670,
+          "end_ms": 38850,
+          "confidence": 0.9999933242797852
+        },
+        {
+          "text": "it.",
+          "start_ms": 38970,
+          "end_ms": 39210,
+          "confidence": 0.9991135895252228
+        }
+      ]
+    },
+    {
+      "text": "Thank you,",
+      "start_ms": 40230,
+      "end_ms": 40890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 40230,
+          "end_ms": 40410,
+          "confidence": 0.9998847246170044
+        },
+        {
+          "text": "you,",
+          "start_ms": 40590,
+          "end_ms": 40890,
+          "confidence": 0.9997941553592682
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 41970,
+      "end_ms": 42390,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 41970,
+          "end_ms": 42390,
+          "confidence": 0.9989485442638397
+        }
+      ]
+    },
+    {
+      "text": "I'm ending it.",
+      "start_ms": 44310,
+      "end_ms": 45450,
+      "text_sk": "Ukončujem to.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 44310,
+          "end_ms": 44550,
+          "confidence": 0.964628001054128
+        },
+        {
+          "text": "ending",
+          "start_ms": 44610,
+          "end_ms": 44970,
+          "confidence": 0.6333722472190857
+        },
+        {
+          "text": "it.",
+          "start_ms": 45210,
+          "end_ms": 45450,
+          "confidence": 0.6513815075159073
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 46290,
+      "end_ms": 47010,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 46290,
+          "end_ms": 46350,
+          "confidence": 0.37609460949897766
+        },
+        {
+          "text": "new",
+          "start_ms": 46530,
+          "end_ms": 46590,
+          "confidence": 0.8201714754104614
+        },
+        {
+          "text": "today.",
+          "start_ms": 46710,
+          "end_ms": 47010,
+          "confidence": 0.9368032515048981
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 48210,
+      "end_ms": 49170,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 48210,
+          "end_ms": 48270,
+          "confidence": 0.590106189250946
+        },
+        {
+          "text": "always",
+          "start_ms": 48390,
+          "end_ms": 48690,
+          "confidence": 0.9652834335962931
+        },
+        {
+          "text": "gone.",
+          "start_ms": 48870,
+          "end_ms": 49170,
+          "confidence": 0.8815056482950846
+        }
+      ]
+    },
+    {
+      "text": "It's history.",
+      "start_ms": 50010,
+      "end_ms": 50970,
+      "text_sk": "Je to história.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 50010,
+          "end_ms": 50190,
+          "confidence": 0.7527465522289276
+        },
+        {
+          "text": "history.",
+          "start_ms": 50310,
+          "end_ms": 50970,
+          "confidence": 0.711089700460434
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle.",
+      "start_ms": 51690,
+      "end_ms": 52770,
+      "text_sk": "Je to zázrak.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 51690,
+          "end_ms": 51930,
+          "confidence": 0.9965196847915649
+        },
+        {
+          "text": "a",
+          "start_ms": 52050,
+          "end_ms": 52110,
+          "confidence": 0.9993993639945984
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 52230,
+          "end_ms": 52770,
+          "confidence": 0.8691980640093485
+        }
+      ]
+    },
+    {
+      "text": "What you did for me.",
+      "start_ms": 53490,
+      "end_ms": 54930,
+      "text_sk": "To, čo si pre mňa urobil.",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 53490,
+          "end_ms": 53670,
+          "confidence": 0.9980952739715576
+        },
+        {
+          "text": "you",
+          "start_ms": 53790,
+          "end_ms": 53910,
+          "confidence": 0.9761614203453064
+        },
+        {
+          "text": "did",
+          "start_ms": 54090,
+          "end_ms": 54150,
+          "confidence": 0.9893989562988281
+        },
+        {
+          "text": "for",
+          "start_ms": 54390,
+          "end_ms": 54450,
+          "confidence": 0.9994139075279236
+        },
+        {
+          "text": "me.",
+          "start_ms": 54750,
+          "end_ms": 54930,
+          "confidence": 0.8911011517047882
+        }
+      ]
+    },
+    {
+      "text": "Thank",
+      "start_ms": 55590,
+      "end_ms": 55830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 55590,
+          "end_ms": 55830,
+          "confidence": 0.9997520446777344
+        }
+      ]
+    },
+    {
+      "text": "you,",
+      "start_ms": 56250,
+      "end_ms": 56430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you,",
+          "start_ms": 56250,
+          "end_ms": 56430,
+          "confidence": 0.9997778534889221
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 57090,
+      "end_ms": 57270,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 57090,
+          "end_ms": 57270,
+          "confidence": 0.9993393421173096
+        }
+      ]
+    },
+    {
+      "text": "You made a way.",
+      "start_ms": 57450,
+      "end_ms": 58590,
+      "text_sk": "Urobili si cestu.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 57450,
+          "end_ms": 57510,
+          "confidence": 0.9999446868896484
+        },
+        {
+          "text": "made",
+          "start_ms": 57750,
+          "end_ms": 57810,
+          "confidence": 0.9980431199073792
+        },
+        {
+          "text": "a",
+          "start_ms": 57990,
+          "end_ms": 58050,
+          "confidence": 0.9721837043762207
+        },
+        {
+          "text": "way.",
+          "start_ms": 58350,
+          "end_ms": 58590,
+          "confidence": 0.9927907586097717
+        }
+      ]
+    },
+    {
+      "text": "Let's go.",
+      "start_ms": 59130,
+      "end_ms": 59610,
+      "text_sk": "Poďme.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 59130,
+          "end_ms": 59310,
+          "confidence": 0.9996720850467682
+        },
+        {
+          "text": "go.",
+          "start_ms": 59370,
+          "end_ms": 59610,
+          "confidence": 0.9982921779155731
+        }
+      ]
+    },
+    {
+      "text": "I saw a mountain",
+      "start_ms": 66930,
+      "end_ms": 67950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 66930,
+          "end_ms": 66990,
+          "confidence": 0.9380279779434204
+        },
+        {
+          "text": "saw",
+          "start_ms": 67230,
+          "end_ms": 67410,
+          "confidence": 0.9940179288387299
+        },
+        {
+          "text": "a",
+          "start_ms": 67410,
+          "end_ms": 67470,
+          "confidence": 0.960035502910614
+        },
+        {
+          "text": "mountain",
+          "start_ms": 67650,
+          "end_ms": 67950,
+          "confidence": 0.8102285861968994
+        }
+      ]
+    },
+    {
+      "text": "and I watched you move it.",
+      "start_ms": 68370,
+      "end_ms": 70050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 68370,
+          "end_ms": 68430,
+          "confidence": 0.9947153925895691
+        },
+        {
+          "text": "I",
+          "start_ms": 68610,
+          "end_ms": 68670,
+          "confidence": 0.9999561309814453
+        },
+        {
+          "text": "watched",
+          "start_ms": 68790,
+          "end_ms": 69030,
+          "confidence": 0.9997610251108805
+        },
+        {
+          "text": "you",
+          "start_ms": 69150,
+          "end_ms": 69330,
+          "confidence": 0.9918244481086731
+        },
+        {
+          "text": "move",
+          "start_ms": 69510,
+          "end_ms": 69690,
+          "confidence": 0.97276371717453
+        },
+        {
+          "text": "it.",
+          "start_ms": 69810,
+          "end_ms": 70050,
+          "confidence": 0.9999771416187286
+        }
+      ]
+    },
+    {
+      "text": "You took my place",
+      "start_ms": 70530,
+      "end_ms": 71310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 70530,
+          "end_ms": 70590,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "took",
+          "start_ms": 70770,
+          "end_ms": 70830,
+          "confidence": 0.9999713897705078
+        },
+        {
+          "text": "my",
+          "start_ms": 71010,
+          "end_ms": 71070,
+          "confidence": 0.9998683929443359
+        },
+        {
+          "text": "place",
+          "start_ms": 71250,
+          "end_ms": 71310,
+          "confidence": 0.9993936419487
+        }
+      ]
+    },
+    {
+      "text": "when no one else could do it.",
+      "start_ms": 71730,
+      "end_ms": 73770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "when",
+          "start_ms": 71730,
+          "end_ms": 71790,
+          "confidence": 0.8996180295944214
+        },
+        {
+          "text": "no",
+          "start_ms": 72090,
+          "end_ms": 72150,
+          "confidence": 0.9999447464942932
+        },
+        {
+          "text": "one",
+          "start_ms": 72390,
+          "end_ms": 72450,
+          "confidence": 0.9999485015869141
+        },
+        {
+          "text": "else",
+          "start_ms": 72570,
+          "end_ms": 72810,
+          "confidence": 0.9999895095825195
+        },
+        {
+          "text": "could",
+          "start_ms": 72930,
+          "end_ms": 73050,
+          "confidence": 0.9996596872806549
+        },
+        {
+          "text": "do",
+          "start_ms": 73170,
+          "end_ms": 73230,
+          "confidence": 0.9999829530715942
+        },
+        {
+          "text": "it.",
+          "start_ms": 73350,
+          "end_ms": 73770,
+          "confidence": 0.9999815225601196
+        }
+      ]
+    },
+    {
+      "text": "The least I can do is sing, \"Hallelujah.\"",
+      "start_ms": 74550,
+      "end_ms": 77490,
+      "text_sk": "To najmenej, čo môžem urobiť, je zaspievať: \"Haleluja.\"",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 74550,
+          "end_ms": 74610,
+          "confidence": 0.9965118169784546
+        },
+        {
+          "text": "least",
+          "start_ms": 74730,
+          "end_ms": 74850,
+          "confidence": 0.9989119470119476
+        },
+        {
+          "text": "I",
+          "start_ms": 74970,
+          "end_ms": 75030,
+          "confidence": 0.9999256134033203
+        },
+        {
+          "text": "can",
+          "start_ms": 75270,
+          "end_ms": 75330,
+          "confidence": 0.9616026878356934
+        },
+        {
+          "text": "do",
+          "start_ms": 75570,
+          "end_ms": 75630,
+          "confidence": 0.9732123613357544
+        },
+        {
+          "text": "is",
+          "start_ms": 75930,
+          "end_ms": 75990,
+          "confidence": 0.9992964267730713
+        },
+        {
+          "text": "sing,",
+          "start_ms": 76230,
+          "end_ms": 76650,
+          "confidence": 0.63534215092659
+        },
+        {
+          "text": "\"Hallelujah.\"",
+          "start_ms": 76650,
+          "end_ms": 77490,
+          "confidence": 0.946519672870636
+        }
+      ]
+    },
+    {
+      "text": "Thank you,",
+      "start_ms": 78870,
+      "end_ms": 79470,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 78870,
+          "end_ms": 79050,
+          "confidence": 0.9999532103538513
+        },
+        {
+          "text": "you,",
+          "start_ms": 79290,
+          "end_ms": 79470,
+          "confidence": 0.9999447464942932
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 80430,
+      "end_ms": 80790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 80430,
+          "end_ms": 80790,
+          "confidence": 0.9995943307876587
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 81270,
+      "end_ms": 83730,
+      "text_sk": "Žijem to.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 81270,
+          "end_ms": 82950,
+          "confidence": 0.9133575161298116
+        },
+        {
+          "text": "living",
+          "start_ms": 83010,
+          "end_ms": 83250,
+          "confidence": 0.872735857963562
+        },
+        {
+          "text": "it.",
+          "start_ms": 83490,
+          "end_ms": 83730,
+          "confidence": 0.9696824848651886
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 84690,
+      "end_ms": 85470,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 84690,
+          "end_ms": 84750,
+          "confidence": 0.997174859046936
+        },
+        {
+          "text": "new",
+          "start_ms": 84930,
+          "end_ms": 84990,
+          "confidence": 0.9996075630187988
+        },
+        {
+          "text": "today.",
+          "start_ms": 85170,
+          "end_ms": 85470,
+          "confidence": 0.9933529198169708
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 86550,
+      "end_ms": 87510,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 86550,
+          "end_ms": 86610,
+          "confidence": 0.8313775062561035
+        },
+        {
+          "text": "always",
+          "start_ms": 86790,
+          "end_ms": 87090,
+          "confidence": 0.9980263908704122
+        },
+        {
+          "text": "gone.",
+          "start_ms": 87270,
+          "end_ms": 87510,
+          "confidence": 0.9997972448666891
+        }
+      ]
+    },
+    {
+      "text": "It's",
+      "start_ms": 88470,
+      "end_ms": 88650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 88470,
+          "end_ms": 88650,
+          "confidence": 0.998252660036087
+        }
+      ]
+    },
+    {
+      "text": "history.",
+      "start_ms": 89070,
+      "end_ms": 89370,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "history.",
+          "start_ms": 89070,
+          "end_ms": 89370,
+          "confidence": 0.996095210313797
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle.",
+      "start_ms": 90150,
+      "end_ms": 91110,
+      "text_sk": "Je to zázrak.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 90150,
+          "end_ms": 90330,
+          "confidence": 0.9999583661556244
+        },
+        {
+          "text": "a",
+          "start_ms": 90450,
+          "end_ms": 90510,
+          "confidence": 0.9999797344207764
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 90630,
+          "end_ms": 91110,
+          "confidence": 0.9999436338742574
+        }
+      ]
+    },
+    {
+      "text": "What you did for me.",
+      "start_ms": 91950,
+      "end_ms": 93270,
+      "text_sk": "To, čo si pre mňa urobil.",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 91950,
+          "end_ms": 92130,
+          "confidence": 0.9998239874839783
+        },
+        {
+          "text": "you",
+          "start_ms": 92190,
+          "end_ms": 92370,
+          "confidence": 0.9998188614845276
+        },
+        {
+          "text": "did",
+          "start_ms": 92550,
+          "end_ms": 92610,
+          "confidence": 0.9990067481994629
+        },
+        {
+          "text": "for",
+          "start_ms": 92850,
+          "end_ms": 92910,
+          "confidence": 0.9999142289161682
+        },
+        {
+          "text": "me.",
+          "start_ms": 93090,
+          "end_ms": 93270,
+          "confidence": 0.9992004930973053
+        }
+      ]
+    },
+    {
+      "text": "Thank you,",
+      "start_ms": 94050,
+      "end_ms": 94890,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 94050,
+          "end_ms": 94290,
+          "confidence": 0.9999180436134338
+        },
+        {
+          "text": "you,",
+          "start_ms": 94590,
+          "end_ms": 94890,
+          "confidence": 0.9998979568481445
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 95370,
+      "end_ms": 95610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 95370,
+          "end_ms": 95610,
+          "confidence": 0.99994096159935
+        }
+      ]
+    },
+    {
+      "text": "You made a way.",
+      "start_ms": 95910,
+      "end_ms": 96750,
+      "text_sk": "Urobili si cestu.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 95910,
+          "end_ms": 95970,
+          "confidence": 0.676261305809021
+        },
+        {
+          "text": "made",
+          "start_ms": 96210,
+          "end_ms": 96270,
+          "confidence": 0.9993290901184082
+        },
+        {
+          "text": "a",
+          "start_ms": 96450,
+          "end_ms": 96510,
+          "confidence": 0.9999448657035828
+        },
+        {
+          "text": "way.",
+          "start_ms": 96630,
+          "end_ms": 96750,
+          "confidence": 0.9991202354431152
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 97050,
+      "end_ms": 97890,
+      "text_sk": "Žijem to.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 97050,
+          "end_ms": 97290,
+          "confidence": 0.9942786892255148
+        },
+        {
+          "text": "living",
+          "start_ms": 97350,
+          "end_ms": 97650,
+          "confidence": 0.941341906785965
+        },
+        {
+          "text": "it.",
+          "start_ms": 97710,
+          "end_ms": 97890,
+          "confidence": 0.9985530972480774
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 98010,
+      "end_ms": 98910,
+      "text_sk": "Žijem to.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 98010,
+          "end_ms": 98190,
+          "confidence": 0.99992968638738
+        },
+        {
+          "text": "living",
+          "start_ms": 98310,
+          "end_ms": 98550,
+          "confidence": 0.9997025430202484
+        },
+        {
+          "text": "it.",
+          "start_ms": 98730,
+          "end_ms": 98910,
+          "confidence": 0.9997169673442841
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 99150,
+      "end_ms": 99690,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 99150,
+          "end_ms": 99210,
+          "confidence": 0.9971412420272827
+        },
+        {
+          "text": "new",
+          "start_ms": 99330,
+          "end_ms": 99390,
+          "confidence": 0.9999390244483948
+        },
+        {
+          "text": "today.",
+          "start_ms": 99510,
+          "end_ms": 99690,
+          "confidence": 0.9997092187404633
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 100110,
+      "end_ms": 100710,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 100110,
+          "end_ms": 100170,
+          "confidence": 0.9936993718147278
+        },
+        {
+          "text": "new",
+          "start_ms": 100290,
+          "end_ms": 100350,
+          "confidence": 0.9999179840087891
+        },
+        {
+          "text": "today.",
+          "start_ms": 100470,
+          "end_ms": 100710,
+          "confidence": 0.999409019947052
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 101010,
+      "end_ms": 101850,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 101010,
+          "end_ms": 101070,
+          "confidence": 0.9476314187049866
+        },
+        {
+          "text": "always",
+          "start_ms": 101250,
+          "end_ms": 101550,
+          "confidence": 0.9986619750658671
+        },
+        {
+          "text": "gone.",
+          "start_ms": 101610,
+          "end_ms": 101850,
+          "confidence": 0.9994926452636719
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 102030,
+      "end_ms": 102690,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 102030,
+          "end_ms": 102090,
+          "confidence": 0.9935716390609741
+        },
+        {
+          "text": "always",
+          "start_ms": 102210,
+          "end_ms": 102450,
+          "confidence": 0.9997462034225464
+        },
+        {
+          "text": "gone.",
+          "start_ms": 102510,
+          "end_ms": 102690,
+          "confidence": 0.9997246265411377
+        }
+      ]
+    },
+    {
+      "text": "It's history.",
+      "start_ms": 102990,
+      "end_ms": 103590,
+      "text_sk": "Je to história.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 102990,
+          "end_ms": 103170,
+          "confidence": 0.999419242143631
+        },
+        {
+          "text": "history.",
+          "start_ms": 103350,
+          "end_ms": 103590,
+          "confidence": 0.9991030097007751
+        }
+      ]
+    },
+    {
+      "text": "It's history.",
+      "start_ms": 103830,
+      "end_ms": 104430,
+      "text_sk": "Je to história.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 103830,
+          "end_ms": 104010,
+          "confidence": 0.9984874725341797
+        },
+        {
+          "text": "history.",
+          "start_ms": 104070,
+          "end_ms": 104430,
+          "confidence": 0.9930198192596436
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle.",
+      "start_ms": 105510,
+      "end_ms": 105690,
+      "text_sk": "Je to zázrak.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 105510,
+          "end_ms": 105690,
+          "confidence": 0.8116927742958069
+        },
+        {
+          "text": "a",
+          "start_ms": 105690,
+          "end_ms": 105690,
+          "confidence": 0.9984604716300964
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 105690,
+          "end_ms": 105690,
+          "confidence": 0.9997995694478353
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle.",
+      "start_ms": 106590,
+      "end_ms": 106650,
+      "text_sk": "Je to zázrak.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 106590,
+          "end_ms": 106650,
+          "confidence": 0.843366265296936
+        },
+        {
+          "text": "a",
+          "start_ms": 106650,
+          "end_ms": 106650,
+          "confidence": 0.9998666048049927
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 106650,
+          "end_ms": 106650,
+          "confidence": 0.9998268286387125
+        }
+      ]
+    },
+    {
+      "text": "What you did for me.",
+      "start_ms": 106650,
+      "end_ms": 107490,
+      "text_sk": "To, čo si pre mňa urobil.",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 106650,
+          "end_ms": 106710,
+          "confidence": 0.9986780881881714
+        },
+        {
+          "text": "you",
+          "start_ms": 106770,
+          "end_ms": 106890,
+          "confidence": 0.9998838305473328
+        },
+        {
+          "text": "did",
+          "start_ms": 107010,
+          "end_ms": 107070,
+          "confidence": 0.9999313950538635
+        },
+        {
+          "text": "for",
+          "start_ms": 107190,
+          "end_ms": 107250,
+          "confidence": 0.9998816847801208
+        },
+        {
+          "text": "me.",
+          "start_ms": 107310,
+          "end_ms": 107490,
+          "confidence": 0.9994242191314697
+        }
+      ]
+    },
+    {
+      "text": "What you did for me.",
+      "start_ms": 107490,
+      "end_ms": 108570,
+      "text_sk": "To, čo si pre mňa urobil?",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 107490,
+          "end_ms": 107610,
+          "confidence": 0.9823541045188904
+        },
+        {
+          "text": "you",
+          "start_ms": 107670,
+          "end_ms": 107790,
+          "confidence": 0.9998236000537872
+        },
+        {
+          "text": "did",
+          "start_ms": 107910,
+          "end_ms": 107970,
+          "confidence": 0.9998726844787598
+        },
+        {
+          "text": "for",
+          "start_ms": 108090,
+          "end_ms": 108150,
+          "confidence": 0.9993028044700623
+        },
+        {
+          "text": "me.",
+          "start_ms": 108390,
+          "end_ms": 108570,
+          "confidence": 0.9995967149734497
+        }
+      ]
+    },
+    {
+      "text": "Thank you,",
+      "start_ms": 109230,
+      "end_ms": 110130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 109230,
+          "end_ms": 109590,
+          "confidence": 0.9993115067481995
+        },
+        {
+          "text": "you,",
+          "start_ms": 109950,
+          "end_ms": 110130,
+          "confidence": 0.9998113811016083
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 110850,
+      "end_ms": 111090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 110850,
+          "end_ms": 111090,
+          "confidence": 0.9999723434448242
+        }
+      ]
+    },
+    {
+      "text": "You made a way.",
+      "start_ms": 111210,
+      "end_ms": 112170,
+      "text_sk": "Urobili si cestu.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 111210,
+          "end_ms": 111270,
+          "confidence": 0.9997006058692932
+        },
+        {
+          "text": "made",
+          "start_ms": 111570,
+          "end_ms": 111630,
+          "confidence": 0.999815046787262
+        },
+        {
+          "text": "a",
+          "start_ms": 111750,
+          "end_ms": 111810,
+          "confidence": 0.9977656006813049
+        },
+        {
+          "text": "way.",
+          "start_ms": 111990,
+          "end_ms": 112170,
+          "confidence": 0.9994640350341797
+        }
+      ]
+    },
+    {
+      "text": "And he's been a way maker.",
+      "start_ms": 114270,
+      "end_ms": 115530,
+      "text_sk": "A on bol ten, čo si razil cestu.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 114270,
+          "end_ms": 114330,
+          "confidence": 0.3462032079696655
+        },
+        {
+          "text": "he's",
+          "start_ms": 114450,
+          "end_ms": 114630,
+          "confidence": 0.8966793119907379
+        },
+        {
+          "text": "been",
+          "start_ms": 114690,
+          "end_ms": 114750,
+          "confidence": 0.9995653033256531
+        },
+        {
+          "text": "a",
+          "start_ms": 114810,
+          "end_ms": 114870,
+          "confidence": 0.8929674029350281
+        },
+        {
+          "text": "way",
+          "start_ms": 114930,
+          "end_ms": 115050,
+          "confidence": 0.9901969730854034
+        },
+        {
+          "text": "maker.",
+          "start_ms": 115230,
+          "end_ms": 115530,
+          "confidence": 0.7035450786352158
+        }
+      ]
+    },
+    {
+      "text": "A chain breaker.",
+      "start_ms": 116550,
+      "end_ms": 117330,
+      "text_sk": "Ten, čo láme reťaze.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 116550,
+          "end_ms": 116610,
+          "confidence": 0.9995423555374146
+        },
+        {
+          "text": "chain",
+          "start_ms": 116790,
+          "end_ms": 116970,
+          "confidence": 0.9503138363361359
+        },
+        {
+          "text": "breaker.",
+          "start_ms": 117030,
+          "end_ms": 117330,
+          "confidence": 0.9982298612594604
+        }
+      ]
+    },
+    {
+      "text": "I need you to pray tonight.",
+      "start_ms": 117510,
+      "end_ms": 118890,
+      "text_sk": "Potrebujem, aby si sa dnes večer modlil.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 117510,
+          "end_ms": 117570,
+          "confidence": 0.9878445863723755
+        },
+        {
+          "text": "need",
+          "start_ms": 117690,
+          "end_ms": 117810,
+          "confidence": 0.9815448522567749
+        },
+        {
+          "text": "you",
+          "start_ms": 117870,
+          "end_ms": 117990,
+          "confidence": 0.854865312576294
+        },
+        {
+          "text": "to",
+          "start_ms": 118050,
+          "end_ms": 118110,
+          "confidence": 0.9996281266212463
+        },
+        {
+          "text": "pray",
+          "start_ms": 118170,
+          "end_ms": 118350,
+          "confidence": 0.957201361656189
+        },
+        {
+          "text": "tonight.",
+          "start_ms": 118470,
+          "end_ms": 118890,
+          "confidence": 0.9993971188863119
+        }
+      ]
+    },
+    {
+      "text": "Every single",
+      "start_ms": 120450,
+      "end_ms": 120810,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 120450,
+          "end_ms": 120690,
+          "confidence": 0.9926252365112305
+        },
+        {
+          "text": "single",
+          "start_ms": 120750,
+          "end_ms": 120810,
+          "confidence": 0.9984758496284485
+        }
+      ]
+    },
+    {
+      "text": "debt I owe,",
+      "start_ms": 121350,
+      "end_ms": 122130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "debt",
+          "start_ms": 121350,
+          "end_ms": 121470,
+          "confidence": 0.8373372554779053
+        },
+        {
+          "text": "I",
+          "start_ms": 121590,
+          "end_ms": 121650,
+          "confidence": 0.9997414946556091
+        },
+        {
+          "text": "owe,",
+          "start_ms": 121890,
+          "end_ms": 122130,
+          "confidence": 0.9311414162317911
+        }
+      ]
+    },
+    {
+      "text": "you canceled it.",
+      "start_ms": 122610,
+      "end_ms": 123750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 122610,
+          "end_ms": 122730,
+          "confidence": 0.9903121888637543
+        },
+        {
+          "text": "canceled",
+          "start_ms": 122850,
+          "end_ms": 123390,
+          "confidence": 0.9777597188949585
+        },
+        {
+          "text": "it.",
+          "start_ms": 123570,
+          "end_ms": 123750,
+          "confidence": 0.9999732971191406
+        }
+      ]
+    },
+    {
+      "text": "Every sin I ever",
+      "start_ms": 124170,
+      "end_ms": 125130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 124170,
+          "end_ms": 124410,
+          "confidence": 0.9994890093803406
+        },
+        {
+          "text": "sin",
+          "start_ms": 124590,
+          "end_ms": 124650,
+          "confidence": 0.9992774128913879
+        },
+        {
+          "text": "I",
+          "start_ms": 124890,
+          "end_ms": 124950,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "ever",
+          "start_ms": 125070,
+          "end_ms": 125130,
+          "confidence": 0.999140202999115
+        }
+      ]
+    },
+    {
+      "text": "chose, you covered it.",
+      "start_ms": 125670,
+      "end_ms": 127470,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "chose,",
+          "start_ms": 125670,
+          "end_ms": 125970,
+          "confidence": 0.9985886414845785
+        },
+        {
+          "text": "you",
+          "start_ms": 126270,
+          "end_ms": 126450,
+          "confidence": 0.9927978813648224
+        },
+        {
+          "text": "covered",
+          "start_ms": 126810,
+          "end_ms": 127110,
+          "confidence": 0.9417202174663544
+        },
+        {
+          "text": "it.",
+          "start_ms": 127290,
+          "end_ms": 127470,
+          "confidence": 0.9999479055404663
+        }
+      ]
+    },
+    {
+      "text": "When the fight was getting close,",
+      "start_ms": 127890,
+      "end_ms": 129690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 127890,
+          "end_ms": 127950,
+          "confidence": 0.9999199509620667
+        },
+        {
+          "text": "the",
+          "start_ms": 128190,
+          "end_ms": 128250,
+          "confidence": 0.9983953237533569
+        },
+        {
+          "text": "fight",
+          "start_ms": 128370,
+          "end_ms": 128550,
+          "confidence": 0.9470756947994232
+        },
+        {
+          "text": "was",
+          "start_ms": 128610,
+          "end_ms": 128670,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "getting",
+          "start_ms": 128850,
+          "end_ms": 129150,
+          "confidence": 0.999993642171224
+        },
+        {
+          "text": "close,",
+          "start_ms": 129390,
+          "end_ms": 129690,
+          "confidence": 0.9975336392720541
+        }
+      ]
+    },
+    {
+      "text": "you handled it.",
+      "start_ms": 130110,
+      "end_ms": 131430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 130110,
+          "end_ms": 130290,
+          "confidence": 0.9403419196605682
+        },
+        {
+          "text": "handled",
+          "start_ms": 130650,
+          "end_ms": 131010,
+          "confidence": 0.9996559321880341
+        },
+        {
+          "text": "it.",
+          "start_ms": 131190,
+          "end_ms": 131430,
+          "confidence": 0.9998944401741028
+        }
+      ]
+    },
+    {
+      "text": "You stepped right in",
+      "start_ms": 132090,
+      "end_ms": 133170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 132090,
+          "end_ms": 132150,
+          "confidence": 0.9999523162841797
+        },
+        {
+          "text": "stepped",
+          "start_ms": 132510,
+          "end_ms": 132750,
+          "confidence": 0.8649400075276693
+        },
+        {
+          "text": "right",
+          "start_ms": 132930,
+          "end_ms": 132990,
+          "confidence": 0.9999932646751404
+        },
+        {
+          "text": "in",
+          "start_ms": 133110,
+          "end_ms": 133170,
+          "confidence": 0.9999356269836426
+        }
+      ]
+    },
+    {
+      "text": "and finished it.",
+      "start_ms": 134250,
+      "end_ms": 135270,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 134250,
+          "end_ms": 134310,
+          "confidence": 0.9999237060546875
+        },
+        {
+          "text": "finished",
+          "start_ms": 134550,
+          "end_ms": 134730,
+          "confidence": 0.9998226463794708
+        },
+        {
+          "text": "it.",
+          "start_ms": 135030,
+          "end_ms": 135270,
+          "confidence": 0.9999818801879883
+        }
+      ]
+    },
+    {
+      "text": "Every single",
+      "start_ms": 135690,
+      "end_ms": 136110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 135690,
+          "end_ms": 135930,
+          "confidence": 0.9999208450317383
+        },
+        {
+          "text": "single",
+          "start_ms": 136050,
+          "end_ms": 136110,
+          "confidence": 0.9998607635498047
+        }
+      ]
+    },
+    {
+      "text": "debt I owe,",
+      "start_ms": 136590,
+      "end_ms": 137430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "debt",
+          "start_ms": 136590,
+          "end_ms": 136770,
+          "confidence": 0.9994862377643585
+        },
+        {
+          "text": "I",
+          "start_ms": 136890,
+          "end_ms": 136950,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "owe,",
+          "start_ms": 137190,
+          "end_ms": 137430,
+          "confidence": 0.9981871644655863
+        }
+      ]
+    },
+    {
+      "text": "you canceled it.",
+      "start_ms": 137850,
+      "end_ms": 139050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 137850,
+          "end_ms": 137970,
+          "confidence": 0.9998970925807953
+        },
+        {
+          "text": "canceled",
+          "start_ms": 138090,
+          "end_ms": 138690,
+          "confidence": 0.9997172156969706
+        },
+        {
+          "text": "it.",
+          "start_ms": 138810,
+          "end_ms": 139050,
+          "confidence": 0.9999931454658508
+        }
+      ]
+    },
+    {
+      "text": "Every sin I ever",
+      "start_ms": 139470,
+      "end_ms": 140550,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 139470,
+          "end_ms": 139710,
+          "confidence": 0.9999220669269562
+        },
+        {
+          "text": "sin",
+          "start_ms": 139950,
+          "end_ms": 140010,
+          "confidence": 0.9990061521530151
+        },
+        {
+          "text": "I",
+          "start_ms": 140190,
+          "end_ms": 140250,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "ever",
+          "start_ms": 140490,
+          "end_ms": 140550,
+          "confidence": 0.999631941318512
+        }
+      ]
+    },
+    {
+      "text": "chose, you covered it.",
+      "start_ms": 140970,
+      "end_ms": 142830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "chose,",
+          "start_ms": 140970,
+          "end_ms": 141270,
+          "confidence": 0.9999580383300781
+        },
+        {
+          "text": "you",
+          "start_ms": 141630,
+          "end_ms": 141810,
+          "confidence": 0.9999580383300781
+        },
+        {
+          "text": "covered",
+          "start_ms": 142110,
+          "end_ms": 142410,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "it.",
+          "start_ms": 142590,
+          "end_ms": 142830,
+          "confidence": 0.999995231628418
+        }
+      ]
+    },
+    {
+      "text": "When the fight was getting close,",
+      "start_ms": 143370,
+      "end_ms": 145110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 143370,
+          "end_ms": 143430,
+          "confidence": 0.9999008178710938
+        },
+        {
+          "text": "the",
+          "start_ms": 143610,
+          "end_ms": 143670,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "fight",
+          "start_ms": 143790,
+          "end_ms": 143910,
+          "confidence": 0.9997998178005219
+        },
+        {
+          "text": "was",
+          "start_ms": 144030,
+          "end_ms": 144090,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "getting",
+          "start_ms": 144330,
+          "end_ms": 144570,
+          "confidence": 0.9999936819076538
+        },
+        {
+          "text": "close,",
+          "start_ms": 144750,
+          "end_ms": 145110,
+          "confidence": 0.9999505678812662
+        }
+      ]
+    },
+    {
+      "text": "you handled it.",
+      "start_ms": 145530,
+      "end_ms": 146790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 145530,
+          "end_ms": 145650,
+          "confidence": 0.9990191459655762
+        },
+        {
+          "text": "handled",
+          "start_ms": 145950,
+          "end_ms": 146310,
+          "confidence": 0.9997479319572449
+        },
+        {
+          "text": "it.",
+          "start_ms": 146550,
+          "end_ms": 146790,
+          "confidence": 0.9999838173389435
+        }
+      ]
+    },
+    {
+      "text": "You never",
+      "start_ms": 147450,
+      "end_ms": 148110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 147450,
+          "end_ms": 147510,
+          "confidence": 0.9999217987060547
+        },
+        {
+          "text": "never",
+          "start_ms": 147870,
+          "end_ms": 148110,
+          "confidence": 0.998472273349762
+        }
+      ]
+    },
+    {
+      "text": "failed.",
+      "start_ms": 148530,
+      "end_ms": 148770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "failed.",
+          "start_ms": 148530,
+          "end_ms": 148770,
+          "confidence": 0.949641207853953
+        }
+      ]
+    },
+    {
+      "text": "You never",
+      "start_ms": 149430,
+      "end_ms": 149970,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 149430,
+          "end_ms": 149490,
+          "confidence": 0.9998761415481567
+        },
+        {
+          "text": "never",
+          "start_ms": 149730,
+          "end_ms": 149970,
+          "confidence": 0.9973984360694885
+        }
+      ]
+    },
+    {
+      "text": "failed.",
+      "start_ms": 150390,
+      "end_ms": 150630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "failed.",
+          "start_ms": 150390,
+          "end_ms": 150630,
+          "confidence": 0.7759602169195811
+        }
+      ]
+    },
+    {
+      "text": "Every single",
+      "start_ms": 151050,
+      "end_ms": 151530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 151050,
+          "end_ms": 151290,
+          "confidence": 0.999579519033432
+        },
+        {
+          "text": "single",
+          "start_ms": 151470,
+          "end_ms": 151530,
+          "confidence": 0.9966167211532593
+        }
+      ]
+    },
+    {
+      "text": "word you spoke",
+      "start_ms": 152010,
+      "end_ms": 152790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "word",
+          "start_ms": 152010,
+          "end_ms": 152070,
+          "confidence": 0.5576230883598328
+        },
+        {
+          "text": "you",
+          "start_ms": 152310,
+          "end_ms": 152430,
+          "confidence": 0.9962659478187561
+        },
+        {
+          "text": "spoke",
+          "start_ms": 152610,
+          "end_ms": 152790,
+          "confidence": 0.9851202666759491
+        }
+      ]
+    },
+    {
+      "text": "is coming true.",
+      "start_ms": 153390,
+      "end_ms": 154470,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 153390,
+          "end_ms": 153450,
+          "confidence": 0.9985172152519226
+        },
+        {
+          "text": "coming",
+          "start_ms": 153690,
+          "end_ms": 153990,
+          "confidence": 0.9458588659763336
+        },
+        {
+          "text": "true.",
+          "start_ms": 154110,
+          "end_ms": 154470,
+          "confidence": 0.9988248944282532
+        }
+      ]
+    },
+    {
+      "text": "Every line the devil told,",
+      "start_ms": 154950,
+      "end_ms": 156630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 154950,
+          "end_ms": 155190,
+          "confidence": 0.9999208450317383
+        },
+        {
+          "text": "line",
+          "start_ms": 155370,
+          "end_ms": 155430,
+          "confidence": 0.7216867208480835
+        },
+        {
+          "text": "the",
+          "start_ms": 155610,
+          "end_ms": 155670,
+          "confidence": 0.9771127700805664
+        },
+        {
+          "text": "devil",
+          "start_ms": 155850,
+          "end_ms": 156150,
+          "confidence": 0.9956616759300232
+        },
+        {
+          "text": "told,",
+          "start_ms": 156330,
+          "end_ms": 156630,
+          "confidence": 0.7099175055821737
+        }
+      ]
+    },
+    {
+      "text": "my spot of you,",
+      "start_ms": 157290,
+      "end_ms": 158190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "my",
+          "start_ms": 157290,
+          "end_ms": 157350,
+          "confidence": 0.3846237361431122
+        },
+        {
+          "text": "spot",
+          "start_ms": 157590,
+          "end_ms": 157710,
+          "confidence": 0.6283312290906906
+        },
+        {
+          "text": "of",
+          "start_ms": 157830,
+          "end_ms": 157890,
+          "confidence": 0.41228991746902466
+        },
+        {
+          "text": "you,",
+          "start_ms": 158010,
+          "end_ms": 158190,
+          "confidence": 0.6627369970083237
+        }
+      ]
+    },
+    {
+      "text": "to me it's impossible.",
+      "start_ms": 158790,
+      "end_ms": 160350,
+      "text_sk": "pre mňa je to nemožné.",
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 158790,
+          "end_ms": 158850,
+          "confidence": 0.9563713073730469
+        },
+        {
+          "text": "me",
+          "start_ms": 159030,
+          "end_ms": 159090,
+          "confidence": 0.974319338798523
+        },
+        {
+          "text": "it's",
+          "start_ms": 159270,
+          "end_ms": 159450,
+          "confidence": 0.9618100821971893
+        },
+        {
+          "text": "impossible.",
+          "start_ms": 159510,
+          "end_ms": 160350,
+          "confidence": 0.9846612930297851
+        }
+      ]
+    },
+    {
+      "text": "But not for you.",
+      "start_ms": 161190,
+      "end_ms": 162090,
+      "text_sk": "Ale nie pre teba.",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 161190,
+          "end_ms": 161250,
+          "confidence": 0.8401241898536682
+        },
+        {
+          "text": "not",
+          "start_ms": 161430,
+          "end_ms": 161490,
+          "confidence": 0.9487000107765198
+        },
+        {
+          "text": "for",
+          "start_ms": 161670,
+          "end_ms": 161730,
+          "confidence": 0.999761700630188
+        },
+        {
+          "text": "you.",
+          "start_ms": 161910,
+          "end_ms": 162090,
+          "confidence": 0.9982657134532928
+        }
+      ]
+    },
+    {
+      "text": "It's what you do.",
+      "start_ms": 162990,
+      "end_ms": 164190,
+      "text_sk": "Je to to, čo robíš.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 162990,
+          "end_ms": 163170,
+          "confidence": 0.9790040850639343
+        },
+        {
+          "text": "what",
+          "start_ms": 163290,
+          "end_ms": 163470,
+          "confidence": 0.9647641479969025
+        },
+        {
+          "text": "you",
+          "start_ms": 163590,
+          "end_ms": 163710,
+          "confidence": 0.9980210661888123
+        },
+        {
+          "text": "do.",
+          "start_ms": 163890,
+          "end_ms": 164190,
+          "confidence": 0.998561292886734
+        }
+      ]
+    },
+    {
+      "text": "Let's go.",
+      "start_ms": 164670,
+      "end_ms": 165030,
+      "text_sk": "Poďme.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 164670,
+          "end_ms": 164850,
+          "confidence": 0.9883017838001251
+        },
+        {
+          "text": "go.",
+          "start_ms": 164910,
+          "end_ms": 165030,
+          "confidence": 0.9647646248340607
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 165090,
+      "end_ms": 166410,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 165090,
+          "end_ms": 165150,
+          "confidence": 0.9950363636016846
+        },
+        {
+          "text": "you",
+          "start_ms": 165210,
+          "end_ms": 165330,
+          "confidence": 0.999899685382843
+        },
+        {
+          "text": "keep",
+          "start_ms": 165390,
+          "end_ms": 165570,
+          "confidence": 0.9991055428981781
+        },
+        {
+          "text": "on",
+          "start_ms": 165690,
+          "end_ms": 165750,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "doing",
+          "start_ms": 165870,
+          "end_ms": 166050,
+          "confidence": 0.9996758997440338
+        },
+        {
+          "text": "it.",
+          "start_ms": 166170,
+          "end_ms": 166410,
+          "confidence": 0.9999514520168304
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 168870,
+      "end_ms": 170250,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 168870,
+          "end_ms": 168930,
+          "confidence": 0.9972891807556152
+        },
+        {
+          "text": "you",
+          "start_ms": 168990,
+          "end_ms": 169110,
+          "confidence": 0.9999485313892365
+        },
+        {
+          "text": "keep",
+          "start_ms": 169230,
+          "end_ms": 169350,
+          "confidence": 0.9999946653842926
+        },
+        {
+          "text": "on",
+          "start_ms": 169470,
+          "end_ms": 169530,
+          "confidence": 0.9999874830245972
+        },
+        {
+          "text": "doing",
+          "start_ms": 169650,
+          "end_ms": 169890,
+          "confidence": 0.9998232424259186
+        },
+        {
+          "text": "it.",
+          "start_ms": 170010,
+          "end_ms": 170250,
+          "confidence": 0.9997429847717285
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 172650,
+      "end_ms": 174030,
+      "text_sk": "A ty v tom pokračuješ. V tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 172650,
+          "end_ms": 172710,
+          "confidence": 0.95948725938797
+        },
+        {
+          "text": "you",
+          "start_ms": 172830,
+          "end_ms": 172950,
+          "confidence": 0.999952107667923
+        },
+        {
+          "text": "keep",
+          "start_ms": 173010,
+          "end_ms": 173130,
+          "confidence": 0.9999932944774628
+        },
+        {
+          "text": "on",
+          "start_ms": 173310,
+          "end_ms": 173370,
+          "confidence": 0.999967098236084
+        },
+        {
+          "text": "doing",
+          "start_ms": 173490,
+          "end_ms": 173730,
+          "confidence": 0.9998802840709686
+        },
+        {
+          "text": "it.",
+          "start_ms": 173850,
+          "end_ms": 174030,
+          "confidence": 0.999993771314621
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 176430,
+      "end_ms": 177930,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 176430,
+          "end_ms": 176490,
+          "confidence": 0.9989287257194519
+        },
+        {
+          "text": "you",
+          "start_ms": 176610,
+          "end_ms": 176730,
+          "confidence": 0.9999866783618927
+        },
+        {
+          "text": "keep",
+          "start_ms": 176790,
+          "end_ms": 176970,
+          "confidence": 0.9999933838844299
+        },
+        {
+          "text": "on",
+          "start_ms": 177090,
+          "end_ms": 177150,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "doing",
+          "start_ms": 177330,
+          "end_ms": 177570,
+          "confidence": 0.9998808801174164
+        },
+        {
+          "text": "it.",
+          "start_ms": 177690,
+          "end_ms": 177930,
+          "confidence": 0.9999700784683228
+        }
+      ]
+    },
+    {
+      "text": "Sing it out.",
+      "start_ms": 180510,
+      "end_ms": 181290,
+      "text_sk": "Zaspievaj to nahlas.",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 180510,
+          "end_ms": 180570,
+          "confidence": 0.9340577125549316
+        },
+        {
+          "text": "it",
+          "start_ms": 180750,
+          "end_ms": 180810,
+          "confidence": 0.9754587411880493
+        },
+        {
+          "text": "out.",
+          "start_ms": 180990,
+          "end_ms": 181290,
+          "confidence": 0.9628749191761017
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 182550,
+      "end_ms": 183510,
+      "text_sk": "Žijem to.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 182550,
+          "end_ms": 182730,
+          "confidence": 0.9999427795410156
+        },
+        {
+          "text": "living",
+          "start_ms": 182850,
+          "end_ms": 183090,
+          "confidence": 0.9968764185905457
+        },
+        {
+          "text": "it.",
+          "start_ms": 183270,
+          "end_ms": 183510,
+          "confidence": 0.999673068523407
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 184530,
+      "end_ms": 185250,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 184530,
+          "end_ms": 184590,
+          "confidence": 0.994056224822998
+        },
+        {
+          "text": "new",
+          "start_ms": 184710,
+          "end_ms": 184770,
+          "confidence": 0.9999644756317139
+        },
+        {
+          "text": "today.",
+          "start_ms": 185010,
+          "end_ms": 185250,
+          "confidence": 0.9997046887874603
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 186450,
+      "end_ms": 187350,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 186450,
+          "end_ms": 186510,
+          "confidence": 0.9633493423461914
+        },
+        {
+          "text": "always",
+          "start_ms": 186690,
+          "end_ms": 186990,
+          "confidence": 0.9998390475908915
+        },
+        {
+          "text": "gone.",
+          "start_ms": 187110,
+          "end_ms": 187350,
+          "confidence": 0.9987139701843262
+        }
+      ]
+    },
+    {
+      "text": "It's history.",
+      "start_ms": 188370,
+      "end_ms": 189210,
+      "text_sk": "Je to história.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 188370,
+          "end_ms": 188550,
+          "confidence": 0.9999828338623047
+        },
+        {
+          "text": "history.",
+          "start_ms": 188850,
+          "end_ms": 189210,
+          "confidence": 0.9998503029346466
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle.",
+      "start_ms": 189930,
+      "end_ms": 190950,
+      "text_sk": "Je to zázrak.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 189930,
+          "end_ms": 190110,
+          "confidence": 0.9999828338623047
+        },
+        {
+          "text": "a",
+          "start_ms": 190230,
+          "end_ms": 190290,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 190470,
+          "end_ms": 190950,
+          "confidence": 0.9999587138493856
+        }
+      ]
+    },
+    {
+      "text": "What you did for me.",
+      "start_ms": 191790,
+      "end_ms": 193230,
+      "text_sk": "To, čo si pre mňa urobil.",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 191790,
+          "end_ms": 191910,
+          "confidence": 0.9919748902320862
+        },
+        {
+          "text": "you",
+          "start_ms": 192030,
+          "end_ms": 192150,
+          "confidence": 0.9998102784156799
+        },
+        {
+          "text": "did",
+          "start_ms": 192330,
+          "end_ms": 192390,
+          "confidence": 0.999468207359314
+        },
+        {
+          "text": "for",
+          "start_ms": 192630,
+          "end_ms": 192690,
+          "confidence": 0.9997311234474182
+        },
+        {
+          "text": "me.",
+          "start_ms": 193050,
+          "end_ms": 193230,
+          "confidence": 0.9998638033866882
+        }
+      ]
+    },
+    {
+      "text": "Thank",
+      "start_ms": 193770,
+      "end_ms": 193950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 193770,
+          "end_ms": 193950,
+          "confidence": 0.9987539947032928
+        }
+      ]
+    },
+    {
+      "text": "you,",
+      "start_ms": 194730,
+      "end_ms": 194910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you,",
+          "start_ms": 194730,
+          "end_ms": 194910,
+          "confidence": 0.9987627267837524
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 195450,
+      "end_ms": 195630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 195450,
+          "end_ms": 195630,
+          "confidence": 0.9999572932720184
+        }
+      ]
+    },
+    {
+      "text": "You made a way.",
+      "start_ms": 195810,
+      "end_ms": 196770,
+      "text_sk": "Urobili ste si cestu.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 195810,
+          "end_ms": 195870,
+          "confidence": 0.9985756278038025
+        },
+        {
+          "text": "made",
+          "start_ms": 196170,
+          "end_ms": 196230,
+          "confidence": 0.9988820552825928
+        },
+        {
+          "text": "a",
+          "start_ms": 196290,
+          "end_ms": 196350,
+          "confidence": 0.998449444770813
+        },
+        {
+          "text": "way.",
+          "start_ms": 196590,
+          "end_ms": 196770,
+          "confidence": 0.9977205097675323
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 197010,
+      "end_ms": 198750,
+      "text_sk": "Žijem to.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 197010,
+          "end_ms": 198210,
+          "confidence": 0.9958130915959676
+        },
+        {
+          "text": "living",
+          "start_ms": 198210,
+          "end_ms": 198210,
+          "confidence": 0.9990480542182922
+        },
+        {
+          "text": "it.",
+          "start_ms": 198210,
+          "end_ms": 198750,
+          "confidence": 0.9999554753303528
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 198990,
+      "end_ms": 199590,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 198990,
+          "end_ms": 199050,
+          "confidence": 0.8788964152336121
+        },
+        {
+          "text": "new",
+          "start_ms": 199230,
+          "end_ms": 199290,
+          "confidence": 0.9998382329940796
+        },
+        {
+          "text": "today.",
+          "start_ms": 199410,
+          "end_ms": 199590,
+          "confidence": 0.9984178245067596
+        }
+      ]
+    },
+    {
+      "text": "A new today.",
+      "start_ms": 199890,
+      "end_ms": 200550,
+      "text_sk": "Nový deň.",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 199890,
+          "end_ms": 199950,
+          "confidence": 0.9936440587043762
+        },
+        {
+          "text": "new",
+          "start_ms": 200070,
+          "end_ms": 200130,
+          "confidence": 0.9998818635940552
+        },
+        {
+          "text": "today.",
+          "start_ms": 200310,
+          "end_ms": 200550,
+          "confidence": 0.925452470779419
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 200970,
+      "end_ms": 201750,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 200970,
+          "end_ms": 201030,
+          "confidence": 0.9739231467247009
+        },
+        {
+          "text": "always",
+          "start_ms": 201150,
+          "end_ms": 201450,
+          "confidence": 0.9997013807296753
+        },
+        {
+          "text": "gone.",
+          "start_ms": 201510,
+          "end_ms": 201750,
+          "confidence": 0.9976630409558614
+        }
+      ]
+    },
+    {
+      "text": "He always gone.",
+      "start_ms": 201870,
+      "end_ms": 202590,
+      "text_sk": "On je vždy preč.",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 201870,
+          "end_ms": 201930,
+          "confidence": 0.7086357474327087
+        },
+        {
+          "text": "always",
+          "start_ms": 202050,
+          "end_ms": 202350,
+          "confidence": 0.999815026919047
+        },
+        {
+          "text": "gone.",
+          "start_ms": 202410,
+          "end_ms": 202590,
+          "confidence": 0.9998990495999655
+        }
+      ]
+    },
+    {
+      "text": "It's history.",
+      "start_ms": 202770,
+      "end_ms": 203490,
+      "text_sk": "Je to história.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 202770,
+          "end_ms": 202890,
+          "confidence": 0.9999553263187408
+        },
+        {
+          "text": "history.",
+          "start_ms": 203190,
+          "end_ms": 203490,
+          "confidence": 0.9997458159923553
+        }
+      ]
+    },
+    {
+      "text": "It's history.",
+      "start_ms": 203730,
+      "end_ms": 204570,
+      "text_sk": "Je to história.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 203730,
+          "end_ms": 203850,
+          "confidence": 0.9965435266494751
+        },
+        {
+          "text": "history.",
+          "start_ms": 204210,
+          "end_ms": 204570,
+          "confidence": 0.8492336571216583
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle.",
+      "start_ms": 204750,
+      "end_ms": 206190,
+      "text_sk": "Je to zázrak.",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 204750,
+          "end_ms": 205650,
+          "confidence": 0.8350663185119629
+        },
+        {
+          "text": "a",
+          "start_ms": 205710,
+          "end_ms": 205770,
+          "confidence": 0.9996818900108337
+        },
+        {
+          "text": "miracle.",
+          "start_ms": 205890,
+          "end_ms": 206190,
+          "confidence": 0.9981608589490255
+        }
+      ]
+    },
+    {
+      "text": "You stand up on.",
+      "start_ms": 207270,
+      "end_ms": 208170,
+      "text_sk": "Ty sa postavíš na.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 207270,
+          "end_ms": 207330,
+          "confidence": 0.3920532464981079
+        },
+        {
+          "text": "stand",
+          "start_ms": 207570,
+          "end_ms": 207630,
+          "confidence": 0.3275081515312195
+        },
+        {
+          "text": "up",
+          "start_ms": 207750,
+          "end_ms": 207810,
+          "confidence": 0.980090320110321
+        },
+        {
+          "text": "on.",
+          "start_ms": 207930,
+          "end_ms": 208170,
+          "confidence": 0.6856233179569244
+        }
+      ]
+    },
+    {
+      "text": "Me.",
+      "start_ms": 208470,
+      "end_ms": 208650,
+      "text_sk": "Mňa.",
+      "words": [
+        {
+          "text": "Me.",
+          "start_ms": 208470,
+          "end_ms": 208650,
+          "confidence": 0.7627881169319153
+        }
+      ]
+    },
+    {
+      "text": "Thank",
+      "start_ms": 209070,
+      "end_ms": 209250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 209070,
+          "end_ms": 209250,
+          "confidence": 0.9973273575305939
+        }
+      ]
+    },
+    {
+      "text": "you,",
+      "start_ms": 209970,
+      "end_ms": 210150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you,",
+          "start_ms": 209970,
+          "end_ms": 210150,
+          "confidence": 0.9984605610370636
+        }
+      ]
+    },
+    {
+      "text": "Lord.",
+      "start_ms": 210630,
+      "end_ms": 210870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 210630,
+          "end_ms": 210870,
+          "confidence": 0.9998642206192017
+        }
+      ]
+    },
+    {
+      "text": "You made a way.",
+      "start_ms": 211050,
+      "end_ms": 212190,
+      "text_sk": "Urobili ste si cestu.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 211050,
+          "end_ms": 211110,
+          "confidence": 0.9998026490211487
+        },
+        {
+          "text": "made",
+          "start_ms": 211410,
+          "end_ms": 211470,
+          "confidence": 0.9998489618301392
+        },
+        {
+          "text": "a",
+          "start_ms": 211650,
+          "end_ms": 211710,
+          "confidence": 0.9998784065246582
+        },
+        {
+          "text": "way.",
+          "start_ms": 211950,
+          "end_ms": 212190,
+          "confidence": 0.9993473291397095
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 218790,
+      "end_ms": 220110,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 218790,
+          "end_ms": 218850,
+          "confidence": 0.9987437129020691
+        },
+        {
+          "text": "you",
+          "start_ms": 218970,
+          "end_ms": 219090,
+          "confidence": 0.9981213510036469
+        },
+        {
+          "text": "keep",
+          "start_ms": 219210,
+          "end_ms": 219330,
+          "confidence": 0.999836266040802
+        },
+        {
+          "text": "on",
+          "start_ms": 219450,
+          "end_ms": 219510,
+          "confidence": 0.9999905228614807
+        },
+        {
+          "text": "doing",
+          "start_ms": 219690,
+          "end_ms": 219930,
+          "confidence": 0.9992090463638306
+        },
+        {
+          "text": "it.",
+          "start_ms": 219930,
+          "end_ms": 220110,
+          "confidence": 0.9995770156383514
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing",
+      "start_ms": 222810,
+      "end_ms": 223050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 222810,
+          "end_ms": 222870,
+          "confidence": 0.4923393726348877
+        },
+        {
+          "text": "you",
+          "start_ms": 222930,
+          "end_ms": 223050,
+          "confidence": 0.9994038045406342
+        },
+        {
+          "text": "keep",
+          "start_ms": 223050,
+          "end_ms": 223050,
+          "confidence": 0.9999704957008362
+        },
+        {
+          "text": "on",
+          "start_ms": 223050,
+          "end_ms": 223050,
+          "confidence": 0.9999465346336365
+        },
+        {
+          "text": "doing",
+          "start_ms": 223050,
+          "end_ms": 223050,
+          "confidence": 0.9996317625045776
+        }
+      ]
+    },
+    {
+      "text": "it.",
+      "start_ms": 223830,
+      "end_ms": 224010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "it.",
+          "start_ms": 223830,
+          "end_ms": 224010,
+          "confidence": 0.9998069405555725
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 224010,
+      "end_ms": 224010,
+      "text_sk": "A ty v tom pokračuješ. V tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 224010,
+          "end_ms": 224010,
+          "confidence": 0.9760065674781799
+        },
+        {
+          "text": "you",
+          "start_ms": 224010,
+          "end_ms": 224010,
+          "confidence": 0.9990221261978149
+        },
+        {
+          "text": "keep",
+          "start_ms": 224010,
+          "end_ms": 224010,
+          "confidence": 0.9998053312301636
+        },
+        {
+          "text": "on",
+          "start_ms": 224010,
+          "end_ms": 224010,
+          "confidence": 0.9997546672821045
+        },
+        {
+          "text": "doing",
+          "start_ms": 224010,
+          "end_ms": 224010,
+          "confidence": 0.9995603859424591
+        },
+        {
+          "text": "it.",
+          "start_ms": 224010,
+          "end_ms": 224010,
+          "confidence": 0.9997010231018066
+        }
+      ]
+    },
+    {
+      "text": "And",
+      "start_ms": 224310,
+      "end_ms": 224370,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 224310,
+          "end_ms": 224370,
+          "confidence": 0.6559638381004333
+        }
+      ]
+    },
+    {
+      "text": "you keep on doing it.",
+      "start_ms": 226710,
+      "end_ms": 227190,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 226710,
+          "end_ms": 226830,
+          "confidence": 0.9989619255065918
+        },
+        {
+          "text": "keep",
+          "start_ms": 226890,
+          "end_ms": 227010,
+          "confidence": 0.999096691608429
+        },
+        {
+          "text": "on",
+          "start_ms": 227130,
+          "end_ms": 227190,
+          "confidence": 0.9987238645553589
+        },
+        {
+          "text": "doing",
+          "start_ms": 227190,
+          "end_ms": 227190,
+          "confidence": 0.9972213506698608
+        },
+        {
+          "text": "it.",
+          "start_ms": 227190,
+          "end_ms": 227190,
+          "confidence": 0.9996358752250671
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 227190,
+      "end_ms": 227790,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 227190,
+          "end_ms": 227190,
+          "confidence": 0.9593451619148254
+        },
+        {
+          "text": "you",
+          "start_ms": 227190,
+          "end_ms": 227190,
+          "confidence": 0.999506264925003
+        },
+        {
+          "text": "keep",
+          "start_ms": 227190,
+          "end_ms": 227190,
+          "confidence": 0.999814361333847
+        },
+        {
+          "text": "on",
+          "start_ms": 227190,
+          "end_ms": 227190,
+          "confidence": 0.9988124370574951
+        },
+        {
+          "text": "doing",
+          "start_ms": 227370,
+          "end_ms": 227610,
+          "confidence": 0.9992457032203674
+        },
+        {
+          "text": "it.",
+          "start_ms": 227610,
+          "end_ms": 227790,
+          "confidence": 0.999850332736969
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 229650,
+      "end_ms": 230490,
+      "text_sk": "A ty v to pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 229650,
+          "end_ms": 229710,
+          "confidence": 0.7693957090377808
+        },
+        {
+          "text": "you",
+          "start_ms": 229710,
+          "end_ms": 229830,
+          "confidence": 0.9995614290237427
+        },
+        {
+          "text": "keep",
+          "start_ms": 229890,
+          "end_ms": 230010,
+          "confidence": 0.9997731149196625
+        },
+        {
+          "text": "on",
+          "start_ms": 230070,
+          "end_ms": 230130,
+          "confidence": 0.999977171421051
+        },
+        {
+          "text": "doing",
+          "start_ms": 230190,
+          "end_ms": 230310,
+          "confidence": 0.9996292293071747
+        },
+        {
+          "text": "it.",
+          "start_ms": 230310,
+          "end_ms": 230490,
+          "confidence": 0.9998666048049927
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 230490,
+      "end_ms": 231630,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 230490,
+          "end_ms": 230490,
+          "confidence": 0.977573812007904
+        },
+        {
+          "text": "you",
+          "start_ms": 230550,
+          "end_ms": 230670,
+          "confidence": 0.9998297095298767
+        },
+        {
+          "text": "keep",
+          "start_ms": 230730,
+          "end_ms": 230850,
+          "confidence": 0.9999201893806458
+        },
+        {
+          "text": "on",
+          "start_ms": 230970,
+          "end_ms": 231030,
+          "confidence": 0.9999398589134216
+        },
+        {
+          "text": "doing",
+          "start_ms": 231150,
+          "end_ms": 231390,
+          "confidence": 0.9999183714389801
+        },
+        {
+          "text": "it.",
+          "start_ms": 231450,
+          "end_ms": 231630,
+          "confidence": 0.999950110912323
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 234270,
+      "end_ms": 234690,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 234270,
+          "end_ms": 234330,
+          "confidence": 0.682006299495697
+        },
+        {
+          "text": "you",
+          "start_ms": 234450,
+          "end_ms": 234510,
+          "confidence": 0.9994576275348663
+        },
+        {
+          "text": "keep",
+          "start_ms": 234510,
+          "end_ms": 234690,
+          "confidence": 0.9998041093349457
+        },
+        {
+          "text": "on",
+          "start_ms": 234690,
+          "end_ms": 234690,
+          "confidence": 0.9996983408927917
+        },
+        {
+          "text": "doing",
+          "start_ms": 234690,
+          "end_ms": 234690,
+          "confidence": 0.9994260966777802
+        },
+        {
+          "text": "it.",
+          "start_ms": 234690,
+          "end_ms": 234690,
+          "confidence": 0.9998014271259308
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 234690,
+      "end_ms": 235530,
+      "text_sk": "A ty v tom stále pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 234690,
+          "end_ms": 234690,
+          "confidence": 0.6643886566162109
+        },
+        {
+          "text": "you",
+          "start_ms": 234690,
+          "end_ms": 234690,
+          "confidence": 0.9991880655288696
+        },
+        {
+          "text": "keep",
+          "start_ms": 234690,
+          "end_ms": 234690,
+          "confidence": 0.9997615218162537
+        },
+        {
+          "text": "on",
+          "start_ms": 234810,
+          "end_ms": 234870,
+          "confidence": 0.9997284412384033
+        },
+        {
+          "text": "doing",
+          "start_ms": 235050,
+          "end_ms": 235290,
+          "confidence": 0.9997604489326477
+        },
+        {
+          "text": "it.",
+          "start_ms": 235350,
+          "end_ms": 235530,
+          "confidence": 0.9999153017997742
+        }
+      ]
+    },
+    {
+      "text": "Keep on, keep on, keep on.",
+      "start_ms": 235890,
+      "end_ms": 237750,
+      "text_sk": "Pokračuj, pokračuj, pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 235890,
+          "end_ms": 236070,
+          "confidence": 0.9660960733890533
+        },
+        {
+          "text": "on,",
+          "start_ms": 236190,
+          "end_ms": 236370,
+          "confidence": 0.8521159887313843
+        },
+        {
+          "text": "keep",
+          "start_ms": 236550,
+          "end_ms": 236730,
+          "confidence": 0.9999151825904846
+        },
+        {
+          "text": "on,",
+          "start_ms": 236790,
+          "end_ms": 237030,
+          "confidence": 0.9996415376663208
+        },
+        {
+          "text": "keep",
+          "start_ms": 237270,
+          "end_ms": 237390,
+          "confidence": 0.9998181164264679
+        },
+        {
+          "text": "on.",
+          "start_ms": 237510,
+          "end_ms": 237750,
+          "confidence": 0.9951666295528412
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 238110,
+      "end_ms": 239370,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 238110,
+          "end_ms": 238170,
+          "confidence": 0.9619203805923462
+        },
+        {
+          "text": "you",
+          "start_ms": 238230,
+          "end_ms": 238350,
+          "confidence": 0.999825656414032
+        },
+        {
+          "text": "keep",
+          "start_ms": 238410,
+          "end_ms": 238530,
+          "confidence": 0.9999772012233734
+        },
+        {
+          "text": "on",
+          "start_ms": 238650,
+          "end_ms": 238710,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "doing",
+          "start_ms": 238890,
+          "end_ms": 239130,
+          "confidence": 0.9997684359550476
+        },
+        {
+          "text": "it.",
+          "start_ms": 239190,
+          "end_ms": 239370,
+          "confidence": 0.9999616146087646
+        }
+      ]
+    },
+    {
+      "text": "Keep on, keep on, keep on.",
+      "start_ms": 239670,
+      "end_ms": 241590,
+      "text_sk": "Pokračuj, pokračuj, pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 239670,
+          "end_ms": 239790,
+          "confidence": 0.9991071224212646
+        },
+        {
+          "text": "on,",
+          "start_ms": 239910,
+          "end_ms": 240150,
+          "confidence": 0.9937041997909546
+        },
+        {
+          "text": "keep",
+          "start_ms": 240330,
+          "end_ms": 240510,
+          "confidence": 0.9999375641345978
+        },
+        {
+          "text": "on,",
+          "start_ms": 240570,
+          "end_ms": 240810,
+          "confidence": 0.9759694337844849
+        },
+        {
+          "text": "keep",
+          "start_ms": 241110,
+          "end_ms": 241290,
+          "confidence": 0.9990763068199158
+        },
+        {
+          "text": "on.",
+          "start_ms": 241410,
+          "end_ms": 241590,
+          "confidence": 0.9977131485939026
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 241950,
+      "end_ms": 243210,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 241950,
+          "end_ms": 242010,
+          "confidence": 0.9582892656326294
+        },
+        {
+          "text": "you",
+          "start_ms": 242070,
+          "end_ms": 242190,
+          "confidence": 0.9998360574245453
+        },
+        {
+          "text": "keep",
+          "start_ms": 242250,
+          "end_ms": 242370,
+          "confidence": 0.9999866783618927
+        },
+        {
+          "text": "on",
+          "start_ms": 242490,
+          "end_ms": 242550,
+          "confidence": 0.9999732971191406
+        },
+        {
+          "text": "doing",
+          "start_ms": 242730,
+          "end_ms": 242910,
+          "confidence": 0.99994096159935
+        },
+        {
+          "text": "it.",
+          "start_ms": 243030,
+          "end_ms": 243210,
+          "confidence": 0.9999765455722809
+        }
+      ]
+    },
+    {
+      "text": "Keep on, keep on, keep on.",
+      "start_ms": 243450,
+      "end_ms": 245430,
+      "text_sk": "Pokračuj, pokračuj, pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 243450,
+          "end_ms": 243630,
+          "confidence": 0.9987850785255432
+        },
+        {
+          "text": "on,",
+          "start_ms": 243750,
+          "end_ms": 243930,
+          "confidence": 0.9851835668087006
+        },
+        {
+          "text": "keep",
+          "start_ms": 244230,
+          "end_ms": 244350,
+          "confidence": 0.9994387924671173
+        },
+        {
+          "text": "on,",
+          "start_ms": 244470,
+          "end_ms": 244710,
+          "confidence": 0.9995081424713135
+        },
+        {
+          "text": "keep",
+          "start_ms": 244950,
+          "end_ms": 245070,
+          "confidence": 0.9994821548461914
+        },
+        {
+          "text": "on.",
+          "start_ms": 245190,
+          "end_ms": 245430,
+          "confidence": 0.9981400370597839
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 245850,
+      "end_ms": 247050,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 245850,
+          "end_ms": 245910,
+          "confidence": 0.608034610748291
+        },
+        {
+          "text": "you",
+          "start_ms": 245910,
+          "end_ms": 246030,
+          "confidence": 0.9995909631252289
+        },
+        {
+          "text": "keep",
+          "start_ms": 246090,
+          "end_ms": 246210,
+          "confidence": 0.9998556673526764
+        },
+        {
+          "text": "on",
+          "start_ms": 246330,
+          "end_ms": 246390,
+          "confidence": 0.9999276399612427
+        },
+        {
+          "text": "doing",
+          "start_ms": 246570,
+          "end_ms": 246810,
+          "confidence": 0.9998426735401154
+        },
+        {
+          "text": "it.",
+          "start_ms": 246870,
+          "end_ms": 247050,
+          "confidence": 0.9999640882015228
+        }
+      ]
+    },
+    {
+      "text": "Keep on.",
+      "start_ms": 247350,
+      "end_ms": 247890,
+      "text_sk": "Pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 247350,
+          "end_ms": 247530,
+          "confidence": 0.9966048002243042
+        },
+        {
+          "text": "on.",
+          "start_ms": 247650,
+          "end_ms": 247890,
+          "confidence": 0.8519243001937866
+        }
+      ]
+    },
+    {
+      "text": "On doing it.",
+      "start_ms": 248550,
+      "end_ms": 249630,
+      "text_sk": "Pokračuj v tom.",
+      "words": [
+        {
+          "text": "On",
+          "start_ms": 248550,
+          "end_ms": 248610,
+          "confidence": 0.4431937336921692
+        },
+        {
+          "text": "doing",
+          "start_ms": 248730,
+          "end_ms": 248910,
+          "confidence": 0.8017820119857788
+        },
+        {
+          "text": "it.",
+          "start_ms": 249030,
+          "end_ms": 249630,
+          "confidence": 0.9991328418254852
+        }
+      ]
+    },
+    {
+      "text": "You keep on doing it.",
+      "start_ms": 249750,
+      "end_ms": 250890,
+      "text_sk": "Ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 249750,
+          "end_ms": 249810,
+          "confidence": 0.6251012682914734
+        },
+        {
+          "text": "keep",
+          "start_ms": 249990,
+          "end_ms": 250110,
+          "confidence": 0.9987101256847382
+        },
+        {
+          "text": "on",
+          "start_ms": 250230,
+          "end_ms": 250290,
+          "confidence": 0.9997885823249817
+        },
+        {
+          "text": "doing",
+          "start_ms": 250470,
+          "end_ms": 250650,
+          "confidence": 0.9992903172969818
+        },
+        {
+          "text": "it.",
+          "start_ms": 250710,
+          "end_ms": 250890,
+          "confidence": 0.9999259114265442
+        }
+      ]
+    },
+    {
+      "text": "Keep on, keep on, keep on.",
+      "start_ms": 251250,
+      "end_ms": 253170,
+      "text_sk": "Pokračuj, pokračuj, pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 251250,
+          "end_ms": 251370,
+          "confidence": 0.9972151219844818
+        },
+        {
+          "text": "on,",
+          "start_ms": 251490,
+          "end_ms": 251730,
+          "confidence": 0.9905503392219543
+        },
+        {
+          "text": "keep",
+          "start_ms": 251910,
+          "end_ms": 252090,
+          "confidence": 0.9997084438800812
+        },
+        {
+          "text": "on,",
+          "start_ms": 252210,
+          "end_ms": 252450,
+          "confidence": 0.9978043735027313
+        },
+        {
+          "text": "keep",
+          "start_ms": 252690,
+          "end_ms": 252810,
+          "confidence": 0.9997789561748505
+        },
+        {
+          "text": "on.",
+          "start_ms": 252990,
+          "end_ms": 253170,
+          "confidence": 0.9694155156612396
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 253830,
+      "end_ms": 254790,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 253830,
+          "end_ms": 253890,
+          "confidence": 0.5680036544799805
+        },
+        {
+          "text": "you",
+          "start_ms": 253890,
+          "end_ms": 253890,
+          "confidence": 0.9967153072357178
+        },
+        {
+          "text": "keep",
+          "start_ms": 253890,
+          "end_ms": 254010,
+          "confidence": 0.9994452595710754
+        },
+        {
+          "text": "on",
+          "start_ms": 254130,
+          "end_ms": 254190,
+          "confidence": 0.9999223947525024
+        },
+        {
+          "text": "doing",
+          "start_ms": 254370,
+          "end_ms": 254550,
+          "confidence": 0.9996129870414734
+        },
+        {
+          "text": "it.",
+          "start_ms": 254610,
+          "end_ms": 254790,
+          "confidence": 0.9999743103981018
+        }
+      ]
+    },
+    {
+      "text": "Keep on, keep on.",
+      "start_ms": 255030,
+      "end_ms": 256170,
+      "text_sk": "Pokračuj, pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 255030,
+          "end_ms": 255210,
+          "confidence": 0.9984071850776672
+        },
+        {
+          "text": "on,",
+          "start_ms": 255330,
+          "end_ms": 255570,
+          "confidence": 0.9925730526447296
+        },
+        {
+          "text": "keep",
+          "start_ms": 255750,
+          "end_ms": 255870,
+          "confidence": 0.9998762607574463
+        },
+        {
+          "text": "on.",
+          "start_ms": 255990,
+          "end_ms": 256170,
+          "confidence": 0.8472503125667572
+        }
+      ]
+    },
+    {
+      "text": "Keep on.",
+      "start_ms": 256530,
+      "end_ms": 257010,
+      "text_sk": "Pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 256530,
+          "end_ms": 256710,
+          "confidence": 0.9660898745059967
+        },
+        {
+          "text": "on.",
+          "start_ms": 256770,
+          "end_ms": 257010,
+          "confidence": 0.9675268828868866
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 257370,
+      "end_ms": 258630,
+      "text_sk": "A ty v tom pokračuješ.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 257370,
+          "end_ms": 257430,
+          "confidence": 0.9599773287773132
+        },
+        {
+          "text": "you",
+          "start_ms": 257490,
+          "end_ms": 257610,
+          "confidence": 0.9995053112506866
+        },
+        {
+          "text": "keep",
+          "start_ms": 257670,
+          "end_ms": 257790,
+          "confidence": 0.999923050403595
+        },
+        {
+          "text": "on",
+          "start_ms": 257850,
+          "end_ms": 257910,
+          "confidence": 0.9997836947441101
+        },
+        {
+          "text": "doing",
+          "start_ms": 258150,
+          "end_ms": 258330,
+          "confidence": 0.999638706445694
+        },
+        {
+          "text": "it.",
+          "start_ms": 258450,
+          "end_ms": 258630,
+          "confidence": 0.9999893605709076
+        }
+      ]
+    },
+    {
+      "text": "Keep on, keep on, keep on.",
+      "start_ms": 258810,
+      "end_ms": 260790,
+      "text_sk": "Pokračuj, pokračuj, pokračuj.",
+      "words": [
+        {
+          "text": "Keep",
+          "start_ms": 258810,
+          "end_ms": 258990,
+          "confidence": 0.9994660019874573
+        },
+        {
+          "text": "on,",
+          "start_ms": 259110,
+          "end_ms": 259350,
+          "confidence": 0.9992982447147369
+        },
+        {
+          "text": "keep",
+          "start_ms": 259590,
+          "end_ms": 259770,
+          "confidence": 0.9999489188194275
+        },
+        {
+          "text": "on,",
+          "start_ms": 259830,
+          "end_ms": 260070,
+          "confidence": 0.9985598921775818
+        },
+        {
+          "text": "keep",
+          "start_ms": 260310,
+          "end_ms": 260430,
+          "confidence": 0.9999919533729553
+        },
+        {
+          "text": "on.",
+          "start_ms": 260550,
+          "end_ms": 260790,
+          "confidence": 0.9995759725570679
+        }
+      ]
+    },
+    {
+      "text": "Thank you.",
+      "start_ms": 261510,
+      "end_ms": 263910,
+      "text_sk": "Ďakujem.",
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 261510,
+          "end_ms": 263430,
+          "confidence": 0.7818059623241425
+        },
+        {
+          "text": "you.",
+          "start_ms": 263730,
+          "end_ms": 263910,
+          "confidence": 0.9863672256469727
+        }
+      ]
+    },
+    {
+      "text": "You made a way.",
+      "start_ms": 264990,
+      "end_ms": 266310,
+      "text_sk": "Urobili ste si cestu.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 264990,
+          "end_ms": 265050,
+          "confidence": 0.9779130220413208
+        },
+        {
+          "text": "made",
+          "start_ms": 265410,
+          "end_ms": 265470,
+          "confidence": 0.9937559962272644
+        },
+        {
+          "text": "a",
+          "start_ms": 265770,
+          "end_ms": 265830,
+          "confidence": 0.997148334980011
+        },
+        {
+          "text": "way.",
+          "start_ms": 266130,
+          "end_ms": 266310,
+          "confidence": 0.998931497335434
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 268530,
+      "end_ms": 269190,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 268530,
+          "end_ms": 269190,
+          "confidence": 0.9988662749528885
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 271890,
+      "end_ms": 273090,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 271890,
+          "end_ms": 273090,
+          "confidence": 0.9995021671056747
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.966986922849702,
+  "metadata": {
+    "model": "stt-async-v5",
+    "transcription_id": "c883ab6e-b27b-47ba-b086-2c85e3a79f07",
+    "elapsed_s": 31.8,
+    "token_count": 2034,
+    "source_token_count": 936,
+    "line_count": 149,
+    "target_language": "sk",
+    "languages_seen": [
+      "en",
+      "sk"
+    ],
+    "line_gap_ms": 400,
+    "translation_alignment": {
+      "n_runs": 232,
+      "n_translation_runs": 116,
+      "n_lines_aligned_1to1": 89,
+      "n_segments_unaligned_multi_line": 27,
+      "n_orphan_translation_segments": 0,
+      "unaligned_translation_segments": [
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            2,
+            3
+          ],
+          "text_sk": "Dnes ráno som sa zobudil do milosti a milosrdenstva,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            6,
+            7
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            8,
+            9
+          ],
+          "text_sk": "Je neuveriteľné, že niekto taký dokonalý"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            10,
+            11
+          ],
+          "text_sk": "mi ukáže lásku, keď som si ju nezaslúžil."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            13,
+            14
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            21,
+            22,
+            23
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            26,
+            27
+          ],
+          "text_sk": "Videl som horu a sledoval som, ako ju hýbeš."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            28,
+            29
+          ],
+          "text_sk": "Zaujal si moje miesto, keď to nikto iný nedokázal."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            31,
+            32
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            36,
+            37
+          ],
+          "text_sk": "Je to história."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            40,
+            41
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            55,
+            56
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            61,
+            62,
+            63
+          ],
+          "text_sk": "Každý jeden dlh, ktorý som dlžný, si zrušil."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            64,
+            65
+          ],
+          "text_sk": "Každý hriech, ktorý som si kedy zvolil, si pokryl."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            66,
+            67
+          ],
+          "text_sk": "Keď sa boj začínal približovať, zvládol si to."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            68,
+            69
+          ],
+          "text_sk": "Vstúpil si priamo do toho a dokončil to."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            70,
+            71,
+            72
+          ],
+          "text_sk": "Každý jeden dlh, ktorý som dlžný, si zrušil."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            73,
+            74
+          ],
+          "text_sk": "Každý hriech, ktorý som si kedy zvolil, si pokryl."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            75,
+            76
+          ],
+          "text_sk": "Keď sa boj začínal približovať, zvládol si to."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            77,
+            78
+          ],
+          "text_sk": "Nikdy si nezlyhal."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            79,
+            80
+          ],
+          "text_sk": "Nikdy si nezlyhal."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            81,
+            82,
+            83
+          ],
+          "text_sk": "Každé slovo, ktoré si vyslovil, sa stáva skutočnosťou."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            84,
+            85
+          ],
+          "text_sk": "Každý riadok, ktorý povedal diabol, moja časť teba,"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            101,
+            102,
+            103
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            115,
+            116,
+            117
+          ],
+          "text_sk": "Ďakujem ti, Pane."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            120,
+            121
+          ],
+          "text_sk": "A ty v tom pokračuješ."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            123,
+            124
+          ],
+          "text_sk": "A ty v tom pokračuješ."
+        }
+      ]
+    }
+  }
+}

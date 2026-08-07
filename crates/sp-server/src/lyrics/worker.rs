@@ -502,8 +502,9 @@ impl LyricsWorker {
 
             // asr_path branch — only when there IS a candidate (just untimed).
             // Whisperx gate rejected this song; asr_path uses AAI ASR +
-            // silence-gap split (no Claude-merge). Candidate text is no longer
-            // consumed here — asr_path is audio-only.
+            // silence-gap split + a drop-safe index-level Claude regroup. The
+            // candidate text is passed in as AAI keyterms (helper bias) and as
+            // the regroup phrasing reference — it never adds or drops lines.
             if crate::lyrics::orchestrator::has_any_text_candidate(&ctx.candidate_texts) {
                 tracing::info!(
                     video_id,

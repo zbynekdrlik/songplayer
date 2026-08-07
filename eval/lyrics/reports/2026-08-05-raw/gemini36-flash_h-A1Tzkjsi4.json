@@ -1,0 +1,496 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\h-A1Tzkjsi4_vocal16k.wav",
+  "duration_ms": 615000,
+  "lines": [
+    {
+      "text": "Our Father",
+      "start_ms": 27280,
+      "end_ms": 30510,
+      "text_sk": "Náš Otec",
+      "words": null
+    },
+    {
+      "text": "in heaven",
+      "start_ms": 30510,
+      "end_ms": 34150,
+      "text_sk": "v nebesiach",
+      "words": null
+    },
+    {
+      "text": "hallowed be Your name",
+      "start_ms": 34150,
+      "end_ms": 39590,
+      "text_sk": "posväť sa meno Tvoje",
+      "words": null
+    },
+    {
+      "text": "Your kingdom",
+      "start_ms": 39590,
+      "end_ms": 44880,
+      "text_sk": "Tvoje kráľovstvo",
+      "words": null
+    },
+    {
+      "text": "is coming",
+      "start_ms": 44880,
+      "end_ms": 48280,
+      "text_sk": "prichádza",
+      "words": null
+    },
+    {
+      "text": "Let Your will be done today",
+      "start_ms": 48280,
+      "end_ms": 54100,
+      "text_sk": "Nech sa stane Tvoja vôľa dnes",
+      "words": null
+    },
+    {
+      "text": "Providing,",
+      "start_ms": 54100,
+      "end_ms": 57320,
+      "text_sk": "Zaobstarávaš,",
+      "words": null
+    },
+    {
+      "text": "protecting,",
+      "start_ms": 57320,
+      "end_ms": 60610,
+      "text_sk": "Chrániš,",
+      "words": null
+    },
+    {
+      "text": "and forgiving us our sins,",
+      "start_ms": 60610,
+      "end_ms": 67320,
+      "text_sk": "a odpúšťaš nám naše hriechy,",
+      "words": null
+    },
+    {
+      "text": "as we humbly come before You,",
+      "start_ms": 67320,
+      "end_ms": 73800,
+      "text_sk": "ako pred Teba pokorne prichádzame,",
+      "words": null
+    },
+    {
+      "text": "as we worship You and sing:",
+      "start_ms": 73800,
+      "end_ms": 80920,
+      "text_sk": "keď Ťa uctievame a spievame:",
+      "words": null
+    },
+    {
+      "text": "Yours is the kingdom,",
+      "start_ms": 80920,
+      "end_ms": 84180,
+      "text_sk": "Tvoje je kráľovstvo,",
+      "words": null
+    },
+    {
+      "text": "Yours is the power,",
+      "start_ms": 84180,
+      "end_ms": 87520,
+      "text_sk": "Tvoja je moc,",
+      "words": null
+    },
+    {
+      "text": "Yours is the glory,",
+      "start_ms": 87520,
+      "end_ms": 91100,
+      "text_sk": "Tvoja je sláva,",
+      "words": null
+    },
+    {
+      "text": "forever,",
+      "start_ms": 91100,
+      "end_ms": 94820,
+      "text_sk": "naveky,",
+      "words": null
+    },
+    {
+      "text": "Come Holy Spirit,",
+      "start_ms": 94820,
+      "end_ms": 98190,
+      "text_sk": "Príď, Duchu Svätý,",
+      "words": null
+    },
+    {
+      "text": "pour out Your fire,",
+      "start_ms": 98190,
+      "end_ms": 101880,
+      "text_sk": "vylej svoj oheň,",
+      "words": null
+    },
+    {
+      "text": "this is revival,",
+      "start_ms": 101880,
+      "end_ms": 104920,
+      "text_sk": "toto je prebudenie,",
+      "words": null
+    },
+    {
+      "text": "this is revival.",
+      "start_ms": 104920,
+      "end_ms": 150000,
+      "text_sk": "toto je prebudenie.",
+      "words": null
+    },
+    {
+      "text": "Our Father",
+      "start_ms": 217400,
+      "end_ms": 220550,
+      "text_sk": "Náš Otec",
+      "words": null
+    },
+    {
+      "text": "in heaven",
+      "start_ms": 220550,
+      "end_ms": 224210,
+      "text_sk": "v nebesiach",
+      "words": null
+    },
+    {
+      "text": "hallowed be Your name",
+      "start_ms": 224210,
+      "end_ms": 229710,
+      "text_sk": "posväť sa meno Tvoje",
+      "words": null
+    },
+    {
+      "text": "Your kingdom",
+      "start_ms": 229710,
+      "end_ms": 234810,
+      "text_sk": "Tvoje kráľovstvo",
+      "words": null
+    },
+    {
+      "text": "is coming",
+      "start_ms": 234810,
+      "end_ms": 238120,
+      "text_sk": "prichádza",
+      "words": null
+    },
+    {
+      "text": "Let Your will be done today",
+      "start_ms": 238120,
+      "end_ms": 244100,
+      "text_sk": "Nech sa stane Tvoja vôľa dnes",
+      "words": null
+    },
+    {
+      "text": "Providing,",
+      "start_ms": 244100,
+      "end_ms": 247290,
+      "text_sk": "Zaobstarávaš,",
+      "words": null
+    },
+    {
+      "text": "protecting,",
+      "start_ms": 247290,
+      "end_ms": 250590,
+      "text_sk": "Chrániš,",
+      "words": null
+    },
+    {
+      "text": "and forgiving us our sins,",
+      "start_ms": 250590,
+      "end_ms": 257310,
+      "text_sk": "a odpúšťaš nám naše hriechy,",
+      "words": null
+    },
+    {
+      "text": "as we humbly come before You,",
+      "start_ms": 257310,
+      "end_ms": 263810,
+      "text_sk": "ako pred Teba pokorne prichádzame,",
+      "words": null
+    },
+    {
+      "text": "as we worship You and sing:",
+      "start_ms": 263810,
+      "end_ms": 270810,
+      "text_sk": "keď Ťa uctievame a spievame:",
+      "words": null
+    },
+    {
+      "text": "Yours is the kingdom,",
+      "start_ms": 270810,
+      "end_ms": 274210,
+      "text_sk": "Tvoje je kráľovstvo,",
+      "words": null
+    },
+    {
+      "text": "Yours is the power,",
+      "start_ms": 274210,
+      "end_ms": 277600,
+      "text_sk": "Tvoja je moc,",
+      "words": null
+    },
+    {
+      "text": "Yours is the glory,",
+      "start_ms": 277600,
+      "end_ms": 281100,
+      "text_sk": "Tvoja je sláva,",
+      "words": null
+    },
+    {
+      "text": "forever,",
+      "start_ms": 281100,
+      "end_ms": 284810,
+      "text_sk": "naveky,",
+      "words": null
+    },
+    {
+      "text": "Come Holy Spirit,",
+      "start_ms": 284810,
+      "end_ms": 288180,
+      "text_sk": "Príď, Duchu Svätý,",
+      "words": null
+    },
+    {
+      "text": "pour out Your fire,",
+      "start_ms": 288180,
+      "end_ms": 291900,
+      "text_sk": "vylej svoj oheň,",
+      "words": null
+    },
+    {
+      "text": "this is revival,",
+      "start_ms": 291900,
+      "end_ms": 294890,
+      "text_sk": "toto je prebudenie,",
+      "words": null
+    },
+    {
+      "text": "this is revival.",
+      "start_ms": 294890,
+      "end_ms": 298100,
+      "text_sk": "toto je prebudenie.",
+      "words": null
+    },
+    {
+      "text": "Yours is the kingdom,",
+      "start_ms": 298100,
+      "end_ms": 301500,
+      "text_sk": "Tvoje je kráľovstvo,",
+      "words": null
+    },
+    {
+      "text": "Yours is the power,",
+      "start_ms": 301500,
+      "end_ms": 304890,
+      "text_sk": "Tvoja je moc,",
+      "words": null
+    },
+    {
+      "text": "Yours is the glory,",
+      "start_ms": 304890,
+      "end_ms": 308390,
+      "text_sk": "Tvoja je sláva,",
+      "words": null
+    },
+    {
+      "text": "forever,",
+      "start_ms": 308390,
+      "end_ms": 312100,
+      "text_sk": "naveky,",
+      "words": null
+    },
+    {
+      "text": "Come Holy Spirit,",
+      "start_ms": 312100,
+      "end_ms": 315490,
+      "text_sk": "Príď, Duchu Svätý,",
+      "words": null
+    },
+    {
+      "text": "pour out Your fire,",
+      "start_ms": 315490,
+      "end_ms": 319200,
+      "text_sk": "vylej svoj oheň,",
+      "words": null
+    },
+    {
+      "text": "this is revival,",
+      "start_ms": 319200,
+      "end_ms": 322190,
+      "text_sk": "toto je prebudenie,",
+      "words": null
+    },
+    {
+      "text": "this is revival.",
+      "start_ms": 322190,
+      "end_ms": 420000,
+      "text_sk": "toto je prebudenie.",
+      "words": null
+    },
+    {
+      "text": "I can hear the wind blowing, blowing, blowing",
+      "start_ms": 420000,
+      "end_ms": 426800,
+      "text_sk": "Počujem duť vietor, veje, veje",
+      "words": null
+    },
+    {
+      "text": "I can feel the ground shaking, shaking, shaking",
+      "start_ms": 426800,
+      "end_ms": 433390,
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "words": null
+    },
+    {
+      "text": "I can see the fire falling, falling, falling",
+      "start_ms": 433390,
+      "end_ms": 440000,
+      "text_sk": "Vidím, ako padá oheň, padá, padá",
+      "words": null
+    },
+    {
+      "text": "So let Your kingdom come, let Your will be done",
+      "start_ms": 440000,
+      "end_ms": 447190,
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "words": null
+    },
+    {
+      "text": "I can hear the wind blowing, blowing, blowing",
+      "start_ms": 447190,
+      "end_ms": 453900,
+      "text_sk": "Počujem duť vietor, veje, veje",
+      "words": null
+    },
+    {
+      "text": "I can feel the ground shaking, shaking, shaking",
+      "start_ms": 453900,
+      "end_ms": 460490,
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "words": null
+    },
+    {
+      "text": "I can see the fire falling, falling, falling",
+      "start_ms": 460490,
+      "end_ms": 467200,
+      "text_sk": "Vidím, ako padá oheň, padá, padá",
+      "words": null
+    },
+    {
+      "text": "So let Your kingdom come, let Your will be done",
+      "start_ms": 467200,
+      "end_ms": 474100,
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "words": null
+    },
+    {
+      "text": "I can hear the wind blowing, blowing, blowing",
+      "start_ms": 474100,
+      "end_ms": 480800,
+      "text_sk": "Počujem duť vietor, veje, veje",
+      "words": null
+    },
+    {
+      "text": "I can feel the ground shaking, shaking, shaking",
+      "start_ms": 480800,
+      "end_ms": 487390,
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "words": null
+    },
+    {
+      "text": "I can see the fire falling, falling, falling",
+      "start_ms": 487390,
+      "end_ms": 494100,
+      "text_sk": "Vidím, ako padá oheň, padá, padá",
+      "words": null
+    },
+    {
+      "text": "So let Your kingdom come, let Your will be done",
+      "start_ms": 494100,
+      "end_ms": 543400,
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "words": null
+    },
+    {
+      "text": "Yours is the kingdom,",
+      "start_ms": 543400,
+      "end_ms": 546800,
+      "text_sk": "Tvoje je kráľovstvo,",
+      "words": null
+    },
+    {
+      "text": "Yours is the power,",
+      "start_ms": 546800,
+      "end_ms": 550190,
+      "text_sk": "Tvoja je moc,",
+      "words": null
+    },
+    {
+      "text": "Yours is the glory,",
+      "start_ms": 550190,
+      "end_ms": 553690,
+      "text_sk": "Tvoja je sláva,",
+      "words": null
+    },
+    {
+      "text": "forever,",
+      "start_ms": 553690,
+      "end_ms": 557400,
+      "text_sk": "naveky,",
+      "words": null
+    },
+    {
+      "text": "Come Holy Spirit,",
+      "start_ms": 557400,
+      "end_ms": 560790,
+      "text_sk": "Príď, Duchu Svätý,",
+      "words": null
+    },
+    {
+      "text": "pour out Your fire,",
+      "start_ms": 560790,
+      "end_ms": 564500,
+      "text_sk": "vylej svoj oheň,",
+      "words": null
+    },
+    {
+      "text": "this is revival,",
+      "start_ms": 564500,
+      "end_ms": 567490,
+      "text_sk": "toto je prebudenie,",
+      "words": null
+    },
+    {
+      "text": "this is revival.",
+      "start_ms": 567490,
+      "end_ms": 615000,
+      "text_sk": "toto je prebudenie.",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 36.8,
+    "line_count": 66,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 9688,
+      "candidatesTokenCount": 4232,
+      "totalTokenCount": 15771,
+      "promptTokensDetails": [
+        {
+          "modality": "AUDIO",
+          "tokenCount": 9663
+        },
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        }
+      ],
+      "thoughtsTokenCount": 1851,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "files_api",
+    "audio_bytes": 24735092
+  }
+}

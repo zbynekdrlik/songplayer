@@ -1,0 +1,1155 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\p74PDWAFk0A_vocal16k.wav",
+  "duration_ms": 503441,
+  "lines": [
+    {
+      "text": "The enemy may take some things",
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "start_ms": 100,
+      "end_ms": 2820,
+      "mean_word_loss": 0.1690758188565572
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 3340,
+      "end_ms": 5260,
+      "mean_word_loss": 0.2778503991308667
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 5760,
+      "end_ms": 7460,
+      "mean_word_loss": 0.15586504255022324
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 7980,
+      "end_ms": 11480,
+      "mean_word_loss": 0.23701699688321068
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 11940,
+      "end_ms": 13740,
+      "mean_word_loss": 0.25372307092424423
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 14300,
+      "end_ms": 16419,
+      "mean_word_loss": 0.1302534648350307
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 16560,
+      "end_ms": 19960,
+      "mean_word_loss": 0.16848268849509102
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 20420,
+      "end_ms": 22780,
+      "mean_word_loss": 0.23783525304188805
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 22860,
+      "end_ms": 24660,
+      "mean_word_loss": 0.10730429376874652
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 25100,
+      "end_ms": 29000,
+      "mean_word_loss": 0.16108852681659516
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 29020,
+      "end_ms": 31440,
+      "mean_word_loss": 0.23553075563339962
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 31460,
+      "end_ms": 33280,
+      "mean_word_loss": 0.09572649683271135
+    },
+    {
+      "text": "So lungs breathe",
+      "text_sk": "Tak pľúca dýchajú",
+      "start_ms": 35440,
+      "end_ms": 38580,
+      "mean_word_loss": 2.040753609793527
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 39980,
+      "end_ms": 42660,
+      "mean_word_loss": 0.8996772766113281
+    },
+    {
+      "text": "And hands reach",
+      "text_sk": "A ruky sa naťahujú",
+      "start_ms": 44020,
+      "end_ms": 47020,
+      "mean_word_loss": 0.6965087678697374
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 47460,
+      "end_ms": 51380,
+      "mean_word_loss": 0.20488492647806802
+    },
+    {
+      "text": "Lungs breathe",
+      "text_sk": "Pľúca dýchajú",
+      "start_ms": 52820,
+      "end_ms": 55760,
+      "mean_word_loss": 0.7331460135323661
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 57100,
+      "end_ms": 59840,
+      "mean_word_loss": 0.869488525390625
+    },
+    {
+      "text": "And hands reach",
+      "text_sk": "A ruky sa naťahujú",
+      "start_ms": 61200,
+      "end_ms": 64180,
+      "mean_word_loss": 0.6782913208007812
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 64580,
+      "end_ms": 68040,
+      "mean_word_loss": 0.19795864725869802
+    },
+    {
+      "text": "Whoa lungs breathe",
+      "text_sk": "Hej pľúca dýchajú",
+      "start_ms": 68400,
+      "end_ms": 72760,
+      "mean_word_loss": 1.1685267857142858
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 73240,
+      "end_ms": 73960,
+      "mean_word_loss": 0.8409477233886719
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 74260,
+      "end_ms": 76900,
+      "mean_word_loss": 1.2505462646484375
+    },
+    {
+      "text": "Oh hands reach",
+      "text_sk": "Ó ruky sa naťahujú",
+      "start_ms": 77160,
+      "end_ms": 80260,
+      "mean_word_loss": 1.9140093485514322
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 80660,
+      "end_ms": 85200,
+      "mean_word_loss": 0.2039306125943623
+    },
+    {
+      "text": "Because the enemy may take some things",
+      "text_sk": "Pretože nepriateľ môže vziať niektoré veci",
+      "start_ms": 85280,
+      "end_ms": 88180,
+      "mean_word_loss": 0.2647548571735823
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 89000,
+      "end_ms": 90850,
+      "mean_word_loss": 0.27903011904822456
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 91440,
+      "end_ms": 93160,
+      "mean_word_loss": 0.1246042251586914
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 93580,
+      "end_ms": 96880,
+      "mean_word_loss": 0.2860736052195231
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 97560,
+      "end_ms": 98840,
+      "mean_word_loss": 0.24994755585988362
+    },
+    {
+      "text": "Done so much for me",
+      "text_sk": "Urobil pre mňa tak veľa",
+      "start_ms": 98960,
+      "end_ms": 100220,
+      "mean_word_loss": 1.3762123107910156
+    },
+    {
+      "text": "I cannot tell it all",
+      "text_sk": "Nemôžem to všetko povedať",
+      "start_ms": 100920,
+      "end_ms": 102400,
+      "mean_word_loss": 0.43311767578125
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 102660,
+      "end_ms": 105540,
+      "mean_word_loss": 0.33167901947384787
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 106140,
+      "end_ms": 107980,
+      "mean_word_loss": 0.4219011624654134
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 108580,
+      "end_ms": 110100,
+      "mean_word_loss": 0.13243743351527623
+    },
+    {
+      "text": "You sound good",
+      "text_sk": "Znieš dobre",
+      "start_ms": 110140,
+      "end_ms": 110780,
+      "mean_word_loss": 1.5150933159722222
+    },
+    {
+      "text": "Sing it out the enemy may take some things",
+      "text_sk": "Spievaj, nepriateľ môže vziať niektoré veci",
+      "start_ms": 111060,
+      "end_ms": 114120,
+      "mean_word_loss": 0.8087983696549027
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 114720,
+      "end_ms": 116600,
+      "mean_word_loss": 0.42219290733337406
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 117100,
+      "end_ms": 118920,
+      "mean_word_loss": 0.12144557407924106
+    },
+    {
+      "text": "So we say lungs",
+      "text_sk": "Tak hovoríme pľúca",
+      "start_ms": 119580,
+      "end_ms": 121220,
+      "mean_word_loss": 1.7361246744791667
+    },
+    {
+      "text": "Lungs breathe",
+      "text_sk": "Pľúca dýchajú",
+      "start_ms": 121440,
+      "end_ms": 123480,
+      "mean_word_loss": 1.2125065394810266
+    },
+    {
+      "text": "Breathe oh mouth",
+      "text_sk": "Dýchaj ó ústa",
+      "start_ms": 123520,
+      "end_ms": 125340,
+      "mean_word_loss": 1.8428646087646483
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 125660,
+      "end_ms": 127380,
+      "mean_word_loss": 0.810732650756836
+    },
+    {
+      "text": "Sing and hands",
+      "text_sk": "Spievaj a ruky",
+      "start_ms": 127800,
+      "end_ms": 129759,
+      "mean_word_loss": 0.9758572048611112
+    },
+    {
+      "text": "Hands reach",
+      "text_sk": "Ruky sa naťahujú",
+      "start_ms": 129940,
+      "end_ms": 131600,
+      "mean_word_loss": 1.3030179023742676
+    },
+    {
+      "text": "I command my soul",
+      "text_sk": "Prikazujem svojej duši",
+      "start_ms": 131900,
+      "end_ms": 133360,
+      "mean_word_loss": 2.3992396763392856
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 133420,
+      "end_ms": 135800,
+      "mean_word_loss": 0.6639339810325986
+    },
+    {
+      "text": "And lungs",
+      "text_sk": "A pľúca",
+      "start_ms": 137120,
+      "end_ms": 139240,
+      "mean_word_loss": 2.10966796875
+    },
+    {
+      "text": "Lungs breathe",
+      "text_sk": "Pľúca dýchajú",
+      "start_ms": 139540,
+      "end_ms": 140320,
+      "mean_word_loss": 1.4037257603236608
+    },
+    {
+      "text": "Breathe and mouth",
+      "text_sk": "Dýchaj a ústa",
+      "start_ms": 140329,
+      "end_ms": 142460,
+      "mean_word_loss": 0.709655507405599
+    },
+    {
+      "text": "Mouth you will sing",
+      "text_sk": "Ústa budete spievať",
+      "start_ms": 142820,
+      "end_ms": 144540,
+      "mean_word_loss": 0.5329847971598307
+    },
+    {
+      "text": "Sing and hands",
+      "text_sk": "Spievaj a ruky",
+      "start_ms": 144980,
+      "end_ms": 147120,
+      "mean_word_loss": 0.5894680447048611
+    },
+    {
+      "text": "Hands reach",
+      "text_sk": "Ruky sa naťahujú",
+      "start_ms": 147300,
+      "end_ms": 148860,
+      "mean_word_loss": 1.1993407726287841
+    },
+    {
+      "text": "This is",
+      "text_sk": "Toto je",
+      "start_ms": 149280,
+      "end_ms": 150269,
+      "mean_word_loss": 0.36922669410705566
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 150340,
+      "end_ms": 153200,
+      "mean_word_loss": 0.47489265790061347
+    },
+    {
+      "text": "Somebody praise Him now",
+      "text_sk": "Niekto Ho teraz chváľte",
+      "start_ms": 153260,
+      "end_ms": 155500,
+      "mean_word_loss": 1.582742730776469
+    },
+    {
+      "text": "One more time",
+      "text_sk": "Ešte raz",
+      "start_ms": 155780,
+      "end_ms": 169100,
+      "mean_word_loss": 1.331464131673177
+    },
+    {
+      "text": "Tell your lungs to breathe",
+      "text_sk": "Povedz svojim pľúcam nech dýchajú",
+      "start_ms": 169880,
+      "end_ms": 171100,
+      "mean_word_loss": 1.3385491507393974
+    },
+    {
+      "text": "Oh lungs",
+      "text_sk": "Ó pľúca",
+      "start_ms": 171300,
+      "end_ms": 173540,
+      "mean_word_loss": 2.8115234375
+    },
+    {
+      "text": "Lungs breathe",
+      "text_sk": "Pľúca dýchajú",
+      "start_ms": 173549,
+      "end_ms": 174540,
+      "mean_word_loss": 1.2915961129324776
+    },
+    {
+      "text": "Breathe and mouth",
+      "text_sk": "Dýchaj a ústa",
+      "start_ms": 174960,
+      "end_ms": 177060,
+      "mean_word_loss": 0.6465197366381449
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 177120,
+      "end_ms": 178680,
+      "mean_word_loss": 0.7484634399414063
+    },
+    {
+      "text": "Sing and hands",
+      "text_sk": "Spievaj a ruky",
+      "start_ms": 179240,
+      "end_ms": 182360,
+      "mean_word_loss": 0.9240695529513889
+    },
+    {
+      "text": "Hands reach",
+      "text_sk": "Ruky sa naťahujú",
+      "start_ms": 182370,
+      "end_ms": 183100,
+      "mean_word_loss": 1.2437528133392335
+    },
+    {
+      "text": "This is",
+      "text_sk": "Toto je",
+      "start_ms": 183540,
+      "end_ms": 185340,
+      "mean_word_loss": 0.2900581359863281
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 185350,
+      "end_ms": 187100,
+      "mean_word_loss": 0.4941744123186384
+    },
+    {
+      "text": "Oh the Bible says I will bless the Lord at all times",
+      "text_sk": "Ó Biblia hovorí, že budem žehnať Pánovi v každom čase",
+      "start_ms": 187260,
+      "end_ms": 192760,
+      "mean_word_loss": 0.8601945400238037
+    },
+    {
+      "text": "And His praise will continually be in my mouth",
+      "text_sk": "A Jeho chvála bude neustále v mojich ústach",
+      "start_ms": 194500,
+      "end_ms": 197160,
+      "mean_word_loss": 0.18481788282041198
+    },
+    {
+      "text": "Sometimes you gotta encourage yourself",
+      "text_sk": "Niekedy sa musíš povzbudiť sám",
+      "start_ms": 197920,
+      "end_ms": 199720,
+      "mean_word_loss": 0.0816846862104204
+    },
+    {
+      "text": "Can I prophesy",
+      "text_sk": "Môžem prorokovať",
+      "start_ms": 200120,
+      "end_ms": 201140,
+      "mean_word_loss": 0.4278818766276042
+    },
+    {
+      "text": "Some of you walked in weak but you about to walk out strong",
+      "text_sk": "Niektorí z vás vošli slabí, ale vyjdete silní",
+      "start_ms": 201280,
+      "end_ms": 204420,
+      "mean_word_loss": 0.1213835814060309
+    },
+    {
+      "text": "You you walked in depressed but you about to walk out with the joy of the Lord",
+      "text_sk": "Vy ste vošli skľúčení, ale vyjdete s radosťou Pána",
+      "start_ms": 204520,
+      "end_ms": 208760,
+      "mean_word_loss": 0.20971613397785263
+    },
+    {
+      "text": "Flowing through your heart",
+      "text_sk": "Prúdiacou cez vaše srdce",
+      "start_ms": 209700,
+      "end_ms": 210690,
+      "mean_word_loss": 0.11268939971923828
+    },
+    {
+      "text": "So we about to have a good old fashioned Atlanta praise break",
+      "text_sk": "Takže teraz budeme mať starú dobrú atlantskú chválu",
+      "start_ms": 211240,
+      "end_ms": 213950,
+      "mean_word_loss": 0.3407541732939463
+    },
+    {
+      "text": "Naomi is that alright",
+      "text_sk": "Naomi, je to v poriadku",
+      "start_ms": 214040,
+      "end_ms": 215020,
+      "mean_word_loss": 2.0429656982421873
+    },
+    {
+      "text": "That's alright",
+      "text_sk": "To je v poriadku",
+      "start_ms": 215160,
+      "end_ms": 217540,
+      "mean_word_loss": 1.305163792201451
+    },
+    {
+      "text": "Let's do it again",
+      "text_sk": "Poďme to urobiť znova",
+      "start_ms": 217640,
+      "end_ms": 218740,
+      "mean_word_loss": 0.5807764053344726
+    },
+    {
+      "text": "The enemy may take some things",
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "start_ms": 218820,
+      "end_ms": 219980,
+      "mean_word_loss": 0.26269618007871837
+    },
+    {
+      "text": "You ready",
+      "text_sk": "Ste pripravení",
+      "start_ms": 220040,
+      "end_ms": 220420,
+      "mean_word_loss": 0.4510106404622396
+    },
+    {
+      "text": "One two three let's go",
+      "text_sk": "Jeden dva tri poďme",
+      "start_ms": 221100,
+      "end_ms": 222700,
+      "mean_word_loss": 0.18763450622558592
+    },
+    {
+      "text": "The enemy may take some things",
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "start_ms": 223060,
+      "end_ms": 225520,
+      "mean_word_loss": 0.3415183623631795
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 226140,
+      "end_ms": 227960,
+      "mean_word_loss": 0.4398492283291287
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 228640,
+      "end_ms": 229780,
+      "mean_word_loss": 0.17065435137067522
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 230740,
+      "end_ms": 234100,
+      "mean_word_loss": 0.4101827167329334
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 234700,
+      "end_ms": 236540,
+      "mean_word_loss": 0.3134395463126046
+    },
+    {
+      "text": "Let's take it up just a little more",
+      "text_sk": "Poďme to ešte trochu zvýšiť",
+      "start_ms": 236960,
+      "end_ms": 238280,
+      "mean_word_loss": 0.7888848563035329
+    },
+    {
+      "text": "The enemy may take",
+      "text_sk": "Nepriateľ môže vziať",
+      "start_ms": 239060,
+      "end_ms": 240760,
+      "mean_word_loss": 0.8562022527058919
+    },
+    {
+      "text": "May take some things",
+      "text_sk": "Môže vziať niektoré veci",
+      "start_ms": 241080,
+      "end_ms": 242440,
+      "mean_word_loss": 0.7901796996593475
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 242500,
+      "end_ms": 244880,
+      "mean_word_loss": 0.3113628591809954
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 244960,
+      "end_ms": 245680,
+      "mean_word_loss": 0.17642972128731865
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 245720,
+      "end_ms": 246940,
+      "mean_word_loss": 0.24166777474539622
+    },
+    {
+      "text": "Shantae I made up my mind",
+      "text_sk": "Shantae, rozhodol som sa",
+      "start_ms": 246960,
+      "end_ms": 248480,
+      "mean_word_loss": 1.418849400111607
+    },
+    {
+      "text": "The enemy may take some things",
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "start_ms": 248780,
+      "end_ms": 251280,
+      "mean_word_loss": 0.5716337124506632
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 252120,
+      "end_ms": 253170,
+      "mean_word_loss": 0.29243474687848775
+    },
+    {
+      "text": "One two",
+      "text_sk": "Jeden dva",
+      "start_ms": 253300,
+      "end_ms": 254600,
+      "mean_word_loss": 1.6956787109375
+    },
+    {
+      "text": "Everybody turn up let's go",
+      "text_sk": "Všetci pridajte, poďme",
+      "start_ms": 255440,
+      "end_ms": 263280,
+      "mean_word_loss": 1.1037258572048612
+    },
+    {
+      "text": "I need to see you turn it up Atlanta",
+      "text_sk": "Potrebujem vidieť, ako to zvyšujete Atlanta",
+      "start_ms": 263320,
+      "end_ms": 265160,
+      "mean_word_loss": 1.6116309594855738
+    },
+    {
+      "text": "Let's go",
+      "text_sk": "Poďme",
+      "start_ms": 265520,
+      "end_ms": 265960,
+      "mean_word_loss": 1.3627037048339843
+    },
+    {
+      "text": "Enemy may take",
+      "text_sk": "Nepriateľ môže vziať",
+      "start_ms": 267240,
+      "end_ms": 273880,
+      "mean_word_loss": 1.1711038377549912
+    },
+    {
+      "text": "The enemy may take some things",
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "start_ms": 274580,
+      "end_ms": 277000,
+      "mean_word_loss": 0.736265790462494
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 277560,
+      "end_ms": 279420,
+      "mean_word_loss": 0.4734115645999
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 280000,
+      "end_ms": 281580,
+      "mean_word_loss": 0.15318028586251395
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 282180,
+      "end_ms": 286100,
+      "mean_word_loss": 0.4895284380231585
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 286140,
+      "end_ms": 290240,
+      "mean_word_loss": 0.3572466956244575
+    },
+    {
+      "text": "Can't take my worship",
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "start_ms": 290250,
+      "end_ms": 292171,
+      "mean_word_loss": 0.16665586744035993
+    },
+    {
+      "text": "We're gonna turn up our praise just a little bit more",
+      "text_sk": "Ešte trochu viac zvýšime našu chválu",
+      "start_ms": 292220,
+      "end_ms": 294040,
+      "mean_word_loss": 0.9433263431895863
+    },
+    {
+      "text": "That's cool champ",
+      "text_sk": "To je super šampión",
+      "start_ms": 294060,
+      "end_ms": 294780,
+      "mean_word_loss": 1.0460159301757812
+    },
+    {
+      "text": "I think Atlanta got a little bit more",
+      "text_sk": "Myslím, že Atlanta má ešte trochu viac",
+      "start_ms": 295700,
+      "end_ms": 297240,
+      "mean_word_loss": 0.5823624542781285
+    },
+    {
+      "text": "You got a little bit more",
+      "text_sk": "Máte ešte trochu viac",
+      "start_ms": 297280,
+      "end_ms": 298220,
+      "mean_word_loss": 0.3146855566236708
+    },
+    {
+      "text": "Tell your neighbor give me a little room",
+      "text_sk": "Povedz svojmu susedovi urob mi trochu miesta",
+      "start_ms": 300100,
+      "end_ms": 301580,
+      "mean_word_loss": 0.14322692404190698
+    },
+    {
+      "text": "Give me a little room",
+      "text_sk": "Urob mi trochu miesta",
+      "start_ms": 301640,
+      "end_ms": 302380,
+      "mean_word_loss": 0.19581737915674846
+    },
+    {
+      "text": "Give me a little room",
+      "text_sk": "Urob mi trochu miesta",
+      "start_ms": 302420,
+      "end_ms": 303180,
+      "mean_word_loss": 0.17918755213419596
+    },
+    {
+      "text": "Give me a little room",
+      "text_sk": "Urob mi trochu miesta",
+      "start_ms": 303240,
+      "end_ms": 304000,
+      "mean_word_loss": 0.15434192021687826
+    },
+    {
+      "text": "So we say lungs",
+      "text_sk": "Tak hovoríme pľúca",
+      "start_ms": 304010,
+      "end_ms": 309600,
+      "mean_word_loss": 1.9664031982421875
+    },
+    {
+      "text": "Lungs breathe",
+      "text_sk": "Pľúca dýchajú",
+      "start_ms": 310020,
+      "end_ms": 311720,
+      "mean_word_loss": 1.042624991280692
+    },
+    {
+      "text": "Breathe mouth",
+      "text_sk": "Dýchaj ústa",
+      "start_ms": 312160,
+      "end_ms": 313820,
+      "mean_word_loss": 0.8207154410226004
+    },
+    {
+      "text": "Mouth sing",
+      "text_sk": "Ústa spievajú",
+      "start_ms": 314260,
+      "end_ms": 315900,
+      "mean_word_loss": 0.6019966125488281
+    },
+    {
+      "text": "Sing and hands",
+      "text_sk": "Spievaj a ruky",
+      "start_ms": 316340,
+      "end_ms": 318560,
+      "mean_word_loss": 0.9519694010416666
+    },
+    {
+      "text": "Hands reach",
+      "text_sk": "Ruky sa naťahujú",
+      "start_ms": 319660,
+      "end_ms": 320260,
+      "mean_word_loss": 1.2400972366333007
+    },
+    {
+      "text": "Reach this is my way to victory",
+      "text_sk": "Naťahuj sa toto je moja cesta k víťazstvu",
+      "start_ms": 320660,
+      "end_ms": 324620,
+      "mean_word_loss": 0.416366246930596
+    },
+    {
+      "text": "Oh this is my way to victory",
+      "text_sk": "Ó toto je moja cesta k víťazstvu",
+      "start_ms": 325340,
+      "end_ms": 329760,
+      "mean_word_loss": 0.4809490126006457
+    },
+    {
+      "text": "This is my way to victory",
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "start_ms": 330400,
+      "end_ms": 333980,
+      "mean_word_loss": 0.24849210466657368
+    },
+    {
+      "text": "Oh this is my way to victory",
+      "text_sk": "Ó toto je moja cesta k víťazstvu",
+      "start_ms": 334480,
+      "end_ms": 338160,
+      "mean_word_loss": 0.27463053359466344
+    },
+    {
+      "text": "One more time",
+      "text_sk": "Ešte raz",
+      "start_ms": 339180,
+      "end_ms": 339800,
+      "mean_word_loss": 1.2255918714735243
+    },
+    {
+      "text": "Everybody turn up let's go",
+      "text_sk": "Všetci pridajte, poďme",
+      "start_ms": 340080,
+      "end_ms": 342140,
+      "mean_word_loss": 1.1985110473632812
+    },
+    {
+      "text": "Let's go let's go",
+      "text_sk": "Poďme poďme",
+      "start_ms": 342200,
+      "end_ms": 342640,
+      "mean_word_loss": 0.4252532958984375
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "text_sk": "Radosť Pána je moja sila",
+      "start_ms": 342900,
+      "end_ms": 352570,
+      "mean_word_loss": 1.988526980082194
+    },
+    {
+      "text": "You can count on my words",
+      "text_sk": "Môžeš sa spoľahnúť na moje slová",
+      "start_ms": 352640,
+      "end_ms": 354280,
+      "mean_word_loss": 0.7334296332465278
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "text_sk": "Radosť Pána je moja sila",
+      "start_ms": 354340,
+      "end_ms": 360270,
+      "mean_word_loss": 1.986031759352911
+    },
+    {
+      "text": "Enemy may take some things",
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "start_ms": 360300,
+      "end_ms": 362760,
+      "mean_word_loss": 0.5394111061096192
+    },
+    {
+      "text": "But he can't take my",
+      "text_sk": "Ale nemôže mi vziať moju",
+      "start_ms": 363260,
+      "end_ms": 364360,
+      "mean_word_loss": 0.5223352877298991
+    },
+    {
+      "text": "He can't",
+      "text_sk": "Nemôže",
+      "start_ms": 364920,
+      "end_ms": 365580,
+      "mean_word_loss": 2.8489410400390627
+    },
+    {
+      "text": "He won't",
+      "text_sk": "Nebude",
+      "start_ms": 365800,
+      "end_ms": 370000,
+      "mean_word_loss": 3.43843994140625
+    },
+    {
+      "text": "The joy that I have the world didn't give it",
+      "text_sk": "Radosť, ktorú mám, svet mi ju nedal",
+      "start_ms": 370010,
+      "end_ms": 372020,
+      "mean_word_loss": 0.6025289503733318
+    },
+    {
+      "text": "The world can't take it away",
+      "text_sk": "Svet mi ju nemôže vziať",
+      "start_ms": 372080,
+      "end_ms": 374260,
+      "mean_word_loss": 0.32882806989881724
+    },
+    {
+      "text": "Hold the music one time",
+      "text_sk": "Podrž hudbu raz",
+      "start_ms": 374900,
+      "end_ms": 375960,
+      "mean_word_loss": 1.2802257283528646
+    },
+    {
+      "text": "Oh the enemy may take",
+      "text_sk": "Ó nepriateľ môže vziať",
+      "start_ms": 376600,
+      "end_ms": 379000,
+      "mean_word_loss": 0.666551284790039
+    },
+    {
+      "text": "See you're not gonna have Bible study in your bedroom",
+      "text_sk": "Vidíš, nebudeš mať štúdium Biblie vo svojej spálni",
+      "start_ms": 380800,
+      "end_ms": 393000,
+      "mean_word_loss": 1.7458735075451077
+    },
+    {
+      "text": "Sing it out the enemy",
+      "text_sk": "Spievaj nepriateľ",
+      "start_ms": 393900,
+      "end_ms": 397780,
+      "mean_word_loss": 1.589718017578125
+    },
+    {
+      "text": "Oh this feels good Norman",
+      "text_sk": "Ó toto je dobrý pocit Norman",
+      "start_ms": 399090,
+      "end_ms": 401680,
+      "mean_word_loss": 1.9312656656901042
+    },
+    {
+      "text": "Sing it out the enemy",
+      "text_sk": "Spievaj nepriateľ",
+      "start_ms": 401820,
+      "end_ms": 410351,
+      "mean_word_loss": 1.4495393880208334
+    },
+    {
+      "text": "One more time the enemy",
+      "text_sk": "Ešte raz nepriateľ",
+      "start_ms": 410360,
+      "end_ms": 411900,
+      "mean_word_loss": 1.3688927714029948
+    },
+    {
+      "text": "That's how you feel Elijah",
+      "text_sk": "Takto sa cítiš Eliáš",
+      "start_ms": 413000,
+      "end_ms": 419920,
+      "mean_word_loss": 1.8887481689453125
+    },
+    {
+      "text": "Enemy may take",
+      "text_sk": "Nepriateľ môže vziať",
+      "start_ms": 420040,
+      "end_ms": 421400,
+      "mean_word_loss": 0.7046133041381836
+    },
+    {
+      "text": "We gotta move but you got 20 more seconds",
+      "text_sk": "Musíme ísť, ale máte ešte 20 sekúnd",
+      "start_ms": 422860,
+      "end_ms": 424960,
+      "mean_word_loss": 1.6876092658471809
+    },
+    {
+      "text": "You ready",
+      "text_sk": "Ste pripravení",
+      "start_ms": 425000,
+      "end_ms": 425380,
+      "mean_word_loss": 0.7103474934895834
+    },
+    {
+      "text": "Turn up turn up turn up",
+      "text_sk": "Pridaj pridaj pridaj",
+      "start_ms": 426320,
+      "end_ms": 427290,
+      "mean_word_loss": 1.0450236002604167
+    },
+    {
+      "text": "'Cause He's been so good to me",
+      "text_sk": "Pretože bol ku mne taký dobrý",
+      "start_ms": 427340,
+      "end_ms": 437200,
+      "mean_word_loss": 1.3660096668061754
+    },
+    {
+      "text": "He's been so good to me",
+      "text_sk": "Bol ku mne taký dobrý",
+      "start_ms": 437320,
+      "end_ms": 437691,
+      "mean_word_loss": 0.9448369344075521
+    },
+    {
+      "text": "He's been so good to me",
+      "text_sk": "Bol ku mne taký dobrý",
+      "start_ms": 437720,
+      "end_ms": 438950,
+      "mean_word_loss": 0.6756477355957031
+    },
+    {
+      "text": "Oh been so good to me",
+      "text_sk": "Ó bol ku mne taký dobrý",
+      "start_ms": 438950,
+      "end_ms": 441220,
+      "mean_word_loss": 1.0739943186442058
+    },
+    {
+      "text": "Oh na na na na",
+      "text_sk": "Ó na na na na",
+      "start_ms": 441540,
+      "end_ms": 444351,
+      "mean_word_loss": 3.38671875
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "text_sk": "Radosť Pána je moja sila",
+      "start_ms": 444440,
+      "end_ms": 455460,
+      "mean_word_loss": 2.0567920321509954
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "text_sk": "Radosť Pána je moja sila",
+      "start_ms": 455580,
+      "end_ms": 458620,
+      "mean_word_loss": 1.8876625242687408
+    },
+    {
+      "text": "Last time",
+      "text_sk": "Poslednýkrát",
+      "start_ms": 459240,
+      "end_ms": 460440,
+      "mean_word_loss": 0.7059192657470703
+    },
+    {
+      "text": "The enemy enemy may take some things",
+      "text_sk": "Nepriateľ nepriateľ môže vziať niektoré veci",
+      "start_ms": 461000,
+      "end_ms": 464840,
+      "mean_word_loss": 0.5291296016602289
+    },
+    {
+      "text": "But he can't take my worship",
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "start_ms": 465180,
+      "end_ms": 468140,
+      "mean_word_loss": 0.48676514928303066
+    },
+    {
+      "text": "No no no",
+      "text_sk": "Nie nie nie",
+      "start_ms": 468150,
+      "end_ms": 468611,
+      "mean_word_loss": 2.884765625
+    },
+    {
+      "text": "Oh no no no",
+      "text_sk": "Ó nie nie nie",
+      "start_ms": 468720,
+      "end_ms": 469660,
+      "mean_word_loss": 1.97698974609375
+    },
+    {
+      "text": "I made up my mind man",
+      "text_sk": "Rozhodol som sa človeče",
+      "start_ms": 472580,
+      "end_ms": 473620,
+      "mean_word_loss": 1.038214789496528
+    },
+    {
+      "text": "Oh no no no",
+      "text_sk": "Ó nie nie nie",
+      "start_ms": 474860,
+      "end_ms": 475980,
+      "mean_word_loss": 1.4600830078125
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "start_ms": 476100,
+      "end_ms": 503441,
+      "mean_word_loss": 0.7273118495941162
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.583001772030935,
+  "metadata": {
+    "n_tokens_sent": 801,
+    "n_words_returned_raw": 1601,
+    "n_words_returned_content": 801,
+    "n_characters_returned": 3886,
+    "runtime_sec": 9.1,
+    "n_lines": 162,
+    "n_lines_timed": 162,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

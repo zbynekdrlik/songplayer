@@ -538,3 +538,74 @@ async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
         "Started with malformed lyrics JSON must set lyrics_state=None, not panic or preserve stale state"
     );
 }
+
+/// Regression for #134: handle_play_video must record the play in
+/// play_history the same as the natural SelectAndPlay selector path does,
+/// so a manually-picked song counts toward "already played" and the
+/// unplayed-first selector doesn't immediately re-offer it.
+#[tokio::test]
+async fn handle_play_video_records_play_history() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active, kind) \
+         VALUES (9, 'p', 'u', 'SP-fast', 1, 'youtube')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (77, 9, 'manual_pick', 1, '/cache/v.mp4', '/cache/v.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool: pool.clone(),
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
+    engine.ensure_pipeline(9, "SP-fast");
+
+    // Before: nothing played yet.
+    let unplayed_before = crate::db::models::get_unplayed_normalized_video_ids(&pool, 9)
+        .await
+        .unwrap();
+    assert_eq!(unplayed_before, vec![77]);
+
+    engine.handle_play_video(9, 77, None).await;
+
+    // After a manual play, play_history has one row for this video...
+    let history_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM play_history WHERE playlist_id = 9 AND video_id = 77",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        history_count, 1,
+        "handle_play_video must record the play in play_history"
+    );
+
+    // ...and the selector no longer considers it unplayed.
+    let unplayed_after = crate::db::models::get_unplayed_normalized_video_ids(&pool, 9)
+        .await
+        .unwrap();
+    assert!(
+        unplayed_after.is_empty(),
+        "manually-played video must no longer show up as unplayed"
+    );
+}

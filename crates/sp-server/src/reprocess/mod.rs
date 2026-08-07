@@ -348,6 +348,12 @@ impl ReprocessWorker {
     /// successful result, or the last error encountered (prioritising
     /// `RateLimited` so the batch-abort path always wins over generic
     /// failures).
+    ///
+    /// This path bypasses `metadata::get_metadata` (and its
+    /// `sanitize::strip_emoji` choke point, #135) entirely, so it sanitizes
+    /// the returned `song`/`artist` itself — the invariant "nothing
+    /// unsanitized is ever persisted" must hold here too, independent of
+    /// which providers are wired.
     async fn try_providers(
         &self,
         video_id: &str,
@@ -362,7 +368,11 @@ impl ReprocessWorker {
 
         for provider in self.providers.iter() {
             match provider.extract(video_id, title).await {
-                Ok(meta) => return Ok(meta),
+                Ok(mut meta) => {
+                    meta.song = crate::metadata::sanitize::strip_emoji(&meta.song);
+                    meta.artist = crate::metadata::sanitize::strip_emoji(&meta.artist);
+                    return Ok(meta);
+                }
                 Err(MetadataError::RateLimited) => {
                     saw_rate_limit = true;
                     last_err = MetadataError::RateLimited;
@@ -684,6 +694,52 @@ mod tests {
             BACKOFF_STAGES.len() - 1,
             "stage must cap at the last entry"
         );
+    }
+
+    /// Provider whose extracted metadata still carries a raw emoji — used to
+    /// prove `try_providers` sanitizes its return value structurally,
+    /// independent of whether the provider itself sanitizes.
+    struct EmojiProvider;
+
+    #[async_trait]
+    impl MetadataProvider for EmojiProvider {
+        async fn extract(
+            &self,
+            _video_id: &str,
+            _title: &str,
+        ) -> Result<VideoMetadata, MetadataError> {
+            Ok(VideoMetadata {
+                song: "Song".into(),
+                artist: "Foo \u{1F525}".into(),
+                source: MetadataSource::Gemini,
+                gemini_failed: false,
+            })
+        }
+        fn name(&self) -> &str {
+            "emoji-mock"
+        }
+    }
+
+    /// #135 follow-up: `try_providers` bypasses `metadata::get_metadata`
+    /// entirely, so today it has no sanitization of its own. The only wired
+    /// provider (Gemini) happens to sanitize internally, so there is no live
+    /// leak — but the invariant "nothing unsanitized is ever persisted"
+    /// doesn't hold structurally on this path. A provider whose output still
+    /// carries a raw emoji must come back clean regardless.
+    #[tokio::test]
+    async fn try_providers_sanitizes_emoji_in_returned_metadata() {
+        let pool = setup().await;
+        let providers: Arc<Vec<Box<dyn MetadataProvider>>> =
+            Arc::new(vec![Box::new(EmojiProvider)]);
+        let worker = ReprocessWorker::new(pool, providers, PathBuf::from("."));
+
+        let meta = worker.try_providers("vid123", "title").await.unwrap();
+
+        assert_eq!(
+            meta.artist, "Foo",
+            "emoji must be stripped from provider output"
+        );
+        assert_eq!(meta.song, "Song");
     }
 
     /// Successful extraction clears the video's per-video backoff so a

@@ -1,0 +1,112 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\xPkg_vW4yE0_vocal16k.wav",
+  "duration_ms": 257820,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed",
+      "text_sk": "Keď je moje srdce preťažené",
+      "start_ms": 8420,
+      "end_ms": 12100,
+      "mean_word_loss": 0.2180858126553622
+    },
+    {
+      "text": "When I barely trust myself lead me to the rock",
+      "text_sk": "Keď si sotva verím, veď ma ku skale",
+      "start_ms": 14540,
+      "end_ms": 20080,
+      "mean_word_loss": 0.14736195882161457
+    },
+    {
+      "text": "Higher than I",
+      "text_sk": "Vyššie než ja",
+      "start_ms": 22020,
+      "end_ms": 23220,
+      "mean_word_loss": 0.2501983642578125
+    },
+    {
+      "text": "When the night is closing in",
+      "text_sk": "Keď sa noc blíži",
+      "start_ms": 26260,
+      "end_ms": 30060,
+      "mean_word_loss": 0.25428992377387155
+    },
+    {
+      "text": "To remind me of my sin lead me to the rock",
+      "text_sk": "Aby mi pripomenula môj hriech, veď ma ku skale",
+      "start_ms": 31640,
+      "end_ms": 38580,
+      "mean_word_loss": 0.2339446327903054
+    },
+    {
+      "text": "Higher than I lead me to the rock",
+      "text_sk": "Vyššie než ja, veď ma ku skale",
+      "start_ms": 40060,
+      "end_ms": 95900,
+      "mean_word_loss": 0.23076534271240234
+    },
+    {
+      "text": "Higher than I higher than I",
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "start_ms": 99640,
+      "end_ms": 108440,
+      "mean_word_loss": 0.2662586636013455
+    },
+    {
+      "text": "Higher than I higher than I",
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "start_ms": 109920,
+      "end_ms": 120260,
+      "mean_word_loss": 0.24783028496636286
+    },
+    {
+      "text": "Higher than I",
+      "text_sk": "Vyššie než ja",
+      "start_ms": 122000,
+      "end_ms": 123660,
+      "mean_word_loss": 0.3126737806532118
+    },
+    {
+      "text": "So much stronger so much greater",
+      "text_sk": "Oveľa silnejší, oveľa väčší",
+      "start_ms": 125740,
+      "end_ms": 129360,
+      "mean_word_loss": 0.7800815403461456
+    },
+    {
+      "text": "So much wiser so much higher",
+      "text_sk": "Oveľa múdrejší, oveľa vyšší",
+      "start_ms": 129740,
+      "end_ms": 232460,
+      "mean_word_loss": 0.33512830899821383
+    },
+    {
+      "text": "Higher than I higher than I",
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "start_ms": 232480,
+      "end_ms": 237220,
+      "mean_word_loss": 0.37638388739691836
+    },
+    {
+      "text": "[Instrumental]",
+      "text_sk": "[Inštrumentálna časť]",
+      "start_ms": 238920,
+      "end_ms": 257820,
+      "mean_word_loss": 1.120743887765067
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.3429360573356216,
+  "metadata": {
+    "n_tokens_sent": 77,
+    "n_words_returned_raw": 153,
+    "n_words_returned_content": 77,
+    "n_characters_returned": 370,
+    "runtime_sec": 4.6,
+    "n_lines": 13,
+    "n_lines_timed": 13,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

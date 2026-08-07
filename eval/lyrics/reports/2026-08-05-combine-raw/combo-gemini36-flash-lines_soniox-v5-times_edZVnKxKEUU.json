@@ -1,0 +1,518 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "edZVnKxKEUU",
+  "duration_ms": 341610,
+  "lines": [
+    {
+      "text": "When the King speaks a word, it cannot be overturned, it's as good as done",
+      "start_ms": 22290,
+      "end_ms": 27750,
+      "text_sk": "Keď Kráľ povie slovo, nemožno ho zvrátiť, je to, akoby sa stalo",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "And when Heaven touches earth, it can never be reversed, it's the Kingdom come",
+      "start_ms": 29670,
+      "end_ms": 34590,
+      "text_sk": "A keď sa Nebo dotkne zeme, nikdy sa to nedá zvrátiť, prichádza Kráľovstvo",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 14,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "So get the lies out the way, they don't have the final say, there is only One",
+      "start_ms": 36990,
+      "end_ms": 42750,
+      "text_sk": "Takže preč s klamstvami, nemajú posledné slovo, je tu iba Jeden",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "Sovereign Supreme, every word He speaks is Holy",
+      "start_ms": 44490,
+      "end_ms": 48930,
+      "text_sk": "Zvrchovaný Najvyšší, každé slovo, ktoré povie, je Sväté",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "The realm of God has overcome",
+      "start_ms": 54810,
+      "end_ms": 58110,
+      "text_sk": "Božia ríša zvíťazila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My testimony is He's good",
+      "start_ms": 58410,
+      "end_ms": 61350,
+      "text_sk": "Moje svedectvo je, že On je dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And if He said that it is done, it is done, so be it God",
+      "start_ms": 62250,
+      "end_ms": 68430,
+      "text_sk": "A ak povedal, že je dokonané, je dokonané, nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "To the One on the throne who cannot be overthrown, sing Hallelujah",
+      "start_ms": 75330,
+      "end_ms": 80550,
+      "text_sk": "Tomu na tróne, ktorého nemožno zvrhnúť, spievajte Hallelujah",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "To the Last and the First, Ruler of the universe, sing Hallelujah",
+      "start_ms": 82650,
+      "end_ms": 87990,
+      "text_sk": "Poslednému a Prvému, Vládcovi vesmíru, spievajte Hallelujah",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "To the Alpha, Omega, the Master, the Maker, the Name above...",
+      "start_ms": 90210,
+      "end_ms": 95790,
+      "text_sk": "Alfe, Omege, Pánovi, Stvoriteľovi, Menu nad...",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "...every other name, give Him all the praise, He's Holy",
+      "start_ms": 97470,
+      "end_ms": 102150,
+      "text_sk": "...každé iné meno, vzdajte Mu všetku chválu, On je Svätý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "The realm of God has overcome",
+      "start_ms": 103890,
+      "end_ms": 106650,
+      "text_sk": "Božia ríša zvíťazila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My testimony is He's good",
+      "start_ms": 107550,
+      "end_ms": 110550,
+      "text_sk": "Moje svedectvo je, že On je dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And if He said that it is done, it is done, so be it God",
+      "start_ms": 111390,
+      "end_ms": 117510,
+      "text_sk": "A ak povedal, že je dokonané, je dokonané, nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "The weapons of the enemy",
+      "start_ms": 118950,
+      "end_ms": 121470,
+      "text_sk": "Zbrane nepriateľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "They have no power over me",
+      "start_ms": 122790,
+      "end_ms": 125490,
+      "text_sk": "Nemajú nadomnou žiadnu moc",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The One with all authority cover me, so be it God",
+      "start_ms": 126450,
+      "end_ms": 132750,
+      "text_sk": "Ten so všetkou autoritou ma prikrýva, nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 134910,
+      "end_ms": 136530,
+      "text_sk": "Nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 138690,
+      "end_ms": 140430,
+      "text_sk": "Nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "From the throne to a cross",
+      "start_ms": 146910,
+      "end_ms": 149430,
+      "text_sk": "Z trónu na kríž",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Who would pay such a price",
+      "start_ms": 150330,
+      "end_ms": 153150,
+      "text_sk": "Kto by zaplatil takú cenu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "For the sins of the world",
+      "start_ms": 154110,
+      "end_ms": 157710,
+      "text_sk": "Za hriechy sveta",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Here's your King, crucified",
+      "start_ms": 157890,
+      "end_ms": 161490,
+      "text_sk": "Tu je váš Kráľ, ukrižovaný",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "See the nails in His hands",
+      "start_ms": 161670,
+      "end_ms": 164550,
+      "text_sk": "Hľaďte na klince v Jeho rukách",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "See the wounds in His side",
+      "start_ms": 165450,
+      "end_ms": 169050,
+      "text_sk": "Hľaďte na rany v Jeho boku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "See the crown made of thorns",
+      "start_ms": 169170,
+      "end_ms": 171630,
+      "text_sk": "Hľaďte na korunu z tŕnia",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "That instead prophesied",
+      "start_ms": 172950,
+      "end_ms": 175830,
+      "text_sk": "Ktorá namiesto toho prorokovala",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Dying was not the end",
+      "start_ms": 177750,
+      "end_ms": 179790,
+      "text_sk": "Smrť nebola koncom",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Wipe the tears from your eyes",
+      "start_ms": 180690,
+      "end_ms": 183690,
+      "text_sk": "Utrite si slzy z očí",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Don't forget what He said",
+      "start_ms": 184410,
+      "end_ms": 187470,
+      "text_sk": "Nezabudnite, čo povedal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "On the third He would rise",
+      "start_ms": 188250,
+      "end_ms": 191370,
+      "text_sk": "Na tretí deň vstane",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "He's alive! He's alive! He's alive! He's alive! He's alive! He's alive! He's alive! He's alive!",
+      "start_ms": 192030,
+      "end_ms": 206310,
+      "text_sk": "On žije! On žije! On žije! On žije! On žije! On žije! On žije! On žije!",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "The realm of God has overcome",
+      "start_ms": 207750,
+      "end_ms": 210750,
+      "text_sk": "Božia ríša zvíťazila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "My testimony is He's good",
+      "start_ms": 211590,
+      "end_ms": 214470,
+      "text_sk": "Moje svedectvo je, že On je dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "And if He said that it is done, it is done, so be it God",
+      "start_ms": 215370,
+      "end_ms": 221670,
+      "text_sk": "A ak povedal, že je dokonané, je dokonané, nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "The weapons of the enemy",
+      "start_ms": 222990,
+      "end_ms": 225450,
+      "text_sk": "Zbrane nepriateľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "They have no power over me",
+      "start_ms": 226830,
+      "end_ms": 229410,
+      "text_sk": "Nemajú nadomnou žiadnu moc",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The One with all authority cover me, so be it God",
+      "start_ms": 230430,
+      "end_ms": 236850,
+      "text_sk": "Ten so všetkou autoritou ma prikrýva, nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 238830,
+      "end_ms": 240810,
+      "text_sk": "Nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "It is final, it is written, it is settled, it is finished",
+      "start_ms": 244230,
+      "end_ms": 251130,
+      "text_sk": "Je to definitívne, je to napísané, je to rozhodnuté, je to dokonané",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "See that old grave he was in, now he isn't, He is risen",
+      "start_ms": 251550,
+      "end_ms": 258810,
+      "text_sk": "Pozrite na ten starý hrob, v ktorom bol, teraz tam nie je, vstal z mŕtvych",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "It is final, it is written, it is settled, it is finished",
+      "start_ms": 259110,
+      "end_ms": 266190,
+      "text_sk": "Je to definitívne, je to napísané, je to rozhodnuté, je to dokonané",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "See that old grave he was in, now he isn't, He is risen",
+      "start_ms": 266670,
+      "end_ms": 273810,
+      "text_sk": "Pozrite na ten starý hrob, v ktorom bol, teraz tam nie je, vstal z mŕtvych",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "Hallelujah, Hallelujah, Hallelujah, Hallelujah",
+      "start_ms": 276210,
+      "end_ms": 282810,
+      "text_sk": "Aleluja, Aleluja, Aleluja, Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Hallelujah, Hallelujah, Hallelujah, Hallelujah",
+      "start_ms": 283710,
+      "end_ms": 296010,
+      "text_sk": "Aleluja, Aleluja, Aleluja, Aleluja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Like a thief in the night",
+      "start_ms": 321810,
+      "end_ms": 325470,
+      "text_sk": "Ako zlodej v noci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "He'll return for His bride",
+      "start_ms": 325710,
+      "end_ms": 328470,
+      "text_sk": "Vráti sa pre svoju nevestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Even so, Jesus come",
+      "start_ms": 329550,
+      "end_ms": 332430,
+      "text_sk": "Rovnako tak, Ježiš, príď",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Jesus come, split the skies",
+      "start_ms": 333390,
+      "end_ms": 336750,
+      "text_sk": "Ježiš, príď, rozraz nebesia",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 339030,
+      "end_ms": 341610,
+      "text_sk": "Nech sa tak stane, Bože",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 50,
+    "n_lines_timed": 50,
+    "n_lines_untimed": 0,
+    "n_words_total": 396,
+    "n_words_aligned": 381,
+    "word_align_rate": 0.9621212121212122,
+    "n_monotonic_violations_clamped": 0
+  }
+}

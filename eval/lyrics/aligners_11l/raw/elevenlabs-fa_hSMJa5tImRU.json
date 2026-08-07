@@ -1,0 +1,714 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\hSMJa5tImRU_vocal16k.wav",
+  "duration_ms": 669460,
+  "lines": [
+    {
+      "text": "You come at the right time",
+      "text_sk": "Prichádzaš v pravý čas",
+      "start_ms": 27140,
+      "end_ms": 31380,
+      "mean_word_loss": 0.4699819564819336
+    },
+    {
+      "text": "When I least expect it never behind",
+      "text_sk": "Keď to najmenej čakám, nikdy nie pozadu",
+      "start_ms": 32980,
+      "end_ms": 38020,
+      "mean_word_loss": 0.5927159036908831
+    },
+    {
+      "text": "So why would I be surprised when You deliver every time",
+      "text_sk": "Tak prečo by som bol prekvapený, keď ma vyslobodíš zakaždým",
+      "start_ms": 40100,
+      "end_ms": 51540,
+      "mean_word_loss": 1.0613036828639704
+    },
+    {
+      "text": "On mountain tops",
+      "text_sk": "Na vrcholoch hôr",
+      "start_ms": 53580,
+      "end_ms": 56180,
+      "mean_word_loss": 0.7828852732976278
+    },
+    {
+      "text": "You stay the same",
+      "text_sk": "Zostávaš rovnaký",
+      "start_ms": 57080,
+      "end_ms": 58840,
+      "mean_word_loss": 0.6409479777018229
+    },
+    {
+      "text": "On valleys low",
+      "text_sk": "V nízkych údoliach",
+      "start_ms": 59860,
+      "end_ms": 62460,
+      "mean_word_loss": 2.789279513888889
+    },
+    {
+      "text": "You never change",
+      "text_sk": "Nikdy sa nemeníš",
+      "start_ms": 63480,
+      "end_ms": 65519,
+      "mean_word_loss": 0.8086934407552083
+    },
+    {
+      "text": "And I believe that I will see",
+      "text_sk": "A verím, že uvidím",
+      "start_ms": 66620,
+      "end_ms": 71720,
+      "mean_word_loss": 0.5048639985168872
+    },
+    {
+      "text": "The goodness of the Lord",
+      "text_sk": "Dobrotu Pána",
+      "start_ms": 73140,
+      "end_ms": 77020,
+      "mean_word_loss": 0.7119120279947916
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "start_ms": 77960,
+      "end_ms": 85360,
+      "mean_word_loss": 1.2055858793712797
+    },
+    {
+      "text": "Your faithfulness remains",
+      "text_sk": "Tvoja vernosť zostáva",
+      "start_ms": 86220,
+      "end_ms": 91220,
+      "mean_word_loss": 0.6800468611338782
+    },
+    {
+      "text": "You go",
+      "text_sk": "Ideš",
+      "start_ms": 92120,
+      "end_ms": 101940,
+      "mean_word_loss": 2.0144856770833335
+    },
+    {
+      "text": "You go before me",
+      "text_sk": "Ideš predo mnou",
+      "start_ms": 102620,
+      "end_ms": 106800,
+      "mean_word_loss": 1.5171457926432292
+    },
+    {
+      "text": "To prepare the blessing",
+      "text_sk": "Pripraviť požehnanie",
+      "start_ms": 108020,
+      "end_ms": 110200,
+      "mean_word_loss": 1.456877208891369
+    },
+    {
+      "text": "You've made a way",
+      "text_sk": "Pripravil si cestu",
+      "start_ms": 111540,
+      "end_ms": 113060,
+      "mean_word_loss": 0.9751434326171875
+    },
+    {
+      "text": "It's more than I could imagine",
+      "text_sk": "Je to viac, než si dokážem predstaviť",
+      "start_ms": 115460,
+      "end_ms": 119940,
+      "mean_word_loss": 0.6579378037225633
+    },
+    {
+      "text": "More than I can fathom",
+      "text_sk": "Viac, než dokážem pochopiť",
+      "start_ms": 121100,
+      "end_ms": 123220,
+      "mean_word_loss": 1.2197555541992187
+    },
+    {
+      "text": "Or comprehend",
+      "text_sk": "Alebo zrozumieť",
+      "start_ms": 124500,
+      "end_ms": 128360,
+      "mean_word_loss": 2.49365234375
+    },
+    {
+      "text": "On mountain tops",
+      "text_sk": "Na vrcholoch hôr",
+      "start_ms": 128420,
+      "end_ms": 130829,
+      "mean_word_loss": 1.3371869723002117
+    },
+    {
+      "text": "I'm so glad that You stay the same",
+      "text_sk": "Som tak rád, že zostávaš rovnaký",
+      "start_ms": 130920,
+      "end_ms": 133920,
+      "mean_word_loss": 0.8549346923828125
+    },
+    {
+      "text": "In valleys low",
+      "text_sk": "V nízkych údoliach",
+      "start_ms": 134280,
+      "end_ms": 137420,
+      "mean_word_loss": 2.9400421626984126
+    },
+    {
+      "text": "You never change",
+      "text_sk": "Nikdy sa nemeníš",
+      "start_ms": 138000,
+      "end_ms": 140400,
+      "mean_word_loss": 0.7895345052083335
+    },
+    {
+      "text": "And I believe that I will see",
+      "text_sk": "A verím, že uvidím",
+      "start_ms": 140840,
+      "end_ms": 146860,
+      "mean_word_loss": 0.5716616831669191
+    },
+    {
+      "text": "The goodness of the Lord",
+      "text_sk": "Dobrotu Pána",
+      "start_ms": 147380,
+      "end_ms": 151431,
+      "mean_word_loss": 0.7755808512369792
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "start_ms": 152800,
+      "end_ms": 160660,
+      "mean_word_loss": 1.2619427393353173
+    },
+    {
+      "text": "Your faithfulness remains",
+      "text_sk": "Tvoja vernosť zostáva",
+      "start_ms": 161280,
+      "end_ms": 166280,
+      "mean_word_loss": 0.6134289540941753
+    },
+    {
+      "text": "You never change",
+      "text_sk": "Nikdy sa nemeníš",
+      "start_ms": 167080,
+      "end_ms": 167960,
+      "mean_word_loss": 0.8906290690104166
+    },
+    {
+      "text": "You never change",
+      "text_sk": "Nikdy sa nemeníš",
+      "start_ms": 168720,
+      "end_ms": 169960,
+      "mean_word_loss": 0.28366627163357205
+    },
+    {
+      "text": "You never change",
+      "text_sk": "Nikdy sa nemeníš",
+      "start_ms": 170340,
+      "end_ms": 178020,
+      "mean_word_loss": 0.06195299360487196
+    },
+    {
+      "text": "God of my present God of my future",
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "start_ms": 178280,
+      "end_ms": 183980,
+      "mean_word_loss": 1.388310262135097
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 184800,
+      "end_ms": 190800,
+      "mean_word_loss": 0.2067630577970434
+    },
+    {
+      "text": "God of my present God of my future",
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "start_ms": 191400,
+      "end_ms": 197200,
+      "mean_word_loss": 0.8920334378878275
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 197860,
+      "end_ms": 203480,
+      "mean_word_loss": 0.30767979533584033
+    },
+    {
+      "text": "God of my present God of my future",
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "start_ms": 203720,
+      "end_ms": 209620,
+      "mean_word_loss": 0.8890132279623123
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 209720,
+      "end_ms": 216480,
+      "mean_word_loss": 0.31879868772294784
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 216620,
+      "end_ms": 230120,
+      "mean_word_loss": 0.5739241326296771
+    },
+    {
+      "text": "And I believe that I will see",
+      "text_sk": "A verím, že uvidím",
+      "start_ms": 230620,
+      "end_ms": 237980,
+      "mean_word_loss": 1.0521714865755871
+    },
+    {
+      "text": "The goodness of the Lord",
+      "text_sk": "Dobrotu Pána",
+      "start_ms": 239720,
+      "end_ms": 244120,
+      "mean_word_loss": 0.8682118733723959
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "start_ms": 244200,
+      "end_ms": 250540,
+      "mean_word_loss": 1.3627795022631448
+    },
+    {
+      "text": "Your faithfulness remains",
+      "text_sk": "Tvoja vernosť zostáva",
+      "start_ms": 252720,
+      "end_ms": 259260,
+      "mean_word_loss": 0.5666620920574855
+    },
+    {
+      "text": "God of my present God of my future",
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "start_ms": 269660,
+      "end_ms": 274940,
+      "mean_word_loss": 1.2592408543541318
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 275240,
+      "end_ms": 295890,
+      "mean_word_loss": 0.2297070269231443
+    },
+    {
+      "text": "God of my present God of my future",
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "start_ms": 295891,
+      "end_ms": 301120,
+      "mean_word_loss": 0.9659342992873419
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 301200,
+      "end_ms": 307930,
+      "mean_word_loss": 0.3421144902706146
+    },
+    {
+      "text": "God of my present God of my future",
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "start_ms": 307980,
+      "end_ms": 312540,
+      "mean_word_loss": 0.9739689770199004
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "start_ms": 312550,
+      "end_ms": 325370,
+      "mean_word_loss": 0.3621646187923573
+    },
+    {
+      "text": "You hold it all together",
+      "text_sk": "Držíš to všetko pohromade",
+      "start_ms": 325380,
+      "end_ms": 328140,
+      "mean_word_loss": 0.3354351182778676
+    },
+    {
+      "text": "You hold it all together",
+      "text_sk": "Držíš to všetko pohromade",
+      "start_ms": 331800,
+      "end_ms": 334420,
+      "mean_word_loss": 0.41910572449366257
+    },
+    {
+      "text": "In my hands it falls apart but You hold it all",
+      "text_sk": "V mojich rukách sa to rozpadá, ale Ty to držíš všetko",
+      "start_ms": 335560,
+      "end_ms": 340130,
+      "mean_word_loss": 0.47142916592684664
+    },
+    {
+      "text": "In my hands I fall apart but You hold it all",
+      "text_sk": "V mojich rukách padám, ale Ty to držíš všetko",
+      "start_ms": 341520,
+      "end_ms": 347960,
+      "mean_word_loss": 0.498468896114465
+    },
+    {
+      "text": "My past my present my future You hold",
+      "text_sk": "Moju minulosť moju prítomnosť moju budúcnosť Ty držíš",
+      "start_ms": 347980,
+      "end_ms": 353200,
+      "mean_word_loss": 1.1556460970924014
+    },
+    {
+      "text": "You hold",
+      "text_sk": "Ty držíš",
+      "start_ms": 357260,
+      "end_ms": 358760,
+      "mean_word_loss": 0.7383130391438801
+    },
+    {
+      "text": "And I believe that I will see",
+      "text_sk": "A verím, že uvidím",
+      "start_ms": 360580,
+      "end_ms": 365520,
+      "mean_word_loss": 1.2417537663258662
+    },
+    {
+      "text": "The goodness of the Lord",
+      "text_sk": "Dobrotu Pána",
+      "start_ms": 366080,
+      "end_ms": 370991,
+      "mean_word_loss": 0.9776479085286459
+    },
+    {
+      "text": "Your goodness doesn't change",
+      "text_sk": "Tvoja dobrota sa nemení",
+      "start_ms": 370991,
+      "end_ms": 373380,
+      "mean_word_loss": 0.6723234767005557
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "start_ms": 373540,
+      "end_ms": 378900,
+      "mean_word_loss": 1.3871269104972719
+    },
+    {
+      "text": "Your faithfulness remains",
+      "text_sk": "Tvoja vernosť zostáva",
+      "start_ms": 379860,
+      "end_ms": 390700,
+      "mean_word_loss": 0.5596871338193379
+    },
+    {
+      "text": "Great is Thy faithfulness",
+      "text_sk": "Veľká je Tvoja vernosť",
+      "start_ms": 390780,
+      "end_ms": 392920,
+      "mean_word_loss": 2.134938891728719
+    },
+    {
+      "text": "Morning by morning new mercies",
+      "text_sk": "Ráno čo ráno nové milosrdenstvá",
+      "start_ms": 393040,
+      "end_ms": 398060,
+      "mean_word_loss": 1.8603288922991073
+    },
+    {
+      "text": "Morning by morning Your faithful",
+      "text_sk": "Ráno čo ráno si verný",
+      "start_ms": 398440,
+      "end_ms": 401000,
+      "mean_word_loss": 1.0531821114676339
+    },
+    {
+      "text": "All I have needed Thy hand has provided",
+      "text_sk": "Všetko, čo som potreboval, Tvoja ruka poskytla",
+      "start_ms": 401860,
+      "end_ms": 406140,
+      "mean_word_loss": 1.2694250742594402
+    },
+    {
+      "text": "All I have needed Thy hand has provided",
+      "text_sk": "Všetko, čo som potreboval, Tvoja ruka poskytla",
+      "start_ms": 406340,
+      "end_ms": 411640,
+      "mean_word_loss": 1.9639593760172527
+    },
+    {
+      "text": "You have provided You have provided",
+      "text_sk": "Poskytol si Poskytol si",
+      "start_ms": 411660,
+      "end_ms": 416800,
+      "mean_word_loss": 0.48083856370713973
+    },
+    {
+      "text": "Your faithfulness",
+      "text_sk": "Tvoja vernosť",
+      "start_ms": 418020,
+      "end_ms": 423270,
+      "mean_word_loss": 0.6167087554931641
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "text_sk": "Si Alfa a si Omega",
+      "start_ms": 423400,
+      "end_ms": 428580,
+      "mean_word_loss": 1.0467369624546596
+    },
+    {
+      "text": "You're in the middle You hold it all together",
+      "text_sk": "Si uprostred Držíš to všetko pohromade",
+      "start_ms": 429680,
+      "end_ms": 435800,
+      "mean_word_loss": 0.20743596443423518
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "text_sk": "Si Alfa a si Omega",
+      "start_ms": 436360,
+      "end_ms": 441960,
+      "mean_word_loss": 0.722724351428804
+    },
+    {
+      "text": "You're in the middle You hold it all together",
+      "text_sk": "Si uprostred Držíš to všetko pohromade",
+      "start_ms": 442720,
+      "end_ms": 448880,
+      "mean_word_loss": 0.21261432766914368
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "text_sk": "Si Alfa a si Omega",
+      "start_ms": 449400,
+      "end_ms": 454910,
+      "mean_word_loss": 0.708479963030134
+    },
+    {
+      "text": "You're in the middle You hold it all",
+      "text_sk": "Si uprostred Držíš to všetko",
+      "start_ms": 454910,
+      "end_ms": 460540,
+      "mean_word_loss": 0.2581292788187663
+    },
+    {
+      "text": "You are the Alpha",
+      "text_sk": "Si Alfa",
+      "start_ms": 461020,
+      "end_ms": 463080,
+      "mean_word_loss": 0.861956787109375
+    },
+    {
+      "text": "But You're not just at the beginning",
+      "text_sk": "Ale nie si len na začiatku",
+      "start_ms": 464040,
+      "end_ms": 465800,
+      "mean_word_loss": 0.9607451113443526
+    },
+    {
+      "text": "But You're not just at the end",
+      "text_sk": "Ale nie si len na konci",
+      "start_ms": 467120,
+      "end_ms": 469040,
+      "mean_word_loss": 1.1144247509184337
+    },
+    {
+      "text": "You're right here in the middle",
+      "text_sk": "Si priamo tu uprostred",
+      "start_ms": 469480,
+      "end_ms": 471720,
+      "mean_word_loss": 0.25230493545532223
+    },
+    {
+      "text": "You're not just at the beginning",
+      "text_sk": "Nie si len na začiatku",
+      "start_ms": 476800,
+      "end_ms": 488160,
+      "mean_word_loss": 1.1968272262149386
+    },
+    {
+      "text": "And You're not just watching from the end",
+      "text_sk": "A nesleduješ len z konca",
+      "start_ms": 489560,
+      "end_ms": 491960,
+      "mean_word_loss": 0.9167567789554596
+    },
+    {
+      "text": "But You're walking with me in the middle",
+      "text_sk": "Ale kráčaš so mnou uprostred",
+      "start_ms": 492920,
+      "end_ms": 494920,
+      "mean_word_loss": 0.8543487616947719
+    },
+    {
+      "text": "You're walking with me in the middle",
+      "text_sk": "Kráčaš so mnou uprostred",
+      "start_ms": 496060,
+      "end_ms": 498000,
+      "mean_word_loss": 0.4528729120890299
+    },
+    {
+      "text": "You're the God of the middle",
+      "text_sk": "Si Boh uprostred",
+      "start_ms": 499120,
+      "end_ms": 500680,
+      "mean_word_loss": 0.484254413180881
+    },
+    {
+      "text": "You're Jehovah in the middle",
+      "text_sk": "Si Jehova uprostred",
+      "start_ms": 501820,
+      "end_ms": 503820,
+      "mean_word_loss": 0.49869445619128994
+    },
+    {
+      "text": "You're Provider in the middle",
+      "text_sk": "Si Poskytovateľ uprostred",
+      "start_ms": 504420,
+      "end_ms": 506660,
+      "mean_word_loss": 0.4828533172607422
+    },
+    {
+      "text": "You are Healer in the middle",
+      "text_sk": "Si Uzdraviteľ uprostred",
+      "start_ms": 507220,
+      "end_ms": 509420,
+      "mean_word_loss": 0.29161787033081055
+    },
+    {
+      "text": "You're our Keeper in the middle",
+      "text_sk": "Si náš Strážca uprostred",
+      "start_ms": 509940,
+      "end_ms": 512340,
+      "mean_word_loss": 0.4357975323994954
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "text_sk": "Si Alfa a si Omega",
+      "start_ms": 512740,
+      "end_ms": 519880,
+      "mean_word_loss": 0.9390703292120071
+    },
+    {
+      "text": "You're in the middle You hold it all",
+      "text_sk": "Si uprostred Držíš to všetko",
+      "start_ms": 521240,
+      "end_ms": 526040,
+      "mean_word_loss": 0.24339612325032553
+    },
+    {
+      "text": "You do",
+      "text_sk": "Robíš to",
+      "start_ms": 528280,
+      "end_ms": 556620,
+      "mean_word_loss": 1.4671223958333333
+    },
+    {
+      "text": "You do",
+      "text_sk": "Robíš to",
+      "start_ms": 557220,
+      "end_ms": 563120,
+      "mean_word_loss": 1.2203572591145833
+    },
+    {
+      "text": "In my hands I fall apart but You You hold",
+      "text_sk": "V mojich rukách padám, ale Ty Ty držíš",
+      "start_ms": 566080,
+      "end_ms": 571000,
+      "mean_word_loss": 1.132888479232788
+    },
+    {
+      "text": "In my hands it falls apart but You",
+      "text_sk": "V mojich rukách sa to rozpadá, ale Ty",
+      "start_ms": 573400,
+      "end_ms": 577020,
+      "mean_word_loss": 1.093050773938497
+    },
+    {
+      "text": "You've got the whole world",
+      "text_sk": "Máš celý svet",
+      "start_ms": 579940,
+      "end_ms": 582460,
+      "mean_word_loss": 0.525021006266276
+    },
+    {
+      "text": "You've got the whole world",
+      "text_sk": "Máš celý svet",
+      "start_ms": 586600,
+      "end_ms": 589440,
+      "mean_word_loss": 0.828764139811198
+    },
+    {
+      "text": "You hold it all",
+      "text_sk": "Držíš to všetko",
+      "start_ms": 589860,
+      "end_ms": 591260,
+      "mean_word_loss": 0.2411632537841797
+    },
+    {
+      "text": "This is in Your story it's in Your plans",
+      "text_sk": "Toto je v Tvojom príbehu je to v Tvojich plánoch",
+      "start_ms": 593120,
+      "end_ms": 595900,
+      "mean_word_loss": 0.622105238172743
+    },
+    {
+      "text": "You hold",
+      "text_sk": "Držíš",
+      "start_ms": 596300,
+      "end_ms": 598840,
+      "mean_word_loss": 0.5668487548828125
+    },
+    {
+      "text": "Oh one more time",
+      "text_sk": "Ešte raz",
+      "start_ms": 601700,
+      "end_ms": 603660,
+      "mean_word_loss": 2.1064751942952475
+    },
+    {
+      "text": "And I believe that I will see",
+      "text_sk": "A verím, že uvidím",
+      "start_ms": 605300,
+      "end_ms": 610760,
+      "mean_word_loss": 1.150802300900829
+    },
+    {
+      "text": "The goodness of the Lord",
+      "text_sk": "Dobrotu Pána",
+      "start_ms": 612520,
+      "end_ms": 615930,
+      "mean_word_loss": 1.134881591796875
+    },
+    {
+      "text": "One thing I'm sure about I'm confident",
+      "text_sk": "Jedna vec, ktorou som si istý, som si istý",
+      "start_ms": 617940,
+      "end_ms": 620860,
+      "mean_word_loss": 0.8525355747767858
+    },
+    {
+      "text": "As seasons change Your faithfulness",
+      "text_sk": "Keď sa ročné obdobia menia, Tvoja vernosť",
+      "start_ms": 622320,
+      "end_ms": 669460,
+      "mean_word_loss": 1.231429286230178
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.6471721482681015,
+  "metadata": {
+    "n_tokens_sent": 583,
+    "n_words_returned_raw": 1165,
+    "n_words_returned_content": 583,
+    "n_characters_returned": 2950,
+    "runtime_sec": 12.3,
+    "n_lines": 99,
+    "n_lines_timed": 99,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

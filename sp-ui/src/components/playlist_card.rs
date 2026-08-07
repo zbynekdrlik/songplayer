@@ -6,12 +6,17 @@ use sp_core::playback::PlaybackState;
 
 use crate::components::karaoke_panel;
 use crate::components::playback_controls;
+use crate::components::video_list;
 use crate::store::DashboardStore;
 
 #[component]
 pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
     let pid = playlist.id;
+    // #134: song list is collapsed by default — a busy playlist can have
+    // dozens of cached videos, and most dashboard glances only care about
+    // now-playing + transport controls. Toggled open on demand.
+    let songs_open = RwSignal::new(false);
 
     view! {
         <div class="playlist-card">
@@ -70,6 +75,23 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
             </div>
 
             <playback_controls::PlaybackControls playlist_id=pid />
+
+            <div class="playlist-songs">
+                <button
+                    class="playlist-songs-toggle"
+                    data-testid="playlist-songs-toggle"
+                    on:click=move |_| songs_open.update(|o| *o = !*o)
+                >
+                    {move || if songs_open.get() { "▼ Songs" } else { "▶ Songs" }}
+                </button>
+                {move || {
+                    if songs_open.get() {
+                        view! { <video_list::VideoList playlist_id=pid /> }.into_any()
+                    } else {
+                        view! { <span></span> }.into_any()
+                    }
+                }}
+            </div>
         </div>
     }
 }

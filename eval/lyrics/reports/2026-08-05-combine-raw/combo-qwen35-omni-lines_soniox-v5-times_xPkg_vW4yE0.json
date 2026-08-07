@@ -1,0 +1,148 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_soniox-v5-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "soniox-v5",
+  "video_id": "xPkg_vW4yE0",
+  "duration_ms": 245550,
+  "lines": [
+    {
+      "text": "When my heart is overwhelmed",
+      "start_ms": 8910,
+      "end_ms": 11790,
+      "text_sk": "Keď je moje srdce preťažené",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "When I barely trust myself lead me to the rock",
+      "start_ms": 14730,
+      "end_ms": 19710,
+      "text_sk": "Keď si sotva verím, veď ma ku skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 22410,
+      "end_ms": 22830,
+      "text_sk": "Vyššie než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "When the night is closing in",
+      "start_ms": 26670,
+      "end_ms": 32490,
+      "text_sk": "Keď sa noc blíži",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "To remind me of my sin lead me to the rock",
+      "start_ms": 32970,
+      "end_ms": 37950,
+      "text_sk": "Aby mi pripomenula môj hriech, veď ma ku skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "Higher than I lead me to the rock",
+      "start_ms": 40470,
+      "end_ms": 45870,
+      "text_sk": "Vyššie než ja, veď ma ku skale",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Higher than I higher than I",
+      "start_ms": 48450,
+      "end_ms": 52830,
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Higher than I higher than I",
+      "start_ms": 56490,
+      "end_ms": 60930,
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Higher than I",
+      "start_ms": 64470,
+      "end_ms": 64890,
+      "text_sk": "Vyššie než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "So much stronger so much greater",
+      "start_ms": 68310,
+      "end_ms": 71550,
+      "text_sk": "Oveľa silnejší, oveľa väčší",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "So much wiser so much higher",
+      "start_ms": 72210,
+      "end_ms": 75570,
+      "text_sk": "Oveľa múdrejší, oveľa vyšší",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Higher than I higher than I",
+      "start_ms": 76410,
+      "end_ms": 143190,
+      "text_sk": "Vyššie než ja, vyššie než ja",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "[Instrumental]",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "[Inštrumentálna časť]",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 1,
+      "n_words_aligned": 0
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 13,
+    "n_lines_timed": 12,
+    "n_lines_untimed": 1,
+    "n_words_total": 77,
+    "n_words_aligned": 68,
+    "word_align_rate": 0.8831168831168831,
+    "n_monotonic_violations_clamped": 0
+  }
+}

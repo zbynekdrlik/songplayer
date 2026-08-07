@@ -1,0 +1,5626 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\q5m09rqOoxE_vocal16k.wav",
+  "duration_ms": 640409,
+  "lines": [
+    {
+      "text": "Faithful through the ages.",
+      "start_ms": 16641,
+      "end_ms": 18539,
+      "text_sk": "Verní po stáročia.",
+      "words": [
+        {
+          "text": "Faithful",
+          "start_ms": 16641,
+          "end_ms": 17161,
+          "confidence": 0.99460393
+        },
+        {
+          "text": "through",
+          "start_ms": 17193,
+          "end_ms": 17323,
+          "confidence": 0.9762675
+        },
+        {
+          "text": "the",
+          "start_ms": 17371,
+          "end_ms": 17599,
+          "confidence": 0.9997029
+        },
+        {
+          "text": "ages.",
+          "start_ms": 17599,
+          "end_ms": 18539,
+          "confidence": 0.91610706
+        }
+      ]
+    },
+    {
+      "text": "God of Abraham, you're the God of covenants and faithful promises. Time and time again, you have proven you'll do just what you said.",
+      "start_ms": 18539,
+      "end_ms": 41366,
+      "text_sk": "Bože Abraháma, ty si Boh zmlúv a verných zasľúbení. Znova a znova si dokázal, že urobíš presne to, čo si povedal.",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 27160,
+          "end_ms": 27630,
+          "confidence": 0.5215003
+        },
+        {
+          "text": "of",
+          "start_ms": 27630,
+          "end_ms": 27776,
+          "confidence": 0.9999478
+        },
+        {
+          "text": "Abraham,",
+          "start_ms": 27792,
+          "end_ms": 28343,
+          "confidence": 0.9871031
+        },
+        {
+          "text": "you're",
+          "start_ms": 29007,
+          "end_ms": 29120,
+          "confidence": 0.9540836
+        },
+        {
+          "text": "the",
+          "start_ms": 29120,
+          "end_ms": 29201,
+          "confidence": 0.9999455
+        },
+        {
+          "text": "God",
+          "start_ms": 29331,
+          "end_ms": 29671,
+          "confidence": 0.99641657
+        },
+        {
+          "text": "of",
+          "start_ms": 29671,
+          "end_ms": 29720,
+          "confidence": 0.9999403
+        },
+        {
+          "text": "covenants",
+          "start_ms": 29817,
+          "end_ms": 31113,
+          "confidence": 0.86936826
+        },
+        {
+          "text": "and",
+          "start_ms": 31275,
+          "end_ms": 31356,
+          "confidence": 0.9993703
+        },
+        {
+          "text": "faithful",
+          "start_ms": 31356,
+          "end_ms": 31907,
+          "confidence": 0.9999516
+        },
+        {
+          "text": "promises.",
+          "start_ms": 31923,
+          "end_ms": 32879,
+          "confidence": 0.9993135
+        },
+        {
+          "text": "Time",
+          "start_ms": 35507,
+          "end_ms": 35782,
+          "confidence": 0.9998909
+        },
+        {
+          "text": "and",
+          "start_ms": 35911,
+          "end_ms": 36056,
+          "confidence": 0.9999453
+        },
+        {
+          "text": "time",
+          "start_ms": 36056,
+          "end_ms": 36411,
+          "confidence": 0.99998116
+        },
+        {
+          "text": "again,",
+          "start_ms": 36411,
+          "end_ms": 36911,
+          "confidence": 0.965698
+        },
+        {
+          "text": "you",
+          "start_ms": 37751,
+          "end_ms": 37815,
+          "confidence": 0.99654216
+        },
+        {
+          "text": "have",
+          "start_ms": 37848,
+          "end_ms": 38138,
+          "confidence": 0.99970007
+        },
+        {
+          "text": "proven",
+          "start_ms": 38170,
+          "end_ms": 38816,
+          "confidence": 0.99982303
+        },
+        {
+          "text": "you'll",
+          "start_ms": 38816,
+          "end_ms": 39752,
+          "confidence": 0.8152723
+        },
+        {
+          "text": "do",
+          "start_ms": 39784,
+          "end_ms": 39913,
+          "confidence": 0.9999529
+        },
+        {
+          "text": "just",
+          "start_ms": 40010,
+          "end_ms": 40333,
+          "confidence": 0.99998105
+        },
+        {
+          "text": "what",
+          "start_ms": 40333,
+          "end_ms": 40591,
+          "confidence": 0.99996257
+        },
+        {
+          "text": "you",
+          "start_ms": 40591,
+          "end_ms": 40688,
+          "confidence": 0.99927396
+        },
+        {
+          "text": "said.",
+          "start_ms": 40688,
+          "end_ms": 41366,
+          "confidence": 0.9140524
+        }
+      ]
+    },
+    {
+      "text": "Though the storms may come and the winds may blow, I'll remain steadfast. And let my heart learn, when you speak a word, it will Come to pass. Great is your faithfulness to me. Great is your faithfulness to me. From the rising sun to the setting same, I will praise your name. Great is your faithfulness to me, Lord. Seasons change; you remain the same.",
+      "start_ms": 42227,
+      "end_ms": 104990,
+      "text_sk": "Hoci môžu prísť búrky a fúkať vetry, zostanem pevný. A nech sa moje srdce naučí, keď povieš slovo, stane sa. Veľká je tvoja vernosť voči mne. Veľká je tvoja vernosť voči mne. Od východu slnka až po jeho západ budem oslavovať tvoje meno. Veľká je tvoja vernosť voči mne, Pane. Ročné obdobia sa menia; ty zostávaš rovnaký.",
+      "words": [
+        {
+          "text": "Though",
+          "start_ms": 42227,
+          "end_ms": 42372,
+          "confidence": 0.99993145
+        },
+        {
+          "text": "the",
+          "start_ms": 42485,
+          "end_ms": 42583,
+          "confidence": 0.9999082
+        },
+        {
+          "text": "storms",
+          "start_ms": 42583,
+          "end_ms": 43343,
+          "confidence": 0.9999224
+        },
+        {
+          "text": "may",
+          "start_ms": 43375,
+          "end_ms": 43472,
+          "confidence": 0.99997425
+        },
+        {
+          "text": "come",
+          "start_ms": 43861,
+          "end_ms": 44168,
+          "confidence": 0.99997175
+        },
+        {
+          "text": "and",
+          "start_ms": 44330,
+          "end_ms": 44653,
+          "confidence": 0.9955662
+        },
+        {
+          "text": "the",
+          "start_ms": 44653,
+          "end_ms": 44848,
+          "confidence": 0.99958414
+        },
+        {
+          "text": "winds",
+          "start_ms": 44993,
+          "end_ms": 45446,
+          "confidence": 0.9996296
+        },
+        {
+          "text": "may",
+          "start_ms": 45478,
+          "end_ms": 45576,
+          "confidence": 0.99997544
+        },
+        {
+          "text": "blow,",
+          "start_ms": 45964,
+          "end_ms": 46287,
+          "confidence": 0.9994814
+        },
+        {
+          "text": "I'll",
+          "start_ms": 46384,
+          "end_ms": 46757,
+          "confidence": 0.9980989
+        },
+        {
+          "text": "remain",
+          "start_ms": 46757,
+          "end_ms": 47630,
+          "confidence": 0.9999707
+        },
+        {
+          "text": "steadfast.",
+          "start_ms": 48067,
+          "end_ms": 50138,
+          "confidence": 0.72244424
+        },
+        {
+          "text": "And",
+          "start_ms": 50720,
+          "end_ms": 50785,
+          "confidence": 0.99918944
+        },
+        {
+          "text": "let",
+          "start_ms": 50979,
+          "end_ms": 51206,
+          "confidence": 0.99982446
+        },
+        {
+          "text": "my",
+          "start_ms": 51206,
+          "end_ms": 51304,
+          "confidence": 0.9999782
+        },
+        {
+          "text": "heart",
+          "start_ms": 51715,
+          "end_ms": 52289,
+          "confidence": 0.99991524
+        },
+        {
+          "text": "learn,",
+          "start_ms": 52289,
+          "end_ms": 52568,
+          "confidence": 0.7559775
+        },
+        {
+          "text": "when",
+          "start_ms": 52699,
+          "end_ms": 52830,
+          "confidence": 0.99989235
+        },
+        {
+          "text": "you",
+          "start_ms": 53027,
+          "end_ms": 53191,
+          "confidence": 0.9990483
+        },
+        {
+          "text": "speak",
+          "start_ms": 53191,
+          "end_ms": 53930,
+          "confidence": 0.99995553
+        },
+        {
+          "text": "a",
+          "start_ms": 53930,
+          "end_ms": 53962,
+          "confidence": 0.9997459
+        },
+        {
+          "text": "word,",
+          "start_ms": 54422,
+          "end_ms": 54635,
+          "confidence": 0.99850446
+        },
+        {
+          "text": "it",
+          "start_ms": 54832,
+          "end_ms": 55127,
+          "confidence": 0.9918465
+        },
+        {
+          "text": "will",
+          "start_ms": 55144,
+          "end_ms": 57162,
+          "confidence": 0.99778855
+        },
+        {
+          "text": "Come",
+          "start_ms": 55410,
+          "end_ms": 56136,
+          "confidence": 0.46230707
+        },
+        {
+          "text": "to",
+          "start_ms": 56475,
+          "end_ms": 56700,
+          "confidence": 0.97719437
+        },
+        {
+          "text": "pass.",
+          "start_ms": 57604,
+          "end_ms": 58556,
+          "confidence": 0.95699114
+        },
+        {
+          "text": "Great",
+          "start_ms": 59557,
+          "end_ms": 60331,
+          "confidence": 0.99992204
+        },
+        {
+          "text": "is",
+          "start_ms": 60751,
+          "end_ms": 61380,
+          "confidence": 0.99920326
+        },
+        {
+          "text": "your",
+          "start_ms": 61477,
+          "end_ms": 61574,
+          "confidence": 0.90162617
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 61574,
+          "end_ms": 64607,
+          "confidence": 0.9997401
+        },
+        {
+          "text": "to",
+          "start_ms": 64850,
+          "end_ms": 64898,
+          "confidence": 0.99880636
+        },
+        {
+          "text": "me.",
+          "start_ms": 65932,
+          "end_ms": 66191,
+          "confidence": 0.94975704
+        },
+        {
+          "text": "Great",
+          "start_ms": 67952,
+          "end_ms": 68727,
+          "confidence": 0.99995923
+        },
+        {
+          "text": "is",
+          "start_ms": 69147,
+          "end_ms": 69697,
+          "confidence": 0.99996066
+        },
+        {
+          "text": "your",
+          "start_ms": 69697,
+          "end_ms": 69907,
+          "confidence": 0.9998627
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 69907,
+          "end_ms": 72686,
+          "confidence": 0.99996257
+        },
+        {
+          "text": "to",
+          "start_ms": 73138,
+          "end_ms": 73446,
+          "confidence": 0.99997795
+        },
+        {
+          "text": "me.",
+          "start_ms": 74320,
+          "end_ms": 74515,
+          "confidence": 0.99018204
+        },
+        {
+          "text": "From",
+          "start_ms": 75648,
+          "end_ms": 75972,
+          "confidence": 0.9999647
+        },
+        {
+          "text": "the",
+          "start_ms": 76037,
+          "end_ms": 76296,
+          "confidence": 0.9999733
+        },
+        {
+          "text": "rising",
+          "start_ms": 76442,
+          "end_ms": 77219,
+          "confidence": 0.9993511
+        },
+        {
+          "text": "sun",
+          "start_ms": 77332,
+          "end_ms": 77689,
+          "confidence": 0.99858415
+        },
+        {
+          "text": "to",
+          "start_ms": 77753,
+          "end_ms": 78077,
+          "confidence": 0.9996604
+        },
+        {
+          "text": "the",
+          "start_ms": 78158,
+          "end_ms": 78304,
+          "confidence": 0.9999597
+        },
+        {
+          "text": "setting",
+          "start_ms": 78304,
+          "end_ms": 79243,
+          "confidence": 0.99972695
+        },
+        {
+          "text": "same,",
+          "start_ms": 79438,
+          "end_ms": 79940,
+          "confidence": 0.9864015
+        },
+        {
+          "text": "I",
+          "start_ms": 79988,
+          "end_ms": 80004,
+          "confidence": 0.99942064
+        },
+        {
+          "text": "will",
+          "start_ms": 80312,
+          "end_ms": 80523,
+          "confidence": 0.960857
+        },
+        {
+          "text": "praise",
+          "start_ms": 80636,
+          "end_ms": 81430,
+          "confidence": 0.9999511
+        },
+        {
+          "text": "your",
+          "start_ms": 81547,
+          "end_ms": 82639,
+          "confidence": 0.9949208
+        },
+        {
+          "text": "name.",
+          "start_ms": 82723,
+          "end_ms": 83278,
+          "confidence": 0.99663407
+        },
+        {
+          "text": "Great",
+          "start_ms": 84720,
+          "end_ms": 85590,
+          "confidence": 0.76823896
+        },
+        {
+          "text": "is",
+          "start_ms": 85848,
+          "end_ms": 86460,
+          "confidence": 0.9988238
+        },
+        {
+          "text": "your",
+          "start_ms": 86508,
+          "end_ms": 86734,
+          "confidence": 0.8928573
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 86830,
+          "end_ms": 89456,
+          "confidence": 0.9996052
+        },
+        {
+          "text": "to",
+          "start_ms": 89940,
+          "end_ms": 90182,
+          "confidence": 0.9966047
+        },
+        {
+          "text": "me,",
+          "start_ms": 91085,
+          "end_ms": 91198,
+          "confidence": 0.88282436
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 92135,
+          "end_ms": 94201,
+          "confidence": 0.72108495
+        },
+        {
+          "text": "Seasons",
+          "start_ms": 97186,
+          "end_ms": 97364,
+          "confidence": 0.6094974
+        },
+        {
+          "text": "change;",
+          "start_ms": 102025,
+          "end_ms": 103378,
+          "confidence": 0.7090822
+        },
+        {
+          "text": "you",
+          "start_ms": 103982,
+          "end_ms": 104079,
+          "confidence": 0.9935748
+        },
+        {
+          "text": "remain",
+          "start_ms": 104128,
+          "end_ms": 104405,
+          "confidence": 0.9999368
+        },
+        {
+          "text": "the",
+          "start_ms": 104520,
+          "end_ms": 104568,
+          "confidence": 0.999985
+        },
+        {
+          "text": "same.",
+          "start_ms": 104568,
+          "end_ms": 104990,
+          "confidence": 0.99744207
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 108852,
+      "end_ms": 109095,
+      "text_sk": "Áno.",
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 108852,
+          "end_ms": 109095,
+          "confidence": 0.69455385
+        }
+      ]
+    },
+    {
+      "text": "God from age to age, though the earth may pass away, your word remains the same. Yeah, your history can prove there's nothing you can't do. You're faithful and true. Though the storms may come and the winds may blow, I'll remain steadfast and let my heart learn when you speak a word, it will come to pass.",
+      "start_ms": 110890,
+      "end_ms": 139900,
+      "text_sk": "Bože, z veku na vek, aj keď zem pominie, tvoje slovo zostáva rovnaké. Áno, tvoja história môže dokázať, že neexistuje nič, čo by si nemohol urobiť. Si verný a pravdivý. Aj keď prídu búrky a zafúkajú vetry, zostanem pevný a nech moje srdce spozná, keď prehovoríš slovo, stane sa.",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 110890,
+          "end_ms": 111230,
+          "confidence": 0.6924169
+        },
+        {
+          "text": "from",
+          "start_ms": 111230,
+          "end_ms": 111457,
+          "confidence": 0.53981864
+        },
+        {
+          "text": "age",
+          "start_ms": 111457,
+          "end_ms": 111766,
+          "confidence": 0.99771285
+        },
+        {
+          "text": "to",
+          "start_ms": 111798,
+          "end_ms": 111944,
+          "confidence": 0.999835
+        },
+        {
+          "text": "age,",
+          "start_ms": 112025,
+          "end_ms": 112414,
+          "confidence": 0.91080767
+        },
+        {
+          "text": "though",
+          "start_ms": 112690,
+          "end_ms": 112852,
+          "confidence": 0.9980463
+        },
+        {
+          "text": "the",
+          "start_ms": 112852,
+          "end_ms": 113079,
+          "confidence": 0.9999181
+        },
+        {
+          "text": "earth",
+          "start_ms": 113079,
+          "end_ms": 113225,
+          "confidence": 0.9866937
+        },
+        {
+          "text": "may",
+          "start_ms": 113257,
+          "end_ms": 113355,
+          "confidence": 0.9999187
+        },
+        {
+          "text": "pass",
+          "start_ms": 113500,
+          "end_ms": 113938,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "away,",
+          "start_ms": 113971,
+          "end_ms": 114165,
+          "confidence": 0.98258936
+        },
+        {
+          "text": "your",
+          "start_ms": 114944,
+          "end_ms": 115106,
+          "confidence": 0.7449075
+        },
+        {
+          "text": "word",
+          "start_ms": 115122,
+          "end_ms": 115333,
+          "confidence": 0.9403572
+        },
+        {
+          "text": "remains",
+          "start_ms": 115446,
+          "end_ms": 115981,
+          "confidence": 0.99998915
+        },
+        {
+          "text": "the",
+          "start_ms": 115997,
+          "end_ms": 116095,
+          "confidence": 0.99998176
+        },
+        {
+          "text": "same.",
+          "start_ms": 116095,
+          "end_ms": 116841,
+          "confidence": 0.9940923
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 119070,
+          "end_ms": 119166,
+          "confidence": 0.88462734
+        },
+        {
+          "text": "your",
+          "start_ms": 119182,
+          "end_ms": 119247,
+          "confidence": 0.9773933
+        },
+        {
+          "text": "history",
+          "start_ms": 119247,
+          "end_ms": 119923,
+          "confidence": 0.9999645
+        },
+        {
+          "text": "can",
+          "start_ms": 120052,
+          "end_ms": 120197,
+          "confidence": 0.9999136
+        },
+        {
+          "text": "prove",
+          "start_ms": 120294,
+          "end_ms": 121083,
+          "confidence": 0.9999614
+        },
+        {
+          "text": "there's",
+          "start_ms": 121180,
+          "end_ms": 121341,
+          "confidence": 0.97838914
+        },
+        {
+          "text": "nothing",
+          "start_ms": 121357,
+          "end_ms": 121808,
+          "confidence": 0.9964361
+        },
+        {
+          "text": "you",
+          "start_ms": 121840,
+          "end_ms": 121937,
+          "confidence": 0.9969879
+        },
+        {
+          "text": "can't",
+          "start_ms": 122082,
+          "end_ms": 122243,
+          "confidence": 0.9991129
+        },
+        {
+          "text": "do.",
+          "start_ms": 122323,
+          "end_ms": 122501,
+          "confidence": 0.98904824
+        },
+        {
+          "text": "You're",
+          "start_ms": 123274,
+          "end_ms": 123354,
+          "confidence": 0.9972977
+        },
+        {
+          "text": "faithful",
+          "start_ms": 123354,
+          "end_ms": 123966,
+          "confidence": 0.9998723
+        },
+        {
+          "text": "and",
+          "start_ms": 124240,
+          "end_ms": 124627,
+          "confidence": 0.99996376
+        },
+        {
+          "text": "true.",
+          "start_ms": 124723,
+          "end_ms": 124949,
+          "confidence": 0.7666909
+        },
+        {
+          "text": "Though",
+          "start_ms": 125883,
+          "end_ms": 126189,
+          "confidence": 0.9995851
+        },
+        {
+          "text": "the",
+          "start_ms": 126270,
+          "end_ms": 126366,
+          "confidence": 0.9999043
+        },
+        {
+          "text": "storms",
+          "start_ms": 126366,
+          "end_ms": 127124,
+          "confidence": 0.9999192
+        },
+        {
+          "text": "may",
+          "start_ms": 127156,
+          "end_ms": 127397,
+          "confidence": 0.99997556
+        },
+        {
+          "text": "come",
+          "start_ms": 127623,
+          "end_ms": 127865,
+          "confidence": 0.99998105
+        },
+        {
+          "text": "and",
+          "start_ms": 128010,
+          "end_ms": 128299,
+          "confidence": 0.99668
+        },
+        {
+          "text": "the",
+          "start_ms": 128299,
+          "end_ms": 128541,
+          "confidence": 0.99994767
+        },
+        {
+          "text": "winds",
+          "start_ms": 128686,
+          "end_ms": 129137,
+          "confidence": 0.99970526
+        },
+        {
+          "text": "may",
+          "start_ms": 129234,
+          "end_ms": 129411,
+          "confidence": 0.99994695
+        },
+        {
+          "text": "blow,",
+          "start_ms": 129411,
+          "end_ms": 129975,
+          "confidence": 0.9993049
+        },
+        {
+          "text": "I'll",
+          "start_ms": 130055,
+          "end_ms": 130522,
+          "confidence": 0.9969408
+        },
+        {
+          "text": "remain",
+          "start_ms": 130522,
+          "end_ms": 131312,
+          "confidence": 0.9999827
+        },
+        {
+          "text": "steadfast",
+          "start_ms": 131682,
+          "end_ms": 134034,
+          "confidence": 0.9999585
+        },
+        {
+          "text": "and",
+          "start_ms": 134388,
+          "end_ms": 134453,
+          "confidence": 0.6494581
+        },
+        {
+          "text": "let",
+          "start_ms": 134646,
+          "end_ms": 134823,
+          "confidence": 0.9999043
+        },
+        {
+          "text": "my",
+          "start_ms": 134823,
+          "end_ms": 135065,
+          "confidence": 0.99999
+        },
+        {
+          "text": "heart",
+          "start_ms": 135532,
+          "end_ms": 136064,
+          "confidence": 0.9998803
+        },
+        {
+          "text": "learn",
+          "start_ms": 136080,
+          "end_ms": 136305,
+          "confidence": 0.9998816
+        },
+        {
+          "text": "when",
+          "start_ms": 136418,
+          "end_ms": 136547,
+          "confidence": 0.8343447
+        },
+        {
+          "text": "you",
+          "start_ms": 136740,
+          "end_ms": 136837,
+          "confidence": 0.99844724
+        },
+        {
+          "text": "speak",
+          "start_ms": 136950,
+          "end_ms": 137569,
+          "confidence": 0.9999764
+        },
+        {
+          "text": "a",
+          "start_ms": 137618,
+          "end_ms": 137797,
+          "confidence": 0.9996687
+        },
+        {
+          "text": "word,",
+          "start_ms": 138107,
+          "end_ms": 138498,
+          "confidence": 0.9683713
+        },
+        {
+          "text": "it",
+          "start_ms": 138514,
+          "end_ms": 138775,
+          "confidence": 0.9997197
+        },
+        {
+          "text": "will",
+          "start_ms": 138775,
+          "end_ms": 138922,
+          "confidence": 0.99983895
+        },
+        {
+          "text": "come",
+          "start_ms": 139166,
+          "end_ms": 139704,
+          "confidence": 0.99975795
+        },
+        {
+          "text": "to",
+          "start_ms": 139704,
+          "end_ms": 139835,
+          "confidence": 0.7704345
+        },
+        {
+          "text": "pass.",
+          "start_ms": 139835,
+          "end_ms": 139900,
+          "confidence": 0.78300536
+        }
+      ]
+    },
+    {
+      "text": "To that, great is your faithfulness to me. Whoa, great is your faithfulness from the rising sun to the setting of the waves. Your name, great, great. Is your faithfulness to me.",
+      "start_ms": 140220,
+      "end_ms": 174937,
+      "text_sk": "Tvoja vernosť voči mne je nesmierna. Ó, tvoja vernosť je nesmierna od východu slnka až po západ vĺn. Tvoje meno, nesmierne, nesmierne. Je tvoja vernosť voči mne.",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 140220,
+          "end_ms": 140429,
+          "confidence": 0.4265847
+        },
+        {
+          "text": "that,",
+          "start_ms": 141219,
+          "end_ms": 143008,
+          "confidence": 0.5526656
+        },
+        {
+          "text": "great",
+          "start_ms": 143217,
+          "end_ms": 144136,
+          "confidence": 0.9955533
+        },
+        {
+          "text": "is",
+          "start_ms": 144426,
+          "end_ms": 145055,
+          "confidence": 0.9987112
+        },
+        {
+          "text": "your",
+          "start_ms": 145152,
+          "end_ms": 145329,
+          "confidence": 0.8443579
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 145329,
+          "end_ms": 148166,
+          "confidence": 0.999326
+        },
+        {
+          "text": "to",
+          "start_ms": 148488,
+          "end_ms": 148730,
+          "confidence": 0.97762376
+        },
+        {
+          "text": "me.",
+          "start_ms": 149583,
+          "end_ms": 149777,
+          "confidence": 0.96468836
+        },
+        {
+          "text": "Whoa,",
+          "start_ms": 150631,
+          "end_ms": 150824,
+          "confidence": 0.83631814
+        },
+        {
+          "text": "great",
+          "start_ms": 151694,
+          "end_ms": 152741,
+          "confidence": 0.9907907
+        },
+        {
+          "text": "is",
+          "start_ms": 152806,
+          "end_ms": 153434,
+          "confidence": 0.99940133
+        },
+        {
+          "text": "your",
+          "start_ms": 153466,
+          "end_ms": 153708,
+          "confidence": 0.9996619
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 153708,
+          "end_ms": 157011,
+          "confidence": 0.9997476
+        },
+        {
+          "text": "from",
+          "start_ms": 157060,
+          "end_ms": 157591,
+          "confidence": 0.757875
+        },
+        {
+          "text": "the",
+          "start_ms": 157591,
+          "end_ms": 157817,
+          "confidence": 0.9997223
+        },
+        {
+          "text": "rising",
+          "start_ms": 157817,
+          "end_ms": 158832,
+          "confidence": 0.9990952
+        },
+        {
+          "text": "sun",
+          "start_ms": 158929,
+          "end_ms": 160041,
+          "confidence": 0.99728477
+        },
+        {
+          "text": "to",
+          "start_ms": 161443,
+          "end_ms": 161652,
+          "confidence": 0.99651766
+        },
+        {
+          "text": "the",
+          "start_ms": 161829,
+          "end_ms": 162087,
+          "confidence": 0.9993104
+        },
+        {
+          "text": "setting",
+          "start_ms": 163121,
+          "end_ms": 163591,
+          "confidence": 0.841417
+        },
+        {
+          "text": "of",
+          "start_ms": 163623,
+          "end_ms": 163947,
+          "confidence": 0.6763727
+        },
+        {
+          "text": "the",
+          "start_ms": 163947,
+          "end_ms": 164206,
+          "confidence": 0.6530744
+        },
+        {
+          "text": "waves.",
+          "start_ms": 164320,
+          "end_ms": 165130,
+          "confidence": 0.43236634
+        },
+        {
+          "text": "Your",
+          "start_ms": 165308,
+          "end_ms": 165502,
+          "confidence": 0.865407
+        },
+        {
+          "text": "name,",
+          "start_ms": 166312,
+          "end_ms": 166652,
+          "confidence": 0.9734212
+        },
+        {
+          "text": "great,",
+          "start_ms": 167106,
+          "end_ms": 167932,
+          "confidence": 0.89954174
+        },
+        {
+          "text": "great.",
+          "start_ms": 168483,
+          "end_ms": 168791,
+          "confidence": 0.89577955
+        },
+        {
+          "text": "Is",
+          "start_ms": 169537,
+          "end_ms": 170174,
+          "confidence": 0.7597744
+        },
+        {
+          "text": "your",
+          "start_ms": 170207,
+          "end_ms": 170533,
+          "confidence": 0.9675726
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 170533,
+          "end_ms": 173716,
+          "confidence": 0.9998765
+        },
+        {
+          "text": "to",
+          "start_ms": 173781,
+          "end_ms": 173928,
+          "confidence": 0.98763835
+        },
+        {
+          "text": "me.",
+          "start_ms": 174694,
+          "end_ms": 174937,
+          "confidence": 0.9029254
+        }
+      ]
+    },
+    {
+      "text": "To you.",
+      "start_ms": 174937,
+      "end_ms": 176996,
+      "text_sk": "Pre teba.",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 176461,
+          "end_ms": 176574,
+          "confidence": 0.44396126
+        },
+        {
+          "text": "you.",
+          "start_ms": 176866,
+          "end_ms": 176996,
+          "confidence": 0.7726521
+        }
+      ]
+    },
+    {
+      "text": "Oh, your faithfulness, it never runs out.",
+      "start_ms": 176996,
+      "end_ms": 185643,
+      "text_sk": "Tvoja vernosť sa nikdy nevyčerpá.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 180221,
+          "end_ms": 180254,
+          "confidence": 0.660191
+        },
+        {
+          "text": "your",
+          "start_ms": 180432,
+          "end_ms": 180691,
+          "confidence": 0.8235191
+        },
+        {
+          "text": "faithfulness,",
+          "start_ms": 180691,
+          "end_ms": 183479,
+          "confidence": 0.94034064
+        },
+        {
+          "text": "it",
+          "start_ms": 183999,
+          "end_ms": 184031,
+          "confidence": 0.99857855
+        },
+        {
+          "text": "never",
+          "start_ms": 184031,
+          "end_ms": 184422,
+          "confidence": 0.9999726
+        },
+        {
+          "text": "runs",
+          "start_ms": 184422,
+          "end_ms": 185285,
+          "confidence": 0.9998517
+        },
+        {
+          "text": "out.",
+          "start_ms": 185383,
+          "end_ms": 185643,
+          "confidence": 0.996559
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 185643,
+      "end_ms": 187907,
+      "text_sk": "Áno.",
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 187109,
+          "end_ms": 187907,
+          "confidence": 0.9131335
+        }
+      ]
+    },
+    {
+      "text": "It never runs out. Oh. Your faithfulness, oh, it never runs out.",
+      "start_ms": 187907,
+      "end_ms": 202196,
+      "text_sk": "Nikdy sa nevyčerpá. Ó. Tvoja vernosť, ó, nikdy sa nevyčerpá.",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 188249,
+          "end_ms": 188282,
+          "confidence": 0.9908982
+        },
+        {
+          "text": "never",
+          "start_ms": 188282,
+          "end_ms": 188656,
+          "confidence": 0.9999467
+        },
+        {
+          "text": "runs",
+          "start_ms": 188656,
+          "end_ms": 189520,
+          "confidence": 0.9996575
+        },
+        {
+          "text": "out.",
+          "start_ms": 189552,
+          "end_ms": 190695,
+          "confidence": 0.9707487
+        },
+        {
+          "text": "Oh.",
+          "start_ms": 193046,
+          "end_ms": 193128,
+          "confidence": 0.77593815
+        },
+        {
+          "text": "Your",
+          "start_ms": 196330,
+          "end_ms": 196539,
+          "confidence": 0.509996
+        },
+        {
+          "text": "faithfulness,",
+          "start_ms": 196684,
+          "end_ms": 198554,
+          "confidence": 0.936608
+        },
+        {
+          "text": "oh,",
+          "start_ms": 199553,
+          "end_ms": 199730,
+          "confidence": 0.96156096
+        },
+        {
+          "text": "it",
+          "start_ms": 200761,
+          "end_ms": 200794,
+          "confidence": 0.999064
+        },
+        {
+          "text": "never",
+          "start_ms": 200794,
+          "end_ms": 201261,
+          "confidence": 0.9999926
+        },
+        {
+          "text": "runs",
+          "start_ms": 201261,
+          "end_ms": 202067,
+          "confidence": 0.99979717
+        },
+        {
+          "text": "out.",
+          "start_ms": 202131,
+          "end_ms": 202196,
+          "confidence": 0.9676229
+        }
+      ]
+    },
+    {
+      "text": "It never runs out.",
+      "start_ms": 202953,
+      "end_ms": 204531,
+      "text_sk": "Nikdy sa neminie.",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 202953,
+          "end_ms": 203066,
+          "confidence": 0.74921536
+        },
+        {
+          "text": "never",
+          "start_ms": 203066,
+          "end_ms": 203195,
+          "confidence": 0.99996746
+        },
+        {
+          "text": "runs",
+          "start_ms": 203195,
+          "end_ms": 204130,
+          "confidence": 0.9999548
+        },
+        {
+          "text": "out.",
+          "start_ms": 204130,
+          "end_ms": 204531,
+          "confidence": 0.9978907
+        }
+      ]
+    },
+    {
+      "text": "It never runs out.",
+      "start_ms": 204901,
+      "end_ms": 206316,
+      "text_sk": "Nikdy sa neminie.",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 204901,
+          "end_ms": 204966,
+          "confidence": 0.9993994
+        },
+        {
+          "text": "never",
+          "start_ms": 204966,
+          "end_ms": 205367,
+          "confidence": 0.99999297
+        },
+        {
+          "text": "runs",
+          "start_ms": 205367,
+          "end_ms": 206139,
+          "confidence": 0.99992347
+        },
+        {
+          "text": "out.",
+          "start_ms": 206236,
+          "end_ms": 206316,
+          "confidence": 0.9996008
+        }
+      ]
+    },
+    {
+      "text": "It never runs out.",
+      "start_ms": 207281,
+      "end_ms": 208374,
+      "text_sk": "Nikdy sa neminie.",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 207281,
+          "end_ms": 207313,
+          "confidence": 0.9943646
+        },
+        {
+          "text": "never",
+          "start_ms": 207313,
+          "end_ms": 207441,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "runs",
+          "start_ms": 207441,
+          "end_ms": 208229,
+          "confidence": 0.99993455
+        },
+        {
+          "text": "out.",
+          "start_ms": 208326,
+          "end_ms": 208374,
+          "confidence": 0.9998903
+        }
+      ]
+    },
+    {
+      "text": "I put my faith in Jesus, my anchor to the ground, my hope and firm foundation.",
+      "start_ms": 210014,
+      "end_ms": 221735,
+      "text_sk": "Vkladám svoju vieru v Ježiša, moju kotvu na zemi, moju nádej a pevný základ.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 210014,
+          "end_ms": 210190,
+          "confidence": 0.9996917
+        },
+        {
+          "text": "put",
+          "start_ms": 210271,
+          "end_ms": 210834,
+          "confidence": 0.9995672
+        },
+        {
+          "text": "my",
+          "start_ms": 210834,
+          "end_ms": 211155,
+          "confidence": 0.9999527
+        },
+        {
+          "text": "faith",
+          "start_ms": 211252,
+          "end_ms": 211927,
+          "confidence": 0.9999794
+        },
+        {
+          "text": "in",
+          "start_ms": 212023,
+          "end_ms": 212329,
+          "confidence": 0.9999815
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 212490,
+          "end_ms": 213487,
+          "confidence": 0.99401623
+        },
+        {
+          "text": "my",
+          "start_ms": 214114,
+          "end_ms": 214226,
+          "confidence": 0.99991095
+        },
+        {
+          "text": "anchor",
+          "start_ms": 214612,
+          "end_ms": 215272,
+          "confidence": 0.9997919
+        },
+        {
+          "text": "to",
+          "start_ms": 215497,
+          "end_ms": 215770,
+          "confidence": 0.99991894
+        },
+        {
+          "text": "the",
+          "start_ms": 216124,
+          "end_ms": 216317,
+          "confidence": 0.9999794
+        },
+        {
+          "text": "ground,",
+          "start_ms": 216607,
+          "end_ms": 216832,
+          "confidence": 0.7293342
+        },
+        {
+          "text": "my",
+          "start_ms": 218311,
+          "end_ms": 218408,
+          "confidence": 0.8068138
+        },
+        {
+          "text": "hope",
+          "start_ms": 218713,
+          "end_ms": 219212,
+          "confidence": 0.9997814
+        },
+        {
+          "text": "and",
+          "start_ms": 219276,
+          "end_ms": 219711,
+          "confidence": 0.99972695
+        },
+        {
+          "text": "firm",
+          "start_ms": 219759,
+          "end_ms": 220290,
+          "confidence": 0.9999616
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 220290,
+          "end_ms": 221735,
+          "confidence": 0.99804276
+        }
+      ]
+    },
+    {
+      "text": "He'll never let me down. No, I put My faith in Jesus, my anchor to the ground.",
+      "start_ms": 222514,
+      "end_ms": 234369,
+      "text_sk": "Nikdy ma nesklame. Nie, svoju vieru vkladám do Ježiša, môjho ukotvenia na zemi.",
+      "words": [
+        {
+          "text": "He'll",
+          "start_ms": 222514,
+          "end_ms": 222807,
+          "confidence": 0.99856985
+        },
+        {
+          "text": "never",
+          "start_ms": 222839,
+          "end_ms": 223440,
+          "confidence": 0.9999746
+        },
+        {
+          "text": "let",
+          "start_ms": 223489,
+          "end_ms": 224430,
+          "confidence": 0.9997743
+        },
+        {
+          "text": "me",
+          "start_ms": 224463,
+          "end_ms": 224723,
+          "confidence": 0.99992335
+        },
+        {
+          "text": "down.",
+          "start_ms": 225011,
+          "end_ms": 225031,
+          "confidence": 0.9157295
+        },
+        {
+          "text": "No,",
+          "start_ms": 225031,
+          "end_ms": 225080,
+          "confidence": 0.88175505
+        },
+        {
+          "text": "I",
+          "start_ms": 225096,
+          "end_ms": 225145,
+          "confidence": 0.98267096
+        },
+        {
+          "text": "put",
+          "start_ms": 225194,
+          "end_ms": 225794,
+          "confidence": 0.99914944
+        },
+        {
+          "text": "My",
+          "start_ms": 227650,
+          "end_ms": 227795,
+          "confidence": 0.47391173
+        },
+        {
+          "text": "faith",
+          "start_ms": 228005,
+          "end_ms": 228635,
+          "confidence": 0.9855241
+        },
+        {
+          "text": "in",
+          "start_ms": 228732,
+          "end_ms": 229103,
+          "confidence": 0.9986713
+        },
+        {
+          "text": "Jesus,",
+          "start_ms": 229216,
+          "end_ms": 230266,
+          "confidence": 0.96661264
+        },
+        {
+          "text": "my",
+          "start_ms": 230896,
+          "end_ms": 231106,
+          "confidence": 0.9987318
+        },
+        {
+          "text": "anchor",
+          "start_ms": 231381,
+          "end_ms": 232059,
+          "confidence": 0.99820256
+        },
+        {
+          "text": "to",
+          "start_ms": 232285,
+          "end_ms": 232495,
+          "confidence": 0.99903727
+        },
+        {
+          "text": "the",
+          "start_ms": 232851,
+          "end_ms": 233109,
+          "confidence": 0.9998803
+        },
+        {
+          "text": "ground.",
+          "start_ms": 233400,
+          "end_ms": 234369,
+          "confidence": 0.8619032
+        }
+      ]
+    },
+    {
+      "text": "He's my hope and firm foundation.",
+      "start_ms": 234450,
+      "end_ms": 238875,
+      "text_sk": "Je mojou nádejou a pevnou oporou.",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 234450,
+          "end_ms": 235177,
+          "confidence": 0.9470577
+        },
+        {
+          "text": "my",
+          "start_ms": 235193,
+          "end_ms": 235306,
+          "confidence": 0.99992955
+        },
+        {
+          "text": "hope",
+          "start_ms": 235580,
+          "end_ms": 236146,
+          "confidence": 0.9328887
+        },
+        {
+          "text": "and",
+          "start_ms": 236146,
+          "end_ms": 236436,
+          "confidence": 0.99837035
+        },
+        {
+          "text": "firm",
+          "start_ms": 236469,
+          "end_ms": 236953,
+          "confidence": 0.9976331
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 236953,
+          "end_ms": 238875,
+          "confidence": 0.958146
+        }
+      ]
+    },
+    {
+      "text": "He'll never let me down.",
+      "start_ms": 239052,
+      "end_ms": 241701,
+      "text_sk": "Nikdy ma nesklame.",
+      "words": [
+        {
+          "text": "He'll",
+          "start_ms": 239052,
+          "end_ms": 239504,
+          "confidence": 0.9836384
+        },
+        {
+          "text": "never",
+          "start_ms": 239569,
+          "end_ms": 240457,
+          "confidence": 0.9999697
+        },
+        {
+          "text": "let",
+          "start_ms": 240748,
+          "end_ms": 241281,
+          "confidence": 0.99877423
+        },
+        {
+          "text": "me",
+          "start_ms": 241281,
+          "end_ms": 241329,
+          "confidence": 0.781871
+        },
+        {
+          "text": "down.",
+          "start_ms": 241345,
+          "end_ms": 241701,
+          "confidence": 0.9889725
+        }
+      ]
+    },
+    {
+      "text": "What a God I put my trust in. Yes, I do. My anchor to the ground. My hope and firm foundation. He'll never let me down.",
+      "start_ms": 242137,
+      "end_ms": 256220,
+      "text_sk": "V akého Boha skladám svoju dôveru. Áno, skladám. Moja kotva na zemi. Moja nádej a pevný základ. Nikdy ma nesklame.",
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 242137,
+          "end_ms": 242766,
+          "confidence": 0.4067711
+        },
+        {
+          "text": "a",
+          "start_ms": 242799,
+          "end_ms": 242815,
+          "confidence": 0.5423228
+        },
+        {
+          "text": "God",
+          "start_ms": 242847,
+          "end_ms": 243235,
+          "confidence": 0.7809079
+        },
+        {
+          "text": "I",
+          "start_ms": 243412,
+          "end_ms": 243590,
+          "confidence": 0.90145254
+        },
+        {
+          "text": "put",
+          "start_ms": 243816,
+          "end_ms": 244284,
+          "confidence": 0.9748834
+        },
+        {
+          "text": "my",
+          "start_ms": 244333,
+          "end_ms": 244591,
+          "confidence": 0.9997106
+        },
+        {
+          "text": "trust",
+          "start_ms": 244866,
+          "end_ms": 245367,
+          "confidence": 0.9854983
+        },
+        {
+          "text": "in.",
+          "start_ms": 245367,
+          "end_ms": 245917,
+          "confidence": 0.86604893
+        },
+        {
+          "text": "Yes,",
+          "start_ms": 246240,
+          "end_ms": 246580,
+          "confidence": 0.9669063
+        },
+        {
+          "text": "I",
+          "start_ms": 246726,
+          "end_ms": 246774,
+          "confidence": 0.9993674
+        },
+        {
+          "text": "do.",
+          "start_ms": 247243,
+          "end_ms": 247389,
+          "confidence": 0.9960488
+        },
+        {
+          "text": "My",
+          "start_ms": 247631,
+          "end_ms": 247728,
+          "confidence": 0.9884908
+        },
+        {
+          "text": "anchor",
+          "start_ms": 248035,
+          "end_ms": 248602,
+          "confidence": 0.9987457
+        },
+        {
+          "text": "to",
+          "start_ms": 249071,
+          "end_ms": 249216,
+          "confidence": 0.9991155
+        },
+        {
+          "text": "the",
+          "start_ms": 249572,
+          "end_ms": 249814,
+          "confidence": 0.9999753
+        },
+        {
+          "text": "ground.",
+          "start_ms": 250283,
+          "end_ms": 251610,
+          "confidence": 0.97902554
+        },
+        {
+          "text": "My",
+          "start_ms": 251755,
+          "end_ms": 251933,
+          "confidence": 0.9953406
+        },
+        {
+          "text": "hope",
+          "start_ms": 252305,
+          "end_ms": 253372,
+          "confidence": 0.9977324
+        },
+        {
+          "text": "and",
+          "start_ms": 253372,
+          "end_ms": 253841,
+          "confidence": 0.988789
+        },
+        {
+          "text": "firm",
+          "start_ms": 253841,
+          "end_ms": 254165,
+          "confidence": 0.99928147
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 254230,
+          "end_ms": 254611,
+          "confidence": 0.9996161
+        },
+        {
+          "text": "He'll",
+          "start_ms": 254661,
+          "end_ms": 255026,
+          "confidence": 0.9627847
+        },
+        {
+          "text": "never",
+          "start_ms": 255026,
+          "end_ms": 255341,
+          "confidence": 0.99995744
+        },
+        {
+          "text": "let",
+          "start_ms": 255341,
+          "end_ms": 255457,
+          "confidence": 0.99942636
+        },
+        {
+          "text": "me",
+          "start_ms": 255457,
+          "end_ms": 255672,
+          "confidence": 0.9998733
+        },
+        {
+          "text": "down.",
+          "start_ms": 255672,
+          "end_ms": 256220,
+          "confidence": 0.9978103
+        }
+      ]
+    },
+    {
+      "text": "Never let me down.",
+      "start_ms": 256352,
+      "end_ms": 257547,
+      "text_sk": "Nikdy ma nesklamte.",
+      "words": [
+        {
+          "text": "Never",
+          "start_ms": 256352,
+          "end_ms": 256651,
+          "confidence": 0.6663445
+        },
+        {
+          "text": "let",
+          "start_ms": 256833,
+          "end_ms": 256933,
+          "confidence": 0.99951565
+        },
+        {
+          "text": "me",
+          "start_ms": 256933,
+          "end_ms": 257016,
+          "confidence": 0.9998424
+        },
+        {
+          "text": "down.",
+          "start_ms": 257016,
+          "end_ms": 257547,
+          "confidence": 0.9901064
+        }
+      ]
+    },
+    {
+      "text": "My faith in Jesus.",
+      "start_ms": 259550,
+      "end_ms": 262075,
+      "text_sk": "Moja viera v Ježiša.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 259550,
+          "end_ms": 259760,
+          "confidence": 0.45217237
+        },
+        {
+          "text": "faith",
+          "start_ms": 260068,
+          "end_ms": 260505,
+          "confidence": 0.96015203
+        },
+        {
+          "text": "in",
+          "start_ms": 260553,
+          "end_ms": 260699,
+          "confidence": 0.6132431
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 261039,
+          "end_ms": 262075,
+          "confidence": 0.6485981
+        }
+      ]
+    },
+    {
+      "text": "My God to the ground. He's my hope.",
+      "start_ms": 263063,
+      "end_ms": 268054,
+      "text_sk": "Môj Boh k zemi. On je moja nádej.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 263063,
+          "end_ms": 263144,
+          "confidence": 0.96681553
+        },
+        {
+          "text": "God",
+          "start_ms": 263776,
+          "end_ms": 264083,
+          "confidence": 0.543522
+        },
+        {
+          "text": "to",
+          "start_ms": 264099,
+          "end_ms": 264197,
+          "confidence": 0.9729537
+        },
+        {
+          "text": "the",
+          "start_ms": 264278,
+          "end_ms": 264423,
+          "confidence": 0.99935085
+        },
+        {
+          "text": "ground.",
+          "start_ms": 264423,
+          "end_ms": 265298,
+          "confidence": 0.6077854
+        },
+        {
+          "text": "He's",
+          "start_ms": 267247,
+          "end_ms": 267618,
+          "confidence": 0.7049296
+        },
+        {
+          "text": "my",
+          "start_ms": 267618,
+          "end_ms": 267828,
+          "confidence": 0.9988003
+        },
+        {
+          "text": "hope.",
+          "start_ms": 267828,
+          "end_ms": 268054,
+          "confidence": 0.7131815
+        }
+      ]
+    },
+    {
+      "text": "My only hope. My only hope.",
+      "start_ms": 268619,
+      "end_ms": 272507,
+      "text_sk": "Moja jediná nádej. Moja jediná nádej.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 268619,
+          "end_ms": 268651,
+          "confidence": 0.99584216
+        },
+        {
+          "text": "only",
+          "start_ms": 269022,
+          "end_ms": 269361,
+          "confidence": 0.7563264
+        },
+        {
+          "text": "hope.",
+          "start_ms": 269425,
+          "end_ms": 269926,
+          "confidence": 0.9922838
+        },
+        {
+          "text": "My",
+          "start_ms": 270022,
+          "end_ms": 270748,
+          "confidence": 0.9073153
+        },
+        {
+          "text": "only",
+          "start_ms": 271120,
+          "end_ms": 272072,
+          "confidence": 0.9778209
+        },
+        {
+          "text": "hope.",
+          "start_ms": 272104,
+          "end_ms": 272507,
+          "confidence": 0.9959617
+        }
+      ]
+    },
+    {
+      "text": "He'll never let me down. He'll never let me down.",
+      "start_ms": 272814,
+      "end_ms": 277408,
+      "text_sk": "Nikdy ma nesklame. Nikdy ma nesklame.",
+      "words": [
+        {
+          "text": "He'll",
+          "start_ms": 272814,
+          "end_ms": 273024,
+          "confidence": 0.97922254
+        },
+        {
+          "text": "never",
+          "start_ms": 273153,
+          "end_ms": 273734,
+          "confidence": 0.99995816
+        },
+        {
+          "text": "let",
+          "start_ms": 273734,
+          "end_ms": 273846,
+          "confidence": 0.9996567
+        },
+        {
+          "text": "me",
+          "start_ms": 274040,
+          "end_ms": 274218,
+          "confidence": 0.9999455
+        },
+        {
+          "text": "down.",
+          "start_ms": 274218,
+          "end_ms": 274411,
+          "confidence": 0.9400335
+        },
+        {
+          "text": "He'll",
+          "start_ms": 274589,
+          "end_ms": 275234,
+          "confidence": 0.9508157
+        },
+        {
+          "text": "never",
+          "start_ms": 275234,
+          "end_ms": 276057,
+          "confidence": 0.9999883
+        },
+        {
+          "text": "let",
+          "start_ms": 276138,
+          "end_ms": 276624,
+          "confidence": 0.9999739
+        },
+        {
+          "text": "me",
+          "start_ms": 276624,
+          "end_ms": 276897,
+          "confidence": 0.99998856
+        },
+        {
+          "text": "down.",
+          "start_ms": 277306,
+          "end_ms": 277408,
+          "confidence": 0.99797726
+        }
+      ]
+    },
+    {
+      "text": "Whoa, faithful. Great is your faithfulness to me. I'll pray. From the rising sun, from the rising sun to the setting same, I will praise your— in every season, great is your faithfulness to me.",
+      "start_ms": 281002,
+      "end_ms": 314622,
+      "text_sk": "Vau, verný. Veľká je tvoja vernosť voči mne. Budem sa modliť. Od východu slnka, od východu slnka až po jeho západ, budem chváliť tvoju – v každom ročnom období, veľká je tvoja vernosť voči mne.",
+      "words": [
+        {
+          "text": "Whoa,",
+          "start_ms": 281002,
+          "end_ms": 281034,
+          "confidence": 0.64561796
+        },
+        {
+          "text": "faithful.",
+          "start_ms": 281083,
+          "end_ms": 283053,
+          "confidence": 0.67237884
+        },
+        {
+          "text": "Great",
+          "start_ms": 283505,
+          "end_ms": 284700,
+          "confidence": 0.9995047
+        },
+        {
+          "text": "is",
+          "start_ms": 284700,
+          "end_ms": 285330,
+          "confidence": 0.99972194
+        },
+        {
+          "text": "your",
+          "start_ms": 285363,
+          "end_ms": 285621,
+          "confidence": 0.9235394
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 285686,
+          "end_ms": 288835,
+          "confidence": 0.99989235
+        },
+        {
+          "text": "to",
+          "start_ms": 288835,
+          "end_ms": 288932,
+          "confidence": 0.989592
+        },
+        {
+          "text": "me.",
+          "start_ms": 288932,
+          "end_ms": 289061,
+          "confidence": 0.9953294
+        },
+        {
+          "text": "I'll",
+          "start_ms": 291450,
+          "end_ms": 291835,
+          "confidence": 0.6396087
+        },
+        {
+          "text": "pray.",
+          "start_ms": 291916,
+          "end_ms": 292205,
+          "confidence": 0.7720196
+        },
+        {
+          "text": "From",
+          "start_ms": 297443,
+          "end_ms": 297717,
+          "confidence": 0.73117924
+        },
+        {
+          "text": "the",
+          "start_ms": 297909,
+          "end_ms": 298070,
+          "confidence": 0.999405
+        },
+        {
+          "text": "rising",
+          "start_ms": 298070,
+          "end_ms": 299163,
+          "confidence": 0.998467
+        },
+        {
+          "text": "sun,",
+          "start_ms": 299195,
+          "end_ms": 299886,
+          "confidence": 0.7187025
+        },
+        {
+          "text": "from",
+          "start_ms": 299982,
+          "end_ms": 300384,
+          "confidence": 0.89304066
+        },
+        {
+          "text": "the",
+          "start_ms": 300384,
+          "end_ms": 300690,
+          "confidence": 0.9996959
+        },
+        {
+          "text": "rising",
+          "start_ms": 300690,
+          "end_ms": 301174,
+          "confidence": 0.9998785
+        },
+        {
+          "text": "sun",
+          "start_ms": 301222,
+          "end_ms": 301578,
+          "confidence": 0.99949956
+        },
+        {
+          "text": "to",
+          "start_ms": 301674,
+          "end_ms": 301901,
+          "confidence": 0.890581
+        },
+        {
+          "text": "the",
+          "start_ms": 302014,
+          "end_ms": 302240,
+          "confidence": 0.9999262
+        },
+        {
+          "text": "setting",
+          "start_ms": 302240,
+          "end_ms": 303273,
+          "confidence": 0.99948287
+        },
+        {
+          "text": "same,",
+          "start_ms": 303321,
+          "end_ms": 303822,
+          "confidence": 0.9609734
+        },
+        {
+          "text": "I",
+          "start_ms": 303935,
+          "end_ms": 304113,
+          "confidence": 0.99279153
+        },
+        {
+          "text": "will",
+          "start_ms": 304193,
+          "end_ms": 304306,
+          "confidence": 0.99863416
+        },
+        {
+          "text": "praise",
+          "start_ms": 304306,
+          "end_ms": 305130,
+          "confidence": 0.9979564
+        },
+        {
+          "text": "your—",
+          "start_ms": 305566,
+          "end_ms": 305824,
+          "confidence": 0.45834872
+        },
+        {
+          "text": "in",
+          "start_ms": 306518,
+          "end_ms": 306583,
+          "confidence": 0.7266582
+        },
+        {
+          "text": "every",
+          "start_ms": 306680,
+          "end_ms": 307310,
+          "confidence": 0.9998136
+        },
+        {
+          "text": "season,",
+          "start_ms": 307503,
+          "end_ms": 308601,
+          "confidence": 0.9294396
+        },
+        {
+          "text": "great",
+          "start_ms": 308698,
+          "end_ms": 309764,
+          "confidence": 0.99855214
+        },
+        {
+          "text": "is",
+          "start_ms": 309764,
+          "end_ms": 310377,
+          "confidence": 0.9884144
+        },
+        {
+          "text": "your",
+          "start_ms": 310393,
+          "end_ms": 310732,
+          "confidence": 0.9980458
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 310732,
+          "end_ms": 313945,
+          "confidence": 0.99988705
+        },
+        {
+          "text": "to",
+          "start_ms": 313993,
+          "end_ms": 314058,
+          "confidence": 0.9429424
+        },
+        {
+          "text": "me.",
+          "start_ms": 314445,
+          "end_ms": 314622,
+          "confidence": 0.95043916
+        }
+      ]
+    },
+    {
+      "text": "Say, I put my faith, I put my faith in Jesus.",
+      "start_ms": 314622,
+      "end_ms": 320144,
+      "text_sk": "Vložil som svoju vieru, vložil som svoju vieru v Ježiša.",
+      "words": [
+        {
+          "text": "Say,",
+          "start_ms": 314929,
+          "end_ms": 314994,
+          "confidence": 0.97567934
+        },
+        {
+          "text": "I",
+          "start_ms": 315026,
+          "end_ms": 315058,
+          "confidence": 0.9969433
+        },
+        {
+          "text": "put",
+          "start_ms": 315074,
+          "end_ms": 315236,
+          "confidence": 0.9678724
+        },
+        {
+          "text": "my",
+          "start_ms": 315430,
+          "end_ms": 315672,
+          "confidence": 0.99991035
+        },
+        {
+          "text": "faith,",
+          "start_ms": 315914,
+          "end_ms": 316640,
+          "confidence": 0.8304144
+        },
+        {
+          "text": "I",
+          "start_ms": 316850,
+          "end_ms": 317028,
+          "confidence": 0.9525421
+        },
+        {
+          "text": "put",
+          "start_ms": 317028,
+          "end_ms": 317657,
+          "confidence": 0.9991555
+        },
+        {
+          "text": "my",
+          "start_ms": 317657,
+          "end_ms": 317770,
+          "confidence": 0.9988839
+        },
+        {
+          "text": "faith",
+          "start_ms": 318077,
+          "end_ms": 318335,
+          "confidence": 0.9968515
+        },
+        {
+          "text": "in",
+          "start_ms": 318729,
+          "end_ms": 318780,
+          "confidence": 0.9200548
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 319087,
+          "end_ms": 320144,
+          "confidence": 0.960509
+        }
+      ]
+    },
+    {
+      "text": "My anchor to the ground.",
+      "start_ms": 320846,
+      "end_ms": 323565,
+      "text_sk": "Moja kotva na zemi.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 320846,
+          "end_ms": 321040,
+          "confidence": 0.7961966
+        },
+        {
+          "text": "anchor",
+          "start_ms": 321331,
+          "end_ms": 321817,
+          "confidence": 0.99540764
+        },
+        {
+          "text": "to",
+          "start_ms": 322222,
+          "end_ms": 322513,
+          "confidence": 0.9979169
+        },
+        {
+          "text": "the",
+          "start_ms": 322788,
+          "end_ms": 323047,
+          "confidence": 0.9998878
+        },
+        {
+          "text": "ground.",
+          "start_ms": 323274,
+          "end_ms": 323565,
+          "confidence": 0.9296556
+        }
+      ]
+    },
+    {
+      "text": "He's my hope, my hope and firm foundation.",
+      "start_ms": 323662,
+      "end_ms": 327757,
+      "text_sk": "Je mojou nádejou, mojou nádejou a pevnou oporou.",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 323662,
+          "end_ms": 324083,
+          "confidence": 0.98637545
+        },
+        {
+          "text": "my",
+          "start_ms": 324083,
+          "end_ms": 324180,
+          "confidence": 0.9999043
+        },
+        {
+          "text": "hope,",
+          "start_ms": 324471,
+          "end_ms": 324633,
+          "confidence": 0.753024
+        },
+        {
+          "text": "my",
+          "start_ms": 324747,
+          "end_ms": 325168,
+          "confidence": 0.9925095
+        },
+        {
+          "text": "hope",
+          "start_ms": 325200,
+          "end_ms": 325912,
+          "confidence": 0.9938746
+        },
+        {
+          "text": "and",
+          "start_ms": 326106,
+          "end_ms": 326446,
+          "confidence": 0.96971726
+        },
+        {
+          "text": "firm",
+          "start_ms": 326511,
+          "end_ms": 326883,
+          "confidence": 0.99971014
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 326997,
+          "end_ms": 327757,
+          "confidence": 0.9938424
+        }
+      ]
+    },
+    {
+      "text": "He'll never let me down.",
+      "start_ms": 327952,
+      "end_ms": 329374,
+      "text_sk": "Nikdy ma nesklame.",
+      "words": [
+        {
+          "text": "He'll",
+          "start_ms": 327952,
+          "end_ms": 328292,
+          "confidence": 0.71560013
+        },
+        {
+          "text": "never",
+          "start_ms": 328292,
+          "end_ms": 328599,
+          "confidence": 0.99986887
+        },
+        {
+          "text": "let",
+          "start_ms": 328615,
+          "end_ms": 328842,
+          "confidence": 0.9984005
+        },
+        {
+          "text": "me",
+          "start_ms": 328955,
+          "end_ms": 329214,
+          "confidence": 0.9999511
+        },
+        {
+          "text": "down.",
+          "start_ms": 329262,
+          "end_ms": 329374,
+          "confidence": 0.97176206
+        }
+      ]
+    },
+    {
+      "text": "You never let me down.",
+      "start_ms": 329583,
+      "end_ms": 332251,
+      "text_sk": "Nikdy ma nesklamete.",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 329583,
+          "end_ms": 329728,
+          "confidence": 0.50978535
+        },
+        {
+          "text": "never",
+          "start_ms": 329905,
+          "end_ms": 330210,
+          "confidence": 0.6778198
+        },
+        {
+          "text": "let",
+          "start_ms": 330628,
+          "end_ms": 331078,
+          "confidence": 0.99864227
+        },
+        {
+          "text": "me",
+          "start_ms": 331271,
+          "end_ms": 331512,
+          "confidence": 0.99589455
+        },
+        {
+          "text": "down.",
+          "start_ms": 331608,
+          "end_ms": 332251,
+          "confidence": 0.9984428
+        }
+      ]
+    },
+    {
+      "text": "I put my faith.",
+      "start_ms": 332379,
+      "end_ms": 333328,
+      "text_sk": "Vkladám svoju vieru.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 332379,
+          "end_ms": 332412,
+          "confidence": 0.9839475
+        },
+        {
+          "text": "put",
+          "start_ms": 332637,
+          "end_ms": 332829,
+          "confidence": 0.9844922
+        },
+        {
+          "text": "my",
+          "start_ms": 332829,
+          "end_ms": 332910,
+          "confidence": 0.99987483
+        },
+        {
+          "text": "faith.",
+          "start_ms": 333119,
+          "end_ms": 333328,
+          "confidence": 0.8912997
+        }
+      ]
+    },
+    {
+      "text": "I put my anchor. He's my hope, my hope and firm foundation.",
+      "start_ms": 333585,
+      "end_ms": 344158,
+      "text_sk": "Vložil som svoju kotvu. Je mojou nádejou, mojou nádejou a pevným základom.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 333585,
+          "end_ms": 333601,
+          "confidence": 0.97920793
+        },
+        {
+          "text": "put",
+          "start_ms": 333681,
+          "end_ms": 334372,
+          "confidence": 0.9976761
+        },
+        {
+          "text": "my",
+          "start_ms": 336574,
+          "end_ms": 336750,
+          "confidence": 0.9852938
+        },
+        {
+          "text": "anchor.",
+          "start_ms": 336975,
+          "end_ms": 337779,
+          "confidence": 0.87154394
+        },
+        {
+          "text": "He's",
+          "start_ms": 340372,
+          "end_ms": 340841,
+          "confidence": 0.9826261
+        },
+        {
+          "text": "my",
+          "start_ms": 340857,
+          "end_ms": 341068,
+          "confidence": 0.9999218
+        },
+        {
+          "text": "hope,",
+          "start_ms": 341181,
+          "end_ms": 341763,
+          "confidence": 0.98510265
+        },
+        {
+          "text": "my",
+          "start_ms": 341844,
+          "end_ms": 341925,
+          "confidence": 0.9999467
+        },
+        {
+          "text": "hope",
+          "start_ms": 342168,
+          "end_ms": 342734,
+          "confidence": 0.9999535
+        },
+        {
+          "text": "and",
+          "start_ms": 342799,
+          "end_ms": 343203,
+          "confidence": 0.99996984
+        },
+        {
+          "text": "firm",
+          "start_ms": 343219,
+          "end_ms": 343640,
+          "confidence": 0.99998784
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 343769,
+          "end_ms": 344158,
+          "confidence": 0.9997667
+        }
+      ]
+    },
+    {
+      "text": "Never let me down. Come on, sing it out.",
+      "start_ms": 344271,
+      "end_ms": 347377,
+      "text_sk": "Nikdy ma nesklamte. Poďte, zaspievajte to.",
+      "words": [
+        {
+          "text": "Never",
+          "start_ms": 344271,
+          "end_ms": 344756,
+          "confidence": 0.98825604
+        },
+        {
+          "text": "let",
+          "start_ms": 345096,
+          "end_ms": 346051,
+          "confidence": 0.99969697
+        },
+        {
+          "text": "me",
+          "start_ms": 346051,
+          "end_ms": 346293,
+          "confidence": 0.99999464
+        },
+        {
+          "text": "down.",
+          "start_ms": 346374,
+          "end_ms": 346568,
+          "confidence": 0.9990156
+        },
+        {
+          "text": "Come",
+          "start_ms": 346698,
+          "end_ms": 346860,
+          "confidence": 0.80340123
+        },
+        {
+          "text": "on,",
+          "start_ms": 346860,
+          "end_ms": 346957,
+          "confidence": 0.9985425
+        },
+        {
+          "text": "sing",
+          "start_ms": 347021,
+          "end_ms": 347151,
+          "confidence": 0.9999299
+        },
+        {
+          "text": "it",
+          "start_ms": 347167,
+          "end_ms": 347248,
+          "confidence": 0.99996185
+        },
+        {
+          "text": "out.",
+          "start_ms": 347248,
+          "end_ms": 347377,
+          "confidence": 0.98453915
+        }
+      ]
+    },
+    {
+      "text": "Say, I put my faith in My anchor to the ground, my hope and my hope and firm foundation.",
+      "start_ms": 347976,
+      "end_ms": 361192,
+      "text_sk": "Vkladám svoju vieru do môjho ukotvenia k zemi, mojej nádeje a mojej pevnej istoty.",
+      "words": [
+        {
+          "text": "Say,",
+          "start_ms": 347976,
+          "end_ms": 348251,
+          "confidence": 0.84714735
+        },
+        {
+          "text": "I",
+          "start_ms": 348316,
+          "end_ms": 348413,
+          "confidence": 0.9925741
+        },
+        {
+          "text": "put",
+          "start_ms": 348477,
+          "end_ms": 348785,
+          "confidence": 0.99844813
+        },
+        {
+          "text": "my",
+          "start_ms": 349037,
+          "end_ms": 349088,
+          "confidence": 0.9999485
+        },
+        {
+          "text": "faith",
+          "start_ms": 349412,
+          "end_ms": 349634,
+          "confidence": 0.99973553
+        },
+        {
+          "text": "in",
+          "start_ms": 349634,
+          "end_ms": 350469,
+          "confidence": 0.5467925
+        },
+        {
+          "text": "My",
+          "start_ms": 352279,
+          "end_ms": 352359,
+          "confidence": 0.7938059
+        },
+        {
+          "text": "anchor",
+          "start_ms": 352681,
+          "end_ms": 353407,
+          "confidence": 0.99677086
+        },
+        {
+          "text": "to",
+          "start_ms": 353568,
+          "end_ms": 353826,
+          "confidence": 0.9995296
+        },
+        {
+          "text": "the",
+          "start_ms": 354212,
+          "end_ms": 354293,
+          "confidence": 0.9998957
+        },
+        {
+          "text": "ground,",
+          "start_ms": 354615,
+          "end_ms": 355389,
+          "confidence": 0.8568562
+        },
+        {
+          "text": "my",
+          "start_ms": 356533,
+          "end_ms": 356662,
+          "confidence": 0.9981329
+        },
+        {
+          "text": "hope",
+          "start_ms": 356871,
+          "end_ms": 357516,
+          "confidence": 0.97617435
+        },
+        {
+          "text": "and",
+          "start_ms": 357516,
+          "end_ms": 357951,
+          "confidence": 0.5548578
+        },
+        {
+          "text": "my",
+          "start_ms": 358563,
+          "end_ms": 358660,
+          "confidence": 0.9437447
+        },
+        {
+          "text": "hope",
+          "start_ms": 358966,
+          "end_ms": 359530,
+          "confidence": 0.99579453
+        },
+        {
+          "text": "and",
+          "start_ms": 359772,
+          "end_ms": 359901,
+          "confidence": 0.95341015
+        },
+        {
+          "text": "firm",
+          "start_ms": 359933,
+          "end_ms": 360288,
+          "confidence": 0.8783746
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 360482,
+          "end_ms": 361192,
+          "confidence": 0.95885223
+        }
+      ]
+    },
+    {
+      "text": "Never let me down, never let me. I put my faith in Jesus.",
+      "start_ms": 361305,
+      "end_ms": 370656,
+      "text_sk": "Nikdy ma nesklam, nikdy ma nesklam. Svoju vieru vkladám do Ježiša.",
+      "words": [
+        {
+          "text": "Never",
+          "start_ms": 361305,
+          "end_ms": 361482,
+          "confidence": 0.9731492
+        },
+        {
+          "text": "let",
+          "start_ms": 361531,
+          "end_ms": 361708,
+          "confidence": 0.997903
+        },
+        {
+          "text": "me",
+          "start_ms": 361708,
+          "end_ms": 361950,
+          "confidence": 0.99954885
+        },
+        {
+          "text": "down,",
+          "start_ms": 362031,
+          "end_ms": 362224,
+          "confidence": 0.77408993
+        },
+        {
+          "text": "never",
+          "start_ms": 362434,
+          "end_ms": 363241,
+          "confidence": 0.999418
+        },
+        {
+          "text": "let",
+          "start_ms": 363515,
+          "end_ms": 364032,
+          "confidence": 0.9996983
+        },
+        {
+          "text": "me.",
+          "start_ms": 364145,
+          "end_ms": 364451,
+          "confidence": 0.7653396
+        },
+        {
+          "text": "I",
+          "start_ms": 364839,
+          "end_ms": 365016,
+          "confidence": 0.99053675
+        },
+        {
+          "text": "put",
+          "start_ms": 365097,
+          "end_ms": 365694,
+          "confidence": 0.955671
+        },
+        {
+          "text": "my",
+          "start_ms": 365742,
+          "end_ms": 366065,
+          "confidence": 0.9998503
+        },
+        {
+          "text": "faith",
+          "start_ms": 366146,
+          "end_ms": 366839,
+          "confidence": 0.9984604
+        },
+        {
+          "text": "in",
+          "start_ms": 367422,
+          "end_ms": 368214,
+          "confidence": 0.9623351
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 369945,
+          "end_ms": 370656,
+          "confidence": 0.6805606
+        }
+      ]
+    },
+    {
+      "text": "My anchor to the ground, my hope and firm foundation.",
+      "start_ms": 371158,
+      "end_ms": 377663,
+      "text_sk": "Moja kotva na zemi, moja nádej a pevný základ.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 371158,
+          "end_ms": 371255,
+          "confidence": 0.60929906
+        },
+        {
+          "text": "anchor",
+          "start_ms": 371562,
+          "end_ms": 372257,
+          "confidence": 0.9988238
+        },
+        {
+          "text": "to",
+          "start_ms": 372548,
+          "end_ms": 372710,
+          "confidence": 0.9957754
+        },
+        {
+          "text": "the",
+          "start_ms": 373098,
+          "end_ms": 373341,
+          "confidence": 0.7600172
+        },
+        {
+          "text": "ground,",
+          "start_ms": 373503,
+          "end_ms": 375346,
+          "confidence": 0.69013166
+        },
+        {
+          "text": "my",
+          "start_ms": 375362,
+          "end_ms": 375459,
+          "confidence": 0.98247993
+        },
+        {
+          "text": "hope",
+          "start_ms": 375751,
+          "end_ms": 376090,
+          "confidence": 0.89320946
+        },
+        {
+          "text": "and",
+          "start_ms": 376220,
+          "end_ms": 376465,
+          "confidence": 0.9998764
+        },
+        {
+          "text": "firm",
+          "start_ms": 376580,
+          "end_ms": 376875,
+          "confidence": 0.9985434
+        },
+        {
+          "text": "foundation.",
+          "start_ms": 377154,
+          "end_ms": 377663,
+          "confidence": 0.99770826
+        }
+      ]
+    },
+    {
+      "text": "He'll never let me down.",
+      "start_ms": 377712,
+      "end_ms": 379319,
+      "text_sk": "Nikdy ma nesklame.",
+      "words": [
+        {
+          "text": "He'll",
+          "start_ms": 377712,
+          "end_ms": 377843,
+          "confidence": 0.9273408
+        },
+        {
+          "text": "never",
+          "start_ms": 377843,
+          "end_ms": 378302,
+          "confidence": 0.9977375
+        },
+        {
+          "text": "let",
+          "start_ms": 378302,
+          "end_ms": 379122,
+          "confidence": 0.9971762
+        },
+        {
+          "text": "me",
+          "start_ms": 379204,
+          "end_ms": 379237,
+          "confidence": 0.9987565
+        },
+        {
+          "text": "down.",
+          "start_ms": 379237,
+          "end_ms": 379319,
+          "confidence": 0.9390721
+        }
+      ]
+    },
+    {
+      "text": "You never let me down. Oh, great is your faithfulness to me. Great is your faithfulness to me. Great is your faithfulness from the rising sun. Hey, rays from the rising sun!",
+      "start_ms": 383683,
+      "end_ms": 415677,
+      "text_sk": "Nikdy ma nesklamete. Ó, veľká je tvoja vernosť voči mne. Veľká je tvoja vernosť voči mne. Veľká je tvoja vernosť od východu slnka. Hej, lúče od východu slnka!",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 383683,
+          "end_ms": 383781,
+          "confidence": 0.5093347
+        },
+        {
+          "text": "never",
+          "start_ms": 383959,
+          "end_ms": 384833,
+          "confidence": 0.6674104
+        },
+        {
+          "text": "let",
+          "start_ms": 384995,
+          "end_ms": 385643,
+          "confidence": 0.99877053
+        },
+        {
+          "text": "me",
+          "start_ms": 385643,
+          "end_ms": 385837,
+          "confidence": 0.9995468
+        },
+        {
+          "text": "down.",
+          "start_ms": 386129,
+          "end_ms": 386987,
+          "confidence": 0.9543814
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 389158,
+          "end_ms": 389302,
+          "confidence": 0.6470088
+        },
+        {
+          "text": "great",
+          "start_ms": 389977,
+          "end_ms": 391423,
+          "confidence": 0.65514416
+        },
+        {
+          "text": "is",
+          "start_ms": 391423,
+          "end_ms": 392066,
+          "confidence": 0.46340954
+        },
+        {
+          "text": "your",
+          "start_ms": 392066,
+          "end_ms": 392242,
+          "confidence": 0.69655305
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 392387,
+          "end_ms": 395086,
+          "confidence": 0.9979991
+        },
+        {
+          "text": "to",
+          "start_ms": 395520,
+          "end_ms": 395729,
+          "confidence": 0.47326356
+        },
+        {
+          "text": "me.",
+          "start_ms": 396388,
+          "end_ms": 396484,
+          "confidence": 0.96854514
+        },
+        {
+          "text": "Great",
+          "start_ms": 396661,
+          "end_ms": 397529,
+          "confidence": 0.7496576
+        },
+        {
+          "text": "is",
+          "start_ms": 397529,
+          "end_ms": 397754,
+          "confidence": 0.974411
+        },
+        {
+          "text": "your",
+          "start_ms": 398478,
+          "end_ms": 398720,
+          "confidence": 0.9916258
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 398720,
+          "end_ms": 399704,
+          "confidence": 0.9998257
+        },
+        {
+          "text": "to",
+          "start_ms": 399768,
+          "end_ms": 399914,
+          "confidence": 0.6392585
+        },
+        {
+          "text": "me.",
+          "start_ms": 400349,
+          "end_ms": 400672,
+          "confidence": 0.97803366
+        },
+        {
+          "text": "Great",
+          "start_ms": 400753,
+          "end_ms": 400962,
+          "confidence": 0.58720094
+        },
+        {
+          "text": "is",
+          "start_ms": 400995,
+          "end_ms": 401446,
+          "confidence": 0.9963058
+        },
+        {
+          "text": "your",
+          "start_ms": 401801,
+          "end_ms": 402221,
+          "confidence": 0.995389
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 402527,
+          "end_ms": 403737,
+          "confidence": 0.99983954
+        },
+        {
+          "text": "from",
+          "start_ms": 404221,
+          "end_ms": 404609,
+          "confidence": 0.73423463
+        },
+        {
+          "text": "the",
+          "start_ms": 404625,
+          "end_ms": 404706,
+          "confidence": 0.99714357
+        },
+        {
+          "text": "rising",
+          "start_ms": 404706,
+          "end_ms": 405964,
+          "confidence": 0.9990004
+        },
+        {
+          "text": "sun.",
+          "start_ms": 406061,
+          "end_ms": 407416,
+          "confidence": 0.9844798
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 410515,
+          "end_ms": 410759,
+          "confidence": 0.76012194
+        },
+        {
+          "text": "rays",
+          "start_ms": 411166,
+          "end_ms": 412029,
+          "confidence": 0.5082646
+        },
+        {
+          "text": "from",
+          "start_ms": 412551,
+          "end_ms": 412844,
+          "confidence": 0.9997899
+        },
+        {
+          "text": "the",
+          "start_ms": 412958,
+          "end_ms": 413283,
+          "confidence": 0.999936
+        },
+        {
+          "text": "rising",
+          "start_ms": 413349,
+          "end_ms": 414309,
+          "confidence": 0.9946536
+        },
+        {
+          "text": "sun!",
+          "start_ms": 414342,
+          "end_ms": 415677,
+          "confidence": 0.7083001
+        }
+      ]
+    },
+    {
+      "text": "Hey, from the rising sun! Let it go up and let it go down. I'll still bless you. I'll still praise you. Let it go up. Then let it go down, and I'll still bless you. I'll still bless you.",
+      "start_ms": 416782,
+      "end_ms": 440166,
+      "text_sk": "Zdravím vás od vychádzajúceho slnka! Nech stúpa a nech klesá. Stále vám budem žehnať. Stále vás budem chváliť. Nech stúpa. Potom nech klesá a ja vám stále budem žehnať. Stále vám budem žehnať.",
+      "words": [
+        {
+          "text": "Hey,",
+          "start_ms": 416782,
+          "end_ms": 416863,
+          "confidence": 0.96695
+        },
+        {
+          "text": "from",
+          "start_ms": 420642,
+          "end_ms": 421239,
+          "confidence": 0.9578464
+        },
+        {
+          "text": "the",
+          "start_ms": 421385,
+          "end_ms": 421465,
+          "confidence": 0.9999839
+        },
+        {
+          "text": "rising",
+          "start_ms": 421481,
+          "end_ms": 422644,
+          "confidence": 0.9999285
+        },
+        {
+          "text": "sun!",
+          "start_ms": 422676,
+          "end_ms": 423451,
+          "confidence": 0.9579846
+        },
+        {
+          "text": "Let",
+          "start_ms": 424130,
+          "end_ms": 424437,
+          "confidence": 0.99434763
+        },
+        {
+          "text": "it",
+          "start_ms": 424437,
+          "end_ms": 424533,
+          "confidence": 0.998718
+        },
+        {
+          "text": "go",
+          "start_ms": 424533,
+          "end_ms": 424856,
+          "confidence": 0.98223996
+        },
+        {
+          "text": "up",
+          "start_ms": 424937,
+          "end_ms": 425389,
+          "confidence": 0.99380505
+        },
+        {
+          "text": "and",
+          "start_ms": 425826,
+          "end_ms": 426036,
+          "confidence": 0.83943564
+        },
+        {
+          "text": "let",
+          "start_ms": 426230,
+          "end_ms": 426472,
+          "confidence": 0.9995963
+        },
+        {
+          "text": "it",
+          "start_ms": 426472,
+          "end_ms": 426956,
+          "confidence": 0.9999876
+        },
+        {
+          "text": "go",
+          "start_ms": 426956,
+          "end_ms": 427037,
+          "confidence": 0.9996464
+        },
+        {
+          "text": "down.",
+          "start_ms": 427683,
+          "end_ms": 427812,
+          "confidence": 0.96310186
+        },
+        {
+          "text": "I'll",
+          "start_ms": 428232,
+          "end_ms": 428539,
+          "confidence": 0.8839452
+        },
+        {
+          "text": "still",
+          "start_ms": 428571,
+          "end_ms": 428959,
+          "confidence": 0.99996793
+        },
+        {
+          "text": "bless",
+          "start_ms": 428975,
+          "end_ms": 429362,
+          "confidence": 0.99987996
+        },
+        {
+          "text": "you.",
+          "start_ms": 429362,
+          "end_ms": 429540,
+          "confidence": 0.92920274
+        },
+        {
+          "text": "I'll",
+          "start_ms": 430493,
+          "end_ms": 431074,
+          "confidence": 0.9954517
+        },
+        {
+          "text": "still",
+          "start_ms": 431074,
+          "end_ms": 431671,
+          "confidence": 0.9996749
+        },
+        {
+          "text": "praise",
+          "start_ms": 431687,
+          "end_ms": 431768,
+          "confidence": 0.99958414
+        },
+        {
+          "text": "you.",
+          "start_ms": 431784,
+          "end_ms": 431897,
+          "confidence": 0.9986819
+        },
+        {
+          "text": "Let",
+          "start_ms": 432527,
+          "end_ms": 432834,
+          "confidence": 0.9998093
+        },
+        {
+          "text": "it",
+          "start_ms": 432834,
+          "end_ms": 432947,
+          "confidence": 0.9999479
+        },
+        {
+          "text": "go",
+          "start_ms": 432947,
+          "end_ms": 433238,
+          "confidence": 0.92948556
+        },
+        {
+          "text": "up.",
+          "start_ms": 433722,
+          "end_ms": 433819,
+          "confidence": 0.88459736
+        },
+        {
+          "text": "Then",
+          "start_ms": 434424,
+          "end_ms": 434634,
+          "confidence": 0.63030756
+        },
+        {
+          "text": "let",
+          "start_ms": 434650,
+          "end_ms": 434893,
+          "confidence": 0.99878687
+        },
+        {
+          "text": "it",
+          "start_ms": 434893,
+          "end_ms": 434990,
+          "confidence": 0.9997092
+        },
+        {
+          "text": "go",
+          "start_ms": 434990,
+          "end_ms": 435216,
+          "confidence": 0.9920854
+        },
+        {
+          "text": "down,",
+          "start_ms": 435232,
+          "end_ms": 436090,
+          "confidence": 0.9482755
+        },
+        {
+          "text": "and",
+          "start_ms": 436607,
+          "end_ms": 436753,
+          "confidence": 0.9996525
+        },
+        {
+          "text": "I'll",
+          "start_ms": 436753,
+          "end_ms": 437012,
+          "confidence": 0.99811846
+        },
+        {
+          "text": "still",
+          "start_ms": 437012,
+          "end_ms": 437222,
+          "confidence": 0.9999759
+        },
+        {
+          "text": "bless",
+          "start_ms": 437416,
+          "end_ms": 437837,
+          "confidence": 0.9999882
+        },
+        {
+          "text": "you.",
+          "start_ms": 437885,
+          "end_ms": 437998,
+          "confidence": 0.98512167
+        },
+        {
+          "text": "I'll",
+          "start_ms": 438807,
+          "end_ms": 439050,
+          "confidence": 0.99905515
+        },
+        {
+          "text": "still",
+          "start_ms": 439114,
+          "end_ms": 439519,
+          "confidence": 0.9999908
+        },
+        {
+          "text": "bless",
+          "start_ms": 439519,
+          "end_ms": 439939,
+          "confidence": 0.9999943
+        },
+        {
+          "text": "you.",
+          "start_ms": 439972,
+          "end_ms": 440166,
+          "confidence": 0.99496
+        }
+      ]
+    },
+    {
+      "text": "Let it go up, then let it come down, and I'll still bless you.",
+      "start_ms": 440635,
+      "end_ms": 446398,
+      "text_sk": "Nech to stúpa, potom nech to klesá, a aj tak ti budem žehnať.",
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 440635,
+          "end_ms": 441217,
+          "confidence": 0.5387371
+        },
+        {
+          "text": "it",
+          "start_ms": 441217,
+          "end_ms": 441379,
+          "confidence": 0.9992212
+        },
+        {
+          "text": "go",
+          "start_ms": 441379,
+          "end_ms": 441622,
+          "confidence": 0.99580044
+        },
+        {
+          "text": "up,",
+          "start_ms": 441767,
+          "end_ms": 442463,
+          "confidence": 0.6669224
+        },
+        {
+          "text": "then",
+          "start_ms": 442916,
+          "end_ms": 443045,
+          "confidence": 0.8972955
+        },
+        {
+          "text": "let",
+          "start_ms": 443142,
+          "end_ms": 443320,
+          "confidence": 0.9999162
+        },
+        {
+          "text": "it",
+          "start_ms": 443320,
+          "end_ms": 443450,
+          "confidence": 0.99995196
+        },
+        {
+          "text": "come",
+          "start_ms": 443450,
+          "end_ms": 443578,
+          "confidence": 0.9996024
+        },
+        {
+          "text": "down,",
+          "start_ms": 443578,
+          "end_ms": 443772,
+          "confidence": 0.9529108
+        },
+        {
+          "text": "and",
+          "start_ms": 443804,
+          "end_ms": 444513,
+          "confidence": 0.9966798
+        },
+        {
+          "text": "I'll",
+          "start_ms": 444513,
+          "end_ms": 445335,
+          "confidence": 0.9999235
+        },
+        {
+          "text": "still",
+          "start_ms": 445335,
+          "end_ms": 445625,
+          "confidence": 0.9999939
+        },
+        {
+          "text": "bless",
+          "start_ms": 445802,
+          "end_ms": 446156,
+          "confidence": 0.99999464
+        },
+        {
+          "text": "you.",
+          "start_ms": 446285,
+          "end_ms": 446398,
+          "confidence": 0.9995643
+        }
+      ]
+    },
+    {
+      "text": "I'll still bless you. I'll still bless you. I'll still bless you. I'll still bless you.",
+      "start_ms": 447252,
+      "end_ms": 455434,
+      "text_sk": "Stále ti budem žehnať. Stále ti budem žehnať. Stále ti budem žehnať. Stále ti budem žehnať.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 447252,
+          "end_ms": 448042,
+          "confidence": 0.99769247
+        },
+        {
+          "text": "still",
+          "start_ms": 448155,
+          "end_ms": 448573,
+          "confidence": 0.99995184
+        },
+        {
+          "text": "bless",
+          "start_ms": 448638,
+          "end_ms": 449669,
+          "confidence": 0.9999943
+        },
+        {
+          "text": "you.",
+          "start_ms": 449685,
+          "end_ms": 449863,
+          "confidence": 0.99744433
+        },
+        {
+          "text": "I'll",
+          "start_ms": 450088,
+          "end_ms": 450298,
+          "confidence": 0.99892414
+        },
+        {
+          "text": "still",
+          "start_ms": 450330,
+          "end_ms": 450668,
+          "confidence": 0.99976176
+        },
+        {
+          "text": "bless",
+          "start_ms": 450668,
+          "end_ms": 451071,
+          "confidence": 0.99999154
+        },
+        {
+          "text": "you.",
+          "start_ms": 451071,
+          "end_ms": 451297,
+          "confidence": 0.99978685
+        },
+        {
+          "text": "I'll",
+          "start_ms": 451442,
+          "end_ms": 451699,
+          "confidence": 0.9987438
+        },
+        {
+          "text": "still",
+          "start_ms": 451699,
+          "end_ms": 451893,
+          "confidence": 0.99998355
+        },
+        {
+          "text": "bless",
+          "start_ms": 451990,
+          "end_ms": 452426,
+          "confidence": 0.9999896
+        },
+        {
+          "text": "you.",
+          "start_ms": 452426,
+          "end_ms": 452604,
+          "confidence": 0.9997195
+        },
+        {
+          "text": "I'll",
+          "start_ms": 453461,
+          "end_ms": 453720,
+          "confidence": 0.9859002
+        },
+        {
+          "text": "still",
+          "start_ms": 453720,
+          "end_ms": 454011,
+          "confidence": 0.99997425
+        },
+        {
+          "text": "bless",
+          "start_ms": 454383,
+          "end_ms": 455095,
+          "confidence": 0.99998474
+        },
+        {
+          "text": "you.",
+          "start_ms": 455256,
+          "end_ms": 455434,
+          "confidence": 0.9991687
+        }
+      ]
+    },
+    {
+      "text": "Great is, great is the faithfulness.",
+      "start_ms": 455499,
+      "end_ms": 459364,
+      "text_sk": "Veľká je, veľká je vernosť.",
+      "words": [
+        {
+          "text": "Great",
+          "start_ms": 455499,
+          "end_ms": 456453,
+          "confidence": 0.9977164
+        },
+        {
+          "text": "is,",
+          "start_ms": 456453,
+          "end_ms": 456922,
+          "confidence": 0.8681925
+        },
+        {
+          "text": "great",
+          "start_ms": 457343,
+          "end_ms": 457860,
+          "confidence": 0.99980706
+        },
+        {
+          "text": "is",
+          "start_ms": 457860,
+          "end_ms": 457893,
+          "confidence": 0.9999126
+        },
+        {
+          "text": "the",
+          "start_ms": 457957,
+          "end_ms": 458087,
+          "confidence": 0.9935469
+        },
+        {
+          "text": "faithfulness.",
+          "start_ms": 458087,
+          "end_ms": 459364,
+          "confidence": 0.7949468
+        }
+      ]
+    },
+    {
+      "text": "To me, I'll still bless you. Faith, I'll still bless you.",
+      "start_ms": 462851,
+      "end_ms": 470353,
+      "text_sk": "Ja ťa aj tak požehnám. Viera, ja ťa aj tak požehnám.",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 462851,
+          "end_ms": 463093,
+          "confidence": 0.8467255
+        },
+        {
+          "text": "me,",
+          "start_ms": 463577,
+          "end_ms": 463900,
+          "confidence": 0.95775855
+        },
+        {
+          "text": "I'll",
+          "start_ms": 464755,
+          "end_ms": 464949,
+          "confidence": 0.9962472
+        },
+        {
+          "text": "still",
+          "start_ms": 464949,
+          "end_ms": 465207,
+          "confidence": 0.99999106
+        },
+        {
+          "text": "bless",
+          "start_ms": 465336,
+          "end_ms": 465836,
+          "confidence": 0.99998677
+        },
+        {
+          "text": "you.",
+          "start_ms": 465901,
+          "end_ms": 466062,
+          "confidence": 0.98828495
+        },
+        {
+          "text": "Faith,",
+          "start_ms": 467772,
+          "end_ms": 468531,
+          "confidence": 0.51220804
+        },
+        {
+          "text": "I'll",
+          "start_ms": 468660,
+          "end_ms": 469144,
+          "confidence": 0.98770595
+        },
+        {
+          "text": "still",
+          "start_ms": 469144,
+          "end_ms": 469515,
+          "confidence": 0.99999285
+        },
+        {
+          "text": "bless",
+          "start_ms": 469580,
+          "end_ms": 469998,
+          "confidence": 0.9999926
+        },
+        {
+          "text": "you.",
+          "start_ms": 470159,
+          "end_ms": 470353,
+          "confidence": 0.98124796
+        }
+      ]
+    },
+    {
+      "text": "Rising sun, I'll still bless you.",
+      "start_ms": 471690,
+      "end_ms": 474445,
+      "text_sk": "Vychádzajúce slnko, aj tak ti budem žehnať.",
+      "words": [
+        {
+          "text": "Rising",
+          "start_ms": 471690,
+          "end_ms": 472802,
+          "confidence": 0.4374188
+        },
+        {
+          "text": "sun,",
+          "start_ms": 472914,
+          "end_ms": 473124,
+          "confidence": 0.88386923
+        },
+        {
+          "text": "I'll",
+          "start_ms": 473156,
+          "end_ms": 473430,
+          "confidence": 0.99343854
+        },
+        {
+          "text": "still",
+          "start_ms": 473430,
+          "end_ms": 473591,
+          "confidence": 0.9999943
+        },
+        {
+          "text": "bless",
+          "start_ms": 473720,
+          "end_ms": 474300,
+          "confidence": 0.9999789
+        },
+        {
+          "text": "you.",
+          "start_ms": 474413,
+          "end_ms": 474445,
+          "confidence": 0.9983084
+        }
+      ]
+    },
+    {
+      "text": "I'll still bless you.",
+      "start_ms": 475589,
+      "end_ms": 478393,
+      "text_sk": "Stále ti budem žehnať.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 475589,
+          "end_ms": 477522,
+          "confidence": 0.9935369
+        },
+        {
+          "text": "still",
+          "start_ms": 477522,
+          "end_ms": 477861,
+          "confidence": 0.999974
+        },
+        {
+          "text": "bless",
+          "start_ms": 477989,
+          "end_ms": 478280,
+          "confidence": 0.99916303
+        },
+        {
+          "text": "you.",
+          "start_ms": 478280,
+          "end_ms": 478393,
+          "confidence": 0.93600184
+        }
+      ]
+    },
+    {
+      "text": "Challenge your faith, I'll still bless you.",
+      "start_ms": 478457,
+      "end_ms": 482904,
+      "text_sk": "Vyzvite svoju vieru, aj tak vás požehnám.",
+      "words": [
+        {
+          "text": "Challenge",
+          "start_ms": 478457,
+          "end_ms": 478975,
+          "confidence": 0.23247035
+        },
+        {
+          "text": "your",
+          "start_ms": 479266,
+          "end_ms": 479622,
+          "confidence": 0.98764753
+        },
+        {
+          "text": "faith,",
+          "start_ms": 480236,
+          "end_ms": 480414,
+          "confidence": 0.32987761
+        },
+        {
+          "text": "I'll",
+          "start_ms": 480479,
+          "end_ms": 481692,
+          "confidence": 0.9880505
+        },
+        {
+          "text": "still",
+          "start_ms": 481692,
+          "end_ms": 481999,
+          "confidence": 0.99996114
+        },
+        {
+          "text": "bless",
+          "start_ms": 482112,
+          "end_ms": 482759,
+          "confidence": 0.9999815
+        },
+        {
+          "text": "you.",
+          "start_ms": 482759,
+          "end_ms": 482904,
+          "confidence": 0.99903756
+        }
+      ]
+    },
+    {
+      "text": "I'll still bless you.",
+      "start_ms": 483988,
+      "end_ms": 487125,
+      "text_sk": "Stále ti budem žehnať.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 483988,
+          "end_ms": 485993,
+          "confidence": 0.99530244
+        },
+        {
+          "text": "still",
+          "start_ms": 485993,
+          "end_ms": 486446,
+          "confidence": 0.9999471
+        },
+        {
+          "text": "bless",
+          "start_ms": 486559,
+          "end_ms": 486899,
+          "confidence": 0.9999255
+        },
+        {
+          "text": "you.",
+          "start_ms": 486947,
+          "end_ms": 487125,
+          "confidence": 0.9991286
+        }
+      ]
+    },
+    {
+      "text": "Yes, I'll still bless you in the middle of the storm, in the middle of my trial. I'll still bless you in the middle of the road when I don't know where to go. I'll still bless you in the middle of my storm, in the middle of my trial.",
+      "start_ms": 489521,
+      "end_ms": 513133,
+      "text_sk": "Áno, stále ti budem žehnať uprostred búrky, uprostred mojej skúšky. Stále ti budem žehnať uprostred cesty, keď nebudem vedieť, kam ísť. Stále ti budem žehnať uprostred mojej búrky, uprostred mojej skúšky.",
+      "words": [
+        {
+          "text": "Yes,",
+          "start_ms": 489521,
+          "end_ms": 489764,
+          "confidence": 0.69877285
+        },
+        {
+          "text": "I'll",
+          "start_ms": 489910,
+          "end_ms": 490089,
+          "confidence": 0.9997936
+        },
+        {
+          "text": "still",
+          "start_ms": 490089,
+          "end_ms": 490381,
+          "confidence": 0.9999876
+        },
+        {
+          "text": "bless",
+          "start_ms": 490560,
+          "end_ms": 490917,
+          "confidence": 0.99999475
+        },
+        {
+          "text": "you",
+          "start_ms": 491046,
+          "end_ms": 491192,
+          "confidence": 0.97795725
+        },
+        {
+          "text": "in",
+          "start_ms": 492831,
+          "end_ms": 492896,
+          "confidence": 0.8130788
+        },
+        {
+          "text": "the",
+          "start_ms": 492929,
+          "end_ms": 493010,
+          "confidence": 0.9999876
+        },
+        {
+          "text": "middle",
+          "start_ms": 493026,
+          "end_ms": 493432,
+          "confidence": 0.9999933
+        },
+        {
+          "text": "of",
+          "start_ms": 493480,
+          "end_ms": 493594,
+          "confidence": 0.99999475
+        },
+        {
+          "text": "the",
+          "start_ms": 493594,
+          "end_ms": 493675,
+          "confidence": 0.9996462
+        },
+        {
+          "text": "storm,",
+          "start_ms": 493675,
+          "end_ms": 494292,
+          "confidence": 0.84694076
+        },
+        {
+          "text": "in",
+          "start_ms": 495038,
+          "end_ms": 495087,
+          "confidence": 0.9789873
+        },
+        {
+          "text": "the",
+          "start_ms": 495119,
+          "end_ms": 495217,
+          "confidence": 0.9999945
+        },
+        {
+          "text": "middle",
+          "start_ms": 495217,
+          "end_ms": 495622,
+          "confidence": 0.9999956
+        },
+        {
+          "text": "of",
+          "start_ms": 495671,
+          "end_ms": 495817,
+          "confidence": 0.999995
+        },
+        {
+          "text": "my",
+          "start_ms": 495849,
+          "end_ms": 495947,
+          "confidence": 0.99995315
+        },
+        {
+          "text": "trial.",
+          "start_ms": 496093,
+          "end_ms": 496628,
+          "confidence": 0.99199903
+        },
+        {
+          "text": "I'll",
+          "start_ms": 497679,
+          "end_ms": 498409,
+          "confidence": 0.7933173
+        },
+        {
+          "text": "still",
+          "start_ms": 498409,
+          "end_ms": 498684,
+          "confidence": 0.99999475
+        },
+        {
+          "text": "bless",
+          "start_ms": 498798,
+          "end_ms": 499382,
+          "confidence": 0.9999969
+        },
+        {
+          "text": "you",
+          "start_ms": 499430,
+          "end_ms": 499625,
+          "confidence": 0.9999473
+        },
+        {
+          "text": "in",
+          "start_ms": 501376,
+          "end_ms": 501441,
+          "confidence": 0.99814165
+        },
+        {
+          "text": "the",
+          "start_ms": 501457,
+          "end_ms": 501554,
+          "confidence": 0.99999225
+        },
+        {
+          "text": "middle",
+          "start_ms": 501554,
+          "end_ms": 501976,
+          "confidence": 0.9999962
+        },
+        {
+          "text": "of",
+          "start_ms": 502040,
+          "end_ms": 502186,
+          "confidence": 0.99999416
+        },
+        {
+          "text": "the",
+          "start_ms": 502186,
+          "end_ms": 502267,
+          "confidence": 0.99998844
+        },
+        {
+          "text": "road",
+          "start_ms": 502267,
+          "end_ms": 502900,
+          "confidence": 0.99998856
+        },
+        {
+          "text": "when",
+          "start_ms": 503256,
+          "end_ms": 503386,
+          "confidence": 0.9903376
+        },
+        {
+          "text": "I",
+          "start_ms": 503419,
+          "end_ms": 503435,
+          "confidence": 0.9999907
+        },
+        {
+          "text": "don't",
+          "start_ms": 503435,
+          "end_ms": 503743,
+          "confidence": 0.9999858
+        },
+        {
+          "text": "know",
+          "start_ms": 503743,
+          "end_ms": 503889,
+          "confidence": 0.9999894
+        },
+        {
+          "text": "where",
+          "start_ms": 503970,
+          "end_ms": 504083,
+          "confidence": 0.99997497
+        },
+        {
+          "text": "to",
+          "start_ms": 504083,
+          "end_ms": 504181,
+          "confidence": 0.99993217
+        },
+        {
+          "text": "go.",
+          "start_ms": 504294,
+          "end_ms": 504537,
+          "confidence": 0.9983726
+        },
+        {
+          "text": "I'll",
+          "start_ms": 506510,
+          "end_ms": 506703,
+          "confidence": 0.9968726
+        },
+        {
+          "text": "still",
+          "start_ms": 506703,
+          "end_ms": 507107,
+          "confidence": 0.99999344
+        },
+        {
+          "text": "bless",
+          "start_ms": 507107,
+          "end_ms": 507786,
+          "confidence": 0.9999937
+        },
+        {
+          "text": "you",
+          "start_ms": 508238,
+          "end_ms": 508416,
+          "confidence": 0.9998305
+        },
+        {
+          "text": "in",
+          "start_ms": 509369,
+          "end_ms": 509498,
+          "confidence": 0.9685441
+        },
+        {
+          "text": "the",
+          "start_ms": 509514,
+          "end_ms": 509611,
+          "confidence": 0.99997973
+        },
+        {
+          "text": "middle",
+          "start_ms": 509611,
+          "end_ms": 510080,
+          "confidence": 0.9999894
+        },
+        {
+          "text": "of",
+          "start_ms": 510080,
+          "end_ms": 510193,
+          "confidence": 0.9999877
+        },
+        {
+          "text": "my",
+          "start_ms": 510193,
+          "end_ms": 510483,
+          "confidence": 0.9999888
+        },
+        {
+          "text": "storm,",
+          "start_ms": 510483,
+          "end_ms": 511097,
+          "confidence": 0.9993869
+        },
+        {
+          "text": "in",
+          "start_ms": 511630,
+          "end_ms": 511776,
+          "confidence": 0.9999417
+        },
+        {
+          "text": "the",
+          "start_ms": 511776,
+          "end_ms": 511873,
+          "confidence": 0.9999939
+        },
+        {
+          "text": "middle",
+          "start_ms": 511873,
+          "end_ms": 512276,
+          "confidence": 0.9999951
+        },
+        {
+          "text": "of",
+          "start_ms": 512276,
+          "end_ms": 512406,
+          "confidence": 0.9999814
+        },
+        {
+          "text": "my",
+          "start_ms": 512438,
+          "end_ms": 512535,
+          "confidence": 0.99999
+        },
+        {
+          "text": "trial.",
+          "start_ms": 512680,
+          "end_ms": 513133,
+          "confidence": 0.9997498
+        }
+      ]
+    },
+    {
+      "text": "I'll still bless you when I'm in the middle of the road.",
+      "start_ms": 514869,
+      "end_ms": 517761,
+      "text_sk": "Stále ti budem žehnať, aj keď budem uprostred cesty.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 514869,
+          "end_ms": 515067,
+          "confidence": 0.9994379
+        },
+        {
+          "text": "still",
+          "start_ms": 515067,
+          "end_ms": 515464,
+          "confidence": 0.999984
+        },
+        {
+          "text": "bless",
+          "start_ms": 515464,
+          "end_ms": 516356,
+          "confidence": 0.99997866
+        },
+        {
+          "text": "you",
+          "start_ms": 516356,
+          "end_ms": 516455,
+          "confidence": 0.999933
+        },
+        {
+          "text": "when",
+          "start_ms": 516455,
+          "end_ms": 516769,
+          "confidence": 0.9991184
+        },
+        {
+          "text": "I'm",
+          "start_ms": 516769,
+          "end_ms": 516852,
+          "confidence": 0.9999345
+        },
+        {
+          "text": "in",
+          "start_ms": 516852,
+          "end_ms": 516918,
+          "confidence": 0.9999118
+        },
+        {
+          "text": "the",
+          "start_ms": 517034,
+          "end_ms": 517315,
+          "confidence": 0.99991095
+        },
+        {
+          "text": "middle",
+          "start_ms": 517315,
+          "end_ms": 517513,
+          "confidence": 0.9999542
+        },
+        {
+          "text": "of",
+          "start_ms": 517513,
+          "end_ms": 517579,
+          "confidence": 0.9996371
+        },
+        {
+          "text": "the",
+          "start_ms": 517662,
+          "end_ms": 517695,
+          "confidence": 0.999803
+        },
+        {
+          "text": "road.",
+          "start_ms": 517695,
+          "end_ms": 517761,
+          "confidence": 0.79412323
+        }
+      ]
+    },
+    {
+      "text": "I don't know which way to go.",
+      "start_ms": 519830,
+      "end_ms": 521797,
+      "text_sk": "Neviem, ktorým smerom sa mám vydať.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 519830,
+          "end_ms": 519878,
+          "confidence": 0.3715443
+        },
+        {
+          "text": "don't",
+          "start_ms": 519878,
+          "end_ms": 520187,
+          "confidence": 0.9881759
+        },
+        {
+          "text": "know",
+          "start_ms": 520285,
+          "end_ms": 520561,
+          "confidence": 0.99998057
+        },
+        {
+          "text": "which",
+          "start_ms": 520740,
+          "end_ms": 520967,
+          "confidence": 0.9996798
+        },
+        {
+          "text": "way",
+          "start_ms": 521146,
+          "end_ms": 521195,
+          "confidence": 0.9999825
+        },
+        {
+          "text": "to",
+          "start_ms": 521488,
+          "end_ms": 521569,
+          "confidence": 0.99996054
+        },
+        {
+          "text": "go.",
+          "start_ms": 521650,
+          "end_ms": 521797,
+          "confidence": 0.9544686
+        }
+      ]
+    },
+    {
+      "text": "I'll still, I'll still bless you.",
+      "start_ms": 521894,
+      "end_ms": 524739,
+      "text_sk": "Stále ťa budem, stále ťa budem žehnať.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 521894,
+          "end_ms": 522382,
+          "confidence": 0.959122
+        },
+        {
+          "text": "still,",
+          "start_ms": 522382,
+          "end_ms": 522837,
+          "confidence": 0.8302263
+        },
+        {
+          "text": "I'll",
+          "start_ms": 522951,
+          "end_ms": 523520,
+          "confidence": 0.9989186
+        },
+        {
+          "text": "still",
+          "start_ms": 523520,
+          "end_ms": 523796,
+          "confidence": 0.9999821
+        },
+        {
+          "text": "bless",
+          "start_ms": 523845,
+          "end_ms": 524479,
+          "confidence": 0.9997857
+        },
+        {
+          "text": "you.",
+          "start_ms": 524560,
+          "end_ms": 524739,
+          "confidence": 0.86385024
+        }
+      ]
+    },
+    {
+      "text": "I'll still bless you. I'll still bless you. Oh, I've got a reason to bless you. Yeah, I've got a reason to bless you. I'll still bless you. I've got a reason to bless your name.",
+      "start_ms": 525308,
+      "end_ms": 544314,
+      "text_sk": "Stále ti budem žehnať. Stále ti budem žehnať. Ó, mám dôvod ti žehnať. Áno, mám dôvod ti žehnať. Stále ti budem žehnať. Mám dôvod žehnať tvoje meno.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 525308,
+          "end_ms": 525682,
+          "confidence": 0.78984344
+        },
+        {
+          "text": "still",
+          "start_ms": 525731,
+          "end_ms": 526088,
+          "confidence": 0.99998796
+        },
+        {
+          "text": "bless",
+          "start_ms": 526202,
+          "end_ms": 526702,
+          "confidence": 0.9999212
+        },
+        {
+          "text": "you.",
+          "start_ms": 526832,
+          "end_ms": 526864,
+          "confidence": 0.9944327
+        },
+        {
+          "text": "I'll",
+          "start_ms": 528140,
+          "end_ms": 529884,
+          "confidence": 0.94562167
+        },
+        {
+          "text": "still",
+          "start_ms": 529932,
+          "end_ms": 530449,
+          "confidence": 0.9999634
+        },
+        {
+          "text": "bless",
+          "start_ms": 530481,
+          "end_ms": 531062,
+          "confidence": 0.99999213
+        },
+        {
+          "text": "you.",
+          "start_ms": 531127,
+          "end_ms": 531240,
+          "confidence": 0.9964631
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 531757,
+          "end_ms": 531789,
+          "confidence": 0.76978964
+        },
+        {
+          "text": "I've",
+          "start_ms": 533129,
+          "end_ms": 533468,
+          "confidence": 0.9079729
+        },
+        {
+          "text": "got",
+          "start_ms": 533468,
+          "end_ms": 533711,
+          "confidence": 0.9999665
+        },
+        {
+          "text": "a",
+          "start_ms": 533711,
+          "end_ms": 533856,
+          "confidence": 0.99995303
+        },
+        {
+          "text": "reason",
+          "start_ms": 533856,
+          "end_ms": 534373,
+          "confidence": 0.999992
+        },
+        {
+          "text": "to",
+          "start_ms": 534373,
+          "end_ms": 534437,
+          "confidence": 0.99997115
+        },
+        {
+          "text": "bless",
+          "start_ms": 534518,
+          "end_ms": 534987,
+          "confidence": 0.9999963
+        },
+        {
+          "text": "you.",
+          "start_ms": 534987,
+          "end_ms": 535084,
+          "confidence": 0.9751844
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 536282,
+          "end_ms": 536783,
+          "confidence": 0.94599265
+        },
+        {
+          "text": "I've",
+          "start_ms": 537172,
+          "end_ms": 537496,
+          "confidence": 0.99961233
+        },
+        {
+          "text": "got",
+          "start_ms": 537512,
+          "end_ms": 537755,
+          "confidence": 0.9999896
+        },
+        {
+          "text": "a",
+          "start_ms": 537755,
+          "end_ms": 537900,
+          "confidence": 0.9999908
+        },
+        {
+          "text": "reason",
+          "start_ms": 537900,
+          "end_ms": 538434,
+          "confidence": 0.999995
+        },
+        {
+          "text": "to",
+          "start_ms": 538467,
+          "end_ms": 538499,
+          "confidence": 0.99999094
+        },
+        {
+          "text": "bless",
+          "start_ms": 538564,
+          "end_ms": 539276,
+          "confidence": 0.99999404
+        },
+        {
+          "text": "you.",
+          "start_ms": 539357,
+          "end_ms": 539551,
+          "confidence": 0.9992224
+        },
+        {
+          "text": "I'll",
+          "start_ms": 540086,
+          "end_ms": 540344,
+          "confidence": 0.8655166
+        },
+        {
+          "text": "still",
+          "start_ms": 540344,
+          "end_ms": 540555,
+          "confidence": 0.9984699
+        },
+        {
+          "text": "bless",
+          "start_ms": 540587,
+          "end_ms": 540927,
+          "confidence": 0.235993
+        },
+        {
+          "text": "you.",
+          "start_ms": 541235,
+          "end_ms": 541267,
+          "confidence": 0.97164655
+        },
+        {
+          "text": "I've",
+          "start_ms": 541316,
+          "end_ms": 541478,
+          "confidence": 0.99641114
+        },
+        {
+          "text": "got",
+          "start_ms": 541785,
+          "end_ms": 542028,
+          "confidence": 0.998095
+        },
+        {
+          "text": "a",
+          "start_ms": 542028,
+          "end_ms": 542190,
+          "confidence": 0.9999863
+        },
+        {
+          "text": "reason",
+          "start_ms": 542190,
+          "end_ms": 542967,
+          "confidence": 0.99999106
+        },
+        {
+          "text": "to",
+          "start_ms": 542999,
+          "end_ms": 543032,
+          "confidence": 0.9999659
+        },
+        {
+          "text": "bless",
+          "start_ms": 543096,
+          "end_ms": 543550,
+          "confidence": 0.9994198
+        },
+        {
+          "text": "your",
+          "start_ms": 543550,
+          "end_ms": 543810,
+          "confidence": 0.9943031
+        },
+        {
+          "text": "name.",
+          "start_ms": 543826,
+          "end_ms": 544314,
+          "confidence": 0.9995419
+        }
+      ]
+    },
+    {
+      "text": "You've been faithful.",
+      "start_ms": 544395,
+      "end_ms": 544980,
+      "text_sk": "Bol/Bola ste verný/verná.",
+      "words": [
+        {
+          "text": "You've",
+          "start_ms": 544395,
+          "end_ms": 544704,
+          "confidence": 0.98787206
+        },
+        {
+          "text": "been",
+          "start_ms": 544704,
+          "end_ms": 544834,
+          "confidence": 0.9999746
+        },
+        {
+          "text": "faithful.",
+          "start_ms": 544834,
+          "end_ms": 544980,
+          "confidence": 0.991927
+        }
+      ]
+    },
+    {
+      "text": "You've been faithful. You've been faithful. So good to me. You've been so good. Come on, just lift up your praise. Just lift up your worship to Him. You've been so good. You've been so good. Yes. Let this house, this body be filled with your praise.",
+      "start_ms": 545517,
+      "end_ms": 565456,
+      "text_sk": "Bol si verný. Bol si verný. Tak dobrý ku mne. Bol si tak dobrý. No tak, pozdvihnite svoju chválu. Len pozdvihnite svoje uctievanie k Nemu. Bol si tak dobrý. Bol si tak dobrý. Áno. Nech je tento dom, toto telo naplnené vašou chválou.",
+      "words": [
+        {
+          "text": "You've",
+          "start_ms": 545517,
+          "end_ms": 545940,
+          "confidence": 0.99907285
+        },
+        {
+          "text": "been",
+          "start_ms": 545940,
+          "end_ms": 546232,
+          "confidence": 0.9999697
+        },
+        {
+          "text": "faithful.",
+          "start_ms": 546330,
+          "end_ms": 547289,
+          "confidence": 0.99954176
+        },
+        {
+          "text": "You've",
+          "start_ms": 547712,
+          "end_ms": 547956,
+          "confidence": 0.96064764
+        },
+        {
+          "text": "been",
+          "start_ms": 548053,
+          "end_ms": 548249,
+          "confidence": 0.9992894
+        },
+        {
+          "text": "faithful.",
+          "start_ms": 548411,
+          "end_ms": 549452,
+          "confidence": 0.89976954
+        },
+        {
+          "text": "So",
+          "start_ms": 550520,
+          "end_ms": 550795,
+          "confidence": 0.62493277
+        },
+        {
+          "text": "good",
+          "start_ms": 550876,
+          "end_ms": 551135,
+          "confidence": 0.9993193
+        },
+        {
+          "text": "to",
+          "start_ms": 551135,
+          "end_ms": 551345,
+          "confidence": 0.99926895
+        },
+        {
+          "text": "me.",
+          "start_ms": 551345,
+          "end_ms": 551442,
+          "confidence": 0.7351059
+        },
+        {
+          "text": "You've",
+          "start_ms": 551847,
+          "end_ms": 552251,
+          "confidence": 0.9809957
+        },
+        {
+          "text": "been",
+          "start_ms": 552251,
+          "end_ms": 552705,
+          "confidence": 0.99997175
+        },
+        {
+          "text": "so",
+          "start_ms": 552721,
+          "end_ms": 552866,
+          "confidence": 0.99868387
+        },
+        {
+          "text": "good.",
+          "start_ms": 553125,
+          "end_ms": 553271,
+          "confidence": 0.9959626
+        },
+        {
+          "text": "Come",
+          "start_ms": 553530,
+          "end_ms": 553643,
+          "confidence": 0.9996363
+        },
+        {
+          "text": "on,",
+          "start_ms": 553643,
+          "end_ms": 553676,
+          "confidence": 0.91807467
+        },
+        {
+          "text": "just",
+          "start_ms": 553708,
+          "end_ms": 553951,
+          "confidence": 0.9999467
+        },
+        {
+          "text": "lift",
+          "start_ms": 553951,
+          "end_ms": 554096,
+          "confidence": 0.99983394
+        },
+        {
+          "text": "up",
+          "start_ms": 554096,
+          "end_ms": 554194,
+          "confidence": 0.9999596
+        },
+        {
+          "text": "your",
+          "start_ms": 554194,
+          "end_ms": 554355,
+          "confidence": 0.99966013
+        },
+        {
+          "text": "praise.",
+          "start_ms": 554355,
+          "end_ms": 554711,
+          "confidence": 0.9849294
+        },
+        {
+          "text": "Just",
+          "start_ms": 554922,
+          "end_ms": 555132,
+          "confidence": 0.99997926
+        },
+        {
+          "text": "lift",
+          "start_ms": 555148,
+          "end_ms": 555326,
+          "confidence": 0.99999034
+        },
+        {
+          "text": "up",
+          "start_ms": 555326,
+          "end_ms": 555472,
+          "confidence": 0.999863
+        },
+        {
+          "text": "your",
+          "start_ms": 555472,
+          "end_ms": 555585,
+          "confidence": 0.99947745
+        },
+        {
+          "text": "worship",
+          "start_ms": 555585,
+          "end_ms": 556071,
+          "confidence": 0.9999745
+        },
+        {
+          "text": "to",
+          "start_ms": 556071,
+          "end_ms": 556184,
+          "confidence": 0.99980706
+        },
+        {
+          "text": "Him.",
+          "start_ms": 556184,
+          "end_ms": 556298,
+          "confidence": 0.7783108
+        },
+        {
+          "text": "You've",
+          "start_ms": 556767,
+          "end_ms": 557026,
+          "confidence": 0.9995104
+        },
+        {
+          "text": "been",
+          "start_ms": 557188,
+          "end_ms": 557398,
+          "confidence": 0.9999933
+        },
+        {
+          "text": "so",
+          "start_ms": 557431,
+          "end_ms": 557770,
+          "confidence": 0.9999132
+        },
+        {
+          "text": "good.",
+          "start_ms": 557851,
+          "end_ms": 558418,
+          "confidence": 0.992983
+        },
+        {
+          "text": "You've",
+          "start_ms": 558466,
+          "end_ms": 558709,
+          "confidence": 0.9969149
+        },
+        {
+          "text": "been",
+          "start_ms": 558709,
+          "end_ms": 558887,
+          "confidence": 0.9999572
+        },
+        {
+          "text": "so",
+          "start_ms": 558887,
+          "end_ms": 559098,
+          "confidence": 0.999655
+        },
+        {
+          "text": "good.",
+          "start_ms": 560000,
+          "end_ms": 560209,
+          "confidence": 0.9912001
+        },
+        {
+          "text": "Yes.",
+          "start_ms": 560338,
+          "end_ms": 560579,
+          "confidence": 0.6243735
+        },
+        {
+          "text": "Let",
+          "start_ms": 560660,
+          "end_ms": 560965,
+          "confidence": 0.99413764
+        },
+        {
+          "text": "this",
+          "start_ms": 560965,
+          "end_ms": 561786,
+          "confidence": 0.99378383
+        },
+        {
+          "text": "house,",
+          "start_ms": 561786,
+          "end_ms": 562092,
+          "confidence": 0.96179914
+        },
+        {
+          "text": "this",
+          "start_ms": 562334,
+          "end_ms": 562655,
+          "confidence": 0.9729667
+        },
+        {
+          "text": "body",
+          "start_ms": 562671,
+          "end_ms": 563122,
+          "confidence": 0.9854316
+        },
+        {
+          "text": "be",
+          "start_ms": 563476,
+          "end_ms": 563557,
+          "confidence": 0.69564736
+        },
+        {
+          "text": "filled",
+          "start_ms": 563653,
+          "end_ms": 563862,
+          "confidence": 0.9998306
+        },
+        {
+          "text": "with",
+          "start_ms": 563862,
+          "end_ms": 564184,
+          "confidence": 0.9996729
+        },
+        {
+          "text": "your",
+          "start_ms": 564184,
+          "end_ms": 564361,
+          "confidence": 0.5407465
+        },
+        {
+          "text": "praise.",
+          "start_ms": 564361,
+          "end_ms": 565456,
+          "confidence": 0.8371013
+        }
+      ]
+    },
+    {
+      "text": "Be filled with your praise.",
+      "start_ms": 565713,
+      "end_ms": 567146,
+      "text_sk": "Nech ste naplnení chválou.",
+      "words": [
+        {
+          "text": "Be",
+          "start_ms": 565713,
+          "end_ms": 565923,
+          "confidence": 0.9448792
+        },
+        {
+          "text": "filled",
+          "start_ms": 565955,
+          "end_ms": 566615,
+          "confidence": 0.99982184
+        },
+        {
+          "text": "with",
+          "start_ms": 566615,
+          "end_ms": 566920,
+          "confidence": 0.9998179
+        },
+        {
+          "text": "your",
+          "start_ms": 566920,
+          "end_ms": 566969,
+          "confidence": 0.99446726
+        },
+        {
+          "text": "praise.",
+          "start_ms": 566969,
+          "end_ms": 567146,
+          "confidence": 0.9898171
+        }
+      ]
+    },
+    {
+      "text": "We bless your name.",
+      "start_ms": 569200,
+      "end_ms": 570836,
+      "text_sk": "Tvoje meno zvelebujeme.",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 569200,
+          "end_ms": 569248,
+          "confidence": 0.95202434
+        },
+        {
+          "text": "bless",
+          "start_ms": 569475,
+          "end_ms": 570026,
+          "confidence": 0.9992176
+        },
+        {
+          "text": "your",
+          "start_ms": 570026,
+          "end_ms": 570123,
+          "confidence": 0.85798913
+        },
+        {
+          "text": "name.",
+          "start_ms": 570123,
+          "end_ms": 570836,
+          "confidence": 0.990495
+        }
+      ]
+    },
+    {
+      "text": "We bless your name. Oh, I still bless you.",
+      "start_ms": 570918,
+      "end_ms": 575148,
+      "text_sk": "Dobrorečíme tvojmu menu. Ó, stále ti dobrorečím.",
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 570918,
+          "end_ms": 571015,
+          "confidence": 0.95656216
+        },
+        {
+          "text": "bless",
+          "start_ms": 571177,
+          "end_ms": 572862,
+          "confidence": 0.9974694
+        },
+        {
+          "text": "your",
+          "start_ms": 573025,
+          "end_ms": 573122,
+          "confidence": 0.7001098
+        },
+        {
+          "text": "name.",
+          "start_ms": 573122,
+          "end_ms": 573187,
+          "confidence": 0.980795
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 573349,
+          "end_ms": 573365,
+          "confidence": 0.43810195
+        },
+        {
+          "text": "I",
+          "start_ms": 573592,
+          "end_ms": 573657,
+          "confidence": 0.63835627
+        },
+        {
+          "text": "still",
+          "start_ms": 573770,
+          "end_ms": 574046,
+          "confidence": 0.94589376
+        },
+        {
+          "text": "bless",
+          "start_ms": 574175,
+          "end_ms": 574986,
+          "confidence": 0.9933902
+        },
+        {
+          "text": "you.",
+          "start_ms": 574986,
+          "end_ms": 575148,
+          "confidence": 0.9745023
+        }
+      ]
+    },
+    {
+      "text": "Oh, I still bless you. Oh, I'll still bless you. Oh, I'll still bless you. Great is your faithfulness.",
+      "start_ms": 576678,
+      "end_ms": 590867,
+      "text_sk": "Stále ti žehnám. Stále ti budem žehnať. Stále ti budem žehnať. Veľká je tvoja vernosť.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 576678,
+          "end_ms": 576859,
+          "confidence": 0.77268624
+        },
+        {
+          "text": "I",
+          "start_ms": 577747,
+          "end_ms": 577928,
+          "confidence": 0.8661744
+        },
+        {
+          "text": "still",
+          "start_ms": 577928,
+          "end_ms": 578208,
+          "confidence": 0.9954803
+        },
+        {
+          "text": "bless",
+          "start_ms": 578339,
+          "end_ms": 579161,
+          "confidence": 0.9999274
+        },
+        {
+          "text": "you.",
+          "start_ms": 579161,
+          "end_ms": 579293,
+          "confidence": 0.99809414
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 579886,
+          "end_ms": 579983,
+          "confidence": 0.71603215
+        },
+        {
+          "text": "I'll",
+          "start_ms": 580143,
+          "end_ms": 582088,
+          "confidence": 0.7726409
+        },
+        {
+          "text": "still",
+          "start_ms": 582088,
+          "end_ms": 582362,
+          "confidence": 0.99880385
+        },
+        {
+          "text": "bless",
+          "start_ms": 582474,
+          "end_ms": 583165,
+          "confidence": 0.9998779
+        },
+        {
+          "text": "you.",
+          "start_ms": 583278,
+          "end_ms": 583438,
+          "confidence": 0.9469679
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 583985,
+          "end_ms": 584162,
+          "confidence": 0.9847494
+        },
+        {
+          "text": "I'll",
+          "start_ms": 586074,
+          "end_ms": 586331,
+          "confidence": 0.9975613
+        },
+        {
+          "text": "still",
+          "start_ms": 586331,
+          "end_ms": 586524,
+          "confidence": 0.9999205
+        },
+        {
+          "text": "bless",
+          "start_ms": 586717,
+          "end_ms": 587521,
+          "confidence": 0.9999391
+        },
+        {
+          "text": "you.",
+          "start_ms": 587521,
+          "end_ms": 587633,
+          "confidence": 0.9988343
+        },
+        {
+          "text": "Great",
+          "start_ms": 588099,
+          "end_ms": 588550,
+          "confidence": 0.9997836
+        },
+        {
+          "text": "is",
+          "start_ms": 588550,
+          "end_ms": 588712,
+          "confidence": 0.99967384
+        },
+        {
+          "text": "your",
+          "start_ms": 588825,
+          "end_ms": 589084,
+          "confidence": 0.96499836
+        },
+        {
+          "text": "faithfulness.",
+          "start_ms": 589084,
+          "end_ms": 590867,
+          "confidence": 0.980932
+        }
+      ]
+    },
+    {
+      "text": "Great is your faithfulness to me. Great is great is your faithfulness. From the rising sun, from the rising sun to the Setting, say my praise. From the rising sun, from the rising sun, oh my God, I will praise your name. From the rising sun, I will praise your name. Great is the Faithfulness to me.",
+      "start_ms": 591256,
+      "end_ms": 640409,
+      "text_sk": "Veľká je tvoja vernosť voči mne. Veľká je, veľká je tvoja vernosť. Od východu slnka, od východu slnka až po západ, nech znie moja chvála. Od východu slnka, od východu slnka, ó môj Bože, budem oslavovať tvoje meno. Od východu slnka budem oslavovať tvoje meno. Veľká je vernosť voči mne.",
+      "words": [
+        {
+          "text": "Great",
+          "start_ms": 591256,
+          "end_ms": 592228,
+          "confidence": 0.99875045
+        },
+        {
+          "text": "is",
+          "start_ms": 592390,
+          "end_ms": 593006,
+          "confidence": 0.9997329
+        },
+        {
+          "text": "your",
+          "start_ms": 593039,
+          "end_ms": 593266,
+          "confidence": 0.9999018
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 593266,
+          "end_ms": 596069,
+          "confidence": 0.99976045
+        },
+        {
+          "text": "to",
+          "start_ms": 596410,
+          "end_ms": 596619,
+          "confidence": 0.9718692
+        },
+        {
+          "text": "me.",
+          "start_ms": 597488,
+          "end_ms": 597666,
+          "confidence": 0.99843353
+        },
+        {
+          "text": "Great",
+          "start_ms": 598487,
+          "end_ms": 599179,
+          "confidence": 0.55524695
+        },
+        {
+          "text": "is",
+          "start_ms": 599179,
+          "end_ms": 599469,
+          "confidence": 0.98832804
+        },
+        {
+          "text": "great",
+          "start_ms": 599582,
+          "end_ms": 600709,
+          "confidence": 0.5795591
+        },
+        {
+          "text": "is",
+          "start_ms": 600773,
+          "end_ms": 601321,
+          "confidence": 0.99150896
+        },
+        {
+          "text": "your",
+          "start_ms": 601418,
+          "end_ms": 601546,
+          "confidence": 0.99993217
+        },
+        {
+          "text": "faithfulness.",
+          "start_ms": 601611,
+          "end_ms": 603978,
+          "confidence": 0.82096314
+        },
+        {
+          "text": "From",
+          "start_ms": 605250,
+          "end_ms": 605411,
+          "confidence": 0.9960466
+        },
+        {
+          "text": "the",
+          "start_ms": 605524,
+          "end_ms": 605685,
+          "confidence": 0.9998272
+        },
+        {
+          "text": "rising",
+          "start_ms": 605685,
+          "end_ms": 606783,
+          "confidence": 0.9991148
+        },
+        {
+          "text": "sun,",
+          "start_ms": 606832,
+          "end_ms": 607914,
+          "confidence": 0.6740065
+        },
+        {
+          "text": "from",
+          "start_ms": 608010,
+          "end_ms": 608269,
+          "confidence": 0.6309052
+        },
+        {
+          "text": "the",
+          "start_ms": 608269,
+          "end_ms": 608349,
+          "confidence": 0.9998179
+        },
+        {
+          "text": "rising",
+          "start_ms": 608349,
+          "end_ms": 608882,
+          "confidence": 0.99981195
+        },
+        {
+          "text": "sun",
+          "start_ms": 608931,
+          "end_ms": 609205,
+          "confidence": 0.99908924
+        },
+        {
+          "text": "to",
+          "start_ms": 609480,
+          "end_ms": 609576,
+          "confidence": 0.89648575
+        },
+        {
+          "text": "the",
+          "start_ms": 609576,
+          "end_ms": 609835,
+          "confidence": 0.99680674
+        },
+        {
+          "text": "Setting,",
+          "start_ms": 610040,
+          "end_ms": 610931,
+          "confidence": 0.49079013
+        },
+        {
+          "text": "say",
+          "start_ms": 610979,
+          "end_ms": 611368,
+          "confidence": 0.57474774
+        },
+        {
+          "text": "my",
+          "start_ms": 611433,
+          "end_ms": 611546,
+          "confidence": 0.76835
+        },
+        {
+          "text": "praise.",
+          "start_ms": 611952,
+          "end_ms": 612875,
+          "confidence": 0.7566027
+        },
+        {
+          "text": "From",
+          "start_ms": 613296,
+          "end_ms": 613766,
+          "confidence": 0.64756566
+        },
+        {
+          "text": "the",
+          "start_ms": 613961,
+          "end_ms": 614204,
+          "confidence": 0.99938977
+        },
+        {
+          "text": "rising",
+          "start_ms": 614204,
+          "end_ms": 615144,
+          "confidence": 0.9961028
+        },
+        {
+          "text": "sun,",
+          "start_ms": 615257,
+          "end_ms": 615743,
+          "confidence": 0.8781475
+        },
+        {
+          "text": "from",
+          "start_ms": 615776,
+          "end_ms": 615954,
+          "confidence": 0.99886036
+        },
+        {
+          "text": "the",
+          "start_ms": 616067,
+          "end_ms": 616327,
+          "confidence": 0.9999608
+        },
+        {
+          "text": "rising",
+          "start_ms": 616456,
+          "end_ms": 617250,
+          "confidence": 0.9999192
+        },
+        {
+          "text": "sun,",
+          "start_ms": 617428,
+          "end_ms": 617736,
+          "confidence": 0.8362953
+        },
+        {
+          "text": "oh",
+          "start_ms": 617833,
+          "end_ms": 617866,
+          "confidence": 0.9800173
+        },
+        {
+          "text": "my",
+          "start_ms": 617931,
+          "end_ms": 618125,
+          "confidence": 0.9988788
+        },
+        {
+          "text": "God,",
+          "start_ms": 618255,
+          "end_ms": 618627,
+          "confidence": 0.9758468
+        },
+        {
+          "text": "I",
+          "start_ms": 620040,
+          "end_ms": 620104,
+          "confidence": 0.93890625
+        },
+        {
+          "text": "will",
+          "start_ms": 620234,
+          "end_ms": 620332,
+          "confidence": 0.99990296
+        },
+        {
+          "text": "praise",
+          "start_ms": 620332,
+          "end_ms": 620526,
+          "confidence": 0.9999603
+        },
+        {
+          "text": "your",
+          "start_ms": 620559,
+          "end_ms": 620965,
+          "confidence": 0.98125225
+        },
+        {
+          "text": "name.",
+          "start_ms": 620997,
+          "end_ms": 621452,
+          "confidence": 0.99512655
+        },
+        {
+          "text": "From",
+          "start_ms": 621760,
+          "end_ms": 622782,
+          "confidence": 0.95574725
+        },
+        {
+          "text": "the",
+          "start_ms": 623805,
+          "end_ms": 624048,
+          "confidence": 0.9999418
+        },
+        {
+          "text": "rising",
+          "start_ms": 624925,
+          "end_ms": 625720,
+          "confidence": 0.999841
+        },
+        {
+          "text": "sun,",
+          "start_ms": 625850,
+          "end_ms": 626207,
+          "confidence": 0.99877906
+        },
+        {
+          "text": "I",
+          "start_ms": 628405,
+          "end_ms": 628453,
+          "confidence": 0.9054378
+        },
+        {
+          "text": "will",
+          "start_ms": 628743,
+          "end_ms": 628969,
+          "confidence": 0.999938
+        },
+        {
+          "text": "praise",
+          "start_ms": 628969,
+          "end_ms": 629839,
+          "confidence": 0.9999721
+        },
+        {
+          "text": "your",
+          "start_ms": 630177,
+          "end_ms": 630451,
+          "confidence": 0.99978393
+        },
+        {
+          "text": "name.",
+          "start_ms": 631305,
+          "end_ms": 633110,
+          "confidence": 0.9946074
+        },
+        {
+          "text": "Great",
+          "start_ms": 633577,
+          "end_ms": 633931,
+          "confidence": 0.8302889
+        },
+        {
+          "text": "is",
+          "start_ms": 634769,
+          "end_ms": 635398,
+          "confidence": 0.9852519
+        },
+        {
+          "text": "the",
+          "start_ms": 635494,
+          "end_ms": 635688,
+          "confidence": 0.86150795
+        },
+        {
+          "text": "Faithfulness",
+          "start_ms": 635660,
+          "end_ms": 638571,
+          "confidence": 0.8871404
+        },
+        {
+          "text": "to",
+          "start_ms": 639010,
+          "end_ms": 639352,
+          "confidence": 0.99654883
+        },
+        {
+          "text": "me.",
+          "start_ms": 640312,
+          "end_ms": 640409,
+          "confidence": 0.99511147
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9362209,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "a866f937-3018-456e-8946-2d4b4a3090fd",
+    "elapsed_s": 34.4,
+    "word_count": 857,
+    "utterance_count": 58,
+    "line_count": 58,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 650
+  }
+}

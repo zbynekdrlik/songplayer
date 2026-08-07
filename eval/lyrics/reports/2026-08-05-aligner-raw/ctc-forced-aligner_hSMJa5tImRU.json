@@ -1,0 +1,3724 @@
+{
+  "backend_id": "ctc-forced-aligner",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\hSMJa5tImRU_vocal16k.wav",
+  "duration_ms": 669513,
+  "lines": [
+    {
+      "text": "You come at the right time",
+      "start_ms": 27080,
+      "end_ms": 31520,
+      "text_sk": "Prichádzaš v pravý čas",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 27080,
+          "end_ms": 27520
+        },
+        {
+          "text": "come",
+          "start_ms": 27520,
+          "end_ms": 29140
+        },
+        {
+          "text": "at",
+          "start_ms": 29140,
+          "end_ms": 29800
+        },
+        {
+          "text": "the",
+          "start_ms": 29800,
+          "end_ms": 30040
+        },
+        {
+          "text": "right",
+          "start_ms": 30040,
+          "end_ms": 30800
+        },
+        {
+          "text": "time",
+          "start_ms": 30800,
+          "end_ms": 31520
+        }
+      ]
+    },
+    {
+      "text": "When I least expect it never behind",
+      "start_ms": 31520,
+      "end_ms": 39040,
+      "text_sk": "Keď to najmenej čakám, nikdy nie pozadu",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 31520,
+          "end_ms": 33180
+        },
+        {
+          "text": "I",
+          "start_ms": 33180,
+          "end_ms": 33320
+        },
+        {
+          "text": "least",
+          "start_ms": 33320,
+          "end_ms": 34060
+        },
+        {
+          "text": "expect",
+          "start_ms": 34060,
+          "end_ms": 34860
+        },
+        {
+          "text": "it",
+          "start_ms": 34860,
+          "end_ms": 35680
+        },
+        {
+          "text": "never",
+          "start_ms": 35680,
+          "end_ms": 37180
+        },
+        {
+          "text": "behind",
+          "start_ms": 37180,
+          "end_ms": 39040
+        }
+      ]
+    },
+    {
+      "text": "So why would I be surprised when You deliver every time",
+      "start_ms": 39040,
+      "end_ms": 52540,
+      "text_sk": "Tak prečo by som bol prekvapený, keď ma vyslobodíš zakaždým",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 39040,
+          "end_ms": 40440
+        },
+        {
+          "text": "why",
+          "start_ms": 40440,
+          "end_ms": 42040
+        },
+        {
+          "text": "would",
+          "start_ms": 42040,
+          "end_ms": 42960
+        },
+        {
+          "text": "I",
+          "start_ms": 42960,
+          "end_ms": 43080
+        },
+        {
+          "text": "be",
+          "start_ms": 43080,
+          "end_ms": 43500
+        },
+        {
+          "text": "surprised",
+          "start_ms": 43500,
+          "end_ms": 45500
+        },
+        {
+          "text": "when",
+          "start_ms": 45500,
+          "end_ms": 46400
+        },
+        {
+          "text": "You",
+          "start_ms": 46400,
+          "end_ms": 46820
+        },
+        {
+          "text": "deliver",
+          "start_ms": 46820,
+          "end_ms": 48840
+        },
+        {
+          "text": "every",
+          "start_ms": 48840,
+          "end_ms": 50820
+        },
+        {
+          "text": "time",
+          "start_ms": 50820,
+          "end_ms": 52540
+        }
+      ]
+    },
+    {
+      "text": "On mountain tops",
+      "start_ms": 52540,
+      "end_ms": 56560,
+      "text_sk": "Na vrcholoch hôr",
+      "words": [
+        {
+          "text": "On",
+          "start_ms": 52540,
+          "end_ms": 53800
+        },
+        {
+          "text": "mountain",
+          "start_ms": 53800,
+          "end_ms": 55300
+        },
+        {
+          "text": "tops",
+          "start_ms": 55300,
+          "end_ms": 56560
+        }
+      ]
+    },
+    {
+      "text": "You stay the same",
+      "start_ms": 56560,
+      "end_ms": 59920,
+      "text_sk": "Zostávaš rovnaký",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 56560,
+          "end_ms": 57240
+        },
+        {
+          "text": "stay",
+          "start_ms": 57240,
+          "end_ms": 57960
+        },
+        {
+          "text": "the",
+          "start_ms": 57960,
+          "end_ms": 58160
+        },
+        {
+          "text": "same",
+          "start_ms": 58160,
+          "end_ms": 59920
+        }
+      ]
+    },
+    {
+      "text": "On valleys low",
+      "start_ms": 59920,
+      "end_ms": 63600,
+      "text_sk": "V nízkych údoliach",
+      "words": [
+        {
+          "text": "On",
+          "start_ms": 59920,
+          "end_ms": 60160
+        },
+        {
+          "text": "valleys",
+          "start_ms": 60160,
+          "end_ms": 61760
+        },
+        {
+          "text": "low",
+          "start_ms": 61760,
+          "end_ms": 63600
+        }
+      ]
+    },
+    {
+      "text": "You never change",
+      "start_ms": 63600,
+      "end_ms": 66680,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 63600,
+          "end_ms": 63800
+        },
+        {
+          "text": "never",
+          "start_ms": 63800,
+          "end_ms": 64740
+        },
+        {
+          "text": "change",
+          "start_ms": 64740,
+          "end_ms": 66680
+        }
+      ]
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 66680,
+      "end_ms": 72440,
+      "text_sk": "A verím, že uvidím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 66680,
+          "end_ms": 66880
+        },
+        {
+          "text": "I",
+          "start_ms": 66880,
+          "end_ms": 67300
+        },
+        {
+          "text": "believe",
+          "start_ms": 67300,
+          "end_ms": 69580
+        },
+        {
+          "text": "that",
+          "start_ms": 69580,
+          "end_ms": 70120
+        },
+        {
+          "text": "I",
+          "start_ms": 70120,
+          "end_ms": 70540
+        },
+        {
+          "text": "will",
+          "start_ms": 70540,
+          "end_ms": 71240
+        },
+        {
+          "text": "see",
+          "start_ms": 71240,
+          "end_ms": 72440
+        }
+      ]
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 72440,
+      "end_ms": 77920,
+      "text_sk": "Dobrotu Pána",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 72440,
+          "end_ms": 73280
+        },
+        {
+          "text": "goodness",
+          "start_ms": 73280,
+          "end_ms": 74580
+        },
+        {
+          "text": "of",
+          "start_ms": 74580,
+          "end_ms": 75660
+        },
+        {
+          "text": "the",
+          "start_ms": 75660,
+          "end_ms": 75940
+        },
+        {
+          "text": "Lord",
+          "start_ms": 75940,
+          "end_ms": 77920
+        }
+      ]
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 77920,
+      "end_ms": 86200,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 77920,
+          "end_ms": 79820
+        },
+        {
+          "text": "confident",
+          "start_ms": 79820,
+          "end_ms": 82360
+        },
+        {
+          "text": "as",
+          "start_ms": 82360,
+          "end_ms": 83060
+        },
+        {
+          "text": "seasons",
+          "start_ms": 83060,
+          "end_ms": 84360
+        },
+        {
+          "text": "change",
+          "start_ms": 84360,
+          "end_ms": 86200
+        }
+      ]
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 86200,
+      "end_ms": 102580,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 86200,
+          "end_ms": 86360
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 86360,
+          "end_ms": 89280
+        },
+        {
+          "text": "remains",
+          "start_ms": 89280,
+          "end_ms": 102580
+        }
+      ]
+    },
+    {
+      "text": "You go",
+      "start_ms": 102580,
+      "end_ms": 104000,
+      "text_sk": "Ideš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 102580,
+          "end_ms": 102820
+        },
+        {
+          "text": "go",
+          "start_ms": 102820,
+          "end_ms": 104000
+        }
+      ]
+    },
+    {
+      "text": "You go before me",
+      "start_ms": 104000,
+      "end_ms": 107780,
+      "text_sk": "Ideš predo mnou",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 104000,
+          "end_ms": 105120
+        },
+        {
+          "text": "go",
+          "start_ms": 105120,
+          "end_ms": 105560
+        },
+        {
+          "text": "before",
+          "start_ms": 105560,
+          "end_ms": 106800
+        },
+        {
+          "text": "me",
+          "start_ms": 106800,
+          "end_ms": 107780
+        }
+      ]
+    },
+    {
+      "text": "To prepare the blessing",
+      "start_ms": 107780,
+      "end_ms": 110820,
+      "text_sk": "Pripraviť požehnanie",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 107780,
+          "end_ms": 108180
+        },
+        {
+          "text": "prepare",
+          "start_ms": 108180,
+          "end_ms": 109100
+        },
+        {
+          "text": "the",
+          "start_ms": 109100,
+          "end_ms": 109260
+        },
+        {
+          "text": "blessing",
+          "start_ms": 109260,
+          "end_ms": 110820
+        }
+      ]
+    },
+    {
+      "text": "You've made a way",
+      "start_ms": 110820,
+      "end_ms": 114320,
+      "text_sk": "Pripravil si cestu",
+      "words": [
+        {
+          "text": "You've",
+          "start_ms": 110820,
+          "end_ms": 111840
+        },
+        {
+          "text": "made",
+          "start_ms": 111840,
+          "end_ms": 112600
+        },
+        {
+          "text": "a",
+          "start_ms": 112600,
+          "end_ms": 112620
+        },
+        {
+          "text": "way",
+          "start_ms": 112620,
+          "end_ms": 114320
+        }
+      ]
+    },
+    {
+      "text": "It's more than I could imagine",
+      "start_ms": 114320,
+      "end_ms": 120540,
+      "text_sk": "Je to viac, než si dokážem predstaviť",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 114320,
+          "end_ms": 115740
+        },
+        {
+          "text": "more",
+          "start_ms": 115740,
+          "end_ms": 117020
+        },
+        {
+          "text": "than",
+          "start_ms": 117020,
+          "end_ms": 118080
+        },
+        {
+          "text": "I",
+          "start_ms": 118080,
+          "end_ms": 118240
+        },
+        {
+          "text": "could",
+          "start_ms": 118240,
+          "end_ms": 118980
+        },
+        {
+          "text": "imagine",
+          "start_ms": 118980,
+          "end_ms": 120540
+        }
+      ]
+    },
+    {
+      "text": "More than I can fathom",
+      "start_ms": 120540,
+      "end_ms": 123900,
+      "text_sk": "Viac, než dokážem pochopiť",
+      "words": [
+        {
+          "text": "More",
+          "start_ms": 120540,
+          "end_ms": 121500
+        },
+        {
+          "text": "than",
+          "start_ms": 121500,
+          "end_ms": 122040
+        },
+        {
+          "text": "I",
+          "start_ms": 122040,
+          "end_ms": 122100
+        },
+        {
+          "text": "can",
+          "start_ms": 122100,
+          "end_ms": 122400
+        },
+        {
+          "text": "fathom",
+          "start_ms": 122400,
+          "end_ms": 123900
+        }
+      ]
+    },
+    {
+      "text": "Or comprehend",
+      "start_ms": 123900,
+      "end_ms": 128460,
+      "text_sk": "Alebo zrozumieť",
+      "words": [
+        {
+          "text": "Or",
+          "start_ms": 123900,
+          "end_ms": 124740
+        },
+        {
+          "text": "comprehend",
+          "start_ms": 124740,
+          "end_ms": 128460
+        }
+      ]
+    },
+    {
+      "text": "On mountain tops",
+      "start_ms": 128460,
+      "end_ms": 130500,
+      "text_sk": "Na vrcholoch hôr",
+      "words": [
+        {
+          "text": "On",
+          "start_ms": 128460,
+          "end_ms": 128820
+        },
+        {
+          "text": "mountain",
+          "start_ms": 128820,
+          "end_ms": 130360
+        },
+        {
+          "text": "tops",
+          "start_ms": 130360,
+          "end_ms": 130500
+        }
+      ]
+    },
+    {
+      "text": "I'm so glad that You stay the same",
+      "start_ms": 130500,
+      "end_ms": 134660,
+      "text_sk": "Som tak rád, že zostávať rovnaký",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 130500,
+          "end_ms": 131080
+        },
+        {
+          "text": "so",
+          "start_ms": 131080,
+          "end_ms": 131320
+        },
+        {
+          "text": "glad",
+          "start_ms": 131320,
+          "end_ms": 131740
+        },
+        {
+          "text": "that",
+          "start_ms": 131740,
+          "end_ms": 132100
+        },
+        {
+          "text": "You",
+          "start_ms": 132100,
+          "end_ms": 132360
+        },
+        {
+          "text": "stay",
+          "start_ms": 132360,
+          "end_ms": 133100
+        },
+        {
+          "text": "the",
+          "start_ms": 133100,
+          "end_ms": 133300
+        },
+        {
+          "text": "same",
+          "start_ms": 133300,
+          "end_ms": 134660
+        }
+      ]
+    },
+    {
+      "text": "In valleys low",
+      "start_ms": 134660,
+      "end_ms": 137940,
+      "text_sk": "V nízkych údoliach",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 134660,
+          "end_ms": 135300
+        },
+        {
+          "text": "valleys",
+          "start_ms": 135300,
+          "end_ms": 136980
+        },
+        {
+          "text": "low",
+          "start_ms": 136980,
+          "end_ms": 137940
+        }
+      ]
+    },
+    {
+      "text": "You never change",
+      "start_ms": 137940,
+      "end_ms": 140720,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 137940,
+          "end_ms": 138960
+        },
+        {
+          "text": "never",
+          "start_ms": 138960,
+          "end_ms": 139820
+        },
+        {
+          "text": "change",
+          "start_ms": 139820,
+          "end_ms": 140720
+        }
+      ]
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 140720,
+      "end_ms": 147880,
+      "text_sk": "A verím, že uvidím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 140720,
+          "end_ms": 142140
+        },
+        {
+          "text": "I",
+          "start_ms": 142140,
+          "end_ms": 142640
+        },
+        {
+          "text": "believe",
+          "start_ms": 142640,
+          "end_ms": 144680
+        },
+        {
+          "text": "that",
+          "start_ms": 144680,
+          "end_ms": 145240
+        },
+        {
+          "text": "I",
+          "start_ms": 145240,
+          "end_ms": 145660
+        },
+        {
+          "text": "will",
+          "start_ms": 145660,
+          "end_ms": 146300
+        },
+        {
+          "text": "see",
+          "start_ms": 146300,
+          "end_ms": 147880
+        }
+      ]
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 147880,
+      "end_ms": 152160,
+      "text_sk": "Dobrotu Pána",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 147880,
+          "end_ms": 148380
+        },
+        {
+          "text": "goodness",
+          "start_ms": 148380,
+          "end_ms": 149700
+        },
+        {
+          "text": "of",
+          "start_ms": 149700,
+          "end_ms": 150320
+        },
+        {
+          "text": "the",
+          "start_ms": 150320,
+          "end_ms": 151160
+        },
+        {
+          "text": "Lord",
+          "start_ms": 151160,
+          "end_ms": 152160
+        }
+      ]
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 152160,
+      "end_ms": 161240,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 152160,
+          "end_ms": 153060
+        },
+        {
+          "text": "confident",
+          "start_ms": 153060,
+          "end_ms": 155000
+        },
+        {
+          "text": "as",
+          "start_ms": 155000,
+          "end_ms": 157240
+        },
+        {
+          "text": "seasons",
+          "start_ms": 157240,
+          "end_ms": 159560
+        },
+        {
+          "text": "change",
+          "start_ms": 159560,
+          "end_ms": 161240
+        }
+      ]
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 161240,
+      "end_ms": 167040,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 161240,
+          "end_ms": 161480
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 161480,
+          "end_ms": 164160
+        },
+        {
+          "text": "remains",
+          "start_ms": 164160,
+          "end_ms": 167040
+        }
+      ]
+    },
+    {
+      "text": "You never change",
+      "start_ms": 167040,
+      "end_ms": 168340,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 167040,
+          "end_ms": 167200
+        },
+        {
+          "text": "never",
+          "start_ms": 167200,
+          "end_ms": 167600
+        },
+        {
+          "text": "change",
+          "start_ms": 167600,
+          "end_ms": 168340
+        }
+      ]
+    },
+    {
+      "text": "You never change",
+      "start_ms": 168340,
+      "end_ms": 170120,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 168340,
+          "end_ms": 168860
+        },
+        {
+          "text": "never",
+          "start_ms": 168860,
+          "end_ms": 169240
+        },
+        {
+          "text": "change",
+          "start_ms": 169240,
+          "end_ms": 170120
+        }
+      ]
+    },
+    {
+      "text": "You never change",
+      "start_ms": 170120,
+      "end_ms": 177280,
+      "text_sk": "Nikdy sa nemeníš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 170120,
+          "end_ms": 170500
+        },
+        {
+          "text": "never",
+          "start_ms": 170500,
+          "end_ms": 171640
+        },
+        {
+          "text": "change",
+          "start_ms": 171640,
+          "end_ms": 177280
+        }
+      ]
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 177280,
+      "end_ms": 184320,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 177280,
+          "end_ms": 178580
+        },
+        {
+          "text": "of",
+          "start_ms": 178580,
+          "end_ms": 178820
+        },
+        {
+          "text": "my",
+          "start_ms": 178820,
+          "end_ms": 179120
+        },
+        {
+          "text": "present",
+          "start_ms": 179120,
+          "end_ms": 181060
+        },
+        {
+          "text": "God",
+          "start_ms": 181060,
+          "end_ms": 181860
+        },
+        {
+          "text": "of",
+          "start_ms": 181860,
+          "end_ms": 182100
+        },
+        {
+          "text": "my",
+          "start_ms": 182100,
+          "end_ms": 182440
+        },
+        {
+          "text": "future",
+          "start_ms": 182440,
+          "end_ms": 184320
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 184320,
+      "end_ms": 190960,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 184320,
+          "end_ms": 184960
+        },
+        {
+          "text": "write",
+          "start_ms": 184960,
+          "end_ms": 185340
+        },
+        {
+          "text": "my",
+          "start_ms": 185340,
+          "end_ms": 185640
+        },
+        {
+          "text": "story",
+          "start_ms": 185640,
+          "end_ms": 187420
+        },
+        {
+          "text": "You",
+          "start_ms": 187420,
+          "end_ms": 188340
+        },
+        {
+          "text": "hold",
+          "start_ms": 188340,
+          "end_ms": 189200
+        },
+        {
+          "text": "it",
+          "start_ms": 189200,
+          "end_ms": 189420
+        },
+        {
+          "text": "all",
+          "start_ms": 189420,
+          "end_ms": 189900
+        },
+        {
+          "text": "together",
+          "start_ms": 189900,
+          "end_ms": 190960
+        }
+      ]
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 190960,
+      "end_ms": 197320,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 190960,
+          "end_ms": 191720
+        },
+        {
+          "text": "of",
+          "start_ms": 191720,
+          "end_ms": 191960
+        },
+        {
+          "text": "my",
+          "start_ms": 191960,
+          "end_ms": 192260
+        },
+        {
+          "text": "present",
+          "start_ms": 192260,
+          "end_ms": 194240
+        },
+        {
+          "text": "God",
+          "start_ms": 194240,
+          "end_ms": 194920
+        },
+        {
+          "text": "of",
+          "start_ms": 194920,
+          "end_ms": 195160
+        },
+        {
+          "text": "my",
+          "start_ms": 195160,
+          "end_ms": 195500
+        },
+        {
+          "text": "future",
+          "start_ms": 195500,
+          "end_ms": 197320
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 197320,
+      "end_ms": 204160,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 197320,
+          "end_ms": 198020
+        },
+        {
+          "text": "write",
+          "start_ms": 198020,
+          "end_ms": 198440
+        },
+        {
+          "text": "my",
+          "start_ms": 198440,
+          "end_ms": 198740
+        },
+        {
+          "text": "story",
+          "start_ms": 198740,
+          "end_ms": 200780
+        },
+        {
+          "text": "You",
+          "start_ms": 200780,
+          "end_ms": 201420
+        },
+        {
+          "text": "hold",
+          "start_ms": 201420,
+          "end_ms": 202200
+        },
+        {
+          "text": "it",
+          "start_ms": 202200,
+          "end_ms": 202420
+        },
+        {
+          "text": "all",
+          "start_ms": 202420,
+          "end_ms": 202940
+        },
+        {
+          "text": "together",
+          "start_ms": 202940,
+          "end_ms": 204160
+        }
+      ]
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 204160,
+      "end_ms": 209300,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 204160,
+          "end_ms": 204720
+        },
+        {
+          "text": "of",
+          "start_ms": 204720,
+          "end_ms": 205660
+        },
+        {
+          "text": "my",
+          "start_ms": 205660,
+          "end_ms": 206720
+        },
+        {
+          "text": "present",
+          "start_ms": 206720,
+          "end_ms": 207560
+        },
+        {
+          "text": "God",
+          "start_ms": 207560,
+          "end_ms": 208000
+        },
+        {
+          "text": "of",
+          "start_ms": 208000,
+          "end_ms": 208220
+        },
+        {
+          "text": "my",
+          "start_ms": 208220,
+          "end_ms": 208540
+        },
+        {
+          "text": "future",
+          "start_ms": 208540,
+          "end_ms": 209300
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 209300,
+      "end_ms": 222920,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 209300,
+          "end_ms": 210020
+        },
+        {
+          "text": "write",
+          "start_ms": 210020,
+          "end_ms": 210720
+        },
+        {
+          "text": "my",
+          "start_ms": 210720,
+          "end_ms": 211000
+        },
+        {
+          "text": "story",
+          "start_ms": 211000,
+          "end_ms": 213000
+        },
+        {
+          "text": "You",
+          "start_ms": 213000,
+          "end_ms": 214460
+        },
+        {
+          "text": "hold",
+          "start_ms": 214460,
+          "end_ms": 215220
+        },
+        {
+          "text": "it",
+          "start_ms": 215220,
+          "end_ms": 215300
+        },
+        {
+          "text": "all",
+          "start_ms": 215300,
+          "end_ms": 216000
+        },
+        {
+          "text": "together",
+          "start_ms": 216000,
+          "end_ms": 222920
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 222920,
+      "end_ms": 233220,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 222920,
+          "end_ms": 223460
+        },
+        {
+          "text": "write",
+          "start_ms": 223460,
+          "end_ms": 224060
+        },
+        {
+          "text": "my",
+          "start_ms": 224060,
+          "end_ms": 224300
+        },
+        {
+          "text": "story",
+          "start_ms": 224300,
+          "end_ms": 225660
+        },
+        {
+          "text": "You",
+          "start_ms": 225660,
+          "end_ms": 226720
+        },
+        {
+          "text": "hold",
+          "start_ms": 226720,
+          "end_ms": 229060
+        },
+        {
+          "text": "it",
+          "start_ms": 229060,
+          "end_ms": 229300
+        },
+        {
+          "text": "all",
+          "start_ms": 229300,
+          "end_ms": 229560
+        },
+        {
+          "text": "together",
+          "start_ms": 229560,
+          "end_ms": 233220
+        }
+      ]
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 233220,
+      "end_ms": 239560,
+      "text_sk": "A verím, že uvidím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 233220,
+          "end_ms": 234220
+        },
+        {
+          "text": "I",
+          "start_ms": 234220,
+          "end_ms": 235220
+        },
+        {
+          "text": "believe",
+          "start_ms": 235220,
+          "end_ms": 238220
+        },
+        {
+          "text": "that",
+          "start_ms": 238220,
+          "end_ms": 238380
+        },
+        {
+          "text": "I",
+          "start_ms": 238380,
+          "end_ms": 238480
+        },
+        {
+          "text": "will",
+          "start_ms": 238480,
+          "end_ms": 238940
+        },
+        {
+          "text": "see",
+          "start_ms": 238940,
+          "end_ms": 239560
+        }
+      ]
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 239560,
+      "end_ms": 245440,
+      "text_sk": "Dobrotu Pána",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 239560,
+          "end_ms": 240760
+        },
+        {
+          "text": "goodness",
+          "start_ms": 240760,
+          "end_ms": 244240
+        },
+        {
+          "text": "of",
+          "start_ms": 244240,
+          "end_ms": 244440
+        },
+        {
+          "text": "the",
+          "start_ms": 244440,
+          "end_ms": 244780
+        },
+        {
+          "text": "Lord",
+          "start_ms": 244780,
+          "end_ms": 245440
+        }
+      ]
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 245440,
+      "end_ms": 251840,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 245440,
+          "end_ms": 246040
+        },
+        {
+          "text": "confident",
+          "start_ms": 246040,
+          "end_ms": 249460
+        },
+        {
+          "text": "as",
+          "start_ms": 249460,
+          "end_ms": 249660
+        },
+        {
+          "text": "seasons",
+          "start_ms": 249660,
+          "end_ms": 250580
+        },
+        {
+          "text": "change",
+          "start_ms": 250580,
+          "end_ms": 251840
+        }
+      ]
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 251840,
+      "end_ms": 267220,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 251840,
+          "end_ms": 252900
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 252900,
+          "end_ms": 256240
+        },
+        {
+          "text": "remains",
+          "start_ms": 256240,
+          "end_ms": 267220
+        }
+      ]
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 267220,
+      "end_ms": 275800,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 267220,
+          "end_ms": 270000
+        },
+        {
+          "text": "of",
+          "start_ms": 270000,
+          "end_ms": 270180
+        },
+        {
+          "text": "my",
+          "start_ms": 270180,
+          "end_ms": 270540
+        },
+        {
+          "text": "present",
+          "start_ms": 270540,
+          "end_ms": 272360
+        },
+        {
+          "text": "God",
+          "start_ms": 272360,
+          "end_ms": 273280
+        },
+        {
+          "text": "of",
+          "start_ms": 273280,
+          "end_ms": 273540
+        },
+        {
+          "text": "my",
+          "start_ms": 273540,
+          "end_ms": 273880
+        },
+        {
+          "text": "future",
+          "start_ms": 273880,
+          "end_ms": 275800
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 275800,
+      "end_ms": 281380,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 275800,
+          "end_ms": 276360
+        },
+        {
+          "text": "write",
+          "start_ms": 276360,
+          "end_ms": 276800
+        },
+        {
+          "text": "my",
+          "start_ms": 276800,
+          "end_ms": 277480
+        },
+        {
+          "text": "story",
+          "start_ms": 277480,
+          "end_ms": 278200
+        },
+        {
+          "text": "You",
+          "start_ms": 278200,
+          "end_ms": 278560
+        },
+        {
+          "text": "hold",
+          "start_ms": 278560,
+          "end_ms": 279000
+        },
+        {
+          "text": "it",
+          "start_ms": 279000,
+          "end_ms": 279200
+        },
+        {
+          "text": "all",
+          "start_ms": 279200,
+          "end_ms": 279480
+        },
+        {
+          "text": "together",
+          "start_ms": 279480,
+          "end_ms": 281380
+        }
+      ]
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 281380,
+      "end_ms": 289300,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 281380,
+          "end_ms": 283160
+        },
+        {
+          "text": "of",
+          "start_ms": 283160,
+          "end_ms": 283360
+        },
+        {
+          "text": "my",
+          "start_ms": 283360,
+          "end_ms": 284940
+        },
+        {
+          "text": "present",
+          "start_ms": 284940,
+          "end_ms": 287940
+        },
+        {
+          "text": "God",
+          "start_ms": 287940,
+          "end_ms": 288080
+        },
+        {
+          "text": "of",
+          "start_ms": 288080,
+          "end_ms": 288320
+        },
+        {
+          "text": "my",
+          "start_ms": 288320,
+          "end_ms": 288520
+        },
+        {
+          "text": "future",
+          "start_ms": 288520,
+          "end_ms": 289300
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 289300,
+      "end_ms": 299080,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 289300,
+          "end_ms": 289600
+        },
+        {
+          "text": "write",
+          "start_ms": 289600,
+          "end_ms": 289900
+        },
+        {
+          "text": "my",
+          "start_ms": 289900,
+          "end_ms": 293080
+        },
+        {
+          "text": "story",
+          "start_ms": 293080,
+          "end_ms": 295040
+        },
+        {
+          "text": "You",
+          "start_ms": 295040,
+          "end_ms": 295240
+        },
+        {
+          "text": "hold",
+          "start_ms": 295240,
+          "end_ms": 297720
+        },
+        {
+          "text": "it",
+          "start_ms": 297720,
+          "end_ms": 298100
+        },
+        {
+          "text": "all",
+          "start_ms": 298100,
+          "end_ms": 298300
+        },
+        {
+          "text": "together",
+          "start_ms": 298300,
+          "end_ms": 299080
+        }
+      ]
+    },
+    {
+      "text": "God of my present God of my future",
+      "start_ms": 299080,
+      "end_ms": 311340,
+      "text_sk": "Boh mojej prítomnosti Boh mojej budúcnosti",
+      "words": [
+        {
+          "text": "God",
+          "start_ms": 299080,
+          "end_ms": 301200
+        },
+        {
+          "text": "of",
+          "start_ms": 301200,
+          "end_ms": 301560
+        },
+        {
+          "text": "my",
+          "start_ms": 301560,
+          "end_ms": 301780
+        },
+        {
+          "text": "present",
+          "start_ms": 301780,
+          "end_ms": 304220
+        },
+        {
+          "text": "God",
+          "start_ms": 304220,
+          "end_ms": 306780
+        },
+        {
+          "text": "of",
+          "start_ms": 306780,
+          "end_ms": 307960
+        },
+        {
+          "text": "my",
+          "start_ms": 307960,
+          "end_ms": 308320
+        },
+        {
+          "text": "future",
+          "start_ms": 308320,
+          "end_ms": 311340
+        }
+      ]
+    },
+    {
+      "text": "You write my story You hold it all together",
+      "start_ms": 311340,
+      "end_ms": 323380,
+      "text_sk": "Píšeš môj príbeh Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 311340,
+          "end_ms": 311720
+        },
+        {
+          "text": "write",
+          "start_ms": 311720,
+          "end_ms": 311980
+        },
+        {
+          "text": "my",
+          "start_ms": 311980,
+          "end_ms": 312040
+        },
+        {
+          "text": "story",
+          "start_ms": 312040,
+          "end_ms": 312580
+        },
+        {
+          "text": "You",
+          "start_ms": 312580,
+          "end_ms": 314620
+        },
+        {
+          "text": "hold",
+          "start_ms": 314620,
+          "end_ms": 315080
+        },
+        {
+          "text": "it",
+          "start_ms": 315080,
+          "end_ms": 315340
+        },
+        {
+          "text": "all",
+          "start_ms": 315340,
+          "end_ms": 316780
+        },
+        {
+          "text": "together",
+          "start_ms": 316780,
+          "end_ms": 323380
+        }
+      ]
+    },
+    {
+      "text": "You hold it all together",
+      "start_ms": 323380,
+      "end_ms": 330360,
+      "text_sk": "Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 323380,
+          "end_ms": 325580
+        },
+        {
+          "text": "hold",
+          "start_ms": 325580,
+          "end_ms": 326500
+        },
+        {
+          "text": "it",
+          "start_ms": 326500,
+          "end_ms": 327120
+        },
+        {
+          "text": "all",
+          "start_ms": 327120,
+          "end_ms": 327460
+        },
+        {
+          "text": "together",
+          "start_ms": 327460,
+          "end_ms": 330360
+        }
+      ]
+    },
+    {
+      "text": "You hold it all together",
+      "start_ms": 330360,
+      "end_ms": 335040,
+      "text_sk": "Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 330360,
+          "end_ms": 331960
+        },
+        {
+          "text": "hold",
+          "start_ms": 331960,
+          "end_ms": 332840
+        },
+        {
+          "text": "it",
+          "start_ms": 332840,
+          "end_ms": 333040
+        },
+        {
+          "text": "all",
+          "start_ms": 333040,
+          "end_ms": 333560
+        },
+        {
+          "text": "together",
+          "start_ms": 333560,
+          "end_ms": 335040
+        }
+      ]
+    },
+    {
+      "text": "In my hands it falls apart but You hold it all",
+      "start_ms": 335040,
+      "end_ms": 340860,
+      "text_sk": "V mojich rukách sa to rozpadá, ale Ty to držíš všetko",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 335040,
+          "end_ms": 335720
+        },
+        {
+          "text": "my",
+          "start_ms": 335720,
+          "end_ms": 336060
+        },
+        {
+          "text": "hands",
+          "start_ms": 336060,
+          "end_ms": 336600
+        },
+        {
+          "text": "it",
+          "start_ms": 336600,
+          "end_ms": 336740
+        },
+        {
+          "text": "falls",
+          "start_ms": 336740,
+          "end_ms": 337220
+        },
+        {
+          "text": "apart",
+          "start_ms": 337220,
+          "end_ms": 337720
+        },
+        {
+          "text": "but",
+          "start_ms": 337720,
+          "end_ms": 338060
+        },
+        {
+          "text": "You",
+          "start_ms": 338060,
+          "end_ms": 338600
+        },
+        {
+          "text": "hold",
+          "start_ms": 338600,
+          "end_ms": 339360
+        },
+        {
+          "text": "it",
+          "start_ms": 339360,
+          "end_ms": 339560
+        },
+        {
+          "text": "all",
+          "start_ms": 339560,
+          "end_ms": 340860
+        }
+      ]
+    },
+    {
+      "text": "In my hands I fall apart but You hold it all",
+      "start_ms": 340860,
+      "end_ms": 347080,
+      "text_sk": "V mojich rukách padám, ale Ty to držíš všetko",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 340860,
+          "end_ms": 341620
+        },
+        {
+          "text": "my",
+          "start_ms": 341620,
+          "end_ms": 341880
+        },
+        {
+          "text": "hands",
+          "start_ms": 341880,
+          "end_ms": 342600
+        },
+        {
+          "text": "I",
+          "start_ms": 342600,
+          "end_ms": 342740
+        },
+        {
+          "text": "fall",
+          "start_ms": 342740,
+          "end_ms": 343300
+        },
+        {
+          "text": "apart",
+          "start_ms": 343300,
+          "end_ms": 343960
+        },
+        {
+          "text": "but",
+          "start_ms": 343960,
+          "end_ms": 344600
+        },
+        {
+          "text": "You",
+          "start_ms": 344600,
+          "end_ms": 345060
+        },
+        {
+          "text": "hold",
+          "start_ms": 345060,
+          "end_ms": 345860
+        },
+        {
+          "text": "it",
+          "start_ms": 345860,
+          "end_ms": 346000
+        },
+        {
+          "text": "all",
+          "start_ms": 346000,
+          "end_ms": 347080
+        }
+      ]
+    },
+    {
+      "text": "My past my present my future You hold",
+      "start_ms": 347080,
+      "end_ms": 355960,
+      "text_sk": "Moju minulosť moju prítomnosť moju budúcnosť Ty držíš",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 347080,
+          "end_ms": 348140
+        },
+        {
+          "text": "past",
+          "start_ms": 348140,
+          "end_ms": 348780
+        },
+        {
+          "text": "my",
+          "start_ms": 348780,
+          "end_ms": 349020
+        },
+        {
+          "text": "present",
+          "start_ms": 349020,
+          "end_ms": 349620
+        },
+        {
+          "text": "my",
+          "start_ms": 349620,
+          "end_ms": 349820
+        },
+        {
+          "text": "future",
+          "start_ms": 349820,
+          "end_ms": 350540
+        },
+        {
+          "text": "You",
+          "start_ms": 350540,
+          "end_ms": 350940
+        },
+        {
+          "text": "hold",
+          "start_ms": 350940,
+          "end_ms": 355960
+        }
+      ]
+    },
+    {
+      "text": "You hold",
+      "start_ms": 355960,
+      "end_ms": 360580,
+      "text_sk": "Ty držíš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 355960,
+          "end_ms": 358200
+        },
+        {
+          "text": "hold",
+          "start_ms": 358200,
+          "end_ms": 360580
+        }
+      ]
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 360580,
+      "end_ms": 365420,
+      "text_sk": "A verím, že uvidím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 360580,
+          "end_ms": 361060
+        },
+        {
+          "text": "I",
+          "start_ms": 361060,
+          "end_ms": 361500
+        },
+        {
+          "text": "believe",
+          "start_ms": 361500,
+          "end_ms": 362720
+        },
+        {
+          "text": "that",
+          "start_ms": 362720,
+          "end_ms": 363660
+        },
+        {
+          "text": "I",
+          "start_ms": 363660,
+          "end_ms": 364240
+        },
+        {
+          "text": "will",
+          "start_ms": 364240,
+          "end_ms": 365100
+        },
+        {
+          "text": "see",
+          "start_ms": 365100,
+          "end_ms": 365420
+        }
+      ]
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 365420,
+      "end_ms": 369300,
+      "text_sk": "Dobrotu Pána",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 365420,
+          "end_ms": 365500
+        },
+        {
+          "text": "goodness",
+          "start_ms": 365500,
+          "end_ms": 366160
+        },
+        {
+          "text": "of",
+          "start_ms": 366160,
+          "end_ms": 366720
+        },
+        {
+          "text": "the",
+          "start_ms": 366720,
+          "end_ms": 367140
+        },
+        {
+          "text": "Lord",
+          "start_ms": 367140,
+          "end_ms": 369300
+        }
+      ]
+    },
+    {
+      "text": "Your goodness doesn't change",
+      "start_ms": 369300,
+      "end_ms": 373420,
+      "text_sk": "Tvoja dobrota sa nemení",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 369300,
+          "end_ms": 371280
+        },
+        {
+          "text": "goodness",
+          "start_ms": 371280,
+          "end_ms": 371840
+        },
+        {
+          "text": "doesn't",
+          "start_ms": 371840,
+          "end_ms": 372520
+        },
+        {
+          "text": "change",
+          "start_ms": 372520,
+          "end_ms": 373420
+        }
+      ]
+    },
+    {
+      "text": "I'm confident as seasons change",
+      "start_ms": 373420,
+      "end_ms": 384980,
+      "text_sk": "Som si istý, keď sa ročné obdobia menia",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 373420,
+          "end_ms": 373740
+        },
+        {
+          "text": "confident",
+          "start_ms": 373740,
+          "end_ms": 375940
+        },
+        {
+          "text": "as",
+          "start_ms": 375940,
+          "end_ms": 376580
+        },
+        {
+          "text": "seasons",
+          "start_ms": 376580,
+          "end_ms": 377040
+        },
+        {
+          "text": "change",
+          "start_ms": 377040,
+          "end_ms": 384980
+        }
+      ]
+    },
+    {
+      "text": "Your faithfulness remains",
+      "start_ms": 384980,
+      "end_ms": 390740,
+      "text_sk": "Tvoja vernosť zostáva",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 384980,
+          "end_ms": 385160
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 385160,
+          "end_ms": 386580
+        },
+        {
+          "text": "remains",
+          "start_ms": 386580,
+          "end_ms": 390740
+        }
+      ]
+    },
+    {
+      "text": "Great is Thy faithfulness",
+      "start_ms": 390740,
+      "end_ms": 394200,
+      "text_sk": "Veľká je Tvoja vernosť",
+      "words": [
+        {
+          "text": "Great",
+          "start_ms": 390740,
+          "end_ms": 391220
+        },
+        {
+          "text": "is",
+          "start_ms": 391220,
+          "end_ms": 391400
+        },
+        {
+          "text": "Thy",
+          "start_ms": 391400,
+          "end_ms": 391580
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 391580,
+          "end_ms": 394200
+        }
+      ]
+    },
+    {
+      "text": "Morning by morning new mercies",
+      "start_ms": 394200,
+      "end_ms": 398220,
+      "text_sk": "Ráno čo ráno nové milosrdenstvá",
+      "words": [
+        {
+          "text": "Morning",
+          "start_ms": 394200,
+          "end_ms": 396040
+        },
+        {
+          "text": "by",
+          "start_ms": 396040,
+          "end_ms": 396200
+        },
+        {
+          "text": "morning",
+          "start_ms": 396200,
+          "end_ms": 397040
+        },
+        {
+          "text": "new",
+          "start_ms": 397040,
+          "end_ms": 397240
+        },
+        {
+          "text": "mercies",
+          "start_ms": 397240,
+          "end_ms": 398220
+        }
+      ]
+    },
+    {
+      "text": "Morning by morning Your faithful",
+      "start_ms": 398220,
+      "end_ms": 401900,
+      "text_sk": "Ráno čo ráno si verný",
+      "words": [
+        {
+          "text": "Morning",
+          "start_ms": 398220,
+          "end_ms": 398940
+        },
+        {
+          "text": "by",
+          "start_ms": 398940,
+          "end_ms": 399080
+        },
+        {
+          "text": "morning",
+          "start_ms": 399080,
+          "end_ms": 399640
+        },
+        {
+          "text": "Your",
+          "start_ms": 399640,
+          "end_ms": 399940
+        },
+        {
+          "text": "faithful",
+          "start_ms": 399940,
+          "end_ms": 401900
+        }
+      ]
+    },
+    {
+      "text": "All I have needed Thy hand has provided",
+      "start_ms": 401900,
+      "end_ms": 406260,
+      "text_sk": "Všetko, čo som potreboval, Tvoja ruka poskytla",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 401900,
+          "end_ms": 402300
+        },
+        {
+          "text": "I",
+          "start_ms": 402300,
+          "end_ms": 402460
+        },
+        {
+          "text": "have",
+          "start_ms": 402460,
+          "end_ms": 403400
+        },
+        {
+          "text": "needed",
+          "start_ms": 403400,
+          "end_ms": 404200
+        },
+        {
+          "text": "Thy",
+          "start_ms": 404200,
+          "end_ms": 404620
+        },
+        {
+          "text": "hand",
+          "start_ms": 404620,
+          "end_ms": 405080
+        },
+        {
+          "text": "has",
+          "start_ms": 405080,
+          "end_ms": 405340
+        },
+        {
+          "text": "provided",
+          "start_ms": 405340,
+          "end_ms": 406260
+        }
+      ]
+    },
+    {
+      "text": "All I have needed Thy hand has provided",
+      "start_ms": 406260,
+      "end_ms": 411640,
+      "text_sk": "Všetko, čo som potreboval, Tvoja ruka poskytla",
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 406260,
+          "end_ms": 406600
+        },
+        {
+          "text": "I",
+          "start_ms": 406600,
+          "end_ms": 407580
+        },
+        {
+          "text": "have",
+          "start_ms": 407580,
+          "end_ms": 408840
+        },
+        {
+          "text": "needed",
+          "start_ms": 408840,
+          "end_ms": 410140
+        },
+        {
+          "text": "Thy",
+          "start_ms": 410140,
+          "end_ms": 410360
+        },
+        {
+          "text": "hand",
+          "start_ms": 410360,
+          "end_ms": 410600
+        },
+        {
+          "text": "has",
+          "start_ms": 410600,
+          "end_ms": 410660
+        },
+        {
+          "text": "provided",
+          "start_ms": 410660,
+          "end_ms": 411640
+        }
+      ]
+    },
+    {
+      "text": "You have provided You have provided",
+      "start_ms": 411640,
+      "end_ms": 418060,
+      "text_sk": "Poskytol si Poskytol si",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 411640,
+          "end_ms": 411780
+        },
+        {
+          "text": "have",
+          "start_ms": 411780,
+          "end_ms": 412260
+        },
+        {
+          "text": "provided",
+          "start_ms": 412260,
+          "end_ms": 413720
+        },
+        {
+          "text": "You",
+          "start_ms": 413720,
+          "end_ms": 413860
+        },
+        {
+          "text": "have",
+          "start_ms": 413860,
+          "end_ms": 414620
+        },
+        {
+          "text": "provided",
+          "start_ms": 414620,
+          "end_ms": 418060
+        }
+      ]
+    },
+    {
+      "text": "Your faithfulness",
+      "start_ms": 418060,
+      "end_ms": 423400,
+      "text_sk": "Tvoja vernosť",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 418060,
+          "end_ms": 418300
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 418300,
+          "end_ms": 423400
+        }
+      ]
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 423400,
+      "end_ms": 429020,
+      "text_sk": "Si Alfa a si Omega",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 423400,
+          "end_ms": 423620
+        },
+        {
+          "text": "are",
+          "start_ms": 423620,
+          "end_ms": 423920
+        },
+        {
+          "text": "the",
+          "start_ms": 423920,
+          "end_ms": 424220
+        },
+        {
+          "text": "Alpha",
+          "start_ms": 424220,
+          "end_ms": 425800
+        },
+        {
+          "text": "and",
+          "start_ms": 425800,
+          "end_ms": 426760
+        },
+        {
+          "text": "You're",
+          "start_ms": 426760,
+          "end_ms": 427260
+        },
+        {
+          "text": "Omega",
+          "start_ms": 427260,
+          "end_ms": 429020
+        }
+      ]
+    },
+    {
+      "text": "You're in the middle You hold it all together",
+      "start_ms": 429020,
+      "end_ms": 435920,
+      "text_sk": "Si uprostred Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 429020,
+          "end_ms": 430060
+        },
+        {
+          "text": "in",
+          "start_ms": 430060,
+          "end_ms": 430280
+        },
+        {
+          "text": "the",
+          "start_ms": 430280,
+          "end_ms": 430560
+        },
+        {
+          "text": "middle",
+          "start_ms": 430560,
+          "end_ms": 432320
+        },
+        {
+          "text": "You",
+          "start_ms": 432320,
+          "end_ms": 433320
+        },
+        {
+          "text": "hold",
+          "start_ms": 433320,
+          "end_ms": 434100
+        },
+        {
+          "text": "it",
+          "start_ms": 434100,
+          "end_ms": 434280
+        },
+        {
+          "text": "all",
+          "start_ms": 434280,
+          "end_ms": 434780
+        },
+        {
+          "text": "together",
+          "start_ms": 434780,
+          "end_ms": 435920
+        }
+      ]
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 435920,
+      "end_ms": 442040,
+      "text_sk": "Si Alfa a si Omega",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 435920,
+          "end_ms": 436560
+        },
+        {
+          "text": "are",
+          "start_ms": 436560,
+          "end_ms": 436940
+        },
+        {
+          "text": "the",
+          "start_ms": 436940,
+          "end_ms": 437580
+        },
+        {
+          "text": "Alpha",
+          "start_ms": 437580,
+          "end_ms": 438980
+        },
+        {
+          "text": "and",
+          "start_ms": 438980,
+          "end_ms": 439740
+        },
+        {
+          "text": "You're",
+          "start_ms": 439740,
+          "end_ms": 440260
+        },
+        {
+          "text": "Omega",
+          "start_ms": 440260,
+          "end_ms": 442040
+        }
+      ]
+    },
+    {
+      "text": "You're in the middle You hold it all together",
+      "start_ms": 442040,
+      "end_ms": 451660,
+      "text_sk": "Si uprostred Držíš to všetko pohromade",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 442040,
+          "end_ms": 443180
+        },
+        {
+          "text": "in",
+          "start_ms": 443180,
+          "end_ms": 443320
+        },
+        {
+          "text": "the",
+          "start_ms": 443320,
+          "end_ms": 443580
+        },
+        {
+          "text": "middle",
+          "start_ms": 443580,
+          "end_ms": 446120
+        },
+        {
+          "text": "You",
+          "start_ms": 446120,
+          "end_ms": 446340
+        },
+        {
+          "text": "hold",
+          "start_ms": 446340,
+          "end_ms": 447080
+        },
+        {
+          "text": "it",
+          "start_ms": 447080,
+          "end_ms": 450200
+        },
+        {
+          "text": "all",
+          "start_ms": 450200,
+          "end_ms": 450840
+        },
+        {
+          "text": "together",
+          "start_ms": 450840,
+          "end_ms": 451660
+        }
+      ]
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 451660,
+      "end_ms": 454600,
+      "text_sk": "Si Alfa a si Omega",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 451660,
+          "end_ms": 452040
+        },
+        {
+          "text": "are",
+          "start_ms": 452040,
+          "end_ms": 452280
+        },
+        {
+          "text": "the",
+          "start_ms": 452280,
+          "end_ms": 452600
+        },
+        {
+          "text": "Alpha",
+          "start_ms": 452600,
+          "end_ms": 452980
+        },
+        {
+          "text": "and",
+          "start_ms": 452980,
+          "end_ms": 453240
+        },
+        {
+          "text": "You're",
+          "start_ms": 453240,
+          "end_ms": 453620
+        },
+        {
+          "text": "Omega",
+          "start_ms": 453620,
+          "end_ms": 454600
+        }
+      ]
+    },
+    {
+      "text": "You're in the middle You hold it all",
+      "start_ms": 454600,
+      "end_ms": 460740,
+      "text_sk": "Si uprostred Držíš to všetko",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 454600,
+          "end_ms": 455080
+        },
+        {
+          "text": "in",
+          "start_ms": 455080,
+          "end_ms": 455280
+        },
+        {
+          "text": "the",
+          "start_ms": 455280,
+          "end_ms": 455480
+        },
+        {
+          "text": "middle",
+          "start_ms": 455480,
+          "end_ms": 458600
+        },
+        {
+          "text": "You",
+          "start_ms": 458600,
+          "end_ms": 459380
+        },
+        {
+          "text": "hold",
+          "start_ms": 459380,
+          "end_ms": 460120
+        },
+        {
+          "text": "it",
+          "start_ms": 460120,
+          "end_ms": 460320
+        },
+        {
+          "text": "all",
+          "start_ms": 460320,
+          "end_ms": 460740
+        }
+      ]
+    },
+    {
+      "text": "You are the Alpha",
+      "start_ms": 460740,
+      "end_ms": 463320,
+      "text_sk": "Si Alfa",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 460740,
+          "end_ms": 461260
+        },
+        {
+          "text": "are",
+          "start_ms": 461260,
+          "end_ms": 461820
+        },
+        {
+          "text": "the",
+          "start_ms": 461820,
+          "end_ms": 462060
+        },
+        {
+          "text": "Alpha",
+          "start_ms": 462060,
+          "end_ms": 463320
+        }
+      ]
+    },
+    {
+      "text": "But You're not just at the beginning",
+      "start_ms": 463320,
+      "end_ms": 467200,
+      "text_sk": "Ale nie si len na začiatku",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 463320,
+          "end_ms": 464200
+        },
+        {
+          "text": "You're",
+          "start_ms": 464200,
+          "end_ms": 464380
+        },
+        {
+          "text": "not",
+          "start_ms": 464380,
+          "end_ms": 464640
+        },
+        {
+          "text": "just",
+          "start_ms": 464640,
+          "end_ms": 464960
+        },
+        {
+          "text": "at",
+          "start_ms": 464960,
+          "end_ms": 465100
+        },
+        {
+          "text": "the",
+          "start_ms": 465100,
+          "end_ms": 465260
+        },
+        {
+          "text": "beginning",
+          "start_ms": 465260,
+          "end_ms": 467200
+        }
+      ]
+    },
+    {
+      "text": "But You're not just at the end",
+      "start_ms": 467200,
+      "end_ms": 469480,
+      "text_sk": "Ale nie si len na konci",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 467200,
+          "end_ms": 467420
+        },
+        {
+          "text": "You're",
+          "start_ms": 467420,
+          "end_ms": 467620
+        },
+        {
+          "text": "not",
+          "start_ms": 467620,
+          "end_ms": 467960
+        },
+        {
+          "text": "just",
+          "start_ms": 467960,
+          "end_ms": 468300
+        },
+        {
+          "text": "at",
+          "start_ms": 468300,
+          "end_ms": 468500
+        },
+        {
+          "text": "the",
+          "start_ms": 468500,
+          "end_ms": 468700
+        },
+        {
+          "text": "end",
+          "start_ms": 468700,
+          "end_ms": 469480
+        }
+      ]
+    },
+    {
+      "text": "You're right here in the middle",
+      "start_ms": 469480,
+      "end_ms": 479040,
+      "text_sk": "Si priamo tu uprostred",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 469480,
+          "end_ms": 469860
+        },
+        {
+          "text": "right",
+          "start_ms": 469860,
+          "end_ms": 470060
+        },
+        {
+          "text": "here",
+          "start_ms": 470060,
+          "end_ms": 470940
+        },
+        {
+          "text": "in",
+          "start_ms": 470940,
+          "end_ms": 471080
+        },
+        {
+          "text": "the",
+          "start_ms": 471080,
+          "end_ms": 471240
+        },
+        {
+          "text": "middle",
+          "start_ms": 471240,
+          "end_ms": 479040
+        }
+      ]
+    },
+    {
+      "text": "You're not just at the beginning",
+      "start_ms": 479040,
+      "end_ms": 488860,
+      "text_sk": "Nie si len na začiatku",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 479040,
+          "end_ms": 486620
+        },
+        {
+          "text": "not",
+          "start_ms": 486620,
+          "end_ms": 486840
+        },
+        {
+          "text": "just",
+          "start_ms": 486840,
+          "end_ms": 487140
+        },
+        {
+          "text": "at",
+          "start_ms": 487140,
+          "end_ms": 487320
+        },
+        {
+          "text": "the",
+          "start_ms": 487320,
+          "end_ms": 487460
+        },
+        {
+          "text": "beginning",
+          "start_ms": 487460,
+          "end_ms": 488860
+        }
+      ]
+    },
+    {
+      "text": "And You're not just watching from the end",
+      "start_ms": 488860,
+      "end_ms": 492440,
+      "text_sk": "A nesleduješ len z konca",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 488860,
+          "end_ms": 489680
+        },
+        {
+          "text": "You're",
+          "start_ms": 489680,
+          "end_ms": 489840
+        },
+        {
+          "text": "not",
+          "start_ms": 489840,
+          "end_ms": 490080
+        },
+        {
+          "text": "just",
+          "start_ms": 490080,
+          "end_ms": 490380
+        },
+        {
+          "text": "watching",
+          "start_ms": 490380,
+          "end_ms": 490860
+        },
+        {
+          "text": "from",
+          "start_ms": 490860,
+          "end_ms": 491240
+        },
+        {
+          "text": "the",
+          "start_ms": 491240,
+          "end_ms": 491540
+        },
+        {
+          "text": "end",
+          "start_ms": 491540,
+          "end_ms": 492440
+        }
+      ]
+    },
+    {
+      "text": "But You're walking with me in the middle",
+      "start_ms": 492440,
+      "end_ms": 495900,
+      "text_sk": "Ale kráčaš so mnou uprostred",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 492440,
+          "end_ms": 493060
+        },
+        {
+          "text": "You're",
+          "start_ms": 493060,
+          "end_ms": 493260
+        },
+        {
+          "text": "walking",
+          "start_ms": 493260,
+          "end_ms": 493760
+        },
+        {
+          "text": "with",
+          "start_ms": 493760,
+          "end_ms": 493980
+        },
+        {
+          "text": "me",
+          "start_ms": 493980,
+          "end_ms": 494160
+        },
+        {
+          "text": "in",
+          "start_ms": 494160,
+          "end_ms": 494400
+        },
+        {
+          "text": "the",
+          "start_ms": 494400,
+          "end_ms": 494520
+        },
+        {
+          "text": "middle",
+          "start_ms": 494520,
+          "end_ms": 495900
+        }
+      ]
+    },
+    {
+      "text": "You're walking with me in the middle",
+      "start_ms": 495900,
+      "end_ms": 498560,
+      "text_sk": "Kráčaš so mnou uprostred",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 495900,
+          "end_ms": 496200
+        },
+        {
+          "text": "walking",
+          "start_ms": 496200,
+          "end_ms": 496680
+        },
+        {
+          "text": "with",
+          "start_ms": 496680,
+          "end_ms": 496960
+        },
+        {
+          "text": "me",
+          "start_ms": 496960,
+          "end_ms": 497140
+        },
+        {
+          "text": "in",
+          "start_ms": 497140,
+          "end_ms": 497300
+        },
+        {
+          "text": "the",
+          "start_ms": 497300,
+          "end_ms": 497420
+        },
+        {
+          "text": "middle",
+          "start_ms": 497420,
+          "end_ms": 498560
+        }
+      ]
+    },
+    {
+      "text": "You're the God of the middle",
+      "start_ms": 498560,
+      "end_ms": 501200,
+      "text_sk": "Si Boh uprostred",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 498560,
+          "end_ms": 499280
+        },
+        {
+          "text": "the",
+          "start_ms": 499280,
+          "end_ms": 499420
+        },
+        {
+          "text": "God",
+          "start_ms": 499420,
+          "end_ms": 499840
+        },
+        {
+          "text": "of",
+          "start_ms": 499840,
+          "end_ms": 500080
+        },
+        {
+          "text": "the",
+          "start_ms": 500080,
+          "end_ms": 500240
+        },
+        {
+          "text": "middle",
+          "start_ms": 500240,
+          "end_ms": 501200
+        }
+      ]
+    },
+    {
+      "text": "You're Jehovah in the middle",
+      "start_ms": 501200,
+      "end_ms": 504060,
+      "text_sk": "Si Jehova uprostred",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 501200,
+          "end_ms": 502040
+        },
+        {
+          "text": "Jehovah",
+          "start_ms": 502040,
+          "end_ms": 502760
+        },
+        {
+          "text": "in",
+          "start_ms": 502760,
+          "end_ms": 502940
+        },
+        {
+          "text": "the",
+          "start_ms": 502940,
+          "end_ms": 503120
+        },
+        {
+          "text": "middle",
+          "start_ms": 503120,
+          "end_ms": 504060
+        }
+      ]
+    },
+    {
+      "text": "You're Provider in the middle",
+      "start_ms": 504060,
+      "end_ms": 506880,
+      "text_sk": "Si Poskytovateľ uprostred",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 504060,
+          "end_ms": 504620
+        },
+        {
+          "text": "Provider",
+          "start_ms": 504620,
+          "end_ms": 505660
+        },
+        {
+          "text": "in",
+          "start_ms": 505660,
+          "end_ms": 505840
+        },
+        {
+          "text": "the",
+          "start_ms": 505840,
+          "end_ms": 506000
+        },
+        {
+          "text": "middle",
+          "start_ms": 506000,
+          "end_ms": 506880
+        }
+      ]
+    },
+    {
+      "text": "You are Healer in the middle",
+      "start_ms": 506880,
+      "end_ms": 509620,
+      "text_sk": "Si Uzdraviteľ uprostred",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 506880,
+          "end_ms": 507360
+        },
+        {
+          "text": "are",
+          "start_ms": 507360,
+          "end_ms": 507640
+        },
+        {
+          "text": "Healer",
+          "start_ms": 507640,
+          "end_ms": 508360
+        },
+        {
+          "text": "in",
+          "start_ms": 508360,
+          "end_ms": 508560
+        },
+        {
+          "text": "the",
+          "start_ms": 508560,
+          "end_ms": 508740
+        },
+        {
+          "text": "middle",
+          "start_ms": 508740,
+          "end_ms": 509620
+        }
+      ]
+    },
+    {
+      "text": "You're our Keeper in the middle",
+      "start_ms": 509620,
+      "end_ms": 514680,
+      "text_sk": "Si náš Strážca uprostred",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 509620,
+          "end_ms": 510160
+        },
+        {
+          "text": "our",
+          "start_ms": 510160,
+          "end_ms": 510340
+        },
+        {
+          "text": "Keeper",
+          "start_ms": 510340,
+          "end_ms": 511300
+        },
+        {
+          "text": "in",
+          "start_ms": 511300,
+          "end_ms": 511500
+        },
+        {
+          "text": "the",
+          "start_ms": 511500,
+          "end_ms": 511660
+        },
+        {
+          "text": "middle",
+          "start_ms": 511660,
+          "end_ms": 514680
+        }
+      ]
+    },
+    {
+      "text": "You are the Alpha and You're Omega",
+      "start_ms": 514680,
+      "end_ms": 520500,
+      "text_sk": "Si Alfa a si Omega",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 514680,
+          "end_ms": 514840
+        },
+        {
+          "text": "are",
+          "start_ms": 514840,
+          "end_ms": 515200
+        },
+        {
+          "text": "the",
+          "start_ms": 515200,
+          "end_ms": 515600
+        },
+        {
+          "text": "Alpha",
+          "start_ms": 515600,
+          "end_ms": 517200
+        },
+        {
+          "text": "and",
+          "start_ms": 517200,
+          "end_ms": 518220
+        },
+        {
+          "text": "You're",
+          "start_ms": 518220,
+          "end_ms": 518680
+        },
+        {
+          "text": "Omega",
+          "start_ms": 518680,
+          "end_ms": 520500
+        }
+      ]
+    },
+    {
+      "text": "You're in the middle You hold it all",
+      "start_ms": 520500,
+      "end_ms": 539680,
+      "text_sk": "Si uprostred Držíš to všetko",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 520500,
+          "end_ms": 521660
+        },
+        {
+          "text": "in",
+          "start_ms": 521660,
+          "end_ms": 521820
+        },
+        {
+          "text": "the",
+          "start_ms": 521820,
+          "end_ms": 522020
+        },
+        {
+          "text": "middle",
+          "start_ms": 522020,
+          "end_ms": 523400
+        },
+        {
+          "text": "You",
+          "start_ms": 523400,
+          "end_ms": 524720
+        },
+        {
+          "text": "hold",
+          "start_ms": 524720,
+          "end_ms": 525620
+        },
+        {
+          "text": "it",
+          "start_ms": 525620,
+          "end_ms": 525780
+        },
+        {
+          "text": "all",
+          "start_ms": 525780,
+          "end_ms": 539680
+        }
+      ]
+    },
+    {
+      "text": "You do",
+      "start_ms": 539680,
+      "end_ms": 559280,
+      "text_sk": "Robíš to",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 539680,
+          "end_ms": 556080
+        },
+        {
+          "text": "do",
+          "start_ms": 556080,
+          "end_ms": 559280
+        }
+      ]
+    },
+    {
+      "text": "You do",
+      "start_ms": 559280,
+      "end_ms": 564820,
+      "text_sk": "Robíš to",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 559280,
+          "end_ms": 562540
+        },
+        {
+          "text": "do",
+          "start_ms": 562540,
+          "end_ms": 564820
+        }
+      ]
+    },
+    {
+      "text": "In my hands I fall apart but You You hold",
+      "start_ms": 564820,
+      "end_ms": 572220,
+      "text_sk": "V mojich rukách padám, ale Ty Ty držíš",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 564820,
+          "end_ms": 566980
+        },
+        {
+          "text": "my",
+          "start_ms": 566980,
+          "end_ms": 567280
+        },
+        {
+          "text": "hands",
+          "start_ms": 567280,
+          "end_ms": 567860
+        },
+        {
+          "text": "I",
+          "start_ms": 567860,
+          "end_ms": 567960
+        },
+        {
+          "text": "fall",
+          "start_ms": 567960,
+          "end_ms": 568500
+        },
+        {
+          "text": "apart",
+          "start_ms": 568500,
+          "end_ms": 569040
+        },
+        {
+          "text": "but",
+          "start_ms": 569040,
+          "end_ms": 569240
+        },
+        {
+          "text": "You",
+          "start_ms": 569240,
+          "end_ms": 569840
+        },
+        {
+          "text": "You",
+          "start_ms": 569840,
+          "end_ms": 570420
+        },
+        {
+          "text": "hold",
+          "start_ms": 570420,
+          "end_ms": 572220
+        }
+      ]
+    },
+    {
+      "text": "In my hands it falls apart but You",
+      "start_ms": 572220,
+      "end_ms": 578160,
+      "text_sk": "V mojich rukách sa to rozpadá, ale Ty",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 572220,
+          "end_ms": 573540
+        },
+        {
+          "text": "my",
+          "start_ms": 573540,
+          "end_ms": 573820
+        },
+        {
+          "text": "hands",
+          "start_ms": 573820,
+          "end_ms": 574460
+        },
+        {
+          "text": "it",
+          "start_ms": 574460,
+          "end_ms": 574620
+        },
+        {
+          "text": "falls",
+          "start_ms": 574620,
+          "end_ms": 575160
+        },
+        {
+          "text": "apart",
+          "start_ms": 575160,
+          "end_ms": 576040
+        },
+        {
+          "text": "but",
+          "start_ms": 576040,
+          "end_ms": 576300
+        },
+        {
+          "text": "You",
+          "start_ms": 576300,
+          "end_ms": 578160
+        }
+      ]
+    },
+    {
+      "text": "You've got the whole world",
+      "start_ms": 578160,
+      "end_ms": 584460,
+      "text_sk": "Máš celý svet",
+      "words": [
+        {
+          "text": "You've",
+          "start_ms": 578160,
+          "end_ms": 580320
+        },
+        {
+          "text": "got",
+          "start_ms": 580320,
+          "end_ms": 580660
+        },
+        {
+          "text": "the",
+          "start_ms": 580660,
+          "end_ms": 580980
+        },
+        {
+          "text": "whole",
+          "start_ms": 580980,
+          "end_ms": 581800
+        },
+        {
+          "text": "world",
+          "start_ms": 581800,
+          "end_ms": 584460
+        }
+      ]
+    },
+    {
+      "text": "You've got the whole world",
+      "start_ms": 584460,
+      "end_ms": 589800,
+      "text_sk": "Máš celý svet",
+      "words": [
+        {
+          "text": "You've",
+          "start_ms": 584460,
+          "end_ms": 586960
+        },
+        {
+          "text": "got",
+          "start_ms": 586960,
+          "end_ms": 587260
+        },
+        {
+          "text": "the",
+          "start_ms": 587260,
+          "end_ms": 587440
+        },
+        {
+          "text": "whole",
+          "start_ms": 587440,
+          "end_ms": 588140
+        },
+        {
+          "text": "world",
+          "start_ms": 588140,
+          "end_ms": 589800
+        }
+      ]
+    },
+    {
+      "text": "You hold it all",
+      "start_ms": 589800,
+      "end_ms": 591180,
+      "text_sk": "Držíš to všetko",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 589800,
+          "end_ms": 590040
+        },
+        {
+          "text": "hold",
+          "start_ms": 590040,
+          "end_ms": 590760
+        },
+        {
+          "text": "it",
+          "start_ms": 590760,
+          "end_ms": 590980
+        },
+        {
+          "text": "all",
+          "start_ms": 590980,
+          "end_ms": 591180
+        }
+      ]
+    },
+    {
+      "text": "This is in Your story it's in Your plans",
+      "start_ms": 591180,
+      "end_ms": 596080,
+      "text_sk": "Toto je v Tvojom príbehu je to v Tvojich plánoch",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 591180,
+          "end_ms": 593320
+        },
+        {
+          "text": "is",
+          "start_ms": 593320,
+          "end_ms": 593540
+        },
+        {
+          "text": "in",
+          "start_ms": 593540,
+          "end_ms": 593720
+        },
+        {
+          "text": "Your",
+          "start_ms": 593720,
+          "end_ms": 594020
+        },
+        {
+          "text": "story",
+          "start_ms": 594020,
+          "end_ms": 594500
+        },
+        {
+          "text": "it's",
+          "start_ms": 594500,
+          "end_ms": 594860
+        },
+        {
+          "text": "in",
+          "start_ms": 594860,
+          "end_ms": 595060
+        },
+        {
+          "text": "Your",
+          "start_ms": 595060,
+          "end_ms": 595340
+        },
+        {
+          "text": "plans",
+          "start_ms": 595340,
+          "end_ms": 596080
+        }
+      ]
+    },
+    {
+      "text": "You hold",
+      "start_ms": 596080,
+      "end_ms": 602580,
+      "text_sk": "Držíš",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 596080,
+          "end_ms": 596500
+        },
+        {
+          "text": "hold",
+          "start_ms": 596500,
+          "end_ms": 602580
+        }
+      ]
+    },
+    {
+      "text": "Oh one more time",
+      "start_ms": 602580,
+      "end_ms": 605740,
+      "text_sk": "Ešte raz",
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 602580,
+          "end_ms": 603160
+        },
+        {
+          "text": "one",
+          "start_ms": 603160,
+          "end_ms": 603260
+        },
+        {
+          "text": "more",
+          "start_ms": 603260,
+          "end_ms": 603380
+        },
+        {
+          "text": "time",
+          "start_ms": 603380,
+          "end_ms": 605740
+        }
+      ]
+    },
+    {
+      "text": "And I believe that I will see",
+      "start_ms": 605740,
+      "end_ms": 611460,
+      "text_sk": "A verím, že uvidím",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 605740,
+          "end_ms": 606260
+        },
+        {
+          "text": "I",
+          "start_ms": 606260,
+          "end_ms": 606400
+        },
+        {
+          "text": "believe",
+          "start_ms": 606400,
+          "end_ms": 608740
+        },
+        {
+          "text": "that",
+          "start_ms": 608740,
+          "end_ms": 609140
+        },
+        {
+          "text": "I",
+          "start_ms": 609140,
+          "end_ms": 609300
+        },
+        {
+          "text": "will",
+          "start_ms": 609300,
+          "end_ms": 610180
+        },
+        {
+          "text": "see",
+          "start_ms": 610180,
+          "end_ms": 611460
+        }
+      ]
+    },
+    {
+      "text": "The goodness of the Lord",
+      "start_ms": 611460,
+      "end_ms": 617940,
+      "text_sk": "Dobrotu Pána",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 611460,
+          "end_ms": 612460
+        },
+        {
+          "text": "goodness",
+          "start_ms": 612460,
+          "end_ms": 613920
+        },
+        {
+          "text": "of",
+          "start_ms": 613920,
+          "end_ms": 614620
+        },
+        {
+          "text": "the",
+          "start_ms": 614620,
+          "end_ms": 615360
+        },
+        {
+          "text": "Lord",
+          "start_ms": 615360,
+          "end_ms": 617940
+        }
+      ]
+    },
+    {
+      "text": "One thing I'm sure about I'm confident",
+      "start_ms": 617940,
+      "end_ms": 622360,
+      "text_sk": "Jedna vec, ktorou som si istý, som si istý",
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 617940,
+          "end_ms": 618140
+        },
+        {
+          "text": "thing",
+          "start_ms": 618140,
+          "end_ms": 618380
+        },
+        {
+          "text": "I'm",
+          "start_ms": 618380,
+          "end_ms": 618580
+        },
+        {
+          "text": "sure",
+          "start_ms": 618580,
+          "end_ms": 619000
+        },
+        {
+          "text": "about",
+          "start_ms": 619000,
+          "end_ms": 619220
+        },
+        {
+          "text": "I'm",
+          "start_ms": 619220,
+          "end_ms": 619380
+        },
+        {
+          "text": "confident",
+          "start_ms": 619380,
+          "end_ms": 622360
+        }
+      ]
+    },
+    {
+      "text": "As seasons change Your faithfulness",
+      "start_ms": 622360,
+      "end_ms": 628640,
+      "text_sk": "Keď sa ročné obdobia menia, Tvoja vernosť",
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 622360,
+          "end_ms": 623160
+        },
+        {
+          "text": "seasons",
+          "start_ms": 623160,
+          "end_ms": 624420
+        },
+        {
+          "text": "change",
+          "start_ms": 624420,
+          "end_ms": 625580
+        },
+        {
+          "text": "Your",
+          "start_ms": 625580,
+          "end_ms": 626220
+        },
+        {
+          "text": "faithfulness",
+          "start_ms": 626220,
+          "end_ms": 628640
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "edges",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 2.56,
+    "model_load_sec": null,
+    "error": null
+  }
+}

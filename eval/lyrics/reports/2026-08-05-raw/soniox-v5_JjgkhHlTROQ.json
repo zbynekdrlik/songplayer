@@ -1,0 +1,3559 @@
+{
+  "backend_id": "soniox-v5",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\JjgkhHlTROQ_vocal16k.wav",
+  "duration_ms": 231150,
+  "lines": [
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 570,
+      "end_ms": 1950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 570,
+          "end_ms": 810,
+          "confidence": 0.9995425542195638
+        },
+        {
+          "text": "been",
+          "start_ms": 810,
+          "end_ms": 870,
+          "confidence": 0.9999855756759644
+        },
+        {
+          "text": "washed",
+          "start_ms": 990,
+          "end_ms": 1170,
+          "confidence": 0.8692950308322906
+        },
+        {
+          "text": "in",
+          "start_ms": 1350,
+          "end_ms": 1410,
+          "confidence": 0.9980802536010742
+        },
+        {
+          "text": "the",
+          "start_ms": 1530,
+          "end_ms": 1590,
+          "confidence": 0.9997947216033936
+        },
+        {
+          "text": "water,",
+          "start_ms": 1710,
+          "end_ms": 1950,
+          "confidence": 0.8476804792881012
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 2370,
+      "end_ms": 3690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 2370,
+          "end_ms": 2550,
+          "confidence": 0.9781266450881958
+        },
+        {
+          "text": "in",
+          "start_ms": 2790,
+          "end_ms": 2850,
+          "confidence": 0.9999047517776489
+        },
+        {
+          "text": "the",
+          "start_ms": 2970,
+          "end_ms": 3030,
+          "confidence": 0.9999675750732422
+        },
+        {
+          "text": "blood.",
+          "start_ms": 3270,
+          "end_ms": 3690,
+          "confidence": 0.9166925996541977
+        }
+      ]
+    },
+    {
+      "text": "I'm as good as a—",
+      "start_ms": 3750,
+      "end_ms": 6150,
+      "text_sk": "Som taký dobrý ako—",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 3750,
+          "end_ms": 3990,
+          "confidence": 0.9993098378181458
+        },
+        {
+          "text": "as",
+          "start_ms": 4050,
+          "end_ms": 4110,
+          "confidence": 0.9992144703865051
+        },
+        {
+          "text": "good",
+          "start_ms": 4170,
+          "end_ms": 4350,
+          "confidence": 0.9999904632568359
+        },
+        {
+          "text": "as",
+          "start_ms": 4590,
+          "end_ms": 4650,
+          "confidence": 0.9997525811195374
+        },
+        {
+          "text": "a—",
+          "start_ms": 5010,
+          "end_ms": 6150,
+          "confidence": 0.3165556490421295
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 6510,
+      "end_ms": 7050,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 6510,
+          "end_ms": 7050,
+          "confidence": 0.9643575251102448
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 7290,
+      "end_ms": 8670,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 7290,
+          "end_ms": 7470,
+          "confidence": 0.9976359208424886
+        },
+        {
+          "text": "been",
+          "start_ms": 7470,
+          "end_ms": 7530,
+          "confidence": 0.9999820590019226
+        },
+        {
+          "text": "washed",
+          "start_ms": 7650,
+          "end_ms": 7830,
+          "confidence": 0.955312579870224
+        },
+        {
+          "text": "in",
+          "start_ms": 8010,
+          "end_ms": 8070,
+          "confidence": 0.9999351501464844
+        },
+        {
+          "text": "the",
+          "start_ms": 8190,
+          "end_ms": 8250,
+          "confidence": 0.9999695420265198
+        },
+        {
+          "text": "water,",
+          "start_ms": 8370,
+          "end_ms": 8670,
+          "confidence": 0.9993650913238525
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 9090,
+      "end_ms": 10350,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 9090,
+          "end_ms": 9270,
+          "confidence": 0.9876554012298584
+        },
+        {
+          "text": "in",
+          "start_ms": 9510,
+          "end_ms": 9570,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "the",
+          "start_ms": 9690,
+          "end_ms": 9750,
+          "confidence": 0.999969482421875
+        },
+        {
+          "text": "blood.",
+          "start_ms": 9930,
+          "end_ms": 10350,
+          "confidence": 0.9958597868680954
+        }
+      ]
+    },
+    {
+      "text": "I'll be better than—",
+      "start_ms": 10470,
+      "end_ms": 11790,
+      "text_sk": "Budem lepší než—",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 10470,
+          "end_ms": 10650,
+          "confidence": 0.9988004763921102
+        },
+        {
+          "text": "be",
+          "start_ms": 10830,
+          "end_ms": 10890,
+          "confidence": 0.9964307546615601
+        },
+        {
+          "text": "better",
+          "start_ms": 11130,
+          "end_ms": 11310,
+          "confidence": 0.6244757771492004
+        },
+        {
+          "text": "than—",
+          "start_ms": 11490,
+          "end_ms": 11790,
+          "confidence": 0.8313725292682648
+        }
+      ]
+    },
+    {
+      "text": "Let's go.",
+      "start_ms": 13590,
+      "end_ms": 14070,
+      "text_sk": "Poďme.",
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 13590,
+          "end_ms": 13710,
+          "confidence": 0.9974506199359894
+        },
+        {
+          "text": "go.",
+          "start_ms": 13830,
+          "end_ms": 14070,
+          "confidence": 0.9672845602035522
+        }
+      ]
+    },
+    {
+      "text": "And I'm clean.",
+      "start_ms": 20730,
+      "end_ms": 21510,
+      "text_sk": "A som čistý.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 20730,
+          "end_ms": 20790,
+          "confidence": 0.9496281147003174
+        },
+        {
+          "text": "I'm",
+          "start_ms": 20970,
+          "end_ms": 21150,
+          "confidence": 0.9912076393763224
+        },
+        {
+          "text": "clean.",
+          "start_ms": 21210,
+          "end_ms": 21510,
+          "confidence": 0.9901693860689799
+        }
+      ]
+    },
+    {
+      "text": "Sin was stained on me,",
+      "start_ms": 22890,
+      "end_ms": 24690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Sin",
+          "start_ms": 22890,
+          "end_ms": 22950,
+          "confidence": 0.9971354603767395
+        },
+        {
+          "text": "was",
+          "start_ms": 23250,
+          "end_ms": 23310,
+          "confidence": 0.9984372854232788
+        },
+        {
+          "text": "stained",
+          "start_ms": 23610,
+          "end_ms": 23850,
+          "confidence": 0.9986774921417236
+        },
+        {
+          "text": "on",
+          "start_ms": 24030,
+          "end_ms": 24090,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "me,",
+          "start_ms": 24390,
+          "end_ms": 24690,
+          "confidence": 0.9998379647731781
+        }
+      ]
+    },
+    {
+      "text": "and shame was",
+      "start_ms": 25830,
+      "end_ms": 26610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 25830,
+          "end_ms": 25890,
+          "confidence": 0.7056490182876587
+        },
+        {
+          "text": "shame",
+          "start_ms": 26250,
+          "end_ms": 26430,
+          "confidence": 0.9997435212135315
+        },
+        {
+          "text": "was",
+          "start_ms": 26550,
+          "end_ms": 26610,
+          "confidence": 0.9971811175346375
+        }
+      ]
+    },
+    {
+      "text": "running",
+      "start_ms": 27150,
+      "end_ms": 27510,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "running",
+          "start_ms": 27150,
+          "end_ms": 27510,
+          "confidence": 0.9907808005809784
+        }
+      ]
+    },
+    {
+      "text": "deep.",
+      "start_ms": 27990,
+      "end_ms": 28410,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "deep.",
+          "start_ms": 27990,
+          "end_ms": 28410,
+          "confidence": 0.8919057051340739
+        }
+      ]
+    },
+    {
+      "text": "But love was",
+      "start_ms": 29550,
+      "end_ms": 30090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 29550,
+          "end_ms": 29610,
+          "confidence": 0.9866488575935364
+        },
+        {
+          "text": "love",
+          "start_ms": 29670,
+          "end_ms": 29850,
+          "confidence": 0.9996044337749481
+        },
+        {
+          "text": "was",
+          "start_ms": 30030,
+          "end_ms": 30090,
+          "confidence": 0.9999580383300781
+        }
+      ]
+    },
+    {
+      "text": "spilled on Calvary.",
+      "start_ms": 30570,
+      "end_ms": 32310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "spilled",
+          "start_ms": 30570,
+          "end_ms": 30810,
+          "confidence": 0.9905705749988556
+        },
+        {
+          "text": "on",
+          "start_ms": 31110,
+          "end_ms": 31170,
+          "confidence": 0.999983012676239
+        },
+        {
+          "text": "Calvary.",
+          "start_ms": 31530,
+          "end_ms": 32310,
+          "confidence": 0.8991936842600504
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah, I'm clean.",
+      "start_ms": 33390,
+      "end_ms": 35250,
+      "text_sk": "Ó, haleluja, som čistý.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 33390,
+          "end_ms": 33570,
+          "confidence": 0.9246667325496674
+        },
+        {
+          "text": "hallelujah,",
+          "start_ms": 33750,
+          "end_ms": 34290,
+          "confidence": 0.9701930284500122
+        },
+        {
+          "text": "I'm",
+          "start_ms": 34650,
+          "end_ms": 34830,
+          "confidence": 0.9998436768849691
+        },
+        {
+          "text": "clean.",
+          "start_ms": 34950,
+          "end_ms": 35250,
+          "confidence": 0.984520673751831
+        }
+      ]
+    },
+    {
+      "text": "And God, how",
+      "start_ms": 36450,
+      "end_ms": 37230,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 36450,
+          "end_ms": 36510,
+          "confidence": 0.7952951192855835
+        },
+        {
+          "text": "God,",
+          "start_ms": 36690,
+          "end_ms": 36930,
+          "confidence": 0.9986385405063629
+        },
+        {
+          "text": "how",
+          "start_ms": 37170,
+          "end_ms": 37230,
+          "confidence": 0.9999226331710815
+        }
+      ]
+    },
+    {
+      "text": "can it",
+      "start_ms": 37650,
+      "end_ms": 38010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "can",
+          "start_ms": 37650,
+          "end_ms": 37710,
+          "confidence": 0.99978107213974
+        },
+        {
+          "text": "it",
+          "start_ms": 37950,
+          "end_ms": 38010,
+          "confidence": 0.9998049139976501
+        }
+      ]
+    },
+    {
+      "text": "be?",
+      "start_ms": 38490,
+      "end_ms": 38790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "be?",
+          "start_ms": 38490,
+          "end_ms": 38790,
+          "confidence": 0.9829182922840118
+        }
+      ]
+    },
+    {
+      "text": "I'm ransomed and",
+      "start_ms": 39690,
+      "end_ms": 41070,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 39690,
+          "end_ms": 39930,
+          "confidence": 0.9999624888102213
+        },
+        {
+          "text": "ransomed",
+          "start_ms": 40170,
+          "end_ms": 40710,
+          "confidence": 0.9993260949850082
+        },
+        {
+          "text": "and",
+          "start_ms": 41010,
+          "end_ms": 41070,
+          "confidence": 0.9999904632568359
+        }
+      ]
+    },
+    {
+      "text": "redeemed,",
+      "start_ms": 41490,
+      "end_ms": 42090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "redeemed,",
+          "start_ms": 41490,
+          "end_ms": 42090,
+          "confidence": 0.9997745007276535
+        }
+      ]
+    },
+    {
+      "text": "and standing",
+      "start_ms": 43110,
+      "end_ms": 43830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 43110,
+          "end_ms": 43170,
+          "confidence": 0.8914409279823303
+        },
+        {
+          "text": "standing",
+          "start_ms": 43530,
+          "end_ms": 43830,
+          "confidence": 0.9999505877494812
+        }
+      ]
+    },
+    {
+      "text": "in Your",
+      "start_ms": 44310,
+      "end_ms": 44730,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 44310,
+          "end_ms": 44370,
+          "confidence": 0.9999637603759766
+        },
+        {
+          "text": "Your",
+          "start_ms": 44670,
+          "end_ms": 44730,
+          "confidence": 0.7979693412780762
+        }
+      ]
+    },
+    {
+      "text": "victory.",
+      "start_ms": 45330,
+      "end_ms": 46050,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "victory.",
+          "start_ms": 45330,
+          "end_ms": 46050,
+          "confidence": 0.9998728632926941
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 47070,
+      "end_ms": 48090,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 47070,
+          "end_ms": 47250,
+          "confidence": 0.9995157718658447
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 47490,
+          "end_ms": 48090,
+          "confidence": 0.9993871301412582
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 48450,
+      "end_ms": 49950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 48450,
+          "end_ms": 48630,
+          "confidence": 0.9998372991879781
+        },
+        {
+          "text": "been",
+          "start_ms": 48690,
+          "end_ms": 48750,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "washed",
+          "start_ms": 48870,
+          "end_ms": 49050,
+          "confidence": 0.9999181032180786
+        },
+        {
+          "text": "in",
+          "start_ms": 49230,
+          "end_ms": 49290,
+          "confidence": 0.9999982118606567
+        },
+        {
+          "text": "the",
+          "start_ms": 49470,
+          "end_ms": 49530,
+          "confidence": 0.9999841451644897
+        },
+        {
+          "text": "water,",
+          "start_ms": 49650,
+          "end_ms": 49950,
+          "confidence": 0.9998642802238464
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 50430,
+      "end_ms": 51690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 50430,
+          "end_ms": 50610,
+          "confidence": 0.999872237443924
+        },
+        {
+          "text": "in",
+          "start_ms": 50850,
+          "end_ms": 50910,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "the",
+          "start_ms": 50970,
+          "end_ms": 51030,
+          "confidence": 0.9999599456787109
+        },
+        {
+          "text": "blood.",
+          "start_ms": 51270,
+          "end_ms": 51690,
+          "confidence": 0.9999880790710449
+        }
+      ]
+    },
+    {
+      "text": "I'm as good as",
+      "start_ms": 51810,
+      "end_ms": 52650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 51810,
+          "end_ms": 51990,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "as",
+          "start_ms": 52050,
+          "end_ms": 52110,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "good",
+          "start_ms": 52230,
+          "end_ms": 52350,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "as",
+          "start_ms": 52590,
+          "end_ms": 52650,
+          "confidence": 0.9999752044677734
+        }
+      ]
+    },
+    {
+      "text": "a—",
+      "start_ms": 53070,
+      "end_ms": 53310,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "a—",
+          "start_ms": 53070,
+          "end_ms": 53310,
+          "confidence": 0.9191255569458008
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 54030,
+      "end_ms": 54930,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 54030,
+          "end_ms": 54210,
+          "confidence": 0.9431921541690826
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 54390,
+          "end_ms": 54930,
+          "confidence": 0.9997707009315491
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 55230,
+      "end_ms": 56790,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 55230,
+          "end_ms": 55410,
+          "confidence": 0.9998546044031779
+        },
+        {
+          "text": "been",
+          "start_ms": 55470,
+          "end_ms": 55530,
+          "confidence": 0.9999982118606567
+        },
+        {
+          "text": "washed",
+          "start_ms": 55650,
+          "end_ms": 55890,
+          "confidence": 0.9998573362827301
+        },
+        {
+          "text": "in",
+          "start_ms": 56070,
+          "end_ms": 56130,
+          "confidence": 1.0
+        },
+        {
+          "text": "the",
+          "start_ms": 56250,
+          "end_ms": 56310,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "water,",
+          "start_ms": 56490,
+          "end_ms": 56790,
+          "confidence": 0.9999103546142578
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 57270,
+      "end_ms": 58590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 57270,
+          "end_ms": 57450,
+          "confidence": 0.9998646080493927
+        },
+        {
+          "text": "in",
+          "start_ms": 57690,
+          "end_ms": 57750,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "the",
+          "start_ms": 57870,
+          "end_ms": 57930,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "blood.",
+          "start_ms": 58110,
+          "end_ms": 58590,
+          "confidence": 0.9999890327453613
+        }
+      ]
+    },
+    {
+      "text": "I'll be clear again.",
+      "start_ms": 58650,
+      "end_ms": 60090,
+      "text_sk": "Znova budem čistý.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 58650,
+          "end_ms": 58890,
+          "confidence": 0.9997553825378418
+        },
+        {
+          "text": "be",
+          "start_ms": 59010,
+          "end_ms": 59070,
+          "confidence": 0.9977652430534363
+        },
+        {
+          "text": "clear",
+          "start_ms": 59190,
+          "end_ms": 59430,
+          "confidence": 0.47271963953971863
+        },
+        {
+          "text": "again.",
+          "start_ms": 59790,
+          "end_ms": 60090,
+          "confidence": 0.7569604516029358
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah, I'm clean.",
+      "start_ms": 60870,
+      "end_ms": 62970,
+      "text_sk": "Ó, haleluja, som čistý.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 60870,
+          "end_ms": 61110,
+          "confidence": 0.9990273118019104
+        },
+        {
+          "text": "hallelujah,",
+          "start_ms": 61290,
+          "end_ms": 61890,
+          "confidence": 0.9442147463560104
+        },
+        {
+          "text": "I'm",
+          "start_ms": 62250,
+          "end_ms": 62490,
+          "confidence": 0.9999682108561198
+        },
+        {
+          "text": "clean.",
+          "start_ms": 62730,
+          "end_ms": 62970,
+          "confidence": 0.9979127248128256
+        }
+      ]
+    },
+    {
+      "text": "It's not what I have",
+      "start_ms": 64050,
+      "end_ms": 65490,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 64050,
+          "end_ms": 64230,
+          "confidence": 0.9789047837257385
+        },
+        {
+          "text": "not",
+          "start_ms": 64350,
+          "end_ms": 64410,
+          "confidence": 0.9999732971191406
+        },
+        {
+          "text": "what",
+          "start_ms": 64710,
+          "end_ms": 64890,
+          "confidence": 0.9999847412109375
+        },
+        {
+          "text": "I",
+          "start_ms": 65070,
+          "end_ms": 65130,
+          "confidence": 0.9999905228614807
+        },
+        {
+          "text": "have",
+          "start_ms": 65430,
+          "end_ms": 65490,
+          "confidence": 0.9989268183708191
+        }
+      ]
+    },
+    {
+      "text": "done,",
+      "start_ms": 65970,
+      "end_ms": 66210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "done,",
+          "start_ms": 65970,
+          "end_ms": 66210,
+          "confidence": 0.9871991574764252
+        }
+      ]
+    },
+    {
+      "text": "but what You've done for me.",
+      "start_ms": 67410,
+      "end_ms": 69690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 67410,
+          "end_ms": 67470,
+          "confidence": 0.9131094813346863
+        },
+        {
+          "text": "what",
+          "start_ms": 67770,
+          "end_ms": 67890,
+          "confidence": 0.9999455809593201
+        },
+        {
+          "text": "You've",
+          "start_ms": 68070,
+          "end_ms": 68370,
+          "confidence": 0.9955919782320658
+        },
+        {
+          "text": "done",
+          "start_ms": 68430,
+          "end_ms": 68610,
+          "confidence": 0.999974250793457
+        },
+        {
+          "text": "for",
+          "start_ms": 68970,
+          "end_ms": 69030,
+          "confidence": 0.9997215867042542
+        },
+        {
+          "text": "me.",
+          "start_ms": 69390,
+          "end_ms": 69690,
+          "confidence": 0.996372252702713
+        }
+      ]
+    },
+    {
+      "text": "You painted all",
+      "start_ms": 71010,
+      "end_ms": 72150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 71010,
+          "end_ms": 71070,
+          "confidence": 0.9976986050605774
+        },
+        {
+          "text": "painted",
+          "start_ms": 71310,
+          "end_ms": 71730,
+          "confidence": 0.801356186469396
+        },
+        {
+          "text": "all",
+          "start_ms": 72090,
+          "end_ms": 72150,
+          "confidence": 0.8443349599838257
+        }
+      ]
+    },
+    {
+      "text": "upon that tree.",
+      "start_ms": 72630,
+      "end_ms": 73950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "upon",
+          "start_ms": 72630,
+          "end_ms": 73050,
+          "confidence": 0.9677569568157196
+        },
+        {
+          "text": "that",
+          "start_ms": 73290,
+          "end_ms": 73350,
+          "confidence": 0.997314453125
+        },
+        {
+          "text": "tree.",
+          "start_ms": 73710,
+          "end_ms": 73950,
+          "confidence": 0.9925339818000793
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah,",
+      "start_ms": 74790,
+      "end_ms": 75750,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 74790,
+          "end_ms": 74970,
+          "confidence": 0.9997530579566956
+        },
+        {
+          "text": "hallelujah,",
+          "start_ms": 75150,
+          "end_ms": 75750,
+          "confidence": 0.9996911436319351
+        }
+      ]
+    },
+    {
+      "text": "I'm clean.",
+      "start_ms": 76170,
+      "end_ms": 77010,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 76170,
+          "end_ms": 76410,
+          "confidence": 0.9999835093816122
+        },
+        {
+          "text": "clean.",
+          "start_ms": 76710,
+          "end_ms": 77010,
+          "confidence": 0.9996021787325541
+        }
+      ]
+    },
+    {
+      "text": "Your love has",
+      "start_ms": 77910,
+      "end_ms": 78630,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 77910,
+          "end_ms": 77970,
+          "confidence": 0.9986085891723633
+        },
+        {
+          "text": "love",
+          "start_ms": 78150,
+          "end_ms": 78330,
+          "confidence": 0.9998380541801453
+        },
+        {
+          "text": "has",
+          "start_ms": 78570,
+          "end_ms": 78630,
+          "confidence": 0.9999790191650391
+        }
+      ]
+    },
+    {
+      "text": "overcome,",
+      "start_ms": 79050,
+      "end_ms": 80130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "overcome,",
+          "start_ms": 79050,
+          "end_ms": 80130,
+          "confidence": 0.9994492332140604
+        }
+      ]
+    },
+    {
+      "text": "and Your mercy",
+      "start_ms": 81090,
+      "end_ms": 82110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 81090,
+          "end_ms": 81150,
+          "confidence": 0.9982277750968933
+        },
+        {
+          "text": "Your",
+          "start_ms": 81270,
+          "end_ms": 81330,
+          "confidence": 0.9966410994529724
+        },
+        {
+          "text": "mercy",
+          "start_ms": 81570,
+          "end_ms": 82110,
+          "confidence": 0.9999275207519531
+        }
+      ]
+    },
+    {
+      "text": "is",
+      "start_ms": 82530,
+      "end_ms": 82590,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 82530,
+          "end_ms": 82590,
+          "confidence": 0.9999866485595703
+        }
+      ]
+    },
+    {
+      "text": "supreme.",
+      "start_ms": 83010,
+      "end_ms": 83490,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "supreme.",
+          "start_ms": 83010,
+          "end_ms": 83490,
+          "confidence": 0.9998868505160013
+        }
+      ]
+    },
+    {
+      "text": "I'm dancing in Your",
+      "start_ms": 84750,
+      "end_ms": 86250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 84750,
+          "end_ms": 84930,
+          "confidence": 0.9999784429868063
+        },
+        {
+          "text": "dancing",
+          "start_ms": 85110,
+          "end_ms": 85590,
+          "confidence": 0.9990286628405253
+        },
+        {
+          "text": "in",
+          "start_ms": 85890,
+          "end_ms": 85950,
+          "confidence": 0.9999837279319763
+        },
+        {
+          "text": "Your",
+          "start_ms": 86190,
+          "end_ms": 86250,
+          "confidence": 0.9997501969337463
+        }
+      ]
+    },
+    {
+      "text": "victory.",
+      "start_ms": 86850,
+      "end_ms": 87570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "victory.",
+          "start_ms": 86850,
+          "end_ms": 87570,
+          "confidence": 0.9999306996663412
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 88590,
+      "end_ms": 89550,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 88590,
+          "end_ms": 88770,
+          "confidence": 0.999908447265625
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 88950,
+          "end_ms": 89550,
+          "confidence": 0.9999556541442871
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 89850,
+      "end_ms": 91470,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 89850,
+          "end_ms": 90090,
+          "confidence": 0.9998595317204794
+        },
+        {
+          "text": "been",
+          "start_ms": 90150,
+          "end_ms": 90210,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "washed",
+          "start_ms": 90330,
+          "end_ms": 90510,
+          "confidence": 0.9998713433742523
+        },
+        {
+          "text": "in",
+          "start_ms": 90690,
+          "end_ms": 90750,
+          "confidence": 0.9999982118606567
+        },
+        {
+          "text": "the",
+          "start_ms": 90990,
+          "end_ms": 91050,
+          "confidence": 0.9999951124191284
+        },
+        {
+          "text": "water,",
+          "start_ms": 91170,
+          "end_ms": 91470,
+          "confidence": 0.9999159872531891
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 91950,
+      "end_ms": 93210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 91950,
+          "end_ms": 92130,
+          "confidence": 0.9996032416820526
+        },
+        {
+          "text": "in",
+          "start_ms": 92310,
+          "end_ms": 92370,
+          "confidence": 0.9999904632568359
+        },
+        {
+          "text": "the",
+          "start_ms": 92670,
+          "end_ms": 92730,
+          "confidence": 0.9999809265136719
+        },
+        {
+          "text": "blood.",
+          "start_ms": 92850,
+          "end_ms": 93210,
+          "confidence": 0.9999837875366211
+        }
+      ]
+    },
+    {
+      "text": "I'm as good as",
+      "start_ms": 93270,
+      "end_ms": 94170,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 93270,
+          "end_ms": 93450,
+          "confidence": 0.9999910990397135
+        },
+        {
+          "text": "as",
+          "start_ms": 93570,
+          "end_ms": 93630,
+          "confidence": 0.9999675750732422
+        },
+        {
+          "text": "good",
+          "start_ms": 93750,
+          "end_ms": 93930,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "as",
+          "start_ms": 94110,
+          "end_ms": 94170,
+          "confidence": 0.9999313354492188
+        }
+      ]
+    },
+    {
+      "text": "a—",
+      "start_ms": 94590,
+      "end_ms": 94830,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "a—",
+          "start_ms": 94590,
+          "end_ms": 94830,
+          "confidence": 0.9099262356758118
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 95490,
+      "end_ms": 96450,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 95490,
+          "end_ms": 95670,
+          "confidence": 0.9997130632400513
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 95850,
+          "end_ms": 96450,
+          "confidence": 0.9999375492334366
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 96690,
+      "end_ms": 98250,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 96690,
+          "end_ms": 96930,
+          "confidence": 0.9986106554667155
+        },
+        {
+          "text": "been",
+          "start_ms": 96930,
+          "end_ms": 96990,
+          "confidence": 0.999998152256012
+        },
+        {
+          "text": "washed",
+          "start_ms": 97170,
+          "end_ms": 97350,
+          "confidence": 0.9998349249362946
+        },
+        {
+          "text": "in",
+          "start_ms": 97530,
+          "end_ms": 97590,
+          "confidence": 0.9999984502792358
+        },
+        {
+          "text": "the",
+          "start_ms": 97770,
+          "end_ms": 97830,
+          "confidence": 0.9999945163726807
+        },
+        {
+          "text": "water,",
+          "start_ms": 98010,
+          "end_ms": 98250,
+          "confidence": 0.9997276961803436
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 98730,
+      "end_ms": 99990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 98730,
+          "end_ms": 98970,
+          "confidence": 0.9995834231376648
+        },
+        {
+          "text": "in",
+          "start_ms": 99210,
+          "end_ms": 99270,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "the",
+          "start_ms": 99390,
+          "end_ms": 99450,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "blood.",
+          "start_ms": 99570,
+          "end_ms": 99990,
+          "confidence": 0.9999776035547256
+        }
+      ]
+    },
+    {
+      "text": "I'll be clear again.",
+      "start_ms": 100170,
+      "end_ms": 101250,
+      "text_sk": "Znova budem čistý.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 100170,
+          "end_ms": 100410,
+          "confidence": 0.9922208984692892
+        },
+        {
+          "text": "be",
+          "start_ms": 100470,
+          "end_ms": 100530,
+          "confidence": 0.9998381733894348
+        },
+        {
+          "text": "clear",
+          "start_ms": 100710,
+          "end_ms": 100890,
+          "confidence": 0.9801025390625
+        },
+        {
+          "text": "again.",
+          "start_ms": 101010,
+          "end_ms": 101250,
+          "confidence": 0.9738616645336151
+        }
+      ]
+    },
+    {
+      "text": "Sing it again.",
+      "start_ms": 102510,
+      "end_ms": 103350,
+      "text_sk": "Zaspievaj to znova.",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 102510,
+          "end_ms": 102570,
+          "confidence": 0.8892322182655334
+        },
+        {
+          "text": "it",
+          "start_ms": 102810,
+          "end_ms": 102870,
+          "confidence": 0.9622778296470642
+        },
+        {
+          "text": "again.",
+          "start_ms": 102990,
+          "end_ms": 103350,
+          "confidence": 0.9980792999267578
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 103590,
+      "end_ms": 105150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 103590,
+          "end_ms": 103830,
+          "confidence": 0.9997737010320028
+        },
+        {
+          "text": "been",
+          "start_ms": 103890,
+          "end_ms": 103950,
+          "confidence": 0.9975128769874573
+        },
+        {
+          "text": "washed",
+          "start_ms": 104130,
+          "end_ms": 104310,
+          "confidence": 0.9998769760131836
+        },
+        {
+          "text": "in",
+          "start_ms": 104490,
+          "end_ms": 104550,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "the",
+          "start_ms": 104670,
+          "end_ms": 104730,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "water,",
+          "start_ms": 104910,
+          "end_ms": 105150,
+          "confidence": 0.9999179840087891
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 105630,
+      "end_ms": 106950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 105630,
+          "end_ms": 105870,
+          "confidence": 0.999665379524231
+        },
+        {
+          "text": "in",
+          "start_ms": 106050,
+          "end_ms": 106110,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "the",
+          "start_ms": 106290,
+          "end_ms": 106350,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "blood.",
+          "start_ms": 106470,
+          "end_ms": 106950,
+          "confidence": 0.9999909400939941
+        }
+      ]
+    },
+    {
+      "text": "I'm as good as a—",
+      "start_ms": 107010,
+      "end_ms": 108510,
+      "text_sk": "Som taký dobrý ako—",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 107010,
+          "end_ms": 107190,
+          "confidence": 0.999993642171224
+        },
+        {
+          "text": "as",
+          "start_ms": 107250,
+          "end_ms": 107310,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "good",
+          "start_ms": 107430,
+          "end_ms": 107610,
+          "confidence": 0.9999971389770508
+        },
+        {
+          "text": "as",
+          "start_ms": 107850,
+          "end_ms": 107910,
+          "confidence": 0.9999828338623047
+        },
+        {
+          "text": "a—",
+          "start_ms": 108270,
+          "end_ms": 108510,
+          "confidence": 0.9928774833679199
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 109290,
+      "end_ms": 110250,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 109290,
+          "end_ms": 109470,
+          "confidence": 0.999474972486496
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 109650,
+          "end_ms": 110250,
+          "confidence": 0.9998455345630646
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 110490,
+      "end_ms": 112110,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 110490,
+          "end_ms": 110730,
+          "confidence": 0.999902089436849
+        },
+        {
+          "text": "been",
+          "start_ms": 110790,
+          "end_ms": 110850,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "washed",
+          "start_ms": 110970,
+          "end_ms": 111150,
+          "confidence": 0.9996672570705414
+        },
+        {
+          "text": "in",
+          "start_ms": 111330,
+          "end_ms": 111390,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "the",
+          "start_ms": 111630,
+          "end_ms": 111690,
+          "confidence": 0.9999771118164062
+        },
+        {
+          "text": "water,",
+          "start_ms": 111810,
+          "end_ms": 112110,
+          "confidence": 0.7644960284233093
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 112530,
+      "end_ms": 113910,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 112530,
+          "end_ms": 112770,
+          "confidence": 0.9046400189399719
+        },
+        {
+          "text": "in",
+          "start_ms": 113010,
+          "end_ms": 113070,
+          "confidence": 0.9999904632568359
+        },
+        {
+          "text": "the",
+          "start_ms": 113250,
+          "end_ms": 113310,
+          "confidence": 0.9999909400939941
+        },
+        {
+          "text": "blood.",
+          "start_ms": 113430,
+          "end_ms": 113910,
+          "confidence": 0.9999052286148071
+        }
+      ]
+    },
+    {
+      "text": "It has—",
+      "start_ms": 114510,
+      "end_ms": 115230,
+      "text_sk": "To má—",
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 114510,
+          "end_ms": 114570,
+          "confidence": 0.5003837943077087
+        },
+        {
+          "text": "has—",
+          "start_ms": 114810,
+          "end_ms": 115230,
+          "confidence": 0.7249214947223663
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 116250,
+      "end_ms": 117270,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 116250,
+          "end_ms": 116430,
+          "confidence": 0.9997340142726898
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 116610,
+          "end_ms": 117270,
+          "confidence": 0.9990399330854416
+        }
+      ]
+    },
+    {
+      "text": "Because You took away my",
+      "start_ms": 119850,
+      "end_ms": 121290,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 119850,
+          "end_ms": 120150,
+          "confidence": 0.9911653598149618
+        },
+        {
+          "text": "You",
+          "start_ms": 120210,
+          "end_ms": 120270,
+          "confidence": 0.9840646386146545
+        },
+        {
+          "text": "took",
+          "start_ms": 120450,
+          "end_ms": 120510,
+          "confidence": 0.9999332427978516
+        },
+        {
+          "text": "away",
+          "start_ms": 120630,
+          "end_ms": 120870,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "my",
+          "start_ms": 121230,
+          "end_ms": 121290,
+          "confidence": 0.9999775886535645
+        }
+      ]
+    },
+    {
+      "text": "shame,",
+      "start_ms": 121830,
+      "end_ms": 122130,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "shame,",
+          "start_ms": 121830,
+          "end_ms": 122130,
+          "confidence": 0.9892181555430094
+        }
+      ]
+    },
+    {
+      "text": "and You nailed it to the",
+      "start_ms": 123510,
+      "end_ms": 124530,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 123510,
+          "end_ms": 123570,
+          "confidence": 0.6779273748397827
+        },
+        {
+          "text": "You",
+          "start_ms": 123750,
+          "end_ms": 123810,
+          "confidence": 0.9459512829780579
+        },
+        {
+          "text": "nailed",
+          "start_ms": 123990,
+          "end_ms": 124170,
+          "confidence": 0.9997375210126241
+        },
+        {
+          "text": "it",
+          "start_ms": 124170,
+          "end_ms": 124230,
+          "confidence": 0.9996739029884338
+        },
+        {
+          "text": "to",
+          "start_ms": 124290,
+          "end_ms": 124350,
+          "confidence": 0.9902707934379578
+        },
+        {
+          "text": "the",
+          "start_ms": 124470,
+          "end_ms": 124530,
+          "confidence": 0.9998016953468323
+        }
+      ]
+    },
+    {
+      "text": "cross.",
+      "start_ms": 125010,
+      "end_ms": 125610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "cross.",
+          "start_ms": 125010,
+          "end_ms": 125610,
+          "confidence": 0.9997584819793701
+        }
+      ]
+    },
+    {
+      "text": "You got me running out the",
+      "start_ms": 126510,
+      "end_ms": 128070,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 126510,
+          "end_ms": 126570,
+          "confidence": 0.9999656677246094
+        },
+        {
+          "text": "got",
+          "start_ms": 126870,
+          "end_ms": 126930,
+          "confidence": 0.9094317555427551
+        },
+        {
+          "text": "me",
+          "start_ms": 127050,
+          "end_ms": 127110,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "running",
+          "start_ms": 127230,
+          "end_ms": 127530,
+          "confidence": 0.9999533295631409
+        },
+        {
+          "text": "out",
+          "start_ms": 127770,
+          "end_ms": 127830,
+          "confidence": 0.8457884192466736
+        },
+        {
+          "text": "the",
+          "start_ms": 128010,
+          "end_ms": 128070,
+          "confidence": 0.7583882212638855
+        }
+      ]
+    },
+    {
+      "text": "grave.",
+      "start_ms": 128670,
+      "end_ms": 129210,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "grave.",
+          "start_ms": 128670,
+          "end_ms": 129210,
+          "confidence": 0.9994623959064484
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah, here I",
+      "start_ms": 130170,
+      "end_ms": 131610,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 130170,
+          "end_ms": 130350,
+          "confidence": 0.9995205402374268
+        },
+        {
+          "text": "hallelujah,",
+          "start_ms": 130470,
+          "end_ms": 130950,
+          "confidence": 0.9992636144161224
+        },
+        {
+          "text": "here",
+          "start_ms": 131250,
+          "end_ms": 131430,
+          "confidence": 0.9999752342700958
+        },
+        {
+          "text": "I",
+          "start_ms": 131550,
+          "end_ms": 131610,
+          "confidence": 0.9999961853027344
+        }
+      ]
+    },
+    {
+      "text": "come.",
+      "start_ms": 132270,
+      "end_ms": 132570,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "come.",
+          "start_ms": 132270,
+          "end_ms": 132570,
+          "confidence": 0.8907365500926971
+        }
+      ]
+    },
+    {
+      "text": "Because You took away my",
+      "start_ms": 133530,
+      "end_ms": 134850,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 133530,
+          "end_ms": 133830,
+          "confidence": 0.9939647714296976
+        },
+        {
+          "text": "You",
+          "start_ms": 133830,
+          "end_ms": 133890,
+          "confidence": 0.9999213814735413
+        },
+        {
+          "text": "took",
+          "start_ms": 134130,
+          "end_ms": 134190,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "away",
+          "start_ms": 134370,
+          "end_ms": 134550,
+          "confidence": 0.9999990463256836
+        },
+        {
+          "text": "my",
+          "start_ms": 134790,
+          "end_ms": 134850,
+          "confidence": 0.9999809265136719
+        }
+      ]
+    },
+    {
+      "text": "shame,",
+      "start_ms": 135390,
+      "end_ms": 135870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "shame,",
+          "start_ms": 135390,
+          "end_ms": 135870,
+          "confidence": 0.9997292160987854
+        }
+      ]
+    },
+    {
+      "text": "and You nailed it to the",
+      "start_ms": 137310,
+      "end_ms": 138390,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 137310,
+          "end_ms": 137370,
+          "confidence": 0.9766954183578491
+        },
+        {
+          "text": "You",
+          "start_ms": 137490,
+          "end_ms": 137550,
+          "confidence": 0.9990087151527405
+        },
+        {
+          "text": "nailed",
+          "start_ms": 137730,
+          "end_ms": 137970,
+          "confidence": 0.9999549190203348
+        },
+        {
+          "text": "it",
+          "start_ms": 137970,
+          "end_ms": 138030,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "to",
+          "start_ms": 138150,
+          "end_ms": 138210,
+          "confidence": 0.999441385269165
+        },
+        {
+          "text": "the",
+          "start_ms": 138330,
+          "end_ms": 138390,
+          "confidence": 0.9999924302101135
+        }
+      ]
+    },
+    {
+      "text": "cross.",
+      "start_ms": 139170,
+      "end_ms": 139770,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "cross.",
+          "start_ms": 139170,
+          "end_ms": 139770,
+          "confidence": 0.9992941816647848
+        }
+      ]
+    },
+    {
+      "text": "You got me running out the",
+      "start_ms": 140430,
+      "end_ms": 141870,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 140430,
+          "end_ms": 140490,
+          "confidence": 0.9998950958251953
+        },
+        {
+          "text": "got",
+          "start_ms": 140790,
+          "end_ms": 140850,
+          "confidence": 0.9993612766265869
+        },
+        {
+          "text": "me",
+          "start_ms": 141030,
+          "end_ms": 141090,
+          "confidence": 0.9999866485595703
+        },
+        {
+          "text": "running",
+          "start_ms": 141210,
+          "end_ms": 141510,
+          "confidence": 0.9999618530273438
+        },
+        {
+          "text": "out",
+          "start_ms": 141630,
+          "end_ms": 141690,
+          "confidence": 0.9999542236328125
+        },
+        {
+          "text": "the",
+          "start_ms": 141810,
+          "end_ms": 141870,
+          "confidence": 0.9902384877204895
+        }
+      ]
+    },
+    {
+      "text": "grave.",
+      "start_ms": 142470,
+      "end_ms": 143370,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "grave.",
+          "start_ms": 142470,
+          "end_ms": 143370,
+          "confidence": 0.9987131953239441
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 144270,
+      "end_ms": 144810,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 144270,
+          "end_ms": 144810,
+          "confidence": 0.9885831624269485
+        }
+      ]
+    },
+    {
+      "text": "Oh, we took it away.",
+      "start_ms": 145890,
+      "end_ms": 146970,
+      "text_sk": "Ó, vzali sme to preč.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 145890,
+          "end_ms": 146010,
+          "confidence": 0.9965851604938507
+        },
+        {
+          "text": "we",
+          "start_ms": 146070,
+          "end_ms": 146130,
+          "confidence": 0.4435502588748932
+        },
+        {
+          "text": "took",
+          "start_ms": 146190,
+          "end_ms": 146250,
+          "confidence": 0.9993783831596375
+        },
+        {
+          "text": "it",
+          "start_ms": 146370,
+          "end_ms": 146430,
+          "confidence": 0.9961071014404297
+        },
+        {
+          "text": "away.",
+          "start_ms": 146490,
+          "end_ms": 146970,
+          "confidence": 0.9899991750717163
+        }
+      ]
+    },
+    {
+      "text": "Oh, You took away my",
+      "start_ms": 147810,
+      "end_ms": 148710,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 147810,
+          "end_ms": 147870,
+          "confidence": 0.8971202671527863
+        },
+        {
+          "text": "You",
+          "start_ms": 147870,
+          "end_ms": 147870,
+          "confidence": 0.9836686849594116
+        },
+        {
+          "text": "took",
+          "start_ms": 148050,
+          "end_ms": 148110,
+          "confidence": 0.9999542236328125
+        },
+        {
+          "text": "away",
+          "start_ms": 148230,
+          "end_ms": 148410,
+          "confidence": 0.9999828338623047
+        },
+        {
+          "text": "my",
+          "start_ms": 148650,
+          "end_ms": 148710,
+          "confidence": 0.9999924302101135
+        }
+      ]
+    },
+    {
+      "text": "shame,",
+      "start_ms": 149130,
+      "end_ms": 149430,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "shame,",
+          "start_ms": 149130,
+          "end_ms": 149430,
+          "confidence": 0.9874343872070312
+        }
+      ]
+    },
+    {
+      "text": "and You nailed it to the old rock and cross.",
+      "start_ms": 150990,
+      "end_ms": 153690,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 150990,
+          "end_ms": 151050,
+          "confidence": 0.8926950097084045
+        },
+        {
+          "text": "You",
+          "start_ms": 151170,
+          "end_ms": 151230,
+          "confidence": 0.9986194372177124
+        },
+        {
+          "text": "nailed",
+          "start_ms": 151530,
+          "end_ms": 151710,
+          "confidence": 0.9997600714365641
+        },
+        {
+          "text": "it",
+          "start_ms": 151710,
+          "end_ms": 151770,
+          "confidence": 0.999971866607666
+        },
+        {
+          "text": "to",
+          "start_ms": 151890,
+          "end_ms": 151950,
+          "confidence": 0.7769205570220947
+        },
+        {
+          "text": "the",
+          "start_ms": 152190,
+          "end_ms": 152250,
+          "confidence": 0.9535742998123169
+        },
+        {
+          "text": "old",
+          "start_ms": 152370,
+          "end_ms": 152430,
+          "confidence": 0.8847787380218506
+        },
+        {
+          "text": "rock",
+          "start_ms": 152670,
+          "end_ms": 152730,
+          "confidence": 0.7230008840560913
+        },
+        {
+          "text": "and",
+          "start_ms": 152970,
+          "end_ms": 153030,
+          "confidence": 0.8322611451148987
+        },
+        {
+          "text": "cross.",
+          "start_ms": 153330,
+          "end_ms": 153690,
+          "confidence": 0.8449120124181112
+        }
+      ]
+    },
+    {
+      "text": "Got me running out the—",
+      "start_ms": 154530,
+      "end_ms": 156630,
+      "text_sk": "Vyviedol si ma z—",
+      "words": [
+        {
+          "text": "Got",
+          "start_ms": 154530,
+          "end_ms": 154590,
+          "confidence": 0.8478169441223145
+        },
+        {
+          "text": "me",
+          "start_ms": 154770,
+          "end_ms": 154830,
+          "confidence": 0.9999885559082031
+        },
+        {
+          "text": "running",
+          "start_ms": 155010,
+          "end_ms": 155310,
+          "confidence": 0.9997864365577698
+        },
+        {
+          "text": "out",
+          "start_ms": 155490,
+          "end_ms": 155550,
+          "confidence": 0.9998972415924072
+        },
+        {
+          "text": "the—",
+          "start_ms": 155850,
+          "end_ms": 156630,
+          "confidence": 0.551427036523819
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah, here I come.",
+      "start_ms": 157830,
+      "end_ms": 159570,
+      "text_sk": "Ó, haleluja, tu prichádzam.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 157830,
+          "end_ms": 157950,
+          "confidence": 0.9996387362480164
+        },
+        {
+          "text": "hallelujah,",
+          "start_ms": 158070,
+          "end_ms": 158550,
+          "confidence": 0.9880562871694565
+        },
+        {
+          "text": "here",
+          "start_ms": 158850,
+          "end_ms": 159030,
+          "confidence": 0.9999876022338867
+        },
+        {
+          "text": "I",
+          "start_ms": 159150,
+          "end_ms": 159210,
+          "confidence": 0.9874358177185059
+        },
+        {
+          "text": "come.",
+          "start_ms": 159390,
+          "end_ms": 159570,
+          "confidence": 0.9744740426540375
+        }
+      ]
+    },
+    {
+      "text": "Because You took away the shame, and You nailed it to the cross.",
+      "start_ms": 159690,
+      "end_ms": 164670,
+      "text_sk": "Lebo si vzal hanbu a pribil si ju na kríž.",
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 159690,
+          "end_ms": 159930,
+          "confidence": 0.9982744654019674
+        },
+        {
+          "text": "You",
+          "start_ms": 159930,
+          "end_ms": 159990,
+          "confidence": 0.9615642428398132
+        },
+        {
+          "text": "took",
+          "start_ms": 160170,
+          "end_ms": 160230,
+          "confidence": 0.9995063543319702
+        },
+        {
+          "text": "away",
+          "start_ms": 160410,
+          "end_ms": 160650,
+          "confidence": 0.9999800026416779
+        },
+        {
+          "text": "the",
+          "start_ms": 160830,
+          "end_ms": 160890,
+          "confidence": 0.4232361316680908
+        },
+        {
+          "text": "shame,",
+          "start_ms": 161130,
+          "end_ms": 161370,
+          "confidence": 0.9274012049039205
+        },
+        {
+          "text": "and",
+          "start_ms": 161670,
+          "end_ms": 161730,
+          "confidence": 0.9727556705474854
+        },
+        {
+          "text": "You",
+          "start_ms": 161850,
+          "end_ms": 161910,
+          "confidence": 0.8830776810646057
+        },
+        {
+          "text": "nailed",
+          "start_ms": 162090,
+          "end_ms": 163830,
+          "confidence": 0.8603370189666748
+        },
+        {
+          "text": "it",
+          "start_ms": 163830,
+          "end_ms": 163890,
+          "confidence": 0.9998310804367065
+        },
+        {
+          "text": "to",
+          "start_ms": 164010,
+          "end_ms": 164070,
+          "confidence": 0.990213930606842
+        },
+        {
+          "text": "the",
+          "start_ms": 164130,
+          "end_ms": 164190,
+          "confidence": 0.9999833106994629
+        },
+        {
+          "text": "cross.",
+          "start_ms": 164370,
+          "end_ms": 164670,
+          "confidence": 0.8821749687194824
+        }
+      ]
+    },
+    {
+      "text": "And You nailed it to the cross.",
+      "start_ms": 165030,
+      "end_ms": 166410,
+      "text_sk": "A pribil si ju na kríž.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 165030,
+          "end_ms": 165090,
+          "confidence": 0.9864251017570496
+        },
+        {
+          "text": "You",
+          "start_ms": 165270,
+          "end_ms": 165330,
+          "confidence": 0.8344398736953735
+        },
+        {
+          "text": "nailed",
+          "start_ms": 165510,
+          "end_ms": 165690,
+          "confidence": 0.9988026022911072
+        },
+        {
+          "text": "it",
+          "start_ms": 165690,
+          "end_ms": 165750,
+          "confidence": 0.999847412109375
+        },
+        {
+          "text": "to",
+          "start_ms": 165810,
+          "end_ms": 165870,
+          "confidence": 0.9983755350112915
+        },
+        {
+          "text": "the",
+          "start_ms": 165990,
+          "end_ms": 166050,
+          "confidence": 0.9982349276542664
+        },
+        {
+          "text": "cross.",
+          "start_ms": 166110,
+          "end_ms": 166410,
+          "confidence": 0.9361422856648763
+        }
+      ]
+    },
+    {
+      "text": "And it came running to You.",
+      "start_ms": 166650,
+      "end_ms": 168330,
+      "text_sk": "A pribehlo to k Tebe.",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 166650,
+          "end_ms": 166710,
+          "confidence": 0.5671221017837524
+        },
+        {
+          "text": "it",
+          "start_ms": 166890,
+          "end_ms": 166950,
+          "confidence": 0.9516909122467041
+        },
+        {
+          "text": "came",
+          "start_ms": 167130,
+          "end_ms": 167250,
+          "confidence": 0.9677344262599945
+        },
+        {
+          "text": "running",
+          "start_ms": 167550,
+          "end_ms": 167970,
+          "confidence": 0.8550004065036774
+        },
+        {
+          "text": "to",
+          "start_ms": 168090,
+          "end_ms": 168150,
+          "confidence": 0.9302397966384888
+        },
+        {
+          "text": "You.",
+          "start_ms": 168210,
+          "end_ms": 168330,
+          "confidence": 0.8563462495803833
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah, here I come.",
+      "start_ms": 170130,
+      "end_ms": 171570,
+      "text_sk": "Haleluja, tu prichádzam.",
+      "words": [
+        {
+          "text": "Hallelujah,",
+          "start_ms": 170130,
+          "end_ms": 170670,
+          "confidence": 0.9959889799356461
+        },
+        {
+          "text": "here",
+          "start_ms": 170910,
+          "end_ms": 171030,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "I",
+          "start_ms": 171150,
+          "end_ms": 171210,
+          "confidence": 0.9999962449073792
+        },
+        {
+          "text": "come.",
+          "start_ms": 171390,
+          "end_ms": 171570,
+          "confidence": 0.9997289776802063
+        }
+      ]
+    },
+    {
+      "text": "Sing, \"Hallelujah, here I come.\"",
+      "start_ms": 173250,
+      "end_ms": 175050,
+      "text_sk": "Spievaj: \"Haleluja, tu prichádzam.\"",
+      "words": [
+        {
+          "text": "Sing,",
+          "start_ms": 173250,
+          "end_ms": 173430,
+          "confidence": 0.7381413280963898
+        },
+        {
+          "text": "\"Hallelujah,",
+          "start_ms": 173550,
+          "end_ms": 174090,
+          "confidence": 0.9658645391464233
+        },
+        {
+          "text": "here",
+          "start_ms": 174330,
+          "end_ms": 174510,
+          "confidence": 0.9985620677471161
+        },
+        {
+          "text": "I",
+          "start_ms": 174570,
+          "end_ms": 174630,
+          "confidence": 0.999996542930603
+        },
+        {
+          "text": "come.\"",
+          "start_ms": 174750,
+          "end_ms": 175050,
+          "confidence": 0.9997395078341166
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 175410,
+      "end_ms": 175890,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 175410,
+          "end_ms": 175890,
+          "confidence": 0.9321170300245285
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah, here I come.",
+      "start_ms": 177030,
+      "end_ms": 178470,
+      "text_sk": "Haleluja, tu prichádzam.",
+      "words": [
+        {
+          "text": "Hallelujah,",
+          "start_ms": 177030,
+          "end_ms": 177570,
+          "confidence": 0.9982127100229263
+        },
+        {
+          "text": "here",
+          "start_ms": 177810,
+          "end_ms": 177990,
+          "confidence": 0.9999591410160065
+        },
+        {
+          "text": "I",
+          "start_ms": 178050,
+          "end_ms": 178110,
+          "confidence": 0.9999963045120239
+        },
+        {
+          "text": "come.",
+          "start_ms": 178230,
+          "end_ms": 178470,
+          "confidence": 0.9998629987239838
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 178950,
+      "end_ms": 179670,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 178950,
+          "end_ms": 179670,
+          "confidence": 0.9263555109500885
+        }
+      ]
+    },
+    {
+      "text": "I'm not depressed anymore.",
+      "start_ms": 180210,
+      "end_ms": 181710,
+      "text_sk": "Už nie som deprimovaný.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 180210,
+          "end_ms": 180390,
+          "confidence": 0.9980045954386393
+        },
+        {
+          "text": "not",
+          "start_ms": 180510,
+          "end_ms": 180570,
+          "confidence": 0.9999542832374573
+        },
+        {
+          "text": "depressed",
+          "start_ms": 180690,
+          "end_ms": 181110,
+          "confidence": 0.9711679816246033
+        },
+        {
+          "text": "anymore.",
+          "start_ms": 181170,
+          "end_ms": 181710,
+          "confidence": 0.9998129457235336
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah, here I come.",
+      "start_ms": 182370,
+      "end_ms": 183570,
+      "text_sk": "Haleluja, tu prichádzam.",
+      "words": [
+        {
+          "text": "Hallelujah,",
+          "start_ms": 182370,
+          "end_ms": 182910,
+          "confidence": 0.9433948695659637
+        },
+        {
+          "text": "here",
+          "start_ms": 183090,
+          "end_ms": 183270,
+          "confidence": 0.9997797906398773
+        },
+        {
+          "text": "I",
+          "start_ms": 183270,
+          "end_ms": 183330,
+          "confidence": 0.9986657500267029
+        },
+        {
+          "text": "come.",
+          "start_ms": 183390,
+          "end_ms": 183570,
+          "confidence": 0.9990663230419159
+        }
+      ]
+    },
+    {
+      "text": "My anxiety left me.",
+      "start_ms": 183810,
+      "end_ms": 185550,
+      "text_sk": "Moja úzkosť ma opustila.",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 183810,
+          "end_ms": 183870,
+          "confidence": 0.8763566613197327
+        },
+        {
+          "text": "anxiety",
+          "start_ms": 183990,
+          "end_ms": 184830,
+          "confidence": 0.9993973821401596
+        },
+        {
+          "text": "left",
+          "start_ms": 185130,
+          "end_ms": 185190,
+          "confidence": 0.9033525586128235
+        },
+        {
+          "text": "me.",
+          "start_ms": 185430,
+          "end_ms": 185550,
+          "confidence": 0.9994710385799408
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah, here I come.",
+      "start_ms": 185970,
+      "end_ms": 187410,
+      "text_sk": "Haleluja, tu prichádzam.",
+      "words": [
+        {
+          "text": "Hallelujah,",
+          "start_ms": 185970,
+          "end_ms": 186450,
+          "confidence": 0.9976658523082733
+        },
+        {
+          "text": "here",
+          "start_ms": 186690,
+          "end_ms": 186870,
+          "confidence": 0.9999376237392426
+        },
+        {
+          "text": "I",
+          "start_ms": 186990,
+          "end_ms": 187050,
+          "confidence": 0.9996297955513
+        },
+        {
+          "text": "come.",
+          "start_ms": 187230,
+          "end_ms": 187410,
+          "confidence": 0.9989417493343353
+        }
+      ]
+    },
+    {
+      "text": "If You've been clean, everybody",
+      "start_ms": 187590,
+      "end_ms": 189090,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "If",
+          "start_ms": 187590,
+          "end_ms": 187710,
+          "confidence": 0.9022813439369202
+        },
+        {
+          "text": "You've",
+          "start_ms": 187770,
+          "end_ms": 188010,
+          "confidence": 0.8734861413637797
+        },
+        {
+          "text": "been",
+          "start_ms": 188010,
+          "end_ms": 188070,
+          "confidence": 0.9972161054611206
+        },
+        {
+          "text": "clean,",
+          "start_ms": 188130,
+          "end_ms": 188370,
+          "confidence": 0.9797238707542419
+        },
+        {
+          "text": "everybody",
+          "start_ms": 188730,
+          "end_ms": 189090,
+          "confidence": 0.9524706999460856
+        }
+      ]
+    },
+    {
+      "text": "jump, jump, jump.",
+      "start_ms": 189570,
+      "end_ms": 190650,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "jump,",
+          "start_ms": 189570,
+          "end_ms": 189870,
+          "confidence": 0.9097033739089966
+        },
+        {
+          "text": "jump,",
+          "start_ms": 189930,
+          "end_ms": 190230,
+          "confidence": 0.9997358322143555
+        },
+        {
+          "text": "jump.",
+          "start_ms": 190350,
+          "end_ms": 190650,
+          "confidence": 0.9654386242230734
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 196530,
+      "end_ms": 198390,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 196530,
+          "end_ms": 198390,
+          "confidence": 0.8974758982658386
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 203370,
+      "end_ms": 205170,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 203370,
+          "end_ms": 205170,
+          "confidence": 0.9875574260950089
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 206790,
+      "end_ms": 208650,
+      "text_sk": "Haleluja.",
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 206790,
+          "end_ms": 208650,
+          "confidence": 0.9824442565441132
+        }
+      ]
+    },
+    {
+      "text": "Thank You, Jesus.",
+      "start_ms": 210630,
+      "end_ms": 211710,
+      "text_sk": "Ďakujem Ti, Ježišu.",
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 210630,
+          "end_ms": 210750,
+          "confidence": 0.9542979300022125
+        },
+        {
+          "text": "You,",
+          "start_ms": 210870,
+          "end_ms": 210990,
+          "confidence": 0.993447482585907
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 211290,
+          "end_ms": 211710,
+          "confidence": 0.9990546107292175
+        }
+      ]
+    },
+    {
+      "text": "Come on, you sing.",
+      "start_ms": 215130,
+      "end_ms": 215910,
+      "text_sk": "No tak, zaspievaj.",
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 215130,
+          "end_ms": 215250,
+          "confidence": 0.9944721758365631
+        },
+        {
+          "text": "on,",
+          "start_ms": 215310,
+          "end_ms": 215430,
+          "confidence": 0.9981513321399689
+        },
+        {
+          "text": "you",
+          "start_ms": 215490,
+          "end_ms": 215610,
+          "confidence": 0.9675920903682709
+        },
+        {
+          "text": "sing.",
+          "start_ms": 215670,
+          "end_ms": 215910,
+          "confidence": 0.778365820646286
+        }
+      ]
+    },
+    {
+      "text": "Because I've been washed in the water,",
+      "start_ms": 217230,
+      "end_ms": 219150,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 217230,
+          "end_ms": 217470,
+          "confidence": 0.9995878338813782
+        },
+        {
+          "text": "I've",
+          "start_ms": 217590,
+          "end_ms": 217830,
+          "confidence": 0.9998932878176371
+        },
+        {
+          "text": "been",
+          "start_ms": 217890,
+          "end_ms": 217950,
+          "confidence": 0.9999526143074036
+        },
+        {
+          "text": "washed",
+          "start_ms": 218130,
+          "end_ms": 218310,
+          "confidence": 0.9996663331985474
+        },
+        {
+          "text": "in",
+          "start_ms": 218490,
+          "end_ms": 218550,
+          "confidence": 0.9999790191650391
+        },
+        {
+          "text": "the",
+          "start_ms": 218670,
+          "end_ms": 218730,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "water,",
+          "start_ms": 218910,
+          "end_ms": 219150,
+          "confidence": 0.9999456405639648
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 219570,
+      "end_ms": 220950,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 219570,
+          "end_ms": 219810,
+          "confidence": 0.8254577219486237
+        },
+        {
+          "text": "in",
+          "start_ms": 220050,
+          "end_ms": 220110,
+          "confidence": 0.9999656677246094
+        },
+        {
+          "text": "the",
+          "start_ms": 220230,
+          "end_ms": 220290,
+          "confidence": 0.9999752640724182
+        },
+        {
+          "text": "blood.",
+          "start_ms": 220590,
+          "end_ms": 220950,
+          "confidence": 0.9999733120203018
+        }
+      ]
+    },
+    {
+      "text": "I'm as good as a—",
+      "start_ms": 221010,
+      "end_ms": 222510,
+      "text_sk": "Som taký dobrý ako—",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 221010,
+          "end_ms": 221250,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "as",
+          "start_ms": 221310,
+          "end_ms": 221370,
+          "confidence": 0.9999923706054688
+        },
+        {
+          "text": "good",
+          "start_ms": 221490,
+          "end_ms": 221670,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "as",
+          "start_ms": 221910,
+          "end_ms": 221970,
+          "confidence": 0.9999809861183167
+        },
+        {
+          "text": "a—",
+          "start_ms": 222270,
+          "end_ms": 222510,
+          "confidence": 0.9547812640666962
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 223350,
+      "end_ms": 224250,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 223350,
+          "end_ms": 223530,
+          "confidence": 0.999748021364212
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 223650,
+          "end_ms": 224250,
+          "confidence": 0.9990593492984772
+        }
+      ]
+    },
+    {
+      "text": "I've been washed in the water,",
+      "start_ms": 224610,
+      "end_ms": 225990,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 224610,
+          "end_ms": 224790,
+          "confidence": 0.99719766775767
+        },
+        {
+          "text": "been",
+          "start_ms": 224790,
+          "end_ms": 224850,
+          "confidence": 0.9999980926513672
+        },
+        {
+          "text": "washed",
+          "start_ms": 225030,
+          "end_ms": 225210,
+          "confidence": 0.9998607933521271
+        },
+        {
+          "text": "in",
+          "start_ms": 225330,
+          "end_ms": 225390,
+          "confidence": 0.9999942779541016
+        },
+        {
+          "text": "the",
+          "start_ms": 225510,
+          "end_ms": 225570,
+          "confidence": 0.9999961853027344
+        },
+        {
+          "text": "water,",
+          "start_ms": 225750,
+          "end_ms": 225990,
+          "confidence": 0.9947070777416229
+        }
+      ]
+    },
+    {
+      "text": "washed in the blood.",
+      "start_ms": 226470,
+      "end_ms": 227730,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "washed",
+          "start_ms": 226470,
+          "end_ms": 226650,
+          "confidence": 0.8179614543914795
+        },
+        {
+          "text": "in",
+          "start_ms": 226950,
+          "end_ms": 227010,
+          "confidence": 0.9999217987060547
+        },
+        {
+          "text": "the",
+          "start_ms": 227130,
+          "end_ms": 227190,
+          "confidence": 0.9999662637710571
+        },
+        {
+          "text": "blood.",
+          "start_ms": 227310,
+          "end_ms": 227730,
+          "confidence": 0.9997856616973877
+        }
+      ]
+    },
+    {
+      "text": "I'll be clear again.",
+      "start_ms": 228030,
+      "end_ms": 229410,
+      "text_sk": "Znova budem čistý.",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 228030,
+          "end_ms": 228330,
+          "confidence": 0.9834376176198324
+        },
+        {
+          "text": "be",
+          "start_ms": 228390,
+          "end_ms": 228450,
+          "confidence": 0.9997170567512512
+        },
+        {
+          "text": "clear",
+          "start_ms": 228570,
+          "end_ms": 228870,
+          "confidence": 0.8826384544372559
+        },
+        {
+          "text": "again.",
+          "start_ms": 229050,
+          "end_ms": 229410,
+          "confidence": 0.9915511310100555
+        }
+      ]
+    },
+    {
+      "text": "Oh, hallelujah.",
+      "start_ms": 230190,
+      "end_ms": 231150,
+      "text_sk": "Ó, haleluja.",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 230190,
+          "end_ms": 230310,
+          "confidence": 0.999819427728653
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 230550,
+          "end_ms": 231150,
+          "confidence": 0.999846950173378
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9675660833387832,
+  "metadata": {
+    "model": "stt-async-v5",
+    "transcription_id": "6113e5f0-e089-4ec5-acb3-1c078321d025",
+    "elapsed_s": 25.9,
+    "token_count": 1545,
+    "source_token_count": 771,
+    "line_count": 114,
+    "target_language": "sk",
+    "languages_seen": [
+      "en",
+      "sk"
+    ],
+    "line_gap_ms": 400,
+    "translation_alignment": {
+      "n_runs": 142,
+      "n_translation_runs": 71,
+      "n_lines_aligned_1to1": 43,
+      "n_segments_unaligned_multi_line": 28,
+      "n_orphan_translation_segments": 0,
+      "unaligned_translation_segments": [
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            0,
+            1
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            4,
+            5
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            9,
+            10,
+            11,
+            12
+          ],
+          "text_sk": "Hriech na mne bol potretý a hanba sa mi hlboko šírila."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            13,
+            14
+          ],
+          "text_sk": "Ale láska sa vyliala na Kalvárii."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            16,
+            17,
+            18
+          ],
+          "text_sk": "A Bože, ako je to možné?"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "text_sk": "Som vykúpený a vykúpený a stojím vo Tvojom víťazstve."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            25,
+            26
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            27,
+            28
+          ],
+          "text_sk": "Som taký dobrý ako—"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            30,
+            31
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            34,
+            35,
+            36
+          ],
+          "text_sk": "Nie je to to, čo som urobil, ale to, čo si urobil za mňa."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            37,
+            38
+          ],
+          "text_sk": "Všetko si namaľoval na ten strom."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            39,
+            40
+          ],
+          "text_sk": "Ó, haleluja, som čistý."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            41,
+            42,
+            43,
+            44,
+            45
+          ],
+          "text_sk": "Tvoja láska zvíťazila a Tvoje milosrdenstvo je najvyššie."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            46,
+            47
+          ],
+          "text_sk": "Tancujem vo Tvojom víťazstve."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            49,
+            50
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            51,
+            52
+          ],
+          "text_sk": "Som taký dobrý ako—"
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            54,
+            55
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            58,
+            59
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            62,
+            63
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            66,
+            67,
+            68,
+            69
+          ],
+          "text_sk": "Lebo si mi vzal hanbu a pribil si ju na kríž."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            70,
+            71
+          ],
+          "text_sk": "Vyviedol si ma z hrobu."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            72,
+            73
+          ],
+          "text_sk": "Ó, haleluja, tu prichádzam."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            74,
+            75,
+            76,
+            77
+          ],
+          "text_sk": "Lebo si mi vzal hanbu a pribil si ju na kríž."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            78,
+            79
+          ],
+          "text_sk": "Vyviedol si ma z hrobu."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            82,
+            83,
+            84
+          ],
+          "text_sk": "Ó, vzal si mi hanbu a pribil si ju na starý kameň a kríž."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            99,
+            100
+          ],
+          "text_sk": "Ak si bol čistý, všetci skáčte, skáčte, skáčte."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            106,
+            107
+          ],
+          "text_sk": "Lebo som bol umytý vo vode, umytý v krvi."
+        },
+        {
+          "reason": "multi_line_segment",
+          "line_indices": [
+            110,
+            111
+          ],
+          "text_sk": "Bol som umytý vo vode, umytý v krvi."
+        }
+      ]
+    }
+  }
+}

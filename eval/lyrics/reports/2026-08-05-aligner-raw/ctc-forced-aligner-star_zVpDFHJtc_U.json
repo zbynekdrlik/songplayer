@@ -1,0 +1,2183 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\zVpDFHJtc_U_vocal16k.wav",
+  "duration_ms": 394453,
+  "lines": [
+    {
+      "text": "I hear Your voice",
+      "start_ms": 12380,
+      "end_ms": 14220,
+      "text_sk": "Počujem Tvoj hlas",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 12380,
+          "end_ms": 12400
+        },
+        {
+          "text": "hear",
+          "start_ms": 12540,
+          "end_ms": 12860
+        },
+        {
+          "text": "Your",
+          "start_ms": 12960,
+          "end_ms": 13220
+        },
+        {
+          "text": "voice",
+          "start_ms": 13320,
+          "end_ms": 14220
+        }
+      ]
+    },
+    {
+      "text": "Even in the distance",
+      "start_ms": 15060,
+      "end_ms": 16880,
+      "text_sk": "Aj v diaľke",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 15060,
+          "end_ms": 15380
+        },
+        {
+          "text": "in",
+          "start_ms": 15460,
+          "end_ms": 15560
+        },
+        {
+          "text": "the",
+          "start_ms": 15600,
+          "end_ms": 15680
+        },
+        {
+          "text": "distance",
+          "start_ms": 15820,
+          "end_ms": 16880
+        }
+      ]
+    },
+    {
+      "text": "Even in the silence",
+      "start_ms": 18340,
+      "end_ms": 20180,
+      "text_sk": "Aj v tichu",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 18340,
+          "end_ms": 18660
+        },
+        {
+          "text": "in",
+          "start_ms": 18760,
+          "end_ms": 18840
+        },
+        {
+          "text": "the",
+          "start_ms": 18880,
+          "end_ms": 18960
+        },
+        {
+          "text": "silence",
+          "start_ms": 19080,
+          "end_ms": 20180
+        }
+      ]
+    },
+    {
+      "text": "Even in the static",
+      "start_ms": 21640,
+      "end_ms": 23240,
+      "text_sk": "Aj v statike",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 21640,
+          "end_ms": 21960
+        },
+        {
+          "text": "in",
+          "start_ms": 22060,
+          "end_ms": 22140
+        },
+        {
+          "text": "the",
+          "start_ms": 22180,
+          "end_ms": 22240
+        },
+        {
+          "text": "static",
+          "start_ms": 22360,
+          "end_ms": 23240
+        }
+      ]
+    },
+    {
+      "text": "I see You move",
+      "start_ms": 25500,
+      "end_ms": 27460,
+      "text_sk": "Vidím Ťa pohybovať sa",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 25500,
+          "end_ms": 25520
+        },
+        {
+          "text": "see",
+          "start_ms": 25660,
+          "end_ms": 25960
+        },
+        {
+          "text": "You",
+          "start_ms": 26120,
+          "end_ms": 26280
+        },
+        {
+          "text": "move",
+          "start_ms": 26500,
+          "end_ms": 27460
+        }
+      ]
+    },
+    {
+      "text": "Even in the dark night",
+      "start_ms": 28200,
+      "end_ms": 29960,
+      "text_sk": "Aj v temnej noci",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 28200,
+          "end_ms": 28520
+        },
+        {
+          "text": "in",
+          "start_ms": 28620,
+          "end_ms": 28700
+        },
+        {
+          "text": "the",
+          "start_ms": 28740,
+          "end_ms": 28820
+        },
+        {
+          "text": "dark",
+          "start_ms": 28960,
+          "end_ms": 29540
+        },
+        {
+          "text": "night",
+          "start_ms": 29620,
+          "end_ms": 29960
+        }
+      ]
+    },
+    {
+      "text": "Even in the half light",
+      "start_ms": 31480,
+      "end_ms": 33300,
+      "text_sk": "Aj v polosvete",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 31480,
+          "end_ms": 31780
+        },
+        {
+          "text": "in",
+          "start_ms": 31880,
+          "end_ms": 31980
+        },
+        {
+          "text": "the",
+          "start_ms": 32020,
+          "end_ms": 32120
+        },
+        {
+          "text": "half",
+          "start_ms": 32240,
+          "end_ms": 32800
+        },
+        {
+          "text": "light",
+          "start_ms": 32900,
+          "end_ms": 33300
+        }
+      ]
+    },
+    {
+      "text": "Even in the stillness",
+      "start_ms": 34780,
+      "end_ms": 36560,
+      "text_sk": "Aj v tichu",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 34780,
+          "end_ms": 35100
+        },
+        {
+          "text": "in",
+          "start_ms": 35180,
+          "end_ms": 35260
+        },
+        {
+          "text": "the",
+          "start_ms": 35300,
+          "end_ms": 35380
+        },
+        {
+          "text": "stillness",
+          "start_ms": 35500,
+          "end_ms": 36560
+        }
+      ]
+    },
+    {
+      "text": "And after the fire",
+      "start_ms": 37820,
+      "end_ms": 40220,
+      "text_sk": "A po ohni",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 37820,
+          "end_ms": 38040
+        },
+        {
+          "text": "after",
+          "start_ms": 38160,
+          "end_ms": 38700
+        },
+        {
+          "text": "the",
+          "start_ms": 38840,
+          "end_ms": 38920
+        },
+        {
+          "text": "fire",
+          "start_ms": 39200,
+          "end_ms": 40220
+        }
+      ]
+    },
+    {
+      "text": "And after the wind",
+      "start_ms": 41100,
+      "end_ms": 43180,
+      "text_sk": "A po vetre",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 41100,
+          "end_ms": 41300
+        },
+        {
+          "text": "after",
+          "start_ms": 41420,
+          "end_ms": 41940
+        },
+        {
+          "text": "the",
+          "start_ms": 42120,
+          "end_ms": 42220
+        },
+        {
+          "text": "wind",
+          "start_ms": 42500,
+          "end_ms": 43180
+        }
+      ]
+    },
+    {
+      "text": "When chaos subsides",
+      "start_ms": 44340,
+      "end_ms": 47620,
+      "text_sk": "Keď sa chaos utíši",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 44340,
+          "end_ms": 44460
+        },
+        {
+          "text": "chaos",
+          "start_ms": 44560,
+          "end_ms": 45300
+        },
+        {
+          "text": "subsides",
+          "start_ms": 45420,
+          "end_ms": 47620
+        }
+      ]
+    },
+    {
+      "text": "I listen again",
+      "start_ms": 47700,
+      "end_ms": 49520,
+      "text_sk": "Znovu počúvam",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 47700,
+          "end_ms": 47720
+        },
+        {
+          "text": "listen",
+          "start_ms": 47820,
+          "end_ms": 48840
+        },
+        {
+          "text": "again",
+          "start_ms": 48960,
+          "end_ms": 49520
+        }
+      ]
+    },
+    {
+      "text": "And after the earth shakes",
+      "start_ms": 50980,
+      "end_ms": 53920,
+      "text_sk": "A keď sa zem trasie",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 50980,
+          "end_ms": 51160
+        },
+        {
+          "text": "after",
+          "start_ms": 51320,
+          "end_ms": 51840
+        },
+        {
+          "text": "the",
+          "start_ms": 51980,
+          "end_ms": 52100
+        },
+        {
+          "text": "earth",
+          "start_ms": 52500,
+          "end_ms": 53060
+        },
+        {
+          "text": "shakes",
+          "start_ms": 53180,
+          "end_ms": 53920
+        }
+      ]
+    },
+    {
+      "text": "You're calling me in",
+      "start_ms": 54220,
+      "end_ms": 56360,
+      "text_sk": "Voláš ma dnu",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 54220,
+          "end_ms": 54360
+        },
+        {
+          "text": "calling",
+          "start_ms": 54420,
+          "end_ms": 55160
+        },
+        {
+          "text": "me",
+          "start_ms": 55280,
+          "end_ms": 55380
+        },
+        {
+          "text": "in",
+          "start_ms": 55620,
+          "end_ms": 56360
+        }
+      ]
+    },
+    {
+      "text": "A voice in the quiet",
+      "start_ms": 57560,
+      "end_ms": 60800,
+      "text_sk": "Hlas v tichu",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 57560,
+          "end_ms": 57580
+        },
+        {
+          "text": "voice",
+          "start_ms": 57720,
+          "end_ms": 58180
+        },
+        {
+          "text": "in",
+          "start_ms": 58240,
+          "end_ms": 58480
+        },
+        {
+          "text": "the",
+          "start_ms": 58560,
+          "end_ms": 58660
+        },
+        {
+          "text": "quiet",
+          "start_ms": 58820,
+          "end_ms": 60800
+        }
+      ]
+    },
+    {
+      "text": "A whisper within",
+      "start_ms": 60860,
+      "end_ms": 62620,
+      "text_sk": "Šepot vo vnútri",
+      "words": [
+        {
+          "text": "A",
+          "start_ms": 60860,
+          "end_ms": 60880
+        },
+        {
+          "text": "whisper",
+          "start_ms": 60980,
+          "end_ms": 61780
+        },
+        {
+          "text": "within",
+          "start_ms": 62000,
+          "end_ms": 62620
+        }
+      ]
+    },
+    {
+      "text": "When You speak I am still",
+      "start_ms": 64340,
+      "end_ms": 69960,
+      "text_sk": "Keď hovoríš, som pokojný",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 64340,
+          "end_ms": 64700
+        },
+        {
+          "text": "You",
+          "start_ms": 64840,
+          "end_ms": 65140
+        },
+        {
+          "text": "speak",
+          "start_ms": 65440,
+          "end_ms": 67860
+        },
+        {
+          "text": "I",
+          "start_ms": 68120,
+          "end_ms": 68140
+        },
+        {
+          "text": "am",
+          "start_ms": 68280,
+          "end_ms": 68580
+        },
+        {
+          "text": "still",
+          "start_ms": 68780,
+          "end_ms": 69960
+        }
+      ]
+    },
+    {
+      "text": "I believe You are near",
+      "start_ms": 70980,
+      "end_ms": 76260,
+      "text_sk": "Verím, že si blízko",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 70980,
+          "end_ms": 71000
+        },
+        {
+          "text": "believe",
+          "start_ms": 71500,
+          "end_ms": 73020
+        },
+        {
+          "text": "You",
+          "start_ms": 74180,
+          "end_ms": 74340
+        },
+        {
+          "text": "are",
+          "start_ms": 74880,
+          "end_ms": 75180
+        },
+        {
+          "text": "near",
+          "start_ms": 75360,
+          "end_ms": 76260
+        }
+      ]
+    },
+    {
+      "text": "Speak to me draw me in",
+      "start_ms": 77340,
+      "end_ms": 83020,
+      "text_sk": "Hovor ku mne, pritiahni ma",
+      "words": [
+        {
+          "text": "Speak",
+          "start_ms": 77340,
+          "end_ms": 78000
+        },
+        {
+          "text": "to",
+          "start_ms": 78080,
+          "end_ms": 78220
+        },
+        {
+          "text": "me",
+          "start_ms": 78680,
+          "end_ms": 78800
+        },
+        {
+          "text": "draw",
+          "start_ms": 80680,
+          "end_ms": 81140
+        },
+        {
+          "text": "me",
+          "start_ms": 81340,
+          "end_ms": 81460
+        },
+        {
+          "text": "in",
+          "start_ms": 82100,
+          "end_ms": 83020
+        }
+      ]
+    },
+    {
+      "text": "Where You are I'll remain",
+      "start_ms": 84000,
+      "end_ms": 91240,
+      "text_sk": "Kde si Ty, tam zostanem",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 84000,
+          "end_ms": 84160
+        },
+        {
+          "text": "You",
+          "start_ms": 84680,
+          "end_ms": 84980
+        },
+        {
+          "text": "are",
+          "start_ms": 85380,
+          "end_ms": 86440
+        },
+        {
+          "text": "I'll",
+          "start_ms": 87420,
+          "end_ms": 87800
+        },
+        {
+          "text": "remain",
+          "start_ms": 87880,
+          "end_ms": 91240
+        }
+      ]
+    },
+    {
+      "text": "I feel Your love",
+      "start_ms": 91280,
+      "end_ms": 93980,
+      "text_sk": "Cítim Tvoju lásku",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 91280,
+          "end_ms": 91300
+        },
+        {
+          "text": "feel",
+          "start_ms": 91360,
+          "end_ms": 91680
+        },
+        {
+          "text": "Your",
+          "start_ms": 91820,
+          "end_ms": 92100
+        },
+        {
+          "text": "love",
+          "start_ms": 92240,
+          "end_ms": 93980
+        }
+      ]
+    },
+    {
+      "text": "Even in the heartache",
+      "start_ms": 94040,
+      "end_ms": 97280,
+      "text_sk": "Aj v bolesti srdca",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 94040,
+          "end_ms": 94300
+        },
+        {
+          "text": "in",
+          "start_ms": 94380,
+          "end_ms": 94460
+        },
+        {
+          "text": "the",
+          "start_ms": 94500,
+          "end_ms": 94580
+        },
+        {
+          "text": "heartache",
+          "start_ms": 94680,
+          "end_ms": 97280
+        }
+      ]
+    },
+    {
+      "text": "Even though my heart breaks",
+      "start_ms": 97340,
+      "end_ms": 99080,
+      "text_sk": "Aj keď sa moje srdce láme",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 97340,
+          "end_ms": 97540
+        },
+        {
+          "text": "though",
+          "start_ms": 97600,
+          "end_ms": 97760
+        },
+        {
+          "text": "my",
+          "start_ms": 97800,
+          "end_ms": 97880
+        },
+        {
+          "text": "heart",
+          "start_ms": 98000,
+          "end_ms": 98480
+        },
+        {
+          "text": "breaks",
+          "start_ms": 98600,
+          "end_ms": 99080
+        }
+      ]
+    },
+    {
+      "text": "Even then Your word stays",
+      "start_ms": 100620,
+      "end_ms": 104100,
+      "text_sk": "Aj vtedy Tvoje slovo zostáva",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 100620,
+          "end_ms": 100840
+        },
+        {
+          "text": "then",
+          "start_ms": 100900,
+          "end_ms": 101080
+        },
+        {
+          "text": "Your",
+          "start_ms": 101140,
+          "end_ms": 101280
+        },
+        {
+          "text": "word",
+          "start_ms": 101320,
+          "end_ms": 101600
+        },
+        {
+          "text": "stays",
+          "start_ms": 101860,
+          "end_ms": 104100
+        }
+      ]
+    },
+    {
+      "text": "I know You're here",
+      "start_ms": 104260,
+      "end_ms": 107140,
+      "text_sk": "Viem, že si tu",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 104260,
+          "end_ms": 104280
+        },
+        {
+          "text": "know",
+          "start_ms": 104420,
+          "end_ms": 104800
+        },
+        {
+          "text": "You're",
+          "start_ms": 104960,
+          "end_ms": 105480
+        },
+        {
+          "text": "here",
+          "start_ms": 105640,
+          "end_ms": 107140
+        }
+      ]
+    },
+    {
+      "text": "Even when I'm broken",
+      "start_ms": 107200,
+      "end_ms": 108760,
+      "text_sk": "Aj keď som zlomený",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 107200,
+          "end_ms": 107400
+        },
+        {
+          "text": "when",
+          "start_ms": 107460,
+          "end_ms": 107660
+        },
+        {
+          "text": "I'm",
+          "start_ms": 107680,
+          "end_ms": 107800
+        },
+        {
+          "text": "broken",
+          "start_ms": 107880,
+          "end_ms": 108760
+        }
+      ]
+    },
+    {
+      "text": "Even when I'm hopeless",
+      "start_ms": 110400,
+      "end_ms": 112220,
+      "text_sk": "Aj keď som beznádejný",
+      "words": [
+        {
+          "text": "Even",
+          "start_ms": 110400,
+          "end_ms": 110700
+        },
+        {
+          "text": "when",
+          "start_ms": 110760,
+          "end_ms": 110940
+        },
+        {
+          "text": "I'm",
+          "start_ms": 110960,
+          "end_ms": 111080
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 111180,
+          "end_ms": 112220
+        }
+      ]
+    },
+    {
+      "text": "I know where my hope is",
+      "start_ms": 113760,
+      "end_ms": 116280,
+      "text_sk": "Viem, kde je moja nádej",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 113760,
+          "end_ms": 113780
+        },
+        {
+          "text": "know",
+          "start_ms": 113840,
+          "end_ms": 114020
+        },
+        {
+          "text": "where",
+          "start_ms": 114060,
+          "end_ms": 114200
+        },
+        {
+          "text": "my",
+          "start_ms": 114240,
+          "end_ms": 114340
+        },
+        {
+          "text": "hope",
+          "start_ms": 114460,
+          "end_ms": 115100
+        },
+        {
+          "text": "is",
+          "start_ms": 115180,
+          "end_ms": 116280
+        }
+      ]
+    },
+    {
+      "text": "When You speak I am still",
+      "start_ms": 116880,
+      "end_ms": 121900,
+      "text_sk": "Keď hovoríš, som pokojný",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 116880,
+          "end_ms": 117360
+        },
+        {
+          "text": "You",
+          "start_ms": 117480,
+          "end_ms": 117940
+        },
+        {
+          "text": "speak",
+          "start_ms": 118060,
+          "end_ms": 119760
+        },
+        {
+          "text": "I",
+          "start_ms": 120780,
+          "end_ms": 120800
+        },
+        {
+          "text": "am",
+          "start_ms": 120900,
+          "end_ms": 121200
+        },
+        {
+          "text": "still",
+          "start_ms": 121400,
+          "end_ms": 121900
+        }
+      ]
+    },
+    {
+      "text": "I believe You are near",
+      "start_ms": 121940,
+      "end_ms": 129300,
+      "text_sk": "Verím, že si blízko",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 121940,
+          "end_ms": 121960
+        },
+        {
+          "text": "believe",
+          "start_ms": 124120,
+          "end_ms": 125900
+        },
+        {
+          "text": "You",
+          "start_ms": 126780,
+          "end_ms": 126920
+        },
+        {
+          "text": "are",
+          "start_ms": 127500,
+          "end_ms": 127740
+        },
+        {
+          "text": "near",
+          "start_ms": 127960,
+          "end_ms": 129300
+        }
+      ]
+    },
+    {
+      "text": "Speak to me Lord draw me in",
+      "start_ms": 129940,
+      "end_ms": 135680,
+      "text_sk": "Hovor ku mne, Pane, pritiahni ma",
+      "words": [
+        {
+          "text": "Speak",
+          "start_ms": 129940,
+          "end_ms": 130580
+        },
+        {
+          "text": "to",
+          "start_ms": 130680,
+          "end_ms": 130840
+        },
+        {
+          "text": "me",
+          "start_ms": 131260,
+          "end_ms": 131440
+        },
+        {
+          "text": "Lord",
+          "start_ms": 131800,
+          "end_ms": 133240
+        },
+        {
+          "text": "draw",
+          "start_ms": 133280,
+          "end_ms": 133780
+        },
+        {
+          "text": "me",
+          "start_ms": 133940,
+          "end_ms": 134100
+        },
+        {
+          "text": "in",
+          "start_ms": 134680,
+          "end_ms": 135680
+        }
+      ]
+    },
+    {
+      "text": "Where You are I'll remain",
+      "start_ms": 136620,
+      "end_ms": 144420,
+      "text_sk": "Kde si Ty, tam zostanem",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 136620,
+          "end_ms": 136980
+        },
+        {
+          "text": "You",
+          "start_ms": 137240,
+          "end_ms": 137420
+        },
+        {
+          "text": "are",
+          "start_ms": 140040,
+          "end_ms": 140700
+        },
+        {
+          "text": "I'll",
+          "start_ms": 140820,
+          "end_ms": 141180
+        },
+        {
+          "text": "remain",
+          "start_ms": 141260,
+          "end_ms": 144420
+        }
+      ]
+    },
+    {
+      "text": "'Cause there is joy in Your presence",
+      "start_ms": 155380,
+      "end_ms": 158960,
+      "text_sk": "Pretože v Tvojej prítomnosti je radosť",
+      "words": [
+        {
+          "text": "'Cause",
+          "start_ms": 155380,
+          "end_ms": 155940
+        },
+        {
+          "text": "there",
+          "start_ms": 155960,
+          "end_ms": 156220
+        },
+        {
+          "text": "is",
+          "start_ms": 156300,
+          "end_ms": 156340
+        },
+        {
+          "text": "joy",
+          "start_ms": 156420,
+          "end_ms": 157380
+        },
+        {
+          "text": "in",
+          "start_ms": 157400,
+          "end_ms": 157600
+        },
+        {
+          "text": "Your",
+          "start_ms": 157620,
+          "end_ms": 157760
+        },
+        {
+          "text": "presence",
+          "start_ms": 157820,
+          "end_ms": 158960
+        }
+      ]
+    },
+    {
+      "text": "There is peace in Your presence",
+      "start_ms": 159240,
+      "end_ms": 162040,
+      "text_sk": "V Tvojej prítomnosti je pokoj",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 159240,
+          "end_ms": 159500
+        },
+        {
+          "text": "is",
+          "start_ms": 159520,
+          "end_ms": 159620
+        },
+        {
+          "text": "peace",
+          "start_ms": 159760,
+          "end_ms": 160760
+        },
+        {
+          "text": "in",
+          "start_ms": 160800,
+          "end_ms": 160840
+        },
+        {
+          "text": "Your",
+          "start_ms": 160860,
+          "end_ms": 160980
+        },
+        {
+          "text": "presence",
+          "start_ms": 161040,
+          "end_ms": 162040
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 171580,
+      "end_ms": 173980,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 171580,
+          "end_ms": 171980
+        },
+        {
+          "text": "hope",
+          "start_ms": 172020,
+          "end_ms": 172420
+        },
+        {
+          "text": "when",
+          "start_ms": 172440,
+          "end_ms": 172620
+        },
+        {
+          "text": "I'm",
+          "start_ms": 172660,
+          "end_ms": 172760
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 172840,
+          "end_ms": 173980
+        }
+      ]
+    },
+    {
+      "text": "There's light in the darkest hour",
+      "start_ms": 174880,
+      "end_ms": 177380,
+      "text_sk": "Je svetlo v najtemnejšej hodine",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 174880,
+          "end_ms": 175240
+        },
+        {
+          "text": "light",
+          "start_ms": 175300,
+          "end_ms": 175700
+        },
+        {
+          "text": "in",
+          "start_ms": 175760,
+          "end_ms": 175840
+        },
+        {
+          "text": "the",
+          "start_ms": 175860,
+          "end_ms": 175940
+        },
+        {
+          "text": "darkest",
+          "start_ms": 176040,
+          "end_ms": 176920
+        },
+        {
+          "text": "hour",
+          "start_ms": 177200,
+          "end_ms": 177380
+        }
+      ]
+    },
+    {
+      "text": "There's peace when I'm restless",
+      "start_ms": 178140,
+      "end_ms": 180620,
+      "text_sk": "Je pokoj, keď som nepokojný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 178140,
+          "end_ms": 178480
+        },
+        {
+          "text": "peace",
+          "start_ms": 178560,
+          "end_ms": 178940
+        },
+        {
+          "text": "when",
+          "start_ms": 178980,
+          "end_ms": 179160
+        },
+        {
+          "text": "I'm",
+          "start_ms": 179220,
+          "end_ms": 179320
+        },
+        {
+          "text": "restless",
+          "start_ms": 179400,
+          "end_ms": 180620
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 181280,
+      "end_ms": 184000,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 181280,
+          "end_ms": 181380
+        },
+        {
+          "text": "not",
+          "start_ms": 181460,
+          "end_ms": 181880
+        },
+        {
+          "text": "over",
+          "start_ms": 181980,
+          "end_ms": 182360
+        },
+        {
+          "text": "it's",
+          "start_ms": 182920,
+          "end_ms": 183040
+        },
+        {
+          "text": "not",
+          "start_ms": 183080,
+          "end_ms": 183500
+        },
+        {
+          "text": "over",
+          "start_ms": 183600,
+          "end_ms": 184000
+        }
+      ]
+    },
+    {
+      "text": "There's grace when I'm anxious",
+      "start_ms": 184740,
+      "end_ms": 187240,
+      "text_sk": "Je milosť, keď som úzkostlivý",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 184740,
+          "end_ms": 185080
+        },
+        {
+          "text": "grace",
+          "start_ms": 185140,
+          "end_ms": 185560
+        },
+        {
+          "text": "when",
+          "start_ms": 185600,
+          "end_ms": 185760
+        },
+        {
+          "text": "I'm",
+          "start_ms": 185800,
+          "end_ms": 185980
+        },
+        {
+          "text": "anxious",
+          "start_ms": 186060,
+          "end_ms": 187240
+        }
+      ]
+    },
+    {
+      "text": "There's joy when I'm brokenhearted",
+      "start_ms": 188000,
+      "end_ms": 190840,
+      "text_sk": "Je radosť, keď mám zlomené srdce",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 188000,
+          "end_ms": 188340
+        },
+        {
+          "text": "joy",
+          "start_ms": 188420,
+          "end_ms": 188780
+        },
+        {
+          "text": "when",
+          "start_ms": 188860,
+          "end_ms": 189060
+        },
+        {
+          "text": "I'm",
+          "start_ms": 189100,
+          "end_ms": 189180
+        },
+        {
+          "text": "brokenhearted",
+          "start_ms": 189240,
+          "end_ms": 190840
+        }
+      ]
+    },
+    {
+      "text": "There's power in Jesus",
+      "start_ms": 191300,
+      "end_ms": 193740,
+      "text_sk": "V Ježišovi je sila",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 191300,
+          "end_ms": 191640
+        },
+        {
+          "text": "power",
+          "start_ms": 191720,
+          "end_ms": 192240
+        },
+        {
+          "text": "in",
+          "start_ms": 192340,
+          "end_ms": 192440
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 192500,
+          "end_ms": 193740
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 194400,
+      "end_ms": 197180,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 194400,
+          "end_ms": 194520
+        },
+        {
+          "text": "not",
+          "start_ms": 194600,
+          "end_ms": 195020
+        },
+        {
+          "text": "over",
+          "start_ms": 195140,
+          "end_ms": 195540
+        },
+        {
+          "text": "it's",
+          "start_ms": 196080,
+          "end_ms": 196180
+        },
+        {
+          "text": "not",
+          "start_ms": 196260,
+          "end_ms": 196680
+        },
+        {
+          "text": "over",
+          "start_ms": 196780,
+          "end_ms": 197180
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 211000,
+      "end_ms": 213420,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 211000,
+          "end_ms": 211360
+        },
+        {
+          "text": "hope",
+          "start_ms": 211440,
+          "end_ms": 211560
+        },
+        {
+          "text": "when",
+          "start_ms": 211880,
+          "end_ms": 212060
+        },
+        {
+          "text": "I'm",
+          "start_ms": 212120,
+          "end_ms": 212260
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 212300,
+          "end_ms": 213420
+        }
+      ]
+    },
+    {
+      "text": "There's light in the darkest hour",
+      "start_ms": 214320,
+      "end_ms": 216820,
+      "text_sk": "Je svetlo v najtemnejšej hodine",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 214320,
+          "end_ms": 214640
+        },
+        {
+          "text": "light",
+          "start_ms": 214980,
+          "end_ms": 215160
+        },
+        {
+          "text": "in",
+          "start_ms": 215220,
+          "end_ms": 215320
+        },
+        {
+          "text": "the",
+          "start_ms": 215340,
+          "end_ms": 215400
+        },
+        {
+          "text": "darkest",
+          "start_ms": 215580,
+          "end_ms": 216360
+        },
+        {
+          "text": "hour",
+          "start_ms": 216380,
+          "end_ms": 216820
+        }
+      ]
+    },
+    {
+      "text": "There's peace when I'm restless",
+      "start_ms": 217600,
+      "end_ms": 220020,
+      "text_sk": "Je pokoj, keď som nepokojný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 217600,
+          "end_ms": 217940
+        },
+        {
+          "text": "peace",
+          "start_ms": 218040,
+          "end_ms": 218340
+        },
+        {
+          "text": "when",
+          "start_ms": 218420,
+          "end_ms": 218600
+        },
+        {
+          "text": "I'm",
+          "start_ms": 218660,
+          "end_ms": 218760
+        },
+        {
+          "text": "restless",
+          "start_ms": 218820,
+          "end_ms": 220020
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 220700,
+      "end_ms": 223480,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 220700,
+          "end_ms": 220820
+        },
+        {
+          "text": "not",
+          "start_ms": 220880,
+          "end_ms": 221300
+        },
+        {
+          "text": "over",
+          "start_ms": 221400,
+          "end_ms": 221860
+        },
+        {
+          "text": "it's",
+          "start_ms": 222360,
+          "end_ms": 222460
+        },
+        {
+          "text": "not",
+          "start_ms": 222520,
+          "end_ms": 222940
+        },
+        {
+          "text": "over",
+          "start_ms": 223120,
+          "end_ms": 223480
+        }
+      ]
+    },
+    {
+      "text": "There's grace when I'm anxious",
+      "start_ms": 227460,
+      "end_ms": 229500,
+      "text_sk": "Je milosť, keď som úzkostlivý",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 227460,
+          "end_ms": 227840
+        },
+        {
+          "text": "grace",
+          "start_ms": 227880,
+          "end_ms": 228180
+        },
+        {
+          "text": "when",
+          "start_ms": 228280,
+          "end_ms": 228440
+        },
+        {
+          "text": "I'm",
+          "start_ms": 228520,
+          "end_ms": 228680
+        },
+        {
+          "text": "anxious",
+          "start_ms": 228780,
+          "end_ms": 229500
+        }
+      ]
+    },
+    {
+      "text": "There's joy when I'm brokenhearted",
+      "start_ms": 240580,
+      "end_ms": 243460,
+      "text_sk": "Je radosť, keď mám zlomené srdce",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 240580,
+          "end_ms": 241000
+        },
+        {
+          "text": "joy",
+          "start_ms": 241040,
+          "end_ms": 241340
+        },
+        {
+          "text": "when",
+          "start_ms": 241440,
+          "end_ms": 241620
+        },
+        {
+          "text": "I'm",
+          "start_ms": 241660,
+          "end_ms": 241760
+        },
+        {
+          "text": "brokenhearted",
+          "start_ms": 241800,
+          "end_ms": 243460
+        }
+      ]
+    },
+    {
+      "text": "There's power in Jesus",
+      "start_ms": 243880,
+      "end_ms": 246220,
+      "text_sk": "V Ježišovi je sila",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 243880,
+          "end_ms": 244260
+        },
+        {
+          "text": "power",
+          "start_ms": 244300,
+          "end_ms": 244900
+        },
+        {
+          "text": "in",
+          "start_ms": 244940,
+          "end_ms": 245020
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 245100,
+          "end_ms": 246220
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 253580,
+      "end_ms": 256660,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 253580,
+          "end_ms": 253720
+        },
+        {
+          "text": "not",
+          "start_ms": 253760,
+          "end_ms": 254200
+        },
+        {
+          "text": "over",
+          "start_ms": 254320,
+          "end_ms": 254740
+        },
+        {
+          "text": "it's",
+          "start_ms": 255240,
+          "end_ms": 255380
+        },
+        {
+          "text": "not",
+          "start_ms": 255400,
+          "end_ms": 255840
+        },
+        {
+          "text": "over",
+          "start_ms": 256020,
+          "end_ms": 256660
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 261560,
+      "end_ms": 265380,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 261560,
+          "end_ms": 262680
+        },
+        {
+          "text": "hope",
+          "start_ms": 262720,
+          "end_ms": 262980
+        },
+        {
+          "text": "when",
+          "start_ms": 264060,
+          "end_ms": 264180
+        },
+        {
+          "text": "I'm",
+          "start_ms": 264360,
+          "end_ms": 264520
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 264540,
+          "end_ms": 265380
+        }
+      ]
+    },
+    {
+      "text": "There's light in the darkest hour",
+      "start_ms": 265400,
+      "end_ms": 271980,
+      "text_sk": "Je svetlo v najtemnejšej hodine",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 265400,
+          "end_ms": 266080
+        },
+        {
+          "text": "light",
+          "start_ms": 266180,
+          "end_ms": 267280
+        },
+        {
+          "text": "in",
+          "start_ms": 268460,
+          "end_ms": 268620
+        },
+        {
+          "text": "the",
+          "start_ms": 268720,
+          "end_ms": 268840
+        },
+        {
+          "text": "darkest",
+          "start_ms": 269140,
+          "end_ms": 270460
+        },
+        {
+          "text": "hour",
+          "start_ms": 271380,
+          "end_ms": 271980
+        }
+      ]
+    },
+    {
+      "text": "There's peace when I'm restless",
+      "start_ms": 272440,
+      "end_ms": 316380,
+      "text_sk": "Je pokoj, keď som nepokojný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 272440,
+          "end_ms": 274560
+        },
+        {
+          "text": "peace",
+          "start_ms": 274680,
+          "end_ms": 275500
+        },
+        {
+          "text": "when",
+          "start_ms": 281240,
+          "end_ms": 281620
+        },
+        {
+          "text": "I'm",
+          "start_ms": 285360,
+          "end_ms": 285820
+        },
+        {
+          "text": "restless",
+          "start_ms": 316160,
+          "end_ms": 316380
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 316460,
+      "end_ms": 317220,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 316460,
+          "end_ms": 316620
+        },
+        {
+          "text": "not",
+          "start_ms": 316660,
+          "end_ms": 316800
+        },
+        {
+          "text": "over",
+          "start_ms": 316840,
+          "end_ms": 316920
+        },
+        {
+          "text": "it's",
+          "start_ms": 316940,
+          "end_ms": 317020
+        },
+        {
+          "text": "not",
+          "start_ms": 317060,
+          "end_ms": 317120
+        },
+        {
+          "text": "over",
+          "start_ms": 317140,
+          "end_ms": 317220
+        }
+      ]
+    },
+    {
+      "text": "There's grace when I'm anxious",
+      "start_ms": 317240,
+      "end_ms": 318760,
+      "text_sk": "Je milosť, keď som úzkostlivý",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 317240,
+          "end_ms": 317380
+        },
+        {
+          "text": "grace",
+          "start_ms": 317440,
+          "end_ms": 317880
+        },
+        {
+          "text": "when",
+          "start_ms": 317980,
+          "end_ms": 318100
+        },
+        {
+          "text": "I'm",
+          "start_ms": 318180,
+          "end_ms": 318340
+        },
+        {
+          "text": "anxious",
+          "start_ms": 318360,
+          "end_ms": 318760
+        }
+      ]
+    },
+    {
+      "text": "There's joy when I'm brokenhearted",
+      "start_ms": 342520,
+      "end_ms": 344300,
+      "text_sk": "Je radosť, keď mám zlomené srdce",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 342520,
+          "end_ms": 342940
+        },
+        {
+          "text": "joy",
+          "start_ms": 343020,
+          "end_ms": 343120
+        },
+        {
+          "text": "when",
+          "start_ms": 343380,
+          "end_ms": 343560
+        },
+        {
+          "text": "I'm",
+          "start_ms": 343620,
+          "end_ms": 343680
+        },
+        {
+          "text": "brokenhearted",
+          "start_ms": 343740,
+          "end_ms": 344300
+        }
+      ]
+    },
+    {
+      "text": "There's power in Jesus",
+      "start_ms": 344340,
+      "end_ms": 360820,
+      "text_sk": "V Ježišovi je sila",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 344340,
+          "end_ms": 345240
+        },
+        {
+          "text": "power",
+          "start_ms": 360360,
+          "end_ms": 360460
+        },
+        {
+          "text": "in",
+          "start_ms": 360520,
+          "end_ms": 360560
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 360720,
+          "end_ms": 360820
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over",
+      "start_ms": 361100,
+      "end_ms": 363380,
+      "text_sk": "Nie je koniec, nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 361100,
+          "end_ms": 361180
+        },
+        {
+          "text": "not",
+          "start_ms": 361800,
+          "end_ms": 361860
+        },
+        {
+          "text": "over",
+          "start_ms": 361940,
+          "end_ms": 362020
+        },
+        {
+          "text": "it's",
+          "start_ms": 362040,
+          "end_ms": 362120
+        },
+        {
+          "text": "not",
+          "start_ms": 362720,
+          "end_ms": 362780
+        },
+        {
+          "text": "over",
+          "start_ms": 363300,
+          "end_ms": 363380
+        }
+      ]
+    },
+    {
+      "text": "It's not over",
+      "start_ms": 363780,
+      "end_ms": 364220,
+      "text_sk": "Nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 363780,
+          "end_ms": 363860
+        },
+        {
+          "text": "not",
+          "start_ms": 364000,
+          "end_ms": 364060
+        },
+        {
+          "text": "over",
+          "start_ms": 364140,
+          "end_ms": 364220
+        }
+      ]
+    },
+    {
+      "text": "It's not over",
+      "start_ms": 364460,
+      "end_ms": 367000,
+      "text_sk": "Nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 364460,
+          "end_ms": 364540
+        },
+        {
+          "text": "not",
+          "start_ms": 365240,
+          "end_ms": 365300
+        },
+        {
+          "text": "over",
+          "start_ms": 366920,
+          "end_ms": 367000
+        }
+      ]
+    },
+    {
+      "text": "It's not over",
+      "start_ms": 367160,
+      "end_ms": 367620,
+      "text_sk": "Nie je koniec",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 367160,
+          "end_ms": 367240
+        },
+        {
+          "text": "not",
+          "start_ms": 367460,
+          "end_ms": 367520
+        },
+        {
+          "text": "over",
+          "start_ms": 367540,
+          "end_ms": 367620
+        }
+      ]
+    },
+    {
+      "text": "When You speak I am still",
+      "start_ms": 367700,
+      "end_ms": 369060,
+      "text_sk": "Keď hovoríš, som pokojný",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 367700,
+          "end_ms": 367780
+        },
+        {
+          "text": "You",
+          "start_ms": 367960,
+          "end_ms": 368020
+        },
+        {
+          "text": "speak",
+          "start_ms": 368380,
+          "end_ms": 368480
+        },
+        {
+          "text": "I",
+          "start_ms": 368660,
+          "end_ms": 368680
+        },
+        {
+          "text": "am",
+          "start_ms": 368840,
+          "end_ms": 368880
+        },
+        {
+          "text": "still",
+          "start_ms": 368940,
+          "end_ms": 369060
+        }
+      ]
+    },
+    {
+      "text": "I believe You are near",
+      "start_ms": 369160,
+      "end_ms": 383220,
+      "text_sk": "Verím, že si blízko",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 369160,
+          "end_ms": 369180
+        },
+        {
+          "text": "believe",
+          "start_ms": 369240,
+          "end_ms": 369380
+        },
+        {
+          "text": "You",
+          "start_ms": 369400,
+          "end_ms": 369460
+        },
+        {
+          "text": "are",
+          "start_ms": 382980,
+          "end_ms": 383040
+        },
+        {
+          "text": "near",
+          "start_ms": 383140,
+          "end_ms": 383220
+        }
+      ]
+    },
+    {
+      "text": "Speak to me draw me in",
+      "start_ms": 383540,
+      "end_ms": 385020,
+      "text_sk": "Hovor ku mne, pritiahni ma",
+      "words": [
+        {
+          "text": "Speak",
+          "start_ms": 383540,
+          "end_ms": 383640
+        },
+        {
+          "text": "to",
+          "start_ms": 383740,
+          "end_ms": 383780
+        },
+        {
+          "text": "me",
+          "start_ms": 383800,
+          "end_ms": 383840
+        },
+        {
+          "text": "draw",
+          "start_ms": 383940,
+          "end_ms": 384020
+        },
+        {
+          "text": "me",
+          "start_ms": 384140,
+          "end_ms": 384180
+        },
+        {
+          "text": "in",
+          "start_ms": 384980,
+          "end_ms": 385020
+        }
+      ]
+    },
+    {
+      "text": "Where You are I'll remain",
+      "start_ms": 385320,
+      "end_ms": 386960,
+      "text_sk": "Kde si Ty, tam zostanem",
+      "words": [
+        {
+          "text": "Where",
+          "start_ms": 385320,
+          "end_ms": 385420
+        },
+        {
+          "text": "You",
+          "start_ms": 385680,
+          "end_ms": 385740
+        },
+        {
+          "text": "are",
+          "start_ms": 385940,
+          "end_ms": 386000
+        },
+        {
+          "text": "I'll",
+          "start_ms": 386120,
+          "end_ms": 386220
+        },
+        {
+          "text": "remain",
+          "start_ms": 386840,
+          "end_ms": 386960
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 386980,
+      "end_ms": 390040,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 386980,
+          "end_ms": 387120
+        },
+        {
+          "text": "hope",
+          "start_ms": 387140,
+          "end_ms": 387220
+        },
+        {
+          "text": "when",
+          "start_ms": 387240,
+          "end_ms": 387320
+        },
+        {
+          "text": "I'm",
+          "start_ms": 387340,
+          "end_ms": 387400
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 389860,
+          "end_ms": 390040
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 390060,
+      "end_ms": 394460,
+      "text_sk": "Je nádej, keď som beznádejný",
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 390060,
+          "end_ms": 390200
+        },
+        {
+          "text": "hope",
+          "start_ms": 390220,
+          "end_ms": 390300
+        },
+        {
+          "text": "when",
+          "start_ms": 390320,
+          "end_ms": 390400
+        },
+        {
+          "text": "I'm",
+          "start_ms": 390420,
+          "end_ms": 390480
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 394280,
+          "end_ms": 394460
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.46,
+    "model_load_sec": null,
+    "error": null
+  }
+}

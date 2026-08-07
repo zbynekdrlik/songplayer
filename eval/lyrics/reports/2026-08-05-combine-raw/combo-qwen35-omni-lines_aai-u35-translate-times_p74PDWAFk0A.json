@@ -1,0 +1,1638 @@
+{
+  "backend_id": "combo-qwen35-omni-lines_aai-u35-translate-times",
+  "line_backend": "qwen35-omni",
+  "time_backend": "aai-u35-translate",
+  "video_id": "p74PDWAFk0A",
+  "duration_ms": 502043,
+  "lines": [
+    {
+      "text": "The enemy may take some things",
+      "start_ms": 272,
+      "end_ms": 2803,
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 3316,
+      "end_ms": 5143,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 5719,
+      "end_ms": 7434,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 7947,
+      "end_ms": 11455,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 11952,
+      "end_ms": 13635,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 14275,
+      "end_ms": 16214,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 16519,
+      "end_ms": 19979,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 20460,
+      "end_ms": 22239,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 22847,
+      "end_ms": 24786,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 25090,
+      "end_ms": 28599,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 29020,
+      "end_ms": 29943,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 31466,
+      "end_ms": 33248,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "So lungs breathe",
+      "start_ms": 35540,
+      "end_ms": 38566,
+      "text_sk": "Tak pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": 40006,
+      "end_ms": 42579,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "And hands reach",
+      "start_ms": 44133,
+      "end_ms": 46950,
+      "text_sk": "A ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 47468,
+      "end_ms": 50916,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Lungs breathe",
+      "start_ms": 53345,
+      "end_ms": 55728,
+      "text_sk": "Pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": 57054,
+      "end_ms": 59692,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "And hands reach",
+      "start_ms": 61261,
+      "end_ms": 64053,
+      "text_sk": "A ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 64656,
+      "end_ms": 67986,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Whoa lungs breathe",
+      "start_ms": 69410,
+      "end_ms": 72453,
+      "text_sk": "Hej pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": 73291,
+      "end_ms": 73838,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": 74273,
+      "end_ms": 76824,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Oh hands reach",
+      "start_ms": 77245,
+      "end_ms": 80272,
+      "text_sk": "Ó ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 80742,
+      "end_ms": 84109,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Because the enemy may take some things",
+      "start_ms": 85245,
+      "end_ms": 87424,
+      "text_sk": "Pretože nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 89039,
+      "end_ms": 90637,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 91460,
+      "end_ms": 92735,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 93617,
+      "end_ms": 95992,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 97591,
+      "end_ms": 98867,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Done so much for me",
+      "start_ms": 98964,
+      "end_ms": 100176,
+      "text_sk": "Urobil pre mňa tak veľa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "I cannot tell it all",
+      "start_ms": 100967,
+      "end_ms": 102426,
+      "text_sk": "Nemôžem to všetko povedať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 102752,
+      "end_ms": 104561,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 106191,
+      "end_ms": 106370,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 106370,
+      "end_ms": 107739,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "You sound good",
+      "start_ms": 110160,
+      "end_ms": 110725,
+      "text_sk": "Znieš dobre",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Sing it out the enemy may take some things",
+      "start_ms": 111065,
+      "end_ms": 112972,
+      "text_sk": "Spievaj, nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 114767,
+      "end_ms": 116476,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 117169,
+      "end_ms": 118878,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "So we say lungs",
+      "start_ms": 119690,
+      "end_ms": 121143,
+      "text_sk": "Tak hovoríme pľúca",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Lungs breathe",
+      "start_ms": 121402,
+      "end_ms": 123276,
+      "text_sk": "Pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Breathe oh mouth",
+      "start_ms": 123583,
+      "end_ms": 124859,
+      "text_sk": "Dýchaj ó ústa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": 125699,
+      "end_ms": 127363,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Sing and hands",
+      "start_ms": 128010,
+      "end_ms": 129848,
+      "text_sk": "Spievaj a ruky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Hands reach",
+      "start_ms": 129961,
+      "end_ms": 131557,
+      "text_sk": "Ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I command my soul",
+      "start_ms": 131977,
+      "end_ms": 133819,
+      "text_sk": "Prikazujem svojej duši",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 134322,
+      "end_ms": 135003,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "And lungs",
+      "start_ms": 136463,
+      "end_ms": 136998,
+      "text_sk": "A pľúca",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Lungs breathe",
+      "start_ms": 138636,
+      "end_ms": 139301,
+      "text_sk": "Pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Breathe and mouth",
+      "start_ms": 139593,
+      "end_ms": 142427,
+      "text_sk": "Dýchaj a ústa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Mouth you will sing",
+      "start_ms": 142845,
+      "end_ms": 144435,
+      "text_sk": "Ústa budete spievať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Sing and hands",
+      "start_ms": 144789,
+      "end_ms": 145994,
+      "text_sk": "Spievaj a ruky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Hands reach",
+      "start_ms": 149223,
+      "end_ms": 149496,
+      "text_sk": "Ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "This is",
+      "start_ms": 149608,
+      "end_ms": 150622,
+      "text_sk": "Toto je",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 150978,
+      "end_ms": 153503,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Somebody praise Him now",
+      "start_ms": 153567,
+      "end_ms": 155283,
+      "text_sk": "Niekto Ho teraz chváľte",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "One more time",
+      "start_ms": 168332,
+      "end_ms": 169077,
+      "text_sk": "Ešte raz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Tell your lungs to breathe",
+      "start_ms": 169870,
+      "end_ms": 171052,
+      "text_sk": "Povedz svojim pľúcam nech dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh lungs",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ó pľúca",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Lungs breathe",
+      "start_ms": 172848,
+      "end_ms": 174257,
+      "text_sk": "Pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Breathe and mouth",
+      "start_ms": 175034,
+      "end_ms": 177428,
+      "text_sk": "Dýchaj a ústa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Sing and hands",
+      "start_ms": 180210,
+      "end_ms": 180533,
+      "text_sk": "Spievaj a ruky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Hands reach",
+      "start_ms": 182555,
+      "end_ms": 183153,
+      "text_sk": "Ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "This is",
+      "start_ms": 183622,
+      "end_ms": 184010,
+      "text_sk": "Toto je",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 184738,
+      "end_ms": 186415,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh the Bible says I will bless the Lord at all times",
+      "start_ms": 187235,
+      "end_ms": 192529,
+      "text_sk": "Ó Biblia hovorí, že budem žehnať Pánovi v každom čase",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "And His praise will continually be in my mouth",
+      "start_ms": 194522,
+      "end_ms": 197213,
+      "text_sk": "A Jeho chvála bude neustále v mojich ústach",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Sometimes you gotta encourage yourself",
+      "start_ms": 197878,
+      "end_ms": 199710,
+      "text_sk": "Niekedy sa musíš povzbudiť sám",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Can I prophesy",
+      "start_ms": 200196,
+      "end_ms": 200845,
+      "text_sk": "Môžem prorokovať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Some of you walked in weak but you about to walk out strong",
+      "start_ms": 201360,
+      "end_ms": 204426,
+      "text_sk": "Niektorí z vás vošli slabí, ale vyjdete silní",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "You you walked in depressed but you about to walk out with the joy of the Lord",
+      "start_ms": 204523,
+      "end_ms": 208736,
+      "text_sk": "Vy ste vošli skľúčení, ale vyjdete s radosťou Pána",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "Flowing through your heart",
+      "start_ms": 209704,
+      "end_ms": 210688,
+      "text_sk": "Prúdiacou cez vaše srdce",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "So we about to have a good old fashioned Atlanta praise break",
+      "start_ms": 211235,
+      "end_ms": 213744,
+      "text_sk": "Takže teraz budeme mať starú dobrú atlantskú chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "Naomi is that alright",
+      "start_ms": 214049,
+      "end_ms": 214693,
+      "text_sk": "Naomi, je to v poriadku",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "That's alright",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "To je v poriadku",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Let's do it again",
+      "start_ms": 217652,
+      "end_ms": 218199,
+      "text_sk": "Poďme to urobiť znova",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "The enemy may take some things",
+      "start_ms": 218670,
+      "end_ms": 219970,
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "You ready",
+      "start_ms": 219970,
+      "end_ms": 221550,
+      "text_sk": "Ste pripravení",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "One two three let's go",
+      "start_ms": 221550,
+      "end_ms": 223070,
+      "text_sk": "Jeden dva tri poďme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "The enemy may take some things",
+      "start_ms": 223070,
+      "end_ms": 225570,
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 225570,
+      "end_ms": 228410,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 228410,
+      "end_ms": 230550,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 230550,
+      "end_ms": 234510,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 234510,
+      "end_ms": 236830,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Let's take it up just a little more",
+      "start_ms": 236830,
+      "end_ms": 238480,
+      "text_sk": "Poďme to ešte trochu zvýšiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "The enemy may take",
+      "start_ms": 239070,
+      "end_ms": 241170,
+      "text_sk": "Nepriateľ môže vziať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "May take some things",
+      "start_ms": 241170,
+      "end_ms": 241710,
+      "text_sk": "Môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 242490,
+      "end_ms": 243570,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 243570,
+      "end_ms": 244670,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 244670,
+      "end_ms": 246990,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Shantae I made up my mind",
+      "start_ms": 246990,
+      "end_ms": 248610,
+      "text_sk": "Shantae, rozhodol som sa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "The enemy may take some things",
+      "start_ms": 248610,
+      "end_ms": 248730,
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 251087,
+      "end_ms": 253774,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "One two",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Jeden dva",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Everybody turn up let's go",
+      "start_ms": 255522,
+      "end_ms": 257011,
+      "text_sk": "Všetci pridajte, poďme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "I need to see you turn it up Atlanta",
+      "start_ms": 263446,
+      "end_ms": 264884,
+      "text_sk": "Potrebujem vidieť, ako to zvyšujete Atlanta",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Let's go",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Poďme",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 2,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Enemy may take",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Nepriateľ môže vziať",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "The enemy may take some things",
+      "start_ms": 270810,
+      "end_ms": 273998,
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 277557,
+      "end_ms": 277814,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 277814,
+      "end_ms": 280144,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": 280305,
+      "end_ms": 283679,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 285109,
+      "end_ms": 286362,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 286410,
+      "end_ms": 287913,
+      "text_sk": "Nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "We're gonna turn up our praise just a little bit more",
+      "start_ms": 292216,
+      "end_ms": 293989,
+      "text_sk": "Ešte trochu viac zvýšime našu chválu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "That's cool champ",
+      "start_ms": 294071,
+      "end_ms": 294396,
+      "text_sk": "To je super šampión",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "I think Atlanta got a little bit more",
+      "start_ms": 295779,
+      "end_ms": 297210,
+      "text_sk": "Myslím, že Atlanta má ešte trochu viac",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "You got a little bit more",
+      "start_ms": 297341,
+      "end_ms": 298268,
+      "text_sk": "Máte ešte trochu viac",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Tell your neighbor give me a little room",
+      "start_ms": 300076,
+      "end_ms": 301613,
+      "text_sk": "Povedz svojmu susedovi urob mi trochu miesta",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Give me a little room",
+      "start_ms": 301629,
+      "end_ms": 302414,
+      "text_sk": "Urob mi trochu miesta",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Give me a little room",
+      "start_ms": 302447,
+      "end_ms": 303248,
+      "text_sk": "Urob mi trochu miesta",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Give me a little room",
+      "start_ms": 303265,
+      "end_ms": 303968,
+      "text_sk": "Urob mi trochu miesta",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "So we say lungs",
+      "start_ms": 308073,
+      "end_ms": 309547,
+      "text_sk": "Tak hovoríme pľúca",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Lungs breathe",
+      "start_ms": 310044,
+      "end_ms": 312126,
+      "text_sk": "Pľúca dýchajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Breathe mouth",
+      "start_ms": 312142,
+      "end_ms": 313392,
+      "text_sk": "Dýchaj ústa",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Mouth sing",
+      "start_ms": 314289,
+      "end_ms": 315635,
+      "text_sk": "Ústa spievajú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Sing and hands",
+      "start_ms": 316228,
+      "end_ms": 318599,
+      "text_sk": "Spievaj a ruky",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Hands reach",
+      "start_ms": 318615,
+      "end_ms": 320250,
+      "text_sk": "Ruky sa naťahujú",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Reach this is my way to victory",
+      "start_ms": 320714,
+      "end_ms": 325088,
+      "text_sk": "Naťahuj sa toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Oh this is my way to victory",
+      "start_ms": 326082,
+      "end_ms": 329414,
+      "text_sk": "Ó toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 330407,
+      "end_ms": 332779,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh this is my way to victory",
+      "start_ms": 334481,
+      "end_ms": 338080,
+      "text_sk": "Ó toto je moja cesta k víťazstvu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "One more time",
+      "start_ms": 339221,
+      "end_ms": 339880,
+      "text_sk": "Ešte raz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "Everybody turn up let's go",
+      "start_ms": 340105,
+      "end_ms": 342195,
+      "text_sk": "Všetci pridajte, poďme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Let's go let's go",
+      "start_ms": 342211,
+      "end_ms": 347644,
+      "text_sk": "Poďme poďme",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 4,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "start_ms": 349796,
+      "end_ms": 352129,
+      "text_sk": "Radosť Pána je moja sila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "You can count on my words",
+      "start_ms": 352635,
+      "end_ms": 354382,
+      "text_sk": "Môžeš sa spoľahnúť na moje slová",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "start_ms": 358146,
+      "end_ms": 360023,
+      "text_sk": "Radosť Pána je moja sila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Enemy may take some things",
+      "start_ms": 360219,
+      "end_ms": 360953,
+      "text_sk": "Nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "But he can't take my",
+      "start_ms": 361231,
+      "end_ms": 362879,
+      "text_sk": "Ale nemôže mi vziať moju",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "He can't",
+      "start_ms": 364850,
+      "end_ms": 366061,
+      "text_sk": "Nemôže",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "He won't",
+      "start_ms": 367095,
+      "end_ms": 368339,
+      "text_sk": "Nebude",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "The joy that I have the world didn't give it",
+      "start_ms": 370003,
+      "end_ms": 372039,
+      "text_sk": "Radosť, ktorú mám, svet mi ju nedal",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "The world can't take it away",
+      "start_ms": 372104,
+      "end_ms": 373477,
+      "text_sk": "Svet mi ju nemôže vziať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Hold the music one time",
+      "start_ms": 375020,
+      "end_ms": 375970,
+      "text_sk": "Podrž hudbu raz",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh the enemy may take",
+      "start_ms": 377480,
+      "end_ms": 378988,
+      "text_sk": "Ó nepriateľ môže vziať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "See you're not gonna have Bible study in your bedroom",
+      "start_ms": 390646,
+      "end_ms": 393034,
+      "text_sk": "Vidíš, nebudeš mať štúdium Biblie vo svojej spálni",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "Sing it out the enemy",
+      "start_ms": 393873,
+      "end_ms": 394809,
+      "text_sk": "Spievaj nepriateľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Oh this feels good Norman",
+      "start_ms": 400129,
+      "end_ms": 401175,
+      "text_sk": "Ó toto je dobrý pocit Norman",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "Sing it out the enemy",
+      "start_ms": 401763,
+      "end_ms": 403412,
+      "text_sk": "Spievaj nepriateľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 4
+    },
+    {
+      "text": "One more time the enemy",
+      "start_ms": 410374,
+      "end_ms": 411793,
+      "text_sk": "Ešte raz nepriateľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "That's how you feel Elijah",
+      "start_ms": 417516,
+      "end_ms": 418980,
+      "text_sk": "Takto sa cítiš Eliáš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "Enemy may take",
+      "start_ms": 420831,
+      "end_ms": 421313,
+      "text_sk": "Nepriateľ môže vziať",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 3,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "We gotta move but you got 20 more seconds",
+      "start_ms": 422842,
+      "end_ms": 424887,
+      "text_sk": "Musíme ísť, ale máte ešte 20 sekúnd",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "You ready",
+      "start_ms": 424936,
+      "end_ms": 425324,
+      "text_sk": "Ste pripravení",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "Turn up turn up turn up",
+      "start_ms": 426247,
+      "end_ms": 428593,
+      "text_sk": "Pridaj pridaj pridaj",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "'Cause He's been so good to me",
+      "start_ms": 430902,
+      "end_ms": 437135,
+      "text_sk": "Pretože bol ku mne taký dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "He's been so good to me",
+      "start_ms": 437586,
+      "end_ms": 439697,
+      "text_sk": "Bol ku mne taký dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "He's been so good to me",
+      "start_ms": 439862,
+      "end_ms": 441199,
+      "text_sk": "Bol ku mne taký dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh been so good to me",
+      "start_ms": 441596,
+      "end_ms": 441777,
+      "text_sk": "Ó bol ku mne taký dobrý",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 1
+    },
+    {
+      "text": "Oh na na na na",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ó na na na na",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 5,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "start_ms": 452940,
+      "end_ms": 455202,
+      "text_sk": "Radosť Pána je moja sila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Joy of the Lord is my strength",
+      "start_ms": 455493,
+      "end_ms": 458595,
+      "text_sk": "Radosť Pána je moja sila",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "Last time",
+      "start_ms": 459960,
+      "end_ms": 460481,
+      "text_sk": "Poslednýkrát",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 2,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "The enemy enemy may take some things",
+      "start_ms": 461034,
+      "end_ms": 462647,
+      "text_sk": "Nepriateľ nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 3
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ale nemôže mi vziať moju chválu",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 6,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "No no no",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Nie nie nie",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 3,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Oh no no no",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ó nie nie nie",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "I made up my mind man",
+      "start_ms": 501302,
+      "end_ms": 502043,
+      "text_sk": "Rozhodol som sa človeče",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "Oh no no no",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ó nie nie nie",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 4,
+      "n_words_aligned": 0
+    },
+    {
+      "text": "Oh the enemy may take some things",
+      "start_ms": null,
+      "end_ms": null,
+      "text_sk": "Ó nepriateľ môže vziať niektoré veci",
+      "words": null,
+      "timed": false,
+      "n_words_in_line": 7,
+      "n_words_aligned": 0
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 162,
+    "n_lines_timed": 150,
+    "n_lines_untimed": 12,
+    "n_words_total": 801,
+    "n_words_aligned": 688,
+    "word_align_rate": 0.8589263420724095,
+    "n_monotonic_violations_clamped": 0
+  }
+}

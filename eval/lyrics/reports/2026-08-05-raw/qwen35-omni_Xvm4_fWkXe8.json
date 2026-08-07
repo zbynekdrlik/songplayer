@@ -1,0 +1,2786 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\Xvm4_fWkXe8_vocal16k.wav",
+  "duration_ms": 999903,
+  "lines": [
+    {
+      "text": "You know it's crazy",
+      "start_ms": 5867,
+      "end_ms": 12439,
+      "text_sk": "Vieš, že je to šialené",
+      "words": null
+    },
+    {
+      "text": "I woke up this morning",
+      "start_ms": 12439,
+      "end_ms": 14402,
+      "text_sk": "Dnes ráno som sa zobudil",
+      "words": null
+    },
+    {
+      "text": "To grace and mercy",
+      "start_ms": 14402,
+      "end_ms": 16059,
+      "text_sk": "K milosti a súcitu",
+      "words": null
+    },
+    {
+      "text": "That just keep on flowing",
+      "start_ms": 16059,
+      "end_ms": 18912,
+      "text_sk": "Ktoré stále prúdia",
+      "words": null
+    },
+    {
+      "text": "My heart is beating",
+      "start_ms": 18912,
+      "end_ms": 20778,
+      "text_sk": "Moje srdce bije",
+      "words": null
+    },
+    {
+      "text": "My eyes are wide open",
+      "start_ms": 20778,
+      "end_ms": 23692,
+      "text_sk": "Moje oči sú široko otvorené",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 23692,
+      "end_ms": 27253,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "It's so amazing",
+      "start_ms": 27253,
+      "end_ms": 29520,
+      "text_sk": "Je to také úžasné",
+      "words": null
+    },
+    {
+      "text": "That someone so perfect",
+      "start_ms": 29520,
+      "end_ms": 31607,
+      "text_sk": "Že niekto taký dokonalý",
+      "words": null
+    },
+    {
+      "text": "Would show me love",
+      "start_ms": 31607,
+      "end_ms": 33951,
+      "text_sk": "By mi ukázal lásku",
+      "words": null
+    },
+    {
+      "text": "When I didn't deserve it",
+      "start_ms": 33951,
+      "end_ms": 36624,
+      "text_sk": "Keď som si ju nezaslúžil",
+      "words": null
+    },
+    {
+      "text": "You gave Your life just",
+      "start_ms": 36624,
+      "end_ms": 38685,
+      "text_sk": "Dal si svoj život len",
+      "words": null
+    },
+    {
+      "text": "To show me I'm worth it",
+      "start_ms": 38685,
+      "end_ms": 40830,
+      "text_sk": "Aby si mi ukázal, že za to stojím",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 40830,
+      "end_ms": 44969,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 44969,
+      "end_ms": 46936,
+      "text_sk": "Žijem v",
+      "words": null
+    },
+    {
+      "text": "A new today",
+      "start_ms": 46936,
+      "end_ms": 49177,
+      "text_sk": "Novom dni",
+      "words": null
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 49177,
+      "end_ms": 50376,
+      "text_sk": "Staré je preč",
+      "words": null
+    },
+    {
+      "text": "It's history",
+      "start_ms": 50376,
+      "end_ms": 51986,
+      "text_sk": "Je to história",
+      "words": null
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 51986,
+      "end_ms": 53999,
+      "text_sk": "Je to zázrak",
+      "words": null
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 53999,
+      "end_ms": 56574,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 56574,
+      "end_ms": 59125,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 59125,
+      "end_ms": 60089,
+      "text_sk": "Urobil si cestu",
+      "words": null
+    },
+    {
+      "text": "I saw a mountain",
+      "start_ms": 60089,
+      "end_ms": 65914,
+      "text_sk": "Videl som horu",
+      "words": null
+    },
+    {
+      "text": "And I watched You move it",
+      "start_ms": 65914,
+      "end_ms": 69983,
+      "text_sk": "A videl som Ťa, ako si ju posunul",
+      "words": null
+    },
+    {
+      "text": "You took my place when",
+      "start_ms": 69983,
+      "end_ms": 71417,
+      "text_sk": "Zaujal si moje miesto, keď",
+      "words": null
+    },
+    {
+      "text": "No one else could do it",
+      "start_ms": 71417,
+      "end_ms": 74080,
+      "text_sk": "To nikto iný nedokázal",
+      "words": null
+    },
+    {
+      "text": "The least I can do",
+      "start_ms": 74080,
+      "end_ms": 75789,
+      "text_sk": "Najmenej, čo môžem urobiť",
+      "words": null
+    },
+    {
+      "text": "Is sing hallelujah",
+      "start_ms": 75789,
+      "end_ms": 77533,
+      "text_sk": "Je spievať aleluja",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 77533,
+      "end_ms": 81512,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 81512,
+      "end_ms": 82914,
+      "text_sk": "Žijem v",
+      "words": null
+    },
+    {
+      "text": "A new today",
+      "start_ms": 82914,
+      "end_ms": 85903,
+      "text_sk": "Novom dni",
+      "words": null
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 85903,
+      "end_ms": 87874,
+      "text_sk": "Staré je preč",
+      "words": null
+    },
+    {
+      "text": "It's history",
+      "start_ms": 87874,
+      "end_ms": 89435,
+      "text_sk": "Je to história",
+      "words": null
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 89435,
+      "end_ms": 91454,
+      "text_sk": "Je to zázrak",
+      "words": null
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 91454,
+      "end_ms": 93983,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 93983,
+      "end_ms": 95554,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 95554,
+      "end_ms": 96723,
+      "text_sk": "Urobil si cestu",
+      "words": null
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 96723,
+      "end_ms": 97690,
+      "text_sk": "Žijem v",
+      "words": null
+    },
+    {
+      "text": "A new today",
+      "start_ms": 97690,
+      "end_ms": 99055,
+      "text_sk": "Novom dni",
+      "words": null
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 99055,
+      "end_ms": 100946,
+      "text_sk": "Staré je preč",
+      "words": null
+    },
+    {
+      "text": "It's history",
+      "start_ms": 100946,
+      "end_ms": 102517,
+      "text_sk": "Je to história",
+      "words": null
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 102517,
+      "end_ms": 104493,
+      "text_sk": "Je to zázrak",
+      "words": null
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 104493,
+      "end_ms": 107139,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 107139,
+      "end_ms": 108720,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 108720,
+      "end_ms": 112278,
+      "text_sk": "Urobil si cestu",
+      "words": null
+    },
+    {
+      "text": "Every single debt I owed",
+      "start_ms": 112278,
+      "end_ms": 116287,
+      "text_sk": "Každý jeden dlh, ktorý som mal",
+      "words": null
+    },
+    {
+      "text": "You cancelled it",
+      "start_ms": 116287,
+      "end_ms": 118890,
+      "text_sk": "Si zrušil",
+      "words": null
+    },
+    {
+      "text": "Every sin I ever chose",
+      "start_ms": 118890,
+      "end_ms": 121227,
+      "text_sk": "Každý hriech, ktorý som si vybral",
+      "words": null
+    },
+    {
+      "text": "You covered it",
+      "start_ms": 121227,
+      "end_ms": 123763,
+      "text_sk": "Si prikryl",
+      "words": null
+    },
+    {
+      "text": "When the fight was getting close",
+      "start_ms": 123763,
+      "end_ms": 126251,
+      "text_sk": "Keď sa boj blížil",
+      "words": null
+    },
+    {
+      "text": "You handled it",
+      "start_ms": 126251,
+      "end_ms": 128787,
+      "text_sk": "Si to zvládol",
+      "words": null
+    },
+    {
+      "text": "You stepped right in",
+      "start_ms": 128787,
+      "end_ms": 131323,
+      "text_sk": "Vkročil si priamo dnu",
+      "words": null
+    },
+    {
+      "text": "And finished it",
+      "start_ms": 131323,
+      "end_ms": 133859,
+      "text_sk": "A dokončil to",
+      "words": null
+    },
+    {
+      "text": "Every single debt I owed",
+      "start_ms": 133859,
+      "end_ms": 136395,
+      "text_sk": "Každý jeden dlh, ktorý som mal",
+      "words": null
+    },
+    {
+      "text": "You cancelled it",
+      "start_ms": 136395,
+      "end_ms": 138931,
+      "text_sk": "Si zrušil",
+      "words": null
+    },
+    {
+      "text": "Every sin I ever chose",
+      "start_ms": 138931,
+      "end_ms": 141467,
+      "text_sk": "Každý hriech, ktorý som si vybral",
+      "words": null
+    },
+    {
+      "text": "You covered it",
+      "start_ms": 141467,
+      "end_ms": 144003,
+      "text_sk": "Si prikryl",
+      "words": null
+    },
+    {
+      "text": "When the fight was getting close",
+      "start_ms": 144003,
+      "end_ms": 146539,
+      "text_sk": "Keď sa boj blížil",
+      "words": null
+    },
+    {
+      "text": "You handled it",
+      "start_ms": 146539,
+      "end_ms": 149075,
+      "text_sk": "Si to zvládol",
+      "words": null
+    },
+    {
+      "text": "You never fail",
+      "start_ms": 149075,
+      "end_ms": 151611,
+      "text_sk": "Nikdy nezlyháš",
+      "words": null
+    },
+    {
+      "text": "You never will",
+      "start_ms": 151611,
+      "end_ms": 154147,
+      "text_sk": "Nikdy nebudeš",
+      "words": null
+    },
+    {
+      "text": "Every single word You spoke",
+      "start_ms": 154147,
+      "end_ms": 156683,
+      "text_sk": "Každé jedno slovo, ktoré si povedal",
+      "words": null
+    },
+    {
+      "text": "Is coming true",
+      "start_ms": 156683,
+      "end_ms": 159219,
+      "text_sk": "Sa stáva skutočnosťou",
+      "words": null
+    },
+    {
+      "text": "Every lie the devil told",
+      "start_ms": 159219,
+      "end_ms": 161755,
+      "text_sk": "Každá lož, ktorú povedal diabol",
+      "words": null
+    },
+    {
+      "text": "Must bow to You",
+      "start_ms": 161755,
+      "end_ms": 164291,
+      "text_sk": "Sa musí pokloniť Tebe",
+      "words": null
+    },
+    {
+      "text": "To me it's impossible",
+      "start_ms": 164291,
+      "end_ms": 166827,
+      "text_sk": "Pre mňa je to nemožné",
+      "words": null
+    },
+    {
+      "text": "But not for You",
+      "start_ms": 166827,
+      "end_ms": 169363,
+      "text_sk": "Ale nie pre Teba",
+      "words": null
+    },
+    {
+      "text": "It's what You do",
+      "start_ms": 169363,
+      "end_ms": 171899,
+      "text_sk": "To je to, čo robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 171899,
+      "end_ms": 173167,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 173167,
+      "end_ms": 175703,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 175703,
+      "end_ms": 178239,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 178239,
+      "end_ms": 180775,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 180775,
+      "end_ms": 183311,
+      "text_sk": "Žijem v",
+      "words": null
+    },
+    {
+      "text": "A new today",
+      "start_ms": 183311,
+      "end_ms": 185847,
+      "text_sk": "Novom dni",
+      "words": null
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 185847,
+      "end_ms": 188383,
+      "text_sk": "Staré je preč",
+      "words": null
+    },
+    {
+      "text": "It's history",
+      "start_ms": 188383,
+      "end_ms": 190919,
+      "text_sk": "Je to história",
+      "words": null
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 190919,
+      "end_ms": 193455,
+      "text_sk": "Je to zázrak",
+      "words": null
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 193455,
+      "end_ms": 195991,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 195991,
+      "end_ms": 198527,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 198527,
+      "end_ms": 201063,
+      "text_sk": "Urobil si cestu",
+      "words": null
+    },
+    {
+      "text": "I'm living in",
+      "start_ms": 201063,
+      "end_ms": 203599,
+      "text_sk": "Žijem v",
+      "words": null
+    },
+    {
+      "text": "A new today",
+      "start_ms": 203599,
+      "end_ms": 206135,
+      "text_sk": "Novom dni",
+      "words": null
+    },
+    {
+      "text": "The old is gone",
+      "start_ms": 206135,
+      "end_ms": 208671,
+      "text_sk": "Staré je preč",
+      "words": null
+    },
+    {
+      "text": "It's history",
+      "start_ms": 208671,
+      "end_ms": 211207,
+      "text_sk": "Je to história",
+      "words": null
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 211207,
+      "end_ms": 213743,
+      "text_sk": "Je to zázrak",
+      "words": null
+    },
+    {
+      "text": "What You did for me",
+      "start_ms": 213743,
+      "end_ms": 216279,
+      "text_sk": "Čo si pre mňa urobil",
+      "words": null
+    },
+    {
+      "text": "Thank You Lord",
+      "start_ms": 216279,
+      "end_ms": 218815,
+      "text_sk": "Ďakujem Ti, Pane",
+      "words": null
+    },
+    {
+      "text": "You made a way",
+      "start_ms": 218815,
+      "end_ms": 221351,
+      "text_sk": "Urobil si cestu",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 221351,
+      "end_ms": 223887,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 223887,
+      "end_ms": 226423,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 226423,
+      "end_ms": 228959,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 228959,
+      "end_ms": 231495,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 231495,
+      "end_ms": 234031,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 234031,
+      "end_ms": 236567,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 236567,
+      "end_ms": 239103,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 239103,
+      "end_ms": 241639,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 241639,
+      "end_ms": 244175,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 244175,
+      "end_ms": 246711,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 246711,
+      "end_ms": 249247,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 249247,
+      "end_ms": 251783,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 251783,
+      "end_ms": 254319,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 254319,
+      "end_ms": 256855,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 256855,
+      "end_ms": 259391,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 259391,
+      "end_ms": 261927,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 261927,
+      "end_ms": 264463,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 264463,
+      "end_ms": 266999,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 266999,
+      "end_ms": 269535,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 269535,
+      "end_ms": 272071,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 272071,
+      "end_ms": 274607,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 274607,
+      "end_ms": 277143,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 277143,
+      "end_ms": 279679,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 279679,
+      "end_ms": 282215,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 282215,
+      "end_ms": 284751,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 284751,
+      "end_ms": 287287,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 287287,
+      "end_ms": 289823,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 289823,
+      "end_ms": 292359,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 292359,
+      "end_ms": 294895,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 294895,
+      "end_ms": 297431,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 297431,
+      "end_ms": 299967,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 299967,
+      "end_ms": 302503,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 302503,
+      "end_ms": 305039,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 305039,
+      "end_ms": 307575,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 307575,
+      "end_ms": 310111,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 310111,
+      "end_ms": 312647,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 312647,
+      "end_ms": 315183,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 315183,
+      "end_ms": 317719,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 317719,
+      "end_ms": 320255,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 320255,
+      "end_ms": 322791,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 322791,
+      "end_ms": 325327,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 325327,
+      "end_ms": 327863,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 327863,
+      "end_ms": 330399,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 330399,
+      "end_ms": 332935,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 332935,
+      "end_ms": 335471,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 335471,
+      "end_ms": 338007,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 338007,
+      "end_ms": 340543,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 340543,
+      "end_ms": 343079,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 343079,
+      "end_ms": 345615,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 345615,
+      "end_ms": 348151,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 348151,
+      "end_ms": 350687,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 350687,
+      "end_ms": 353223,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 353223,
+      "end_ms": 355759,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 355759,
+      "end_ms": 358295,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 358295,
+      "end_ms": 360831,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 360831,
+      "end_ms": 363367,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 363367,
+      "end_ms": 365903,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 365903,
+      "end_ms": 368439,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 368439,
+      "end_ms": 370975,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 370975,
+      "end_ms": 373511,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 373511,
+      "end_ms": 376047,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 376047,
+      "end_ms": 378583,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 378583,
+      "end_ms": 381119,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 381119,
+      "end_ms": 383655,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 383655,
+      "end_ms": 386191,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 386191,
+      "end_ms": 388727,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 388727,
+      "end_ms": 391263,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 391263,
+      "end_ms": 393799,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 393799,
+      "end_ms": 396335,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 396335,
+      "end_ms": 398871,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 398871,
+      "end_ms": 401407,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 401407,
+      "end_ms": 403943,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 403943,
+      "end_ms": 406479,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 406479,
+      "end_ms": 409015,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 409015,
+      "end_ms": 411551,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 411551,
+      "end_ms": 414087,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 414087,
+      "end_ms": 416623,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 416623,
+      "end_ms": 419159,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 419159,
+      "end_ms": 421695,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 421695,
+      "end_ms": 424231,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 424231,
+      "end_ms": 426767,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 426767,
+      "end_ms": 429303,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 429303,
+      "end_ms": 431839,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 431839,
+      "end_ms": 434375,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 434375,
+      "end_ms": 436911,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 436911,
+      "end_ms": 439447,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 439447,
+      "end_ms": 441983,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 441983,
+      "end_ms": 444519,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 444519,
+      "end_ms": 447055,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 447055,
+      "end_ms": 449591,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 449591,
+      "end_ms": 452127,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 452127,
+      "end_ms": 454663,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 454663,
+      "end_ms": 457199,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 457199,
+      "end_ms": 459735,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 459735,
+      "end_ms": 462271,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 462271,
+      "end_ms": 464807,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 464807,
+      "end_ms": 467343,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 467343,
+      "end_ms": 469879,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 469879,
+      "end_ms": 472415,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 472415,
+      "end_ms": 474951,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 474951,
+      "end_ms": 477487,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 477487,
+      "end_ms": 480023,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 480023,
+      "end_ms": 482559,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 482559,
+      "end_ms": 485095,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 485095,
+      "end_ms": 487631,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 487631,
+      "end_ms": 490167,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 490167,
+      "end_ms": 492703,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 492703,
+      "end_ms": 495239,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 495239,
+      "end_ms": 497775,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 497775,
+      "end_ms": 500311,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 500311,
+      "end_ms": 502847,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 502847,
+      "end_ms": 505383,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 505383,
+      "end_ms": 507919,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 507919,
+      "end_ms": 510455,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 510455,
+      "end_ms": 512991,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 512991,
+      "end_ms": 515527,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 515527,
+      "end_ms": 518063,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 518063,
+      "end_ms": 520599,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 520599,
+      "end_ms": 523135,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 523135,
+      "end_ms": 525671,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 525671,
+      "end_ms": 528207,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 528207,
+      "end_ms": 530743,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 530743,
+      "end_ms": 533279,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 533279,
+      "end_ms": 535815,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 535815,
+      "end_ms": 538351,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 538351,
+      "end_ms": 540887,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 540887,
+      "end_ms": 543423,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 543423,
+      "end_ms": 545959,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 545959,
+      "end_ms": 548495,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 548495,
+      "end_ms": 551031,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 551031,
+      "end_ms": 553567,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 553567,
+      "end_ms": 556103,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 556103,
+      "end_ms": 558639,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 558639,
+      "end_ms": 561175,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 561175,
+      "end_ms": 563711,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 563711,
+      "end_ms": 566247,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 566247,
+      "end_ms": 568783,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 568783,
+      "end_ms": 571319,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 571319,
+      "end_ms": 573855,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 573855,
+      "end_ms": 576391,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 576391,
+      "end_ms": 578927,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 578927,
+      "end_ms": 581463,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 581463,
+      "end_ms": 583999,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 583999,
+      "end_ms": 586535,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 586535,
+      "end_ms": 589071,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 589071,
+      "end_ms": 591607,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 591607,
+      "end_ms": 594143,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 594143,
+      "end_ms": 596679,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 596679,
+      "end_ms": 599215,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 599215,
+      "end_ms": 601751,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 601751,
+      "end_ms": 604287,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 604287,
+      "end_ms": 606823,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 606823,
+      "end_ms": 609359,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 609359,
+      "end_ms": 611895,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 611895,
+      "end_ms": 614431,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 614431,
+      "end_ms": 616967,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 616967,
+      "end_ms": 619503,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 619503,
+      "end_ms": 622039,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 622039,
+      "end_ms": 624575,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 624575,
+      "end_ms": 627111,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 627111,
+      "end_ms": 629647,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 629647,
+      "end_ms": 632183,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 632183,
+      "end_ms": 634719,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 634719,
+      "end_ms": 637255,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 637255,
+      "end_ms": 639791,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 639791,
+      "end_ms": 642327,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 642327,
+      "end_ms": 644863,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 644863,
+      "end_ms": 647399,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 647399,
+      "end_ms": 649935,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 649935,
+      "end_ms": 652471,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 652471,
+      "end_ms": 655007,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 655007,
+      "end_ms": 657543,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 657543,
+      "end_ms": 660079,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 660079,
+      "end_ms": 662615,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 662615,
+      "end_ms": 665151,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 665151,
+      "end_ms": 667687,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 667687,
+      "end_ms": 670223,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 670223,
+      "end_ms": 672759,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 672759,
+      "end_ms": 675295,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 675295,
+      "end_ms": 677831,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 677831,
+      "end_ms": 680367,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 680367,
+      "end_ms": 682903,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 682903,
+      "end_ms": 685439,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 685439,
+      "end_ms": 687975,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 687975,
+      "end_ms": 690511,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 690511,
+      "end_ms": 693047,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 693047,
+      "end_ms": 695583,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 695583,
+      "end_ms": 698119,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 698119,
+      "end_ms": 700655,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 700655,
+      "end_ms": 703191,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 703191,
+      "end_ms": 705727,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 705727,
+      "end_ms": 708263,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 708263,
+      "end_ms": 710799,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 710799,
+      "end_ms": 713335,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 713335,
+      "end_ms": 715871,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 715871,
+      "end_ms": 718407,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 718407,
+      "end_ms": 720943,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 720943,
+      "end_ms": 723479,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 723479,
+      "end_ms": 726015,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 726015,
+      "end_ms": 728551,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 728551,
+      "end_ms": 731087,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 731087,
+      "end_ms": 733623,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 733623,
+      "end_ms": 736159,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 736159,
+      "end_ms": 738695,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 738695,
+      "end_ms": 741231,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 741231,
+      "end_ms": 743767,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 743767,
+      "end_ms": 746303,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 746303,
+      "end_ms": 748839,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 748839,
+      "end_ms": 751375,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 751375,
+      "end_ms": 753911,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 753911,
+      "end_ms": 756447,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 756447,
+      "end_ms": 758983,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 758983,
+      "end_ms": 761519,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 761519,
+      "end_ms": 764055,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 764055,
+      "end_ms": 766591,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 766591,
+      "end_ms": 769127,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 769127,
+      "end_ms": 771663,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 771663,
+      "end_ms": 774199,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 774199,
+      "end_ms": 776735,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 776735,
+      "end_ms": 779271,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 779271,
+      "end_ms": 781807,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 781807,
+      "end_ms": 784343,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 784343,
+      "end_ms": 786879,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 786879,
+      "end_ms": 789415,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 789415,
+      "end_ms": 791951,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 791951,
+      "end_ms": 794487,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 794487,
+      "end_ms": 797023,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 797023,
+      "end_ms": 799559,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 799559,
+      "end_ms": 802095,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 802095,
+      "end_ms": 804631,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 804631,
+      "end_ms": 807167,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 807167,
+      "end_ms": 809703,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 809703,
+      "end_ms": 812239,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 812239,
+      "end_ms": 814775,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 814775,
+      "end_ms": 817311,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 817311,
+      "end_ms": 819847,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 819847,
+      "end_ms": 822383,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 822383,
+      "end_ms": 824919,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 824919,
+      "end_ms": 827455,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 827455,
+      "end_ms": 829991,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 829991,
+      "end_ms": 832527,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 832527,
+      "end_ms": 835063,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 835063,
+      "end_ms": 837599,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 837599,
+      "end_ms": 840135,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 840135,
+      "end_ms": 842671,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 842671,
+      "end_ms": 845207,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 845207,
+      "end_ms": 847743,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 847743,
+      "end_ms": 850279,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 850279,
+      "end_ms": 852815,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 852815,
+      "end_ms": 855351,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 855351,
+      "end_ms": 857887,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 857887,
+      "end_ms": 860423,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 860423,
+      "end_ms": 862959,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 862959,
+      "end_ms": 865495,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 865495,
+      "end_ms": 868031,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 868031,
+      "end_ms": 870567,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 870567,
+      "end_ms": 873103,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 873103,
+      "end_ms": 875639,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 875639,
+      "end_ms": 878175,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 878175,
+      "end_ms": 880711,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 880711,
+      "end_ms": 883247,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 883247,
+      "end_ms": 885783,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 885783,
+      "end_ms": 888319,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 888319,
+      "end_ms": 890855,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 890855,
+      "end_ms": 893391,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 893391,
+      "end_ms": 895927,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 895927,
+      "end_ms": 898463,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 898463,
+      "end_ms": 900999,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 900999,
+      "end_ms": 903535,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 903535,
+      "end_ms": 906071,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 906071,
+      "end_ms": 908607,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 908607,
+      "end_ms": 911143,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 911143,
+      "end_ms": 913679,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 913679,
+      "end_ms": 916215,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 916215,
+      "end_ms": 918751,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 918751,
+      "end_ms": 921287,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 921287,
+      "end_ms": 923823,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 923823,
+      "end_ms": 926359,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 926359,
+      "end_ms": 928895,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 928895,
+      "end_ms": 931431,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 931431,
+      "end_ms": 933967,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 933967,
+      "end_ms": 936503,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 936503,
+      "end_ms": 939039,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 939039,
+      "end_ms": 941575,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 941575,
+      "end_ms": 944111,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 944111,
+      "end_ms": 946647,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 946647,
+      "end_ms": 949183,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 949183,
+      "end_ms": 951719,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 951719,
+      "end_ms": 954255,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 954255,
+      "end_ms": 956791,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 956791,
+      "end_ms": 959327,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 959327,
+      "end_ms": 961863,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 961863,
+      "end_ms": 964399,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 964399,
+      "end_ms": 966935,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 966935,
+      "end_ms": 969471,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 969471,
+      "end_ms": 972007,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 972007,
+      "end_ms": 974543,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 974543,
+      "end_ms": 977079,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 977079,
+      "end_ms": 979615,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 979615,
+      "end_ms": 982151,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 982151,
+      "end_ms": 984687,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 984687,
+      "end_ms": 987223,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 987223,
+      "end_ms": 989759,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 989759,
+      "end_ms": 992295,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 992295,
+      "end_ms": 994831,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    },
+    {
+      "text": "And You keep on doing it",
+      "start_ms": 994831,
+      "end_ms": 997367,
+      "text_sk": "A stále to robíš",
+      "words": null
+    },
+    {
+      "text": "Keep on, keep on, keep on",
+      "start_ms": 997367,
+      "end_ms": 999903,
+      "text_sk": "Pokračuj, pokračuj, pokračuj",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 614.9,
+    "line_count": 395,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "transcoded_mp3",
+    "audio_raw_bytes": 17964528,
+    "audio_sent_bytes": 3370077,
+    "audio_sent_b64_chars": 4493436,
+    "audio_format_sent": "mp3"
+  }
+}

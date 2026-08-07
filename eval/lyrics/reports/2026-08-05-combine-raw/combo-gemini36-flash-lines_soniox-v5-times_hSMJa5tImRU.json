@@ -1,0 +1,348 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "hSMJa5tImRU",
+  "duration_ms": 649770,
+  "lines": [
+    {
+      "text": "You come at the right time",
+      "start_ms": 27570,
+      "end_ms": 31590,
+      "text_sk": "Prichádzaš v pravý čas",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "When I least expect it, never behind",
+      "start_ms": 33210,
+      "end_ms": 38850,
+      "text_sk": "Keď to najmenej čakám, nikdy neotáľaš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "So why would I be surprised",
+      "start_ms": 40770,
+      "end_ms": 44550,
+      "text_sk": "Tak prečo by som mal byť prekvapený",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "When You deliver every time",
+      "start_ms": 46230,
+      "end_ms": 53430,
+      "text_sk": "Keď ma zakaždým zachrániš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 5,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "On mountains high, You stay the same",
+      "start_ms": 54150,
+      "end_ms": 59130,
+      "text_sk": "Na vysokých vrchoch zostávaš rovnaký",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "In valleys low, You never change",
+      "start_ms": 64770,
+      "end_ms": 65670,
+      "text_sk": "V hlbokých údoliach sa nikdy nemeníš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 2
+    },
+    {
+      "text": "And I believe that I will see the goodness of the Lord",
+      "start_ms": 67230,
+      "end_ms": 77310,
+      "text_sk": "A ja verím, že uvidím Pánovu dobrotu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "I'm confident in seasons change, Your faithfulness remains",
+      "start_ms": 79710,
+      "end_ms": 91230,
+      "text_sk": "Som si istý, keď sa menia obdobia, Tvoja vernosť trvá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "You go before to prepare the blessing, You made a way",
+      "start_ms": 102930,
+      "end_ms": 112530,
+      "text_sk": "Kráčaš predo mnou, aby si pripravil požehnanie, vytvoril si cestu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 8
+    },
+    {
+      "text": "It's more than I could imagine, more than I can fathom or comprehend",
+      "start_ms": 115710,
+      "end_ms": 123390,
+      "text_sk": "Je to viac, než by som si dokázal predstaviť, viac, než dokážem pochopiť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 11
+    },
+    {
+      "text": "On mountains high, I'm so glad that You stay the same",
+      "start_ms": 128910,
+      "end_ms": 134130,
+      "text_sk": "Na vysokých vrchoch som taký rád, že zostávaš rovnaký",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 11,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "In valleys low, oh yeah, You never change",
+      "start_ms": 135630,
+      "end_ms": 140490,
+      "text_sk": "V hlbokých údoliach, ó áno, Ty sa nikdy nemeníš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "And I believe that I will see the goodness of the Lord",
+      "start_ms": 141750,
+      "end_ms": 152910,
+      "text_sk": "A ja verím, že uvidím Pánovu dobrotu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "I'm confident, in seasons change, Your faithfulness remains",
+      "start_ms": 153150,
+      "end_ms": 166470,
+      "text_sk": "Som si istý, keď sa menia obdobia, Tvoja vernosť trvá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 8,
+      "n_words_aligned": 7
+    },
+    {
+      "text": "You never change, You never change",
+      "start_ms": 167250,
+      "end_ms": 172290,
+      "text_sk": "Nikdy sa nemeníš, nikdy sa nemeníš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 6,
+      "n_words_aligned": 6
+    },
+    {
+      "text": "God of my present, God of my future, You write my story, You hold it all together",
+      "start_ms": 178710,
+      "end_ms": 191430,
+      "text_sk": "Boh mojej prítomnosti, Boh mojej budúcnosti, Píšeš môj príbeh, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "God of my present, God of my future, You write my story, You hold it all together",
+      "start_ms": 191790,
+      "end_ms": 203730,
+      "text_sk": "Boh mojej prítomnosti, Boh mojej budúcnosti, Píšeš môj príbeh, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "God of my present, You are God of my future, You're still writing my story, You hold it all together",
+      "start_ms": 204810,
+      "end_ms": 218130,
+      "text_sk": "Boh mojej prítomnosti, Si Boh mojej budúcnosti, Stále píšeš môj príbeh, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 20,
+      "n_words_aligned": 20
+    },
+    {
+      "text": "And I believe that I will see the goodness of the Lord",
+      "start_ms": 233370,
+      "end_ms": 242190,
+      "text_sk": "A ja verím, že uvidím Pánovu dobrotu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "In the land of the living, confident in seasons change, Your faithfulness remains",
+      "start_ms": 244650,
+      "end_ms": 258330,
+      "text_sk": "V krajine žijúcich, istý si tým, že keď sa menia obdobia, Tvoja vernosť trvá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 10
+    },
+    {
+      "text": "God of my present, God of my future, You write my story, You're the author and the finisher",
+      "start_ms": 269970,
+      "end_ms": 280170,
+      "text_sk": "Boh mojej prítomnosti, Boh mojej budúcnosti, Píšeš môj príbeh, Si pôvodca aj dokončovateľ",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 18,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "God of my present, and You're still writing my future, You write my story, You hold it all together",
+      "start_ms": 296190,
+      "end_ms": 308130,
+      "text_sk": "Boh mojej prítomnosti, a stále píšeš moju budúcnosť, Píšeš môj príbeh, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 19,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "You hold it all together. In my hands it falls apart, but You hold it all together",
+      "start_ms": 331950,
+      "end_ms": 341490,
+      "text_sk": "Držíš to všetko pohromade. V mojich rukách sa to rozpadá, ale Ty to držíš celé pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "And I believe that I will see the goodness of the Lord",
+      "start_ms": 361170,
+      "end_ms": 368190,
+      "text_sk": "A ja verím, že uvidím Pánovu dobrotu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "In seasons change, Your faithfulness, Your faithfulness",
+      "start_ms": 373170,
+      "end_ms": 420150,
+      "text_sk": "Keď sa obdobia menia, Tvoja vernosť, Tvoja vernosť",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 7,
+      "n_words_aligned": 5
+    },
+    {
+      "text": "You are the Alpha and Your Omega, You're in the middle, You hold it all together",
+      "start_ms": 423690,
+      "end_ms": 436230,
+      "text_sk": "Si Alfa a Tvoja Omega, Si v strede, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "You are the Alpha and Your Omega, You're in the middle, You hold it all together",
+      "start_ms": 436530,
+      "end_ms": 448830,
+      "text_sk": "Si Alfa a Tvoja Omega, Si v strede, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 16
+    },
+    {
+      "text": "But You're not just at the beginning, and You're not just at the end, You're right here in the middle",
+      "start_ms": 464190,
+      "end_ms": 471810,
+      "text_sk": "Ale nie si len na začiatku, a nie si len na konci, si priamo tu v strede",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 20,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "You're not just at the beginning, and You're not just watching from there, but You're walking with me in the middle",
+      "start_ms": 486630,
+      "end_ms": 494970,
+      "text_sk": "Nie si len na začiatku a neprizeráš sa len odtiaľ, ale kráčaš so mnou v strede",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 21,
+      "n_words_aligned": 20
+    },
+    {
+      "text": "You are the Alpha and Your Omega, You're in the middle, You hold it all together",
+      "start_ms": 515010,
+      "end_ms": 526410,
+      "text_sk": "Si Alfa a Tvoja Omega, Si v strede, Ty to všetko držíš pohromade",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 15
+    },
+    {
+      "text": "You've got the whole world, You hold it all",
+      "start_ms": 586770,
+      "end_ms": 593190,
+      "text_sk": "Máš celý svet, Ty to všetko držíš",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 9,
+      "n_words_aligned": 9
+    },
+    {
+      "text": "And I believe that I will see the goodness of the Lord",
+      "start_ms": 605970,
+      "end_ms": 617970,
+      "text_sk": "A ja verím, že uvidím Pánovu dobrotu",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 12,
+      "n_words_aligned": 12
+    },
+    {
+      "text": "One thing I'm sure about, I'm confident, Your faithfulness remains",
+      "start_ms": 618210,
+      "end_ms": 630870,
+      "text_sk": "Jednou vecou som si istý, som si istý, Tvoja vernosť trvá",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 10,
+      "n_words_aligned": 9
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 33,
+    "n_lines_timed": 33,
+    "n_lines_untimed": 0,
+    "n_words_total": 398,
+    "n_words_aligned": 367,
+    "word_align_rate": 0.9221105527638191,
+    "n_monotonic_violations_clamped": 0
+  }
+}

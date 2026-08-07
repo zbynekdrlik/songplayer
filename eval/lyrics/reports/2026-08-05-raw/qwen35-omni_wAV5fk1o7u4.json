@@ -1,0 +1,357 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\wAV5fk1o7u4_vocal16k.wav",
+  "duration_ms": 232448,
+  "lines": [
+    {
+      "text": "In our darkest days",
+      "start_ms": 19264,
+      "end_ms": 22,
+      "text_sk": "V našich najtemnejších dňoch",
+      "words": null
+    },
+    {
+      "text": "Through the fear and pain",
+      "start_ms": 22256,
+      "end_ms": 26016,
+      "text_sk": "Cez strach a bolesť",
+      "words": null
+    },
+    {
+      "text": "You were always there with us",
+      "start_ms": 26016,
+      "end_ms": 30,
+      "text_sk": "Vždy si bol s nami",
+      "words": null
+    },
+    {
+      "text": "It's only by Your grace",
+      "start_ms": 37376,
+      "end_ms": 39488,
+      "text_sk": "Je to len vďaka Tvojej milosti",
+      "words": null
+    },
+    {
+      "text": "That we are here today",
+      "start_ms": 39488,
+      "end_ms": 42976,
+      "text_sk": "Že sme tu dnes",
+      "words": null
+    },
+    {
+      "text": "We're the evidence of love",
+      "start_ms": 42976,
+      "end_ms": 46656,
+      "text_sk": "Sme dôkazom lásky",
+      "words": null
+    },
+    {
+      "text": "Over and over You have proved",
+      "start_ms": 54592,
+      "end_ms": 59616,
+      "text_sk": "Znovu a znovu si dokázal",
+      "words": null
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "start_ms": 59616,
+      "end_ms": 62816,
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 62816,
+      "end_ms": 66784,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "Again and again You come through",
+      "start_ms": 69632,
+      "end_ms": 72768,
+      "text_sk": "Znovu a znovu prichádzaš",
+      "words": null
+    },
+    {
+      "text": "Always faithful forever true",
+      "start_ms": 72768,
+      "end_ms": 76000,
+      "text_sk": "Vždy verný, navždy pravdivý",
+      "words": null
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "start_ms": 76000,
+      "end_ms": 79296,
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 79296,
+      "end_ms": 82560,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "Whatever we will face",
+      "start_ms": 82656,
+      "end_ms": 86720,
+      "text_sk": "Čokoľvek budeme čeliť",
+      "words": null
+    },
+    {
+      "text": "In the coming days",
+      "start_ms": 86720,
+      "end_ms": 90176,
+      "text_sk": "V nadchádzajúcich dňoch",
+      "words": null
+    },
+    {
+      "text": "We will never walk alone",
+      "start_ms": 90176,
+      "end_ms": 93984,
+      "text_sk": "Nikdy nebudeme kráčať sami",
+      "words": null
+    },
+    {
+      "text": "And through it all we praise",
+      "start_ms": 102976,
+      "end_ms": 105984,
+      "text_sk": "A cez to všetko chválime",
+      "words": null
+    },
+    {
+      "text": "Our hope will never change",
+      "start_ms": 105984,
+      "end_ms": 109344,
+      "text_sk": "Naša nádej sa nikdy nezmení",
+      "words": null
+    },
+    {
+      "text": "Where Your presence is we're home",
+      "start_ms": 109344,
+      "end_ms": 115584,
+      "text_sk": "Kde je Tvoja prítomnosť, tam sme doma",
+      "words": null
+    },
+    {
+      "text": "Over and over You have proved",
+      "start_ms": 116160,
+      "end_ms": 119136,
+      "text_sk": "Znovu a znovu si dokázal",
+      "words": null
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "start_ms": 119136,
+      "end_ms": 122432,
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 122432,
+      "end_ms": 127136,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "Again and again You come through",
+      "start_ms": 129280,
+      "end_ms": 132416,
+      "text_sk": "Znovu a znovu prichádzaš",
+      "words": null
+    },
+    {
+      "text": "Always faithful forever true",
+      "start_ms": 132416,
+      "end_ms": 135584,
+      "text_sk": "Vždy verný, navždy pravdivý",
+      "words": null
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "start_ms": 135584,
+      "end_ms": 138880,
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 138880,
+      "end_ms": 145216,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "There's no one like You God yeah",
+      "start_ms": 147840,
+      "end_ms": 154432,
+      "text_sk": "Nikto nie je ako Ty, Bože, áno",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 155392,
+      "end_ms": 158144,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": null
+    },
+    {
+      "text": "No matter what the world may say",
+      "start_ms": 158144,
+      "end_ms": 161344,
+      "text_sk": "Bez ohľadu na to, čo svet hovorí",
+      "words": null
+    },
+    {
+      "text": "We know Your word will never change",
+      "start_ms": 161344,
+      "end_ms": 164544,
+      "text_sk": "Vieme, že Tvoje slovo sa nikdy nezmení",
+      "words": null
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 164544,
+      "end_ms": 168160,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 168448,
+      "end_ms": 171328,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": null
+    },
+    {
+      "text": "No matter what the world may say",
+      "start_ms": 171328,
+      "end_ms": 174528,
+      "text_sk": "Bez ohľadu na to, čo svet hovorí",
+      "words": null
+    },
+    {
+      "text": "We know Your word will never change",
+      "start_ms": 174528,
+      "end_ms": 177664,
+      "text_sk": "Vieme, že Tvoje slovo sa nikdy nezmení",
+      "words": null
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 177664,
+      "end_ms": 180736,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": null
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 180736,
+      "end_ms": 183936,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": null
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 183936,
+      "end_ms": 187136,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": null
+    },
+    {
+      "text": "We stand on better promises",
+      "start_ms": 187136,
+      "end_ms": 194624,
+      "text_sk": "Stojíme na lepších zasľúbeniach",
+      "words": null
+    },
+    {
+      "text": "Over and over You have proved",
+      "start_ms": 195200,
+      "end_ms": 198112,
+      "text_sk": "Znovu a znovu si dokázal",
+      "words": null
+    },
+    {
+      "text": "That You are the rock that'll never move",
+      "start_ms": 198112,
+      "end_ms": 201344,
+      "text_sk": "Že si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 201344,
+      "end_ms": 205696,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "Again and again You come through",
+      "start_ms": 208224,
+      "end_ms": 211264,
+      "text_sk": "Znovu a znovu prichádzaš",
+      "words": null
+    },
+    {
+      "text": "You're always faithful forever true",
+      "start_ms": 211264,
+      "end_ms": 214464,
+      "text_sk": "Si vždy verný, navždy pravdivý",
+      "words": null
+    },
+    {
+      "text": "'Cause You are the rock that'll never move",
+      "start_ms": 214464,
+      "end_ms": 217664,
+      "text_sk": "Pretože si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "You are the rock that'll never move",
+      "start_ms": 217664,
+      "end_ms": 221120,
+      "text_sk": "Si skala, ktorá sa nikdy nepohne",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 221120,
+      "end_ms": 223872,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna shake our faith",
+      "start_ms": 223872,
+      "end_ms": 227072,
+      "text_sk": "Nič neotrasie našou vierou",
+      "words": null
+    },
+    {
+      "text": "Nothing's gonna shake our faith yeah",
+      "start_ms": 227072,
+      "end_ms": 232448,
+      "text_sk": "Nič neotrasie našou vierou, áno",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 62.8,
+    "line_count": 48,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "inline_wav",
+    "audio_raw_bytes": 14623084,
+    "audio_sent_bytes": 14623084,
+    "audio_sent_b64_chars": 19497448,
+    "audio_format_sent": "wav"
+  }
+}

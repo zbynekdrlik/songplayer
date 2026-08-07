@@ -569,6 +569,16 @@ impl PlaybackEngine {
                 start_position_ms: position_ms,
             });
 
+            // #134: a manually-picked song must count toward "already
+            // played" the same as a naturally-selected one (SelectAndPlay,
+            // above, does this same call) — otherwise the unplayed-first
+            // selector would immediately re-offer a song the operator just
+            // played by hand.
+            if let Err(e) = crate::db::models::record_play(&self.pool, playlist_id, video_id).await
+            {
+                warn!(playlist_id, video_id, %e, "PlayVideo: failed to record play");
+            }
+
             let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
                 playlist_id,
                 state: WsPlaybackState::Playing,

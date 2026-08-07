@@ -1,0 +1,1684 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\s8o2YuTBYk4_vocal16k.wav",
+  "duration_ms": 214849,
+  "lines": [
+    {
+      "text": "Got a feeling that I really need to let go of everything that's weighing me down. Gotta listen to the voice that I know. You speak to me and say I'm free. Come on, hands high, hands up! Nothing gonna hold me down 'cause you keep setting me free. I feel it all around, 'cause in your presence I'm free.",
+      "start_ms": 2579,
+      "end_ms": 35728,
+      "text_sk": "Mám pocit, že sa naozaj potrebujem zbaviť všetkého, čo ma ťaží. Musím počúvať hlas, ktorý poznám. Ty ku mne hovoríš a hovoríš, že som slobodný. No tak, ruky hore, ruky hore! Nič ma neudrží, pretože ma neustále oslobodzuješ. Cítim to všade okolo, pretože vo tvojej prítomnosti som slobodný.",
+      "words": [
+        {
+          "text": "Got",
+          "start_ms": 2579,
+          "end_ms": 2805,
+          "confidence": 0.9548163
+        },
+        {
+          "text": "a",
+          "start_ms": 2805,
+          "end_ms": 2821,
+          "confidence": 0.9867539
+        },
+        {
+          "text": "feeling",
+          "start_ms": 2821,
+          "end_ms": 3207,
+          "confidence": 0.9680535
+        },
+        {
+          "text": "that",
+          "start_ms": 3320,
+          "end_ms": 3626,
+          "confidence": 0.9984658
+        },
+        {
+          "text": "I",
+          "start_ms": 3626,
+          "end_ms": 3674,
+          "confidence": 0.99964154
+        },
+        {
+          "text": "really",
+          "start_ms": 3803,
+          "end_ms": 4141,
+          "confidence": 0.99477875
+        },
+        {
+          "text": "need",
+          "start_ms": 4141,
+          "end_ms": 4447,
+          "confidence": 0.9994924
+        },
+        {
+          "text": "to",
+          "start_ms": 4447,
+          "end_ms": 4544,
+          "confidence": 0.9998635
+        },
+        {
+          "text": "let",
+          "start_ms": 4689,
+          "end_ms": 4979,
+          "confidence": 0.9999336
+        },
+        {
+          "text": "go",
+          "start_ms": 5156,
+          "end_ms": 5413,
+          "confidence": 0.9999144
+        },
+        {
+          "text": "of",
+          "start_ms": 6380,
+          "end_ms": 6508,
+          "confidence": 0.96055156
+        },
+        {
+          "text": "everything",
+          "start_ms": 6686,
+          "end_ms": 7555,
+          "confidence": 0.9996402
+        },
+        {
+          "text": "that's",
+          "start_ms": 7732,
+          "end_ms": 8328,
+          "confidence": 0.9965782
+        },
+        {
+          "text": "weighing",
+          "start_ms": 8457,
+          "end_ms": 8843,
+          "confidence": 0.99314994
+        },
+        {
+          "text": "me",
+          "start_ms": 9101,
+          "end_ms": 9343,
+          "confidence": 0.99976856
+        },
+        {
+          "text": "down.",
+          "start_ms": 9343,
+          "end_ms": 9890,
+          "confidence": 0.9984627
+        },
+        {
+          "text": "Gotta",
+          "start_ms": 10148,
+          "end_ms": 10406,
+          "confidence": 0.98527163
+        },
+        {
+          "text": "listen",
+          "start_ms": 10406,
+          "end_ms": 10776,
+          "confidence": 0.99996126
+        },
+        {
+          "text": "to",
+          "start_ms": 10824,
+          "end_ms": 11066,
+          "confidence": 0.9999689
+        },
+        {
+          "text": "the",
+          "start_ms": 11066,
+          "end_ms": 11275,
+          "confidence": 0.9993498
+        },
+        {
+          "text": "voice",
+          "start_ms": 11340,
+          "end_ms": 11727,
+          "confidence": 0.9997875
+        },
+        {
+          "text": "that",
+          "start_ms": 11759,
+          "end_ms": 12163,
+          "confidence": 0.9995363
+        },
+        {
+          "text": "I",
+          "start_ms": 12244,
+          "end_ms": 12292,
+          "confidence": 0.9998857
+        },
+        {
+          "text": "know.",
+          "start_ms": 12422,
+          "end_ms": 12906,
+          "confidence": 0.97910625
+        },
+        {
+          "text": "You",
+          "start_ms": 13859,
+          "end_ms": 13940,
+          "confidence": 0.9906625
+        },
+        {
+          "text": "speak",
+          "start_ms": 13940,
+          "end_ms": 14295,
+          "confidence": 0.9998808
+        },
+        {
+          "text": "to",
+          "start_ms": 14295,
+          "end_ms": 14441,
+          "confidence": 0.99993074
+        },
+        {
+          "text": "me",
+          "start_ms": 14586,
+          "end_ms": 14796,
+          "confidence": 0.9999757
+        },
+        {
+          "text": "and",
+          "start_ms": 15797,
+          "end_ms": 15894,
+          "confidence": 0.99279577
+        },
+        {
+          "text": "say",
+          "start_ms": 15910,
+          "end_ms": 16250,
+          "confidence": 0.9992743
+        },
+        {
+          "text": "I'm",
+          "start_ms": 16524,
+          "end_ms": 16783,
+          "confidence": 0.8836576
+        },
+        {
+          "text": "free.",
+          "start_ms": 16847,
+          "end_ms": 17154,
+          "confidence": 0.9618559
+        },
+        {
+          "text": "Come",
+          "start_ms": 18240,
+          "end_ms": 18417,
+          "confidence": 0.9884289
+        },
+        {
+          "text": "on,",
+          "start_ms": 18417,
+          "end_ms": 18563,
+          "confidence": 0.9378508
+        },
+        {
+          "text": "hands",
+          "start_ms": 18579,
+          "end_ms": 18805,
+          "confidence": 0.9972531
+        },
+        {
+          "text": "high,",
+          "start_ms": 18821,
+          "end_ms": 18951,
+          "confidence": 0.9751633
+        },
+        {
+          "text": "hands",
+          "start_ms": 19064,
+          "end_ms": 19209,
+          "confidence": 0.8363746
+        },
+        {
+          "text": "up!",
+          "start_ms": 19306,
+          "end_ms": 19565,
+          "confidence": 0.87624913
+        },
+        {
+          "text": "Nothing",
+          "start_ms": 21100,
+          "end_ms": 21310,
+          "confidence": 0.98693955
+        },
+        {
+          "text": "gonna",
+          "start_ms": 21343,
+          "end_ms": 21504,
+          "confidence": 0.82095283
+        },
+        {
+          "text": "hold",
+          "start_ms": 21650,
+          "end_ms": 21828,
+          "confidence": 0.99977106
+        },
+        {
+          "text": "me",
+          "start_ms": 21828,
+          "end_ms": 21989,
+          "confidence": 0.9999745
+        },
+        {
+          "text": "down",
+          "start_ms": 21989,
+          "end_ms": 22280,
+          "confidence": 0.99989295
+        },
+        {
+          "text": "'cause",
+          "start_ms": 22862,
+          "end_ms": 23007,
+          "confidence": 0.86597914
+        },
+        {
+          "text": "you",
+          "start_ms": 23104,
+          "end_ms": 23282,
+          "confidence": 0.99563885
+        },
+        {
+          "text": "keep",
+          "start_ms": 23282,
+          "end_ms": 23509,
+          "confidence": 0.999783
+        },
+        {
+          "text": "setting",
+          "start_ms": 23509,
+          "end_ms": 23896,
+          "confidence": 0.9880262
+        },
+        {
+          "text": "me",
+          "start_ms": 24010,
+          "end_ms": 24204,
+          "confidence": 0.99974924
+        },
+        {
+          "text": "free.",
+          "start_ms": 24333,
+          "end_ms": 24511,
+          "confidence": 0.9228692
+        },
+        {
+          "text": "I",
+          "start_ms": 28567,
+          "end_ms": 28663,
+          "confidence": 0.51743406
+        },
+        {
+          "text": "feel",
+          "start_ms": 28808,
+          "end_ms": 28936,
+          "confidence": 0.5667833
+        },
+        {
+          "text": "it",
+          "start_ms": 29000,
+          "end_ms": 29129,
+          "confidence": 0.8189628
+        },
+        {
+          "text": "all",
+          "start_ms": 29129,
+          "end_ms": 29370,
+          "confidence": 0.99989784
+        },
+        {
+          "text": "around,",
+          "start_ms": 29370,
+          "end_ms": 30076,
+          "confidence": 0.8345816
+        },
+        {
+          "text": "'cause",
+          "start_ms": 30253,
+          "end_ms": 30477,
+          "confidence": 0.94922376
+        },
+        {
+          "text": "in",
+          "start_ms": 30574,
+          "end_ms": 30638,
+          "confidence": 0.9996018
+        },
+        {
+          "text": "your",
+          "start_ms": 30670,
+          "end_ms": 30879,
+          "confidence": 0.9967998
+        },
+        {
+          "text": "presence",
+          "start_ms": 30895,
+          "end_ms": 31505,
+          "confidence": 0.9999242
+        },
+        {
+          "text": "I'm",
+          "start_ms": 31537,
+          "end_ms": 31794,
+          "confidence": 0.90994936
+        },
+        {
+          "text": "free.",
+          "start_ms": 31794,
+          "end_ms": 35728,
+          "confidence": 0.98144007
+        }
+      ]
+    },
+    {
+      "text": "I'm free. Yeah. Yep. Yep.",
+      "start_ms": 39004,
+      "end_ms": 61945,
+      "text_sk": "Som voľný. Áno. Áno. Áno.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 39004,
+          "end_ms": 39550,
+          "confidence": 0.96475124
+        },
+        {
+          "text": "free.",
+          "start_ms": 39550,
+          "end_ms": 39810,
+          "confidence": 0.97673357
+        },
+        {
+          "text": "Yeah.",
+          "start_ms": 39989,
+          "end_ms": 43000,
+          "confidence": 0.9363917
+        },
+        {
+          "text": "Yep.",
+          "start_ms": 61752,
+          "end_ms": 61833,
+          "confidence": 0.739504
+        },
+        {
+          "text": "Yep.",
+          "start_ms": 61897,
+          "end_ms": 61945,
+          "confidence": 0.7742434
+        }
+      ]
+    },
+    {
+      "text": "When I think of how my life has been changed, it all comes down to being with you. And I know that you are always with me. Lord, I believe with you I'm free.",
+      "start_ms": 62573,
+      "end_ms": 77368,
+      "text_sk": "Keď premýšľam o tom, ako sa môj život zmenil, všetko sa to zredukuje na to, že som s tebou. A viem, že si vždy so mnou. Pane, verím, že s tebou som slobodný.",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 62573,
+          "end_ms": 62702,
+          "confidence": 0.7030867
+        },
+        {
+          "text": "I",
+          "start_ms": 62718,
+          "end_ms": 62814,
+          "confidence": 0.9999567
+        },
+        {
+          "text": "think",
+          "start_ms": 62814,
+          "end_ms": 63136,
+          "confidence": 0.99996305
+        },
+        {
+          "text": "of",
+          "start_ms": 63136,
+          "end_ms": 63217,
+          "confidence": 0.99903476
+        },
+        {
+          "text": "how",
+          "start_ms": 63217,
+          "end_ms": 63394,
+          "confidence": 0.9998716
+        },
+        {
+          "text": "my",
+          "start_ms": 63458,
+          "end_ms": 63619,
+          "confidence": 0.99972266
+        },
+        {
+          "text": "life",
+          "start_ms": 63619,
+          "end_ms": 64182,
+          "confidence": 0.999951
+        },
+        {
+          "text": "has",
+          "start_ms": 64182,
+          "end_ms": 64632,
+          "confidence": 0.9992895
+        },
+        {
+          "text": "been",
+          "start_ms": 64665,
+          "end_ms": 64954,
+          "confidence": 0.9989748
+        },
+        {
+          "text": "changed,",
+          "start_ms": 65131,
+          "end_ms": 66000,
+          "confidence": 0.9961355
+        },
+        {
+          "text": "it",
+          "start_ms": 66418,
+          "end_ms": 66579,
+          "confidence": 0.999191
+        },
+        {
+          "text": "all",
+          "start_ms": 66660,
+          "end_ms": 66821,
+          "confidence": 0.9998776
+        },
+        {
+          "text": "comes",
+          "start_ms": 66821,
+          "end_ms": 67126,
+          "confidence": 0.99992204
+        },
+        {
+          "text": "down",
+          "start_ms": 67143,
+          "end_ms": 67690,
+          "confidence": 0.99994993
+        },
+        {
+          "text": "to",
+          "start_ms": 68204,
+          "end_ms": 68349,
+          "confidence": 0.99704605
+        },
+        {
+          "text": "being",
+          "start_ms": 68446,
+          "end_ms": 68816,
+          "confidence": 0.9861813
+        },
+        {
+          "text": "with",
+          "start_ms": 68929,
+          "end_ms": 69411,
+          "confidence": 0.99993277
+        },
+        {
+          "text": "you.",
+          "start_ms": 69460,
+          "end_ms": 69508,
+          "confidence": 0.9217386
+        },
+        {
+          "text": "And",
+          "start_ms": 70125,
+          "end_ms": 70223,
+          "confidence": 0.9987651
+        },
+        {
+          "text": "I",
+          "start_ms": 70223,
+          "end_ms": 70239,
+          "confidence": 0.99976
+        },
+        {
+          "text": "know",
+          "start_ms": 70239,
+          "end_ms": 70548,
+          "confidence": 0.999928
+        },
+        {
+          "text": "that",
+          "start_ms": 70548,
+          "end_ms": 70775,
+          "confidence": 0.9982444
+        },
+        {
+          "text": "you",
+          "start_ms": 70775,
+          "end_ms": 70986,
+          "confidence": 0.9997476
+        },
+        {
+          "text": "are",
+          "start_ms": 71100,
+          "end_ms": 71376,
+          "confidence": 0.99626297
+        },
+        {
+          "text": "always",
+          "start_ms": 71441,
+          "end_ms": 72220,
+          "confidence": 0.999752
+        },
+        {
+          "text": "with",
+          "start_ms": 72253,
+          "end_ms": 72578,
+          "confidence": 0.9997329
+        },
+        {
+          "text": "me.",
+          "start_ms": 72594,
+          "end_ms": 72984,
+          "confidence": 0.856092
+        },
+        {
+          "text": "Lord,",
+          "start_ms": 73877,
+          "end_ms": 74007,
+          "confidence": 0.8997484
+        },
+        {
+          "text": "I",
+          "start_ms": 74185,
+          "end_ms": 74267,
+          "confidence": 0.9998117
+        },
+        {
+          "text": "believe",
+          "start_ms": 74283,
+          "end_ms": 75306,
+          "confidence": 0.99965274
+        },
+        {
+          "text": "with",
+          "start_ms": 75826,
+          "end_ms": 76004,
+          "confidence": 0.7466974
+        },
+        {
+          "text": "you",
+          "start_ms": 76053,
+          "end_ms": 76313,
+          "confidence": 0.9963708
+        },
+        {
+          "text": "I'm",
+          "start_ms": 76621,
+          "end_ms": 76816,
+          "confidence": 0.9577265
+        },
+        {
+          "text": "free.",
+          "start_ms": 76865,
+          "end_ms": 77368,
+          "confidence": 0.9673142
+        }
+      ]
+    },
+    {
+      "text": "Nothing's gonna hold me down 'cause you keep setting me free.",
+      "start_ms": 80954,
+      "end_ms": 84597,
+      "text_sk": "Nič ma nezadrží, pretože ma neustále oslobodzuješ.",
+      "words": [
+        {
+          "text": "Nothing's",
+          "start_ms": 80954,
+          "end_ms": 81427,
+          "confidence": 0.4006037
+        },
+        {
+          "text": "gonna",
+          "start_ms": 81427,
+          "end_ms": 81574,
+          "confidence": 0.93290967
+        },
+        {
+          "text": "hold",
+          "start_ms": 81574,
+          "end_ms": 81836,
+          "confidence": 0.99835
+        },
+        {
+          "text": "me",
+          "start_ms": 81836,
+          "end_ms": 81999,
+          "confidence": 0.99902177
+        },
+        {
+          "text": "down",
+          "start_ms": 81999,
+          "end_ms": 82620,
+          "confidence": 0.9997814
+        },
+        {
+          "text": "'cause",
+          "start_ms": 82800,
+          "end_ms": 82947,
+          "confidence": 0.7495612
+        },
+        {
+          "text": "you",
+          "start_ms": 83045,
+          "end_ms": 83225,
+          "confidence": 0.8863252
+        },
+        {
+          "text": "keep",
+          "start_ms": 83225,
+          "end_ms": 83388,
+          "confidence": 0.9994355
+        },
+        {
+          "text": "setting",
+          "start_ms": 83388,
+          "end_ms": 83846,
+          "confidence": 0.9978999
+        },
+        {
+          "text": "me",
+          "start_ms": 83960,
+          "end_ms": 84205,
+          "confidence": 0.9990939
+        },
+        {
+          "text": "free.",
+          "start_ms": 84287,
+          "end_ms": 84597,
+          "confidence": 0.9767784
+        }
+      ]
+    },
+    {
+      "text": "I can feel it all around 'cause in your presence I'm free.",
+      "start_ms": 88484,
+      "end_ms": 92120,
+      "text_sk": "Cítim to všade okolo, pretože vo vašej prítomnosti som slobodný.",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 88484,
+          "end_ms": 88516,
+          "confidence": 0.71446264
+        },
+        {
+          "text": "can",
+          "start_ms": 88582,
+          "end_ms": 88761,
+          "confidence": 0.99833703
+        },
+        {
+          "text": "feel",
+          "start_ms": 88859,
+          "end_ms": 88989,
+          "confidence": 0.99408156
+        },
+        {
+          "text": "it",
+          "start_ms": 89038,
+          "end_ms": 89201,
+          "confidence": 0.99944454
+        },
+        {
+          "text": "all",
+          "start_ms": 89201,
+          "end_ms": 89364,
+          "confidence": 0.9984681
+        },
+        {
+          "text": "around",
+          "start_ms": 89430,
+          "end_ms": 90180,
+          "confidence": 0.9995266
+        },
+        {
+          "text": "'cause",
+          "start_ms": 90327,
+          "end_ms": 90555,
+          "confidence": 0.9837483
+        },
+        {
+          "text": "in",
+          "start_ms": 90653,
+          "end_ms": 90816,
+          "confidence": 0.9975395
+        },
+        {
+          "text": "your",
+          "start_ms": 90816,
+          "end_ms": 90995,
+          "confidence": 0.9959692
+        },
+        {
+          "text": "presence",
+          "start_ms": 90995,
+          "end_ms": 91631,
+          "confidence": 0.99989915
+        },
+        {
+          "text": "I'm",
+          "start_ms": 91631,
+          "end_ms": 91876,
+          "confidence": 0.8623878
+        },
+        {
+          "text": "free.",
+          "start_ms": 91876,
+          "end_ms": 92120,
+          "confidence": 0.9811924
+        }
+      ]
+    },
+    {
+      "text": "I'm free. Yeah.",
+      "start_ms": 92120,
+      "end_ms": 114373,
+      "text_sk": "Som slobodný. Áno.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 98995,
+          "end_ms": 99604,
+          "confidence": 0.96384823
+        },
+        {
+          "text": "free.",
+          "start_ms": 99653,
+          "end_ms": 99818,
+          "confidence": 0.9485946
+        },
+        {
+          "text": "Yeah.",
+          "start_ms": 114190,
+          "end_ms": 114373,
+          "confidence": 0.8001167
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high.",
+      "start_ms": 114373,
+      "end_ms": 132425,
+      "text_sk": "Budem ťa chváliť s rukami vyzdvihnutými vysoko. Budem ťa chváliť s rukami vyzdvihnutými vysoko. Budem ťa chváliť s rukami vyzdvihnutými vysoko.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 122081,
+          "end_ms": 122242,
+          "confidence": 0.6650691
+        },
+        {
+          "text": "gonna",
+          "start_ms": 122242,
+          "end_ms": 122581,
+          "confidence": 0.969106
+        },
+        {
+          "text": "praise",
+          "start_ms": 122807,
+          "end_ms": 123114,
+          "confidence": 0.99977034
+        },
+        {
+          "text": "you",
+          "start_ms": 123146,
+          "end_ms": 123259,
+          "confidence": 0.9371093
+        },
+        {
+          "text": "with",
+          "start_ms": 123291,
+          "end_ms": 123485,
+          "confidence": 0.99920815
+        },
+        {
+          "text": "my",
+          "start_ms": 123533,
+          "end_ms": 123775,
+          "confidence": 0.9999645
+        },
+        {
+          "text": "hands",
+          "start_ms": 123775,
+          "end_ms": 124260,
+          "confidence": 0.99979657
+        },
+        {
+          "text": "raised",
+          "start_ms": 124276,
+          "end_ms": 124744,
+          "confidence": 0.99975485
+        },
+        {
+          "text": "high.",
+          "start_ms": 124744,
+          "end_ms": 125002,
+          "confidence": 0.97837085
+        },
+        {
+          "text": "I'm",
+          "start_ms": 125954,
+          "end_ms": 126131,
+          "confidence": 0.9983918
+        },
+        {
+          "text": "gonna",
+          "start_ms": 126131,
+          "end_ms": 126390,
+          "confidence": 0.99974495
+        },
+        {
+          "text": "praise",
+          "start_ms": 126454,
+          "end_ms": 126922,
+          "confidence": 0.99986184
+        },
+        {
+          "text": "you",
+          "start_ms": 126922,
+          "end_ms": 127067,
+          "confidence": 0.99985373
+        },
+        {
+          "text": "with",
+          "start_ms": 127100,
+          "end_ms": 127293,
+          "confidence": 0.99992466
+        },
+        {
+          "text": "my",
+          "start_ms": 127326,
+          "end_ms": 127568,
+          "confidence": 0.9999678
+        },
+        {
+          "text": "hands",
+          "start_ms": 127568,
+          "end_ms": 128003,
+          "confidence": 0.99987423
+        },
+        {
+          "text": "raised",
+          "start_ms": 128068,
+          "end_ms": 128455,
+          "confidence": 0.9999472
+        },
+        {
+          "text": "high.",
+          "start_ms": 128455,
+          "end_ms": 128584,
+          "confidence": 0.99849856
+        },
+        {
+          "text": "I'm",
+          "start_ms": 129617,
+          "end_ms": 129843,
+          "confidence": 0.99886453
+        },
+        {
+          "text": "gonna",
+          "start_ms": 129907,
+          "end_ms": 130327,
+          "confidence": 0.9996908
+        },
+        {
+          "text": "praise",
+          "start_ms": 130392,
+          "end_ms": 130650,
+          "confidence": 0.9988637
+        },
+        {
+          "text": "you",
+          "start_ms": 130650,
+          "end_ms": 130827,
+          "confidence": 0.99969125
+        },
+        {
+          "text": "with",
+          "start_ms": 130860,
+          "end_ms": 130997,
+          "confidence": 0.9996146
+        },
+        {
+          "text": "my",
+          "start_ms": 131049,
+          "end_ms": 131186,
+          "confidence": 0.99971443
+        },
+        {
+          "text": "hands",
+          "start_ms": 131307,
+          "end_ms": 131719,
+          "confidence": 0.9993444
+        },
+        {
+          "text": "raised",
+          "start_ms": 131754,
+          "end_ms": 132270,
+          "confidence": 0.9995664
+        },
+        {
+          "text": "high.",
+          "start_ms": 132270,
+          "end_ms": 132425,
+          "confidence": 0.9951159
+        }
+      ]
+    },
+    {
+      "text": "I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high. Hey, I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised. Oh yes, we are. Hey, oh, I'm gonna praise you with my hands raised high.",
+      "start_ms": 133421,
+      "end_ms": 185253,
+      "text_sk": "Budem ťa chváliť s rukami zdvihnutými vysoko. Budem ťa chváliť s rukami zdvihnutými vysoko. Budem ťa chváliť s rukami zdvihnutými vysoko. Hej, budem ťa chváliť s rukami zdvihnutými vysoko. Budem ťa chváliť s rukami zdvihnutými vysoko. Budem ťa chváliť s rukami zdvihnutými. Ó áno, budeme. Hej, ó, budem ťa chváliť s rukami zdvihnutými vysoko.",
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 133421,
+          "end_ms": 133599,
+          "confidence": 0.7020836
+        },
+        {
+          "text": "gonna",
+          "start_ms": 133599,
+          "end_ms": 133922,
+          "confidence": 0.98885393
+        },
+        {
+          "text": "praise",
+          "start_ms": 134067,
+          "end_ms": 134294,
+          "confidence": 0.9989256
+        },
+        {
+          "text": "you",
+          "start_ms": 134391,
+          "end_ms": 134504,
+          "confidence": 0.9391029
+        },
+        {
+          "text": "with",
+          "start_ms": 134568,
+          "end_ms": 134811,
+          "confidence": 0.9997459
+        },
+        {
+          "text": "my",
+          "start_ms": 134811,
+          "end_ms": 135037,
+          "confidence": 0.99976903
+        },
+        {
+          "text": "hands",
+          "start_ms": 135037,
+          "end_ms": 135457,
+          "confidence": 0.99976903
+        },
+        {
+          "text": "raised",
+          "start_ms": 135538,
+          "end_ms": 136442,
+          "confidence": 0.9933832
+        },
+        {
+          "text": "high.",
+          "start_ms": 136442,
+          "end_ms": 136669,
+          "confidence": 0.97847486
+        },
+        {
+          "text": "I'm",
+          "start_ms": 152112,
+          "end_ms": 152353,
+          "confidence": 0.70639503
+        },
+        {
+          "text": "gonna",
+          "start_ms": 152370,
+          "end_ms": 152692,
+          "confidence": 0.99736625
+        },
+        {
+          "text": "praise",
+          "start_ms": 152692,
+          "end_ms": 153143,
+          "confidence": 0.9998647
+        },
+        {
+          "text": "you",
+          "start_ms": 153175,
+          "end_ms": 153320,
+          "confidence": 0.9991844
+        },
+        {
+          "text": "with",
+          "start_ms": 153320,
+          "end_ms": 153465,
+          "confidence": 0.99987483
+        },
+        {
+          "text": "my",
+          "start_ms": 153610,
+          "end_ms": 153755,
+          "confidence": 0.9991854
+        },
+        {
+          "text": "hands",
+          "start_ms": 153755,
+          "end_ms": 154190,
+          "confidence": 0.9998011
+        },
+        {
+          "text": "raised",
+          "start_ms": 154319,
+          "end_ms": 154706,
+          "confidence": 0.9997731
+        },
+        {
+          "text": "high.",
+          "start_ms": 154706,
+          "end_ms": 154948,
+          "confidence": 0.998472
+        },
+        {
+          "text": "I'm",
+          "start_ms": 155979,
+          "end_ms": 156075,
+          "confidence": 0.9942388
+        },
+        {
+          "text": "gonna",
+          "start_ms": 156075,
+          "end_ms": 156559,
+          "confidence": 0.9875031
+        },
+        {
+          "text": "praise",
+          "start_ms": 156559,
+          "end_ms": 156849,
+          "confidence": 0.9998759
+        },
+        {
+          "text": "you",
+          "start_ms": 156881,
+          "end_ms": 157107,
+          "confidence": 0.9996573
+        },
+        {
+          "text": "with",
+          "start_ms": 157107,
+          "end_ms": 157171,
+          "confidence": 0.99945146
+        },
+        {
+          "text": "my",
+          "start_ms": 157203,
+          "end_ms": 157284,
+          "confidence": 0.9991289
+        },
+        {
+          "text": "hands",
+          "start_ms": 157284,
+          "end_ms": 157526,
+          "confidence": 0.9979101
+        },
+        {
+          "text": "raised",
+          "start_ms": 157542,
+          "end_ms": 157993,
+          "confidence": 0.8796357
+        },
+        {
+          "text": "high.",
+          "start_ms": 157993,
+          "end_ms": 158154,
+          "confidence": 0.7472952
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 158949,
+          "end_ms": 159111,
+          "confidence": 0.7657429
+        },
+        {
+          "text": "I'm",
+          "start_ms": 159208,
+          "end_ms": 159450,
+          "confidence": 0.9930731
+        },
+        {
+          "text": "gonna",
+          "start_ms": 159482,
+          "end_ms": 160113,
+          "confidence": 0.5486129
+        },
+        {
+          "text": "praise",
+          "start_ms": 160323,
+          "end_ms": 160630,
+          "confidence": 0.999566
+        },
+        {
+          "text": "you",
+          "start_ms": 160662,
+          "end_ms": 160743,
+          "confidence": 0.9501717
+        },
+        {
+          "text": "with",
+          "start_ms": 160743,
+          "end_ms": 160856,
+          "confidence": 0.99543095
+        },
+        {
+          "text": "my",
+          "start_ms": 160921,
+          "end_ms": 161164,
+          "confidence": 0.9994294
+        },
+        {
+          "text": "hands",
+          "start_ms": 161212,
+          "end_ms": 161762,
+          "confidence": 0.99970007
+        },
+        {
+          "text": "raised",
+          "start_ms": 161794,
+          "end_ms": 162231,
+          "confidence": 0.9998362
+        },
+        {
+          "text": "high.",
+          "start_ms": 162263,
+          "end_ms": 162392,
+          "confidence": 0.971909
+        },
+        {
+          "text": "I'm",
+          "start_ms": 163427,
+          "end_ms": 163685,
+          "confidence": 0.98064286
+        },
+        {
+          "text": "gonna",
+          "start_ms": 163685,
+          "end_ms": 164122,
+          "confidence": 0.96317047
+        },
+        {
+          "text": "praise",
+          "start_ms": 164122,
+          "end_ms": 164348,
+          "confidence": 0.9999125
+        },
+        {
+          "text": "you",
+          "start_ms": 164461,
+          "end_ms": 164542,
+          "confidence": 0.9996654
+        },
+        {
+          "text": "with",
+          "start_ms": 164542,
+          "end_ms": 164833,
+          "confidence": 0.99960715
+        },
+        {
+          "text": "my",
+          "start_ms": 164849,
+          "end_ms": 164979,
+          "confidence": 0.9999366
+        },
+        {
+          "text": "hands",
+          "start_ms": 165027,
+          "end_ms": 165593,
+          "confidence": 0.9997993
+        },
+        {
+          "text": "raised",
+          "start_ms": 165609,
+          "end_ms": 165997,
+          "confidence": 0.9999552
+        },
+        {
+          "text": "high.",
+          "start_ms": 165997,
+          "end_ms": 166272,
+          "confidence": 0.9984582
+        },
+        {
+          "text": "I'm",
+          "start_ms": 167274,
+          "end_ms": 167452,
+          "confidence": 0.99253386
+        },
+        {
+          "text": "gonna",
+          "start_ms": 167452,
+          "end_ms": 167775,
+          "confidence": 0.99574846
+        },
+        {
+          "text": "praise",
+          "start_ms": 167856,
+          "end_ms": 168147,
+          "confidence": 0.99966
+        },
+        {
+          "text": "you",
+          "start_ms": 168179,
+          "end_ms": 168390,
+          "confidence": 0.9997985
+        },
+        {
+          "text": "with",
+          "start_ms": 168390,
+          "end_ms": 168508,
+          "confidence": 0.99931777
+        },
+        {
+          "text": "my",
+          "start_ms": 168508,
+          "end_ms": 168711,
+          "confidence": 0.9997652
+        },
+        {
+          "text": "hands",
+          "start_ms": 168761,
+          "end_ms": 169235,
+          "confidence": 0.99932635
+        },
+        {
+          "text": "raised.",
+          "start_ms": 169336,
+          "end_ms": 169691,
+          "confidence": 0.8089632
+        },
+        {
+          "text": "Oh",
+          "start_ms": 173789,
+          "end_ms": 173805,
+          "confidence": 0.98393595
+        },
+        {
+          "text": "yes,",
+          "start_ms": 174036,
+          "end_ms": 174202,
+          "confidence": 0.83448076
+        },
+        {
+          "text": "we",
+          "start_ms": 174350,
+          "end_ms": 174548,
+          "confidence": 0.9975879
+        },
+        {
+          "text": "are.",
+          "start_ms": 174631,
+          "end_ms": 174895,
+          "confidence": 0.82805145
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 178030,
+          "end_ms": 178256,
+          "confidence": 0.7951063
+        },
+        {
+          "text": "oh,",
+          "start_ms": 181035,
+          "end_ms": 181051,
+          "confidence": 0.7573839
+        },
+        {
+          "text": "I'm",
+          "start_ms": 182183,
+          "end_ms": 182651,
+          "confidence": 0.9953157
+        },
+        {
+          "text": "gonna",
+          "start_ms": 182651,
+          "end_ms": 182991,
+          "confidence": 0.99219924
+        },
+        {
+          "text": "praise",
+          "start_ms": 182991,
+          "end_ms": 183362,
+          "confidence": 0.9992341
+        },
+        {
+          "text": "you",
+          "start_ms": 183395,
+          "end_ms": 183508,
+          "confidence": 0.99943763
+        },
+        {
+          "text": "with",
+          "start_ms": 183621,
+          "end_ms": 183799,
+          "confidence": 0.9990972
+        },
+        {
+          "text": "my",
+          "start_ms": 183799,
+          "end_ms": 184057,
+          "confidence": 0.9993019
+        },
+        {
+          "text": "hands",
+          "start_ms": 184122,
+          "end_ms": 184494,
+          "confidence": 0.99916327
+        },
+        {
+          "text": "raised",
+          "start_ms": 184526,
+          "end_ms": 185011,
+          "confidence": 0.99955016
+        },
+        {
+          "text": "high.",
+          "start_ms": 185011,
+          "end_ms": 185253,
+          "confidence": 0.9886465
+        }
+      ]
+    },
+    {
+      "text": "Hey. Hey, hey!",
+      "start_ms": 185786,
+      "end_ms": 189355,
+      "text_sk": "Dobrý deň. Dobrý deň, dobrý deň!",
+      "words": [
+        {
+          "text": "Hey.",
+          "start_ms": 185786,
+          "end_ms": 185980,
+          "confidence": 0.6991449
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 188853,
+          "end_ms": 189112,
+          "confidence": 0.56779927
+        },
+        {
+          "text": "hey!",
+          "start_ms": 189257,
+          "end_ms": 189355,
+          "confidence": 0.7075033
+        }
+      ]
+    },
+    {
+      "text": "Walk big! I'm gonna praise. Hey, hey! I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high. I'm gonna praise you with my hands raised high. Come on, lift him up tonight!",
+      "start_ms": 193323,
+      "end_ms": 214849,
+      "text_sk": "Choďte vo veľkom! Budem chváliť. Hej, hej! Budem vás chváliť so zdvihnutými rukami. Budem vás chváliť so zdvihnutými rukami. Budem vás chváliť so zdvihnutými rukami. Poďte, vyzdvihnite ho dnes večer!",
+      "words": [
+        {
+          "text": "Walk",
+          "start_ms": 193323,
+          "end_ms": 193760,
+          "confidence": 0.38746348
+        },
+        {
+          "text": "big!",
+          "start_ms": 194295,
+          "end_ms": 194538,
+          "confidence": 0.4181582
+        },
+        {
+          "text": "I'm",
+          "start_ms": 195088,
+          "end_ms": 195234,
+          "confidence": 0.99341613
+        },
+        {
+          "text": "gonna",
+          "start_ms": 195250,
+          "end_ms": 195671,
+          "confidence": 0.80788714
+        },
+        {
+          "text": "praise.",
+          "start_ms": 195671,
+          "end_ms": 196125,
+          "confidence": 0.74740493
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 196238,
+          "end_ms": 196481,
+          "confidence": 0.9962784
+        },
+        {
+          "text": "hey!",
+          "start_ms": 196708,
+          "end_ms": 196902,
+          "confidence": 0.9914081
+        },
+        {
+          "text": "I'm",
+          "start_ms": 197356,
+          "end_ms": 197533,
+          "confidence": 0.99963063
+        },
+        {
+          "text": "gonna",
+          "start_ms": 197533,
+          "end_ms": 197855,
+          "confidence": 0.99169415
+        },
+        {
+          "text": "praise",
+          "start_ms": 197855,
+          "end_ms": 198274,
+          "confidence": 0.99985635
+        },
+        {
+          "text": "you",
+          "start_ms": 198274,
+          "end_ms": 198499,
+          "confidence": 0.93684685
+        },
+        {
+          "text": "with",
+          "start_ms": 198499,
+          "end_ms": 198628,
+          "confidence": 0.99681026
+        },
+        {
+          "text": "my",
+          "start_ms": 198918,
+          "end_ms": 199208,
+          "confidence": 0.9997359
+        },
+        {
+          "text": "hands",
+          "start_ms": 199208,
+          "end_ms": 199530,
+          "confidence": 0.998919
+        },
+        {
+          "text": "raised",
+          "start_ms": 199530,
+          "end_ms": 200014,
+          "confidence": 0.9987832
+        },
+        {
+          "text": "high.",
+          "start_ms": 200014,
+          "end_ms": 200272,
+          "confidence": 0.9768536
+        },
+        {
+          "text": "I'm",
+          "start_ms": 200980,
+          "end_ms": 201238,
+          "confidence": 0.9998866
+        },
+        {
+          "text": "gonna",
+          "start_ms": 201238,
+          "end_ms": 201399,
+          "confidence": 0.99324656
+        },
+        {
+          "text": "praise",
+          "start_ms": 201721,
+          "end_ms": 202092,
+          "confidence": 0.9999726
+        },
+        {
+          "text": "you",
+          "start_ms": 202189,
+          "end_ms": 202334,
+          "confidence": 0.99980026
+        },
+        {
+          "text": "with",
+          "start_ms": 202350,
+          "end_ms": 202398,
+          "confidence": 0.99998474
+        },
+        {
+          "text": "my",
+          "start_ms": 202511,
+          "end_ms": 202591,
+          "confidence": 0.9999945
+        },
+        {
+          "text": "hands",
+          "start_ms": 202591,
+          "end_ms": 203220,
+          "confidence": 0.9999511
+        },
+        {
+          "text": "raised",
+          "start_ms": 203268,
+          "end_ms": 203783,
+          "confidence": 0.9999504
+        },
+        {
+          "text": "high.",
+          "start_ms": 203816,
+          "end_ms": 203961,
+          "confidence": 0.9536193
+        },
+        {
+          "text": "I'm",
+          "start_ms": 208720,
+          "end_ms": 208819,
+          "confidence": 0.99656814
+        },
+        {
+          "text": "gonna",
+          "start_ms": 208819,
+          "end_ms": 208984,
+          "confidence": 0.995408
+        },
+        {
+          "text": "praise",
+          "start_ms": 209314,
+          "end_ms": 209693,
+          "confidence": 0.9999546
+        },
+        {
+          "text": "you",
+          "start_ms": 209791,
+          "end_ms": 209841,
+          "confidence": 0.99980193
+        },
+        {
+          "text": "with",
+          "start_ms": 209956,
+          "end_ms": 210121,
+          "confidence": 0.999961
+        },
+        {
+          "text": "my",
+          "start_ms": 210137,
+          "end_ms": 210368,
+          "confidence": 0.99998367
+        },
+        {
+          "text": "hands",
+          "start_ms": 210385,
+          "end_ms": 211110,
+          "confidence": 0.99989736
+        },
+        {
+          "text": "raised",
+          "start_ms": 211110,
+          "end_ms": 211604,
+          "confidence": 0.99990237
+        },
+        {
+          "text": "high.",
+          "start_ms": 211604,
+          "end_ms": 211769,
+          "confidence": 0.99332553
+        },
+        {
+          "text": "Come",
+          "start_ms": 213295,
+          "end_ms": 213394,
+          "confidence": 0.54611677
+        },
+        {
+          "text": "on,",
+          "start_ms": 213460,
+          "end_ms": 213692,
+          "confidence": 0.88401634
+        },
+        {
+          "text": "lift",
+          "start_ms": 213708,
+          "end_ms": 213956,
+          "confidence": 0.9996006
+        },
+        {
+          "text": "him",
+          "start_ms": 213956,
+          "end_ms": 214072,
+          "confidence": 0.6148004
+        },
+        {
+          "text": "up",
+          "start_ms": 214121,
+          "end_ms": 214303,
+          "confidence": 0.99998426
+        },
+        {
+          "text": "tonight!",
+          "start_ms": 214303,
+          "end_ms": 214849,
+          "confidence": 0.613087
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9483437,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "49494587-b5a3-4129-b2c4-3690cdcf5ee8",
+    "elapsed_s": 17.1,
+    "word_count": 264,
+    "utterance_count": 10,
+    "line_count": 10,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 239
+  }
+}

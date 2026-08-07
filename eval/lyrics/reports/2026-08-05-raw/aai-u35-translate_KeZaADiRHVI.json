@@ -1,0 +1,3148 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\KeZaADiRHVI_vocal16k.wav",
+  "duration_ms": 264460,
+  "lines": [
+    {
+      "text": "When the Holy Ghost gets a hold of you, there's no telling what you're liable to do. No telling what you're liable to do. Might get fired up. You might get free. But if you brought cold water, don't pour your water on me. I got the Holy Ghost. And I'm burning up. I got the Holy Ghost, and I'm burning up. Nah nah nah nah nah. I got the Holy Ghost, and I'm burning up. I got the Holy Holy Ghost, and I'm burning up. I'm burning up. I'm burning up. Haha. Well, it's getting wild in this upper room. It ain't wine. No, it's a different juice. Well, it don't run out. You can get it for free. But I didn't get it from you, so you can't take it from me. I got the Holy Ghost, and I'm burning up. I got the Holy Ghost, and I'm burning up. La la la la la! I got the Holy Ghost. I'm burning up. I kept holy, holy ghost. I'm burning up. I'm burning up. I'm burning up. I'm burning up. I'm burning up. I'm burning up. I'm burning up. Hey! Hey! Burning up. Burning up. Hey, hey Moses, Moses. Hey Moses. Say hey Moses. Yeah, yeah. I said Moses, Moses. Take off your shoes. This is holy ground. You got a job to do. Got a job to do. I said Moses, Moses. Yeah, I'm talking to you. Talking to you. This is holy ground. You got a job to do. Tell that Pharaoh how you like those frogs. You better let me go if you want them gone. Yeah, tell that Pharaoh how you like those frogs. You better let me go if you want them gone. Well, that bush was burning, but he wasn't burning up. No, no. Well, that bush was burning, but he wasn't burning up. No, no, no, no, no, no. That bush was burning, but he wasn't burning up. Hey, hey! When that bush was burning up, it wasn't burning up. Hey, hey, hey, hey! When that bush was burning up, it wasn't burning up. Nah, nah, it wasn't burning. That bush was burning up, it wasn't burning up. It wasn't burning up, nah. When that bush was burning up, it wasn't burning up. Nah, nah, nah. When that bush was burning up, it wasn't burning up. Hey, hey! You're crazy. I got the Holy Ghost. I'm burning up. I got the Holy Ghost. I'm burning up. La la la la la. I got the Holy Ghost. I'm burning up. I got holy holy ghost. Now I'm burning up. I'm burning up. I'm burning up. I'm bop bop bop bop burning up. I'm bop bop bop bop burning up. I'm bop. I'm burning. I'm burning up, I'm burning up, back to Oregon! I'm burning up, back to Oregon! Back to Oregon! Back to Oregon! I'm on fire! I'm on fire! Yeah, yeah! I'm on fire! Yeah, yeah! I'm on fire! Yeah, yeah! I'm on fire! Yeah, yeah! I'm on fire! Yeah, yeah! I'm on fire, yeah, yeah. I'm on fire, yeah, yeah.",
+      "start_ms": 10371,
+      "end_ms": 264460,
+      "text_sk": "Keď sa vás zmocní Duch Svätý, nedá sa povedať, čo všetko môžete urobiť. Nedá sa povedať, čo všetko môžete urobiť. Môžete sa zapáliť. Môžete sa oslobodiť. Ale ak ste priniesli studenú vodu, nelejte svoju vodu na mňa. Mám Ducha Svätého. A horím. Mám Ducha Svätého a horím. Nie, nie, nie, nie, nie. Mám Ducha Svätého a horím. Mám Ducha Svätého a horím. Horím. Horím. Haha. No, v tejto hornej miestnosti sa to deje divoko. Nie je to víno. Nie, je to iná šťava. No, nedôjde. Môžete ju dostať zadarmo. Ale ja som ju nedostal od vás, takže mi ju nemôžete vziať. Mám Ducha Svätého a horím. Mám Ducha Svätého a horím. La la la la la! Mám Ducha Svätého. Horím. Mám Ducha Svätého. Horím. Horím. Horím. Horím. Horím. Horím. Hej! Hej! Horím. Horím. Hej, hej Mojžiš, Mojžiš. Hej Mojžiš. Povedz hej Mojžiš. Áno, áno. Povedal som Mojžiš, Mojžiš. Zujte si topánky. Toto je svätá zem. Máte prácu. Máte prácu. Povedal som Mojžiš, Mojžiš. Áno, hovorím s vami. Hovorím s vami. Toto je svätá zem. Máte prácu. Povedzte tomu faraónovi, ako sa vám páčia tie žaby. Radšej ma prepustite, ak ich chcete preč. Áno, povedzte tomu faraónovi, ako sa vám páčia tie žaby. Radšej ma prepustite, ak ich chcete preč. No, ten ker horel, ale nezhorel. Nie, nie. No, ten ker horel, ale nezhorel. Nie, nie, nie, nie, nie, nie. Ten ker horel, ale nezhorel. Hej, hej! Keď ten ker horel, nezhorel. Hej, hej, hej, hej! Keď ten ker horel, nezhorel. Nie, nie, nezhorel. Ten ker horel, nezhorel. Nezohorel, nie. Keď ten ker horel, nezhorel. Nie, nie, nie. Keď ten ker horel, nezhorel. Hej, hej! Ste blázon. Mám Ducha Svätého. Horím. Mám Ducha Svätého. Horím. La la la la la. Mám Ducha Svätého. Horím. Mám Ducha Svätého. Teraz horím. Horím. Horím. Bop bop bop bop horím. Bop bop bop bop horím. Bop. Horím. Horím, horím, späť do Oregonu! Horím, späť do Oregonu! Späť do Oregonu! Späť do Oregonu! Horím! Horím! Áno, áno! Horím! Áno, áno! Horím! Áno, áno! Horím! Áno, áno! Horím! Áno, áno! Horím, áno, áno. Horím, áno, áno.",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 10371,
+          "end_ms": 10548,
+          "confidence": 0.62617177
+        },
+        {
+          "text": "the",
+          "start_ms": 10548,
+          "end_ms": 10597,
+          "confidence": 0.9995473
+        },
+        {
+          "text": "Holy",
+          "start_ms": 10597,
+          "end_ms": 11032,
+          "confidence": 0.9066711
+        },
+        {
+          "text": "Ghost",
+          "start_ms": 11032,
+          "end_ms": 11725,
+          "confidence": 0.99889624
+        },
+        {
+          "text": "gets",
+          "start_ms": 12789,
+          "end_ms": 13031,
+          "confidence": 0.9503518
+        },
+        {
+          "text": "a",
+          "start_ms": 13031,
+          "end_ms": 13047,
+          "confidence": 0.99773705
+        },
+        {
+          "text": "hold",
+          "start_ms": 13111,
+          "end_ms": 13450,
+          "confidence": 0.84741485
+        },
+        {
+          "text": "of",
+          "start_ms": 13450,
+          "end_ms": 13498,
+          "confidence": 0.99956447
+        },
+        {
+          "text": "you,",
+          "start_ms": 13514,
+          "end_ms": 13708,
+          "confidence": 0.9989847
+        },
+        {
+          "text": "there's",
+          "start_ms": 15529,
+          "end_ms": 15771,
+          "confidence": 0.9920374
+        },
+        {
+          "text": "no",
+          "start_ms": 15787,
+          "end_ms": 15932,
+          "confidence": 0.99944574
+        },
+        {
+          "text": "telling",
+          "start_ms": 15948,
+          "end_ms": 16400,
+          "confidence": 0.97808176
+        },
+        {
+          "text": "what",
+          "start_ms": 16416,
+          "end_ms": 16545,
+          "confidence": 0.9984774
+        },
+        {
+          "text": "you're",
+          "start_ms": 16593,
+          "end_ms": 16674,
+          "confidence": 0.96186805
+        },
+        {
+          "text": "liable",
+          "start_ms": 16674,
+          "end_ms": 17028,
+          "confidence": 0.99258024
+        },
+        {
+          "text": "to",
+          "start_ms": 17028,
+          "end_ms": 17077,
+          "confidence": 0.9998851
+        },
+        {
+          "text": "do.",
+          "start_ms": 17174,
+          "end_ms": 17302,
+          "confidence": 0.96704936
+        },
+        {
+          "text": "No",
+          "start_ms": 17576,
+          "end_ms": 17802,
+          "confidence": 0.99844104
+        },
+        {
+          "text": "telling",
+          "start_ms": 17802,
+          "end_ms": 18092,
+          "confidence": 0.99954224
+        },
+        {
+          "text": "what",
+          "start_ms": 18205,
+          "end_ms": 18366,
+          "confidence": 0.99995375
+        },
+        {
+          "text": "you're",
+          "start_ms": 18366,
+          "end_ms": 18511,
+          "confidence": 0.99972266
+        },
+        {
+          "text": "liable",
+          "start_ms": 18511,
+          "end_ms": 18802,
+          "confidence": 0.9998975
+        },
+        {
+          "text": "to",
+          "start_ms": 18866,
+          "end_ms": 18947,
+          "confidence": 0.99998283
+        },
+        {
+          "text": "do.",
+          "start_ms": 19398,
+          "end_ms": 19431,
+          "confidence": 0.99546224
+        },
+        {
+          "text": "Might",
+          "start_ms": 19511,
+          "end_ms": 19802,
+          "confidence": 0.99203205
+        },
+        {
+          "text": "get",
+          "start_ms": 19802,
+          "end_ms": 20076,
+          "confidence": 0.9998932
+        },
+        {
+          "text": "fired",
+          "start_ms": 20140,
+          "end_ms": 20786,
+          "confidence": 0.99984956
+        },
+        {
+          "text": "up.",
+          "start_ms": 20786,
+          "end_ms": 21108,
+          "confidence": 0.8018886
+        },
+        {
+          "text": "You",
+          "start_ms": 22399,
+          "end_ms": 22480,
+          "confidence": 0.7910092
+        },
+        {
+          "text": "might",
+          "start_ms": 22480,
+          "end_ms": 22802,
+          "confidence": 0.99995434
+        },
+        {
+          "text": "get",
+          "start_ms": 22802,
+          "end_ms": 23190,
+          "confidence": 0.9994734
+        },
+        {
+          "text": "free.",
+          "start_ms": 23190,
+          "end_ms": 23625,
+          "confidence": 0.99309653
+        },
+        {
+          "text": "But",
+          "start_ms": 25384,
+          "end_ms": 25771,
+          "confidence": 0.9994023
+        },
+        {
+          "text": "if",
+          "start_ms": 25771,
+          "end_ms": 26013,
+          "confidence": 0.9991391
+        },
+        {
+          "text": "you",
+          "start_ms": 26013,
+          "end_ms": 26126,
+          "confidence": 0.9963476
+        },
+        {
+          "text": "brought",
+          "start_ms": 26271,
+          "end_ms": 26578,
+          "confidence": 0.8581449
+        },
+        {
+          "text": "cold",
+          "start_ms": 26594,
+          "end_ms": 26804,
+          "confidence": 0.6761119
+        },
+        {
+          "text": "water,",
+          "start_ms": 26900,
+          "end_ms": 27207,
+          "confidence": 0.99770445
+        },
+        {
+          "text": "don't",
+          "start_ms": 27223,
+          "end_ms": 27481,
+          "confidence": 0.99983954
+        },
+        {
+          "text": "pour",
+          "start_ms": 27481,
+          "end_ms": 27755,
+          "confidence": 0.9973665
+        },
+        {
+          "text": "your",
+          "start_ms": 27804,
+          "end_ms": 28110,
+          "confidence": 0.9903438
+        },
+        {
+          "text": "water",
+          "start_ms": 28110,
+          "end_ms": 28514,
+          "confidence": 0.9999163
+        },
+        {
+          "text": "on",
+          "start_ms": 28514,
+          "end_ms": 28740,
+          "confidence": 0.99990165
+        },
+        {
+          "text": "me.",
+          "start_ms": 28740,
+          "end_ms": 28952,
+          "confidence": 0.99902284
+        },
+        {
+          "text": "I",
+          "start_ms": 29111,
+          "end_ms": 29129,
+          "confidence": 0.9990194
+        },
+        {
+          "text": "got",
+          "start_ms": 29147,
+          "end_ms": 29483,
+          "confidence": 0.99546695
+        },
+        {
+          "text": "the",
+          "start_ms": 29483,
+          "end_ms": 29537,
+          "confidence": 0.9998324
+        },
+        {
+          "text": "Holy",
+          "start_ms": 29554,
+          "end_ms": 29625,
+          "confidence": 0.99962676
+        },
+        {
+          "text": "Ghost.",
+          "start_ms": 29661,
+          "end_ms": 29838,
+          "confidence": 0.9922662
+        },
+        {
+          "text": "And",
+          "start_ms": 31327,
+          "end_ms": 31424,
+          "confidence": 0.61444676
+        },
+        {
+          "text": "I'm",
+          "start_ms": 31424,
+          "end_ms": 31552,
+          "confidence": 0.99867713
+        },
+        {
+          "text": "burning",
+          "start_ms": 31649,
+          "end_ms": 32115,
+          "confidence": 0.99918467
+        },
+        {
+          "text": "up.",
+          "start_ms": 32211,
+          "end_ms": 32324,
+          "confidence": 0.9656348
+        },
+        {
+          "text": "I",
+          "start_ms": 34060,
+          "end_ms": 34236,
+          "confidence": 0.999671
+        },
+        {
+          "text": "got",
+          "start_ms": 34236,
+          "end_ms": 34478,
+          "confidence": 0.9975866
+        },
+        {
+          "text": "the",
+          "start_ms": 34478,
+          "end_ms": 34622,
+          "confidence": 0.9998789
+        },
+        {
+          "text": "Holy",
+          "start_ms": 34622,
+          "end_ms": 35008,
+          "confidence": 0.9551766
+        },
+        {
+          "text": "Ghost,",
+          "start_ms": 35104,
+          "end_ms": 35731,
+          "confidence": 0.856871
+        },
+        {
+          "text": "and",
+          "start_ms": 35780,
+          "end_ms": 36230,
+          "confidence": 0.99801743
+        },
+        {
+          "text": "I'm",
+          "start_ms": 36230,
+          "end_ms": 36471,
+          "confidence": 0.99990267
+        },
+        {
+          "text": "burning",
+          "start_ms": 36471,
+          "end_ms": 37017,
+          "confidence": 0.9990145
+        },
+        {
+          "text": "up.",
+          "start_ms": 37033,
+          "end_ms": 37146,
+          "confidence": 0.96421313
+        },
+        {
+          "text": "Nah",
+          "start_ms": 37210,
+          "end_ms": 37403,
+          "confidence": 0.6580245
+        },
+        {
+          "text": "nah",
+          "start_ms": 37532,
+          "end_ms": 37644,
+          "confidence": 0.7122281
+        },
+        {
+          "text": "nah",
+          "start_ms": 37773,
+          "end_ms": 37885,
+          "confidence": 0.99682474
+        },
+        {
+          "text": "nah",
+          "start_ms": 37934,
+          "end_ms": 38126,
+          "confidence": 0.9996113
+        },
+        {
+          "text": "nah.",
+          "start_ms": 38175,
+          "end_ms": 38448,
+          "confidence": 0.821465
+        },
+        {
+          "text": "I",
+          "start_ms": 38962,
+          "end_ms": 38978,
+          "confidence": 0.99992573
+        },
+        {
+          "text": "got",
+          "start_ms": 38978,
+          "end_ms": 39252,
+          "confidence": 0.9997496
+        },
+        {
+          "text": "the",
+          "start_ms": 39300,
+          "end_ms": 39509,
+          "confidence": 0.9999727
+        },
+        {
+          "text": "Holy",
+          "start_ms": 39670,
+          "end_ms": 39830,
+          "confidence": 0.99997115
+        },
+        {
+          "text": "Ghost,",
+          "start_ms": 39862,
+          "end_ms": 40521,
+          "confidence": 0.9966389
+        },
+        {
+          "text": "and",
+          "start_ms": 40907,
+          "end_ms": 41020,
+          "confidence": 0.9995352
+        },
+        {
+          "text": "I'm",
+          "start_ms": 41052,
+          "end_ms": 41212,
+          "confidence": 0.99993646
+        },
+        {
+          "text": "burning",
+          "start_ms": 41229,
+          "end_ms": 41759,
+          "confidence": 0.99999166
+        },
+        {
+          "text": "up.",
+          "start_ms": 41855,
+          "end_ms": 42032,
+          "confidence": 0.9999289
+        },
+        {
+          "text": "I",
+          "start_ms": 43704,
+          "end_ms": 43720,
+          "confidence": 0.9998925
+        },
+        {
+          "text": "got",
+          "start_ms": 43864,
+          "end_ms": 44122,
+          "confidence": 0.9996246
+        },
+        {
+          "text": "the",
+          "start_ms": 44122,
+          "end_ms": 44170,
+          "confidence": 0.9975375
+        },
+        {
+          "text": "Holy",
+          "start_ms": 44202,
+          "end_ms": 44652,
+          "confidence": 0.8597242
+        },
+        {
+          "text": "Holy",
+          "start_ms": 44668,
+          "end_ms": 45134,
+          "confidence": 0.9886184
+        },
+        {
+          "text": "Ghost,",
+          "start_ms": 45166,
+          "end_ms": 45632,
+          "confidence": 0.98738134
+        },
+        {
+          "text": "and",
+          "start_ms": 45729,
+          "end_ms": 45825,
+          "confidence": 0.9985203
+        },
+        {
+          "text": "I'm",
+          "start_ms": 45825,
+          "end_ms": 45938,
+          "confidence": 0.99993986
+        },
+        {
+          "text": "burning",
+          "start_ms": 46050,
+          "end_ms": 46581,
+          "confidence": 0.99998426
+        },
+        {
+          "text": "up.",
+          "start_ms": 46613,
+          "end_ms": 46709,
+          "confidence": 0.9967287
+        },
+        {
+          "text": "I'm",
+          "start_ms": 46950,
+          "end_ms": 47256,
+          "confidence": 0.99983835
+        },
+        {
+          "text": "burning",
+          "start_ms": 47256,
+          "end_ms": 47754,
+          "confidence": 0.99997306
+        },
+        {
+          "text": "up.",
+          "start_ms": 47818,
+          "end_ms": 48059,
+          "confidence": 0.9934884
+        },
+        {
+          "text": "I'm",
+          "start_ms": 48284,
+          "end_ms": 48510,
+          "confidence": 0.9992619
+        },
+        {
+          "text": "burning",
+          "start_ms": 48510,
+          "end_ms": 49008,
+          "confidence": 0.9999089
+        },
+        {
+          "text": "up.",
+          "start_ms": 49025,
+          "end_ms": 49125,
+          "confidence": 0.99811244
+        },
+        {
+          "text": "Haha.",
+          "start_ms": 52467,
+          "end_ms": 52773,
+          "confidence": 0.072670914
+        },
+        {
+          "text": "Well,",
+          "start_ms": 58249,
+          "end_ms": 58362,
+          "confidence": 0.88418233
+        },
+        {
+          "text": "it's",
+          "start_ms": 58426,
+          "end_ms": 58539,
+          "confidence": 0.8904041
+        },
+        {
+          "text": "getting",
+          "start_ms": 58652,
+          "end_ms": 58957,
+          "confidence": 0.9884681
+        },
+        {
+          "text": "wild",
+          "start_ms": 59070,
+          "end_ms": 59665,
+          "confidence": 0.98891944
+        },
+        {
+          "text": "in",
+          "start_ms": 60599,
+          "end_ms": 60679,
+          "confidence": 0.996635
+        },
+        {
+          "text": "this",
+          "start_ms": 60760,
+          "end_ms": 61017,
+          "confidence": 0.99692637
+        },
+        {
+          "text": "upper",
+          "start_ms": 61146,
+          "end_ms": 61484,
+          "confidence": 0.9437052
+        },
+        {
+          "text": "room.",
+          "start_ms": 61484,
+          "end_ms": 61902,
+          "confidence": 0.82389605
+        },
+        {
+          "text": "It",
+          "start_ms": 62047,
+          "end_ms": 62176,
+          "confidence": 0.7764029
+        },
+        {
+          "text": "ain't",
+          "start_ms": 62289,
+          "end_ms": 63656,
+          "confidence": 0.96945095
+        },
+        {
+          "text": "wine.",
+          "start_ms": 63882,
+          "end_ms": 64348,
+          "confidence": 0.8011031
+        },
+        {
+          "text": "No,",
+          "start_ms": 64944,
+          "end_ms": 65185,
+          "confidence": 0.9723517
+        },
+        {
+          "text": "it's",
+          "start_ms": 65427,
+          "end_ms": 65700,
+          "confidence": 0.99988824
+        },
+        {
+          "text": "a",
+          "start_ms": 65748,
+          "end_ms": 65893,
+          "confidence": 0.99979085
+        },
+        {
+          "text": "different",
+          "start_ms": 65893,
+          "end_ms": 66280,
+          "confidence": 0.99996066
+        },
+        {
+          "text": "juice.",
+          "start_ms": 66280,
+          "end_ms": 66813,
+          "confidence": 0.9922011
+        },
+        {
+          "text": "Well,",
+          "start_ms": 67104,
+          "end_ms": 67525,
+          "confidence": 0.8825027
+        },
+        {
+          "text": "it",
+          "start_ms": 67541,
+          "end_ms": 67622,
+          "confidence": 0.9922233
+        },
+        {
+          "text": "don't",
+          "start_ms": 67622,
+          "end_ms": 68188,
+          "confidence": 0.99991745
+        },
+        {
+          "text": "run",
+          "start_ms": 68253,
+          "end_ms": 68803,
+          "confidence": 0.999286
+        },
+        {
+          "text": "out.",
+          "start_ms": 68803,
+          "end_ms": 69061,
+          "confidence": 0.9924948
+        },
+        {
+          "text": "You",
+          "start_ms": 70355,
+          "end_ms": 70517,
+          "confidence": 0.99996567
+        },
+        {
+          "text": "can",
+          "start_ms": 70517,
+          "end_ms": 70679,
+          "confidence": 0.9999709
+        },
+        {
+          "text": "get",
+          "start_ms": 70679,
+          "end_ms": 70905,
+          "confidence": 0.9999789
+        },
+        {
+          "text": "it",
+          "start_ms": 70905,
+          "end_ms": 71099,
+          "confidence": 0.99998343
+        },
+        {
+          "text": "for",
+          "start_ms": 71099,
+          "end_ms": 71277,
+          "confidence": 0.99926
+        },
+        {
+          "text": "free.",
+          "start_ms": 71277,
+          "end_ms": 71358,
+          "confidence": 0.8253013
+        },
+        {
+          "text": "But",
+          "start_ms": 73154,
+          "end_ms": 73315,
+          "confidence": 0.99989545
+        },
+        {
+          "text": "I",
+          "start_ms": 73379,
+          "end_ms": 73556,
+          "confidence": 0.9999156
+        },
+        {
+          "text": "didn't",
+          "start_ms": 73556,
+          "end_ms": 74279,
+          "confidence": 0.9930053
+        },
+        {
+          "text": "get",
+          "start_ms": 74279,
+          "end_ms": 74456,
+          "confidence": 0.9996618
+        },
+        {
+          "text": "it",
+          "start_ms": 74456,
+          "end_ms": 74521,
+          "confidence": 0.9995028
+        },
+        {
+          "text": "from",
+          "start_ms": 74521,
+          "end_ms": 74762,
+          "confidence": 0.9999547
+        },
+        {
+          "text": "you,",
+          "start_ms": 74762,
+          "end_ms": 74955,
+          "confidence": 0.93500227
+        },
+        {
+          "text": "so",
+          "start_ms": 75325,
+          "end_ms": 75421,
+          "confidence": 0.99979967
+        },
+        {
+          "text": "you",
+          "start_ms": 75486,
+          "end_ms": 75727,
+          "confidence": 0.9999484
+        },
+        {
+          "text": "can't",
+          "start_ms": 75791,
+          "end_ms": 76064,
+          "confidence": 0.9819945
+        },
+        {
+          "text": "take",
+          "start_ms": 76064,
+          "end_ms": 76370,
+          "confidence": 0.9999498
+        },
+        {
+          "text": "it",
+          "start_ms": 76370,
+          "end_ms": 76531,
+          "confidence": 0.99992466
+        },
+        {
+          "text": "from",
+          "start_ms": 76531,
+          "end_ms": 76660,
+          "confidence": 0.9999896
+        },
+        {
+          "text": "me.",
+          "start_ms": 76772,
+          "end_ms": 76965,
+          "confidence": 0.9984681
+        },
+        {
+          "text": "I",
+          "start_ms": 77255,
+          "end_ms": 77415,
+          "confidence": 0.99983156
+        },
+        {
+          "text": "got",
+          "start_ms": 77415,
+          "end_ms": 77721,
+          "confidence": 0.9968887
+        },
+        {
+          "text": "the",
+          "start_ms": 77721,
+          "end_ms": 77817,
+          "confidence": 0.99996364
+        },
+        {
+          "text": "Holy",
+          "start_ms": 77817,
+          "end_ms": 78268,
+          "confidence": 0.9661271
+        },
+        {
+          "text": "Ghost,",
+          "start_ms": 78300,
+          "end_ms": 79104,
+          "confidence": 0.80374616
+        },
+        {
+          "text": "and",
+          "start_ms": 79281,
+          "end_ms": 79442,
+          "confidence": 0.9990631
+        },
+        {
+          "text": "I'm",
+          "start_ms": 79442,
+          "end_ms": 79651,
+          "confidence": 0.9989053
+        },
+        {
+          "text": "burning",
+          "start_ms": 79667,
+          "end_ms": 80165,
+          "confidence": 0.9975624
+        },
+        {
+          "text": "up.",
+          "start_ms": 80230,
+          "end_ms": 80407,
+          "confidence": 0.99405164
+        },
+        {
+          "text": "I",
+          "start_ms": 82002,
+          "end_ms": 82018,
+          "confidence": 0.9944764
+        },
+        {
+          "text": "got",
+          "start_ms": 82244,
+          "end_ms": 82501,
+          "confidence": 0.9837128
+        },
+        {
+          "text": "the",
+          "start_ms": 82501,
+          "end_ms": 82582,
+          "confidence": 0.9999882
+        },
+        {
+          "text": "Holy",
+          "start_ms": 82582,
+          "end_ms": 83114,
+          "confidence": 0.99997914
+        },
+        {
+          "text": "Ghost,",
+          "start_ms": 83130,
+          "end_ms": 83791,
+          "confidence": 0.9991495
+        },
+        {
+          "text": "and",
+          "start_ms": 84178,
+          "end_ms": 84259,
+          "confidence": 0.99945754
+        },
+        {
+          "text": "I'm",
+          "start_ms": 84259,
+          "end_ms": 84436,
+          "confidence": 0.9999357
+        },
+        {
+          "text": "burning",
+          "start_ms": 84500,
+          "end_ms": 84968,
+          "confidence": 0.999757
+        },
+        {
+          "text": "up.",
+          "start_ms": 85065,
+          "end_ms": 85161,
+          "confidence": 0.99782187
+        },
+        {
+          "text": "La",
+          "start_ms": 85242,
+          "end_ms": 85274,
+          "confidence": 0.42395467
+        },
+        {
+          "text": "la",
+          "start_ms": 85274,
+          "end_ms": 85339,
+          "confidence": 0.9144942
+        },
+        {
+          "text": "la",
+          "start_ms": 85339,
+          "end_ms": 85403,
+          "confidence": 0.9981402
+        },
+        {
+          "text": "la",
+          "start_ms": 85403,
+          "end_ms": 85484,
+          "confidence": 0.99503565
+        },
+        {
+          "text": "la!",
+          "start_ms": 85484,
+          "end_ms": 85597,
+          "confidence": 0.6682792
+        },
+        {
+          "text": "I",
+          "start_ms": 85822,
+          "end_ms": 85871,
+          "confidence": 0.9996575
+        },
+        {
+          "text": "got",
+          "start_ms": 85887,
+          "end_ms": 86048,
+          "confidence": 0.9996824
+        },
+        {
+          "text": "the",
+          "start_ms": 86048,
+          "end_ms": 86096,
+          "confidence": 0.9999629
+        },
+        {
+          "text": "Holy",
+          "start_ms": 86096,
+          "end_ms": 86177,
+          "confidence": 0.9996867
+        },
+        {
+          "text": "Ghost.",
+          "start_ms": 86209,
+          "end_ms": 86338,
+          "confidence": 0.99496377
+        },
+        {
+          "text": "I'm",
+          "start_ms": 89002,
+          "end_ms": 89148,
+          "confidence": 0.89486754
+        },
+        {
+          "text": "burning",
+          "start_ms": 89261,
+          "end_ms": 89763,
+          "confidence": 0.99930334
+        },
+        {
+          "text": "up.",
+          "start_ms": 89811,
+          "end_ms": 89925,
+          "confidence": 0.94058657
+        },
+        {
+          "text": "I",
+          "start_ms": 91673,
+          "end_ms": 91689,
+          "confidence": 0.96069574
+        },
+        {
+          "text": "kept",
+          "start_ms": 91689,
+          "end_ms": 92207,
+          "confidence": 0.25095496
+        },
+        {
+          "text": "holy,",
+          "start_ms": 92255,
+          "end_ms": 92725,
+          "confidence": 0.72917867
+        },
+        {
+          "text": "holy",
+          "start_ms": 92822,
+          "end_ms": 93113,
+          "confidence": 0.9587648
+        },
+        {
+          "text": "ghost.",
+          "start_ms": 93146,
+          "end_ms": 93599,
+          "confidence": 0.8637134
+        },
+        {
+          "text": "I'm",
+          "start_ms": 93858,
+          "end_ms": 94101,
+          "confidence": 0.5284456
+        },
+        {
+          "text": "burning",
+          "start_ms": 94117,
+          "end_ms": 94618,
+          "confidence": 0.9999579
+        },
+        {
+          "text": "up.",
+          "start_ms": 94667,
+          "end_ms": 94829,
+          "confidence": 0.96700627
+        },
+        {
+          "text": "I'm",
+          "start_ms": 95023,
+          "end_ms": 95314,
+          "confidence": 0.99997246
+        },
+        {
+          "text": "burning",
+          "start_ms": 95314,
+          "end_ms": 95865,
+          "confidence": 0.99998343
+        },
+        {
+          "text": "up.",
+          "start_ms": 95881,
+          "end_ms": 96609,
+          "confidence": 0.9985648
+        },
+        {
+          "text": "I'm",
+          "start_ms": 97820,
+          "end_ms": 97942,
+          "confidence": 0.65592647
+        },
+        {
+          "text": "burning",
+          "start_ms": 97942,
+          "end_ms": 98170,
+          "confidence": 0.8314753
+        },
+        {
+          "text": "up.",
+          "start_ms": 98187,
+          "end_ms": 98379,
+          "confidence": 0.9987564
+        },
+        {
+          "text": "I'm",
+          "start_ms": 99900,
+          "end_ms": 99996,
+          "confidence": 0.9986453
+        },
+        {
+          "text": "burning",
+          "start_ms": 100012,
+          "end_ms": 100545,
+          "confidence": 0.9999881
+        },
+        {
+          "text": "up.",
+          "start_ms": 100561,
+          "end_ms": 100674,
+          "confidence": 0.99981964
+        },
+        {
+          "text": "I'm",
+          "start_ms": 100883,
+          "end_ms": 101109,
+          "confidence": 0.9977004
+        },
+        {
+          "text": "burning",
+          "start_ms": 101125,
+          "end_ms": 101722,
+          "confidence": 0.9999474
+        },
+        {
+          "text": "up.",
+          "start_ms": 101770,
+          "end_ms": 101915,
+          "confidence": 0.99971193
+        },
+        {
+          "text": "I'm",
+          "start_ms": 102044,
+          "end_ms": 102286,
+          "confidence": 0.98863196
+        },
+        {
+          "text": "burning",
+          "start_ms": 102431,
+          "end_ms": 102931,
+          "confidence": 0.9972488
+        },
+        {
+          "text": "up.",
+          "start_ms": 102980,
+          "end_ms": 103093,
+          "confidence": 0.9991231
+        },
+        {
+          "text": "I'm",
+          "start_ms": 103335,
+          "end_ms": 103528,
+          "confidence": 0.8667273
+        },
+        {
+          "text": "burning",
+          "start_ms": 103560,
+          "end_ms": 104173,
+          "confidence": 0.9995363
+        },
+        {
+          "text": "up.",
+          "start_ms": 104189,
+          "end_ms": 104302,
+          "confidence": 0.9982008
+        },
+        {
+          "text": "Hey!",
+          "start_ms": 105773,
+          "end_ms": 105854,
+          "confidence": 0.45298293
+        },
+        {
+          "text": "Hey!",
+          "start_ms": 106016,
+          "end_ms": 106114,
+          "confidence": 0.9936543
+        },
+        {
+          "text": "Burning",
+          "start_ms": 106341,
+          "end_ms": 106795,
+          "confidence": 0.99153954
+        },
+        {
+          "text": "up.",
+          "start_ms": 106973,
+          "end_ms": 107087,
+          "confidence": 0.979009
+        },
+        {
+          "text": "Burning",
+          "start_ms": 108515,
+          "end_ms": 108904,
+          "confidence": 0.9182301
+        },
+        {
+          "text": "up.",
+          "start_ms": 109017,
+          "end_ms": 109180,
+          "confidence": 0.99457383
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 115334,
+          "end_ms": 115594,
+          "confidence": 0.6016406
+        },
+        {
+          "text": "hey",
+          "start_ms": 115984,
+          "end_ms": 116081,
+          "confidence": 0.9762958
+        },
+        {
+          "text": "Moses,",
+          "start_ms": 116243,
+          "end_ms": 116795,
+          "confidence": 0.6634009
+        },
+        {
+          "text": "Moses.",
+          "start_ms": 116812,
+          "end_ms": 117347,
+          "confidence": 0.7482723
+        },
+        {
+          "text": "Hey",
+          "start_ms": 117786,
+          "end_ms": 118029,
+          "confidence": 0.99186796
+        },
+        {
+          "text": "Moses.",
+          "start_ms": 118094,
+          "end_ms": 118403,
+          "confidence": 0.8883168
+        },
+        {
+          "text": "Say",
+          "start_ms": 120790,
+          "end_ms": 121147,
+          "confidence": 0.5696438
+        },
+        {
+          "text": "hey",
+          "start_ms": 121341,
+          "end_ms": 121519,
+          "confidence": 0.5226485
+        },
+        {
+          "text": "Moses.",
+          "start_ms": 121519,
+          "end_ms": 122297,
+          "confidence": 0.98655427
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 123269,
+          "end_ms": 123480,
+          "confidence": 0.7995713
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 125003,
+          "end_ms": 125328,
+          "confidence": 0.9020643
+        },
+        {
+          "text": "I",
+          "start_ms": 125490,
+          "end_ms": 125587,
+          "confidence": 0.82478064
+        },
+        {
+          "text": "said",
+          "start_ms": 125587,
+          "end_ms": 125879,
+          "confidence": 0.99470985
+        },
+        {
+          "text": "Moses,",
+          "start_ms": 125879,
+          "end_ms": 126365,
+          "confidence": 0.9967426
+        },
+        {
+          "text": "Moses.",
+          "start_ms": 126478,
+          "end_ms": 127078,
+          "confidence": 0.8603569
+        },
+        {
+          "text": "Take",
+          "start_ms": 128002,
+          "end_ms": 128310,
+          "confidence": 0.998896
+        },
+        {
+          "text": "off",
+          "start_ms": 128310,
+          "end_ms": 128504,
+          "confidence": 0.999841
+        },
+        {
+          "text": "your",
+          "start_ms": 128553,
+          "end_ms": 128780,
+          "confidence": 0.9999733
+        },
+        {
+          "text": "shoes.",
+          "start_ms": 128780,
+          "end_ms": 129151,
+          "confidence": 0.9953721
+        },
+        {
+          "text": "This",
+          "start_ms": 130329,
+          "end_ms": 130522,
+          "confidence": 0.98583543
+        },
+        {
+          "text": "is",
+          "start_ms": 130522,
+          "end_ms": 130635,
+          "confidence": 0.9999845
+        },
+        {
+          "text": "holy",
+          "start_ms": 130716,
+          "end_ms": 131071,
+          "confidence": 0.98206466
+        },
+        {
+          "text": "ground.",
+          "start_ms": 131071,
+          "end_ms": 131345,
+          "confidence": 0.99724233
+        },
+        {
+          "text": "You",
+          "start_ms": 132201,
+          "end_ms": 132378,
+          "confidence": 0.9999757
+        },
+        {
+          "text": "got",
+          "start_ms": 132604,
+          "end_ms": 132830,
+          "confidence": 0.9776109
+        },
+        {
+          "text": "a",
+          "start_ms": 132830,
+          "end_ms": 132991,
+          "confidence": 0.99994195
+        },
+        {
+          "text": "job",
+          "start_ms": 132991,
+          "end_ms": 133314,
+          "confidence": 0.999283
+        },
+        {
+          "text": "to",
+          "start_ms": 133330,
+          "end_ms": 133492,
+          "confidence": 0.9999628
+        },
+        {
+          "text": "do.",
+          "start_ms": 133492,
+          "end_ms": 133605,
+          "confidence": 0.99828756
+        },
+        {
+          "text": "Got",
+          "start_ms": 133976,
+          "end_ms": 134202,
+          "confidence": 0.83958966
+        },
+        {
+          "text": "a",
+          "start_ms": 134202,
+          "end_ms": 134282,
+          "confidence": 0.99942636
+        },
+        {
+          "text": "job",
+          "start_ms": 134282,
+          "end_ms": 134718,
+          "confidence": 0.9998671
+        },
+        {
+          "text": "to",
+          "start_ms": 134767,
+          "end_ms": 134928,
+          "confidence": 0.8882604
+        },
+        {
+          "text": "do.",
+          "start_ms": 134928,
+          "end_ms": 134960,
+          "confidence": 0.9922377
+        },
+        {
+          "text": "I",
+          "start_ms": 135041,
+          "end_ms": 135057,
+          "confidence": 0.99923086
+        },
+        {
+          "text": "said",
+          "start_ms": 135089,
+          "end_ms": 135444,
+          "confidence": 0.99994755
+        },
+        {
+          "text": "Moses,",
+          "start_ms": 135444,
+          "end_ms": 135880,
+          "confidence": 0.998563
+        },
+        {
+          "text": "Moses.",
+          "start_ms": 135977,
+          "end_ms": 136606,
+          "confidence": 0.9991945
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 137591,
+          "end_ms": 137833,
+          "confidence": 0.8493484
+        },
+        {
+          "text": "I'm",
+          "start_ms": 137994,
+          "end_ms": 138140,
+          "confidence": 0.9995674
+        },
+        {
+          "text": "talking",
+          "start_ms": 138140,
+          "end_ms": 138269,
+          "confidence": 0.998747
+        },
+        {
+          "text": "to",
+          "start_ms": 138269,
+          "end_ms": 138333,
+          "confidence": 0.99991214
+        },
+        {
+          "text": "you.",
+          "start_ms": 138333,
+          "end_ms": 138511,
+          "confidence": 0.99741054
+        },
+        {
+          "text": "Talking",
+          "start_ms": 138995,
+          "end_ms": 139334,
+          "confidence": 0.99192715
+        },
+        {
+          "text": "to",
+          "start_ms": 139334,
+          "end_ms": 139543,
+          "confidence": 0.9999591
+        },
+        {
+          "text": "you.",
+          "start_ms": 139543,
+          "end_ms": 139688,
+          "confidence": 0.99944854
+        },
+        {
+          "text": "This",
+          "start_ms": 139866,
+          "end_ms": 140173,
+          "confidence": 0.999514
+        },
+        {
+          "text": "is",
+          "start_ms": 140173,
+          "end_ms": 140237,
+          "confidence": 0.9999906
+        },
+        {
+          "text": "holy",
+          "start_ms": 140318,
+          "end_ms": 140721,
+          "confidence": 0.99994123
+        },
+        {
+          "text": "ground.",
+          "start_ms": 140737,
+          "end_ms": 141447,
+          "confidence": 0.9996608
+        },
+        {
+          "text": "You",
+          "start_ms": 141867,
+          "end_ms": 141915,
+          "confidence": 0.99989986
+        },
+        {
+          "text": "got",
+          "start_ms": 142270,
+          "end_ms": 142528,
+          "confidence": 0.9957424
+        },
+        {
+          "text": "a",
+          "start_ms": 142528,
+          "end_ms": 142544,
+          "confidence": 0.9999807
+        },
+        {
+          "text": "job",
+          "start_ms": 142690,
+          "end_ms": 143012,
+          "confidence": 0.99998975
+        },
+        {
+          "text": "to",
+          "start_ms": 143158,
+          "end_ms": 143270,
+          "confidence": 0.9999496
+        },
+        {
+          "text": "do.",
+          "start_ms": 143416,
+          "end_ms": 143512,
+          "confidence": 0.9996488
+        },
+        {
+          "text": "Tell",
+          "start_ms": 145001,
+          "end_ms": 145307,
+          "confidence": 0.8106042
+        },
+        {
+          "text": "that",
+          "start_ms": 145307,
+          "end_ms": 145532,
+          "confidence": 0.9978561
+        },
+        {
+          "text": "Pharaoh",
+          "start_ms": 145532,
+          "end_ms": 146096,
+          "confidence": 0.9344913
+        },
+        {
+          "text": "how",
+          "start_ms": 147142,
+          "end_ms": 147271,
+          "confidence": 0.96781385
+        },
+        {
+          "text": "you",
+          "start_ms": 147319,
+          "end_ms": 147448,
+          "confidence": 0.9977889
+        },
+        {
+          "text": "like",
+          "start_ms": 147464,
+          "end_ms": 147706,
+          "confidence": 0.99579775
+        },
+        {
+          "text": "those",
+          "start_ms": 147722,
+          "end_ms": 147851,
+          "confidence": 0.9999498
+        },
+        {
+          "text": "frogs.",
+          "start_ms": 147883,
+          "end_ms": 148623,
+          "confidence": 0.9633095
+        },
+        {
+          "text": "You",
+          "start_ms": 149477,
+          "end_ms": 149622,
+          "confidence": 0.9841204
+        },
+        {
+          "text": "better",
+          "start_ms": 149638,
+          "end_ms": 149960,
+          "confidence": 0.9990175
+        },
+        {
+          "text": "let",
+          "start_ms": 149976,
+          "end_ms": 150201,
+          "confidence": 0.9999746
+        },
+        {
+          "text": "me",
+          "start_ms": 150201,
+          "end_ms": 150459,
+          "confidence": 0.99997544
+        },
+        {
+          "text": "go",
+          "start_ms": 150459,
+          "end_ms": 150700,
+          "confidence": 0.9999821
+        },
+        {
+          "text": "if",
+          "start_ms": 152053,
+          "end_ms": 152149,
+          "confidence": 0.9367532
+        },
+        {
+          "text": "you",
+          "start_ms": 152149,
+          "end_ms": 152310,
+          "confidence": 0.99997425
+        },
+        {
+          "text": "want",
+          "start_ms": 152310,
+          "end_ms": 152520,
+          "confidence": 0.9988153
+        },
+        {
+          "text": "them",
+          "start_ms": 152520,
+          "end_ms": 152632,
+          "confidence": 0.72261566
+        },
+        {
+          "text": "gone.",
+          "start_ms": 152713,
+          "end_ms": 153244,
+          "confidence": 0.99553776
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 154387,
+          "end_ms": 154564,
+          "confidence": 0.72428185
+        },
+        {
+          "text": "tell",
+          "start_ms": 154580,
+          "end_ms": 154886,
+          "confidence": 0.9998369
+        },
+        {
+          "text": "that",
+          "start_ms": 154886,
+          "end_ms": 155128,
+          "confidence": 0.9996482
+        },
+        {
+          "text": "Pharaoh",
+          "start_ms": 155128,
+          "end_ms": 155675,
+          "confidence": 0.9999788
+        },
+        {
+          "text": "how",
+          "start_ms": 156802,
+          "end_ms": 156899,
+          "confidence": 0.9996799
+        },
+        {
+          "text": "you",
+          "start_ms": 156963,
+          "end_ms": 157124,
+          "confidence": 0.9999336
+        },
+        {
+          "text": "like",
+          "start_ms": 157124,
+          "end_ms": 157382,
+          "confidence": 0.9999424
+        },
+        {
+          "text": "those",
+          "start_ms": 157382,
+          "end_ms": 157623,
+          "confidence": 0.9999813
+        },
+        {
+          "text": "frogs.",
+          "start_ms": 157623,
+          "end_ms": 158396,
+          "confidence": 0.99901295
+        },
+        {
+          "text": "You",
+          "start_ms": 159073,
+          "end_ms": 159282,
+          "confidence": 0.99908435
+        },
+        {
+          "text": "better",
+          "start_ms": 159298,
+          "end_ms": 159620,
+          "confidence": 0.99975663
+        },
+        {
+          "text": "let",
+          "start_ms": 159636,
+          "end_ms": 159942,
+          "confidence": 0.9999466
+        },
+        {
+          "text": "me",
+          "start_ms": 159958,
+          "end_ms": 160200,
+          "confidence": 0.9999434
+        },
+        {
+          "text": "go",
+          "start_ms": 160264,
+          "end_ms": 160425,
+          "confidence": 0.99987936
+        },
+        {
+          "text": "if",
+          "start_ms": 161633,
+          "end_ms": 161810,
+          "confidence": 0.99781954
+        },
+        {
+          "text": "you",
+          "start_ms": 161810,
+          "end_ms": 161922,
+          "confidence": 0.9999739
+        },
+        {
+          "text": "want",
+          "start_ms": 162100,
+          "end_ms": 162358,
+          "confidence": 0.99981767
+        },
+        {
+          "text": "them",
+          "start_ms": 162358,
+          "end_ms": 163102,
+          "confidence": 0.9771005
+        },
+        {
+          "text": "gone.",
+          "start_ms": 163506,
+          "end_ms": 163878,
+          "confidence": 0.9930709
+        },
+        {
+          "text": "Well,",
+          "start_ms": 164461,
+          "end_ms": 164542,
+          "confidence": 0.64057726
+        },
+        {
+          "text": "that",
+          "start_ms": 164558,
+          "end_ms": 164833,
+          "confidence": 0.9998492
+        },
+        {
+          "text": "bush",
+          "start_ms": 164865,
+          "end_ms": 165108,
+          "confidence": 0.9956514
+        },
+        {
+          "text": "was",
+          "start_ms": 165205,
+          "end_ms": 165415,
+          "confidence": 0.9999813
+        },
+        {
+          "text": "burning,",
+          "start_ms": 165512,
+          "end_ms": 165771,
+          "confidence": 0.970028
+        },
+        {
+          "text": "but",
+          "start_ms": 165835,
+          "end_ms": 166094,
+          "confidence": 0.99994636
+        },
+        {
+          "text": "he",
+          "start_ms": 166094,
+          "end_ms": 166401,
+          "confidence": 0.7666776
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 166401,
+          "end_ms": 166725,
+          "confidence": 0.9999221
+        },
+        {
+          "text": "burning",
+          "start_ms": 166725,
+          "end_ms": 167194,
+          "confidence": 0.9998029
+        },
+        {
+          "text": "up.",
+          "start_ms": 167291,
+          "end_ms": 167388,
+          "confidence": 0.9572891
+        },
+        {
+          "text": "No,",
+          "start_ms": 167533,
+          "end_ms": 167727,
+          "confidence": 0.9934721
+        },
+        {
+          "text": "no.",
+          "start_ms": 167857,
+          "end_ms": 168019,
+          "confidence": 0.973445
+        },
+        {
+          "text": "Well,",
+          "start_ms": 169248,
+          "end_ms": 169393,
+          "confidence": 0.9716505
+        },
+        {
+          "text": "that",
+          "start_ms": 169409,
+          "end_ms": 169717,
+          "confidence": 0.99999106
+        },
+        {
+          "text": "bush",
+          "start_ms": 169717,
+          "end_ms": 169992,
+          "confidence": 0.9999609
+        },
+        {
+          "text": "was",
+          "start_ms": 170056,
+          "end_ms": 170267,
+          "confidence": 0.99999285
+        },
+        {
+          "text": "burning,",
+          "start_ms": 170299,
+          "end_ms": 170622,
+          "confidence": 0.99944067
+        },
+        {
+          "text": "but",
+          "start_ms": 170687,
+          "end_ms": 171010,
+          "confidence": 0.99997365
+        },
+        {
+          "text": "he",
+          "start_ms": 171010,
+          "end_ms": 171205,
+          "confidence": 0.9998031
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 171269,
+          "end_ms": 171480,
+          "confidence": 0.9998027
+        },
+        {
+          "text": "burning",
+          "start_ms": 171480,
+          "end_ms": 171974,
+          "confidence": 0.9999825
+        },
+        {
+          "text": "up.",
+          "start_ms": 172073,
+          "end_ms": 172172,
+          "confidence": 0.99991316
+        },
+        {
+          "text": "No,",
+          "start_ms": 172254,
+          "end_ms": 172386,
+          "confidence": 0.9995695
+        },
+        {
+          "text": "no,",
+          "start_ms": 172419,
+          "end_ms": 172485,
+          "confidence": 0.9977282
+        },
+        {
+          "text": "no,",
+          "start_ms": 172568,
+          "end_ms": 172732,
+          "confidence": 0.9993403
+        },
+        {
+          "text": "no,",
+          "start_ms": 172831,
+          "end_ms": 172881,
+          "confidence": 0.99685675
+        },
+        {
+          "text": "no,",
+          "start_ms": 172897,
+          "end_ms": 172930,
+          "confidence": 0.9825918
+        },
+        {
+          "text": "no.",
+          "start_ms": 172996,
+          "end_ms": 173161,
+          "confidence": 0.9912484
+        },
+        {
+          "text": "That",
+          "start_ms": 173243,
+          "end_ms": 173309,
+          "confidence": 0.9986804
+        },
+        {
+          "text": "bush",
+          "start_ms": 173309,
+          "end_ms": 173573,
+          "confidence": 0.999877
+        },
+        {
+          "text": "was",
+          "start_ms": 173573,
+          "end_ms": 173623,
+          "confidence": 0.9998808
+        },
+        {
+          "text": "burning,",
+          "start_ms": 173623,
+          "end_ms": 173787,
+          "confidence": 0.9961929
+        },
+        {
+          "text": "but",
+          "start_ms": 173886,
+          "end_ms": 173952,
+          "confidence": 0.99942845
+        },
+        {
+          "text": "he",
+          "start_ms": 173952,
+          "end_ms": 173985,
+          "confidence": 0.99930656
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 173985,
+          "end_ms": 174381,
+          "confidence": 0.93561643
+        },
+        {
+          "text": "burning",
+          "start_ms": 176232,
+          "end_ms": 176764,
+          "confidence": 0.34188575
+        },
+        {
+          "text": "up.",
+          "start_ms": 176796,
+          "end_ms": 176941,
+          "confidence": 0.95346516
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 177408,
+          "end_ms": 177440,
+          "confidence": 0.6509807
+        },
+        {
+          "text": "hey!",
+          "start_ms": 177971,
+          "end_ms": 178004,
+          "confidence": 0.6745877
+        },
+        {
+          "text": "When",
+          "start_ms": 178873,
+          "end_ms": 178954,
+          "confidence": 0.041346446
+        },
+        {
+          "text": "that",
+          "start_ms": 178970,
+          "end_ms": 179276,
+          "confidence": 0.99693644
+        },
+        {
+          "text": "bush",
+          "start_ms": 179276,
+          "end_ms": 179549,
+          "confidence": 0.98632044
+        },
+        {
+          "text": "was",
+          "start_ms": 179598,
+          "end_ms": 179823,
+          "confidence": 0.9995721
+        },
+        {
+          "text": "burning",
+          "start_ms": 179855,
+          "end_ms": 180145,
+          "confidence": 0.9845259
+        },
+        {
+          "text": "up,",
+          "start_ms": 180242,
+          "end_ms": 180483,
+          "confidence": 0.7050437
+        },
+        {
+          "text": "it",
+          "start_ms": 180580,
+          "end_ms": 180725,
+          "confidence": 0.5496089
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 180805,
+          "end_ms": 181111,
+          "confidence": 0.99414355
+        },
+        {
+          "text": "burning",
+          "start_ms": 181127,
+          "end_ms": 181514,
+          "confidence": 0.9976993
+        },
+        {
+          "text": "up.",
+          "start_ms": 181610,
+          "end_ms": 181691,
+          "confidence": 0.987772
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 181852,
+          "end_ms": 182110,
+          "confidence": 0.96842587
+        },
+        {
+          "text": "hey,",
+          "start_ms": 182174,
+          "end_ms": 182416,
+          "confidence": 0.99214023
+        },
+        {
+          "text": "hey,",
+          "start_ms": 182496,
+          "end_ms": 182593,
+          "confidence": 0.9548662
+        },
+        {
+          "text": "hey!",
+          "start_ms": 182818,
+          "end_ms": 183076,
+          "confidence": 0.99208874
+        },
+        {
+          "text": "When",
+          "start_ms": 183704,
+          "end_ms": 183897,
+          "confidence": 0.9374262
+        },
+        {
+          "text": "that",
+          "start_ms": 183897,
+          "end_ms": 184122,
+          "confidence": 0.9994692
+        },
+        {
+          "text": "bush",
+          "start_ms": 184122,
+          "end_ms": 184445,
+          "confidence": 0.99990916
+        },
+        {
+          "text": "was",
+          "start_ms": 184445,
+          "end_ms": 184750,
+          "confidence": 0.9997793
+        },
+        {
+          "text": "burning",
+          "start_ms": 184750,
+          "end_ms": 185137,
+          "confidence": 0.99583286
+        },
+        {
+          "text": "up,",
+          "start_ms": 185153,
+          "end_ms": 185314,
+          "confidence": 0.9940635
+        },
+        {
+          "text": "it",
+          "start_ms": 185395,
+          "end_ms": 185540,
+          "confidence": 0.9983729
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 185540,
+          "end_ms": 185894,
+          "confidence": 0.99994445
+        },
+        {
+          "text": "burning",
+          "start_ms": 185894,
+          "end_ms": 186393,
+          "confidence": 0.9999498
+        },
+        {
+          "text": "up.",
+          "start_ms": 186441,
+          "end_ms": 186554,
+          "confidence": 0.9839544
+        },
+        {
+          "text": "Nah,",
+          "start_ms": 186618,
+          "end_ms": 186731,
+          "confidence": 0.4499706
+        },
+        {
+          "text": "nah,",
+          "start_ms": 186940,
+          "end_ms": 187134,
+          "confidence": 0.9543988
+        },
+        {
+          "text": "it",
+          "start_ms": 187279,
+          "end_ms": 187407,
+          "confidence": 0.93331736
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 187407,
+          "end_ms": 187665,
+          "confidence": 0.9998894
+        },
+        {
+          "text": "burning.",
+          "start_ms": 187665,
+          "end_ms": 188197,
+          "confidence": 0.8901442
+        },
+        {
+          "text": "That",
+          "start_ms": 188551,
+          "end_ms": 188873,
+          "confidence": 0.7749521
+        },
+        {
+          "text": "bush",
+          "start_ms": 188873,
+          "end_ms": 189179,
+          "confidence": 0.9998914
+        },
+        {
+          "text": "was",
+          "start_ms": 189195,
+          "end_ms": 189453,
+          "confidence": 0.9988789
+        },
+        {
+          "text": "burning",
+          "start_ms": 189517,
+          "end_ms": 189775,
+          "confidence": 0.9984686
+        },
+        {
+          "text": "up,",
+          "start_ms": 189904,
+          "end_ms": 190065,
+          "confidence": 0.96487147
+        },
+        {
+          "text": "it",
+          "start_ms": 190161,
+          "end_ms": 190258,
+          "confidence": 0.955711
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 190403,
+          "end_ms": 190709,
+          "confidence": 0.99967945
+        },
+        {
+          "text": "burning",
+          "start_ms": 190725,
+          "end_ms": 191176,
+          "confidence": 0.9996332
+        },
+        {
+          "text": "up.",
+          "start_ms": 191272,
+          "end_ms": 191433,
+          "confidence": 0.96073323
+        },
+        {
+          "text": "It",
+          "start_ms": 191530,
+          "end_ms": 191594,
+          "confidence": 0.946568
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 191594,
+          "end_ms": 191916,
+          "confidence": 0.99993753
+        },
+        {
+          "text": "burning",
+          "start_ms": 191916,
+          "end_ms": 192303,
+          "confidence": 0.99939966
+        },
+        {
+          "text": "up,",
+          "start_ms": 192480,
+          "end_ms": 192561,
+          "confidence": 0.9521441
+        },
+        {
+          "text": "nah.",
+          "start_ms": 192641,
+          "end_ms": 192850,
+          "confidence": 0.71274596
+        },
+        {
+          "text": "When",
+          "start_ms": 193301,
+          "end_ms": 193350,
+          "confidence": 0.83261657
+        },
+        {
+          "text": "that",
+          "start_ms": 193382,
+          "end_ms": 193656,
+          "confidence": 0.99965703
+        },
+        {
+          "text": "bush",
+          "start_ms": 193704,
+          "end_ms": 194010,
+          "confidence": 0.9999435
+        },
+        {
+          "text": "was",
+          "start_ms": 194010,
+          "end_ms": 194235,
+          "confidence": 0.9998504
+        },
+        {
+          "text": "burning",
+          "start_ms": 194348,
+          "end_ms": 194638,
+          "confidence": 0.99910647
+        },
+        {
+          "text": "up,",
+          "start_ms": 194957,
+          "end_ms": 194977,
+          "confidence": 0.9917117
+        },
+        {
+          "text": "it",
+          "start_ms": 194977,
+          "end_ms": 195139,
+          "confidence": 0.9936907
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 195139,
+          "end_ms": 195415,
+          "confidence": 0.99997205
+        },
+        {
+          "text": "burning",
+          "start_ms": 195480,
+          "end_ms": 195983,
+          "confidence": 0.9999324
+        },
+        {
+          "text": "up.",
+          "start_ms": 196048,
+          "end_ms": 196210,
+          "confidence": 0.9959069
+        },
+        {
+          "text": "Nah,",
+          "start_ms": 197022,
+          "end_ms": 197135,
+          "confidence": 0.9398831
+        },
+        {
+          "text": "nah,",
+          "start_ms": 197330,
+          "end_ms": 197460,
+          "confidence": 0.99838203
+        },
+        {
+          "text": "nah.",
+          "start_ms": 197509,
+          "end_ms": 197687,
+          "confidence": 0.9829821
+        },
+        {
+          "text": "When",
+          "start_ms": 198077,
+          "end_ms": 198207,
+          "confidence": 0.6585986
+        },
+        {
+          "text": "that",
+          "start_ms": 198223,
+          "end_ms": 198483,
+          "confidence": 0.99925894
+        },
+        {
+          "text": "bush",
+          "start_ms": 198483,
+          "end_ms": 198726,
+          "confidence": 0.99987674
+        },
+        {
+          "text": "was",
+          "start_ms": 198726,
+          "end_ms": 199099,
+          "confidence": 0.999405
+        },
+        {
+          "text": "burning",
+          "start_ms": 199132,
+          "end_ms": 199343,
+          "confidence": 0.99921083
+        },
+        {
+          "text": "up,",
+          "start_ms": 199359,
+          "end_ms": 199619,
+          "confidence": 0.99547195
+        },
+        {
+          "text": "it",
+          "start_ms": 199846,
+          "end_ms": 199943,
+          "confidence": 0.99176764
+        },
+        {
+          "text": "wasn't",
+          "start_ms": 199943,
+          "end_ms": 200333,
+          "confidence": 0.9999246
+        },
+        {
+          "text": "burning",
+          "start_ms": 200349,
+          "end_ms": 200885,
+          "confidence": 0.9994966
+        },
+        {
+          "text": "up.",
+          "start_ms": 200901,
+          "end_ms": 200949,
+          "confidence": 0.985852
+        },
+        {
+          "text": "Hey,",
+          "start_ms": 201079,
+          "end_ms": 201160,
+          "confidence": 0.7642164
+        },
+        {
+          "text": "hey!",
+          "start_ms": 201368,
+          "end_ms": 201388,
+          "confidence": 0.8786946
+        },
+        {
+          "text": "You're",
+          "start_ms": 201388,
+          "end_ms": 201631,
+          "confidence": 0.046288457
+        },
+        {
+          "text": "crazy.",
+          "start_ms": 201631,
+          "end_ms": 201826,
+          "confidence": 0.08587545
+        },
+        {
+          "text": "I",
+          "start_ms": 206830,
+          "end_ms": 206846,
+          "confidence": 0.811368
+        },
+        {
+          "text": "got",
+          "start_ms": 206991,
+          "end_ms": 207297,
+          "confidence": 0.9854617
+        },
+        {
+          "text": "the",
+          "start_ms": 207330,
+          "end_ms": 207410,
+          "confidence": 0.9642425
+        },
+        {
+          "text": "Holy",
+          "start_ms": 207410,
+          "end_ms": 207781,
+          "confidence": 0.9232849
+        },
+        {
+          "text": "Ghost.",
+          "start_ms": 207894,
+          "end_ms": 208425,
+          "confidence": 0.9011564
+        },
+        {
+          "text": "I'm",
+          "start_ms": 209086,
+          "end_ms": 209231,
+          "confidence": 0.99985605
+        },
+        {
+          "text": "burning",
+          "start_ms": 209263,
+          "end_ms": 209795,
+          "confidence": 0.9990177
+        },
+        {
+          "text": "up.",
+          "start_ms": 209811,
+          "end_ms": 209988,
+          "confidence": 0.9635457
+        },
+        {
+          "text": "I",
+          "start_ms": 211664,
+          "end_ms": 211841,
+          "confidence": 0.9440352
+        },
+        {
+          "text": "got",
+          "start_ms": 211841,
+          "end_ms": 212147,
+          "confidence": 0.99873096
+        },
+        {
+          "text": "the",
+          "start_ms": 212147,
+          "end_ms": 212244,
+          "confidence": 0.9999112
+        },
+        {
+          "text": "Holy",
+          "start_ms": 212244,
+          "end_ms": 212647,
+          "confidence": 0.9999497
+        },
+        {
+          "text": "Ghost.",
+          "start_ms": 212727,
+          "end_ms": 213710,
+          "confidence": 0.9991449
+        },
+        {
+          "text": "I'm",
+          "start_ms": 213920,
+          "end_ms": 214097,
+          "confidence": 0.9999316
+        },
+        {
+          "text": "burning",
+          "start_ms": 214097,
+          "end_ms": 214629,
+          "confidence": 0.9998598
+        },
+        {
+          "text": "up.",
+          "start_ms": 214662,
+          "end_ms": 214759,
+          "confidence": 0.7930614
+        },
+        {
+          "text": "La",
+          "start_ms": 214824,
+          "end_ms": 214905,
+          "confidence": 0.8133271
+        },
+        {
+          "text": "la",
+          "start_ms": 215066,
+          "end_ms": 215260,
+          "confidence": 0.9720944
+        },
+        {
+          "text": "la",
+          "start_ms": 215390,
+          "end_ms": 215487,
+          "confidence": 0.9883108
+        },
+        {
+          "text": "la",
+          "start_ms": 215487,
+          "end_ms": 215746,
+          "confidence": 0.9937039
+        },
+        {
+          "text": "la.",
+          "start_ms": 215794,
+          "end_ms": 215956,
+          "confidence": 0.622229
+        },
+        {
+          "text": "I",
+          "start_ms": 216587,
+          "end_ms": 216603,
+          "confidence": 0.99959046
+        },
+        {
+          "text": "got",
+          "start_ms": 216603,
+          "end_ms": 216927,
+          "confidence": 0.9997632
+        },
+        {
+          "text": "the",
+          "start_ms": 216927,
+          "end_ms": 217007,
+          "confidence": 0.92342126
+        },
+        {
+          "text": "Holy",
+          "start_ms": 217007,
+          "end_ms": 217493,
+          "confidence": 0.99967754
+        },
+        {
+          "text": "Ghost.",
+          "start_ms": 217557,
+          "end_ms": 217978,
+          "confidence": 0.99824786
+        },
+        {
+          "text": "I'm",
+          "start_ms": 218690,
+          "end_ms": 218932,
+          "confidence": 0.99994195
+        },
+        {
+          "text": "burning",
+          "start_ms": 218932,
+          "end_ms": 219434,
+          "confidence": 0.9999783
+        },
+        {
+          "text": "up.",
+          "start_ms": 219499,
+          "end_ms": 219660,
+          "confidence": 0.9999515
+        },
+        {
+          "text": "I",
+          "start_ms": 221267,
+          "end_ms": 221284,
+          "confidence": 0.9987866
+        },
+        {
+          "text": "got",
+          "start_ms": 221364,
+          "end_ms": 221753,
+          "confidence": 0.9994537
+        },
+        {
+          "text": "holy",
+          "start_ms": 221833,
+          "end_ms": 222222,
+          "confidence": 0.37902102
+        },
+        {
+          "text": "holy",
+          "start_ms": 222319,
+          "end_ms": 222707,
+          "confidence": 0.19901997
+        },
+        {
+          "text": "ghost.",
+          "start_ms": 222739,
+          "end_ms": 223224,
+          "confidence": 0.7238632
+        },
+        {
+          "text": "Now",
+          "start_ms": 223386,
+          "end_ms": 223435,
+          "confidence": 0.8209222
+        },
+        {
+          "text": "I'm",
+          "start_ms": 223451,
+          "end_ms": 223629,
+          "confidence": 0.9933331
+        },
+        {
+          "text": "burning",
+          "start_ms": 223629,
+          "end_ms": 224162,
+          "confidence": 0.9998982
+        },
+        {
+          "text": "up.",
+          "start_ms": 224195,
+          "end_ms": 224356,
+          "confidence": 0.9907338
+        },
+        {
+          "text": "I'm",
+          "start_ms": 224664,
+          "end_ms": 224842,
+          "confidence": 0.9995535
+        },
+        {
+          "text": "burning",
+          "start_ms": 224842,
+          "end_ms": 225375,
+          "confidence": 0.99997103
+        },
+        {
+          "text": "up.",
+          "start_ms": 225408,
+          "end_ms": 225569,
+          "confidence": 0.99966675
+        },
+        {
+          "text": "I'm",
+          "start_ms": 225877,
+          "end_ms": 226054,
+          "confidence": 0.99970794
+        },
+        {
+          "text": "burning",
+          "start_ms": 226119,
+          "end_ms": 226588,
+          "confidence": 0.9999536
+        },
+        {
+          "text": "up.",
+          "start_ms": 226620,
+          "end_ms": 226718,
+          "confidence": 0.9994024
+        },
+        {
+          "text": "I'm",
+          "start_ms": 226944,
+          "end_ms": 227187,
+          "confidence": 0.91951275
+        },
+        {
+          "text": "bop",
+          "start_ms": 227187,
+          "end_ms": 227429,
+          "confidence": 0.4228521
+        },
+        {
+          "text": "bop",
+          "start_ms": 227494,
+          "end_ms": 227769,
+          "confidence": 0.99449885
+        },
+        {
+          "text": "bop",
+          "start_ms": 227817,
+          "end_ms": 228076,
+          "confidence": 0.9984835
+        },
+        {
+          "text": "bop",
+          "start_ms": 228076,
+          "end_ms": 228302,
+          "confidence": 0.9872843
+        },
+        {
+          "text": "burning",
+          "start_ms": 228383,
+          "end_ms": 229014,
+          "confidence": 0.3736164
+        },
+        {
+          "text": "up.",
+          "start_ms": 229334,
+          "end_ms": 229354,
+          "confidence": 0.9991805
+        },
+        {
+          "text": "I'm",
+          "start_ms": 229354,
+          "end_ms": 229548,
+          "confidence": 0.9678589
+        },
+        {
+          "text": "bop",
+          "start_ms": 229596,
+          "end_ms": 229839,
+          "confidence": 0.9855524
+        },
+        {
+          "text": "bop",
+          "start_ms": 229920,
+          "end_ms": 230162,
+          "confidence": 0.9998295
+        },
+        {
+          "text": "bop",
+          "start_ms": 230178,
+          "end_ms": 230421,
+          "confidence": 0.99989134
+        },
+        {
+          "text": "bop",
+          "start_ms": 230470,
+          "end_ms": 230590,
+          "confidence": 0.99886227
+        },
+        {
+          "text": "burning",
+          "start_ms": 230590,
+          "end_ms": 230693,
+          "confidence": 0.91352415
+        },
+        {
+          "text": "up.",
+          "start_ms": 230744,
+          "end_ms": 230779,
+          "confidence": 0.99981964
+        },
+        {
+          "text": "I'm",
+          "start_ms": 230916,
+          "end_ms": 231054,
+          "confidence": 0.9921727
+        },
+        {
+          "text": "bop.",
+          "start_ms": 231054,
+          "end_ms": 231208,
+          "confidence": 0.52585876
+        },
+        {
+          "text": "I'm",
+          "start_ms": 231260,
+          "end_ms": 231328,
+          "confidence": 0.98715824
+        },
+        {
+          "text": "burning.",
+          "start_ms": 231328,
+          "end_ms": 231500,
+          "confidence": 0.7533449
+        },
+        {
+          "text": "I'm",
+          "start_ms": 234190,
+          "end_ms": 234368,
+          "confidence": 0.5828322
+        },
+        {
+          "text": "burning",
+          "start_ms": 234433,
+          "end_ms": 234871,
+          "confidence": 0.94615334
+        },
+        {
+          "text": "up,",
+          "start_ms": 235001,
+          "end_ms": 235179,
+          "confidence": 0.85422057
+        },
+        {
+          "text": "I'm",
+          "start_ms": 235406,
+          "end_ms": 235633,
+          "confidence": 0.9995572
+        },
+        {
+          "text": "burning",
+          "start_ms": 235649,
+          "end_ms": 236363,
+          "confidence": 0.9954586
+        },
+        {
+          "text": "up,",
+          "start_ms": 236476,
+          "end_ms": 236638,
+          "confidence": 0.5582283
+        },
+        {
+          "text": "back",
+          "start_ms": 236800,
+          "end_ms": 237157,
+          "confidence": 0.09527077
+        },
+        {
+          "text": "to",
+          "start_ms": 237206,
+          "end_ms": 237352,
+          "confidence": 0.23065281
+        },
+        {
+          "text": "Oregon!",
+          "start_ms": 237433,
+          "end_ms": 238584,
+          "confidence": 0.29686803
+        },
+        {
+          "text": "I'm",
+          "start_ms": 239054,
+          "end_ms": 239233,
+          "confidence": 0.8270403
+        },
+        {
+          "text": "burning",
+          "start_ms": 239233,
+          "end_ms": 239768,
+          "confidence": 0.98817134
+        },
+        {
+          "text": "up,",
+          "start_ms": 239865,
+          "end_ms": 240368,
+          "confidence": 0.9832391
+        },
+        {
+          "text": "back",
+          "start_ms": 241559,
+          "end_ms": 241864,
+          "confidence": 0.85246927
+        },
+        {
+          "text": "to",
+          "start_ms": 241864,
+          "end_ms": 241945,
+          "confidence": 0.9552091
+        },
+        {
+          "text": "Oregon!",
+          "start_ms": 241945,
+          "end_ms": 242684,
+          "confidence": 0.931118
+        },
+        {
+          "text": "Back",
+          "start_ms": 242748,
+          "end_ms": 243005,
+          "confidence": 0.88489115
+        },
+        {
+          "text": "to",
+          "start_ms": 243166,
+          "end_ms": 243230,
+          "confidence": 0.9935802
+        },
+        {
+          "text": "Oregon!",
+          "start_ms": 243230,
+          "end_ms": 243488,
+          "confidence": 0.9111481
+        },
+        {
+          "text": "Back",
+          "start_ms": 243954,
+          "end_ms": 244436,
+          "confidence": 0.510315
+        },
+        {
+          "text": "to",
+          "start_ms": 244436,
+          "end_ms": 244612,
+          "confidence": 0.9951125
+        },
+        {
+          "text": "Oregon!",
+          "start_ms": 244741,
+          "end_ms": 245095,
+          "confidence": 0.98604894
+        },
+        {
+          "text": "I'm",
+          "start_ms": 245159,
+          "end_ms": 245528,
+          "confidence": 0.8202261
+        },
+        {
+          "text": "on",
+          "start_ms": 245625,
+          "end_ms": 245721,
+          "confidence": 0.9950759
+        },
+        {
+          "text": "fire!",
+          "start_ms": 245721,
+          "end_ms": 246203,
+          "confidence": 0.9051493
+        },
+        {
+          "text": "I'm",
+          "start_ms": 247891,
+          "end_ms": 248035,
+          "confidence": 0.970782
+        },
+        {
+          "text": "on",
+          "start_ms": 248035,
+          "end_ms": 248180,
+          "confidence": 0.99993527
+        },
+        {
+          "text": "fire!",
+          "start_ms": 248212,
+          "end_ms": 248614,
+          "confidence": 0.7863683
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 248919,
+          "end_ms": 249321,
+          "confidence": 0.8633744
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 249337,
+          "end_ms": 249723,
+          "confidence": 0.9255331
+        },
+        {
+          "text": "I'm",
+          "start_ms": 250076,
+          "end_ms": 250366,
+          "confidence": 0.9962793
+        },
+        {
+          "text": "on",
+          "start_ms": 250382,
+          "end_ms": 250591,
+          "confidence": 0.99995744
+        },
+        {
+          "text": "fire!",
+          "start_ms": 250623,
+          "end_ms": 250944,
+          "confidence": 0.99763083
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 251266,
+          "end_ms": 251732,
+          "confidence": 0.99854654
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 251748,
+          "end_ms": 252230,
+          "confidence": 0.99955595
+        },
+        {
+          "text": "I'm",
+          "start_ms": 252535,
+          "end_ms": 252648,
+          "confidence": 0.9981741
+        },
+        {
+          "text": "on",
+          "start_ms": 252696,
+          "end_ms": 252921,
+          "confidence": 0.9999515
+        },
+        {
+          "text": "fire!",
+          "start_ms": 252937,
+          "end_ms": 253290,
+          "confidence": 0.9995259
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 253740,
+          "end_ms": 253853,
+          "confidence": 0.99910337
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 254158,
+          "end_ms": 254335,
+          "confidence": 0.9997086
+        },
+        {
+          "text": "I'm",
+          "start_ms": 254897,
+          "end_ms": 255106,
+          "confidence": 0.99775887
+        },
+        {
+          "text": "on",
+          "start_ms": 255106,
+          "end_ms": 255331,
+          "confidence": 0.9999602
+        },
+        {
+          "text": "fire!",
+          "start_ms": 255379,
+          "end_ms": 255781,
+          "confidence": 0.9997011
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 256087,
+          "end_ms": 256392,
+          "confidence": 0.9989907
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 256569,
+          "end_ms": 257035,
+          "confidence": 0.99952376
+        },
+        {
+          "text": "I'm",
+          "start_ms": 257195,
+          "end_ms": 257420,
+          "confidence": 0.99586576
+        },
+        {
+          "text": "on",
+          "start_ms": 257533,
+          "end_ms": 257694,
+          "confidence": 0.99993813
+        },
+        {
+          "text": "fire!",
+          "start_ms": 257694,
+          "end_ms": 258176,
+          "confidence": 0.99836445
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 258481,
+          "end_ms": 258674,
+          "confidence": 0.99250364
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 259043,
+          "end_ms": 259381,
+          "confidence": 0.99796355
+        },
+        {
+          "text": "I'm",
+          "start_ms": 259560,
+          "end_ms": 259899,
+          "confidence": 0.7655704
+        },
+        {
+          "text": "on",
+          "start_ms": 259899,
+          "end_ms": 260077,
+          "confidence": 0.9985781
+        },
+        {
+          "text": "fire,",
+          "start_ms": 260077,
+          "end_ms": 260498,
+          "confidence": 0.72640663
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 260886,
+          "end_ms": 261274,
+          "confidence": 0.9511246
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 261371,
+          "end_ms": 261694,
+          "confidence": 0.9135586
+        },
+        {
+          "text": "I'm",
+          "start_ms": 262034,
+          "end_ms": 262244,
+          "confidence": 0.99988663
+        },
+        {
+          "text": "on",
+          "start_ms": 262325,
+          "end_ms": 262390,
+          "confidence": 0.9999819
+        },
+        {
+          "text": "fire,",
+          "start_ms": 262503,
+          "end_ms": 263069,
+          "confidence": 0.9978863
+        },
+        {
+          "text": "yeah,",
+          "start_ms": 263296,
+          "end_ms": 263651,
+          "confidence": 0.9974184
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 263781,
+          "end_ms": 264460,
+          "confidence": 0.99677867
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.93376315,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "4da5db1c-cda4-47c8-8712-09b197c2ed06",
+    "elapsed_s": 26.7,
+    "word_count": 520,
+    "utterance_count": 1,
+    "line_count": 1,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 280
+  }
+}

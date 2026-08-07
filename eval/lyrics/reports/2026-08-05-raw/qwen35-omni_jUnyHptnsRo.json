@@ -1,0 +1,322 @@
+{
+  "backend_id": "qwen35-omni",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\jUnyHptnsRo_vocal16k.wav",
+  "duration_ms": 267080,
+  "lines": [
+    {
+      "text": "I say of the Lord",
+      "start_ms": 20000,
+      "end_ms": 23764,
+      "text_sk": "Hovorím o Pánovi",
+      "words": null
+    },
+    {
+      "text": "You will cover me with strength keep me underneath Your wings",
+      "start_ms": 23764,
+      "end_ms": 29651,
+      "text_sk": "Pokryješ ma silou a podržíš ma pod svojimi krídlami",
+      "words": null
+    },
+    {
+      "text": "And arrows fly by day but in Your shadow I am safe",
+      "start_ms": 29651,
+      "end_ms": 38722,
+      "text_sk": "A šípy lietajú cez deň, ale v Tvojom tieni som v bezpečí",
+      "words": null
+    },
+    {
+      "text": "And angels guard my way so I will not fear",
+      "start_ms": 38722,
+      "end_ms": 44438,
+      "text_sk": "A anjeli strážia moju cestu, takže sa nebudem báť",
+      "words": null
+    },
+    {
+      "text": "The terror of night it will not come near",
+      "start_ms": 44438,
+      "end_ms": 50828,
+      "text_sk": "Teror noci sa nepriblíži",
+      "words": null
+    },
+    {
+      "text": "Your presence is light and I find refuge in Your love",
+      "start_ms": 50828,
+      "end_ms": 56580,
+      "text_sk": "Tvoja prítomnosť je svetlo a nachádzam útočisko v Tvojej láske",
+      "words": null
+    },
+    {
+      "text": "You're my fortress my God in whom I trust",
+      "start_ms": 56580,
+      "end_ms": 62242,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem",
+      "words": null
+    },
+    {
+      "text": "I take shelter in Your name amazing grace",
+      "start_ms": 62242,
+      "end_ms": 68109,
+      "text_sk": "Nachádzam úkryt v Tvojom mene, úžasná milosť",
+      "words": null
+    },
+    {
+      "text": "My hiding place",
+      "start_ms": 68109,
+      "end_ms": 73747,
+      "text_sk": "Moje útočisko",
+      "words": null
+    },
+    {
+      "text": "I say of the Lord",
+      "start_ms": 73747,
+      "end_ms": 77945,
+      "text_sk": "Hovorím o Pánovi",
+      "words": null
+    },
+    {
+      "text": "I say of the Lord though destruction",
+      "start_ms": 77945,
+      "end_ms": 83062,
+      "text_sk": "Hovorím o Pánovi, hoci skaza",
+      "words": null
+    },
+    {
+      "text": "Though destruction plays the name of Jesus",
+      "start_ms": 83062,
+      "end_ms": 88358,
+      "text_sk": "Hoci skaza hrá meno Ježiša",
+      "words": null
+    },
+    {
+      "text": "And armies beware He will save me from the snare",
+      "start_ms": 88358,
+      "end_ms": 94478,
+      "text_sk": "A armády si dajú pozor, On ma zachráni z pasce",
+      "words": null
+    },
+    {
+      "text": "No harm can tarry so I will not fear",
+      "start_ms": 94478,
+      "end_ms": 100218,
+      "text_sk": "Žiadna škoda nemôže pretrvať, takže sa nebudem báť",
+      "words": null
+    },
+    {
+      "text": "The terror of night it will not come near",
+      "start_ms": 100218,
+      "end_ms": 106044,
+      "text_sk": "Teror noci sa nepriblíži",
+      "words": null
+    },
+    {
+      "text": "Your presence is light and I find refuge in Your love",
+      "start_ms": 106044,
+      "end_ms": 111732,
+      "text_sk": "Tvoja prítomnosť je svetlo a nachádzam útočisko v Tvojej láske",
+      "words": null
+    },
+    {
+      "text": "You're my fortress my God in whom I trust",
+      "start_ms": 111732,
+      "end_ms": 117480,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem",
+      "words": null
+    },
+    {
+      "text": "I take shelter in Your name amazing grace",
+      "start_ms": 117480,
+      "end_ms": 123195,
+      "text_sk": "Nachádzam úkryt v Tvojom mene, úžasná milosť",
+      "words": null
+    },
+    {
+      "text": "My hiding place",
+      "start_ms": 123195,
+      "end_ms": 128860,
+      "text_sk": "Moje útočisko",
+      "words": null
+    },
+    {
+      "text": "Amazing grace my hiding place",
+      "start_ms": 128860,
+      "end_ms": 134640,
+      "text_sk": "Úžasná milosť, moje útočisko",
+      "words": null
+    },
+    {
+      "text": "You are You are You are my hiding place",
+      "start_ms": 134640,
+      "end_ms": 140260,
+      "text_sk": "Ty si Ty si Ty si moje útočisko",
+      "words": null
+    },
+    {
+      "text": "I hear You say because You love me",
+      "start_ms": 140260,
+      "end_ms": 146120,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma miluješ",
+      "words": null
+    },
+    {
+      "text": "I will rescue You I'll deliver You",
+      "start_ms": 146120,
+      "end_ms": 151880,
+      "text_sk": "Zachránim Ťa, vyslobodím Ťa",
+      "words": null
+    },
+    {
+      "text": "I hear You say because You call me",
+      "start_ms": 151880,
+      "end_ms": 157640,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma voláš",
+      "words": null
+    },
+    {
+      "text": "I will answer You I will fight for You",
+      "start_ms": 157640,
+      "end_ms": 163400,
+      "text_sk": "Odpoviem Ti, budem bojovať za Teba",
+      "words": null
+    },
+    {
+      "text": "I hear You say because You love me",
+      "start_ms": 163400,
+      "end_ms": 169160,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma miluješ",
+      "words": null
+    },
+    {
+      "text": "I will rescue You I'll deliver You",
+      "start_ms": 169160,
+      "end_ms": 174920,
+      "text_sk": "Zachránim Ťa, vyslobodím Ťa",
+      "words": null
+    },
+    {
+      "text": "I hear You say because You call me",
+      "start_ms": 174920,
+      "end_ms": 180680,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma voláš",
+      "words": null
+    },
+    {
+      "text": "I will answer You I'll fight for You",
+      "start_ms": 180680,
+      "end_ms": 186440,
+      "text_sk": "Odpoviem Ti, budem bojovať za Teba",
+      "words": null
+    },
+    {
+      "text": "I hear You say although a thousand may fall at my side",
+      "start_ms": 186440,
+      "end_ms": 192200,
+      "text_sk": "Počujem Ťa hovoriť, hoci tisíc môže padnúť po mojom boku",
+      "words": null
+    },
+    {
+      "text": "Ten thousand more I'll stand secure in You",
+      "start_ms": 192200,
+      "end_ms": 197960,
+      "text_sk": "Desaťtisíc ďalších, budem stáť bezpečne v Tebe",
+      "words": null
+    },
+    {
+      "text": "I hear You say call to Your house",
+      "start_ms": 197960,
+      "end_ms": 203720,
+      "text_sk": "Počujem Ťa hovoriť, volaj do svojho domu",
+      "words": null
+    },
+    {
+      "text": "I'll satisfy Your soul with goodness and mercy",
+      "start_ms": 203720,
+      "end_ms": 209480,
+      "text_sk": "Nasýtim Tvoju dušu dobrotou a milosrdenstvom",
+      "words": null
+    },
+    {
+      "text": "I'll fight upon you",
+      "start_ms": 209480,
+      "end_ms": 215240,
+      "text_sk": "Budem bojovať za teba",
+      "words": null
+    },
+    {
+      "text": "I find refuge in Your love",
+      "start_ms": 215240,
+      "end_ms": 221000,
+      "text_sk": "Nachádzam útočisko v Tvojej láske",
+      "words": null
+    },
+    {
+      "text": "You're my fortress my God in whom I trust",
+      "start_ms": 221000,
+      "end_ms": 226760,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem",
+      "words": null
+    },
+    {
+      "text": "I take shelter in Your name amazing grace",
+      "start_ms": 226760,
+      "end_ms": 232520,
+      "text_sk": "Nachádzam úkryt v Tvojom mene, úžasná milosť",
+      "words": null
+    },
+    {
+      "text": "My hiding place",
+      "start_ms": 232520,
+      "end_ms": 238280,
+      "text_sk": "Moje útočisko",
+      "words": null
+    },
+    {
+      "text": "Amazing grace my hiding place",
+      "start_ms": 238280,
+      "end_ms": 244040,
+      "text_sk": "Úžasná milosť, moje útočisko",
+      "words": null
+    },
+    {
+      "text": "I hear You say because You love me",
+      "start_ms": 244040,
+      "end_ms": 249800,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma miluješ",
+      "words": null
+    },
+    {
+      "text": "I will rescue You I'll deliver You",
+      "start_ms": 249800,
+      "end_ms": 255560,
+      "text_sk": "Zachránim Ťa, vyslobodím Ťa",
+      "words": null
+    },
+    {
+      "text": "I hear You say because You know my name",
+      "start_ms": 255560,
+      "end_ms": 261320,
+      "text_sk": "Počujem Ťa hovoriť, pretože poznáš moje meno",
+      "words": null
+    },
+    {
+      "text": "El Shaddai is near Elohim is here",
+      "start_ms": 261320,
+      "end_ms": 267080,
+      "text_sk": "El Shaddai je blízko, Elohim je tu",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "qwen3.5-omni-plus",
+    "elapsed_s": 60.2,
+    "line_count": 43,
+    "finish_reason": "stop",
+    "usage": null,
+    "audio_transport": "transcoded_mp3",
+    "audio_raw_bytes": 20754636,
+    "audio_sent_bytes": 3893229,
+    "audio_sent_b64_chars": 5190972,
+    "audio_format_sent": "mp3"
+  }
+}

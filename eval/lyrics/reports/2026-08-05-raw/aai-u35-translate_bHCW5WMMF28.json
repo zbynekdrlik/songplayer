@@ -1,0 +1,1692 @@
+{
+  "backend_id": "aai-u35-translate",
+  "backend_revision": 2,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\bHCW5WMMF28_vocal16k.wav",
+  "duration_ms": 155184,
+  "lines": [
+    {
+      "text": "One, you made it all, you've got them all. And 2, I'm laughing so because of you.",
+      "start_ms": 6695,
+      "end_ms": 13342,
+      "text_sk": "Jedna, všetko si to zariadil, všetkých si ich získal. A 2, smejem sa kvôli tebe.",
+      "words": [
+        {
+          "text": "One,",
+          "start_ms": 6695,
+          "end_ms": 6791,
+          "confidence": 0.7222546
+        },
+        {
+          "text": "you",
+          "start_ms": 6823,
+          "end_ms": 6904,
+          "confidence": 0.8813465
+        },
+        {
+          "text": "made",
+          "start_ms": 6936,
+          "end_ms": 7322,
+          "confidence": 0.96177155
+        },
+        {
+          "text": "it",
+          "start_ms": 7322,
+          "end_ms": 7371,
+          "confidence": 0.9987797
+        },
+        {
+          "text": "all,",
+          "start_ms": 7419,
+          "end_ms": 7548,
+          "confidence": 0.8283315
+        },
+        {
+          "text": "you've",
+          "start_ms": 7805,
+          "end_ms": 8047,
+          "confidence": 0.66552347
+        },
+        {
+          "text": "got",
+          "start_ms": 8047,
+          "end_ms": 8304,
+          "confidence": 0.98176783
+        },
+        {
+          "text": "them",
+          "start_ms": 8304,
+          "end_ms": 8465,
+          "confidence": 0.5240828
+        },
+        {
+          "text": "all.",
+          "start_ms": 8530,
+          "end_ms": 8594,
+          "confidence": 0.98230296
+        },
+        {
+          "text": "And",
+          "start_ms": 8787,
+          "end_ms": 9028,
+          "confidence": 0.7257533
+        },
+        {
+          "text": "2,",
+          "start_ms": 9028,
+          "end_ms": 9222,
+          "confidence": 0.9968338
+        },
+        {
+          "text": "I'm",
+          "start_ms": 11105,
+          "end_ms": 11427,
+          "confidence": 0.99526286
+        },
+        {
+          "text": "laughing",
+          "start_ms": 11427,
+          "end_ms": 11974,
+          "confidence": 0.85447097
+        },
+        {
+          "text": "so",
+          "start_ms": 12006,
+          "end_ms": 12328,
+          "confidence": 0.72691727
+        },
+        {
+          "text": "because",
+          "start_ms": 12328,
+          "end_ms": 12859,
+          "confidence": 0.96839774
+        },
+        {
+          "text": "of",
+          "start_ms": 12956,
+          "end_ms": 13197,
+          "confidence": 0.9993099
+        },
+        {
+          "text": "you.",
+          "start_ms": 13197,
+          "end_ms": 13342,
+          "confidence": 0.9169378
+        }
+      ]
+    },
+    {
+      "text": "I've got so many reasons to praise. Then there's 3, you're holding me, you set me free. And 4, I'm not a slave to sin no more. I got so many reasons to praise.",
+      "start_ms": 16983,
+      "end_ms": 37283,
+      "text_sk": "Mám toľko dôvodov na chválu. Potom je tu 3, držíš ma, oslobodzuješ ma. A 4, už nie som otrokom hriechu. Mám toľko dôvodov na chválu.",
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 16983,
+          "end_ms": 17161,
+          "confidence": 0.91911733
+        },
+        {
+          "text": "got",
+          "start_ms": 17161,
+          "end_ms": 17567,
+          "confidence": 0.99986136
+        },
+        {
+          "text": "so",
+          "start_ms": 17567,
+          "end_ms": 17973,
+          "confidence": 0.9993598
+        },
+        {
+          "text": "many",
+          "start_ms": 18152,
+          "end_ms": 18834,
+          "confidence": 0.9990994
+        },
+        {
+          "text": "reasons",
+          "start_ms": 19175,
+          "end_ms": 19645,
+          "confidence": 0.9925505
+        },
+        {
+          "text": "to",
+          "start_ms": 19743,
+          "end_ms": 19889,
+          "confidence": 0.99725646
+        },
+        {
+          "text": "praise.",
+          "start_ms": 19921,
+          "end_ms": 20506,
+          "confidence": 0.97512025
+        },
+        {
+          "text": "Then",
+          "start_ms": 20798,
+          "end_ms": 21025,
+          "confidence": 0.9779132
+        },
+        {
+          "text": "there's",
+          "start_ms": 21058,
+          "end_ms": 21301,
+          "confidence": 0.8816943
+        },
+        {
+          "text": "3,",
+          "start_ms": 21301,
+          "end_ms": 21561,
+          "confidence": 0.9859309
+        },
+        {
+          "text": "you're",
+          "start_ms": 23040,
+          "end_ms": 23288,
+          "confidence": 0.92448026
+        },
+        {
+          "text": "holding",
+          "start_ms": 23305,
+          "end_ms": 23619,
+          "confidence": 0.94224286
+        },
+        {
+          "text": "me,",
+          "start_ms": 23653,
+          "end_ms": 23752,
+          "confidence": 0.9742589
+        },
+        {
+          "text": "you",
+          "start_ms": 24067,
+          "end_ms": 24166,
+          "confidence": 0.9903528
+        },
+        {
+          "text": "set",
+          "start_ms": 24166,
+          "end_ms": 24564,
+          "confidence": 0.9929812
+        },
+        {
+          "text": "me",
+          "start_ms": 24564,
+          "end_ms": 24630,
+          "confidence": 0.9994567
+        },
+        {
+          "text": "free.",
+          "start_ms": 24630,
+          "end_ms": 24978,
+          "confidence": 0.9965689
+        },
+        {
+          "text": "And",
+          "start_ms": 25144,
+          "end_ms": 25210,
+          "confidence": 0.9452951
+        },
+        {
+          "text": "4,",
+          "start_ms": 25310,
+          "end_ms": 25658,
+          "confidence": 0.9506998
+        },
+        {
+          "text": "I'm",
+          "start_ms": 27354,
+          "end_ms": 27582,
+          "confidence": 0.9097952
+        },
+        {
+          "text": "not",
+          "start_ms": 27761,
+          "end_ms": 28119,
+          "confidence": 0.9986318
+        },
+        {
+          "text": "a",
+          "start_ms": 28119,
+          "end_ms": 28184,
+          "confidence": 0.96731013
+        },
+        {
+          "text": "slave",
+          "start_ms": 28184,
+          "end_ms": 28640,
+          "confidence": 0.999534
+        },
+        {
+          "text": "to",
+          "start_ms": 28656,
+          "end_ms": 28688,
+          "confidence": 0.99909246
+        },
+        {
+          "text": "sin",
+          "start_ms": 28688,
+          "end_ms": 29046,
+          "confidence": 0.99967575
+        },
+        {
+          "text": "no",
+          "start_ms": 29095,
+          "end_ms": 29258,
+          "confidence": 0.99769443
+        },
+        {
+          "text": "more.",
+          "start_ms": 29323,
+          "end_ms": 30055,
+          "confidence": 0.9960356
+        },
+        {
+          "text": "I",
+          "start_ms": 33330,
+          "end_ms": 33362,
+          "confidence": 0.5435431
+        },
+        {
+          "text": "got",
+          "start_ms": 33442,
+          "end_ms": 33862,
+          "confidence": 0.96217996
+        },
+        {
+          "text": "so",
+          "start_ms": 33862,
+          "end_ms": 34136,
+          "confidence": 0.9988778
+        },
+        {
+          "text": "many",
+          "start_ms": 34346,
+          "end_ms": 35072,
+          "confidence": 0.99967146
+        },
+        {
+          "text": "reasons",
+          "start_ms": 35137,
+          "end_ms": 36154,
+          "confidence": 0.9937257
+        },
+        {
+          "text": "to",
+          "start_ms": 36186,
+          "end_ms": 36267,
+          "confidence": 0.9959442
+        },
+        {
+          "text": "praise.",
+          "start_ms": 36267,
+          "end_ms": 37283,
+          "confidence": 0.92331135
+        }
+      ]
+    },
+    {
+      "text": "In the morning, in the evening, every time of day, we got a reason to lift up Jesus' name. Say, say, we will lift you higher, 'cause you are our desire. Oh, we will lift you higher. We won't stop at no. We won't stop at no. 5. Every need you will provide. 6. God, you are the reason I exist. Yeah, I've got so many reasons to praise. Yeah, in the morning, In the evening, every time of day, we got a reason to lift up Jesus' name. Let's go! We will lift you higher, lift you higher, Jesus. Oh, we will lift you higher, and we won't stop it. No, we won't stop it. No, gonna use all that we got to praise you on and on. Let everything that has breath give him praise. Let Let all the earth rejoice and make a joyful noise and give him all the praise. Oh yeah! Gonna use all that we got to praise him all and all. Let everything that has breath give him praise. Let all the earth rejoice and make a joyful noise and give him all the praise. Yeah!",
+      "start_ms": 38348,
+      "end_ms": 135039,
+      "text_sk": "Ráno, večer, v každom dennom čase, máme dôvod vyzdvihnúť Ježišovo meno. Hovoríme, hovoríme, vyzdvihneme ťa vyššie, pretože si našou túžbou. Ó, vyzdvihneme ťa vyššie. Nezastavíme sa. Nezastavíme sa. 5. Každú potrebu naplníš. 6. Bože, si dôvodom mojej existencie. Áno, mám toľko dôvodov chváliť. Áno, ráno, večer, v každom dennom čase, máme dôvod vyzdvihnúť Ježišovo meno. Poďme! Vyzdvihneme ťa vyššie, vyzdvihneme ťa vyššie, Ježišu. Ó, vyzdvihneme ťa vyššie a nezastavíme sa. Nie, nezastavíme sa. Použijeme všetko, čo máme, aby sme ťa chválili stále dookola. Nech všetko, čo má dych, mu vzdáva chválu. Nech sa celá zem raduje a nech vydáva radostný zvuk a nech mu vzdáva všetku chválu. Ó áno! Použijeme všetko, čo máme, aby sme ho chválili stále dookola. Nech všetko, čo má dych, mu vzdáva chválu. Nech sa celá zem raduje a nech vydáva radostný zvuk a nech mu vzdáva všetku chválu. Áno!",
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 38348,
+          "end_ms": 38429,
+          "confidence": 0.89755994
+        },
+        {
+          "text": "the",
+          "start_ms": 38429,
+          "end_ms": 38510,
+          "confidence": 0.99997616
+        },
+        {
+          "text": "morning,",
+          "start_ms": 38510,
+          "end_ms": 39058,
+          "confidence": 0.99541265
+        },
+        {
+          "text": "in",
+          "start_ms": 39333,
+          "end_ms": 39413,
+          "confidence": 0.99874145
+        },
+        {
+          "text": "the",
+          "start_ms": 39413,
+          "end_ms": 39559,
+          "confidence": 0.9999882
+        },
+        {
+          "text": "evening,",
+          "start_ms": 39639,
+          "end_ms": 40107,
+          "confidence": 0.99677694
+        },
+        {
+          "text": "every",
+          "start_ms": 40382,
+          "end_ms": 40559,
+          "confidence": 0.99175537
+        },
+        {
+          "text": "time",
+          "start_ms": 40559,
+          "end_ms": 40817,
+          "confidence": 0.9997305
+        },
+        {
+          "text": "of",
+          "start_ms": 40882,
+          "end_ms": 41011,
+          "confidence": 0.9987857
+        },
+        {
+          "text": "day,",
+          "start_ms": 41011,
+          "end_ms": 41269,
+          "confidence": 0.89587146
+        },
+        {
+          "text": "we",
+          "start_ms": 42238,
+          "end_ms": 42318,
+          "confidence": 0.9871393
+        },
+        {
+          "text": "got",
+          "start_ms": 42318,
+          "end_ms": 42560,
+          "confidence": 0.98807806
+        },
+        {
+          "text": "a",
+          "start_ms": 42657,
+          "end_ms": 42673,
+          "confidence": 0.9993393
+        },
+        {
+          "text": "reason",
+          "start_ms": 42690,
+          "end_ms": 43093,
+          "confidence": 0.9991136
+        },
+        {
+          "text": "to",
+          "start_ms": 43351,
+          "end_ms": 43448,
+          "confidence": 0.98769253
+        },
+        {
+          "text": "lift",
+          "start_ms": 43448,
+          "end_ms": 43996,
+          "confidence": 0.99988914
+        },
+        {
+          "text": "up",
+          "start_ms": 43996,
+          "end_ms": 44093,
+          "confidence": 0.9995309
+        },
+        {
+          "text": "Jesus'",
+          "start_ms": 44093,
+          "end_ms": 44642,
+          "confidence": 0.9892239
+        },
+        {
+          "text": "name.",
+          "start_ms": 44642,
+          "end_ms": 44755,
+          "confidence": 0.99147594
+        },
+        {
+          "text": "Say,",
+          "start_ms": 44819,
+          "end_ms": 45061,
+          "confidence": 0.71783507
+        },
+        {
+          "text": "say,",
+          "start_ms": 45319,
+          "end_ms": 45561,
+          "confidence": 0.70222116
+        },
+        {
+          "text": "we",
+          "start_ms": 45690,
+          "end_ms": 45884,
+          "confidence": 0.6272697
+        },
+        {
+          "text": "will",
+          "start_ms": 46190,
+          "end_ms": 46529,
+          "confidence": 0.9918108
+        },
+        {
+          "text": "lift",
+          "start_ms": 46674,
+          "end_ms": 47223,
+          "confidence": 0.9999596
+        },
+        {
+          "text": "you",
+          "start_ms": 47223,
+          "end_ms": 47481,
+          "confidence": 0.9552431
+        },
+        {
+          "text": "higher,",
+          "start_ms": 47723,
+          "end_ms": 48707,
+          "confidence": 0.73231757
+        },
+        {
+          "text": "'cause",
+          "start_ms": 48836,
+          "end_ms": 49627,
+          "confidence": 0.9840141
+        },
+        {
+          "text": "you",
+          "start_ms": 49804,
+          "end_ms": 49869,
+          "confidence": 0.9987317
+        },
+        {
+          "text": "are",
+          "start_ms": 50369,
+          "end_ms": 50740,
+          "confidence": 0.99401337
+        },
+        {
+          "text": "our",
+          "start_ms": 50853,
+          "end_ms": 51143,
+          "confidence": 0.99833316
+        },
+        {
+          "text": "desire.",
+          "start_ms": 51272,
+          "end_ms": 52063,
+          "confidence": 0.9774913
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 53577,
+          "end_ms": 53754,
+          "confidence": 0.92725754
+        },
+        {
+          "text": "we",
+          "start_ms": 53819,
+          "end_ms": 54012,
+          "confidence": 0.48366854
+        },
+        {
+          "text": "will",
+          "start_ms": 54302,
+          "end_ms": 54689,
+          "confidence": 0.9942622
+        },
+        {
+          "text": "lift",
+          "start_ms": 54866,
+          "end_ms": 55350,
+          "confidence": 0.99992347
+        },
+        {
+          "text": "you",
+          "start_ms": 55350,
+          "end_ms": 55495,
+          "confidence": 0.9974132
+        },
+        {
+          "text": "higher.",
+          "start_ms": 55833,
+          "end_ms": 56672,
+          "confidence": 0.9372712
+        },
+        {
+          "text": "We",
+          "start_ms": 57929,
+          "end_ms": 58122,
+          "confidence": 0.6888815
+        },
+        {
+          "text": "won't",
+          "start_ms": 58267,
+          "end_ms": 58622,
+          "confidence": 0.99988896
+        },
+        {
+          "text": "stop",
+          "start_ms": 58622,
+          "end_ms": 58993,
+          "confidence": 0.9999722
+        },
+        {
+          "text": "at",
+          "start_ms": 59138,
+          "end_ms": 59315,
+          "confidence": 0.32478678
+        },
+        {
+          "text": "no.",
+          "start_ms": 59380,
+          "end_ms": 59637,
+          "confidence": 0.7674683
+        },
+        {
+          "text": "We",
+          "start_ms": 59944,
+          "end_ms": 60137,
+          "confidence": 0.76643854
+        },
+        {
+          "text": "won't",
+          "start_ms": 60347,
+          "end_ms": 60637,
+          "confidence": 0.9997556
+        },
+        {
+          "text": "stop",
+          "start_ms": 60637,
+          "end_ms": 60991,
+          "confidence": 0.99990225
+        },
+        {
+          "text": "at",
+          "start_ms": 61153,
+          "end_ms": 61394,
+          "confidence": 0.9991567
+        },
+        {
+          "text": "no.",
+          "start_ms": 61540,
+          "end_ms": 61669,
+          "confidence": 0.98895895
+        },
+        {
+          "text": "5.",
+          "start_ms": 61815,
+          "end_ms": 62561,
+          "confidence": 0.7689962
+        },
+        {
+          "text": "Every",
+          "start_ms": 63988,
+          "end_ms": 64296,
+          "confidence": 0.6649964
+        },
+        {
+          "text": "need",
+          "start_ms": 64296,
+          "end_ms": 64799,
+          "confidence": 0.99983144
+        },
+        {
+          "text": "you",
+          "start_ms": 64799,
+          "end_ms": 64863,
+          "confidence": 0.9035214
+        },
+        {
+          "text": "will",
+          "start_ms": 65042,
+          "end_ms": 65172,
+          "confidence": 0.7800788
+        },
+        {
+          "text": "provide.",
+          "start_ms": 65220,
+          "end_ms": 65869,
+          "confidence": 0.9982891
+        },
+        {
+          "text": "6.",
+          "start_ms": 67982,
+          "end_ms": 68002,
+          "confidence": 0.9971765
+        },
+        {
+          "text": "God,",
+          "start_ms": 68002,
+          "end_ms": 68283,
+          "confidence": 0.927272
+        },
+        {
+          "text": "you",
+          "start_ms": 68332,
+          "end_ms": 68398,
+          "confidence": 0.9944067
+        },
+        {
+          "text": "are",
+          "start_ms": 68498,
+          "end_ms": 68762,
+          "confidence": 0.9986706
+        },
+        {
+          "text": "the",
+          "start_ms": 68762,
+          "end_ms": 69043,
+          "confidence": 0.9998116
+        },
+        {
+          "text": "reason",
+          "start_ms": 69093,
+          "end_ms": 69456,
+          "confidence": 0.999718
+        },
+        {
+          "text": "I",
+          "start_ms": 69572,
+          "end_ms": 69704,
+          "confidence": 0.99761826
+        },
+        {
+          "text": "exist.",
+          "start_ms": 69985,
+          "end_ms": 70233,
+          "confidence": 0.99836314
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 73440,
+          "end_ms": 73842,
+          "confidence": 0.9547085
+        },
+        {
+          "text": "I've",
+          "start_ms": 73939,
+          "end_ms": 74116,
+          "confidence": 0.9994691
+        },
+        {
+          "text": "got",
+          "start_ms": 74116,
+          "end_ms": 74438,
+          "confidence": 0.9999641
+        },
+        {
+          "text": "so",
+          "start_ms": 74438,
+          "end_ms": 74921,
+          "confidence": 0.9997732
+        },
+        {
+          "text": "many",
+          "start_ms": 75018,
+          "end_ms": 75774,
+          "confidence": 0.9998617
+        },
+        {
+          "text": "reasons",
+          "start_ms": 76209,
+          "end_ms": 76676,
+          "confidence": 0.99904543
+        },
+        {
+          "text": "to",
+          "start_ms": 76676,
+          "end_ms": 76837,
+          "confidence": 0.9996031
+        },
+        {
+          "text": "praise.",
+          "start_ms": 76837,
+          "end_ms": 77594,
+          "confidence": 0.9573342
+        },
+        {
+          "text": "Yeah,",
+          "start_ms": 77658,
+          "end_ms": 78786,
+          "confidence": 0.771988
+        },
+        {
+          "text": "in",
+          "start_ms": 79011,
+          "end_ms": 79059,
+          "confidence": 0.9939697
+        },
+        {
+          "text": "the",
+          "start_ms": 79108,
+          "end_ms": 79253,
+          "confidence": 0.9999018
+        },
+        {
+          "text": "morning,",
+          "start_ms": 79253,
+          "end_ms": 79687,
+          "confidence": 0.8931747
+        },
+        {
+          "text": "In",
+          "start_ms": 79982,
+          "end_ms": 80062,
+          "confidence": 0.6010377
+        },
+        {
+          "text": "the",
+          "start_ms": 80062,
+          "end_ms": 80286,
+          "confidence": 0.99996686
+        },
+        {
+          "text": "evening,",
+          "start_ms": 80286,
+          "end_ms": 80863,
+          "confidence": 0.98605156
+        },
+        {
+          "text": "every",
+          "start_ms": 81007,
+          "end_ms": 81152,
+          "confidence": 0.9999701
+        },
+        {
+          "text": "time",
+          "start_ms": 81184,
+          "end_ms": 81456,
+          "confidence": 0.9998555
+        },
+        {
+          "text": "of",
+          "start_ms": 81520,
+          "end_ms": 81649,
+          "confidence": 0.99954164
+        },
+        {
+          "text": "day,",
+          "start_ms": 81649,
+          "end_ms": 82162,
+          "confidence": 0.9188932
+        },
+        {
+          "text": "we",
+          "start_ms": 82867,
+          "end_ms": 82947,
+          "confidence": 0.9996617
+        },
+        {
+          "text": "got",
+          "start_ms": 82947,
+          "end_ms": 83188,
+          "confidence": 0.98783225
+        },
+        {
+          "text": "a",
+          "start_ms": 83188,
+          "end_ms": 83204,
+          "confidence": 0.9998343
+        },
+        {
+          "text": "reason",
+          "start_ms": 83252,
+          "end_ms": 83797,
+          "confidence": 0.9999907
+        },
+        {
+          "text": "to",
+          "start_ms": 84005,
+          "end_ms": 84230,
+          "confidence": 0.9962515
+        },
+        {
+          "text": "lift",
+          "start_ms": 84230,
+          "end_ms": 84614,
+          "confidence": 0.9989379
+        },
+        {
+          "text": "up",
+          "start_ms": 84614,
+          "end_ms": 84775,
+          "confidence": 0.9443712
+        },
+        {
+          "text": "Jesus'",
+          "start_ms": 84775,
+          "end_ms": 85304,
+          "confidence": 0.99094963
+        },
+        {
+          "text": "name.",
+          "start_ms": 85336,
+          "end_ms": 85528,
+          "confidence": 0.9953366
+        },
+        {
+          "text": "Let's",
+          "start_ms": 85576,
+          "end_ms": 85833,
+          "confidence": 0.9999422
+        },
+        {
+          "text": "go!",
+          "start_ms": 85833,
+          "end_ms": 86073,
+          "confidence": 0.96975857
+        },
+        {
+          "text": "We",
+          "start_ms": 86378,
+          "end_ms": 86634,
+          "confidence": 0.9992786
+        },
+        {
+          "text": "will",
+          "start_ms": 86875,
+          "end_ms": 87323,
+          "confidence": 0.99534804
+        },
+        {
+          "text": "lift",
+          "start_ms": 87355,
+          "end_ms": 87900,
+          "confidence": 0.999954
+        },
+        {
+          "text": "you",
+          "start_ms": 87900,
+          "end_ms": 88045,
+          "confidence": 0.92537576
+        },
+        {
+          "text": "higher,",
+          "start_ms": 88397,
+          "end_ms": 89375,
+          "confidence": 0.7039765
+        },
+        {
+          "text": "lift",
+          "start_ms": 89680,
+          "end_ms": 90465,
+          "confidence": 0.44102222
+        },
+        {
+          "text": "you",
+          "start_ms": 90465,
+          "end_ms": 90577,
+          "confidence": 0.99963844
+        },
+        {
+          "text": "higher,",
+          "start_ms": 90882,
+          "end_ms": 91684,
+          "confidence": 0.7557177
+        },
+        {
+          "text": "Jesus.",
+          "start_ms": 91908,
+          "end_ms": 93848,
+          "confidence": 0.49876317
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 94248,
+          "end_ms": 94425,
+          "confidence": 0.9899205
+        },
+        {
+          "text": "we",
+          "start_ms": 94954,
+          "end_ms": 94986,
+          "confidence": 0.9984693
+        },
+        {
+          "text": "will",
+          "start_ms": 94986,
+          "end_ms": 95178,
+          "confidence": 0.9999411
+        },
+        {
+          "text": "lift",
+          "start_ms": 95451,
+          "end_ms": 95948,
+          "confidence": 0.99999416
+        },
+        {
+          "text": "you",
+          "start_ms": 96012,
+          "end_ms": 96092,
+          "confidence": 0.9999548
+        },
+        {
+          "text": "higher,",
+          "start_ms": 96477,
+          "end_ms": 97535,
+          "confidence": 0.9369811
+        },
+        {
+          "text": "and",
+          "start_ms": 98416,
+          "end_ms": 98480,
+          "confidence": 0.9989336
+        },
+        {
+          "text": "we",
+          "start_ms": 98577,
+          "end_ms": 98817,
+          "confidence": 0.999984
+        },
+        {
+          "text": "won't",
+          "start_ms": 98897,
+          "end_ms": 99057,
+          "confidence": 0.9999502
+        },
+        {
+          "text": "stop",
+          "start_ms": 99154,
+          "end_ms": 99618,
+          "confidence": 0.99999225
+        },
+        {
+          "text": "it.",
+          "start_ms": 99763,
+          "end_ms": 99955,
+          "confidence": 0.63541
+        },
+        {
+          "text": "No,",
+          "start_ms": 100099,
+          "end_ms": 100340,
+          "confidence": 0.99367625
+        },
+        {
+          "text": "we",
+          "start_ms": 100644,
+          "end_ms": 100821,
+          "confidence": 0.9996803
+        },
+        {
+          "text": "won't",
+          "start_ms": 100981,
+          "end_ms": 101205,
+          "confidence": 0.9999901
+        },
+        {
+          "text": "stop",
+          "start_ms": 101205,
+          "end_ms": 101606,
+          "confidence": 0.9999957
+        },
+        {
+          "text": "it.",
+          "start_ms": 101847,
+          "end_ms": 102039,
+          "confidence": 0.99789536
+        },
+        {
+          "text": "No,",
+          "start_ms": 102087,
+          "end_ms": 102344,
+          "confidence": 0.98602635
+        },
+        {
+          "text": "gonna",
+          "start_ms": 103386,
+          "end_ms": 103690,
+          "confidence": 0.8802091
+        },
+        {
+          "text": "use",
+          "start_ms": 103690,
+          "end_ms": 104011,
+          "confidence": 0.9999949
+        },
+        {
+          "text": "all",
+          "start_ms": 104011,
+          "end_ms": 104123,
+          "confidence": 0.99996877
+        },
+        {
+          "text": "that",
+          "start_ms": 104123,
+          "end_ms": 104395,
+          "confidence": 0.99972767
+        },
+        {
+          "text": "we",
+          "start_ms": 104428,
+          "end_ms": 104668,
+          "confidence": 0.99996305
+        },
+        {
+          "text": "got",
+          "start_ms": 104668,
+          "end_ms": 105389,
+          "confidence": 0.99939644
+        },
+        {
+          "text": "to",
+          "start_ms": 105389,
+          "end_ms": 105630,
+          "confidence": 0.99872017
+        },
+        {
+          "text": "praise",
+          "start_ms": 105630,
+          "end_ms": 105950,
+          "confidence": 0.999607
+        },
+        {
+          "text": "you",
+          "start_ms": 105950,
+          "end_ms": 106207,
+          "confidence": 0.55205107
+        },
+        {
+          "text": "on",
+          "start_ms": 106271,
+          "end_ms": 106511,
+          "confidence": 0.99717194
+        },
+        {
+          "text": "and",
+          "start_ms": 106511,
+          "end_ms": 106816,
+          "confidence": 0.99992764
+        },
+        {
+          "text": "on.",
+          "start_ms": 106816,
+          "end_ms": 107281,
+          "confidence": 0.9997219
+        },
+        {
+          "text": "Let",
+          "start_ms": 107489,
+          "end_ms": 107778,
+          "confidence": 0.99930036
+        },
+        {
+          "text": "everything",
+          "start_ms": 107778,
+          "end_ms": 108483,
+          "confidence": 0.9999665
+        },
+        {
+          "text": "that",
+          "start_ms": 108515,
+          "end_ms": 108772,
+          "confidence": 0.999961
+        },
+        {
+          "text": "has",
+          "start_ms": 108772,
+          "end_ms": 109124,
+          "confidence": 0.9997975
+        },
+        {
+          "text": "breath",
+          "start_ms": 109237,
+          "end_ms": 109605,
+          "confidence": 0.99996054
+        },
+        {
+          "text": "give",
+          "start_ms": 109782,
+          "end_ms": 110246,
+          "confidence": 0.99974185
+        },
+        {
+          "text": "him",
+          "start_ms": 110279,
+          "end_ms": 110695,
+          "confidence": 0.97147244
+        },
+        {
+          "text": "praise.",
+          "start_ms": 110743,
+          "end_ms": 111208,
+          "confidence": 0.9983011
+        },
+        {
+          "text": "Let",
+          "start_ms": 111561,
+          "end_ms": 111930,
+          "confidence": 0.8607687
+        },
+        {
+          "text": "Let",
+          "start_ms": 111898,
+          "end_ms": 112286,
+          "confidence": 0.62976885
+        },
+        {
+          "text": "all",
+          "start_ms": 112286,
+          "end_ms": 112432,
+          "confidence": 0.9983298
+        },
+        {
+          "text": "the",
+          "start_ms": 112448,
+          "end_ms": 112529,
+          "confidence": 0.9965373
+        },
+        {
+          "text": "earth",
+          "start_ms": 112529,
+          "end_ms": 112561,
+          "confidence": 0.99750394
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 112561,
+          "end_ms": 113192,
+          "confidence": 0.9999589
+        },
+        {
+          "text": "and",
+          "start_ms": 113564,
+          "end_ms": 113645,
+          "confidence": 0.9252298
+        },
+        {
+          "text": "make",
+          "start_ms": 113807,
+          "end_ms": 114130,
+          "confidence": 0.99985325
+        },
+        {
+          "text": "a",
+          "start_ms": 114130,
+          "end_ms": 114227,
+          "confidence": 0.9990121
+        },
+        {
+          "text": "joyful",
+          "start_ms": 114227,
+          "end_ms": 114729,
+          "confidence": 0.9998863
+        },
+        {
+          "text": "noise",
+          "start_ms": 114729,
+          "end_ms": 115165,
+          "confidence": 0.99984217
+        },
+        {
+          "text": "and",
+          "start_ms": 115764,
+          "end_ms": 115845,
+          "confidence": 0.6405797
+        },
+        {
+          "text": "give",
+          "start_ms": 115845,
+          "end_ms": 116152,
+          "confidence": 0.99982315
+        },
+        {
+          "text": "him",
+          "start_ms": 116152,
+          "end_ms": 116411,
+          "confidence": 0.62418395
+        },
+        {
+          "text": "all",
+          "start_ms": 116411,
+          "end_ms": 116524,
+          "confidence": 0.9991671
+        },
+        {
+          "text": "the",
+          "start_ms": 116637,
+          "end_ms": 116832,
+          "confidence": 0.996693
+        },
+        {
+          "text": "praise.",
+          "start_ms": 116880,
+          "end_ms": 118077,
+          "confidence": 0.9255295
+        },
+        {
+          "text": "Oh",
+          "start_ms": 118255,
+          "end_ms": 118336,
+          "confidence": 0.61141723
+        },
+        {
+          "text": "yeah!",
+          "start_ms": 118352,
+          "end_ms": 118530,
+          "confidence": 0.7909851
+        },
+        {
+          "text": "Gonna",
+          "start_ms": 119646,
+          "end_ms": 120034,
+          "confidence": 0.5710022
+        },
+        {
+          "text": "use",
+          "start_ms": 120034,
+          "end_ms": 120277,
+          "confidence": 0.99948126
+        },
+        {
+          "text": "all",
+          "start_ms": 120277,
+          "end_ms": 120455,
+          "confidence": 0.6796867
+        },
+        {
+          "text": "that",
+          "start_ms": 120455,
+          "end_ms": 120697,
+          "confidence": 0.91088027
+        },
+        {
+          "text": "we",
+          "start_ms": 120697,
+          "end_ms": 120795,
+          "confidence": 0.99880064
+        },
+        {
+          "text": "got",
+          "start_ms": 121070,
+          "end_ms": 121554,
+          "confidence": 0.95699036
+        },
+        {
+          "text": "to",
+          "start_ms": 121586,
+          "end_ms": 121763,
+          "confidence": 0.8821713
+        },
+        {
+          "text": "praise",
+          "start_ms": 121892,
+          "end_ms": 122199,
+          "confidence": 0.9988741
+        },
+        {
+          "text": "him",
+          "start_ms": 122215,
+          "end_ms": 122473,
+          "confidence": 0.91225874
+        },
+        {
+          "text": "all",
+          "start_ms": 122473,
+          "end_ms": 122715,
+          "confidence": 0.4799111
+        },
+        {
+          "text": "and",
+          "start_ms": 122780,
+          "end_ms": 122973,
+          "confidence": 0.6151184
+        },
+        {
+          "text": "all.",
+          "start_ms": 123022,
+          "end_ms": 123199,
+          "confidence": 0.98468846
+        },
+        {
+          "text": "Let",
+          "start_ms": 123683,
+          "end_ms": 124006,
+          "confidence": 0.5103575
+        },
+        {
+          "text": "everything",
+          "start_ms": 124006,
+          "end_ms": 124700,
+          "confidence": 0.9991941
+        },
+        {
+          "text": "that",
+          "start_ms": 124732,
+          "end_ms": 125038,
+          "confidence": 0.9969842
+        },
+        {
+          "text": "has",
+          "start_ms": 125038,
+          "end_ms": 125426,
+          "confidence": 0.9980737
+        },
+        {
+          "text": "breath",
+          "start_ms": 125538,
+          "end_ms": 125990,
+          "confidence": 0.9997794
+        },
+        {
+          "text": "give",
+          "start_ms": 126022,
+          "end_ms": 126571,
+          "confidence": 0.99465597
+        },
+        {
+          "text": "him",
+          "start_ms": 126571,
+          "end_ms": 126990,
+          "confidence": 0.99891555
+        },
+        {
+          "text": "praise.",
+          "start_ms": 126990,
+          "end_ms": 127442,
+          "confidence": 0.99509305
+        },
+        {
+          "text": "Let",
+          "start_ms": 127797,
+          "end_ms": 128168,
+          "confidence": 0.93416005
+        },
+        {
+          "text": "all",
+          "start_ms": 128184,
+          "end_ms": 128313,
+          "confidence": 0.9998789
+        },
+        {
+          "text": "the",
+          "start_ms": 128346,
+          "end_ms": 128539,
+          "confidence": 0.99948114
+        },
+        {
+          "text": "earth",
+          "start_ms": 128684,
+          "end_ms": 128814,
+          "confidence": 0.9998216
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 128846,
+          "end_ms": 129604,
+          "confidence": 0.9998535
+        },
+        {
+          "text": "and",
+          "start_ms": 129878,
+          "end_ms": 130136,
+          "confidence": 0.99164724
+        },
+        {
+          "text": "make",
+          "start_ms": 130136,
+          "end_ms": 130443,
+          "confidence": 0.99964404
+        },
+        {
+          "text": "a",
+          "start_ms": 130443,
+          "end_ms": 130540,
+          "confidence": 0.99921644
+        },
+        {
+          "text": "joyful",
+          "start_ms": 130848,
+          "end_ms": 131093,
+          "confidence": 0.99802554
+        },
+        {
+          "text": "noise",
+          "start_ms": 131093,
+          "end_ms": 131404,
+          "confidence": 0.99985397
+        },
+        {
+          "text": "and",
+          "start_ms": 131846,
+          "end_ms": 132092,
+          "confidence": 0.9726796
+        },
+        {
+          "text": "give",
+          "start_ms": 132092,
+          "end_ms": 132403,
+          "confidence": 0.9995764
+        },
+        {
+          "text": "him",
+          "start_ms": 132403,
+          "end_ms": 132730,
+          "confidence": 0.9986059
+        },
+        {
+          "text": "all",
+          "start_ms": 132730,
+          "end_ms": 132779,
+          "confidence": 0.99871945
+        },
+        {
+          "text": "the",
+          "start_ms": 132845,
+          "end_ms": 133025,
+          "confidence": 0.9990734
+        },
+        {
+          "text": "praise.",
+          "start_ms": 133074,
+          "end_ms": 134646,
+          "confidence": 0.9493144
+        },
+        {
+          "text": "Yeah!",
+          "start_ms": 134695,
+          "end_ms": 135039,
+          "confidence": 0.682062
+        }
+      ]
+    },
+    {
+      "text": "Say! We will lift you higher.",
+      "start_ms": 138531,
+      "end_ms": 142280,
+      "text_sk": "Povedzte! Pozdvihneme vás vyššie.",
+      "words": [
+        {
+          "text": "Say!",
+          "start_ms": 138531,
+          "end_ms": 138951,
+          "confidence": 0.5695195
+        },
+        {
+          "text": "We",
+          "start_ms": 139258,
+          "end_ms": 139516,
+          "confidence": 0.99687386
+        },
+        {
+          "text": "will",
+          "start_ms": 139743,
+          "end_ms": 140131,
+          "confidence": 0.98172957
+        },
+        {
+          "text": "lift",
+          "start_ms": 140244,
+          "end_ms": 140729,
+          "confidence": 0.99983966
+        },
+        {
+          "text": "you",
+          "start_ms": 140793,
+          "end_ms": 140939,
+          "confidence": 0.99831045
+        },
+        {
+          "text": "higher.",
+          "start_ms": 141278,
+          "end_ms": 142280,
+          "confidence": 0.8426066
+        }
+      ]
+    },
+    {
+      "text": "You are our desire. Oh, we will lift you higher. Oh, and we won't stop it, no! We won't stop it, no!",
+      "start_ms": 143298,
+      "end_ms": 155184,
+      "text_sk": "Ste našou túžbou. Ó, pozdvihneme vás vyššie. Ó, a nezastavíme to, nie! Nezastavíme to, nie!",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 143298,
+          "end_ms": 143492,
+          "confidence": 0.6766273
+        },
+        {
+          "text": "are",
+          "start_ms": 143864,
+          "end_ms": 144333,
+          "confidence": 0.9599003
+        },
+        {
+          "text": "our",
+          "start_ms": 144430,
+          "end_ms": 144737,
+          "confidence": 0.9284417
+        },
+        {
+          "text": "desire.",
+          "start_ms": 144769,
+          "end_ms": 146806,
+          "confidence": 0.8724688
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 147096,
+          "end_ms": 147161,
+          "confidence": 0.97936976
+        },
+        {
+          "text": "we",
+          "start_ms": 147354,
+          "end_ms": 147612,
+          "confidence": 0.99808455
+        },
+        {
+          "text": "will",
+          "start_ms": 147837,
+          "end_ms": 148047,
+          "confidence": 0.9993218
+        },
+        {
+          "text": "lift",
+          "start_ms": 148079,
+          "end_ms": 148901,
+          "confidence": 0.9999616
+        },
+        {
+          "text": "you",
+          "start_ms": 148901,
+          "end_ms": 149126,
+          "confidence": 0.9999547
+        },
+        {
+          "text": "higher.",
+          "start_ms": 149368,
+          "end_ms": 150318,
+          "confidence": 0.9866887
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 150721,
+          "end_ms": 150898,
+          "confidence": 0.98779315
+        },
+        {
+          "text": "and",
+          "start_ms": 151382,
+          "end_ms": 151446,
+          "confidence": 0.9907206
+        },
+        {
+          "text": "we",
+          "start_ms": 151462,
+          "end_ms": 151575,
+          "confidence": 0.999859
+        },
+        {
+          "text": "won't",
+          "start_ms": 151768,
+          "end_ms": 151881,
+          "confidence": 0.9998035
+        },
+        {
+          "text": "stop",
+          "start_ms": 152026,
+          "end_ms": 152606,
+          "confidence": 0.9999639
+        },
+        {
+          "text": "it,",
+          "start_ms": 152655,
+          "end_ms": 152912,
+          "confidence": 0.8874088
+        },
+        {
+          "text": "no!",
+          "start_ms": 152977,
+          "end_ms": 153170,
+          "confidence": 0.77467734
+        },
+        {
+          "text": "We",
+          "start_ms": 153541,
+          "end_ms": 153718,
+          "confidence": 0.9811788
+        },
+        {
+          "text": "won't",
+          "start_ms": 153718,
+          "end_ms": 153960,
+          "confidence": 0.9999666
+        },
+        {
+          "text": "stop",
+          "start_ms": 154040,
+          "end_ms": 154540,
+          "confidence": 0.99998784
+        },
+        {
+          "text": "it,",
+          "start_ms": 154685,
+          "end_ms": 154910,
+          "confidence": 0.99946105
+        },
+        {
+          "text": "no!",
+          "start_ms": 154991,
+          "end_ms": 155184,
+          "confidence": 0.99379545
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.93150777,
+  "metadata": {
+    "model": "universal-3-5-pro",
+    "transcript_id": "e8f39980-505d-48f1-8549-fb277b4581ad",
+    "elapsed_s": 16.0,
+    "word_count": 272,
+    "utterance_count": 5,
+    "line_count": 5,
+    "target_language": "sk",
+    "language_code": "en",
+    "audio_duration_s": 158
+  }
+}

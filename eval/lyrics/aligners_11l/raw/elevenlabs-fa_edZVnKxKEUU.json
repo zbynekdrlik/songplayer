@@ -1,0 +1,392 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\edZVnKxKEUU_vocal16k.wav",
+  "duration_ms": 349560,
+  "lines": [
+    {
+      "text": "When the King speaks a word it cannot be overturned",
+      "text_sk": "Keď Kráľ vysloví slovo, nemôže byť zvrátené",
+      "start_ms": 10800,
+      "end_ms": 25460,
+      "mean_word_loss": 0.6081374931335449
+    },
+    {
+      "text": "It's as good as done",
+      "text_sk": "Je to tak dobré ako hotové",
+      "start_ms": 25740,
+      "end_ms": 27660,
+      "mean_word_loss": 0.28345775604248047
+    },
+    {
+      "text": "And when Heaven touches Earth it can never be reversed",
+      "text_sk": "A keď sa Nebo dotkne Zeme, nikdy to nemôže byť zvrátené",
+      "start_ms": 29480,
+      "end_ms": 33030,
+      "mean_word_loss": 0.36845666340419225
+    },
+    {
+      "text": "It's the Kingdom come",
+      "text_sk": "Je to príchod Kráľovstva",
+      "start_ms": 33260,
+      "end_ms": 35240,
+      "mean_word_loss": 0.5387907936459496
+    },
+    {
+      "text": "So get the liars out the way",
+      "text_sk": "Takže odstráňte klamárov z cesty",
+      "start_ms": 36760,
+      "end_ms": 38760,
+      "mean_word_loss": 0.3898027692522321
+    },
+    {
+      "text": "They don't have the final say",
+      "text_sk": "Nemajú posledné slovo",
+      "start_ms": 38920,
+      "end_ms": 40640,
+      "mean_word_loss": 0.1692313300238715
+    },
+    {
+      "text": "There is only one Sovereign and Supreme",
+      "text_sk": "Existuje len jeden Zvrchovaný a Najvyšší",
+      "start_ms": 40820,
+      "end_ms": 45620,
+      "mean_word_loss": 0.8301635093429461
+    },
+    {
+      "text": "Every word He speaks is holy",
+      "text_sk": "Každé slovo, ktoré vysloví, je sväté",
+      "start_ms": 46100,
+      "end_ms": 50060,
+      "mean_word_loss": 0.7031797620985243
+    },
+    {
+      "text": "The Lamb of God has overcome",
+      "text_sk": "Baránok Boží zvíťazil",
+      "start_ms": 54240,
+      "end_ms": 57100,
+      "mean_word_loss": 0.6962554719713
+    },
+    {
+      "text": "My testimony is His blood",
+      "text_sk": "Moje svedectvo je Jeho krv",
+      "start_ms": 58020,
+      "end_ms": 61060,
+      "mean_word_loss": 0.4902259148491754
+    },
+    {
+      "text": "And if He said that it is done it is done",
+      "text_sk": "A ak povedal, že je to hotové, je to hotové",
+      "start_ms": 61800,
+      "end_ms": 65760,
+      "mean_word_loss": 0.252422910748106
+    },
+    {
+      "text": "So be it God",
+      "text_sk": "Tak nech sa stane, Bože",
+      "start_ms": 66280,
+      "end_ms": 68040,
+      "mean_word_loss": 0.803863525390625
+    },
+    {
+      "text": "To the One on the throne who cannot be overthrown",
+      "text_sk": "Tomu, kto sedí na tróne a nemôže byť zvrhnutý",
+      "start_ms": 68050,
+      "end_ms": 78500,
+      "mean_word_loss": 1.6147735595703125
+    },
+    {
+      "text": "Sing hallelujah",
+      "text_sk": "Spievajte haleluja",
+      "start_ms": 78580,
+      "end_ms": 80580,
+      "mean_word_loss": 1.781151580810547
+    },
+    {
+      "text": "To the Last and the First Ruler of the universe",
+      "text_sk": "Poslednému a Prvému Vládcovi vesmíru",
+      "start_ms": 82260,
+      "end_ms": 86020,
+      "mean_word_loss": 0.9294741948445638
+    },
+    {
+      "text": "Sing hallelujah",
+      "text_sk": "Spievajte haleluja",
+      "start_ms": 86100,
+      "end_ms": 88100,
+      "mean_word_loss": 1.389959716796875
+    },
+    {
+      "text": "To the Alpha Omega the Master the Maker",
+      "text_sk": "Alfa a Omega, Majstrovi, Stvoriteľovi",
+      "start_ms": 89820,
+      "end_ms": 93900,
+      "mean_word_loss": 1.2104899088541667
+    },
+    {
+      "text": "The name above every other name",
+      "text_sk": "Meno nad každým iným menom",
+      "start_ms": 93960,
+      "end_ms": 98460,
+      "mean_word_loss": 0.5222567240397135
+    },
+    {
+      "text": "Give Him all the praise He's holy",
+      "text_sk": "Vzdajte Mu všetku chválu, On je svätý",
+      "start_ms": 98920,
+      "end_ms": 102100,
+      "mean_word_loss": 0.49911417279924664
+    },
+    {
+      "text": "The Lamb of God has overcome",
+      "text_sk": "Baránok Boží zvíťazil",
+      "start_ms": 103380,
+      "end_ms": 106350,
+      "mean_word_loss": 0.339095221625434
+    },
+    {
+      "text": "My testimony is His blood",
+      "text_sk": "Moje svedectvo je Jeho krv",
+      "start_ms": 107140,
+      "end_ms": 110180,
+      "mean_word_loss": 0.43258548312717016
+    },
+    {
+      "text": "And if He said that it is done it is done",
+      "text_sk": "A ak povedal, že je to hotové, je to hotové",
+      "start_ms": 110940,
+      "end_ms": 114820,
+      "mean_word_loss": 0.2644148161917022
+    },
+    {
+      "text": "So be it God",
+      "text_sk": "Tak nech sa stane, Bože",
+      "start_ms": 115420,
+      "end_ms": 117760,
+      "mean_word_loss": 0.75042724609375
+    },
+    {
+      "text": "The weapons of the enemy",
+      "text_sk": "Zbrane nepriateľa",
+      "start_ms": 118460,
+      "end_ms": 121360,
+      "mean_word_loss": 0.2643459283737909
+    },
+    {
+      "text": "They have no power over me",
+      "text_sk": "Nemajú nado mnou žiadnu moc",
+      "start_ms": 122260,
+      "end_ms": 125860,
+      "mean_word_loss": 0.40360412597656253
+    },
+    {
+      "text": "The One with all authority covers me",
+      "text_sk": "Ten, kto má všetku autoritu, ma pokrýva",
+      "start_ms": 125980,
+      "end_ms": 130000,
+      "mean_word_loss": 0.6298622252449156
+    },
+    {
+      "text": "So be it God",
+      "text_sk": "Tak nech sa stane, Bože",
+      "start_ms": 130500,
+      "end_ms": 132540,
+      "mean_word_loss": 0.72821044921875
+    },
+    {
+      "text": "So be it God",
+      "text_sk": "Tak nech sa stane, Bože",
+      "start_ms": 134300,
+      "end_ms": 134651,
+      "mean_word_loss": 0.8352864583333334
+    },
+    {
+      "text": "So be it God",
+      "text_sk": "Tak nech sa stane, Bože",
+      "start_ms": 134650,
+      "end_ms": 136300,
+      "mean_word_loss": 0.9443155924479166
+    },
+    {
+      "text": "From a throne to a cross",
+      "text_sk": "Z trónu na kríž",
+      "start_ms": 138080,
+      "end_ms": 149440,
+      "mean_word_loss": 2.3434271918402776
+    },
+    {
+      "text": "Who would pay such a price",
+      "text_sk": "Kto by zaplatil takú cenu",
+      "start_ms": 150160,
+      "end_ms": 153300,
+      "mean_word_loss": 0.5263927459716796
+    },
+    {
+      "text": "For the sins of the world",
+      "text_sk": "Za hriechy sveta",
+      "start_ms": 153920,
+      "end_ms": 156900,
+      "mean_word_loss": 0.7620802137586805
+    },
+    {
+      "text": "Here's your King crucified",
+      "text_sk": "Tu je váš Kráľ ukrižovaný",
+      "start_ms": 157700,
+      "end_ms": 160960,
+      "mean_word_loss": 0.6312537723117404
+    },
+    {
+      "text": "See the nails in His hands",
+      "text_sk": "Pozrite na klince v Jeho rukách",
+      "start_ms": 161480,
+      "end_ms": 164359,
+      "mean_word_loss": 1.1204629686143663
+    },
+    {
+      "text": "See the wounds at His side",
+      "text_sk": "Pozrite na rany na Jeho boku",
+      "start_ms": 165280,
+      "end_ms": 168500,
+      "mean_word_loss": 1.8227327134874132
+    },
+    {
+      "text": "See the crown meant to mock",
+      "text_sk": "Pozrite na korunu určenú na výsmech",
+      "start_ms": 169060,
+      "end_ms": 172080,
+      "mean_word_loss": 1.3075687832302518
+    },
+    {
+      "text": "That instead prophesied",
+      "text_sk": "Ktorá namiesto toho prorokovala",
+      "start_ms": 172820,
+      "end_ms": 176120,
+      "mean_word_loss": 0.28481823149181545
+    },
+    {
+      "text": "That it was not the end",
+      "text_sk": "Že to nebol koniec",
+      "start_ms": 176600,
+      "end_ms": 179880,
+      "mean_word_loss": 0.40820905897352433
+    },
+    {
+      "text": "Wipe the tears from your eyes",
+      "text_sk": "Utrite si slzy z očí",
+      "start_ms": 180380,
+      "end_ms": 183740,
+      "mean_word_loss": 0.857344134648641
+    },
+    {
+      "text": "Don't forget that He said",
+      "text_sk": "Nezabudnite, že povedal",
+      "start_ms": 184100,
+      "end_ms": 187260,
+      "mean_word_loss": 0.31112823486328123
+    },
+    {
+      "text": "On the third He would rise",
+      "text_sk": "Na tretí deň vstane",
+      "start_ms": 187980,
+      "end_ms": 191420,
+      "mean_word_loss": 0.6830675760904947
+    },
+    {
+      "text": "He's alive He's alive",
+      "text_sk": "Je nažive Je nažive",
+      "start_ms": 191700,
+      "end_ms": 194980,
+      "mean_word_loss": 0.7775115966796875
+    },
+    {
+      "text": "He's alive He's alive",
+      "text_sk": "Je nažive Je nažive",
+      "start_ms": 195480,
+      "end_ms": 198960,
+      "mean_word_loss": 0.23585233688354493
+    },
+    {
+      "text": "He's alive He's alive",
+      "text_sk": "Je nažive Je nažive",
+      "start_ms": 199300,
+      "end_ms": 202460,
+      "mean_word_loss": 0.10465841293334961
+    },
+    {
+      "text": "He's alive He's alive",
+      "text_sk": "Je nažive Je nažive",
+      "start_ms": 203080,
+      "end_ms": 206840,
+      "mean_word_loss": 0.09033846855163574
+    },
+    {
+      "text": "The Lamb of God has overcome",
+      "text_sk": "Baránok Boží zvíťazil",
+      "start_ms": 207320,
+      "end_ms": 210380,
+      "mean_word_loss": 0.6387909783257378
+    },
+    {
+      "text": "My testimony is His blood",
+      "text_sk": "Moje svedectvo je Jeho krv",
+      "start_ms": 211080,
+      "end_ms": 214780,
+      "mean_word_loss": 0.4443575032552084
+    },
+    {
+      "text": "And if He said that it is done it is done",
+      "text_sk": "A ak povedal, že je to hotové, je to hotové",
+      "start_ms": 214920,
+      "end_ms": 218820,
+      "mean_word_loss": 0.29376550154252484
+    },
+    {
+      "text": "So be it God",
+      "text_sk": "Tak nech sa stane, Bože",
+      "start_ms": 219320,
+      "end_ms": 222471,
+      "mean_word_loss": 0.7377268473307291
+    },
+    {
+      "text": "The weapons of the enemy",
+      "text_sk": "Zbrane nepriateľa",
+      "start_ms": 222471,
+      "end_ms": 225380,
+      "mean_word_loss": 0.2887250046502976
+    },
+    {
+      "text": "They have no power over me",
+      "text_sk": "Nemajú nado mnou žiadnu moc",
+      "start_ms": 226220,
+      "end_ms": 229220,
+      "mean_word_loss": 0.43895568847656247
+    },
+    {
+      "text": "The One with all authority covers me",
+      "text_sk": "Ten, kto má všetku autoritu, ma pokrýva",
+      "start_ms": 229860,
+      "end_ms": 233960,
+      "mean_word_loss": 0.6464669363839286
+    },
+    {
+      "text": "So be it God So be it God",
+      "text_sk": "Tak nech sa stane, Bože Tak nech sa stane, Bože",
+      "start_ms": 234460,
+      "end_ms": 349560,
+      "mean_word_loss": 0.7870941162109375
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.5559338014822544,
+  "metadata": {
+    "n_tokens_sent": 316,
+    "n_words_returned_raw": 631,
+    "n_words_returned_content": 316,
+    "n_characters_returned": 1492,
+    "runtime_sec": 7.4,
+    "n_lines": 53,
+    "n_lines_timed": 53,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

@@ -1,0 +1,286 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\YbGFYaA0SbY_vocal16k.wav",
+  "duration_ms": 409000,
+  "lines": [
+    {
+      "text": "There was no way until You made one",
+      "start_ms": 8700,
+      "end_ms": 15100,
+      "text_sk": "Nebylo cesty, kým si ju neurobil",
+      "words": null
+    },
+    {
+      "text": "Grace upon grace, hallelujah",
+      "start_ms": 15100,
+      "end_ms": 21200,
+      "text_sk": "Milosť nad milosť, aleluja",
+      "words": null
+    },
+    {
+      "text": "Even though I don't deserve it, You did it",
+      "start_ms": 21200,
+      "end_ms": 27500,
+      "text_sk": "Aj keď si to nezaslúžim, urobil si to",
+      "words": null
+    },
+    {
+      "text": "Even though I couldn't earn it, You gave it",
+      "start_ms": 27500,
+      "end_ms": 35000,
+      "text_sk": "Aj keď som si to nemohol zaslúžiť, dal si to",
+      "words": null
+    },
+    {
+      "text": "Who am I that You keep me on Your mind? God, I'm just grateful for You",
+      "start_ms": 35000,
+      "end_ms": 44800,
+      "text_sk": "Kto som ja, že na mňa myslíš? Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 44800,
+      "end_ms": 48800,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "All my life You've been right here by my side, God, I'm just grateful for You",
+      "start_ms": 48800,
+      "end_ms": 56300,
+      "text_sk": "Celý môj život si bol pri mne, Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 56300,
+      "end_ms": 103200,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "Holy, Holy, there's only One",
+      "start_ms": 103200,
+      "end_ms": 109800,
+      "text_sk": "Svätý, Svätý, je len Jeden",
+      "words": null
+    },
+    {
+      "text": "I give You glory for all that You've done",
+      "start_ms": 109800,
+      "end_ms": 116200,
+      "text_sk": "Vzdávam Ti slávu za všetko, čo si urobil",
+      "words": null
+    },
+    {
+      "text": "Even though I don't deserve it, You did it",
+      "start_ms": 116200,
+      "end_ms": 122800,
+      "text_sk": "Aj keď si to nezaslúžim, urobil si to",
+      "words": null
+    },
+    {
+      "text": "Even though I couldn't earn it, You gave it",
+      "start_ms": 122800,
+      "end_ms": 130200,
+      "text_sk": "Aj keď som si to nemohol zaslúžiť, dal si to",
+      "words": null
+    },
+    {
+      "text": "Who am I that You keep me on Your mind? God, I'm just grateful for You",
+      "start_ms": 130200,
+      "end_ms": 139800,
+      "text_sk": "Kto som ja, že na mňa myslíš? Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 139800,
+      "end_ms": 143800,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "All my life You've been right here by my side, God, I'm just grateful for You",
+      "start_ms": 143800,
+      "end_ms": 151500,
+      "text_sk": "Celý môj život si bol pri mne, Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 151500,
+      "end_ms": 155500,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "Who am I, who am I that You keep me on Your mind? God, I'm just grateful for You",
+      "start_ms": 155500,
+      "end_ms": 165000,
+      "text_sk": "Kto som ja, kto som ja, že na mňa myslíš? Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 165000,
+      "end_ms": 169100,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "All my life You've been right here by my side, God, I'm just grateful for You",
+      "start_ms": 169100,
+      "end_ms": 176500,
+      "text_sk": "Celý môj život si bol pri mne, Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You, yeah",
+      "start_ms": 176500,
+      "end_ms": 225800,
+      "text_sk": "Bože, som za Teba taký vďačný, jé",
+      "words": null
+    },
+    {
+      "text": "Whoa, You kept me on Your mind, been here with me on this side",
+      "start_ms": 225800,
+      "end_ms": 236800,
+      "text_sk": "Ooh, myslel si na mňa, bol si tu so mnou na tejto strane",
+      "words": null
+    },
+    {
+      "text": "And I, I'm lifting both of my hands, You gave me chance after chance after chance",
+      "start_ms": 236800,
+      "end_ms": 249600,
+      "text_sk": "A ja, dvíham obe ruky, dal si mi šancu za šancou za šancou",
+      "words": null
+    },
+    {
+      "text": "And I, I'm giving all that I am, You gave me chance after chance after chance. Come on!",
+      "start_ms": 249600,
+      "end_ms": 303600,
+      "text_sk": "A ja, dávam všetko, čo som, dal si mi šancu za šancou za šancou. Poďme!",
+      "words": null
+    },
+    {
+      "text": "And I, I'm lifting both of my hands, You gave me chance after chance after chance",
+      "start_ms": 303600,
+      "end_ms": 316500,
+      "text_sk": "A ja, dvíham obe ruky, dal si mi šancu za šancou za šancou",
+      "words": null
+    },
+    {
+      "text": "And I, I'm giving all that I am, You gave me chance after chance after chance",
+      "start_ms": 316500,
+      "end_ms": 330200,
+      "text_sk": "A ja, dávam všetko, čo som, dal si mi šancu za šancou za šancou",
+      "words": null
+    },
+    {
+      "text": "Who am I that You keep me on Your mind? God, I'm just grateful for You",
+      "start_ms": 330200,
+      "end_ms": 339600,
+      "text_sk": "Kto som ja, že na mňa myslíš? Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 339600,
+      "end_ms": 343800,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "All my life You've been right here by my side, God, I'm just grateful for You",
+      "start_ms": 343800,
+      "end_ms": 351200,
+      "text_sk": "Celý môj život si bol pri mne, Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 351200,
+      "end_ms": 355600,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "Who am I, who am I that You keep me on Your mind? God, I'm just grateful for You",
+      "start_ms": 355600,
+      "end_ms": 364800,
+      "text_sk": "Kto som ja, kto som ja, že na mňa myslíš? Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 364800,
+      "end_ms": 368800,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "All my life You've been right here by my side, God, I'm just grateful for You",
+      "start_ms": 368800,
+      "end_ms": 376500,
+      "text_sk": "Celý môj život si bol pri mne, Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You",
+      "start_ms": 376500,
+      "end_ms": 382800,
+      "text_sk": "Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "Yes, You are! Yes, You are! And I'm here to testify!",
+      "start_ms": 382800,
+      "end_ms": 390500,
+      "text_sk": "Áno, si! Áno, si! A ja som tu, aby som svedčil!",
+      "words": null
+    },
+    {
+      "text": "God, I'm just grateful for You, God, I'm just grateful for You",
+      "start_ms": 390500,
+      "end_ms": 396000,
+      "text_sk": "Bože, som za Teba taký vďačný, Bože, som za Teba taký vďačný",
+      "words": null
+    },
+    {
+      "text": "I'm amazed, yes, I'm amazed! My God, I'm just grateful for You, God, I'm just grateful for You",
+      "start_ms": 396000,
+      "end_ms": 409000,
+      "text_sk": "Som úžasnutý, áno, som úžasnutý! Môj Bože, som za Teba taký vďačný, Bože, som za Teba taký vďačný",
+      "words": null
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 31.7,
+    "line_count": 36,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 7478,
+      "candidatesTokenCount": 3136,
+      "totalTokenCount": 12307,
+      "promptTokensDetails": [
+        {
+          "modality": "AUDIO",
+          "tokenCount": 7453
+        },
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        }
+      ],
+      "thoughtsTokenCount": 1693,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "inline",
+    "audio_bytes": 19077600
+  }
+}

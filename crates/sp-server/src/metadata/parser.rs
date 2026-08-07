@@ -305,6 +305,21 @@ fn shorten_single_artist(name: &str) -> String {
         return name.to_string();
     }
 
+    // Doesn't look like a personal name — leave it unchanged. This guards
+    // stylized event/band names ("PRAISE BREAK!"), strings that already
+    // carry punctuation-abbreviated tokens ("F. B. NATION", "C. Stop"),
+    // and other non-alphabetic tokens from being mangled by the initials
+    // abbreviation below. Order detection (is this really Artist-Song?)
+    // is explicitly out of scope — this only decides whether the STRING
+    // looks like a real personal name worth abbreviating.
+    let has_terminal_punct = words.iter().any(|w| w.ends_with(['!', '?', '.', ':']));
+    let is_all_caps =
+        name.chars().any(|c| c.is_alphabetic()) && !name.chars().any(|c| c.is_lowercase());
+    let has_non_alphabetic_word = words.iter().any(|w| !w.chars().all(|c| c.is_alphabetic()));
+    if has_terminal_punct || is_all_caps || has_non_alphabetic_word {
+        return name.to_string();
+    }
+
     // Check if any word is a band indicator
     if words
         .iter()
@@ -706,5 +721,154 @@ mod tests {
         let m = parse_title("The Blessing | Elevation Worship");
         assert_eq!(m.song, "The Blessing");
         assert_eq!(m.artist, "Elevation Worship");
+    }
+
+    // ---- shorten_single_artist: don't mangle non-personal-name strings ----
+    //
+    // Live catalog damage (#TBD): `shorten_single_artist` treated any
+    // 2-3 word string as "First Last" and abbreviated it, wrecking
+    // stylized event/band names that happen to parse as 2-3 "words".
+    // These regression tests pin the exact live-damaged strings.
+
+    #[test]
+    fn shorten_leaves_exclamation_event_name_unchanged() {
+        // Live damage: "PRAISE BREAK! - planetboom" title parsed
+        // artist="PRAISE BREAK!" then got mangled to "P. Break!".
+        assert_eq!(shorten_artist("PRAISE BREAK!"), "PRAISE BREAK!");
+    }
+
+    #[test]
+    fn shorten_leaves_period_abbreviated_band_name_unchanged() {
+        // Live damage: "F. B. NATION" — already contains period tokens,
+        // must not be re-abbreviated.
+        assert_eq!(shorten_artist("F. B. NATION"), "F. B. NATION");
+    }
+
+    #[test]
+    fn shorten_leaves_comma_separated_period_names_unchanged() {
+        // Live damage: "C. Stop, W. Stop" — comma-split, each segment
+        // already carries a period token.
+        assert_eq!(shorten_artist("C. Stop, W. Stop"), "C. Stop, W. Stop");
+    }
+
+    #[test]
+    fn shorten_leaves_all_caps_comma_names_unchanged() {
+        // Live damage: "I. DECLARE, I. DECREE".
+        assert_eq!(
+            shorten_artist("I. DECLARE, I. DECREE"),
+            "I. DECLARE, I. DECREE"
+        );
+    }
+
+    // ---- shorten_single_artist: isolate each `||` guard condition ----
+    //
+    // Mutation testing (PR #135 CI gate) surfaced two surviving mutants on
+    // the `has_terminal_punct || is_all_caps || has_non_alphabetic_word`
+    // guard (parser.rs:319, cols 27 and 42 — the two `||` operators):
+    // every existing regression string above trips more than one of the
+    // three conditions at once, so replacing either `||` with `&&` left
+    // the guard's early-return outcome unchanged for every existing test.
+    //
+    // Two of the three cases below are genuinely isolated (all-caps-only,
+    // non-alphabetic-word-only) and each kills at least one mutant — see
+    // the per-condition reasoning after each test. The terminal-punct
+    // case is included for completeness and behavioral pinning, but — as
+    // explained there — it cannot be fully isolated from
+    // `has_non_alphabetic_word`: the terminal punctuation characters
+    // (`!`, `?`, `.`, `:`) are themselves never alphabetic, so any word
+    // that trips `has_terminal_punct` (ends with one of them) necessarily
+    // also trips `has_non_alphabetic_word` (contains a non-alphabetic
+    // char). That's a structural property of the guard, not a gap in
+    // this test.
+
+    #[test]
+    fn shorten_leaves_terminal_punctuation_only_unchanged() {
+        // Isolates has_terminal_punct=true, is_all_caps=false (mixed
+        // case). has_non_alphabetic_word is unavoidably ALSO true here —
+        // "Last." contains '.', which is non-alphabetic — so this test
+        // cannot, by itself, distinguish either `&&` mutant (see block
+        // comment above): with has_terminal_punct forced true and
+        // has_non_alphabetic_word forced true alongside it, both
+        // `(A && B) || C` and `A || (B && C)` evaluate to `true` exactly
+        // like the original `A || B || C`, mutant or not. It still pins
+        // the intended behavior: a terminally-punctuated, mixed-case
+        // string must be left unchanged.
+        assert_eq!(shorten_artist("First Last."), "First Last.");
+    }
+
+    #[test]
+    fn shorten_leaves_all_caps_only_unchanged() {
+        // Isolates is_all_caps=true with has_terminal_punct=false and
+        // has_non_alphabetic_word=false ("JOHN SMITH" — no punctuation,
+        // every word purely alphabetic). Original guard: false || true
+        // || false = true (unchanged). Mutant at col 27,
+        // `(has_terminal_punct && is_all_caps) || has_non_alphabetic_word`
+        // = (false && true) || false = false — the mutant would fall
+        // through to abbreviation and return "J. Smith"-shaped output
+        // instead, so this assertion fails under that mutant. Mutant at
+        // col 42, `has_terminal_punct || (is_all_caps && has_non_alphabetic_word)`
+        // = false || (true && false) = false — same failure. This single
+        // case kills BOTH surviving mutants.
+        assert_eq!(shorten_artist("JOHN SMITH"), "JOHN SMITH");
+    }
+
+    #[test]
+    fn shorten_leaves_non_alphabetic_word_only_unchanged() {
+        // Isolates has_non_alphabetic_word=true with has_terminal_punct=false
+        // and is_all_caps=false ("Anna Jo-Lee" — mixed case, no terminal
+        // punctuation, but "Jo-Lee" contains an inner hyphen so it isn't
+        // purely alphabetic). Original guard: false || false || true =
+        // true (unchanged). Mutant at col 42,
+        // `has_terminal_punct || (is_all_caps && has_non_alphabetic_word)`
+        // = false || (false && true) = false — the mutant would fall
+        // through to abbreviation instead of returning the name
+        // unchanged, so this assertion fails under that mutant. (Mutant
+        // at col 27 still evaluates true here — `(false && false) ||
+        // true = true` — so this case alone doesn't kill it; col 27 is
+        // killed by the all-caps-only case above.)
+        assert_eq!(shorten_artist("Anna Jo-Lee"), "Anna Jo-Lee");
+    }
+
+    #[test]
+    fn shorten_still_abbreviates_genuine_personal_name() {
+        // Regression guard: the new guard must not break real
+        // "First Last" abbreviation.
+        assert_eq!(shorten_artist("Michael Bethany"), "M. Bethany");
+    }
+
+    // ---- fallback-path emoji regression (live #135 E2E failure) ----
+
+    /// `parser::parse_title` is the regex FALLBACK `metadata::get_metadata`
+    /// (metadata/mod.rs) uses when every provider fails or none are
+    /// configured. Unlike `GeminiProvider::parse_response`, it never
+    /// stripped emoji — so a fallback-produced artist/song could leak
+    /// emoji straight into the DB. Mirrors the live post-deploy E2E
+    /// failure: video `0HQOYVf6-Yg` stored
+    /// `artist = "Christian Afro House 2025 🔥"`.
+    ///
+    /// This exercises the fallback through `metadata::get_metadata` (empty
+    /// provider list — no provider is ever tried, so `parse_title` is what
+    /// actually produces the returned metadata), because the sanitizer's
+    /// single choke point lives at `get_metadata`'s return, not inside
+    /// `parse_title` itself.
+    #[tokio::test]
+    async fn fallback_path_strips_emoji_from_artist() {
+        let providers: Vec<Box<dyn crate::metadata::MetadataProvider>> = vec![];
+        let meta = crate::metadata::get_metadata(
+            &providers,
+            "0HQOYVf6-Yg",
+            "Our God + The Blessing | Christian Afro House 2025 \u{1F525}",
+        )
+        .await;
+        assert_eq!(meta.song, "Our God + The Blessing");
+        assert_eq!(
+            meta.artist, "Christian Afro House 2025",
+            "fallback path must strip emoji from the artist"
+        );
+        assert!(
+            !meta.artist.chars().any(|c| c as u32 >= 0x2600),
+            "no emoji codepoints may remain in artist: {:?}",
+            meta.artist
+        );
     }
 }

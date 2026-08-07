@@ -1,0 +1,2021 @@
+{
+  "backend_id": "ctc-forced-aligner-star",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\edZVnKxKEUU_vocal16k.wav",
+  "duration_ms": 349588,
+  "lines": [
+    {
+      "text": "When the King speaks a word it cannot be overturned",
+      "start_ms": 21860,
+      "end_ms": 25680,
+      "text_sk": "Keď Kráľ vysloví slovo, nemôže byť zvrátené",
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 21860,
+          "end_ms": 22040
+        },
+        {
+          "text": "the",
+          "start_ms": 22100,
+          "end_ms": 22180
+        },
+        {
+          "text": "King",
+          "start_ms": 22300,
+          "end_ms": 22600
+        },
+        {
+          "text": "speaks",
+          "start_ms": 22700,
+          "end_ms": 23060
+        },
+        {
+          "text": "a",
+          "start_ms": 23160,
+          "end_ms": 23180
+        },
+        {
+          "text": "word",
+          "start_ms": 23280,
+          "end_ms": 23760
+        },
+        {
+          "text": "it",
+          "start_ms": 23800,
+          "end_ms": 23900
+        },
+        {
+          "text": "cannot",
+          "start_ms": 23980,
+          "end_ms": 24340
+        },
+        {
+          "text": "be",
+          "start_ms": 24460,
+          "end_ms": 24560
+        },
+        {
+          "text": "overturned",
+          "start_ms": 24800,
+          "end_ms": 25680
+        }
+      ]
+    },
+    {
+      "text": "It's as good as done",
+      "start_ms": 25720,
+      "end_ms": 27820,
+      "text_sk": "Je to tak dobré ako hotové",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 25720,
+          "end_ms": 25900
+        },
+        {
+          "text": "as",
+          "start_ms": 25940,
+          "end_ms": 26040
+        },
+        {
+          "text": "good",
+          "start_ms": 26120,
+          "end_ms": 26620
+        },
+        {
+          "text": "as",
+          "start_ms": 26700,
+          "end_ms": 27020
+        },
+        {
+          "text": "done",
+          "start_ms": 27100,
+          "end_ms": 27820
+        }
+      ]
+    },
+    {
+      "text": "And when Heaven touches Earth it can never be reversed",
+      "start_ms": 29460,
+      "end_ms": 33180,
+      "text_sk": "A keď sa Nebo dotkne Zeme, nikdy to nemôže byť zvrátené",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 29460,
+          "end_ms": 29620
+        },
+        {
+          "text": "when",
+          "start_ms": 29860,
+          "end_ms": 29940
+        },
+        {
+          "text": "Heaven",
+          "start_ms": 29980,
+          "end_ms": 30280
+        },
+        {
+          "text": "touches",
+          "start_ms": 30360,
+          "end_ms": 30860
+        },
+        {
+          "text": "Earth",
+          "start_ms": 30880,
+          "end_ms": 31360
+        },
+        {
+          "text": "it",
+          "start_ms": 31380,
+          "end_ms": 31460
+        },
+        {
+          "text": "can",
+          "start_ms": 31520,
+          "end_ms": 31740
+        },
+        {
+          "text": "never",
+          "start_ms": 31820,
+          "end_ms": 32180
+        },
+        {
+          "text": "be",
+          "start_ms": 32220,
+          "end_ms": 32380
+        },
+        {
+          "text": "reversed",
+          "start_ms": 32560,
+          "end_ms": 33180
+        }
+      ]
+    },
+    {
+      "text": "It's the Kingdom come",
+      "start_ms": 33280,
+      "end_ms": 35240,
+      "text_sk": "Je to príchod Kráľovstva",
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 33280,
+          "end_ms": 33380
+        },
+        {
+          "text": "the",
+          "start_ms": 33460,
+          "end_ms": 33540
+        },
+        {
+          "text": "Kingdom",
+          "start_ms": 33660,
+          "end_ms": 34540
+        },
+        {
+          "text": "come",
+          "start_ms": 34640,
+          "end_ms": 35240
+        }
+      ]
+    },
+    {
+      "text": "So get the liars out the way",
+      "start_ms": 36720,
+      "end_ms": 38700,
+      "text_sk": "Takže odstráňte klamárov z cesty",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 36720,
+          "end_ms": 36820
+        },
+        {
+          "text": "get",
+          "start_ms": 36960,
+          "end_ms": 37120
+        },
+        {
+          "text": "the",
+          "start_ms": 37160,
+          "end_ms": 37280
+        },
+        {
+          "text": "liars",
+          "start_ms": 37340,
+          "end_ms": 37920
+        },
+        {
+          "text": "out",
+          "start_ms": 37960,
+          "end_ms": 38100
+        },
+        {
+          "text": "the",
+          "start_ms": 38160,
+          "end_ms": 38260
+        },
+        {
+          "text": "way",
+          "start_ms": 38400,
+          "end_ms": 38700
+        }
+      ]
+    },
+    {
+      "text": "They don't have the final say",
+      "start_ms": 38740,
+      "end_ms": 40700,
+      "text_sk": "Nemajú posledné slovo",
+      "words": [
+        {
+          "text": "They",
+          "start_ms": 38740,
+          "end_ms": 39060
+        },
+        {
+          "text": "don't",
+          "start_ms": 39120,
+          "end_ms": 39380
+        },
+        {
+          "text": "have",
+          "start_ms": 39420,
+          "end_ms": 39540
+        },
+        {
+          "text": "the",
+          "start_ms": 39600,
+          "end_ms": 39680
+        },
+        {
+          "text": "final",
+          "start_ms": 39780,
+          "end_ms": 40080
+        },
+        {
+          "text": "say",
+          "start_ms": 40280,
+          "end_ms": 40700
+        }
+      ]
+    },
+    {
+      "text": "There is only one Sovereign and Supreme",
+      "start_ms": 40800,
+      "end_ms": 45800,
+      "text_sk": "Existuje len jeden Zvrchovaný a Najvyšší",
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 40800,
+          "end_ms": 41140
+        },
+        {
+          "text": "is",
+          "start_ms": 41160,
+          "end_ms": 41260
+        },
+        {
+          "text": "only",
+          "start_ms": 41360,
+          "end_ms": 41880
+        },
+        {
+          "text": "one",
+          "start_ms": 42060,
+          "end_ms": 42320
+        },
+        {
+          "text": "Sovereign",
+          "start_ms": 44020,
+          "end_ms": 44740
+        },
+        {
+          "text": "and",
+          "start_ms": 44760,
+          "end_ms": 44820
+        },
+        {
+          "text": "Supreme",
+          "start_ms": 44840,
+          "end_ms": 45800
+        }
+      ]
+    },
+    {
+      "text": "Every word He speaks is holy",
+      "start_ms": 46060,
+      "end_ms": 54360,
+      "text_sk": "Každé slovo, ktoré vysloví, je sväté",
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 46060,
+          "end_ms": 46440
+        },
+        {
+          "text": "word",
+          "start_ms": 46460,
+          "end_ms": 46740
+        },
+        {
+          "text": "He",
+          "start_ms": 46840,
+          "end_ms": 46880
+        },
+        {
+          "text": "speaks",
+          "start_ms": 46900,
+          "end_ms": 47380
+        },
+        {
+          "text": "is",
+          "start_ms": 47480,
+          "end_ms": 47620
+        },
+        {
+          "text": "holy",
+          "start_ms": 54280,
+          "end_ms": 54360
+        }
+      ]
+    },
+    {
+      "text": "The Lamb of God has overcome",
+      "start_ms": 54480,
+      "end_ms": 57420,
+      "text_sk": "Baránok Boží zvíťazil",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 54480,
+          "end_ms": 54620
+        },
+        {
+          "text": "Lamb",
+          "start_ms": 54900,
+          "end_ms": 55180
+        },
+        {
+          "text": "of",
+          "start_ms": 55220,
+          "end_ms": 55320
+        },
+        {
+          "text": "God",
+          "start_ms": 55400,
+          "end_ms": 55820
+        },
+        {
+          "text": "has",
+          "start_ms": 55940,
+          "end_ms": 56360
+        },
+        {
+          "text": "overcome",
+          "start_ms": 56440,
+          "end_ms": 57420
+        }
+      ]
+    },
+    {
+      "text": "My testimony is His blood",
+      "start_ms": 58000,
+      "end_ms": 61780,
+      "text_sk": "Moje svedectvo je Jeho krv",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 58000,
+          "end_ms": 58060
+        },
+        {
+          "text": "testimony",
+          "start_ms": 58240,
+          "end_ms": 60120
+        },
+        {
+          "text": "is",
+          "start_ms": 60200,
+          "end_ms": 60380
+        },
+        {
+          "text": "His",
+          "start_ms": 60400,
+          "end_ms": 60540
+        },
+        {
+          "text": "blood",
+          "start_ms": 60600,
+          "end_ms": 61780
+        }
+      ]
+    },
+    {
+      "text": "And if He said that it is done it is done",
+      "start_ms": 61840,
+      "end_ms": 65680,
+      "text_sk": "A ak povedal, že je to hotové, je to hotové",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 61840,
+          "end_ms": 62060
+        },
+        {
+          "text": "if",
+          "start_ms": 62360,
+          "end_ms": 62680
+        },
+        {
+          "text": "He",
+          "start_ms": 62700,
+          "end_ms": 62780
+        },
+        {
+          "text": "said",
+          "start_ms": 62940,
+          "end_ms": 63200
+        },
+        {
+          "text": "that",
+          "start_ms": 63680,
+          "end_ms": 63960
+        },
+        {
+          "text": "it",
+          "start_ms": 64020,
+          "end_ms": 64180
+        },
+        {
+          "text": "is",
+          "start_ms": 64220,
+          "end_ms": 64340
+        },
+        {
+          "text": "done",
+          "start_ms": 64420,
+          "end_ms": 64780
+        },
+        {
+          "text": "it",
+          "start_ms": 64960,
+          "end_ms": 65120
+        },
+        {
+          "text": "is",
+          "start_ms": 65180,
+          "end_ms": 65280
+        },
+        {
+          "text": "done",
+          "start_ms": 65340,
+          "end_ms": 65680
+        }
+      ]
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 66260,
+      "end_ms": 67460,
+      "text_sk": "Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 66260,
+          "end_ms": 66400
+        },
+        {
+          "text": "be",
+          "start_ms": 66760,
+          "end_ms": 66860
+        },
+        {
+          "text": "it",
+          "start_ms": 67140,
+          "end_ms": 67260
+        },
+        {
+          "text": "God",
+          "start_ms": 67400,
+          "end_ms": 67460
+        }
+      ]
+    },
+    {
+      "text": "To the One on the throne who cannot be overthrown",
+      "start_ms": 67680,
+      "end_ms": 78380,
+      "text_sk": "Tomu, kto sedí na tróne a nemôže byť zvrhnutý",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 67680,
+          "end_ms": 67800
+        },
+        {
+          "text": "the",
+          "start_ms": 74740,
+          "end_ms": 74880
+        },
+        {
+          "text": "One",
+          "start_ms": 75100,
+          "end_ms": 75620
+        },
+        {
+          "text": "on",
+          "start_ms": 75800,
+          "end_ms": 75960
+        },
+        {
+          "text": "the",
+          "start_ms": 75980,
+          "end_ms": 76040
+        },
+        {
+          "text": "throne",
+          "start_ms": 76180,
+          "end_ms": 76680
+        },
+        {
+          "text": "who",
+          "start_ms": 76740,
+          "end_ms": 76800
+        },
+        {
+          "text": "cannot",
+          "start_ms": 76900,
+          "end_ms": 77320
+        },
+        {
+          "text": "be",
+          "start_ms": 77380,
+          "end_ms": 77480
+        },
+        {
+          "text": "overthrown",
+          "start_ms": 77720,
+          "end_ms": 78380
+        }
+      ]
+    },
+    {
+      "text": "Sing hallelujah",
+      "start_ms": 78540,
+      "end_ms": 80680,
+      "text_sk": "Spievajte haleluja",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 78540,
+          "end_ms": 78820
+        },
+        {
+          "text": "hallelujah",
+          "start_ms": 78860,
+          "end_ms": 80680
+        }
+      ]
+    },
+    {
+      "text": "To the Last and the First Ruler of the universe",
+      "start_ms": 82300,
+      "end_ms": 86040,
+      "text_sk": "Poslednému a Prvému Vládcovi vesmíru",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 82300,
+          "end_ms": 82420
+        },
+        {
+          "text": "the",
+          "start_ms": 82540,
+          "end_ms": 82640
+        },
+        {
+          "text": "Last",
+          "start_ms": 82820,
+          "end_ms": 83280
+        },
+        {
+          "text": "and",
+          "start_ms": 83360,
+          "end_ms": 83500
+        },
+        {
+          "text": "the",
+          "start_ms": 83520,
+          "end_ms": 83580
+        },
+        {
+          "text": "First",
+          "start_ms": 83680,
+          "end_ms": 84120
+        },
+        {
+          "text": "Ruler",
+          "start_ms": 84180,
+          "end_ms": 84700
+        },
+        {
+          "text": "of",
+          "start_ms": 84780,
+          "end_ms": 84880
+        },
+        {
+          "text": "the",
+          "start_ms": 84920,
+          "end_ms": 85020
+        },
+        {
+          "text": "universe",
+          "start_ms": 85280,
+          "end_ms": 86040
+        }
+      ]
+    },
+    {
+      "text": "Sing hallelujah",
+      "start_ms": 86100,
+      "end_ms": 88220,
+      "text_sk": "Spievajte haleluja",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 86100,
+          "end_ms": 86400
+        },
+        {
+          "text": "hallelujah",
+          "start_ms": 86440,
+          "end_ms": 88220
+        }
+      ]
+    },
+    {
+      "text": "To the Alpha Omega the Master the Maker",
+      "start_ms": 89840,
+      "end_ms": 93860,
+      "text_sk": "Alfa a Omega, Majstrovi, Stvoriteľovi",
+      "words": [
+        {
+          "text": "To",
+          "start_ms": 89840,
+          "end_ms": 90000
+        },
+        {
+          "text": "the",
+          "start_ms": 90120,
+          "end_ms": 90240
+        },
+        {
+          "text": "Alpha",
+          "start_ms": 90500,
+          "end_ms": 90900
+        },
+        {
+          "text": "Omega",
+          "start_ms": 91280,
+          "end_ms": 91900
+        },
+        {
+          "text": "the",
+          "start_ms": 92040,
+          "end_ms": 92120
+        },
+        {
+          "text": "Master",
+          "start_ms": 92240,
+          "end_ms": 92900
+        },
+        {
+          "text": "the",
+          "start_ms": 92980,
+          "end_ms": 93060
+        },
+        {
+          "text": "Maker",
+          "start_ms": 93180,
+          "end_ms": 93860
+        }
+      ]
+    },
+    {
+      "text": "The name above every other name",
+      "start_ms": 93920,
+      "end_ms": 98480,
+      "text_sk": "Meno nad každým iným menom",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 93920,
+          "end_ms": 94000
+        },
+        {
+          "text": "name",
+          "start_ms": 94140,
+          "end_ms": 94700
+        },
+        {
+          "text": "above",
+          "start_ms": 94740,
+          "end_ms": 96160
+        },
+        {
+          "text": "every",
+          "start_ms": 97080,
+          "end_ms": 97360
+        },
+        {
+          "text": "other",
+          "start_ms": 97560,
+          "end_ms": 97860
+        },
+        {
+          "text": "name",
+          "start_ms": 97940,
+          "end_ms": 98480
+        }
+      ]
+    },
+    {
+      "text": "Give Him all the praise He's holy",
+      "start_ms": 98880,
+      "end_ms": 101240,
+      "text_sk": "Vzdajte Mu všetku chválu, On je svätý",
+      "words": [
+        {
+          "text": "Give",
+          "start_ms": 98880,
+          "end_ms": 99080
+        },
+        {
+          "text": "Him",
+          "start_ms": 99160,
+          "end_ms": 99360
+        },
+        {
+          "text": "all",
+          "start_ms": 99440,
+          "end_ms": 99560
+        },
+        {
+          "text": "the",
+          "start_ms": 99620,
+          "end_ms": 99700
+        },
+        {
+          "text": "praise",
+          "start_ms": 99780,
+          "end_ms": 100320
+        },
+        {
+          "text": "He's",
+          "start_ms": 100360,
+          "end_ms": 100600
+        },
+        {
+          "text": "holy",
+          "start_ms": 100740,
+          "end_ms": 101240
+        }
+      ]
+    },
+    {
+      "text": "The Lamb of God has overcome",
+      "start_ms": 103360,
+      "end_ms": 106360,
+      "text_sk": "Baránok Boží zvíťazil",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 103360,
+          "end_ms": 103460
+        },
+        {
+          "text": "Lamb",
+          "start_ms": 103620,
+          "end_ms": 104360
+        },
+        {
+          "text": "of",
+          "start_ms": 104400,
+          "end_ms": 104500
+        },
+        {
+          "text": "God",
+          "start_ms": 104560,
+          "end_ms": 105100
+        },
+        {
+          "text": "has",
+          "start_ms": 105260,
+          "end_ms": 105460
+        },
+        {
+          "text": "overcome",
+          "start_ms": 105580,
+          "end_ms": 106360
+        }
+      ]
+    },
+    {
+      "text": "My testimony is His blood",
+      "start_ms": 107120,
+      "end_ms": 110140,
+      "text_sk": "Moje svedectvo je Jeho krv",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 107120,
+          "end_ms": 107280
+        },
+        {
+          "text": "testimony",
+          "start_ms": 107380,
+          "end_ms": 109140
+        },
+        {
+          "text": "is",
+          "start_ms": 109340,
+          "end_ms": 109520
+        },
+        {
+          "text": "His",
+          "start_ms": 109540,
+          "end_ms": 109680
+        },
+        {
+          "text": "blood",
+          "start_ms": 109720,
+          "end_ms": 110140
+        }
+      ]
+    },
+    {
+      "text": "And if He said that it is done it is done",
+      "start_ms": 110920,
+      "end_ms": 114820,
+      "text_sk": "A ak povedal, že je to hotové, je to hotové",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 110920,
+          "end_ms": 111160
+        },
+        {
+          "text": "if",
+          "start_ms": 111240,
+          "end_ms": 111780
+        },
+        {
+          "text": "He",
+          "start_ms": 111800,
+          "end_ms": 111880
+        },
+        {
+          "text": "said",
+          "start_ms": 112040,
+          "end_ms": 112800
+        },
+        {
+          "text": "that",
+          "start_ms": 112960,
+          "end_ms": 113080
+        },
+        {
+          "text": "it",
+          "start_ms": 113120,
+          "end_ms": 113280
+        },
+        {
+          "text": "is",
+          "start_ms": 113340,
+          "end_ms": 113460
+        },
+        {
+          "text": "done",
+          "start_ms": 113520,
+          "end_ms": 113900
+        },
+        {
+          "text": "it",
+          "start_ms": 114060,
+          "end_ms": 114240
+        },
+        {
+          "text": "is",
+          "start_ms": 114300,
+          "end_ms": 114420
+        },
+        {
+          "text": "done",
+          "start_ms": 114460,
+          "end_ms": 114820
+        }
+      ]
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 115380,
+      "end_ms": 117260,
+      "text_sk": "Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 115380,
+          "end_ms": 115540
+        },
+        {
+          "text": "be",
+          "start_ms": 115860,
+          "end_ms": 115980
+        },
+        {
+          "text": "it",
+          "start_ms": 116480,
+          "end_ms": 116640
+        },
+        {
+          "text": "God",
+          "start_ms": 116800,
+          "end_ms": 117260
+        }
+      ]
+    },
+    {
+      "text": "The weapons of the enemy",
+      "start_ms": 118440,
+      "end_ms": 121220,
+      "text_sk": "Zbrane nepriateľa",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 118440,
+          "end_ms": 118540
+        },
+        {
+          "text": "weapons",
+          "start_ms": 118740,
+          "end_ms": 119700
+        },
+        {
+          "text": "of",
+          "start_ms": 120160,
+          "end_ms": 120280
+        },
+        {
+          "text": "the",
+          "start_ms": 120380,
+          "end_ms": 120480
+        },
+        {
+          "text": "enemy",
+          "start_ms": 120720,
+          "end_ms": 121220
+        }
+      ]
+    },
+    {
+      "text": "They have no power over me",
+      "start_ms": 122240,
+      "end_ms": 125000,
+      "text_sk": "Nemajú nado mnou žiadnu moc",
+      "words": [
+        {
+          "text": "They",
+          "start_ms": 122240,
+          "end_ms": 122520
+        },
+        {
+          "text": "have",
+          "start_ms": 122540,
+          "end_ms": 123180
+        },
+        {
+          "text": "no",
+          "start_ms": 123200,
+          "end_ms": 123320
+        },
+        {
+          "text": "power",
+          "start_ms": 123420,
+          "end_ms": 124420
+        },
+        {
+          "text": "over",
+          "start_ms": 124500,
+          "end_ms": 124820
+        },
+        {
+          "text": "me",
+          "start_ms": 124880,
+          "end_ms": 125000
+        }
+      ]
+    },
+    {
+      "text": "The One with all authority covers me",
+      "start_ms": 125980,
+      "end_ms": 129720,
+      "text_sk": "Ten, kto má všetku autoritu, ma pokrýva",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 125980,
+          "end_ms": 126080
+        },
+        {
+          "text": "One",
+          "start_ms": 126380,
+          "end_ms": 126780
+        },
+        {
+          "text": "with",
+          "start_ms": 127000,
+          "end_ms": 127220
+        },
+        {
+          "text": "all",
+          "start_ms": 127300,
+          "end_ms": 127900
+        },
+        {
+          "text": "authority",
+          "start_ms": 127980,
+          "end_ms": 128780
+        },
+        {
+          "text": "covers",
+          "start_ms": 129080,
+          "end_ms": 129540
+        },
+        {
+          "text": "me",
+          "start_ms": 129620,
+          "end_ms": 129720
+        }
+      ]
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 130480,
+      "end_ms": 132640,
+      "text_sk": "Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 130480,
+          "end_ms": 130640
+        },
+        {
+          "text": "be",
+          "start_ms": 130980,
+          "end_ms": 131080
+        },
+        {
+          "text": "it",
+          "start_ms": 131340,
+          "end_ms": 131480
+        },
+        {
+          "text": "God",
+          "start_ms": 131920,
+          "end_ms": 132640
+        }
+      ]
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 134240,
+      "end_ms": 136300,
+      "text_sk": "Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 134240,
+          "end_ms": 134400
+        },
+        {
+          "text": "be",
+          "start_ms": 134780,
+          "end_ms": 134900
+        },
+        {
+          "text": "it",
+          "start_ms": 135360,
+          "end_ms": 135640
+        },
+        {
+          "text": "God",
+          "start_ms": 135680,
+          "end_ms": 136300
+        }
+      ]
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 138040,
+      "end_ms": 142520,
+      "text_sk": "Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 138040,
+          "end_ms": 138200
+        },
+        {
+          "text": "be",
+          "start_ms": 138540,
+          "end_ms": 138660
+        },
+        {
+          "text": "it",
+          "start_ms": 139020,
+          "end_ms": 139500
+        },
+        {
+          "text": "God",
+          "start_ms": 141240,
+          "end_ms": 142520
+        }
+      ]
+    },
+    {
+      "text": "From a throne to a cross",
+      "start_ms": 146320,
+      "end_ms": 149220,
+      "text_sk": "Z trónu na kríž",
+      "words": [
+        {
+          "text": "From",
+          "start_ms": 146320,
+          "end_ms": 146620
+        },
+        {
+          "text": "a",
+          "start_ms": 146660,
+          "end_ms": 146680
+        },
+        {
+          "text": "throne",
+          "start_ms": 146840,
+          "end_ms": 147380
+        },
+        {
+          "text": "to",
+          "start_ms": 148200,
+          "end_ms": 148340
+        },
+        {
+          "text": "a",
+          "start_ms": 148520,
+          "end_ms": 148540
+        },
+        {
+          "text": "cross",
+          "start_ms": 148660,
+          "end_ms": 149220
+        }
+      ]
+    },
+    {
+      "text": "Who would pay such a price",
+      "start_ms": 150120,
+      "end_ms": 153060,
+      "text_sk": "Kto by zaplatil takú cenu",
+      "words": [
+        {
+          "text": "Who",
+          "start_ms": 150120,
+          "end_ms": 150220
+        },
+        {
+          "text": "would",
+          "start_ms": 150360,
+          "end_ms": 150500
+        },
+        {
+          "text": "pay",
+          "start_ms": 150580,
+          "end_ms": 150900
+        },
+        {
+          "text": "such",
+          "start_ms": 151980,
+          "end_ms": 152260
+        },
+        {
+          "text": "a",
+          "start_ms": 152300,
+          "end_ms": 152320
+        },
+        {
+          "text": "price",
+          "start_ms": 152420,
+          "end_ms": 153060
+        }
+      ]
+    },
+    {
+      "text": "For the sins of the world",
+      "start_ms": 153900,
+      "end_ms": 156800,
+      "text_sk": "Za hriechy sveta",
+      "words": [
+        {
+          "text": "For",
+          "start_ms": 153900,
+          "end_ms": 154100
+        },
+        {
+          "text": "the",
+          "start_ms": 154140,
+          "end_ms": 154240
+        },
+        {
+          "text": "sins",
+          "start_ms": 154360,
+          "end_ms": 155100
+        },
+        {
+          "text": "of",
+          "start_ms": 155900,
+          "end_ms": 156040
+        },
+        {
+          "text": "the",
+          "start_ms": 156080,
+          "end_ms": 156160
+        },
+        {
+          "text": "world",
+          "start_ms": 156340,
+          "end_ms": 156800
+        }
+      ]
+    },
+    {
+      "text": "Here's your King crucified",
+      "start_ms": 157700,
+      "end_ms": 160900,
+      "text_sk": "Tu je váš Kráľ ukrižovaný",
+      "words": [
+        {
+          "text": "Here's",
+          "start_ms": 157700,
+          "end_ms": 157960
+        },
+        {
+          "text": "your",
+          "start_ms": 157980,
+          "end_ms": 158100
+        },
+        {
+          "text": "King",
+          "start_ms": 158160,
+          "end_ms": 158500
+        },
+        {
+          "text": "crucified",
+          "start_ms": 159560,
+          "end_ms": 160900
+        }
+      ]
+    },
+    {
+      "text": "See the nails in His hands",
+      "start_ms": 161460,
+      "end_ms": 164420,
+      "text_sk": "Pozrite na klince v Jeho rukách",
+      "words": [
+        {
+          "text": "See",
+          "start_ms": 161460,
+          "end_ms": 161640
+        },
+        {
+          "text": "the",
+          "start_ms": 161700,
+          "end_ms": 161800
+        },
+        {
+          "text": "nails",
+          "start_ms": 161940,
+          "end_ms": 162840
+        },
+        {
+          "text": "in",
+          "start_ms": 163460,
+          "end_ms": 163620
+        },
+        {
+          "text": "His",
+          "start_ms": 163660,
+          "end_ms": 163800
+        },
+        {
+          "text": "hands",
+          "start_ms": 163860,
+          "end_ms": 164420
+        }
+      ]
+    },
+    {
+      "text": "See the wounds at His side",
+      "start_ms": 165240,
+      "end_ms": 168500,
+      "text_sk": "Pozrite na rany na Jeho boku",
+      "words": [
+        {
+          "text": "See",
+          "start_ms": 165240,
+          "end_ms": 165460
+        },
+        {
+          "text": "the",
+          "start_ms": 165520,
+          "end_ms": 165620
+        },
+        {
+          "text": "wounds",
+          "start_ms": 165700,
+          "end_ms": 166480
+        },
+        {
+          "text": "at",
+          "start_ms": 167180,
+          "end_ms": 167380
+        },
+        {
+          "text": "His",
+          "start_ms": 167400,
+          "end_ms": 167500
+        },
+        {
+          "text": "side",
+          "start_ms": 167580,
+          "end_ms": 168500
+        }
+      ]
+    },
+    {
+      "text": "See the crown meant to mock",
+      "start_ms": 169020,
+      "end_ms": 171860,
+      "text_sk": "Pozrite na korunu určenú na výsmech",
+      "words": [
+        {
+          "text": "See",
+          "start_ms": 169020,
+          "end_ms": 169220
+        },
+        {
+          "text": "the",
+          "start_ms": 169300,
+          "end_ms": 169380
+        },
+        {
+          "text": "crown",
+          "start_ms": 169460,
+          "end_ms": 170380
+        },
+        {
+          "text": "meant",
+          "start_ms": 170900,
+          "end_ms": 171100
+        },
+        {
+          "text": "to",
+          "start_ms": 171160,
+          "end_ms": 171260
+        },
+        {
+          "text": "mock",
+          "start_ms": 171360,
+          "end_ms": 171860
+        }
+      ]
+    },
+    {
+      "text": "That instead prophesied",
+      "start_ms": 172800,
+      "end_ms": 175920,
+      "text_sk": "Ktorá namiesto toho prorokovala",
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 172800,
+          "end_ms": 173020
+        },
+        {
+          "text": "instead",
+          "start_ms": 173060,
+          "end_ms": 173820
+        },
+        {
+          "text": "prophesied",
+          "start_ms": 174640,
+          "end_ms": 175920
+        }
+      ]
+    },
+    {
+      "text": "That it was not the end",
+      "start_ms": 176580,
+      "end_ms": 179420,
+      "text_sk": "Že to nebol koniec",
+      "words": [
+        {
+          "text": "That",
+          "start_ms": 176580,
+          "end_ms": 176840
+        },
+        {
+          "text": "it",
+          "start_ms": 176860,
+          "end_ms": 176960
+        },
+        {
+          "text": "was",
+          "start_ms": 177040,
+          "end_ms": 178040
+        },
+        {
+          "text": "not",
+          "start_ms": 178460,
+          "end_ms": 178660
+        },
+        {
+          "text": "the",
+          "start_ms": 178740,
+          "end_ms": 178860
+        },
+        {
+          "text": "end",
+          "start_ms": 179080,
+          "end_ms": 179420
+        }
+      ]
+    },
+    {
+      "text": "Wipe the tears from your eyes",
+      "start_ms": 180380,
+      "end_ms": 183700,
+      "text_sk": "Utrite si slzy z očí",
+      "words": [
+        {
+          "text": "Wipe",
+          "start_ms": 180380,
+          "end_ms": 180480
+        },
+        {
+          "text": "the",
+          "start_ms": 180620,
+          "end_ms": 180700
+        },
+        {
+          "text": "tears",
+          "start_ms": 180800,
+          "end_ms": 181800
+        },
+        {
+          "text": "from",
+          "start_ms": 182240,
+          "end_ms": 182420
+        },
+        {
+          "text": "your",
+          "start_ms": 182520,
+          "end_ms": 182760
+        },
+        {
+          "text": "eyes",
+          "start_ms": 182880,
+          "end_ms": 183700
+        }
+      ]
+    },
+    {
+      "text": "Don't forget that He said",
+      "start_ms": 184120,
+      "end_ms": 186800,
+      "text_sk": "Nezabudnite, že povedal",
+      "words": [
+        {
+          "text": "Don't",
+          "start_ms": 184120,
+          "end_ms": 184320
+        },
+        {
+          "text": "forget",
+          "start_ms": 184360,
+          "end_ms": 185320
+        },
+        {
+          "text": "that",
+          "start_ms": 186020,
+          "end_ms": 186300
+        },
+        {
+          "text": "He",
+          "start_ms": 186320,
+          "end_ms": 186360
+        },
+        {
+          "text": "said",
+          "start_ms": 186500,
+          "end_ms": 186800
+        }
+      ]
+    },
+    {
+      "text": "On the third He would rise",
+      "start_ms": 187980,
+      "end_ms": 199600,
+      "text_sk": "Na tretí deň vstane",
+      "words": [
+        {
+          "text": "On",
+          "start_ms": 187980,
+          "end_ms": 188120
+        },
+        {
+          "text": "the",
+          "start_ms": 188160,
+          "end_ms": 188240
+        },
+        {
+          "text": "third",
+          "start_ms": 188340,
+          "end_ms": 189800
+        },
+        {
+          "text": "He",
+          "start_ms": 189820,
+          "end_ms": 189900
+        },
+        {
+          "text": "would",
+          "start_ms": 190040,
+          "end_ms": 190300
+        },
+        {
+          "text": "rise",
+          "start_ms": 199300,
+          "end_ms": 199600
+        }
+      ]
+    },
+    {
+      "text": "He's alive He's alive",
+      "start_ms": 201180,
+      "end_ms": 205040,
+      "text_sk": "Je nažive Je nažive",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 201180,
+          "end_ms": 201420
+        },
+        {
+          "text": "alive",
+          "start_ms": 201460,
+          "end_ms": 203180
+        },
+        {
+          "text": "He's",
+          "start_ms": 203220,
+          "end_ms": 203320
+        },
+        {
+          "text": "alive",
+          "start_ms": 203380,
+          "end_ms": 205040
+        }
+      ]
+    },
+    {
+      "text": "He's alive He's alive",
+      "start_ms": 207300,
+      "end_ms": 209780,
+      "text_sk": "Je nažive Je nažive",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 207300,
+          "end_ms": 207440
+        },
+        {
+          "text": "alive",
+          "start_ms": 207480,
+          "end_ms": 208300
+        },
+        {
+          "text": "He's",
+          "start_ms": 209300,
+          "end_ms": 209440
+        },
+        {
+          "text": "alive",
+          "start_ms": 209520,
+          "end_ms": 209780
+        }
+      ]
+    },
+    {
+      "text": "He's alive He's alive",
+      "start_ms": 211340,
+      "end_ms": 216160,
+      "text_sk": "Je nažive Je nažive",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 211340,
+          "end_ms": 211940
+        },
+        {
+          "text": "alive",
+          "start_ms": 212660,
+          "end_ms": 213320
+        },
+        {
+          "text": "He's",
+          "start_ms": 214800,
+          "end_ms": 215080
+        },
+        {
+          "text": "alive",
+          "start_ms": 215660,
+          "end_ms": 216160
+        }
+      ]
+    },
+    {
+      "text": "He's alive He's alive",
+      "start_ms": 217240,
+      "end_ms": 220420,
+      "text_sk": "Je nažive Je nažive",
+      "words": [
+        {
+          "text": "He's",
+          "start_ms": 217240,
+          "end_ms": 217400
+        },
+        {
+          "text": "alive",
+          "start_ms": 217540,
+          "end_ms": 217860
+        },
+        {
+          "text": "He's",
+          "start_ms": 218000,
+          "end_ms": 218340
+        },
+        {
+          "text": "alive",
+          "start_ms": 219400,
+          "end_ms": 220420
+        }
+      ]
+    },
+    {
+      "text": "The Lamb of God has overcome",
+      "start_ms": 220720,
+      "end_ms": 233380,
+      "text_sk": "Baránok Boží zvíťazil",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 220720,
+          "end_ms": 220860
+        },
+        {
+          "text": "Lamb",
+          "start_ms": 224800,
+          "end_ms": 225060
+        },
+        {
+          "text": "of",
+          "start_ms": 227240,
+          "end_ms": 227400
+        },
+        {
+          "text": "God",
+          "start_ms": 229960,
+          "end_ms": 230240
+        },
+        {
+          "text": "has",
+          "start_ms": 231540,
+          "end_ms": 231900
+        },
+        {
+          "text": "overcome",
+          "start_ms": 232180,
+          "end_ms": 233380
+        }
+      ]
+    },
+    {
+      "text": "My testimony is His blood",
+      "start_ms": 234820,
+      "end_ms": 255320,
+      "text_sk": "Moje svedectvo je Jeho krv",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 234820,
+          "end_ms": 235400
+        },
+        {
+          "text": "testimony",
+          "start_ms": 235840,
+          "end_ms": 239260
+        },
+        {
+          "text": "is",
+          "start_ms": 243980,
+          "end_ms": 244100
+        },
+        {
+          "text": "His",
+          "start_ms": 247720,
+          "end_ms": 247840
+        },
+        {
+          "text": "blood",
+          "start_ms": 255000,
+          "end_ms": 255320
+        }
+      ]
+    },
+    {
+      "text": "And if He said that it is done it is done",
+      "start_ms": 258720,
+      "end_ms": 272380,
+      "text_sk": "A ak povedal, že je to hotové, je to hotové",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 258720,
+          "end_ms": 258820
+        },
+        {
+          "text": "if",
+          "start_ms": 258900,
+          "end_ms": 259060
+        },
+        {
+          "text": "He",
+          "start_ms": 259080,
+          "end_ms": 259120
+        },
+        {
+          "text": "said",
+          "start_ms": 259180,
+          "end_ms": 260000
+        },
+        {
+          "text": "that",
+          "start_ms": 266580,
+          "end_ms": 266840
+        },
+        {
+          "text": "it",
+          "start_ms": 267660,
+          "end_ms": 268100
+        },
+        {
+          "text": "is",
+          "start_ms": 268580,
+          "end_ms": 268720
+        },
+        {
+          "text": "done",
+          "start_ms": 269420,
+          "end_ms": 270260
+        },
+        {
+          "text": "it",
+          "start_ms": 270500,
+          "end_ms": 270660
+        },
+        {
+          "text": "is",
+          "start_ms": 270740,
+          "end_ms": 271340
+        },
+        {
+          "text": "done",
+          "start_ms": 272040,
+          "end_ms": 272380
+        }
+      ]
+    },
+    {
+      "text": "So be it God",
+      "start_ms": 272500,
+      "end_ms": 276700,
+      "text_sk": "Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 272500,
+          "end_ms": 272620
+        },
+        {
+          "text": "be",
+          "start_ms": 273540,
+          "end_ms": 273700
+        },
+        {
+          "text": "it",
+          "start_ms": 274280,
+          "end_ms": 274440
+        },
+        {
+          "text": "God",
+          "start_ms": 276300,
+          "end_ms": 276700
+        }
+      ]
+    },
+    {
+      "text": "The weapons of the enemy",
+      "start_ms": 277680,
+      "end_ms": 321740,
+      "text_sk": "Zbrane nepriateľa",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 277680,
+          "end_ms": 278040
+        },
+        {
+          "text": "weapons",
+          "start_ms": 281720,
+          "end_ms": 283880
+        },
+        {
+          "text": "of",
+          "start_ms": 285820,
+          "end_ms": 287140
+        },
+        {
+          "text": "the",
+          "start_ms": 321460,
+          "end_ms": 321540
+        },
+        {
+          "text": "enemy",
+          "start_ms": 321620,
+          "end_ms": 321740
+        }
+      ]
+    },
+    {
+      "text": "They have no power over me",
+      "start_ms": 321920,
+      "end_ms": 325680,
+      "text_sk": "Nemajú nado mnou žiadnu moc",
+      "words": [
+        {
+          "text": "They",
+          "start_ms": 321920,
+          "end_ms": 322160
+        },
+        {
+          "text": "have",
+          "start_ms": 323420,
+          "end_ms": 323600
+        },
+        {
+          "text": "no",
+          "start_ms": 323660,
+          "end_ms": 323780
+        },
+        {
+          "text": "power",
+          "start_ms": 324160,
+          "end_ms": 324380
+        },
+        {
+          "text": "over",
+          "start_ms": 325400,
+          "end_ms": 325620
+        },
+        {
+          "text": "me",
+          "start_ms": 325640,
+          "end_ms": 325680
+        }
+      ]
+    },
+    {
+      "text": "The One with all authority covers me",
+      "start_ms": 325780,
+      "end_ms": 329960,
+      "text_sk": "Ten, kto má všetku autoritu, ma pokrýva",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 325780,
+          "end_ms": 325940
+        },
+        {
+          "text": "One",
+          "start_ms": 326160,
+          "end_ms": 326240
+        },
+        {
+          "text": "with",
+          "start_ms": 327000,
+          "end_ms": 327260
+        },
+        {
+          "text": "all",
+          "start_ms": 327340,
+          "end_ms": 327420
+        },
+        {
+          "text": "authority",
+          "start_ms": 327560,
+          "end_ms": 328200
+        },
+        {
+          "text": "covers",
+          "start_ms": 329340,
+          "end_ms": 329820
+        },
+        {
+          "text": "me",
+          "start_ms": 329880,
+          "end_ms": 329960
+        }
+      ]
+    },
+    {
+      "text": "So be it God So be it God",
+      "start_ms": 333640,
+      "end_ms": 349600,
+      "text_sk": "Tak nech sa stane, Bože Tak nech sa stane, Bože",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 333640,
+          "end_ms": 333900
+        },
+        {
+          "text": "be",
+          "start_ms": 335180,
+          "end_ms": 335300
+        },
+        {
+          "text": "it",
+          "start_ms": 335340,
+          "end_ms": 335400
+        },
+        {
+          "text": "God",
+          "start_ms": 335740,
+          "end_ms": 336420
+        },
+        {
+          "text": "So",
+          "start_ms": 338480,
+          "end_ms": 338620
+        },
+        {
+          "text": "be",
+          "start_ms": 339100,
+          "end_ms": 339220
+        },
+        {
+          "text": "it",
+          "start_ms": 339860,
+          "end_ms": 339960
+        },
+        {
+          "text": "God",
+          "start_ms": 340360,
+          "end_ms": 349600
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "segment",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.27,
+    "model_load_sec": null,
+    "error": null
+  }
+}

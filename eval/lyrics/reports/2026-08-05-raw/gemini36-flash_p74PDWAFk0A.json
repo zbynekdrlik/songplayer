@@ -1,0 +1,1992 @@
+{
+  "backend_id": "gemini36-flash",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\p74PDWAFk0A_vocal16k.wav",
+  "duration_ms": 156500,
+  "lines": [
+    {
+      "text": "Oh, the enemy may take some things",
+      "start_ms": 10,
+      "end_ms": 3290,
+      "text_sk": "Nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 10,
+          "end_ms": 610,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 610,
+          "end_ms": 910,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 910,
+          "end_ms": 1410,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 1410,
+          "end_ms": 1780,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 1780,
+          "end_ms": 2220,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 2220,
+          "end_ms": 2700,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 2700,
+          "end_ms": 3290,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 3290,
+      "end_ms": 5580,
+      "text_sk": "Ale nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 3290,
+          "end_ms": 3720,
+          "confidence": 0.9
+        },
+        {
+          "text": "he",
+          "start_ms": 3720,
+          "end_ms": 3950,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 3950,
+          "end_ms": 4250,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 4250,
+          "end_ms": 4600,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 4600,
+          "end_ms": 4900,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 4900,
+          "end_ms": 5580,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 5580,
+      "end_ms": 8630,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 5580,
+          "end_ms": 6050,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 6050,
+          "end_ms": 6380,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 6380,
+          "end_ms": 6700,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 6700,
+          "end_ms": 8630,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things",
+      "start_ms": 8630,
+      "end_ms": 11750,
+      "text_sk": "Nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 8630,
+          "end_ms": 9050,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 9050,
+          "end_ms": 9320,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 9320,
+          "end_ms": 9820,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 9820,
+          "end_ms": 10200,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 10200,
+          "end_ms": 10600,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 10600,
+          "end_ms": 11080,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 11080,
+          "end_ms": 11750,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 11750,
+      "end_ms": 14190,
+      "text_sk": "Ale nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 11750,
+          "end_ms": 12180,
+          "confidence": 0.9
+        },
+        {
+          "text": "he",
+          "start_ms": 12180,
+          "end_ms": 12410,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 12410,
+          "end_ms": 12750,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 12750,
+          "end_ms": 13120,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 13120,
+          "end_ms": 13450,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 13450,
+          "end_ms": 14190,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 14190,
+      "end_ms": 17140,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 14190,
+          "end_ms": 14610,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 14610,
+          "end_ms": 14940,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 14940,
+          "end_ms": 15260,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 15260,
+          "end_ms": 17140,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things",
+      "start_ms": 17140,
+      "end_ms": 20260,
+      "text_sk": "Nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 17140,
+          "end_ms": 17560,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 17560,
+          "end_ms": 17830,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 17830,
+          "end_ms": 18330,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 18330,
+          "end_ms": 18710,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 18710,
+          "end_ms": 19110,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 19110,
+          "end_ms": 19590,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 19590,
+          "end_ms": 20260,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 20260,
+      "end_ms": 22700,
+      "text_sk": "Ale nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 20260,
+          "end_ms": 20690,
+          "confidence": 0.9
+        },
+        {
+          "text": "he",
+          "start_ms": 20690,
+          "end_ms": 20920,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 20920,
+          "end_ms": 21260,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 21260,
+          "end_ms": 21630,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 21630,
+          "end_ms": 21960,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 21960,
+          "end_ms": 22700,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 22700,
+      "end_ms": 25650,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 22700,
+          "end_ms": 23120,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 23120,
+          "end_ms": 23450,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 23450,
+          "end_ms": 23770,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 23770,
+          "end_ms": 25650,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things",
+      "start_ms": 25650,
+      "end_ms": 28770,
+      "text_sk": "Nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 25650,
+          "end_ms": 26070,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 26070,
+          "end_ms": 26340,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 26340,
+          "end_ms": 26840,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 26840,
+          "end_ms": 27220,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 27220,
+          "end_ms": 27620,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 27620,
+          "end_ms": 28100,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 28100,
+          "end_ms": 28770,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "But he can't take my",
+      "start_ms": 28770,
+      "end_ms": 31210,
+      "text_sk": "Ale nemôže mi vziať moje",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 28770,
+          "end_ms": 29200,
+          "confidence": 0.9
+        },
+        {
+          "text": "he",
+          "start_ms": 29200,
+          "end_ms": 29430,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 29430,
+          "end_ms": 29770,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 29770,
+          "end_ms": 30140,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 30140,
+          "end_ms": 31210,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 31210,
+      "end_ms": 34160,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 31210,
+          "end_ms": 31630,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 31630,
+          "end_ms": 31960,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 31960,
+          "end_ms": 32280,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 32280,
+          "end_ms": 34160,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "So lungs",
+      "start_ms": 35200,
+      "end_ms": 36580,
+      "text_sk": "Takže pľúca",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 35200,
+          "end_ms": 35800,
+          "confidence": 0.9
+        },
+        {
+          "text": "lungs",
+          "start_ms": 35800,
+          "end_ms": 36580,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Breathe",
+      "start_ms": 36580,
+      "end_ms": 38620,
+      "text_sk": "Dýchajte",
+      "words": [
+        {
+          "text": "Breathe",
+          "start_ms": 36580,
+          "end_ms": 38620,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Mouth",
+      "start_ms": 38620,
+      "end_ms": 40940,
+      "text_sk": "Ústa",
+      "words": [
+        {
+          "text": "Mouth",
+          "start_ms": 38620,
+          "end_ms": 40940,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Sing",
+      "start_ms": 40940,
+      "end_ms": 43510,
+      "text_sk": "Spievajte",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 40940,
+          "end_ms": 43510,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And hands",
+      "start_ms": 43510,
+      "end_ms": 45830,
+      "text_sk": "A ruky",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 43510,
+          "end_ms": 44400,
+          "confidence": 0.9
+        },
+        {
+          "text": "hands",
+          "start_ms": 44400,
+          "end_ms": 45830,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Reach",
+      "start_ms": 45830,
+      "end_ms": 48300,
+      "text_sk": "Vystrite sa",
+      "words": [
+        {
+          "text": "Reach",
+          "start_ms": 45830,
+          "end_ms": 48300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 48300,
+      "end_ms": 52400,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 48300,
+          "end_ms": 48800,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 48800,
+          "end_ms": 49100,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 49100,
+          "end_ms": 49500,
+          "confidence": 0.9
+        },
+        {
+          "text": "way",
+          "start_ms": 49500,
+          "end_ms": 50000,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 50000,
+          "end_ms": 50400,
+          "confidence": 0.9
+        },
+        {
+          "text": "victory",
+          "start_ms": 50400,
+          "end_ms": 52400,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lungs",
+      "start_ms": 52400,
+      "end_ms": 54600,
+      "text_sk": "Pľúca",
+      "words": [
+        {
+          "text": "Lungs",
+          "start_ms": 52400,
+          "end_ms": 54600,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Breathe",
+      "start_ms": 54600,
+      "end_ms": 56900,
+      "text_sk": "Dýchajte",
+      "words": [
+        {
+          "text": "Breathe",
+          "start_ms": 54600,
+          "end_ms": 56900,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Mouth",
+      "start_ms": 56900,
+      "end_ms": 59100,
+      "text_sk": "Ústa",
+      "words": [
+        {
+          "text": "Mouth",
+          "start_ms": 56900,
+          "end_ms": 59100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Sing",
+      "start_ms": 59100,
+      "end_ms": 61300,
+      "text_sk": "Spievajte",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 59100,
+          "end_ms": 61300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And hands",
+      "start_ms": 61300,
+      "end_ms": 63500,
+      "text_sk": "A ruky",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 61300,
+          "end_ms": 62100,
+          "confidence": 0.9
+        },
+        {
+          "text": "hands",
+          "start_ms": 62100,
+          "end_ms": 63500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Reach",
+      "start_ms": 63500,
+      "end_ms": 65500,
+      "text_sk": "Vystrite sa",
+      "words": [
+        {
+          "text": "Reach",
+          "start_ms": 63500,
+          "end_ms": 65500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 65500,
+      "end_ms": 69400,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 65500,
+          "end_ms": 66000,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 66000,
+          "end_ms": 66300,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 66300,
+          "end_ms": 66700,
+          "confidence": 0.9
+        },
+        {
+          "text": "way",
+          "start_ms": 66700,
+          "end_ms": 67200,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 67200,
+          "end_ms": 67600,
+          "confidence": 0.9
+        },
+        {
+          "text": "victory",
+          "start_ms": 67600,
+          "end_ms": 69400,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, lungs",
+      "start_ms": 69400,
+      "end_ms": 71600,
+      "text_sk": "Oh, pľúca",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 69400,
+          "end_ms": 70300,
+          "confidence": 0.9
+        },
+        {
+          "text": "lungs",
+          "start_ms": 70300,
+          "end_ms": 71600,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Breathe",
+      "start_ms": 71600,
+      "end_ms": 73700,
+      "text_sk": "Dýchajte",
+      "words": [
+        {
+          "text": "Breathe",
+          "start_ms": 71600,
+          "end_ms": 73700,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Mouth sing, mouth",
+      "start_ms": 73700,
+      "end_ms": 76100,
+      "text_sk": "Ústa spievajte, ústa",
+      "words": [
+        {
+          "text": "Mouth",
+          "start_ms": 73700,
+          "end_ms": 74500,
+          "confidence": 0.9
+        },
+        {
+          "text": "sing,",
+          "start_ms": 74500,
+          "end_ms": 75300,
+          "confidence": 0.9
+        },
+        {
+          "text": "mouth",
+          "start_ms": 75300,
+          "end_ms": 76100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Sing, oh hands",
+      "start_ms": 76100,
+      "end_ms": 79100,
+      "text_sk": "Spievajte, oh ruky",
+      "words": [
+        {
+          "text": "Sing,",
+          "start_ms": 76100,
+          "end_ms": 77200,
+          "confidence": 0.9
+        },
+        {
+          "text": "oh",
+          "start_ms": 77200,
+          "end_ms": 77800,
+          "confidence": 0.9
+        },
+        {
+          "text": "hands",
+          "start_ms": 77800,
+          "end_ms": 79100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Reach",
+      "start_ms": 79100,
+      "end_ms": 81200,
+      "text_sk": "Vystrite sa",
+      "words": [
+        {
+          "text": "Reach",
+          "start_ms": 79100,
+          "end_ms": 81200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 81200,
+      "end_ms": 85500,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 81200,
+          "end_ms": 81700,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 81700,
+          "end_ms": 82000,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 82000,
+          "end_ms": 82400,
+          "confidence": 0.9
+        },
+        {
+          "text": "way",
+          "start_ms": 82400,
+          "end_ms": 82900,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 82900,
+          "end_ms": 83300,
+          "confidence": 0.9
+        },
+        {
+          "text": "victory",
+          "start_ms": 83300,
+          "end_ms": 85500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Because the enemy may take some things",
+      "start_ms": 85500,
+      "end_ms": 88400,
+      "text_sk": "Lebo nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Because",
+          "start_ms": 85500,
+          "end_ms": 85900,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 85900,
+          "end_ms": 86100,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 86100,
+          "end_ms": 86600,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 86600,
+          "end_ms": 87000,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 87000,
+          "end_ms": 87400,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 87400,
+          "end_ms": 87800,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 87800,
+          "end_ms": 88400,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "But he can't take my worship",
+      "start_ms": 88400,
+      "end_ms": 90700,
+      "text_sk": "Ale nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "But",
+          "start_ms": 88400,
+          "end_ms": 88800,
+          "confidence": 0.9
+        },
+        {
+          "text": "he",
+          "start_ms": 88800,
+          "end_ms": 89000,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 89000,
+          "end_ms": 89300,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 89300,
+          "end_ms": 89700,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 89700,
+          "end_ms": 90000,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 90000,
+          "end_ms": 90700,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 90700,
+      "end_ms": 93200,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 90700,
+          "end_ms": 91200,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 91200,
+          "end_ms": 91500,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 91500,
+          "end_ms": 91800,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 91800,
+          "end_ms": 93200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things",
+      "start_ms": 93200,
+      "end_ms": 96200,
+      "text_sk": "Nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 93200,
+          "end_ms": 93600,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 93600,
+          "end_ms": 93900,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 93900,
+          "end_ms": 94400,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 94400,
+          "end_ms": 94800,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 94800,
+          "end_ms": 95200,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 95200,
+          "end_ms": 95600,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 95600,
+          "end_ms": 96200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Done so much for me",
+      "start_ms": 99200,
+      "end_ms": 101000,
+      "text_sk": "Urobil pre mňa tak veľa",
+      "words": [
+        {
+          "text": "Done",
+          "start_ms": 99200,
+          "end_ms": 99600,
+          "confidence": 0.9
+        },
+        {
+          "text": "so",
+          "start_ms": 99600,
+          "end_ms": 99900,
+          "confidence": 0.9
+        },
+        {
+          "text": "much",
+          "start_ms": 99900,
+          "end_ms": 100300,
+          "confidence": 0.9
+        },
+        {
+          "text": "for",
+          "start_ms": 100300,
+          "end_ms": 100600,
+          "confidence": 0.9
+        },
+        {
+          "text": "me",
+          "start_ms": 100600,
+          "end_ms": 101000,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "I cannot tell it all",
+      "start_ms": 101000,
+      "end_ms": 103200,
+      "text_sk": "Nemôžem to všetko vyrozprávať",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 101000,
+          "end_ms": 101200,
+          "confidence": 0.9
+        },
+        {
+          "text": "cannot",
+          "start_ms": 101200,
+          "end_ms": 101700,
+          "confidence": 0.9
+        },
+        {
+          "text": "tell",
+          "start_ms": 101700,
+          "end_ms": 102100,
+          "confidence": 0.9
+        },
+        {
+          "text": "it",
+          "start_ms": 102100,
+          "end_ms": 102300,
+          "confidence": 0.9
+        },
+        {
+          "text": "all",
+          "start_ms": 102300,
+          "end_ms": 103200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things",
+      "start_ms": 103200,
+      "end_ms": 106200,
+      "text_sk": "Oh, nepriateľ mi môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 103200,
+          "end_ms": 103600,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 103600,
+          "end_ms": 103900,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 103900,
+          "end_ms": 104400,
+          "confidence": 0.9
+        },
+        {
+          "text": "may",
+          "start_ms": 104400,
+          "end_ms": 104800,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 104800,
+          "end_ms": 105200,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 105200,
+          "end_ms": 105600,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 105600,
+          "end_ms": 106200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "He can't take my worship",
+      "start_ms": 106200,
+      "end_ms": 108600,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 106200,
+          "end_ms": 106500,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 106500,
+          "end_ms": 106800,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 106800,
+          "end_ms": 107200,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 107200,
+          "end_ms": 107600,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 107600,
+          "end_ms": 108600,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 108600,
+      "end_ms": 110900,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 108600,
+          "end_ms": 109100,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 109100,
+          "end_ms": 109400,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 109400,
+          "end_ms": 109700,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 109700,
+          "end_ms": 110900,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "You sound good. Sing it out, the enemy",
+      "start_ms": 110900,
+      "end_ms": 113300,
+      "text_sk": "Zniete dobre. Zaspievajte to, nepriateľ",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 110900,
+          "end_ms": 111100,
+          "confidence": 0.9
+        },
+        {
+          "text": "sound",
+          "start_ms": 111100,
+          "end_ms": 111400,
+          "confidence": 0.9
+        },
+        {
+          "text": "good.",
+          "start_ms": 111400,
+          "end_ms": 111800,
+          "confidence": 0.9
+        },
+        {
+          "text": "Sing",
+          "start_ms": 111800,
+          "end_ms": 112100,
+          "confidence": 0.9
+        },
+        {
+          "text": "it",
+          "start_ms": 112100,
+          "end_ms": 112300,
+          "confidence": 0.9
+        },
+        {
+          "text": "out,",
+          "start_ms": 112300,
+          "end_ms": 112600,
+          "confidence": 0.9
+        },
+        {
+          "text": "the",
+          "start_ms": 112600,
+          "end_ms": 112800,
+          "confidence": 0.9
+        },
+        {
+          "text": "enemy",
+          "start_ms": 112800,
+          "end_ms": 113300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "May take some things",
+      "start_ms": 113300,
+      "end_ms": 114600,
+      "text_sk": "Môže vziať niektoré veci",
+      "words": [
+        {
+          "text": "May",
+          "start_ms": 113300,
+          "end_ms": 113600,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 113600,
+          "end_ms": 113900,
+          "confidence": 0.9
+        },
+        {
+          "text": "some",
+          "start_ms": 113900,
+          "end_ms": 114200,
+          "confidence": 0.9
+        },
+        {
+          "text": "things",
+          "start_ms": 114200,
+          "end_ms": 114600,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "He can't take my worship",
+      "start_ms": 114600,
+      "end_ms": 116600,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 114600,
+          "end_ms": 114900,
+          "confidence": 0.9
+        },
+        {
+          "text": "can't",
+          "start_ms": 114900,
+          "end_ms": 115200,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 115200,
+          "end_ms": 115500,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 115500,
+          "end_ms": 115800,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 115800,
+          "end_ms": 116600,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Can't take my worship",
+      "start_ms": 116600,
+      "end_ms": 119500,
+      "text_sk": "Nemôže mi vziať moje uctievanie",
+      "words": [
+        {
+          "text": "Can't",
+          "start_ms": 116600,
+          "end_ms": 117100,
+          "confidence": 0.9
+        },
+        {
+          "text": "take",
+          "start_ms": 117100,
+          "end_ms": 117500,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 117500,
+          "end_ms": 117800,
+          "confidence": 0.9
+        },
+        {
+          "text": "worship",
+          "start_ms": 117800,
+          "end_ms": 119500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "So we sing lungs",
+      "start_ms": 119500,
+      "end_ms": 121500,
+      "text_sk": "Takže spievame pľúca",
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 119500,
+          "end_ms": 119900,
+          "confidence": 0.9
+        },
+        {
+          "text": "we",
+          "start_ms": 119900,
+          "end_ms": 120200,
+          "confidence": 0.9
+        },
+        {
+          "text": "sing",
+          "start_ms": 120200,
+          "end_ms": 120600,
+          "confidence": 0.9
+        },
+        {
+          "text": "lungs",
+          "start_ms": 120600,
+          "end_ms": 121500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Lungs",
+      "start_ms": 121500,
+      "end_ms": 122800,
+      "text_sk": "Pľúca",
+      "words": [
+        {
+          "text": "Lungs",
+          "start_ms": 121500,
+          "end_ms": 122800,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Breathe",
+      "start_ms": 122800,
+      "end_ms": 124000,
+      "text_sk": "Dýchajte",
+      "words": [
+        {
+          "text": "Breathe",
+          "start_ms": 122800,
+          "end_ms": 124000,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, mouth",
+      "start_ms": 124000,
+      "end_ms": 125100,
+      "text_sk": "Oh, ústa",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 124000,
+          "end_ms": 124500,
+          "confidence": 0.9
+        },
+        {
+          "text": "mouth",
+          "start_ms": 124500,
+          "end_ms": 125100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Mouth",
+      "start_ms": 125100,
+      "end_ms": 126100,
+      "text_sk": "Ústa",
+      "words": [
+        {
+          "text": "Mouth",
+          "start_ms": 125100,
+          "end_ms": 126100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Sing",
+      "start_ms": 126100,
+      "end_ms": 127200,
+      "text_sk": "Spievajte",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 126100,
+          "end_ms": 127200,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Sing",
+      "start_ms": 127200,
+      "end_ms": 128300,
+      "text_sk": "Spievajte",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 127200,
+          "end_ms": 128300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And hands",
+      "start_ms": 128300,
+      "end_ms": 129400,
+      "text_sk": "A ruky",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 128300,
+          "end_ms": 128800,
+          "confidence": 0.9
+        },
+        {
+          "text": "hands",
+          "start_ms": 128800,
+          "end_ms": 129400,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Hands",
+      "start_ms": 129400,
+      "end_ms": 130500,
+      "text_sk": "Ruky",
+      "words": [
+        {
+          "text": "Hands",
+          "start_ms": 129400,
+          "end_ms": 130500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Reach",
+      "start_ms": 130500,
+      "end_ms": 131700,
+      "text_sk": "Vystrite sa",
+      "words": [
+        {
+          "text": "Reach",
+          "start_ms": 130500,
+          "end_ms": 131700,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "I command my soul",
+      "start_ms": 131700,
+      "end_ms": 133500,
+      "text_sk": "Prikazujem svojej duši",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 131700,
+          "end_ms": 132000,
+          "confidence": 0.9
+        },
+        {
+          "text": "command",
+          "start_ms": 132000,
+          "end_ms": 132500,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 132500,
+          "end_ms": 132800,
+          "confidence": 0.9
+        },
+        {
+          "text": "soul",
+          "start_ms": 132800,
+          "end_ms": 133500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 133500,
+      "end_ms": 137300,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 133500,
+          "end_ms": 133900,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 133900,
+          "end_ms": 134200,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 134200,
+          "end_ms": 134500,
+          "confidence": 0.9
+        },
+        {
+          "text": "way",
+          "start_ms": 134500,
+          "end_ms": 135000,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 135000,
+          "end_ms": 135400,
+          "confidence": 0.9
+        },
+        {
+          "text": "victory",
+          "start_ms": 135400,
+          "end_ms": 137300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Oh, lungs",
+      "start_ms": 137300,
+      "end_ms": 139100,
+      "text_sk": "Oh, pľúca",
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 137300,
+          "end_ms": 137800,
+          "confidence": 0.9
+        },
+        {
+          "text": "lungs",
+          "start_ms": 137800,
+          "end_ms": 139100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Breathe",
+      "start_ms": 139100,
+      "end_ms": 140500,
+      "text_sk": "Dýchajte",
+      "words": [
+        {
+          "text": "Breathe",
+          "start_ms": 139100,
+          "end_ms": 140500,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Breathe",
+      "start_ms": 140500,
+      "end_ms": 141700,
+      "text_sk": "Dýchajte",
+      "words": [
+        {
+          "text": "Breathe",
+          "start_ms": 140500,
+          "end_ms": 141700,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And mouth",
+      "start_ms": 141700,
+      "end_ms": 142800,
+      "text_sk": "A ústa",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 141700,
+          "end_ms": 142200,
+          "confidence": 0.9
+        },
+        {
+          "text": "mouth",
+          "start_ms": 142200,
+          "end_ms": 142800,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Mouth",
+      "start_ms": 142800,
+      "end_ms": 144000,
+      "text_sk": "Ústa",
+      "words": [
+        {
+          "text": "Mouth",
+          "start_ms": 142800,
+          "end_ms": 144000,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "You will sing",
+      "start_ms": 144000,
+      "end_ms": 145000,
+      "text_sk": "Budete spievať",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 144000,
+          "end_ms": 144300,
+          "confidence": 0.9
+        },
+        {
+          "text": "will",
+          "start_ms": 144300,
+          "end_ms": 144600,
+          "confidence": 0.9
+        },
+        {
+          "text": "sing",
+          "start_ms": 144600,
+          "end_ms": 145000,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Sing",
+      "start_ms": 145000,
+      "end_ms": 146000,
+      "text_sk": "Spievajte",
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 145000,
+          "end_ms": 146000,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "And hands",
+      "start_ms": 146000,
+      "end_ms": 147100,
+      "text_sk": "A ruky",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 146000,
+          "end_ms": 146500,
+          "confidence": 0.9
+        },
+        {
+          "text": "hands",
+          "start_ms": 146500,
+          "end_ms": 147100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Hands",
+      "start_ms": 147100,
+      "end_ms": 148100,
+      "text_sk": "Ruky",
+      "words": [
+        {
+          "text": "Hands",
+          "start_ms": 147100,
+          "end_ms": 148100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Reach",
+      "start_ms": 148100,
+      "end_ms": 149300,
+      "text_sk": "Vystrite sa",
+      "words": [
+        {
+          "text": "Reach",
+          "start_ms": 148100,
+          "end_ms": 149300,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "This is",
+      "start_ms": 149300,
+      "end_ms": 150000,
+      "text_sk": "Toto je",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 149300,
+          "end_ms": 149600,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 149600,
+          "end_ms": 150000,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory",
+      "start_ms": 150000,
+      "end_ms": 154100,
+      "text_sk": "Toto je moja cesta k víťazstvu",
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 150000,
+          "end_ms": 150400,
+          "confidence": 0.9
+        },
+        {
+          "text": "is",
+          "start_ms": 150400,
+          "end_ms": 150700,
+          "confidence": 0.9
+        },
+        {
+          "text": "my",
+          "start_ms": 150700,
+          "end_ms": 151100,
+          "confidence": 0.9
+        },
+        {
+          "text": "way",
+          "start_ms": 151100,
+          "end_ms": 151600,
+          "confidence": 0.9
+        },
+        {
+          "text": "to",
+          "start_ms": 151600,
+          "end_ms": 152000,
+          "confidence": 0.9
+        },
+        {
+          "text": "victory",
+          "start_ms": 152000,
+          "end_ms": 154100,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "text": "Somebody praise Him now!",
+      "start_ms": 154100,
+      "end_ms": 156500,
+      "text_sk": "Nech Ho niekto teraz chváli!",
+      "words": [
+        {
+          "text": "Somebody",
+          "start_ms": 154100,
+          "end_ms": 154700,
+          "confidence": 0.9
+        },
+        {
+          "text": "praise",
+          "start_ms": 154700,
+          "end_ms": 155200,
+          "confidence": 0.9
+        },
+        {
+          "text": "Him",
+          "start_ms": 155200,
+          "end_ms": 155600,
+          "confidence": 0.9
+        },
+        {
+          "text": "now!",
+          "start_ms": 155600,
+          "end_ms": 156500,
+          "confidence": 0.9
+        }
+      ]
+    }
+  ],
+  "raw_confidence": 0.9,
+  "metadata": {
+    "model": "gemini-3.6-flash",
+    "elapsed_s": 92.1,
+    "line_count": 70,
+    "finish_reason": "STOP",
+    "usage": {
+      "promptTokenCount": 12612,
+      "candidatesTokenCount": 12523,
+      "totalTokenCount": 27595,
+      "promptTokensDetails": [
+        {
+          "modality": "AUDIO",
+          "tokenCount": 12587
+        },
+        {
+          "modality": "TEXT",
+          "tokenCount": 25
+        }
+      ],
+      "thoughtsTokenCount": 2460,
+      "serviceTier": "standard"
+    },
+    "audio_transport": "files_api",
+    "audio_bytes": 32221948
+  }
+}

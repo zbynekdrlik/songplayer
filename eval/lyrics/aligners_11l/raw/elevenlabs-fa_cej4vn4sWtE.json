@@ -1,0 +1,623 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\cej4vn4sWtE_vocal16k.wav",
+  "duration_ms": 524880,
+  "lines": [
+    {
+      "text": "I could sing Your name for all my life",
+      "text_sk": "Mohol by som spievať Tvoje meno celý svoj život",
+      "start_ms": 17720,
+      "end_ms": 25260,
+      "mean_word_loss": 0.5795561931751393
+    },
+    {
+      "text": "And still find more to love each time",
+      "text_sk": "A stále nájsť viac, čo milovať zakaždým",
+      "start_ms": 25960,
+      "end_ms": 32600,
+      "mean_word_loss": 0.3006381948788961
+    },
+    {
+      "text": "Jesus be the name ever on my lips",
+      "text_sk": "Ježiš buď menom vždy na mojich perách",
+      "start_ms": 34380,
+      "end_ms": 37740,
+      "mean_word_loss": 0.32679128646850586
+    },
+    {
+      "text": "It's sweeter every time that I call on it",
+      "text_sk": "Je sladšie zakaždým, keď ho vzývam",
+      "start_ms": 41600,
+      "end_ms": 44840,
+      "mean_word_loss": 0.4085252065507192
+    },
+    {
+      "text": "There's just something 'bout Your name",
+      "text_sk": "Na Tvojom mene je niečo výnimočné",
+      "start_ms": 46040,
+      "end_ms": 48180,
+      "mean_word_loss": 0.4058915476319651
+    },
+    {
+      "text": "There's just something 'bout Your name",
+      "text_sk": "Na Tvojom mene je niečo výnimočné",
+      "start_ms": 49760,
+      "end_ms": 55820,
+      "mean_word_loss": 0.30885912072721616
+    },
+    {
+      "text": "That makes me cry holy",
+      "text_sk": "Čo ma núti volať svätý",
+      "start_ms": 56620,
+      "end_ms": 59720,
+      "mean_word_loss": 0.20209826151529947
+    },
+    {
+      "text": "There is no other name",
+      "text_sk": "Nie je žiadne iné meno",
+      "start_ms": 61380,
+      "end_ms": 63400,
+      "mean_word_loss": 0.10887012481689454
+    },
+    {
+      "text": "There is no other name",
+      "text_sk": "Nie je žiadne iné meno",
+      "start_ms": 65080,
+      "end_ms": 70700,
+      "mean_word_loss": 0.1624980926513672
+    },
+    {
+      "text": "Jesus You're worthy",
+      "text_sk": "Ježiš, si hoden",
+      "start_ms": 71880,
+      "end_ms": 75020,
+      "mean_word_loss": 0.4677910592820909
+    },
+    {
+      "text": "You have been the friend who never left",
+      "text_sk": "Bol si priateľ, ktorý nikdy neodišiel",
+      "start_ms": 77680,
+      "end_ms": 85240,
+      "mean_word_loss": 0.3536104996999105
+    },
+    {
+      "text": "I won't forget Your faithfulness",
+      "text_sk": "Nezabudnem na Tvoju vernosť",
+      "start_ms": 86120,
+      "end_ms": 92940,
+      "mean_word_loss": 0.20352502107620238
+    },
+    {
+      "text": "Jesus be the name ever on my lips",
+      "text_sk": "Ježiš buď menom vždy na mojich perách",
+      "start_ms": 94360,
+      "end_ms": 97880,
+      "mean_word_loss": 0.42261343002319335
+    },
+    {
+      "text": "It's sweeter every time that I call on it",
+      "text_sk": "Je sladšie zakaždým, keď ho vzývam",
+      "start_ms": 101640,
+      "end_ms": 105920,
+      "mean_word_loss": 0.6295393202039931
+    },
+    {
+      "text": "There's just something 'bout Your name",
+      "text_sk": "Na Tvojom mene je niečo výnimočné",
+      "start_ms": 106120,
+      "end_ms": 108400,
+      "mean_word_loss": 0.43575483100124135
+    },
+    {
+      "text": "There's just something 'bout Your name",
+      "text_sk": "Na Tvojom mene je niečo výnimočné",
+      "start_ms": 109860,
+      "end_ms": 115740,
+      "mean_word_loss": 0.3096827774451523
+    },
+    {
+      "text": "That makes me cry holy",
+      "text_sk": "Čo ma núti volať svätý",
+      "start_ms": 116640,
+      "end_ms": 119980,
+      "mean_word_loss": 0.18566829681396485
+    },
+    {
+      "text": "There is no other name oh",
+      "text_sk": "Nie je žiadne iné meno, ó",
+      "start_ms": 121300,
+      "end_ms": 123600,
+      "mean_word_loss": 0.5239009221394857
+    },
+    {
+      "text": "There is no other name",
+      "text_sk": "Nie je žiadne iné meno",
+      "start_ms": 125100,
+      "end_ms": 127400,
+      "mean_word_loss": 0.15940990447998046
+    },
+    {
+      "text": "Jesus You're worthy we sing",
+      "text_sk": "Ježiš, si hoden, spievame",
+      "start_ms": 131860,
+      "end_ms": 135980,
+      "mean_word_loss": 0.3565401522318522
+    },
+    {
+      "text": "There's just something 'bout Your name oh Jesus",
+      "text_sk": "Na Tvojom mene je niečo výnimočné, ó Ježiš",
+      "start_ms": 136100,
+      "end_ms": 139420,
+      "mean_word_loss": 0.6860197248912993
+    },
+    {
+      "text": "There's just something 'bout Your name",
+      "text_sk": "Na Tvojom mene je niečo výnimočné",
+      "start_ms": 139820,
+      "end_ms": 146040,
+      "mean_word_loss": 0.41452980949765156
+    },
+    {
+      "text": "That makes me cry holy",
+      "text_sk": "Čo ma núti volať svätý",
+      "start_ms": 146620,
+      "end_ms": 150160,
+      "mean_word_loss": 0.18238967895507813
+    },
+    {
+      "text": "There is no other name I know",
+      "text_sk": "Poznám len jedno meno",
+      "start_ms": 151340,
+      "end_ms": 154520,
+      "mean_word_loss": 0.5828415461948939
+    },
+    {
+      "text": "There is no other name",
+      "text_sk": "Nie je žiadne iné meno",
+      "start_ms": 155140,
+      "end_ms": 161060,
+      "mean_word_loss": 0.35500267028808596
+    },
+    {
+      "text": "Jesus You're worthy yes You are",
+      "text_sk": "Ježiš, si hoden, áno si",
+      "start_ms": 161920,
+      "end_ms": 168960,
+      "mean_word_loss": 0.8274815930260552
+    },
+    {
+      "text": "Hallelujah to the worthy one",
+      "text_sk": "Aleluja tomu hodnému",
+      "start_ms": 170460,
+      "end_ms": 195440,
+      "mean_word_loss": 1.8915293375651043
+    },
+    {
+      "text": "Jesus Your name is like the morning light",
+      "text_sk": "Ježiš, Tvoje meno je ako ranné svetlo",
+      "start_ms": 195580,
+      "end_ms": 200400,
+      "mean_word_loss": 0.7209988117218018
+    },
+    {
+      "text": "The one the darkness can't deny",
+      "text_sk": "Ktoré temnota nemôže poprieť",
+      "start_ms": 200760,
+      "end_ms": 204480,
+      "mean_word_loss": 0.3014240052964952
+    },
+    {
+      "text": "The resurrection and the life Jesus",
+      "text_sk": "Vzkriesenie a život, Ježiš",
+      "start_ms": 204500,
+      "end_ms": 210140,
+      "mean_word_loss": 0.48427595562405057
+    },
+    {
+      "text": "Jesus Your name can save",
+      "text_sk": "Ježiš, Tvoje meno môže zachrániť",
+      "start_ms": 210660,
+      "end_ms": 213720,
+      "mean_word_loss": 0.377279167175293
+    },
+    {
+      "text": "Your name can heal",
+      "text_sk": "Tvoje meno môže uzdraviť",
+      "start_ms": 213940,
+      "end_ms": 215390,
+      "mean_word_loss": 0.8648831049601237
+    },
+    {
+      "text": "Your name can make the storm be still",
+      "text_sk": "Tvoje meno môže utíšiť búrku",
+      "start_ms": 215780,
+      "end_ms": 219180,
+      "mean_word_loss": 0.39545726776123047
+    },
+    {
+      "text": "You never fail You never will Jesus",
+      "text_sk": "Nikdy nezlyháš, nikdy nezlyháš, Ježiš",
+      "start_ms": 219540,
+      "end_ms": 225160,
+      "mean_word_loss": 0.5564360482352121
+    },
+    {
+      "text": "Jesus the bread of life broken for us",
+      "text_sk": "Ježiš, chlieb života lámaný pre nás",
+      "start_ms": 225620,
+      "end_ms": 230440,
+      "mean_word_loss": 0.9274592558542887
+    },
+    {
+      "text": "The wounded and the worthy one",
+      "text_sk": "Zranený a hodný",
+      "start_ms": 230760,
+      "end_ms": 234220,
+      "mean_word_loss": 0.7083416287861173
+    },
+    {
+      "text": "The first and last and soon to come Jesus",
+      "text_sk": "Prvý a posledný a čoskoro príde, Ježiš",
+      "start_ms": 234540,
+      "end_ms": 240160,
+      "mean_word_loss": 1.3703805888140643
+    },
+    {
+      "text": "Jesus the King the overcomer",
+      "text_sk": "Ježiš, Kráľ, víťaz",
+      "start_ms": 240600,
+      "end_ms": 244800,
+      "mean_word_loss": 1.016374151441786
+    },
+    {
+      "text": "The great the Lord who will forever reign",
+      "text_sk": "Veľký Pán, ktorý bude navždy vládnuť",
+      "start_ms": 244880,
+      "end_ms": 249240,
+      "mean_word_loss": 0.951756359281994
+    },
+    {
+      "text": "The name above all other names Jesus",
+      "text_sk": "Meno nad všetky mená, Ježiš",
+      "start_ms": 249540,
+      "end_ms": 255860,
+      "mean_word_loss": 0.7963806878952753
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 255870,
+      "end_ms": 259260,
+      "mean_word_loss": 1.398787930806478
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 260260,
+      "end_ms": 263520,
+      "mean_word_loss": 0.46468296051025393
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 263640,
+      "end_ms": 266560,
+      "mean_word_loss": 0.9945358848571777
+    },
+    {
+      "text": "That gets all the glory",
+      "text_sk": "Ktorému patrí všetka sláva",
+      "start_ms": 266580,
+      "end_ms": 269740,
+      "mean_word_loss": 0.580733642578125
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 271100,
+      "end_ms": 274100,
+      "mean_word_loss": 1.2009066645304363
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 275120,
+      "end_ms": 277940,
+      "mean_word_loss": 0.825460163752238
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 278600,
+      "end_ms": 281040,
+      "mean_word_loss": 0.9137683614095051
+    },
+    {
+      "text": "That gets all the glory Jesus",
+      "text_sk": "Ktorému patrí všetka sláva, Ježiš",
+      "start_ms": 281620,
+      "end_ms": 285040,
+      "mean_word_loss": 0.5688528060913086
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 286140,
+      "end_ms": 288940,
+      "mean_word_loss": 1.2791573969523111
+    },
+    {
+      "text": "Jesus be the name above it all",
+      "text_sk": "Ježiš buď menom nad všetkým",
+      "start_ms": 289600,
+      "end_ms": 293460,
+      "mean_word_loss": 1.0163147381373814
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 294080,
+      "end_ms": 295980,
+      "mean_word_loss": 0.690031369527181
+    },
+    {
+      "text": "That gets all the glory",
+      "text_sk": "Ktorému patrí všetka sláva",
+      "start_ms": 296600,
+      "end_ms": 300080,
+      "mean_word_loss": 0.7790726725260416
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 301080,
+      "end_ms": 304240,
+      "mean_word_loss": 1.2428399912516277
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 305260,
+      "end_ms": 307900,
+      "mean_word_loss": 0.8487041076024373
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 308620,
+      "end_ms": 311040,
+      "mean_word_loss": 0.9116457557678223
+    },
+    {
+      "text": "That gets all the glory yeah",
+      "text_sk": "Ktorému patrí všetka sláva, áno",
+      "start_ms": 311640,
+      "end_ms": 317600,
+      "mean_word_loss": 0.6588717990451388
+    },
+    {
+      "text": "Shout His name Jesus",
+      "text_sk": "Vykričte Jeho meno, Ježiš",
+      "start_ms": 317680,
+      "end_ms": 329210,
+      "mean_word_loss": 2.017278798421224
+    },
+    {
+      "text": "Jesus",
+      "text_sk": "Ježiš",
+      "start_ms": 329211,
+      "end_ms": 330600,
+      "mean_word_loss": 0.2528560638427734
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 331460,
+      "end_ms": 349760,
+      "mean_word_loss": 1.1532745742797852
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 350260,
+      "end_ms": 352860,
+      "mean_word_loss": 0.3902551253636678
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 353640,
+      "end_ms": 356100,
+      "mean_word_loss": 0.9304770851135254
+    },
+    {
+      "text": "That gets all the glory Jesus",
+      "text_sk": "Ktorému patrí všetka sláva, Ježiš",
+      "start_ms": 356580,
+      "end_ms": 360920,
+      "mean_word_loss": 0.6140406714545356
+    },
+    {
+      "text": "Oh Jesus be the name be the name be the name",
+      "text_sk": "Ó, Ježiš buď menom, buď menom, buď menom",
+      "start_ms": 361140,
+      "end_ms": 368550,
+      "mean_word_loss": 1.6431598894523851
+    },
+    {
+      "text": "Oh Jesus be the name",
+      "text_sk": "Ó, Ježiš buď menom",
+      "start_ms": 368620,
+      "end_ms": 370960,
+      "mean_word_loss": 1.1278693644205728
+    },
+    {
+      "text": "That gets all the glory",
+      "text_sk": "Ktorému patrí všetka sláva",
+      "start_ms": 371640,
+      "end_ms": 375660,
+      "mean_word_loss": 0.7075660196940105
+    },
+    {
+      "text": "All the glory",
+      "text_sk": "Všetka sláva",
+      "start_ms": 380540,
+      "end_ms": 382340,
+      "mean_word_loss": 1.7363715277777778
+    },
+    {
+      "text": "Give Him glory give Him glory",
+      "text_sk": "Vzdajte Mu slávu, vzdajte Mu slávu",
+      "start_ms": 383260,
+      "end_ms": 391980,
+      "mean_word_loss": 2.3694200303819444
+    },
+    {
+      "text": "High and lifted up",
+      "text_sk": "Vysoko a povýšený",
+      "start_ms": 393120,
+      "end_ms": 406380,
+      "mean_word_loss": 2.2709503173828125
+    },
+    {
+      "text": "All the glory is Yours",
+      "text_sk": "Všetka sláva je Tvoja",
+      "start_ms": 417130,
+      "end_ms": 434360,
+      "mean_word_loss": 1.9812890625000001
+    },
+    {
+      "text": "Come on sing it again",
+      "text_sk": "Poďte, zaspievajme to znova",
+      "start_ms": 434460,
+      "end_ms": 435460,
+      "mean_word_loss": 2.065673828125
+    },
+    {
+      "text": "There's healing in Your name",
+      "text_sk": "V Tvojom mene je uzdravenie",
+      "start_ms": 455720,
+      "end_ms": 468200,
+      "mean_word_loss": 1.156480952671596
+    },
+    {
+      "text": "There's healing in Your name",
+      "text_sk": "V Tvojom mene je uzdravenie",
+      "start_ms": 469980,
+      "end_ms": 471450,
+      "mean_word_loss": 1.0555158342633928
+    },
+    {
+      "text": "There's healing in Your name",
+      "text_sk": "V Tvojom mene je uzdravenie",
+      "start_ms": 471451,
+      "end_ms": 475560,
+      "mean_word_loss": 1.0835657119750977
+    },
+    {
+      "text": "It makes me cry holy",
+      "text_sk": "Čo ma núti volať svätý",
+      "start_ms": 476640,
+      "end_ms": 479400,
+      "mean_word_loss": 0.9338637288411459
+    },
+    {
+      "text": "There's freedom in Your name",
+      "text_sk": "V Tvojom mene je sloboda",
+      "start_ms": 481320,
+      "end_ms": 483300,
+      "mean_word_loss": 0.6997419493538992
+    },
+    {
+      "text": "There's freedom in Your name",
+      "text_sk": "V Tvojom mene je sloboda",
+      "start_ms": 485020,
+      "end_ms": 487080,
+      "mean_word_loss": 0.6496414797646659
+    },
+    {
+      "text": "There's freedom in Your name",
+      "text_sk": "V Tvojom mene je sloboda",
+      "start_ms": 488760,
+      "end_ms": 490660,
+      "mean_word_loss": 0.5770201206207275
+    },
+    {
+      "text": "It makes me cry holy",
+      "text_sk": "Čo ma núti volať svätý",
+      "start_ms": 491640,
+      "end_ms": 493920,
+      "mean_word_loss": 0.6478466796875
+    },
+    {
+      "text": "There's salvation in Your name",
+      "text_sk": "V Tvojom mene je spasenie",
+      "start_ms": 495880,
+      "end_ms": 498520,
+      "mean_word_loss": 0.47986160762726315
+    },
+    {
+      "text": "Salvation in Your name alone",
+      "text_sk": "Spasenie len v Tvojom mene",
+      "start_ms": 500000,
+      "end_ms": 502460,
+      "mean_word_loss": 0.4919382052951389
+    },
+    {
+      "text": "Salvation in Your name",
+      "text_sk": "Spasenie v Tvojom mene",
+      "start_ms": 503780,
+      "end_ms": 505700,
+      "mean_word_loss": 0.2544433143403795
+    },
+    {
+      "text": "It makes me cry holy",
+      "text_sk": "Čo ma núti volať svätý",
+      "start_ms": 506640,
+      "end_ms": 509060,
+      "mean_word_loss": 0.6942721303304037
+    },
+    {
+      "text": "Sing Jesus be the name",
+      "text_sk": "Spievaj, Ježiš buď menom",
+      "start_ms": 511060,
+      "end_ms": 513659,
+      "mean_word_loss": 0.6536525217692057
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 515280,
+      "end_ms": 517060,
+      "mean_word_loss": 0.4600023825963338
+    },
+    {
+      "text": "Jesus be the name",
+      "text_sk": "Ježiš buď menom",
+      "start_ms": 519000,
+      "end_ms": 521850,
+      "mean_word_loss": 0.3637279987335205
+    },
+    {
+      "text": "That gets all the glory",
+      "text_sk": "Ktorému patrí všetka sláva",
+      "start_ms": 521850,
+      "end_ms": 524880,
+      "mean_word_loss": 0.6886036173502604
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.5968126199117871,
+  "metadata": {
+    "n_tokens_sent": 482,
+    "n_words_returned_raw": 963,
+    "n_words_returned_content": 482,
+    "n_characters_returned": 2392,
+    "runtime_sec": 9.4,
+    "n_lines": 86,
+    "n_lines_timed": 86,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}

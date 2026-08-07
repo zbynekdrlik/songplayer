@@ -1,0 +1,148 @@
+{
+  "backend_id": "combo-gemini36-flash-lines_soniox-v5-times",
+  "line_backend": "gemini36-flash",
+  "time_backend": "soniox-v5",
+  "video_id": "wAV5fk1o7u4",
+  "duration_ms": 210090,
+  "lines": [
+    {
+      "text": "In our darkest days, through the fear and pain, You were always there with us.",
+      "start_ms": 18210,
+      "end_ms": 30090,
+      "text_sk": "V našich najtemnejších dňoch, cez strach a bolesť, bol si s nami vždy.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 15
+    },
+    {
+      "text": "It's only by Your grace that we are here today, we're the evidence of love.",
+      "start_ms": 30390,
+      "end_ms": 40770,
+      "text_sk": "Len Tvojou milosťou sme tu dnes, sme dôkazom lásky.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 15,
+      "n_words_aligned": 14
+    },
+    {
+      "text": "Over and over You have proved that You are the rock that'll never move, You are the rock that'll never move.",
+      "start_ms": 43950,
+      "end_ms": 52650,
+      "text_sk": "Znova a znova si dokázal, že si skalou, ktorá sa nikdy nepohne, si skalou, ktorá sa nikdy nepohne.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 21,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Again and again You come through, always faithful, forever true, 'cause You are the rock that'll never move, You are the rock that'll never move.",
+      "start_ms": 56850,
+      "end_ms": 69090,
+      "text_sk": "Znova a znova prichádzaš, vždy verný, navždy pravdivý, lebo si skalou, ktorá sa nikdy nepohne, si skalou, ktorá sa nikdy nepohne.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 25,
+      "n_words_aligned": 23
+    },
+    {
+      "text": "Whatever we will face in the coming days, we will never walk alone.",
+      "start_ms": 70110,
+      "end_ms": 80010,
+      "text_sk": "Čomukoľvek budeme čeliť v nasledujúcich dňoch, nikdy nebudeme kráčať sami.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 13,
+      "n_words_aligned": 13
+    },
+    {
+      "text": "And through it all we praise, our hope will never change, where Your presence is where home.",
+      "start_ms": 83070,
+      "end_ms": 95970,
+      "text_sk": "A cez to všetko chválime, naša nádej sa nikdy nezmení, tam, kde je Tvoja prítomnosť, tam je domov.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 17,
+      "n_words_aligned": 17
+    },
+    {
+      "text": "Over and over You have proved that You are the rock that'll never move, You are the rock that'll never move.",
+      "start_ms": 96510,
+      "end_ms": 105270,
+      "text_sk": "Znova a znova si dokázal, že si skalou, ktorá sa nikdy nepohne, si skalou, ktorá sa nikdy nepohne.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 21,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Again and again You come through, always faithful, forever true, 'cause You are the rock that'll never move, You are the rock that'll never move.",
+      "start_ms": 109350,
+      "end_ms": 121830,
+      "text_sk": "Znova a znova prichádzaš, vždy verný, navždy pravdivý, lebo si skalou, ktorá sa nikdy nepohne, si skalou, ktorá sa nikdy nepohne.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 25,
+      "n_words_aligned": 23
+    },
+    {
+      "text": "There's no one like You, God. Yeah. Nothing's gonna shake our faith, no matter what the world may say, we know Your word will never change, we stand on better promises.",
+      "start_ms": 128010,
+      "end_ms": 147570,
+      "text_sk": "Nikoho nie je ako Ty, Bože. Áno. Nic neotrasie našou vierou, bez ohľadu na to, čo hovorí svet, vieme, že Tvoje slovo sa nikdy nezmení, stojíme na lepších zasľúbeniach.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 31,
+      "n_words_aligned": 29
+    },
+    {
+      "text": "Nothing's gonna shake our faith, no matter what the world may say, we know Your word will never change, we stand on better promises, we stand on better promises, we stand on better promises, we stand on better promises.",
+      "start_ms": 148830,
+      "end_ms": 170610,
+      "text_sk": "Nič neotrasie našou vierou, bez ohľadu na to, čo hovorí svet, vieme, že Tvoje slovo sa nikdy nezmení, stojíme na lepších zasľúbeniach, stojíme na lepších zasľúbeniach, stojíme na lepších zasľúbeniach, stojíme na lepších zasľúbeniach.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 39,
+      "n_words_aligned": 38
+    },
+    {
+      "text": "Over and over You have proved that You are the rock that'll never move, You are the rock that'll never move.",
+      "start_ms": 175470,
+      "end_ms": 184110,
+      "text_sk": "Znova a znova si dokázal, že si skalou, ktorá sa nikdy nepohne, si skalou, ktorá sa nikdy nepohne.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 21,
+      "n_words_aligned": 19
+    },
+    {
+      "text": "Again and again You come through, always faithful, forever true, 'cause You are the rock that'll never move, You are the rock that'll never move.",
+      "start_ms": 188250,
+      "end_ms": 200850,
+      "text_sk": "Znova a znova prichádzaš, vždy verný, navždy pravdivý, lebo si skalou, ktorá sa nikdy nepohne, si skalou, ktorá sa nikdy nepohne.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 25,
+      "n_words_aligned": 23
+    },
+    {
+      "text": "Nothing's gonna shake our faith, nothing's gonna shake our faith, nothing's gonna shake our faith, yeah.",
+      "start_ms": 201510,
+      "end_ms": 210090,
+      "text_sk": "Nič neotrasie našou vierou, nič neotrasie našou vierou, nič neotrasie našou vierou, áno.",
+      "words": null,
+      "timed": true,
+      "n_words_in_line": 16,
+      "n_words_aligned": 12
+    }
+  ],
+  "combine_stats": {
+    "n_lines": 13,
+    "n_lines_timed": 13,
+    "n_lines_untimed": 0,
+    "n_words_total": 284,
+    "n_words_aligned": 264,
+    "word_align_rate": 0.9295774647887324,
+    "n_monotonic_violations_clamped": 0
+  }
+}

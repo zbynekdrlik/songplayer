@@ -1,0 +1,2036 @@
+{
+  "backend_id": "ctc-forced-aligner",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\jUnyHptnsRo_vocal16k.wav",
+  "duration_ms": 324290,
+  "lines": [
+    {
+      "text": "I say of the Lord",
+      "start_ms": 19140,
+      "end_ms": 23540,
+      "text_sk": "Hovorím o Pánovi",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 19140,
+          "end_ms": 19160
+        },
+        {
+          "text": "say",
+          "start_ms": 19160,
+          "end_ms": 19560
+        },
+        {
+          "text": "of",
+          "start_ms": 19560,
+          "end_ms": 20000
+        },
+        {
+          "text": "the",
+          "start_ms": 20000,
+          "end_ms": 20340
+        },
+        {
+          "text": "Lord",
+          "start_ms": 20340,
+          "end_ms": 23540
+        }
+      ]
+    },
+    {
+      "text": "You will cover me with strength keep me underneath Your wings",
+      "start_ms": 23540,
+      "end_ms": 31880,
+      "text_sk": "Pokryješ ma silou a podržíš ma pod svojimi krídlami",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 23540,
+          "end_ms": 23680
+        },
+        {
+          "text": "will",
+          "start_ms": 23680,
+          "end_ms": 23860
+        },
+        {
+          "text": "cover",
+          "start_ms": 23860,
+          "end_ms": 24880
+        },
+        {
+          "text": "me",
+          "start_ms": 24880,
+          "end_ms": 25120
+        },
+        {
+          "text": "with",
+          "start_ms": 25120,
+          "end_ms": 25540
+        },
+        {
+          "text": "strength",
+          "start_ms": 25540,
+          "end_ms": 26780
+        },
+        {
+          "text": "keep",
+          "start_ms": 26780,
+          "end_ms": 27100
+        },
+        {
+          "text": "me",
+          "start_ms": 27100,
+          "end_ms": 27300
+        },
+        {
+          "text": "underneath",
+          "start_ms": 27300,
+          "end_ms": 28700
+        },
+        {
+          "text": "Your",
+          "start_ms": 28700,
+          "end_ms": 29160
+        },
+        {
+          "text": "wings",
+          "start_ms": 29160,
+          "end_ms": 31880
+        }
+      ]
+    },
+    {
+      "text": "And arrows fly by day but in Your shadow I am safe",
+      "start_ms": 31880,
+      "end_ms": 39840,
+      "text_sk": "A šípy lietajú cez deň, ale v Tvojom tieni som v bezpečí",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 31880,
+          "end_ms": 32300
+        },
+        {
+          "text": "arrows",
+          "start_ms": 32300,
+          "end_ms": 33060
+        },
+        {
+          "text": "fly",
+          "start_ms": 33060,
+          "end_ms": 33480
+        },
+        {
+          "text": "by",
+          "start_ms": 33480,
+          "end_ms": 33680
+        },
+        {
+          "text": "day",
+          "start_ms": 33680,
+          "end_ms": 35420
+        },
+        {
+          "text": "but",
+          "start_ms": 35420,
+          "end_ms": 36860
+        },
+        {
+          "text": "in",
+          "start_ms": 36860,
+          "end_ms": 37020
+        },
+        {
+          "text": "Your",
+          "start_ms": 37020,
+          "end_ms": 37200
+        },
+        {
+          "text": "shadow",
+          "start_ms": 37200,
+          "end_ms": 38400
+        },
+        {
+          "text": "I",
+          "start_ms": 38400,
+          "end_ms": 38720
+        },
+        {
+          "text": "am",
+          "start_ms": 38720,
+          "end_ms": 38960
+        },
+        {
+          "text": "safe",
+          "start_ms": 38960,
+          "end_ms": 39840
+        }
+      ]
+    },
+    {
+      "text": "And angels guard my way so I will not fear",
+      "start_ms": 39840,
+      "end_ms": 46260,
+      "text_sk": "A anjeli strážia moju cestu, takže sa nebudem báť",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 39840,
+          "end_ms": 40620
+        },
+        {
+          "text": "angels",
+          "start_ms": 40620,
+          "end_ms": 41500
+        },
+        {
+          "text": "guard",
+          "start_ms": 41500,
+          "end_ms": 42040
+        },
+        {
+          "text": "my",
+          "start_ms": 42040,
+          "end_ms": 42260
+        },
+        {
+          "text": "way",
+          "start_ms": 42260,
+          "end_ms": 43220
+        },
+        {
+          "text": "so",
+          "start_ms": 43220,
+          "end_ms": 43760
+        },
+        {
+          "text": "I",
+          "start_ms": 43760,
+          "end_ms": 43940
+        },
+        {
+          "text": "will",
+          "start_ms": 43940,
+          "end_ms": 44300
+        },
+        {
+          "text": "not",
+          "start_ms": 44300,
+          "end_ms": 45080
+        },
+        {
+          "text": "fear",
+          "start_ms": 45080,
+          "end_ms": 46260
+        }
+      ]
+    },
+    {
+      "text": "The terror of night it will not come near",
+      "start_ms": 46260,
+      "end_ms": 52960,
+      "text_sk": "Teror noci sa nepriblíži",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 46260,
+          "end_ms": 47160
+        },
+        {
+          "text": "terror",
+          "start_ms": 47160,
+          "end_ms": 48160
+        },
+        {
+          "text": "of",
+          "start_ms": 48160,
+          "end_ms": 48460
+        },
+        {
+          "text": "night",
+          "start_ms": 48460,
+          "end_ms": 49680
+        },
+        {
+          "text": "it",
+          "start_ms": 49680,
+          "end_ms": 50320
+        },
+        {
+          "text": "will",
+          "start_ms": 50320,
+          "end_ms": 50580
+        },
+        {
+          "text": "not",
+          "start_ms": 50580,
+          "end_ms": 50880
+        },
+        {
+          "text": "come",
+          "start_ms": 50880,
+          "end_ms": 52020
+        },
+        {
+          "text": "near",
+          "start_ms": 52020,
+          "end_ms": 52960
+        }
+      ]
+    },
+    {
+      "text": "Your presence is light and I find refuge in Your love",
+      "start_ms": 52960,
+      "end_ms": 63080,
+      "text_sk": "Tvoja prítomnosť je svetlo a nachádzam útočisko v Tvojej láske",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 52960,
+          "end_ms": 53860
+        },
+        {
+          "text": "presence",
+          "start_ms": 53860,
+          "end_ms": 54860
+        },
+        {
+          "text": "is",
+          "start_ms": 54860,
+          "end_ms": 55100
+        },
+        {
+          "text": "light",
+          "start_ms": 55100,
+          "end_ms": 56280
+        },
+        {
+          "text": "and",
+          "start_ms": 56280,
+          "end_ms": 56700
+        },
+        {
+          "text": "I",
+          "start_ms": 56700,
+          "end_ms": 56760
+        },
+        {
+          "text": "find",
+          "start_ms": 56760,
+          "end_ms": 57120
+        },
+        {
+          "text": "refuge",
+          "start_ms": 57120,
+          "end_ms": 59760
+        },
+        {
+          "text": "in",
+          "start_ms": 59760,
+          "end_ms": 59940
+        },
+        {
+          "text": "Your",
+          "start_ms": 59940,
+          "end_ms": 60140
+        },
+        {
+          "text": "love",
+          "start_ms": 60140,
+          "end_ms": 63080
+        }
+      ]
+    },
+    {
+      "text": "You're my fortress my God in whom I trust",
+      "start_ms": 63080,
+      "end_ms": 69860,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 63080,
+          "end_ms": 63520
+        },
+        {
+          "text": "my",
+          "start_ms": 63520,
+          "end_ms": 63800
+        },
+        {
+          "text": "fortress",
+          "start_ms": 63800,
+          "end_ms": 66440
+        },
+        {
+          "text": "my",
+          "start_ms": 66440,
+          "end_ms": 67240
+        },
+        {
+          "text": "God",
+          "start_ms": 67240,
+          "end_ms": 67760
+        },
+        {
+          "text": "in",
+          "start_ms": 67760,
+          "end_ms": 67900
+        },
+        {
+          "text": "whom",
+          "start_ms": 67900,
+          "end_ms": 68600
+        },
+        {
+          "text": "I",
+          "start_ms": 68600,
+          "end_ms": 68800
+        },
+        {
+          "text": "trust",
+          "start_ms": 68800,
+          "end_ms": 69860
+        }
+      ]
+    },
+    {
+      "text": "I take shelter in Your name amazing grace",
+      "start_ms": 69860,
+      "end_ms": 77980,
+      "text_sk": "Nachádzam úkryt v Tvojom mene, úžasná milosť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 69860,
+          "end_ms": 69980
+        },
+        {
+          "text": "take",
+          "start_ms": 69980,
+          "end_ms": 70780
+        },
+        {
+          "text": "shelter",
+          "start_ms": 70780,
+          "end_ms": 72800
+        },
+        {
+          "text": "in",
+          "start_ms": 72800,
+          "end_ms": 73260
+        },
+        {
+          "text": "Your",
+          "start_ms": 73260,
+          "end_ms": 73480
+        },
+        {
+          "text": "name",
+          "start_ms": 73480,
+          "end_ms": 75380
+        },
+        {
+          "text": "amazing",
+          "start_ms": 75380,
+          "end_ms": 76780
+        },
+        {
+          "text": "grace",
+          "start_ms": 76780,
+          "end_ms": 77980
+        }
+      ]
+    },
+    {
+      "text": "My hiding place",
+      "start_ms": 77980,
+      "end_ms": 81560,
+      "text_sk": "Moje útočisko",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 77980,
+          "end_ms": 78840
+        },
+        {
+          "text": "hiding",
+          "start_ms": 78840,
+          "end_ms": 80120
+        },
+        {
+          "text": "place",
+          "start_ms": 80120,
+          "end_ms": 81560
+        }
+      ]
+    },
+    {
+      "text": "I say of the Lord",
+      "start_ms": 81560,
+      "end_ms": 85620,
+      "text_sk": "Hovorím o Pánovi",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 81560,
+          "end_ms": 82420
+        },
+        {
+          "text": "say",
+          "start_ms": 82420,
+          "end_ms": 83200
+        },
+        {
+          "text": "of",
+          "start_ms": 83200,
+          "end_ms": 83620
+        },
+        {
+          "text": "the",
+          "start_ms": 83620,
+          "end_ms": 83840
+        },
+        {
+          "text": "Lord",
+          "start_ms": 83840,
+          "end_ms": 85620
+        }
+      ]
+    },
+    {
+      "text": "I say of the Lord though destruction",
+      "start_ms": 85620,
+      "end_ms": 90200,
+      "text_sk": "Hovorím o Pánovi, hoci skaza",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 85620,
+          "end_ms": 85740
+        },
+        {
+          "text": "say",
+          "start_ms": 85740,
+          "end_ms": 86460
+        },
+        {
+          "text": "of",
+          "start_ms": 86460,
+          "end_ms": 86840
+        },
+        {
+          "text": "the",
+          "start_ms": 86840,
+          "end_ms": 87020
+        },
+        {
+          "text": "Lord",
+          "start_ms": 87020,
+          "end_ms": 88660
+        },
+        {
+          "text": "though",
+          "start_ms": 88660,
+          "end_ms": 88880
+        },
+        {
+          "text": "destruction",
+          "start_ms": 88880,
+          "end_ms": 90200
+        }
+      ]
+    },
+    {
+      "text": "Though destruction plays the name of Jesus",
+      "start_ms": 90200,
+      "end_ms": 96920,
+      "text_sk": "Hoci skaza hrá meno Ježiša",
+      "words": [
+        {
+          "text": "Though",
+          "start_ms": 90200,
+          "end_ms": 90400
+        },
+        {
+          "text": "destruction",
+          "start_ms": 90400,
+          "end_ms": 91400
+        },
+        {
+          "text": "plays",
+          "start_ms": 91400,
+          "end_ms": 92040
+        },
+        {
+          "text": "the",
+          "start_ms": 92040,
+          "end_ms": 92300
+        },
+        {
+          "text": "name",
+          "start_ms": 92300,
+          "end_ms": 92920
+        },
+        {
+          "text": "of",
+          "start_ms": 92920,
+          "end_ms": 93080
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 93080,
+          "end_ms": 96920
+        }
+      ]
+    },
+    {
+      "text": "And armies beware He will save me from the snare",
+      "start_ms": 96920,
+      "end_ms": 105900,
+      "text_sk": "A armády si dajú pozor, On ma zachráni z pasce",
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 96920,
+          "end_ms": 98400
+        },
+        {
+          "text": "armies",
+          "start_ms": 98400,
+          "end_ms": 100200
+        },
+        {
+          "text": "beware",
+          "start_ms": 100200,
+          "end_ms": 101620
+        },
+        {
+          "text": "He",
+          "start_ms": 101620,
+          "end_ms": 102320
+        },
+        {
+          "text": "will",
+          "start_ms": 102320,
+          "end_ms": 102540
+        },
+        {
+          "text": "save",
+          "start_ms": 102540,
+          "end_ms": 103040
+        },
+        {
+          "text": "me",
+          "start_ms": 103040,
+          "end_ms": 103160
+        },
+        {
+          "text": "from",
+          "start_ms": 103160,
+          "end_ms": 103500
+        },
+        {
+          "text": "the",
+          "start_ms": 103500,
+          "end_ms": 103680
+        },
+        {
+          "text": "snare",
+          "start_ms": 103680,
+          "end_ms": 105900
+        }
+      ]
+    },
+    {
+      "text": "No harm can tarry so I will not fear",
+      "start_ms": 105900,
+      "end_ms": 113900,
+      "text_sk": "Žiadna škoda nemôže pretrvať, takže sa nebudem báť",
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 105900,
+          "end_ms": 106200
+        },
+        {
+          "text": "harm",
+          "start_ms": 106200,
+          "end_ms": 106520
+        },
+        {
+          "text": "can",
+          "start_ms": 106520,
+          "end_ms": 106740
+        },
+        {
+          "text": "tarry",
+          "start_ms": 106740,
+          "end_ms": 108900
+        },
+        {
+          "text": "so",
+          "start_ms": 108900,
+          "end_ms": 110380
+        },
+        {
+          "text": "I",
+          "start_ms": 110380,
+          "end_ms": 110560
+        },
+        {
+          "text": "will",
+          "start_ms": 110560,
+          "end_ms": 110960
+        },
+        {
+          "text": "not",
+          "start_ms": 110960,
+          "end_ms": 111840
+        },
+        {
+          "text": "fear",
+          "start_ms": 111840,
+          "end_ms": 113900
+        }
+      ]
+    },
+    {
+      "text": "The terror of night it will not come near",
+      "start_ms": 113900,
+      "end_ms": 118820,
+      "text_sk": "Teror noci sa nepriblíži",
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 113900,
+          "end_ms": 114260
+        },
+        {
+          "text": "terror",
+          "start_ms": 114260,
+          "end_ms": 115000
+        },
+        {
+          "text": "of",
+          "start_ms": 115000,
+          "end_ms": 115120
+        },
+        {
+          "text": "night",
+          "start_ms": 115120,
+          "end_ms": 116280
+        },
+        {
+          "text": "it",
+          "start_ms": 116280,
+          "end_ms": 116620
+        },
+        {
+          "text": "will",
+          "start_ms": 116620,
+          "end_ms": 117180
+        },
+        {
+          "text": "not",
+          "start_ms": 117180,
+          "end_ms": 117600
+        },
+        {
+          "text": "come",
+          "start_ms": 117600,
+          "end_ms": 118660
+        },
+        {
+          "text": "near",
+          "start_ms": 118660,
+          "end_ms": 118820
+        }
+      ]
+    },
+    {
+      "text": "Your presence is light and I find refuge in Your love",
+      "start_ms": 118820,
+      "end_ms": 128360,
+      "text_sk": "Tvoja prítomnosť je svetlo a nachádzam útočisko v Tvojej láske",
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 118820,
+          "end_ms": 118960
+        },
+        {
+          "text": "presence",
+          "start_ms": 118960,
+          "end_ms": 119700
+        },
+        {
+          "text": "is",
+          "start_ms": 119700,
+          "end_ms": 119880
+        },
+        {
+          "text": "light",
+          "start_ms": 119880,
+          "end_ms": 122480
+        },
+        {
+          "text": "and",
+          "start_ms": 122480,
+          "end_ms": 122820
+        },
+        {
+          "text": "I",
+          "start_ms": 122820,
+          "end_ms": 123040
+        },
+        {
+          "text": "find",
+          "start_ms": 123040,
+          "end_ms": 123880
+        },
+        {
+          "text": "refuge",
+          "start_ms": 123880,
+          "end_ms": 125500
+        },
+        {
+          "text": "in",
+          "start_ms": 125500,
+          "end_ms": 125900
+        },
+        {
+          "text": "Your",
+          "start_ms": 125900,
+          "end_ms": 126760
+        },
+        {
+          "text": "love",
+          "start_ms": 126760,
+          "end_ms": 128360
+        }
+      ]
+    },
+    {
+      "text": "You're my fortress my God in whom I trust",
+      "start_ms": 128360,
+      "end_ms": 135640,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 128360,
+          "end_ms": 129700
+        },
+        {
+          "text": "my",
+          "start_ms": 129700,
+          "end_ms": 130400
+        },
+        {
+          "text": "fortress",
+          "start_ms": 130400,
+          "end_ms": 132220
+        },
+        {
+          "text": "my",
+          "start_ms": 132220,
+          "end_ms": 132860
+        },
+        {
+          "text": "God",
+          "start_ms": 132860,
+          "end_ms": 133580
+        },
+        {
+          "text": "in",
+          "start_ms": 133580,
+          "end_ms": 134060
+        },
+        {
+          "text": "whom",
+          "start_ms": 134060,
+          "end_ms": 135240
+        },
+        {
+          "text": "I",
+          "start_ms": 135240,
+          "end_ms": 135340
+        },
+        {
+          "text": "trust",
+          "start_ms": 135340,
+          "end_ms": 135640
+        }
+      ]
+    },
+    {
+      "text": "I take shelter in Your name amazing grace",
+      "start_ms": 135640,
+      "end_ms": 144620,
+      "text_sk": "Nachádzam úkryt v Tvojom mene, úžasná milosť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 135640,
+          "end_ms": 135740
+        },
+        {
+          "text": "take",
+          "start_ms": 135740,
+          "end_ms": 136820
+        },
+        {
+          "text": "shelter",
+          "start_ms": 136820,
+          "end_ms": 140020
+        },
+        {
+          "text": "in",
+          "start_ms": 140020,
+          "end_ms": 140380
+        },
+        {
+          "text": "Your",
+          "start_ms": 140380,
+          "end_ms": 140960
+        },
+        {
+          "text": "name",
+          "start_ms": 140960,
+          "end_ms": 141680
+        },
+        {
+          "text": "amazing",
+          "start_ms": 141680,
+          "end_ms": 143460
+        },
+        {
+          "text": "grace",
+          "start_ms": 143460,
+          "end_ms": 144620
+        }
+      ]
+    },
+    {
+      "text": "My hiding place",
+      "start_ms": 144620,
+      "end_ms": 147700,
+      "text_sk": "Moje útočisko",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 144620,
+          "end_ms": 145580
+        },
+        {
+          "text": "hiding",
+          "start_ms": 145580,
+          "end_ms": 146480
+        },
+        {
+          "text": "place",
+          "start_ms": 146480,
+          "end_ms": 147700
+        }
+      ]
+    },
+    {
+      "text": "Amazing grace my hiding place",
+      "start_ms": 147700,
+      "end_ms": 161020,
+      "text_sk": "Úžasná milosť, moje útočisko",
+      "words": [
+        {
+          "text": "Amazing",
+          "start_ms": 147700,
+          "end_ms": 150080
+        },
+        {
+          "text": "grace",
+          "start_ms": 150080,
+          "end_ms": 151240
+        },
+        {
+          "text": "my",
+          "start_ms": 151240,
+          "end_ms": 152280
+        },
+        {
+          "text": "hiding",
+          "start_ms": 152280,
+          "end_ms": 153480
+        },
+        {
+          "text": "place",
+          "start_ms": 153480,
+          "end_ms": 161020
+        }
+      ]
+    },
+    {
+      "text": "You are You are You are my hiding place",
+      "start_ms": 161020,
+      "end_ms": 169540,
+      "text_sk": "Ty si Ty si Ty si moje útočisko",
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 161020,
+          "end_ms": 161300
+        },
+        {
+          "text": "are",
+          "start_ms": 161300,
+          "end_ms": 161940
+        },
+        {
+          "text": "You",
+          "start_ms": 161940,
+          "end_ms": 162240
+        },
+        {
+          "text": "are",
+          "start_ms": 162240,
+          "end_ms": 162700
+        },
+        {
+          "text": "You",
+          "start_ms": 162700,
+          "end_ms": 162980
+        },
+        {
+          "text": "are",
+          "start_ms": 162980,
+          "end_ms": 163960
+        },
+        {
+          "text": "my",
+          "start_ms": 163960,
+          "end_ms": 164200
+        },
+        {
+          "text": "hiding",
+          "start_ms": 164200,
+          "end_ms": 165140
+        },
+        {
+          "text": "place",
+          "start_ms": 165140,
+          "end_ms": 169540
+        }
+      ]
+    },
+    {
+      "text": "I hear You say because You love me",
+      "start_ms": 169540,
+      "end_ms": 175380,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma miluješ",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 169540,
+          "end_ms": 169680
+        },
+        {
+          "text": "hear",
+          "start_ms": 169680,
+          "end_ms": 170140
+        },
+        {
+          "text": "You",
+          "start_ms": 170140,
+          "end_ms": 170440
+        },
+        {
+          "text": "say",
+          "start_ms": 170440,
+          "end_ms": 171660
+        },
+        {
+          "text": "because",
+          "start_ms": 171660,
+          "end_ms": 173180
+        },
+        {
+          "text": "You",
+          "start_ms": 173180,
+          "end_ms": 173400
+        },
+        {
+          "text": "love",
+          "start_ms": 173400,
+          "end_ms": 174280
+        },
+        {
+          "text": "me",
+          "start_ms": 174280,
+          "end_ms": 175380
+        }
+      ]
+    },
+    {
+      "text": "I will rescue You I'll deliver You",
+      "start_ms": 175380,
+      "end_ms": 182400,
+      "text_sk": "Zachránim Ťa, vyslobodím Ťa",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 175380,
+          "end_ms": 176380
+        },
+        {
+          "text": "will",
+          "start_ms": 176380,
+          "end_ms": 176800
+        },
+        {
+          "text": "rescue",
+          "start_ms": 176800,
+          "end_ms": 178480
+        },
+        {
+          "text": "You",
+          "start_ms": 178480,
+          "end_ms": 179020
+        },
+        {
+          "text": "I'll",
+          "start_ms": 179020,
+          "end_ms": 179720
+        },
+        {
+          "text": "deliver",
+          "start_ms": 179720,
+          "end_ms": 181680
+        },
+        {
+          "text": "You",
+          "start_ms": 181680,
+          "end_ms": 182400
+        }
+      ]
+    },
+    {
+      "text": "I hear You say because You call me",
+      "start_ms": 182400,
+      "end_ms": 188780,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma voláš",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 182400,
+          "end_ms": 182880
+        },
+        {
+          "text": "hear",
+          "start_ms": 182880,
+          "end_ms": 183440
+        },
+        {
+          "text": "You",
+          "start_ms": 183440,
+          "end_ms": 183720
+        },
+        {
+          "text": "say",
+          "start_ms": 183720,
+          "end_ms": 185040
+        },
+        {
+          "text": "because",
+          "start_ms": 185040,
+          "end_ms": 186500
+        },
+        {
+          "text": "You",
+          "start_ms": 186500,
+          "end_ms": 186740
+        },
+        {
+          "text": "call",
+          "start_ms": 186740,
+          "end_ms": 187740
+        },
+        {
+          "text": "me",
+          "start_ms": 187740,
+          "end_ms": 188780
+        }
+      ]
+    },
+    {
+      "text": "I will answer You I will fight for You",
+      "start_ms": 188780,
+      "end_ms": 195500,
+      "text_sk": "Odpoviem Ti, budem bojovať za Teba",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 188780,
+          "end_ms": 189800
+        },
+        {
+          "text": "will",
+          "start_ms": 189800,
+          "end_ms": 190260
+        },
+        {
+          "text": "answer",
+          "start_ms": 190260,
+          "end_ms": 191780
+        },
+        {
+          "text": "You",
+          "start_ms": 191780,
+          "end_ms": 192500
+        },
+        {
+          "text": "I",
+          "start_ms": 192500,
+          "end_ms": 193040
+        },
+        {
+          "text": "will",
+          "start_ms": 193040,
+          "end_ms": 193460
+        },
+        {
+          "text": "fight",
+          "start_ms": 193460,
+          "end_ms": 194320
+        },
+        {
+          "text": "for",
+          "start_ms": 194320,
+          "end_ms": 195180
+        },
+        {
+          "text": "You",
+          "start_ms": 195180,
+          "end_ms": 195500
+        }
+      ]
+    },
+    {
+      "text": "I hear You say because You love me",
+      "start_ms": 195500,
+      "end_ms": 200380,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma miluješ",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 195500,
+          "end_ms": 195580
+        },
+        {
+          "text": "hear",
+          "start_ms": 195580,
+          "end_ms": 196880
+        },
+        {
+          "text": "You",
+          "start_ms": 196880,
+          "end_ms": 197520
+        },
+        {
+          "text": "say",
+          "start_ms": 197520,
+          "end_ms": 198040
+        },
+        {
+          "text": "because",
+          "start_ms": 198040,
+          "end_ms": 199940
+        },
+        {
+          "text": "You",
+          "start_ms": 199940,
+          "end_ms": 200040
+        },
+        {
+          "text": "love",
+          "start_ms": 200040,
+          "end_ms": 200180
+        },
+        {
+          "text": "me",
+          "start_ms": 200180,
+          "end_ms": 200380
+        }
+      ]
+    },
+    {
+      "text": "I will rescue You I'll deliver You",
+      "start_ms": 200380,
+      "end_ms": 209320,
+      "text_sk": "Zachránim Ťa, vyslobodím Ťa",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 200380,
+          "end_ms": 200500
+        },
+        {
+          "text": "will",
+          "start_ms": 200500,
+          "end_ms": 200960
+        },
+        {
+          "text": "rescue",
+          "start_ms": 200960,
+          "end_ms": 204660
+        },
+        {
+          "text": "You",
+          "start_ms": 204660,
+          "end_ms": 205120
+        },
+        {
+          "text": "I'll",
+          "start_ms": 205120,
+          "end_ms": 206340
+        },
+        {
+          "text": "deliver",
+          "start_ms": 206340,
+          "end_ms": 208440
+        },
+        {
+          "text": "You",
+          "start_ms": 208440,
+          "end_ms": 209320
+        }
+      ]
+    },
+    {
+      "text": "I hear You say because You call me",
+      "start_ms": 209320,
+      "end_ms": 216260,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma voláš",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 209320,
+          "end_ms": 209780
+        },
+        {
+          "text": "hear",
+          "start_ms": 209780,
+          "end_ms": 210460
+        },
+        {
+          "text": "You",
+          "start_ms": 210460,
+          "end_ms": 210580
+        },
+        {
+          "text": "say",
+          "start_ms": 210580,
+          "end_ms": 212180
+        },
+        {
+          "text": "because",
+          "start_ms": 212180,
+          "end_ms": 213380
+        },
+        {
+          "text": "You",
+          "start_ms": 213380,
+          "end_ms": 214580
+        },
+        {
+          "text": "call",
+          "start_ms": 214580,
+          "end_ms": 215780
+        },
+        {
+          "text": "me",
+          "start_ms": 215780,
+          "end_ms": 216260
+        }
+      ]
+    },
+    {
+      "text": "I will answer You I'll fight for You",
+      "start_ms": 216260,
+      "end_ms": 221680,
+      "text_sk": "Odpoviem Ti, budem bojovať za Teba",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 216260,
+          "end_ms": 216440
+        },
+        {
+          "text": "will",
+          "start_ms": 216440,
+          "end_ms": 216860
+        },
+        {
+          "text": "answer",
+          "start_ms": 216860,
+          "end_ms": 218360
+        },
+        {
+          "text": "You",
+          "start_ms": 218360,
+          "end_ms": 219260
+        },
+        {
+          "text": "I'll",
+          "start_ms": 219260,
+          "end_ms": 220060
+        },
+        {
+          "text": "fight",
+          "start_ms": 220060,
+          "end_ms": 221100
+        },
+        {
+          "text": "for",
+          "start_ms": 221100,
+          "end_ms": 221360
+        },
+        {
+          "text": "You",
+          "start_ms": 221360,
+          "end_ms": 221680
+        }
+      ]
+    },
+    {
+      "text": "I hear You say although a thousand may fall at my side",
+      "start_ms": 221680,
+      "end_ms": 230200,
+      "text_sk": "Počujem Ťa hovoriť, hoci tisíc môže padnúť po mojom boku",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 221680,
+          "end_ms": 221820
+        },
+        {
+          "text": "hear",
+          "start_ms": 221820,
+          "end_ms": 223020
+        },
+        {
+          "text": "You",
+          "start_ms": 223020,
+          "end_ms": 223800
+        },
+        {
+          "text": "say",
+          "start_ms": 223800,
+          "end_ms": 225280
+        },
+        {
+          "text": "although",
+          "start_ms": 225280,
+          "end_ms": 226580
+        },
+        {
+          "text": "a",
+          "start_ms": 226580,
+          "end_ms": 226700
+        },
+        {
+          "text": "thousand",
+          "start_ms": 226700,
+          "end_ms": 228420
+        },
+        {
+          "text": "may",
+          "start_ms": 228420,
+          "end_ms": 228740
+        },
+        {
+          "text": "fall",
+          "start_ms": 228740,
+          "end_ms": 229180
+        },
+        {
+          "text": "at",
+          "start_ms": 229180,
+          "end_ms": 229400
+        },
+        {
+          "text": "my",
+          "start_ms": 229400,
+          "end_ms": 229440
+        },
+        {
+          "text": "side",
+          "start_ms": 229440,
+          "end_ms": 230200
+        }
+      ]
+    },
+    {
+      "text": "Ten thousand more I'll stand secure in You",
+      "start_ms": 230200,
+      "end_ms": 237680,
+      "text_sk": "Desaťtisíc ďalších, budem stáť bezpečne v Tebe",
+      "words": [
+        {
+          "text": "Ten",
+          "start_ms": 230200,
+          "end_ms": 230320
+        },
+        {
+          "text": "thousand",
+          "start_ms": 230320,
+          "end_ms": 230940
+        },
+        {
+          "text": "more",
+          "start_ms": 230940,
+          "end_ms": 232680
+        },
+        {
+          "text": "I'll",
+          "start_ms": 232680,
+          "end_ms": 233280
+        },
+        {
+          "text": "stand",
+          "start_ms": 233280,
+          "end_ms": 234360
+        },
+        {
+          "text": "secure",
+          "start_ms": 234360,
+          "end_ms": 236780
+        },
+        {
+          "text": "in",
+          "start_ms": 236780,
+          "end_ms": 236960
+        },
+        {
+          "text": "You",
+          "start_ms": 236960,
+          "end_ms": 237680
+        }
+      ]
+    },
+    {
+      "text": "I hear You say call to Your house",
+      "start_ms": 237680,
+      "end_ms": 243480,
+      "text_sk": "Počujem Ťa hovoriť, volaj do svojho domu",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 237680,
+          "end_ms": 238100
+        },
+        {
+          "text": "hear",
+          "start_ms": 238100,
+          "end_ms": 238640
+        },
+        {
+          "text": "You",
+          "start_ms": 238640,
+          "end_ms": 238860
+        },
+        {
+          "text": "say",
+          "start_ms": 238860,
+          "end_ms": 240000
+        },
+        {
+          "text": "call",
+          "start_ms": 240000,
+          "end_ms": 240900
+        },
+        {
+          "text": "to",
+          "start_ms": 240900,
+          "end_ms": 241280
+        },
+        {
+          "text": "Your",
+          "start_ms": 241280,
+          "end_ms": 242160
+        },
+        {
+          "text": "house",
+          "start_ms": 242160,
+          "end_ms": 243480
+        }
+      ]
+    },
+    {
+      "text": "I'll satisfy Your soul with goodness and mercy",
+      "start_ms": 243480,
+      "end_ms": 248580,
+      "text_sk": "Nasýtim Tvoju dušu dobrotou a milosrdenstvom",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 243480,
+          "end_ms": 244880
+        },
+        {
+          "text": "satisfy",
+          "start_ms": 244880,
+          "end_ms": 245640
+        },
+        {
+          "text": "Your",
+          "start_ms": 245640,
+          "end_ms": 245740
+        },
+        {
+          "text": "soul",
+          "start_ms": 245740,
+          "end_ms": 246720
+        },
+        {
+          "text": "with",
+          "start_ms": 246720,
+          "end_ms": 246920
+        },
+        {
+          "text": "goodness",
+          "start_ms": 246920,
+          "end_ms": 247780
+        },
+        {
+          "text": "and",
+          "start_ms": 247780,
+          "end_ms": 248420
+        },
+        {
+          "text": "mercy",
+          "start_ms": 248420,
+          "end_ms": 248580
+        }
+      ]
+    },
+    {
+      "text": "I'll fight upon you",
+      "start_ms": 248580,
+      "end_ms": 254500,
+      "text_sk": "Budem bojovať za teba",
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 248580,
+          "end_ms": 251760
+        },
+        {
+          "text": "fight",
+          "start_ms": 251760,
+          "end_ms": 253200
+        },
+        {
+          "text": "upon",
+          "start_ms": 253200,
+          "end_ms": 253900
+        },
+        {
+          "text": "you",
+          "start_ms": 253900,
+          "end_ms": 254500
+        }
+      ]
+    },
+    {
+      "text": "I find refuge in Your love",
+      "start_ms": 254500,
+      "end_ms": 259820,
+      "text_sk": "Nachádzam útočisko v Tvojej láske",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 254500,
+          "end_ms": 254940
+        },
+        {
+          "text": "find",
+          "start_ms": 254940,
+          "end_ms": 255220
+        },
+        {
+          "text": "refuge",
+          "start_ms": 255220,
+          "end_ms": 256620
+        },
+        {
+          "text": "in",
+          "start_ms": 256620,
+          "end_ms": 257580
+        },
+        {
+          "text": "Your",
+          "start_ms": 257580,
+          "end_ms": 258920
+        },
+        {
+          "text": "love",
+          "start_ms": 258920,
+          "end_ms": 259820
+        }
+      ]
+    },
+    {
+      "text": "You're my fortress my God in whom I trust",
+      "start_ms": 259820,
+      "end_ms": 266060,
+      "text_sk": "Si moja pevnosť, môj Boh, ktorému dôverujem",
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 259820,
+          "end_ms": 260360
+        },
+        {
+          "text": "my",
+          "start_ms": 260360,
+          "end_ms": 260540
+        },
+        {
+          "text": "fortress",
+          "start_ms": 260540,
+          "end_ms": 263200
+        },
+        {
+          "text": "my",
+          "start_ms": 263200,
+          "end_ms": 263860
+        },
+        {
+          "text": "God",
+          "start_ms": 263860,
+          "end_ms": 264380
+        },
+        {
+          "text": "in",
+          "start_ms": 264380,
+          "end_ms": 264700
+        },
+        {
+          "text": "whom",
+          "start_ms": 264700,
+          "end_ms": 265200
+        },
+        {
+          "text": "I",
+          "start_ms": 265200,
+          "end_ms": 265400
+        },
+        {
+          "text": "trust",
+          "start_ms": 265400,
+          "end_ms": 266060
+        }
+      ]
+    },
+    {
+      "text": "I take shelter in Your name amazing grace",
+      "start_ms": 266060,
+      "end_ms": 274480,
+      "text_sk": "Nachádzam úkryt v Tvojom mene, úžasná milosť",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 266060,
+          "end_ms": 266260
+        },
+        {
+          "text": "take",
+          "start_ms": 266260,
+          "end_ms": 267100
+        },
+        {
+          "text": "shelter",
+          "start_ms": 267100,
+          "end_ms": 268280
+        },
+        {
+          "text": "in",
+          "start_ms": 268280,
+          "end_ms": 268480
+        },
+        {
+          "text": "Your",
+          "start_ms": 268480,
+          "end_ms": 270040
+        },
+        {
+          "text": "name",
+          "start_ms": 270040,
+          "end_ms": 271940
+        },
+        {
+          "text": "amazing",
+          "start_ms": 271940,
+          "end_ms": 273320
+        },
+        {
+          "text": "grace",
+          "start_ms": 273320,
+          "end_ms": 274480
+        }
+      ]
+    },
+    {
+      "text": "My hiding place",
+      "start_ms": 274480,
+      "end_ms": 278180,
+      "text_sk": "Moje útočisko",
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 274480,
+          "end_ms": 275380
+        },
+        {
+          "text": "hiding",
+          "start_ms": 275380,
+          "end_ms": 276660
+        },
+        {
+          "text": "place",
+          "start_ms": 276660,
+          "end_ms": 278180
+        }
+      ]
+    },
+    {
+      "text": "Amazing grace my hiding place",
+      "start_ms": 278180,
+      "end_ms": 285060,
+      "text_sk": "Úžasná milosť, moje útočisko",
+      "words": [
+        {
+          "text": "Amazing",
+          "start_ms": 278180,
+          "end_ms": 280160
+        },
+        {
+          "text": "grace",
+          "start_ms": 280160,
+          "end_ms": 282120
+        },
+        {
+          "text": "my",
+          "start_ms": 282120,
+          "end_ms": 283200
+        },
+        {
+          "text": "hiding",
+          "start_ms": 283200,
+          "end_ms": 284260
+        },
+        {
+          "text": "place",
+          "start_ms": 284260,
+          "end_ms": 285060
+        }
+      ]
+    },
+    {
+      "text": "I hear You say because You love me",
+      "start_ms": 285060,
+      "end_ms": 291420,
+      "text_sk": "Počujem Ťa hovoriť, pretože ma miluješ",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 285060,
+          "end_ms": 285260
+        },
+        {
+          "text": "hear",
+          "start_ms": 285260,
+          "end_ms": 286740
+        },
+        {
+          "text": "You",
+          "start_ms": 286740,
+          "end_ms": 287160
+        },
+        {
+          "text": "say",
+          "start_ms": 287160,
+          "end_ms": 288640
+        },
+        {
+          "text": "because",
+          "start_ms": 288640,
+          "end_ms": 289960
+        },
+        {
+          "text": "You",
+          "start_ms": 289960,
+          "end_ms": 290160
+        },
+        {
+          "text": "love",
+          "start_ms": 290160,
+          "end_ms": 291200
+        },
+        {
+          "text": "me",
+          "start_ms": 291200,
+          "end_ms": 291420
+        }
+      ]
+    },
+    {
+      "text": "I will rescue You I'll deliver You",
+      "start_ms": 291420,
+      "end_ms": 296400,
+      "text_sk": "Zachránim Ťa, vyslobodím Ťa",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 291420,
+          "end_ms": 291480
+        },
+        {
+          "text": "will",
+          "start_ms": 291480,
+          "end_ms": 291840
+        },
+        {
+          "text": "rescue",
+          "start_ms": 291840,
+          "end_ms": 292700
+        },
+        {
+          "text": "You",
+          "start_ms": 292700,
+          "end_ms": 293520
+        },
+        {
+          "text": "I'll",
+          "start_ms": 293520,
+          "end_ms": 294400
+        },
+        {
+          "text": "deliver",
+          "start_ms": 294400,
+          "end_ms": 296060
+        },
+        {
+          "text": "You",
+          "start_ms": 296060,
+          "end_ms": 296400
+        }
+      ]
+    },
+    {
+      "text": "I hear You say because You know my name",
+      "start_ms": 296400,
+      "end_ms": 306060,
+      "text_sk": "Počujem Ťa hovoriť, pretože poznáš moje meno",
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 296400,
+          "end_ms": 297540
+        },
+        {
+          "text": "hear",
+          "start_ms": 297540,
+          "end_ms": 299980
+        },
+        {
+          "text": "You",
+          "start_ms": 299980,
+          "end_ms": 300480
+        },
+        {
+          "text": "say",
+          "start_ms": 300480,
+          "end_ms": 301760
+        },
+        {
+          "text": "because",
+          "start_ms": 301760,
+          "end_ms": 303180
+        },
+        {
+          "text": "You",
+          "start_ms": 303180,
+          "end_ms": 303400
+        },
+        {
+          "text": "know",
+          "start_ms": 303400,
+          "end_ms": 304240
+        },
+        {
+          "text": "my",
+          "start_ms": 304240,
+          "end_ms": 304880
+        },
+        {
+          "text": "name",
+          "start_ms": 304880,
+          "end_ms": 306060
+        }
+      ]
+    },
+    {
+      "text": "El Shaddai is near Elohim is here",
+      "start_ms": 306060,
+      "end_ms": 311400,
+      "text_sk": "El Shaddai je blízko, Elohim je tu",
+      "words": [
+        {
+          "text": "El",
+          "start_ms": 306060,
+          "end_ms": 306360
+        },
+        {
+          "text": "Shaddai",
+          "start_ms": 306360,
+          "end_ms": 307580
+        },
+        {
+          "text": "is",
+          "start_ms": 307580,
+          "end_ms": 308280
+        },
+        {
+          "text": "near",
+          "start_ms": 308280,
+          "end_ms": 309140
+        },
+        {
+          "text": "Elohim",
+          "start_ms": 309140,
+          "end_ms": 311100
+        },
+        {
+          "text": "is",
+          "start_ms": 311100,
+          "end_ms": 311240
+        },
+        {
+          "text": "here",
+          "start_ms": 311240,
+          "end_ms": 311400
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "aligner": "ctc-forced-aligner",
+    "star_frequency": "edges",
+    "model_id": "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    "runtime_sec": 1.13,
+    "model_load_sec": null,
+    "error": null
+  }
+}

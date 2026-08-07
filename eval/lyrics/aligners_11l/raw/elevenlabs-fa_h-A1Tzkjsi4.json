@@ -1,0 +1,357 @@
+{
+  "backend_id": "elevenlabs-fa",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\h-A1Tzkjsi4_vocal16k.wav",
+  "duration_ms": 386450,
+  "lines": [
+    {
+      "text": "Our Father in heaven",
+      "text_sk": "Otče náš, ktorý si na nebesiach",
+      "start_ms": 10620,
+      "end_ms": 33540,
+      "mean_word_loss": 0.4659566879272461
+    },
+    {
+      "text": "Holy is Your name",
+      "text_sk": "Posväť sa meno Tvoje",
+      "start_ms": 35120,
+      "end_ms": 38960,
+      "mean_word_loss": 0.49206018447875977
+    },
+    {
+      "text": "Your kingdom is coming",
+      "text_sk": "Príď kráľovstvo Tvoje",
+      "start_ms": 41140,
+      "end_ms": 47060,
+      "mean_word_loss": 0.16043341159820557
+    },
+    {
+      "text": "Let Your will be done today",
+      "text_sk": "Buď vôľa Tvoja dnes",
+      "start_ms": 47980,
+      "end_ms": 52780,
+      "mean_word_loss": 0.21288820372687445
+    },
+    {
+      "text": "Providing protecting",
+      "text_sk": "Opatrujúci a ochraňujúci",
+      "start_ms": 54780,
+      "end_ms": 60840,
+      "mean_word_loss": 0.22544742160373266
+    },
+    {
+      "text": "And forgiving us our sins",
+      "text_sk": "A odpúšťajúci nám naše hriechy",
+      "start_ms": 61660,
+      "end_ms": 66900,
+      "mean_word_loss": 0.4652259826660156
+    },
+    {
+      "text": "As we humbly come before You",
+      "text_sk": "Keď pokorne prichádzame pred Teba",
+      "start_ms": 68680,
+      "end_ms": 74480,
+      "mean_word_loss": 0.5852936638726128
+    },
+    {
+      "text": "As we worship You and sing",
+      "text_sk": "Keď Ťa uctievame a spievame",
+      "start_ms": 75560,
+      "end_ms": 80380,
+      "mean_word_loss": 0.13776573302253844
+    },
+    {
+      "text": "Yours is the kingdom",
+      "text_sk": "Tvoje je kráľovstvo",
+      "start_ms": 81260,
+      "end_ms": 83820,
+      "mean_word_loss": 0.07690597261701312
+    },
+    {
+      "text": "Yours is the power",
+      "text_sk": "Tvoja je moc",
+      "start_ms": 84700,
+      "end_ms": 87540,
+      "mean_word_loss": 0.09835112889607747
+    },
+    {
+      "text": "Yours is the glory forever",
+      "text_sk": "Tvoja je sláva naveky",
+      "start_ms": 88140,
+      "end_ms": 94520,
+      "mean_word_loss": 0.04647402082170759
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "start_ms": 95140,
+      "end_ms": 101380,
+      "mean_word_loss": 0.39448976516723633
+    },
+    {
+      "text": "This is revival this is revival",
+      "text_sk": "Toto je prebudenie, toto je prebudenie",
+      "start_ms": 102040,
+      "end_ms": 108740,
+      "mean_word_loss": 0.11149718080248151
+    },
+    {
+      "text": "Our Father in heaven",
+      "text_sk": "Otče náš, ktorý si na nebesiach",
+      "start_ms": 108900,
+      "end_ms": 143160,
+      "mean_word_loss": 1.8764114379882812
+    },
+    {
+      "text": "Holy is Your name",
+      "text_sk": "Posväť sa meno Tvoje",
+      "start_ms": 144820,
+      "end_ms": 148800,
+      "mean_word_loss": 1.7751045227050781
+    },
+    {
+      "text": "Your kingdom is coming",
+      "text_sk": "Príď kráľovstvo Tvoje",
+      "start_ms": 150660,
+      "end_ms": 156740,
+      "mean_word_loss": 0.47794296911784584
+    },
+    {
+      "text": "Let Your will be done today",
+      "text_sk": "Buď vôľa Tvoja dnes",
+      "start_ms": 157560,
+      "end_ms": 162480,
+      "mean_word_loss": 0.3718934496243795
+    },
+    {
+      "text": "Providing protecting",
+      "text_sk": "Opatrujúci a ochraňujúci",
+      "start_ms": 164500,
+      "end_ms": 170720,
+      "mean_word_loss": 0.24961742824978297
+    },
+    {
+      "text": "And forgiving us our sins",
+      "text_sk": "A odpúšťajúci nám naše hriechy",
+      "start_ms": 171500,
+      "end_ms": 176500,
+      "mean_word_loss": 0.4318735122680664
+    },
+    {
+      "text": "As we humbly come before You",
+      "text_sk": "Keď pokorne prichádzame pred Teba",
+      "start_ms": 176780,
+      "end_ms": 184480,
+      "mean_word_loss": 0.47920650906032985
+    },
+    {
+      "text": "As we worship You and sing",
+      "text_sk": "Keď Ťa uctievame a spievame",
+      "start_ms": 185240,
+      "end_ms": 190540,
+      "mean_word_loss": 0.11567364041767424
+    },
+    {
+      "text": "Yours is the kingdom",
+      "text_sk": "Tvoje je kráľovstvo",
+      "start_ms": 191000,
+      "end_ms": 193640,
+      "mean_word_loss": 0.06919800440470378
+    },
+    {
+      "text": "Yours is the power",
+      "text_sk": "Tvoja je moc",
+      "start_ms": 194420,
+      "end_ms": 197440,
+      "mean_word_loss": 0.10025053024291992
+    },
+    {
+      "text": "Yours is the glory forever",
+      "text_sk": "Tvoja je sláva naveky",
+      "start_ms": 198020,
+      "end_ms": 202200,
+      "mean_word_loss": 0.047473605927966886
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "start_ms": 204840,
+      "end_ms": 211000,
+      "mean_word_loss": 0.3844122943424043
+    },
+    {
+      "text": "This is revival this is revival",
+      "text_sk": "Toto je prebudenie, toto je prebudenie",
+      "start_ms": 211660,
+      "end_ms": 217820,
+      "mean_word_loss": 0.12801262310573033
+    },
+    {
+      "text": "Yours is the kingdom",
+      "text_sk": "Tvoje je kráľovstvo",
+      "start_ms": 218460,
+      "end_ms": 221000,
+      "mean_word_loss": 0.31534508750552226
+    },
+    {
+      "text": "Yours is the power",
+      "text_sk": "Tvoja je moc",
+      "start_ms": 221980,
+      "end_ms": 224820,
+      "mean_word_loss": 0.137614377339681
+    },
+    {
+      "text": "Yours is the glory forever",
+      "text_sk": "Tvoja je sláva naveky",
+      "start_ms": 225280,
+      "end_ms": 231720,
+      "mean_word_loss": 0.10064853849865141
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "start_ms": 232280,
+      "end_ms": 238560,
+      "mean_word_loss": 0.35292316050756545
+    },
+    {
+      "text": "This is revival this is revival",
+      "text_sk": "Toto je prebudenie, toto je prebudenie",
+      "start_ms": 239160,
+      "end_ms": 245100,
+      "mean_word_loss": 0.12935176349821545
+    },
+    {
+      "text": "I can hear the wind blowing blowing blowing",
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať",
+      "start_ms": 246080,
+      "end_ms": 266020,
+      "mean_word_loss": 1.7129153297061013
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "start_ms": 267020,
+      "end_ms": 272800,
+      "mean_word_loss": 0.29159213815416607
+    },
+    {
+      "text": "I can see Your fire falling falling falling",
+      "text_sk": "Vidím Tvoj oheň zostupovať, zostupovať, zostupovať",
+      "start_ms": 273900,
+      "end_ms": 279820,
+      "mean_word_loss": 0.7937718800136021
+    },
+    {
+      "text": "So let Your kingdom come let Your will be done",
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "start_ms": 280680,
+      "end_ms": 287560,
+      "mean_word_loss": 0.19839814390454974
+    },
+    {
+      "text": "I can hear the wind blowing blowing blowing",
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať",
+      "start_ms": 287640,
+      "end_ms": 293340,
+      "mean_word_loss": 0.07870068436577207
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "start_ms": 293360,
+      "end_ms": 298580,
+      "mean_word_loss": 0.3060783687092009
+    },
+    {
+      "text": "I can see Your fire falling falling falling",
+      "text_sk": "Vidím Tvoj oheň zostupovať, zostupovať, zostupovať",
+      "start_ms": 301280,
+      "end_ms": 307360,
+      "mean_word_loss": 0.7849401292346773
+    },
+    {
+      "text": "So let Your kingdom come let Your will be done",
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "start_ms": 308120,
+      "end_ms": 315000,
+      "mean_word_loss": 0.18422925131661552
+    },
+    {
+      "text": "I can hear the wind blowing blowing blowing",
+      "text_sk": "Počujem vietor fúkať, fúkať, fúkať",
+      "start_ms": 315100,
+      "end_ms": 320700,
+      "mean_word_loss": 0.08003918897537958
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "text_sk": "Cítim, ako sa zem trasie, trasie, trasie",
+      "start_ms": 320800,
+      "end_ms": 327860,
+      "mean_word_loss": 0.32349019107364474
+    },
+    {
+      "text": "I can see Your fire falling falling falling",
+      "text_sk": "Vidím Tvoj oheň zostupovať, zostupovať, zostupovať",
+      "start_ms": 328740,
+      "end_ms": 334660,
+      "mean_word_loss": 0.8002625647045317
+    },
+    {
+      "text": "So let Your kingdom come let Your will be done",
+      "text_sk": "Tak nech príde Tvoje kráľovstvo, nech sa stane Tvoja vôľa",
+      "start_ms": 335500,
+      "end_ms": 343160,
+      "mean_word_loss": 0.18508827288945515
+    },
+    {
+      "text": "Yours is the kingdom",
+      "text_sk": "Tvoje je kráľovstvo",
+      "start_ms": 343680,
+      "end_ms": 346240,
+      "mean_word_loss": 0.46605758326394214
+    },
+    {
+      "text": "Yours is the power",
+      "text_sk": "Tvoja je moc",
+      "start_ms": 347120,
+      "end_ms": 349840,
+      "mean_word_loss": 0.12288901011149089
+    },
+    {
+      "text": "Yours is the glory forever",
+      "text_sk": "Tvoja je sláva naveky",
+      "start_ms": 350360,
+      "end_ms": 353780,
+      "mean_word_loss": 0.12456608363560269
+    },
+    {
+      "text": "Come Holy Spirit pour out Your fire",
+      "text_sk": "Príď Duchu Svätý, vylej svoj oheň",
+      "start_ms": 355820,
+      "end_ms": 363700,
+      "mean_word_loss": 0.39224281765165786
+    },
+    {
+      "text": "Oh this is revival this is revival",
+      "text_sk": "Ó, toto je prebudenie, toto je prebudenie",
+      "start_ms": 364060,
+      "end_ms": 386450,
+      "mean_word_loss": 0.617823853784678
+    }
+  ],
+  "raw_confidence": null,
+  "top_level_loss": 0.29347632629866505,
+  "metadata": {
+    "n_tokens_sent": 281,
+    "n_words_returned_raw": 561,
+    "n_words_returned_content": 281,
+    "n_characters_returned": 1471,
+    "runtime_sec": 8.4,
+    "n_lines": 48,
+    "n_lines_timed": 48,
+    "n_lines_untimed_empty_text": 0,
+    "n_lines_untimed_other": 0
+  }
+}
