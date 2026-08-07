@@ -509,6 +509,53 @@ mod empty_song_self_heal_tests {
         assert_eq!(song, None, "song must stay NULL, never coerced to \"\"");
     }
 
+    /// RED: mirrors the live post-deploy E2E production defect — a stored
+    /// row whose `song` is NULL but `normalized = 1` (processing finished
+    /// and produced nothing) must be repaired from its stored `title` via
+    /// the regex title parser, exactly like the empty-string case. This
+    /// is distinct from `skips_null_song_rows_when_unprocessed`: a NULL
+    /// song with `normalized = 0` merely hasn't been processed yet, but
+    /// NULL + `normalized = 1` means the pipeline ran and left the row
+    /// broken — five real catalog rows (e.g. `q_T_-Lh8AFI`, "WELCOME
+    /// HOME | ELEVATION RHYTHM & SEU Worship") were observed live in
+    /// exactly this state.
+    #[tokio::test]
+    async fn heals_null_song_row_when_already_normalized() {
+        let pool = seed_pool().await;
+        sqlx::query(
+            "INSERT INTO videos
+                (playlist_id, youtube_id, title, gemini_failed, normalized)
+             VALUES (1, 'q_T_-Lh8AFI',
+                     'WELCOME HOME | ELEVATION RHYTHM & SEU Worship', 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let healed = self_heal_empty_song_metadata(&pool).await.unwrap();
+        assert_eq!(
+            healed, 1,
+            "a NULL song row that already finished processing (normalized=1) must be repaired"
+        );
+
+        let row = sqlx::query(
+            "SELECT song, artist, gemini_failed FROM videos WHERE youtube_id = 'q_T_-Lh8AFI'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("song"), "WELCOME HOME");
+        assert_eq!(
+            row.get::<String, _>("artist"),
+            "ELEVATION RHYTHM & SEU Worship"
+        );
+        assert_eq!(
+            row.get::<i64, _>("gemini_failed"),
+            1,
+            "a repaired row must be flagged gemini_failed so it reads as parser-derived"
+        );
+    }
+
     /// Idempotent: a second run over an already-repaired catalog heals
     /// nothing.
     #[tokio::test]
