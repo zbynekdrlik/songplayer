@@ -305,6 +305,21 @@ fn shorten_single_artist(name: &str) -> String {
         return name.to_string();
     }
 
+    // Doesn't look like a personal name — leave it unchanged. This guards
+    // stylized event/band names ("PRAISE BREAK!"), strings that already
+    // carry punctuation-abbreviated tokens ("F. B. NATION", "C. Stop"),
+    // and other non-alphabetic tokens from being mangled by the initials
+    // abbreviation below. Order detection (is this really Artist-Song?)
+    // is explicitly out of scope — this only decides whether the STRING
+    // looks like a real personal name worth abbreviating.
+    let has_terminal_punct = words.iter().any(|w| w.ends_with(['!', '?', '.', ':']));
+    let is_all_caps =
+        name.chars().any(|c| c.is_alphabetic()) && !name.chars().any(|c| c.is_lowercase());
+    let has_non_alphabetic_word = words.iter().any(|w| !w.chars().all(|c| c.is_alphabetic()));
+    if has_terminal_punct || is_all_caps || has_non_alphabetic_word {
+        return name.to_string();
+    }
+
     // Check if any word is a band indicator
     if words
         .iter()
