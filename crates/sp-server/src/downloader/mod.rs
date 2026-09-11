@@ -385,4 +385,120 @@ mod tests {
             "each of the 3 alternatives must carry the height cap; spec: {spec}"
         );
     }
+
+    /// RED (#141): yt-dlp answers every anonymous download with "Sign in
+    /// to confirm you're not a bot". A verified Netscape cookie file on
+    /// disk must be threaded through as `--cookies <path>`, right before
+    /// the URL, on both the video and audio yt-dlp invocations.
+    #[test]
+    fn ytdlp_video_args_appends_cookies_before_url_when_present() {
+        let format_spec = "bv*[height<=1440]";
+        let ffmpeg_dir = Path::new("/opt/ffmpeg");
+        let output = Path::new("/cache/abc_video_temp.mp4");
+        let url = "https://www.youtube.com/watch?v=abc";
+        let cookies = Path::new("/data/cookies.txt");
+
+        let args = ytdlp_video_args(format_spec, ffmpeg_dir, output, url, Some(cookies));
+
+        let cookies_pos = args
+            .iter()
+            .position(|a| a.to_str() == Some("--cookies"))
+            .expect("--cookies flag present when a cookie file is given");
+        assert_eq!(
+            args[cookies_pos + 1].to_str(),
+            cookies.to_str(),
+            "the element right after --cookies must be the cookie file path"
+        );
+        assert_eq!(
+            args.last().unwrap().to_str(),
+            Some(url),
+            "the URL must remain the last argument even with --cookies inserted"
+        );
+    }
+
+    #[test]
+    fn ytdlp_video_args_omits_cookies_when_absent() {
+        let format_spec = "bv*[height<=1440]";
+        let ffmpeg_dir = Path::new("/opt/ffmpeg");
+        let output = Path::new("/cache/abc_video_temp.mp4");
+        let url = "https://www.youtube.com/watch?v=abc";
+
+        let args = ytdlp_video_args(format_spec, ffmpeg_dir, output, url, None);
+
+        assert!(
+            !args.iter().any(|a| a.to_str() == Some("--cookies")),
+            "no --cookies flag when no cookie file exists"
+        );
+        assert_eq!(args.last().unwrap().to_str(), Some(url));
+    }
+
+    #[test]
+    fn ytdlp_video_args_keeps_existing_fixed_flags() {
+        let format_spec = "bv*[height<=1440]";
+        let ffmpeg_dir = Path::new("/opt/ffmpeg");
+        let output = Path::new("/cache/abc_video_temp.mp4");
+        let url = "https://www.youtube.com/watch?v=abc";
+
+        let args = ytdlp_video_args(format_spec, ffmpeg_dir, output, url, None);
+
+        for flag in ["-f", "--js-runtimes", "node", "--no-part", "--remux-video"] {
+            assert!(
+                args.iter().any(|a| a.to_str() == Some(flag)),
+                "existing flag {flag} must still be present"
+            );
+        }
+    }
+
+    #[test]
+    fn ytdlp_audio_args_appends_cookies_before_url_when_present() {
+        let ffmpeg_dir = Path::new("/opt/ffmpeg");
+        let output_template = "/cache/abc_audio_temp.%(ext)s";
+        let url = "https://www.youtube.com/watch?v=abc";
+        let cookies = Path::new("/data/cookies.txt");
+
+        let args = ytdlp_audio_args(ffmpeg_dir, output_template, url, Some(cookies));
+
+        let cookies_pos = args
+            .iter()
+            .position(|a| a.to_str() == Some("--cookies"))
+            .expect("--cookies flag present when a cookie file is given");
+        assert_eq!(args[cookies_pos + 1].to_str(), cookies.to_str());
+        assert_eq!(args.last().unwrap().to_str(), Some(url));
+    }
+
+    #[test]
+    fn ytdlp_audio_args_omits_cookies_when_absent() {
+        let ffmpeg_dir = Path::new("/opt/ffmpeg");
+        let output_template = "/cache/abc_audio_temp.%(ext)s";
+        let url = "https://www.youtube.com/watch?v=abc";
+
+        let args = ytdlp_audio_args(ffmpeg_dir, output_template, url, None);
+
+        assert!(!args.iter().any(|a| a.to_str() == Some("--cookies")));
+        assert_eq!(args.last().unwrap().to_str(), Some(url));
+    }
+
+    #[test]
+    fn ytdlp_audio_args_keeps_existing_fixed_flags() {
+        let ffmpeg_dir = Path::new("/opt/ffmpeg");
+        let output_template = "/cache/abc_audio_temp.%(ext)s";
+        let url = "https://www.youtube.com/watch?v=abc";
+
+        let args = ytdlp_audio_args(ffmpeg_dir, output_template, url, None);
+
+        for flag in [
+            "-f",
+            "bestaudio",
+            "--js-runtimes",
+            "node",
+            "--no-part",
+            "--print",
+            "after_move:filepath",
+        ] {
+            assert!(
+                args.iter().any(|a| a.to_str() == Some(flag)),
+                "existing flag {flag} must still be present"
+            );
+        }
+    }
 }
