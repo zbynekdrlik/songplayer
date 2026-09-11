@@ -330,6 +330,13 @@ pub async fn start(
     let tool_paths_clone = tool_paths.clone();
     let dl_pool = pool.clone();
     let dl_cache_dir = config.cache_dir.clone();
+    // Same directory as the SQLite DB — where a production operator drops
+    // cookies.txt (Netscape format) to authenticate yt-dlp downloads (#141).
+    let dl_data_dir = config
+        .db_path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_gemini_key = gemini_key.clone();
     let dl_gemini_model = gemini_model.clone();
@@ -397,6 +404,7 @@ pub async fn start(
                     dl_pool,
                     paths,
                     dl_cache_dir,
+                    dl_data_dir,
                     dl_providers,
                     dl_event_tx_for_worker,
                 );

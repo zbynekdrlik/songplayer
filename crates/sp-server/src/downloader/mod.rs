@@ -14,6 +14,7 @@ pub mod tools;
 
 use crate::metadata::MetadataProvider;
 use sqlx::SqlitePool;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use tokio::sync::broadcast;
 use tools::ToolPaths;
@@ -57,11 +58,90 @@ fn format_spec() -> String {
 /// Download timeout in seconds.
 const DOWNLOAD_TIMEOUT: u64 = 600;
 
+/// Build the argument list for the video-stream yt-dlp invocation.
+///
+/// Reproduces the fixed flag set exactly, and — when `cookies` is
+/// `Some` — inserts a `--cookies <path>` pair immediately before the
+/// URL (#141: an anonymous request now gets YouTube's "Sign in to
+/// confirm you're not a bot" wall; a verified Netscape cookie file
+/// clears it).
+pub(crate) fn ytdlp_video_args(
+    format_spec: &str,
+    ffmpeg_dir: &Path,
+    output: &Path,
+    url: &str,
+    cookies: Option<&Path>,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "--progress".into(),
+        "--newline".into(),
+        "-f".into(),
+        format_spec.into(),
+        "--ffmpeg-location".into(),
+        ffmpeg_dir.into(),
+        "--js-runtimes".into(),
+        "node".into(),
+        "--socket-timeout".into(),
+        DOWNLOAD_TIMEOUT.to_string().into(),
+        "--remux-video".into(),
+        "mp4".into(),
+        "--no-part".into(),
+        "-o".into(),
+        output.into(),
+    ];
+    if let Some(cookies) = cookies {
+        args.push("--cookies".into());
+        args.push(cookies.into());
+    }
+    args.push(url.into());
+    args
+}
+
+/// Build the argument list for the audio-stream yt-dlp invocation. Same
+/// `--cookies` insertion rule as [`ytdlp_video_args`] — see #141.
+pub(crate) fn ytdlp_audio_args(
+    ffmpeg_dir: &Path,
+    output_template: &str,
+    url: &str,
+    cookies: Option<&Path>,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "--progress".into(),
+        "--newline".into(),
+        "-f".into(),
+        "bestaudio".into(),
+        "--ffmpeg-location".into(),
+        ffmpeg_dir.into(),
+        "--js-runtimes".into(),
+        "node".into(),
+        "--socket-timeout".into(),
+        DOWNLOAD_TIMEOUT.to_string().into(),
+        "--no-part".into(),
+        "--print".into(),
+        "after_move:filepath".into(),
+        "-o".into(),
+        output_template.into(),
+    ];
+    if let Some(cookies) = cookies {
+        args.push("--cookies".into());
+        args.push(cookies.into());
+    }
+    args.push(url.into());
+    args
+}
+
 /// Background worker that downloads, extracts metadata, and normalizes videos.
 pub struct DownloadWorker {
     pool: SqlitePool,
     tools: ToolPaths,
     cache_dir: PathBuf,
+    /// Directory holding the app's data (same directory as the SQLite DB).
+    /// A `cookies.txt` Netscape cookie file dropped here — production path
+    /// `C:\ProgramData\SongPlayer\cookies.txt` — is passed to yt-dlp on
+    /// every download to work around YouTube's anonymous-download bot
+    /// check (#141). Re-checked per download, not cached at startup, so a
+    /// cookie file added later takes effect without a restart.
+    data_dir: PathBuf,
     providers: Vec<Box<dyn MetadataProvider>>,
     event_tx: broadcast::Sender<String>,
 }
@@ -71,6 +151,7 @@ impl DownloadWorker {
         pool: SqlitePool,
         tools: ToolPaths,
         cache_dir: PathBuf,
+        data_dir: PathBuf,
         providers: Vec<Box<dyn MetadataProvider>>,
         event_tx: broadcast::Sender<String>,
     ) -> Self {
@@ -78,14 +159,33 @@ impl DownloadWorker {
             pool,
             tools,
             cache_dir,
+            data_dir,
             providers,
             event_tx,
         }
     }
 
+    /// The cookie file path, if one currently exists on disk. Re-checked on
+    /// every call (not cached) so a file dropped in after startup is picked
+    /// up on the very next download without requiring a restart.
+    fn cookies_path(&self) -> Option<PathBuf> {
+        let path = self.data_dir.join("cookies.txt");
+        path.exists().then_some(path)
+    }
+
     /// Run the download worker loop until shutdown is signalled.
     pub async fn run(self, mut shutdown: broadcast::Receiver<()>) {
         tracing::info!("download worker started");
+        match self.cookies_path() {
+            Some(path) => tracing::info!(
+                path = %path.display(),
+                "yt-dlp cookies file present — authenticated YouTube downloads"
+            ),
+            None => tracing::warn!(
+                path = %self.data_dir.join("cookies.txt").display(),
+                "yt-dlp cookies file absent — YouTube downloads may hit the bot-check"
+            ),
+        }
         loop {
             tokio::select! {
                 _ = shutdown.recv() => {
@@ -234,19 +334,16 @@ impl DownloadWorker {
             .ffmpeg
             .parent()
             .unwrap_or(std::path::Path::new("."));
+        let cookies = self.cookies_path();
+        tracing::debug!(
+            video_id,
+            cookies_attached = cookies.is_some(),
+            "building yt-dlp video-stream command"
+        );
+        let args = ytdlp_video_args(&format_spec, ffmpeg_dir, output, &url, cookies.as_deref());
 
         let mut cmd = tokio::process::Command::new(&self.tools.ytdlp);
-        cmd.args(["--progress", "--newline"])
-            .args(["-f", &format_spec])
-            .args(["--ffmpeg-location"])
-            .arg(ffmpeg_dir)
-            .args(["--js-runtimes", "node"])
-            .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
-            .args(["--remux-video", "mp4"])
-            .arg("--no-part")
-            .args(["-o"])
-            .arg(output)
-            .arg(&url)
+        cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut cmd);
@@ -281,18 +378,16 @@ impl DownloadWorker {
             .unwrap_or(std::path::Path::new("."));
 
         let output_template = format!("{}.%(ext)s", output_base.display());
+        let cookies = self.cookies_path();
+        tracing::debug!(
+            video_id,
+            cookies_attached = cookies.is_some(),
+            "building yt-dlp audio-stream command"
+        );
+        let args = ytdlp_audio_args(ffmpeg_dir, &output_template, &url, cookies.as_deref());
 
         let mut cmd = tokio::process::Command::new(&self.tools.ytdlp);
-        cmd.args(["--progress", "--newline"])
-            .args(["-f", "bestaudio"])
-            .args(["--ffmpeg-location"])
-            .arg(ffmpeg_dir)
-            .args(["--js-runtimes", "node"])
-            .args(["--socket-timeout", &DOWNLOAD_TIMEOUT.to_string()])
-            .arg("--no-part")
-            .args(["--print", "after_move:filepath"])
-            .args(["-o", &output_template])
-            .arg(&url)
+        cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut cmd);
