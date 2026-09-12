@@ -859,15 +859,15 @@ fn process_song_routes_through_should_resolve_spotify() {
 #[test]
 fn timed_yt_subs_skips_asr_path_entirely() {
     // Regression guard: a song with a timed yt_subs candidate MUST go through
-    // the existing whisperx path, not the new asr_path branch added for
-    // bucket-1 (`unsupported_source`) songs.
+    // the existing whisperx path, not the asr_path branch.
     //
     // The worker decision tree (worker.rs::process_song gate block):
     //   1. is_allowed_text_source(cands) == true  → whisperx path
-    //   2. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == true
-    //      → asr_path branch
-    //   3. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == false
-    //      → mark_unsupported_source
+    //   2. is_allowed_text_source(cands) == false → asr_path branch, always
+    //      (#120): has_any_text_candidate(cands) == true passes the gathered
+    //      candidate text as AAI keyterms bias; == false runs asr_path BLIND
+    //      with empty keyterms instead of the old mark_unsupported_source
+    //      terminal state.
     //
     // This test asserts that a timed yt_subs candidate triggers path 1, never
     // path 2. If `is_allowed_text_source` were ever modified to reject timed

@@ -489,10 +489,14 @@ impl LyricsWorker {
         // GATE: per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md,
         // refuse to run expensive alignment (Demucs + whisperx, ~3 min/song) on
         // text sources we know produce poor wall output. Allowed set is
-        // yt_subs/lrclib/spotify (line-timed) and description (curated). Anything
-        // else (genius, lrclib-plain-without-timing, no_source) gets routed to
-        // asr_path (AAI U3-Pro transcribe + silence-gap split) if any text
-        // candidate exists. Songs with zero candidates are marked unsupported_source.
+        // yt_subs/lrclib/spotify (line-timed) and description (curated).
+        // Anything else (genius, lrclib-plain-without-timing, no candidates at
+        // all) gets routed to asr_path (AAI U3-Pro transcribe + silence-gap
+        // split). A song WITH a rejected candidate passes it as AAI keyterms
+        // bias; a song with ZERO candidates runs asr_path BLIND with empty
+        // keyterms instead of being marked unsupported_source (#120) — AAI
+        // transcribes unbiased, and the existing empty-transcript quarantine
+        // (`asr_gap`, see asr_path::run) is the safety net for instrumentals.
         if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
             let names: Vec<&str> = ctx
                 .candidate_texts
@@ -500,11 +504,13 @@ impl LyricsWorker {
                 .map(|c| c.source.as_str())
                 .collect();
 
-            // asr_path branch — only when there IS a candidate (just untimed).
             // Whisperx gate rejected this song; asr_path uses AAI ASR +
-            // silence-gap split + a drop-safe index-level Claude regroup. The
-            // candidate text is passed in as AAI keyterms (helper bias) and as
-            // the regroup phrasing reference — it never adds or drops lines.
+            // silence-gap split + a drop-safe index-level Claude regroup. Any
+            // gathered candidate text is passed in as AAI keyterms (helper
+            // bias) and as the regroup phrasing reference — it never adds or
+            // drops lines. Zero candidates means empty keyterms, i.e. a blind
+            // run (#120) — `build_transcript_body` already omits
+            // `keyterms_prompt` when the slice is empty.
             if crate::lyrics::orchestrator::has_any_text_candidate(&ctx.candidate_texts) {
                 tracing::info!(
                     video_id,
@@ -512,40 +518,27 @@ impl LyricsWorker {
                     candidate_sources = ?names,
                     "lyrics: no allowed text source — routing to asr_path"
                 );
-                let result = self
-                    .run_asr_path_branch(
-                        &ctx.candidate_texts,
-                        row.audio_file_path.as_deref(),
-                        video_id,
-                        &youtube_id,
-                        &song,
-                        &artist,
-                        started_at_unix_ms,
-                        start_instant,
-                    )
-                    .await;
-                self.clear_processing().await;
-                return result;
+            } else {
+                tracing::info!(
+                    video_id,
+                    youtube_id = %youtube_id,
+                    "asr_path: no text candidates — running blind (empty keyterms)"
+                );
             }
-
-            // No candidates at all — preserved old behavior: mark unsupported.
-            tracing::warn!(
-                video_id,
-                youtube_id = %youtube_id,
-                candidate_sources = ?names,
-                "lyrics: no text candidate at all — marking unsupported_source"
-            );
-            if let Err(e) = crate::db::models::mark_unsupported_source(
-                &self.pool,
-                video_id,
-                LYRICS_PIPELINE_VERSION,
-            )
-            .await
-            {
-                warn!("worker: mark_unsupported_source error for {youtube_id}: {e}");
-            }
+            let result = self
+                .run_asr_path_branch(
+                    &ctx.candidate_texts,
+                    row.audio_file_path.as_deref(),
+                    video_id,
+                    &youtube_id,
+                    &song,
+                    &artist,
+                    started_at_unix_ms,
+                    start_instant,
+                )
+                .await;
             self.clear_processing().await;
-            return Ok(());
+            return result;
         }
 
         self.broadcast_stage(

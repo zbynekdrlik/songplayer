@@ -399,9 +399,11 @@ fn aligned_lines_to_candidate(
 ///   (curated text; whisperx performs full alignment against it)
 ///
 /// Anything else (`genius`, `lrclib` without timing, raw whisperx with no
-/// text reference, empty candidate list) is rejected. The worker stamps the
-/// row with `lyrics_source = 'unsupported_source'` and bails — see
-/// `db::models::mark_unsupported_source`.
+/// text reference, empty candidate list) is rejected. The worker routes a
+/// rejected song to asr_path — with the candidate text as AAI keyterms bias
+/// when one exists, or BLIND with empty keyterms when the candidate list is
+/// empty (#120) — see `has_any_text_candidate` and
+/// `LyricsWorker::run_asr_path_branch`.
 ///
 /// See `docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md`.
 pub(crate) fn is_allowed_text_source(
@@ -415,10 +417,11 @@ pub(crate) fn is_allowed_text_source(
 }
 
 /// Returns true if `gather_sources` returned ANY text candidate, regardless
-/// of whether the gate accepts it. The asr_path branch uses this to decide
-/// whether to try ASR-based alignment on a song whose only candidates are
-/// untimed (genius, lrclib-untimed, etc.). Songs with zero candidates skip
-/// asr_path and remain marked `no_text_source`.
+/// of whether the gate accepts it. The worker uses this only to choose the
+/// asr_path log line / AAI keyterms: `true` passes the gathered candidate
+/// text as keyterms bias (untimed genius, lrclib-untimed, etc.); `false`
+/// runs asr_path BLIND with empty keyterms (#120) — both cases still reach
+/// asr_path, never a separate "no candidates" terminal state.
 pub(crate) fn has_any_text_candidate(
     candidates: &[crate::lyrics::provider::CandidateText],
 ) -> bool {
