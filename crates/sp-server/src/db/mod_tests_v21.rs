@@ -1,6 +1,7 @@
 //! V21 migration tests (#142) — reference-lyrics marker + feedback columns.
 //! Sibling file split from mod_tests.rs to honor the airuleset 1000-line cap.
 
+use super::MIGRATIONS;
 use super::test_helpers::{apply_first_n, column_names};
 use super::*;
 
@@ -88,5 +89,10 @@ async fn migration_v21_defaults_existing_rows_to_zero_reference_and_null_feedbac
 async fn migration_v21_advances_schema_version() {
     let pool = setup().await;
     let v = current_schema_version(&pool).await.unwrap();
-    assert_eq!(v, 21, "schema_version must advance to 21 after V21 applied");
+    let latest = MIGRATIONS.last().expect("at least one migration").0;
+    assert!(latest >= 21, "V21 must be part of the migration list");
+    assert_eq!(
+        v, latest,
+        "schema_version must advance to the newest migration ({latest}) after all migrations applied"
+    );
 }

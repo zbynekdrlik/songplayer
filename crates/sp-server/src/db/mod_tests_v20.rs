@@ -1,6 +1,7 @@
 //! V20 migration tests (#140) — per-row download retry bookkeeping columns.
 //! Sibling file split from mod_tests.rs to honor the airuleset 1000-line cap.
 
+use super::MIGRATIONS;
 use super::test_helpers::{apply_first_n, column_names};
 use super::*;
 
@@ -89,5 +90,10 @@ async fn migration_v20_defaults_existing_rows_to_zero_attempts_and_null_error_an
 async fn migration_v20_advances_schema_version() {
     let pool = setup().await;
     let v = current_schema_version(&pool).await.unwrap();
-    assert_eq!(v, 20, "schema_version must advance to 20 after V20 applied");
+    let latest = MIGRATIONS.last().expect("at least one migration").0;
+    assert!(latest >= 20, "V20 must be part of the migration list");
+    assert_eq!(
+        v, latest,
+        "schema_version must advance to the newest migration ({latest}) after all migrations applied"
+    );
 }

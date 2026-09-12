@@ -923,3 +923,7 @@ pub async fn queue_update_loop(
 #[path = "worker_tests.rs"]
 #[cfg(test)]
 mod tests;
+
+#[path = "worker_tests_asr_blind.rs"]
+#[cfg(test)]
+mod tests_asr_blind;

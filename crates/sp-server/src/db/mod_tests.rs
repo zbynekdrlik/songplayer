@@ -14,7 +14,8 @@ async fn setup() -> SqlitePool {
 async fn pool_creation_and_migration() {
     let pool = setup().await;
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 21);
+    let latest = MIGRATIONS.last().expect("at least one migration").0;
+    assert_eq!(ver, latest);
 }
 
 #[tokio::test]
@@ -23,7 +24,8 @@ async fn migrations_are_idempotent() {
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap(); // second run must not fail
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 21);
+    let latest = MIGRATIONS.last().expect("at least one migration").0;
+    assert_eq!(ver, latest);
 }
 
 #[tokio::test]
@@ -749,7 +751,8 @@ async fn schema_version_reaches_21() {
     let pool = create_memory_pool().await.unwrap();
     run_migrations(&pool).await.unwrap();
     let ver = current_schema_version(&pool).await.unwrap();
-    assert_eq!(ver, 21);
+    let latest = MIGRATIONS.last().expect("at least one migration").0;
+    assert_eq!(ver, latest);
 }
 
 #[tokio::test]
