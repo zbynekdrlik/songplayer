@@ -125,6 +125,26 @@ no lyrics.
 Do NOT use output-level heuristics (gap size, line count, density) to detect
 failure — calm instrumental passages are legitimate.
 
+## Vocal isolation (`preprocess-vocals`) — measured facts (2026-09-12, #144)
+
+- ≈ 1× realtime on the RTX 3070 Ti at BELOW_NORMAL (240 s song → 233 s;
+  Mel-Roformer pass 0.75×, dereverb 0.16×). Timeout is
+  `aligner::isolation_timeout` = clamp(2 × duration, 600 s, 3600 s); videos
+  over `MAX_LYRICS_DURATION_MS` (30 min) are stamped `unsupported_source`.
+- Stems are written with `use_soundfile=True` — audio-separator's pydub
+  writer hit `MemoryError` on an 827-s 24-bit stem, exhausted the box's RAM
+  and crashed OBS (`video_frame_init`). Never run a second heavy Python job
+  on the box while the worker isolates; measure with the worker paused.
+- Every song failing isolation within ~10 s ⇒ check `lyrics_venv` numpy vs
+  numba (numba caps numpy < 2.5; the bootstrap's torch force-reinstall once
+  pulled numpy 2.5.2 — it now pins numpy afterwards and `IS_READY_PROBE`
+  imports numba/librosa/soundfile so a broken stack is "not ready").
+- A row the asr branch cannot process is DEFERRED (`lyrics_attempts`,
+  `lyrics_next_attempt_at`, 5 min · 2ⁿ, cap 24 h; reset on success and by
+  the reprocess endpoint) — never re-picked on the next 5-s tick. Monitors
+  on the box: `lyrics_progress.py` (buckets, ★, gate tally) and
+  `lyrics_recent.py <min>` (per-song lines/sk/source + Claude failures).
+
 ## Translation — Claude only, never Gemini fallback
 
 EN→SK translation MUST use Claude via CLIProxyAPI (paid Max plan — unlimited).

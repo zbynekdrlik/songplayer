@@ -186,6 +186,27 @@ irm https://raw.githubusercontent.com/owner/repo/branch/scripts/install.ps1 | ie
 Create an `install.ps1` in the repo that handles download, config, scheduled
 task, firewall, and verification. Not manual multi-step commands.
 
+## Dialogs hidden behind Arena's output windows — drive them with UI Automation
+
+Arena's fullscreen "Display" windows cover monitors 2-4, so a Qt dialog that
+opens there (OBS "Crash Detected" / Safe Mode prompt, 2026-09-12) is
+invisible to `Snapshot` and `FocusWindow` fails. Do not click blind — from
+the MCP `Shell`, read and press its buttons by name (never pick OBS Safe
+Mode: it disables NDI and obs-websocket):
+
+```powershell
+Add-Type -AssemblyName UIAutomationClient; Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]<hwnd from the Snapshot window list>)
+$c = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Run in Normal Mode')
+$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $c).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+```
+
+List buttons/text first (`ControlType.Button` / `.Text` with `FindAll`) when the
+labels are unknown. Launch GUI apps that need a working directory via
+`Invoke-CimMethod Win32_Process Create -Arguments @{CommandLine=…; CurrentDirectory=…}`
+(OBS needs `bin\64bit`); the MCP `Shell` sometimes returns "(no output)" for
+longer commands — redirect to a log file and read that instead.
+
 ## win-resolume is always free when user prompts
 
 When the user gives a new prompt, win-resolume is ALWAYS free. Never defer
