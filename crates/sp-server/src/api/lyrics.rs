@@ -281,6 +281,7 @@ pub async fn post_reprocess(
             };
             let sql = format!(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
+                        lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
                         lyrics_source = CASE \
                             WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
@@ -320,6 +321,7 @@ pub async fn post_reprocess(
             };
             match sqlx::query(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
+                        lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
                         lyrics_source = CASE \
                             WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
@@ -379,7 +381,8 @@ pub async fn post_reprocess_all_stale(State(state): State<AppState>) -> impl Int
     };
 
     let res = sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 1 \
+        "UPDATE videos SET lyrics_manual_priority = 1, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
          WHERE has_lyrics = 1 AND lyrics_pipeline_version < ? \
          AND lyrics_manual_priority = 0",
     )

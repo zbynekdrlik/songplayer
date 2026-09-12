@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     ai::client::AiClient,
     db::models::get_next_video_missing_translation,
-    lyrics::{aligner, translator},
+    lyrics::{aligner, translator, worker_outcome::SongOutcome},
 };
 
 pub struct LyricsWorker {
@@ -334,17 +334,26 @@ impl LyricsWorker {
             row.artist,
             row.song
         );
-        if let Err(e) = self.process_song(row).await {
-            debug!("worker: processing failed for {youtube_id}: {e}");
-            let _ = crate::db::models::mark_video_lyrics(
-                &self.pool,
-                video_id,
-                false,
-                Some("no_source"),
-                crate::lyrics::LYRICS_PIPELINE_VERSION,
-            )
-            .await;
-            self.clear_processing().await;
+        match self.process_song(row).await {
+            Ok(SongOutcome::Done) => {}
+            // #144: durable retry backoff (mirrors downloader #140) so the
+            // selector skips this unprocessable row until due instead of
+            // re-picking it every 5 s tick (37-min hot-loop on 3_ccqgwVZYM).
+            Ok(SongOutcome::Deferred(reason)) => {
+                self.defer_song(video_id, &youtube_id, reason).await
+            }
+            Err(e) => {
+                debug!("worker: processing failed for {youtube_id}: {e}");
+                let _ = crate::db::models::mark_video_lyrics(
+                    &self.pool,
+                    video_id,
+                    false,
+                    Some("no_source"),
+                    crate::lyrics::LYRICS_PIPELINE_VERSION,
+                )
+                .await;
+                self.clear_processing().await;
+            }
         }
     }
 
@@ -409,7 +418,10 @@ impl LyricsWorker {
     }
 
     #[cfg_attr(test, mutants::skip)]
-    async fn process_song(&self, mut row: crate::db::models::VideoLyricsRow) -> Result<()> {
+    async fn process_song(
+        &self,
+        mut row: crate::db::models::VideoLyricsRow,
+    ) -> Result<SongOutcome> {
         use crate::lyrics::{
             LYRICS_PIPELINE_VERSION,
             orchestrator::{Orchestrator, OrchestratorInput},
@@ -806,7 +818,7 @@ impl LyricsWorker {
         });
         self.clear_processing().await;
 
-        Ok(())
+        Ok(SongOutcome::Done)
     }
 
     #[cfg_attr(test, mutants::skip)]

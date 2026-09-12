@@ -12,6 +12,13 @@ use sqlx::{Row, SqlitePool};
 mod models_reference;
 pub use models_reference::*;
 
+// Per-row lyrics retry backoff (#144) split into a sibling module so this
+// file stays under the 1000-line airuleset cap. Re-exported so call sites use
+// `crate::db::models::record_lyrics_deferral`.
+#[path = "models_lyrics_backoff.rs"]
+mod models_lyrics_backoff;
+pub use models_lyrics_backoff::*;
+
 // ---------------------------------------------------------------------------
 // Playlists
 // ---------------------------------------------------------------------------
@@ -462,6 +469,7 @@ pub async fn mark_video_lyrics(
     sqlx::query(
         "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ?, \
          lyrics_manual_priority = 0, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
          WHERE id = ?",
@@ -506,6 +514,7 @@ pub async fn mark_video_lyrics_complete(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
          lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
          lyrics_manual_priority = 0, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = ? \
          WHERE id = ?",
@@ -948,6 +957,7 @@ pub async fn mark_unsupported_source(
     sqlx::query(
         "UPDATE videos SET has_lyrics = 0, lyrics_source = 'unsupported_source', \
          lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
          WHERE id = ?",

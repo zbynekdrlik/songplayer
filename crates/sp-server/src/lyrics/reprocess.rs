@@ -48,6 +48,8 @@ async fn fetch_bucket_manual(
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
                     OR v.lyrics_pipeline_version < ?) \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY v.id ASC LIMIT 1",
     )
     .bind(current_version as i64)
@@ -99,6 +101,8 @@ async fn fetch_bucket_null(
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)
@@ -133,6 +137,8 @@ async fn fetch_bucket_stale(
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)

@@ -37,13 +37,21 @@ fn asr_path_defers_instead_of_dropping_the_row() {
 /// same unprocessable row every tick.
 #[test]
 fn process_next_records_deferral_backoff() {
-    let src = include_str!("worker.rs").replace("\r\n", "\n");
+    // process_next must route a Deferred outcome to the durable-backoff path
+    // (`defer_song`), which is where `record_lyrics_deferral` is called — the
+    // helper lives in worker_outcome.rs to keep worker.rs under the size cap.
+    let worker = include_str!("worker.rs").replace("\r\n", "\n");
     assert!(
-        src.contains("SongOutcome::Deferred"),
+        worker.contains("SongOutcome::Deferred"),
         "process_next must handle the Deferred outcome"
     );
     assert!(
-        src.contains("record_lyrics_deferral"),
-        "process_next must record a durable retry backoff via record_lyrics_deferral"
+        worker.contains("defer_song"),
+        "process_next must route a Deferred outcome to defer_song"
+    );
+    let outcome = include_str!("worker_outcome.rs").replace("\r\n", "\n");
+    assert!(
+        outcome.contains("record_lyrics_deferral"),
+        "defer_song must record a durable retry backoff via record_lyrics_deferral"
     );
 }

@@ -18,6 +18,7 @@ use tracing::warn;
 
 use super::worker::LyricsWorker;
 use crate::lyrics::LYRICS_PIPELINE_VERSION;
+use crate::lyrics::worker_outcome::SongOutcome;
 
 impl LyricsWorker {
     /// Run the AssemblyAI Universal-3 Pro alignment path for a song the
@@ -43,7 +44,7 @@ impl LyricsWorker {
         artist: &str,
         started_at_unix_ms: i64,
         start_instant: Instant,
-    ) -> Result<()> {
+    ) -> Result<SongOutcome> {
         let aai_key = crate::db::models::get_setting(
             &self.pool,
             crate::lyrics::asr_path::ASSEMBLYAI_API_KEY_SETTING,
@@ -60,7 +61,7 @@ impl LyricsWorker {
                     youtube_id = %youtube_id,
                     "asr_path: assemblyai_api_key not set — leaving row unprocessed"
                 );
-                return Ok(());
+                return Ok(SongOutcome::Deferred("assemblyai_key_missing"));
             }
         };
 
@@ -109,7 +110,7 @@ impl LyricsWorker {
                 youtube_id = %youtube_id,
                 "asr_path: no preprocessed vocal available — leaving row unprocessed"
             );
-            return Ok(());
+            return Ok(SongOutcome::Deferred("vocal_isolation_failed"));
         };
 
         self.broadcast_stage(
@@ -155,7 +156,7 @@ impl LyricsWorker {
             }
         }
 
-        match result {
+        let outcome = match result {
             Ok(crate::lyrics::asr_path::AsrResult {
                 output: crate::lyrics::asr_path::AsrOutput::Lines { lines, source },
                 ..
@@ -228,6 +229,7 @@ impl LyricsWorker {
                     provider_count: 1,
                     duration_ms,
                 });
+                SongOutcome::Done
             }
             Ok(crate::lyrics::asr_path::AsrResult {
                 output: crate::lyrics::asr_path::AsrOutput::Quarantine { reason },
@@ -249,6 +251,7 @@ impl LyricsWorker {
                 {
                     warn!("worker: quarantine_video_lyrics: {e}");
                 }
+                SongOutcome::Done
             }
             Err(crate::lyrics::asr_path::AsrError::QuotaExhausted) => {
                 warn!(
@@ -264,6 +267,9 @@ impl LyricsWorker {
                     stage: "asr_quota_exhausted".to_string(),
                     provider: Some("assemblyai".to_string()),
                 });
+                // Global AAI quota is gone; defer so the selector backs the row
+                // off instead of hot-looping it (it would re-fail identically).
+                SongOutcome::Deferred("asr_quota_exhausted")
             }
             Err(e) => {
                 warn!(
@@ -271,9 +277,10 @@ impl LyricsWorker {
                     error = %e,
                     "asr_path: error — leaving row unprocessed for retry"
                 );
+                SongOutcome::Deferred("asr_error")
             }
-        }
+        };
 
-        Ok(())
+        Ok(outcome)
     }
 }

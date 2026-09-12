@@ -31,6 +31,7 @@ pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;
 pub mod worker_asr;
+pub mod worker_outcome;
 pub mod worker_reference;
 pub mod youtube_subs;
 pub mod yt_subs_split;

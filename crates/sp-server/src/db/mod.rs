@@ -30,6 +30,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (19, MIGRATION_V19),
     (20, MIGRATION_V20),
     (21, MIGRATION_V21),
+    (22, MIGRATION_V22),
 ];
 
 const MIGRATION_V1: &str = "
@@ -288,6 +289,20 @@ const MIGRATION_V21: &str = "
 ALTER TABLE videos ADD COLUMN lyrics_reference INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE videos ADD COLUMN lyrics_reference_rejected_at TEXT;
 ALTER TABLE videos ADD COLUMN lyrics_reference_note TEXT;
+";
+
+// V22 (#144) — per-row lyrics retry backoff, mirroring the download retry
+// bookkeeping added in V20 (#140). A song the lyrics worker cannot process
+// this pass (missing AAI key, vocal isolation failed, transient ASR error)
+// used to leave the row unstamped, so `get_next_video_for_lyrics` re-selected
+// it every 5 s tick (37-min hot-loop observed on 3_ccqgwVZYM, 2026-09-12).
+// `lyrics_attempts` counts consecutive deferrals; `lyrics_next_attempt_at`
+// (strftime '%Y-%m-%dT%H:%M:%fZ' UTC, NULL = eligible now) lets every bucket
+// query skip a row until its exponential backoff elapses. Both reset to
+// (0, NULL) the moment a row succeeds or reaches a terminal stamp.
+const MIGRATION_V22: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_next_attempt_at TEXT;
 ";
 
 /// Create a connection pool backed by a file.
