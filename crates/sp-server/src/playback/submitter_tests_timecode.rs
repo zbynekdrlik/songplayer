@@ -139,3 +139,40 @@ fn new_with_wallclock_uses_the_injected_clock_directly() {
         "video timecode must derive from the injected clock"
     );
 }
+
+#[test]
+fn paced_black_frame_is_stamped_on_grid_legacy_is_synthesize() {
+    // #147 change 6: on the paced path a standby/black frame is a REAL send, so
+    // it carries its on-grid boundary (§4.3 — never SYNTHESIZE); the legacy
+    // SDK-clocked path keeps SYNTHESIZE (None).
+    let fake_now: i64 = 123_456_789; // deliberately off-grid
+
+    // Legacy (paced flag not set): SYNTHESIZE.
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "BL", true, false).unwrap();
+    let mut legacy = FrameSubmitter::new_with_wallclock(sender, 30, 1, WallClock::fixed(fake_now));
+    legacy.send_black_bgra(1920, 1080);
+    assert_eq!(
+        backend.video_timecodes(),
+        vec![sp_ndi::NDI_SEND_TIMECODE_SYNTHESIZE],
+        "legacy standby frame must be SYNTHESIZE"
+    );
+
+    // Paced: floored on-grid boundary at the send instant.
+    let backend2 = Arc::new(MockNdiBackend::new());
+    let sender2 = NdiSender::new_with_clocking(backend2.clone(), "BP", false, false).unwrap();
+    let mut paced = FrameSubmitter::new_with_wallclock(sender2, 30, 1, WallClock::fixed(fake_now));
+    paced.set_paced(true);
+    paced.send_black_bgra(1920, 1080);
+    let expected = floor_boundary_100ns(fake_now, GENLOCK_GRID_FPS);
+    assert_eq!(
+        backend2.video_timecodes(),
+        vec![expected],
+        "paced standby frame must carry its on-grid boundary"
+    );
+    assert_ne!(
+        expected,
+        sp_ndi::NDI_SEND_TIMECODE_SYNTHESIZE,
+        "the on-grid stamp must not collide with SYNTHESIZE"
+    );
+}

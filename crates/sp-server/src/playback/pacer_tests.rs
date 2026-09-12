@@ -1,18 +1,28 @@
-//! Boundary-paced emission scheduler tests (#147).
+//! Boundary-paced emission scheduler tests (#147 rework — exact 100-ns grid).
 //!
-//! Drive the pure [`Pacer`] with a deterministic (injected) wall clock, a
-//! synthetic PTS stream and a recording sink — no MediaFoundation, so the full
+//! Drive the pure [`Pacer`] with a settable wall clock (never a real `sleep`), a
+//! synthetic PTS stream and a recording sink, so the full
 //! emit/repeat/drop/catch-up/resync/re-latch behaviour runs on the Linux CI
 //! job. `super::*` resolves to the `pacer` module under test.
+//!
+//! These REPLACE the pre-rework tests that encoded the defective behaviour: the
+//! uniform-ns grid, the `floor(now)`-at-emission stamp, the future-dating
+//! "monotonicity guard", and the `service(now, …)` signature that took the
+//! scheduling instant as a parameter. The rework paces on the exact 100-ns grid
+//! (stamp = the serviced boundary itself), reads the wall clock internally
+//! (scheduling read + a fresh emit read after decode), and deletes the guard.
 
 use super::*;
-use crate::playback::wallclock::WallClock;
+use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
-/// 30 fps pacing interval in ns.
-const I30: i64 = 33_333_333;
-/// One 100-ns stamp-grid slot at 30 fps.
-const SLOT_100NS: i64 = 333_333;
+/// The first grid boundary after 0 — `wall_start` after `anchor()` at clock 0.
+const B1: i64 = 333_333;
+
+/// The k-th exact-rational grid boundary at 30 fps, in 100-ns units.
+fn b(k: i64) -> i64 {
+    k * 10_000_000 / 30
+}
 
 fn mk_frame(pts_ns: i64) -> PacedFrame {
     PacedFrame {
@@ -41,48 +51,72 @@ fn mk_frame_with_audio(pts_ns: i64) -> PacedFrame {
     }
 }
 
-/// A recording sink: captures the per-emit (video_tc, audio_tc).
+/// A frame whose presentation time lands exactly on `target_100ns` given a
+/// `wall_start` of [`B1`] (i.e. `anchor()` was called at clock 0).
+fn frame_due_at(target_100ns: i64) -> PacedFrame {
+    mk_frame((target_100ns - B1) * 100)
+}
+
+fn frame_due_at_audio(target_100ns: i64) -> PacedFrame {
+    mk_frame_with_audio((target_100ns - B1) * 100)
+}
+
+/// A recording sink: captures per emit the video/audio timecodes and the size
+/// of the audio batch (every consumed frame's chunks, §6.4).
 #[derive(Default)]
 struct RecordingSink {
     video_tcs: Vec<i64>,
     audio_tcs: Vec<i64>,
+    audio_lens: Vec<usize>,
 }
 
-impl PacedSink for RecordingSink {
-    fn emit(&mut self, _frame: &PacedFrame, video_tc_100ns: i64, audio_tc_100ns: i64) {
-        self.video_tcs.push(video_tc_100ns);
-        self.audio_tcs.push(audio_tc_100ns);
+impl RecordingSink {
+    fn audio_chunks_total(&self) -> usize {
+        self.audio_lens.iter().sum()
     }
 }
 
-fn new_pacer() -> Pacer {
-    Pacer::with_wallclock(30, true, WallClock::fixed(0))
+impl PacedSink for RecordingSink {
+    fn emit(
+        &mut self,
+        _video: &PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.video_tcs.push(video_tc_100ns);
+        self.audio_tcs.push(audio_tc_100ns);
+        self.audio_lens.push(audio.len());
+    }
 }
+
+/// A pacer over a settable clock, anchored at clock 0 (wall_start = [`B1`]).
+fn anchored_pacer() -> (Pacer, SettableClock) {
+    let (wall, clk) = WallClock::settable(0);
+    let mut pacer = Pacer::with_wallclock(30, true, wall);
+    clk.set(0);
+    pacer.anchor();
+    (pacer, clk)
+}
+
+// ---------------------------------------------------------------------------
+// Exact-grid stamping: the serviced boundary IS the stamp (no floor(now)).
+// ---------------------------------------------------------------------------
 
 #[test]
 fn exactly_one_emit_per_boundary_over_100_boundaries() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0); // wall_start = I30
-    let pts_list: Vec<i64> = (0..120).map(|j| j * I30).collect();
-    let mut idx = 0usize;
+    let (mut pacer, clk) = anchored_pacer();
+    // Frame j is due exactly at boundary b(j+1).
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..120i64 {
+        frames.borrow_mut().push_back(frame_due_at(b(j + 1)));
+    }
     let mut sink = RecordingSink::default();
 
     let mut emits = 0;
     for k in 1..=100i64 {
-        let now = k * I30;
-        let outcome = pacer.service(
-            now,
-            || {
-                if idx < pts_list.len() {
-                    let f = mk_frame(pts_list[idx]);
-                    idx += 1;
-                    Some(f)
-                } else {
-                    None
-                }
-            },
-            &mut sink,
-        );
+        clk.set(b(k));
+        let outcome = pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
         if outcome == ServiceOutcome::Emitted {
             emits += 1;
         }
@@ -95,195 +129,109 @@ fn exactly_one_emit_per_boundary_over_100_boundaries() {
         0,
         "one-frame-per-boundary drops nothing"
     );
-    // Timecodes strictly increasing, each by exactly one grid slot.
+    // Stamps are the serviced boundaries: b(1)..b(100), each one grid slot on.
     assert_eq!(sink.video_tcs.len(), 100);
+    assert_eq!(sink.video_tcs[0], b(1));
+    assert_eq!(sink.video_tcs[99], b(100));
     for w in sink.video_tcs.windows(2) {
         let step = w[1] - w[0];
-        assert!(step == SLOT_100NS || step == SLOT_100NS + 1, "step={step}");
+        assert!(step == 333_333 || step == 333_334, "step={step}");
     }
 }
 
 #[test]
-fn sixty_fps_input_decimates_to_thirty_with_dropped() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0);
-    // 60 fps frames: pts every 16_666_666 ns.
-    let cap = 16_666_666i64;
-    let pts_list: Vec<i64> = (0..120).map(|j| j * cap).collect();
-    let mut idx = 0usize;
+fn stamp_is_the_serviced_boundary_never_floor_of_now() {
+    // Service well PAST the boundary (late by ~7 ms): the stamp must be the
+    // boundary itself, never floor(now) — and never future-dated.
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1) + 70_000); // 7 ms past b(1)
+    pacer.service(|| first.take(), &mut sink);
+    assert_eq!(sink.video_tcs, vec![b(1)], "stamp is the boundary");
+    assert!(sink.video_tcs[0] <= sink.audio_tcs[0], "never future-dated");
+    assert_eq!(
+        sink.audio_tcs,
+        vec![b(1) + 70_000],
+        "audio = raw wall clock"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Audio decoupled from the video decision (#147 change 3).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sixty_fps_submits_all_audio_chunks_not_just_emitted_frames() {
+    let (mut pacer, clk) = anchored_pacer();
+    // 60 fps frames every 166_666 (100 ns), each with one audio chunk.
+    let cap = 166_666i64;
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..60i64 {
+        frames
+            .borrow_mut()
+            .push_back(frame_due_at_audio(B1 + j * cap));
+    }
     let mut sink = RecordingSink::default();
 
     let mut emits = 0;
     for k in 1..=30i64 {
-        let now = k * I30;
-        let outcome = pacer.service(
-            now,
-            || {
-                if idx < pts_list.len() {
-                    let f = mk_frame(pts_list[idx]);
-                    idx += 1;
-                    Some(f)
-                } else {
-                    None
-                }
-            },
-            &mut sink,
-        );
-        if outcome == ServiceOutcome::Emitted {
+        clk.set(b(k));
+        if pacer.service(|| frames.borrow_mut().pop_front(), &mut sink) == ServiceOutcome::Emitted {
             emits += 1;
         }
     }
 
-    assert!(
-        (29..=31).contains(&emits),
-        "60->30 decimation: {emits} emits"
-    );
     let dropped = pacer.stats().dropped;
-    assert!((26..=32).contains(&dropped), "~30/s dropped: {dropped}");
+    assert!((29..=31).contains(&emits), "60->30 emits: {emits}");
+    // Every CONSUMED frame's audio ships (emitted AND dropped), so the total
+    // audio-chunk count equals decoded frames, NOT emitted frames.
+    assert_eq!(
+        sink.audio_chunks_total(),
+        dropped as usize + emits as usize,
+        "audio chunks == consumed frames (dropped + emitted)"
+    );
+    assert!(
+        sink.audio_chunks_total() >= 55,
+        "≈60 chunks for ≈60 decoded frames, got {}",
+        sink.audio_chunks_total()
+    );
+    assert!(dropped >= 25, "≈30 frames decimated, got {dropped}");
 }
 
 #[test]
-fn sub_grid_input_repeats_with_strictly_increasing_stamps() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0);
-    // 23.976 fps frames: interval ~41_708_375 ns (> I30 -> some boundaries repeat).
-    let cap = 41_708_375i64;
-    let pts_list: Vec<i64> = (0..40).map(|j| j * cap).collect();
-    let mut idx = 0usize;
+fn sub_grid_repeats_submit_no_audio() {
+    let (mut pacer, clk) = anchored_pacer();
+    // 23.976 fps frames (interval ~417_083 100 ns > one 30-fps slot) so some
+    // boundaries have no due frame and REPEAT — those must submit no audio.
+    let cap = 417_083i64;
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..40i64 {
+        frames
+            .borrow_mut()
+            .push_back(frame_due_at_audio(B1 + j * cap));
+    }
     let mut sink = RecordingSink::default();
 
+    let mut repeats = 0;
     for k in 1..=30i64 {
-        let now = k * I30;
-        pacer.service(
-            now,
-            || {
-                if idx < pts_list.len() {
-                    let f = mk_frame(pts_list[idx]);
-                    idx += 1;
-                    Some(f)
-                } else {
-                    None
-                }
-            },
-            &mut sink,
-        );
+        clk.set(b(k));
+        let outcome = pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+        if outcome == ServiceOutcome::Repeated {
+            repeats += 1;
+            assert_eq!(
+                *sink.audio_lens.last().unwrap(),
+                0,
+                "a repeat must submit NO audio (§6.4)"
+            );
+        }
     }
-
-    assert!(pacer.stats().repeats > 0, "sub-grid content must repeat");
-    // Every stamp (emit + repeat) strictly increases by exactly one grid slot.
-    assert_eq!(sink.video_tcs.len(), 30);
+    assert!(repeats > 0, "sub-grid content must repeat");
+    // Stamps still strictly increase by one grid slot (repeat = serviced boundary).
     for w in sink.video_tcs.windows(2) {
         let step = w[1] - w[0];
-        assert!(step == SLOT_100NS || step == SLOT_100NS + 1, "step={step}");
+        assert!(step == 333_333 || step == 333_334, "step={step}");
     }
-}
-
-#[test]
-fn underrun_repeats_last_frame_stamped_at_new_boundary() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0); // wall_start = I30
-    let mut sink = RecordingSink::default();
-
-    // Emit one real frame at the first boundary.
-    let mut first = Some(mk_frame(0));
-    let o1 = pacer.service(I30, || first.take(), &mut sink);
-    assert_eq!(o1, ServiceOutcome::Emitted);
-
-    // Next boundary: no new frame -> repeat the last, stamped at THIS boundary.
-    let o2 = pacer.service(2 * I30, || None, &mut sink);
-    assert_eq!(o2, ServiceOutcome::Repeated);
-    assert_eq!(pacer.stats().repeats, 1);
-    assert_eq!(sink.video_tcs.len(), 2);
-    assert!(
-        sink.video_tcs[1] > sink.video_tcs[0],
-        "repeat stamp must advance to the new boundary"
-    );
-}
-
-#[test]
-fn late_by_three_intervals_catches_up_then_on_time() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0); // wall_start = I30, next boundary = I30
-    // Frames are buffered (available) for each boundary.
-    let pts_list: Vec<i64> = (0..10).map(|j| j * I30).collect();
-    let mut idx = 0usize;
-    let mut sink = RecordingSink::default();
-
-    // The thread stalled: `now` is 3 intervals past the first boundary. Service
-    // repeatedly at the SAME now — the pacer catches up one interval per emit.
-    let now = I30 + 3 * I30; // B0 + 3 intervals
-    for _ in 0..4 {
-        pacer.service(
-            now,
-            || {
-                if idx < pts_list.len() {
-                    let f = mk_frame(pts_list[idx]);
-                    idx += 1;
-                    Some(f)
-                } else {
-                    None
-                }
-            },
-            &mut sink,
-        );
-    }
-
-    // 3 late catch-up emits, then an on-time emit; the 5th call would Wait.
-    assert_eq!(
-        pacer.stats().late_frames,
-        3,
-        "three catch-up emits are late"
-    );
-    assert_eq!(pacer.stats().resyncs, 0, "a bounded catch-up never resyncs");
-    assert_eq!(pacer.stats().seq, 4);
-    let wait = pacer.service(now, || None, &mut sink);
-    assert!(
-        matches!(wait, ServiceOutcome::Wait { .. }),
-        "caught up -> Wait"
-    );
-}
-
-#[test]
-fn late_by_twelve_with_nothing_pending_resyncs() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0); // wall_start = I30
-    let mut sink = RecordingSink::default();
-
-    // Emit one frame so there is a last frame to repeat.
-    let mut first = Some(mk_frame(0));
-    pacer.service(I30, || first.take(), &mut sink);
-    assert_eq!(pacer.stats().resyncs, 0);
-
-    // Long stall, NO frames available (underrun): now jumps ~13 intervals.
-    let now = I30 + 13 * I30;
-    let o = pacer.service(now, || None, &mut sink);
-    assert_eq!(o, ServiceOutcome::Repeated);
-    assert_eq!(
-        pacer.stats().resyncs,
-        1,
-        "lag>8 with nothing buffered resyncs"
-    );
-}
-
-#[test]
-fn backward_clock_step_relatches() {
-    let mut pacer = new_pacer();
-    let anchor_now = 100 * I30;
-    pacer.anchor(anchor_now); // wall_start = 101*I30
-    let mut sink = RecordingSink::default();
-
-    let mut first = Some(mk_frame(0));
-    pacer.service(101 * I30, || first.take(), &mut sink);
-    assert_eq!(pacer.stats().relatches, 0);
-
-    // Clock steps backward far below the latched boundary.
-    let o = pacer.service(50 * I30, || None, &mut sink);
-    assert!(matches!(o, ServiceOutcome::Wait { .. }));
-    assert_eq!(
-        pacer.stats().relatches,
-        1,
-        "a backward step re-latches once"
-    );
 }
 
 #[test]
@@ -296,31 +244,18 @@ fn audio_is_submitted_before_video_at_every_boundary() {
     let sender = NdiSender::new_with_clocking(backend.clone(), "Paced", false, false).unwrap();
     let mut submitter = crate::playback::submitter::FrameSubmitter::new(sender, 30, 1);
 
-    let mut pacer = new_pacer();
-    pacer.anchor(0);
-    let pts_list: Vec<i64> = (0..30).map(|j| j * I30).collect();
-    let mut idx = 0usize;
+    let (mut pacer, clk) = anchored_pacer();
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..30i64 {
+        frames.borrow_mut().push_back(frame_due_at_audio(b(j + 1)));
+    }
 
     for k in 1..=10i64 {
-        let now = k * I30;
-        pacer.service(
-            now,
-            || {
-                if idx < pts_list.len() {
-                    let f = mk_frame_with_audio(pts_list[idx]);
-                    idx += 1;
-                    Some(f)
-                } else {
-                    None
-                }
-            },
-            &mut submitter,
-        );
+        clk.set(b(k));
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut submitter);
     }
 
     let calls = backend.calls();
-    // For every send_video_async there must be a preceding send_audio since the
-    // last video send (audio-before-video invariant).
     let mut saw_audio_since_video = false;
     let mut video_count = 0;
     for c in &calls {
@@ -336,37 +271,240 @@ fn audio_is_submitted_before_video_at_every_boundary() {
         }
     }
     assert_eq!(video_count, 10, "one paced video frame per boundary");
-    // Video timecodes strictly increasing (each frame its own grid slot).
     let tcs = backend.video_timecodes();
     for w in tcs.windows(2) {
         assert!(w[1] > w[0], "paced video timecodes must strictly increase");
     }
 }
 
+// ---------------------------------------------------------------------------
+// Underrun / catch-up / resync / re-latch.
+// ---------------------------------------------------------------------------
+
 #[test]
-fn jitter_p99_is_computed_from_the_ring() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0);
-    let pts_list: Vec<i64> = (0..30).map(|j| j * I30).collect();
-    let mut idx = 0usize;
+fn underrun_repeats_last_frame_stamped_at_new_boundary() {
+    let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
 
-    // Service each boundary a fixed 7 µs late -> every jitter sample is 7 µs.
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1));
+    assert_eq!(
+        pacer.service(|| first.take(), &mut sink),
+        ServiceOutcome::Emitted
+    );
+
+    clk.set(b(2));
+    assert_eq!(
+        pacer.service(|| None, &mut sink),
+        ServiceOutcome::Repeated,
+        "no new frame -> repeat"
+    );
+    assert_eq!(pacer.stats().repeats, 1);
+    assert_eq!(sink.video_tcs, vec![b(1), b(2)]);
+    assert!(
+        sink.video_tcs[1] > sink.video_tcs[0],
+        "repeat stamp advances to the new boundary"
+    );
+}
+
+#[test]
+fn late_by_three_intervals_catches_up_then_on_time() {
+    // NOTE: this replaces the pre-rework test that (in the defective design)
+    // could assert future-dated stamps; here the clock is fixed 3 slots late
+    // and each catch-up emit is stamped with its own (past) boundary.
+    let (mut pacer, clk) = anchored_pacer();
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..10i64 {
+        frames.borrow_mut().push_back(frame_due_at(b(j + 1)));
+    }
+    let mut sink = RecordingSink::default();
+
+    // The thread stalled: `now` is 3 slots past the first boundary. Service
+    // repeatedly at the SAME now — the pacer catches up one slot per emit.
+    clk.set(b(4));
+    for _ in 0..4 {
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+    }
+
+    assert_eq!(
+        pacer.stats().late_frames,
+        3,
+        "three catch-up emits are late"
+    );
+    assert_eq!(pacer.stats().resyncs, 0, "a bounded catch-up never resyncs");
+    assert_eq!(pacer.stats().seq, 4);
+    // Stamps are the caught-up boundaries b(1)..b(4), each never future-dated.
+    assert_eq!(sink.video_tcs, vec![b(1), b(2), b(3), b(4)]);
+    for tc in &sink.video_tcs {
+        assert!(*tc <= b(4), "never future-dated: tc={tc}");
+    }
+    // The 5th call has caught up -> Wait.
+    clk.set(b(4));
+    assert!(matches!(
+        pacer.service(|| None, &mut sink),
+        ServiceOutcome::Wait { .. }
+    ));
+}
+
+#[test]
+fn late_by_twelve_with_nothing_pending_resyncs() {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+
+    // Emit one frame so there is a last frame to repeat.
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1));
+    pacer.service(|| first.take(), &mut sink);
+    assert_eq!(pacer.stats().resyncs, 0);
+
+    // Long stall, NO frames available (underrun): now jumps ~13 slots.
+    clk.set(b(14));
+    let o = pacer.service(|| None, &mut sink);
+    assert_eq!(o, ServiceOutcome::Repeated);
+    assert_eq!(
+        pacer.stats().resyncs,
+        1,
+        "lag>8 with nothing buffered resyncs"
+    );
+}
+
+#[test]
+fn backward_clock_step_relatches() {
+    let (wall, clk) = WallClock::settable(100 * b(1));
+    let mut pacer = Pacer::with_wallclock(30, true, wall);
+    clk.set(b(100));
+    pacer.anchor(); // wall_start = strict_next(b(100))
+    let mut sink = RecordingSink::default();
+
+    let mut first = Some(mk_frame(0));
+    clk.set(b(101));
+    pacer.service(|| first.take(), &mut sink);
+    assert_eq!(pacer.stats().relatches, 0);
+
+    // Clock steps backward far below the latched boundary.
+    clk.set(b(50));
+    let o = pacer.service(|| None, &mut sink);
+    assert!(matches!(o, ServiceOutcome::Wait { .. }));
+    assert_eq!(
+        pacer.stats().relatches,
+        1,
+        "a backward step re-latches once"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Never future-dated across a mixed run (#147 change 2).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn never_future_dated_over_a_mixed_run_with_catchup_and_resync() {
+    let (mut pacer, clk) = anchored_pacer();
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    // Frames due at b(1)..b(25); phases A/B/C consume all 25.
+    for m in 1..=25i64 {
+        frames.borrow_mut().push_back(frame_due_at(b(m)));
+    }
+    let mut sink = RecordingSink::default();
+
+    // Phase A: on-time b(1)..b(15).
+    for k in 1..=15i64 {
+        clk.set(b(k));
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+    }
+    // Phase B: late-by-3 burst — clock 3 slots ahead, 3 catch-ups (b16..b18).
+    clk.set(b(19));
+    for _ in 0..3 {
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+    }
+    // Phase C: on-time b(19)..b(25).
+    for k in 19..=25i64 {
+        clk.set(b(k));
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+    }
+    // Phase D: starvation resync — clock 12 slots past b(26), nothing buffered.
+    clk.set(b(38));
+    assert_eq!(pacer.service(|| None, &mut sink), ServiceOutcome::Repeated);
+    // Phase E: resume with a frame due at the resynced boundary b(39).
+    frames.borrow_mut().push_back(frame_due_at(b(39)));
+    clk.set(b(39));
+    pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+
+    let stats = pacer.stats();
+    assert!(
+        stats.late_frames >= 3,
+        "catch-up exercised: {}",
+        stats.late_frames
+    );
+    assert_eq!(stats.resyncs, 1, "exactly one resync");
+
+    // Invariant 1: every stamp <= the emit-instant wall clock (audio_tc).
+    for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
+        assert!(*v <= *a, "future-dated stamp: video_tc={v} audio_tc={a}");
+    }
+    // Invariant 2: stamps strictly increase; each step is one grid slot EXCEPT
+    // across a resync, and there is exactly one such multi-slot step.
+    let mut multi_slot = 0;
+    for w in sink.video_tcs.windows(2) {
+        let step = w[1] - w[0];
+        assert!(step > 0, "stamps strictly increase: step={step}");
+        if step != 333_333 && step != 333_334 {
+            multi_slot += 1;
+        }
+    }
+    assert_eq!(
+        multi_slot, stats.resyncs as usize,
+        "only a resync makes a multi-slot stamp gap"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Lateness measured at the submit instant (#147 change 5).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lateness_measured_at_the_submit_instant_includes_decode_time() {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+    let clk2 = clk.clone();
+
+    clk.set(B1); // sched_now = b(1), exactly on the boundary
+    let mut served = false;
+    pacer.service(
+        || {
+            if served {
+                return None;
+            }
+            served = true;
+            clk2.advance(50_000); // +5 ms "decode" before the emit read
+            Some(frame_due_at(B1))
+        },
+        &mut sink,
+    );
+
+    // Stamp is the boundary; audio (emit read) is 5 ms past it.
+    assert_eq!(sink.video_tcs, vec![B1]);
+    assert_eq!(sink.audio_tcs, vec![B1 + 50_000]);
+    let stats = pacer.stats();
+    assert!(
+        stats.max_late_us >= 5_000,
+        "lateness must include decode time: max_late_us={}",
+        stats.max_late_us
+    );
+}
+
+#[test]
+fn jitter_p99_is_computed_from_the_ring() {
+    let (mut pacer, clk) = anchored_pacer();
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..30i64 {
+        frames.borrow_mut().push_back(frame_due_at(b(j + 1)));
+    }
+    let mut sink = RecordingSink::default();
+
+    // Service each boundary a fixed 7 µs (70 × 100 ns) late.
     for k in 1..=20i64 {
-        let now = k * I30 + 7_000; // 7 µs past the boundary
-        pacer.service(
-            now,
-            || {
-                if idx < pts_list.len() {
-                    let f = mk_frame(pts_list[idx]);
-                    idx += 1;
-                    Some(f)
-                } else {
-                    None
-                }
-            },
-            &mut sink,
-        );
+        clk.set(b(k) + 70);
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
     }
 
     let stats = pacer.stats();
@@ -375,13 +513,18 @@ fn jitter_p99_is_computed_from_the_ring() {
     assert!(stats.max_late_us >= 7);
 }
 
+// ---------------------------------------------------------------------------
+// Telemetry + genlock-off guard.
+// ---------------------------------------------------------------------------
+
 #[test]
 fn counters_serialise_on_the_snapshot() {
-    let mut pacer = new_pacer();
-    pacer.anchor(0);
-    let mut first = Some(mk_frame(0));
-    pacer.service(I30, || first.take(), &mut RecordingSink::default());
-    pacer.service(2 * I30, || None, &mut RecordingSink::default()); // a repeat
+    let (mut pacer, clk) = anchored_pacer();
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1));
+    pacer.service(|| first.take(), &mut RecordingSink::default());
+    clk.set(b(2));
+    pacer.service(|| None, &mut RecordingSink::default()); // a repeat
 
     let stats = pacer.stats();
     assert!(stats.enabled);
@@ -400,7 +543,6 @@ fn counters_serialise_on_the_snapshot() {
         assert!(json.get(field).is_some(), "missing pacing field {field}");
     }
     assert_eq!(json["repeats"].as_u64(), Some(1));
-    // serde round-trip.
     let back: crate::playback::ndi_health::PacingStats = serde_json::from_value(json).unwrap();
     assert_eq!(back, stats);
 }
@@ -413,14 +555,64 @@ fn disabled_pacer_reports_default_stats() {
     assert_eq!(stats, crate::playback::ndi_health::PacingStats::default());
 }
 
+#[test]
+fn genlock_off_pacer_waits_one_second_never_spins() {
+    // grid_fps 0 -> interval 0 -> the pacer must return a 1 s wait, never a
+    // zero/near-zero wait that would spin the loop (#147 change 8).
+    let (wall, clk) = WallClock::settable(500);
+    let mut pacer = Pacer::with_wallclock(0, true, wall);
+    clk.set(500);
+    let out = pacer.service(|| None, &mut RecordingSink::default());
+    assert_eq!(
+        out,
+        ServiceOutcome::Wait {
+            until_100ns: 500 + 10_000_000
+        }
+    );
+}
+
 // ---------------------------------------------------------------------------
-// Structural guard: the flag-OFF path is byte-preserved in the pipeline source.
+// Pure sleep-plan decision (#147 change 4).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_path() {
-    // CRLF-normalise so the grep is line-ending agnostic.
+fn plan_sleep_clamps_to_one_second_and_flags_backward_relatch() {
+    let i = 333_333;
+    // Normal wait within one interval: sleep the delta, no relatch.
+    assert_eq!(
+        plan_sleep_100ns(1000, 1000 + 200_000, i),
+        SleepDecision {
+            sleep_100ns: 200_000,
+            relatch: false
+        }
+    );
+    // At/past the boundary: zero sleep, no relatch.
+    assert_eq!(plan_sleep_100ns(5000, 4000, i).sleep_100ns, 0);
+    assert!(!plan_sleep_100ns(5000, 4000, i).relatch);
+    // Boundary more than one interval ahead (a backward jump / anomaly):
+    // relatch, and the coarse sleep is still clamped to 1 s.
+    let d = plan_sleep_100ns(0, 50_000_000, i);
+    assert!(d.relatch);
+    assert_eq!(d.sleep_100ns, 10_000_000);
+    // interval == 0 (genlock off): never relatch; clamped 1 s sleep.
+    let d0 = plan_sleep_100ns(0, 50_000_000, 0);
+    assert!(!d0.relatch);
+    assert_eq!(d0.sleep_100ns, 10_000_000);
+}
+
+// ---------------------------------------------------------------------------
+// Structural guard: the flag-OFF (legacy SDK-clocked) decode path is unchanged.
+// Replaces the pre-rework two-string grep with an exact-substring assertion on
+// the WHOLE legacy `decode_and_send` call site (#147 change 8).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
+    // CRLF-normalise so the assertion is line-ending agnostic.
     let src = include_str!("pipeline.rs").replace("\r\n", "\n");
+
+    // 1. Both sender clockings are present (paced = clock_video=false, legacy =
+    //    clock_video=true), so the flag genuinely selects the path.
     assert!(
         src.contains("new_with_clocking(backend, ndi_name, true, false)"),
         "flag-OFF must still create the SDK-clocked sender (clock_video=true)"
@@ -429,11 +621,34 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_path() {
         src.contains("new_with_clocking(backend, ndi_name, false, false)"),
         "flag-ON must create the app-clocked sender (clock_video=false)"
     );
-    // The legacy decode path still applies the per-file frame rate.
-    let submitter_src = include_str!("submitter.rs").replace("\r\n", "\n");
-    let pipeline_src = &src;
+
+    // 2. The WHOLE legacy `decode_and_send` call site is byte-unchanged — a
+    //    stronger guard than a two-string grep: any edit to how the legacy path
+    //    is invoked (args, order) breaks this.
+    let legacy_call_site = "\
+                    } else {
+                        decode_and_send(
+                            &cmd_rx,
+                            &mut submitter,
+                            &current_video,
+                            &current_audio,
+                            &event_tx,
+                            playlist_id,
+                            &mut paused,
+                            &mut last_heartbeat,
+                            &mut consecutive_bad_polls,
+                            current_start_ms,
+                        )
+                    };";
     assert!(
-        pipeline_src.contains("set_frame_rate") || submitter_src.contains("set_frame_rate"),
+        src.contains(legacy_call_site),
+        "the legacy decode_and_send call site must be byte-for-byte unchanged"
+    );
+
+    // 3. The legacy decode path still applies the per-file frame rate.
+    let submitter_src = include_str!("submitter.rs").replace("\r\n", "\n");
+    assert!(
+        src.contains("set_frame_rate") || submitter_src.contains("set_frame_rate"),
         "the legacy path still calls set_frame_rate from the decoder"
     );
 }
