@@ -28,4 +28,6 @@ paths:
   camera-box's DECIMATOR — never use an epoch-multiple ns grid as a clock
   (it drifts 10 ns/s against the second-anchored stamp grid). Flag
   `genlock_pacing` (DB setting) is read at pipeline spawn → a flip needs a
-  SongPlayer restart (= a deploy).
+  SongPlayer restart (= a deploy). Box test 2026-09-13 01:43: idle/paused
+  outputs hold 30/s, but a PLAYING output ran ~27/s with every frame late
+  (p99 15 s, max 40 s) — read #147 before flipping the flag again.
