@@ -16,8 +16,18 @@ use sp_core::genlock::should_resample_mono_to_real_offset;
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
 /// the system clocks; tests inject a deterministic fake.
 pub trait ClockSource: Send + Sync {
-    /// Sample both clocks "at the same instant".
+    /// Sample both clocks "at the same instant". Called only at anchor time
+    /// (construction + every resample), never on the hot read path.
     fn sample(&self) -> (Instant, i64);
+
+    /// Monotonic instant only, for the hot `now_100ns` read path — it MUST NOT
+    /// touch the realtime clock (#146 follow-up: the read path must not call
+    /// `Utc::now()`). The default pairs it out of
+    /// [`sample`](ClockSource::sample); [`SystemClock`] and any source that
+    /// must keep the read path off the realtime clock override it.
+    fn now_monotonic(&self) -> Instant {
+        self.sample().0
+    }
 }
 
 /// Production clock source: `Instant::now()` paired with the UTC wall clock in

@@ -7,7 +7,7 @@
 //! `#[cfg(test)] #[path = "sender_tests_timecode.rs"] mod sender_tests_timecode;`.
 
 use super::*;
-use crate::types::NDI_SEND_TIMECODE_SYNTHESIZE;
+use crate::types::{FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE};
 use std::sync::Arc;
 use test_util::MockNdiBackend;
 
@@ -84,4 +84,42 @@ fn audio_none_records_synthesize_marker() {
         backend.audio_timecodes(),
         vec![NDI_SEND_TIMECODE_SYNTHESIZE]
     );
+}
+
+// --- Direct tests of the REAL write path (`RealNdiBackend::build_video_frame`).
+// The mock re-implements `unwrap_or(SYNTHESIZE)`, so a bug in the real struct
+// builder would slip past the mock-driven tests above. These call the real
+// builder directly and assert the `NDIlib_video_frame_v2_t` fields. It is pure
+// struct construction (no NDI SDK / DLL) so it runs on the Linux CI runner.
+
+#[test]
+fn build_video_frame_writes_some_timecode_and_zero_timestamp() {
+    let frame = RealNdiBackend::build_video_frame(
+        FourCCVideoType::NV12,
+        1920,
+        1080,
+        1920,
+        30,
+        1,
+        std::ptr::null(),
+        Some(1_234_567_890),
+    );
+    assert_eq!(frame.timecode, 1_234_567_890);
+    assert_eq!(frame.timestamp, 0);
+}
+
+#[test]
+fn build_video_frame_none_writes_synthesize_marker() {
+    let frame = RealNdiBackend::build_video_frame(
+        FourCCVideoType::NV12,
+        1920,
+        1080,
+        1920,
+        30,
+        1,
+        std::ptr::null(),
+        None,
+    );
+    assert_eq!(frame.timecode, NDI_SEND_TIMECODE_SYNTHESIZE);
+    assert_eq!(frame.timestamp, 0);
 }

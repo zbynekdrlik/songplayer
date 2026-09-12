@@ -71,3 +71,71 @@ fn audio_is_submitted_before_video() {
         "audio must be submitted before video: {calls:#?}"
     );
 }
+
+/// A [`ClockSource`] that counts realtime samples — proves `new_with_wallclock`
+/// wires the injected clock directly (no throwaway `WallClock::system()`, no
+/// re-sample on construction) and that the submit read path is monotonic-only
+/// (#146 follow-up).
+struct SampleCountingClock {
+    base: std::time::Instant,
+    utc_100ns: i64,
+    samples: std::sync::atomic::AtomicU64,
+}
+
+impl SampleCountingClock {
+    fn new(utc_100ns: i64) -> Arc<Self> {
+        Arc::new(Self {
+            base: std::time::Instant::now(),
+            utc_100ns,
+            samples: std::sync::atomic::AtomicU64::new(0),
+        })
+    }
+    fn samples(&self) -> u64 {
+        self.samples.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl crate::playback::wallclock::ClockSource for Arc<SampleCountingClock> {
+    fn sample(&self) -> (std::time::Instant, i64) {
+        self.samples
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        (self.base, self.utc_100ns)
+    }
+    fn now_monotonic(&self) -> std::time::Instant {
+        self.base
+    }
+}
+
+#[test]
+fn new_with_wallclock_uses_the_injected_clock_directly() {
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "IC", true, false).unwrap();
+
+    let clock = SampleCountingClock::new(7_000_000);
+    let wall = WallClock::new(Box::new(clock.clone()));
+    // WallClock::new seeded the anchor with exactly one realtime sample.
+    assert_eq!(clock.samples(), 1);
+
+    let mut sub = FrameSubmitter::new_with_wallclock(sender, 30, 1, wall);
+    // Construction must NOT build a throwaway system clock nor re-sample the
+    // injected clock — the injected clock is used directly.
+    assert_eq!(
+        clock.samples(),
+        1,
+        "new_with_wallclock must use the injected clock directly"
+    );
+
+    // The injected clock is the one that stamps; the hot read path is
+    // monotonic-only, so a submit adds no further realtime sample.
+    sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
+    assert_eq!(
+        clock.samples(),
+        1,
+        "the submit read path must be monotonic-only"
+    );
+    assert_eq!(
+        backend.video_timecodes(),
+        vec![floor_boundary_100ns(7_000_000, GENLOCK_GRID_FPS)],
+        "video timecode must derive from the injected clock"
+    );
+}

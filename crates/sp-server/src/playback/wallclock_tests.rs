@@ -95,3 +95,71 @@ fn anchor_resamples_on_100th_tick_not_before() {
         "the 100th tick re-samples the anchor exactly once"
     );
 }
+
+/// A [`ClockSource`] that counts how often the REALTIME clock is sampled
+/// (`sample`) and serves the hot monotonic read path (`now_monotonic`) WITHOUT
+/// touching that counter — so a test can prove `now_100ns` reads only the
+/// monotonic clock (#146 follow-up: never `Utc::now()` on the read path).
+struct RealtimeCountingClock {
+    base: Instant,
+    utc_100ns: i64,
+    realtime_samples: AtomicU64,
+}
+
+impl RealtimeCountingClock {
+    fn new(utc_100ns: i64) -> Arc<Self> {
+        Arc::new(Self {
+            base: Instant::now(),
+            utc_100ns,
+            realtime_samples: AtomicU64::new(0),
+        })
+    }
+    fn realtime_samples(&self) -> u64 {
+        self.realtime_samples.load(Ordering::SeqCst)
+    }
+}
+
+impl ClockSource for Arc<RealtimeCountingClock> {
+    fn sample(&self) -> (Instant, i64) {
+        self.realtime_samples.fetch_add(1, Ordering::SeqCst);
+        (self.base, self.utc_100ns)
+    }
+    fn now_monotonic(&self) -> Instant {
+        // Hot read path: monotonic only — MUST NOT bump the realtime counter.
+        self.base
+    }
+}
+
+#[test]
+fn now_100ns_reads_monotonic_only_never_the_realtime_clock() {
+    let clock = RealtimeCountingClock::new(3_000_000);
+    let mut wall = WallClock::new(Box::new(clock.clone()));
+    // Construction seeds the anchor with exactly one realtime sample.
+    assert_eq!(clock.realtime_samples(), 1);
+
+    // Many reads on the hot path must NOT sample the realtime clock again.
+    for _ in 0..50 {
+        let _ = wall.now_100ns();
+    }
+    assert_eq!(
+        clock.realtime_samples(),
+        1,
+        "now_100ns must read the monotonic clock only, never Utc::now()"
+    );
+
+    // Only the 100th tick re-anchors — one further realtime sample.
+    for _ in 0..99 {
+        wall.tick();
+    }
+    assert_eq!(
+        clock.realtime_samples(),
+        1,
+        "no resample before the 100th tick"
+    );
+    wall.tick();
+    assert_eq!(
+        clock.realtime_samples(),
+        2,
+        "the 100th tick re-samples the realtime clock exactly once"
+    );
+}
