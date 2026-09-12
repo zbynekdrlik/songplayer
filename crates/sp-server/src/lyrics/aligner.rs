@@ -383,3 +383,7 @@ mod tests {
         assert_eq!(parsed.chunks[1].words.len(), 0);
     }
 }
+
+#[path = "aligner_tests_timeout.rs"]
+#[cfg(test)]
+mod tests_timeout;

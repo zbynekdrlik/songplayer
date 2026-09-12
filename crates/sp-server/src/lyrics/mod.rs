@@ -350,3 +350,7 @@ mod probe_tests;
 #[cfg(test)]
 #[path = "canonical_source_regression_tests.rs"]
 mod canonical_source_regression_tests;
+
+#[cfg(test)]
+#[path = "worker_tests_duration_cap.rs"]
+mod worker_tests_duration_cap;
