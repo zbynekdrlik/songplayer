@@ -307,14 +307,15 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     }
   });
 
-  test("at least one song has v18+ Gemini line-level lyrics (replaces the qwen3 tests)", async ({
+  test("at least one song has current-version line-level lyrics (v21 regime, #143)", async ({
     request,
   }) => {
-    // Post-PR #48 (v18+) the pipeline is line-level only and single-
-    // provider Gemini. This test asserts the new architecture is actually
-    // producing usable output on the deployed server:
-    //   - at least one track has `source` starting with "ensemble:gemini"
-    //     (confirms the Gemini provider registered and ran)
+    // Rescoped 2026-09-12: the Gemini regime this test used to key on
+    // (`ensemble:gemini`, v11–v18) is gone — v21 re-queues every such row
+    // (#143), so "a non-stale ensemble:gemini song" no longer exists. The
+    // invariant under test is unchanged and now checked on whatever the
+    // CURRENT pipeline persisted:
+    //   - at least one non-stale track with lyrics at the current version
     //   - line timings are well-formed: monotonic start_ms, end_ms >=
     //     start_ms, non-empty `en` text
     //   - `words` is absent / null for these tracks (confirms v18's drop
@@ -356,20 +357,20 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         s.has_lyrics &&
         !s.is_stale &&
         typeof s.source === "string" &&
-        s.source.startsWith("ensemble:gemini"),
+        s.source.length > 0,
     );
 
     // A missing fixture population must FAIL, not skip (test-strictness): a
     // skip here is permanent silent green, and this assertion is the only
     // end-to-end guard that v18's "no synthesized per-word timings" invariant
     // still holds on real persisted data. If the catalog genuinely stops
-    // carrying ensemble:gemini rows, rescope or delete this test deliberately
+    // carrying non-stale lyrics rows, rescope or delete this test deliberately
     // — do not let it quietly stop running.
     expect(
       geminiSongs.length,
-      "no non-stale ensemble:gemini song in the catalog — this test's fixture " +
-        "population is gone; rescope or delete this test rather than letting " +
-        "it skip into permanent silent green",
+      "no non-stale song with lyrics at the current pipeline version — this " +
+        "test's fixture population is gone; rescope or delete this test rather " +
+        "than letting it skip into permanent silent green",
     ).toBeGreaterThan(0);
 
     const tested: string[] = [];
@@ -378,9 +379,10 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       expect(lr.status()).toBe(200);
       const track: Track = await lr.json();
 
-      expect(track.source, `video ${s.video_id} source on track payload`).toMatch(
-        /^ensemble:gemini/,
-      );
+      expect(
+        typeof track.source === "string" && track.source.length > 0,
+        `video ${s.video_id} source on track payload`,
+      ).toBe(true);
       expect(
         Array.isArray(track.lines) && track.lines.length > 0,
         `video ${s.video_id} must have at least one line`,
@@ -404,6 +406,6 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       }
       tested.push(`#${s.video_id}`);
     }
-    console.log(`v18+ Gemini check OK on: ${tested.join(", ")}`);
+    console.log(`current-version line-level check OK on: ${tested.join(", ")}`);
   });
 });
