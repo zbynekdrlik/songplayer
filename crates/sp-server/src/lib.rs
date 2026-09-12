@@ -388,11 +388,16 @@ pub async fn start(
                     }
                     Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
                 }
+                // Shared with the download worker below: an update never
+                // runs while a song is downloading and vice versa.
+                let ytdlp_lock: downloader::YtdlpLock =
+                    std::sync::Arc::new(tokio::sync::Mutex::new(()));
                 let ytdlp_interval_secs = ytdlp_update_interval_secs();
                 tokio::spawn(periodic_ytdlp_update(
                     tools_mgr,
                     paths.ytdlp.clone(),
                     ytdlp_interval_secs,
+                    ytdlp_lock.clone(),
                     ytdlp_update_shutdown.subscribe(),
                 ));
                 info!(
@@ -461,6 +466,7 @@ pub async fn start(
                     dl_data_dir,
                     dl_providers,
                     dl_event_tx_for_worker,
+                    ytdlp_lock,
                 );
                 tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                 info!("download worker started");
@@ -894,6 +900,7 @@ async fn periodic_ytdlp_update(
     tools_mgr: downloader::tools::ToolsManager,
     ytdlp_path: PathBuf,
     interval_secs: u64,
+    ytdlp_lock: downloader::YtdlpLock,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
@@ -903,6 +910,8 @@ async fn periodic_ytdlp_update(
         tokio::select! {
             _ = shutdown.recv() => return,
             _ = interval.tick() => {
+                // Wait for any in-flight download before touching the binary.
+                let _ytdlp_guard = ytdlp_lock.lock().await;
                 match tools_mgr.update_ytdlp().await {
                     Ok(()) => {
                         let version = tools_mgr.ytdlp_version(&ytdlp_path).await.ok();

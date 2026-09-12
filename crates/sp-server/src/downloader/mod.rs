@@ -130,11 +130,19 @@ pub(crate) fn ytdlp_audio_args(
     args
 }
 
+/// Serializes every yt-dlp invocation against `yt-dlp --update` (#140 review
+/// finding): on Windows the binary cannot be replaced while a download is
+/// running it, so the self-updater and the download worker take this lock in
+/// turn — an update waits for the in-flight song, a download waits for the
+/// swap — instead of the update silently failing on a file lock.
+pub type YtdlpLock = std::sync::Arc<tokio::sync::Mutex<()>>;
+
 /// Background worker that downloads, extracts metadata, and normalizes videos.
 pub struct DownloadWorker {
     pool: SqlitePool,
     tools: ToolPaths,
     cache_dir: PathBuf,
+    ytdlp_lock: YtdlpLock,
     /// Directory holding the app's data (same directory as the SQLite DB).
     /// A `cookies.txt` Netscape cookie file dropped here — production path
     /// `C:\ProgramData\SongPlayer\cookies.txt` — is passed to yt-dlp on
@@ -154,11 +162,13 @@ impl DownloadWorker {
         data_dir: PathBuf,
         providers: Vec<Box<dyn MetadataProvider>>,
         event_tx: broadcast::Sender<String>,
+        ytdlp_lock: YtdlpLock,
     ) -> Self {
         Self {
             pool,
             tools,
             cache_dir,
+            ytdlp_lock,
             data_dir,
             providers,
             event_tx,
@@ -192,7 +202,12 @@ impl DownloadWorker {
                     tracing::info!("download worker received shutdown signal");
                     break;
                 }
-                _ = self.process_next() => {}
+                _ = async {
+                    // Hold the yt-dlp lock for the whole song so a
+                    // `yt-dlp --update` never swaps the binary mid-download.
+                    let _ytdlp_guard = self.ytdlp_lock.lock().await;
+                    self.process_next().await
+                } => {}
             }
             tokio::select! {
                 _ = shutdown.recv() => break,
