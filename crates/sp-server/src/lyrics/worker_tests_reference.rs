@@ -312,7 +312,12 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
 
     let cand = crate::lyrics::tier1::CandidateText {
         source: "description".to_string(),
-        lines: vec!["amazing grace".into(), "how sweet the sound".into()],
+        lines: vec![
+            "amazing grace".into(),
+            "how sweet the sound".into(),
+            "that saved a wretch".into(),
+            "like me".into(),
+        ],
         line_timings: None,
         has_timing: false,
     };
@@ -328,12 +333,23 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
                 start_ms: 2100,
                 end_ms: 3500,
             },
+            MtlLine {
+                text: "that saved a wretch".into(),
+                start_ms: 3600,
+                end_ms: 4900,
+            },
+            MtlLine {
+                text: "like me".into(),
+                start_ms: 5000,
+                end_ms: 6000,
+            },
         ],
         device: "cuda".into(),
         elapsed_s: 42.0,
     };
     // Independent ASR agrees closely — a clean gate PASS (see the identical
     // fixture rationale in orchestrator_tests.rs::run_reference_stage_pass_*).
+    // Each line's first word starts within ±50 ms of the mtl line start.
     let words = vec![
         AsrWord {
             text: "amazing".into(),
@@ -364,6 +380,36 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
             text: "sound".into(),
             start_ms: 2800,
             end_ms: 3480,
+        },
+        AsrWord {
+            text: "that".into(),
+            start_ms: 3610,
+            end_ms: 3900,
+        },
+        AsrWord {
+            text: "saved".into(),
+            start_ms: 3900,
+            end_ms: 4200,
+        },
+        AsrWord {
+            text: "a".into(),
+            start_ms: 4200,
+            end_ms: 4400,
+        },
+        AsrWord {
+            text: "wretch".into(),
+            start_ms: 4400,
+            end_ms: 4880,
+        },
+        AsrWord {
+            text: "like".into(),
+            start_ms: 5020,
+            end_ms: 5400,
+        },
+        AsrWord {
+            text: "me".into(),
+            start_ms: 5400,
+            end_ms: 5980,
         },
     ];
     let backend = FakeReferenceStageBackend {
@@ -437,7 +483,12 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
 
     let cand = crate::lyrics::tier1::CandidateText {
         source: "description".to_string(),
-        lines: vec!["amazing grace".into(), "how sweet the sound".into()],
+        lines: vec![
+            "amazing grace".into(),
+            "how sweet the sound".into(),
+            "that saved a wretch".into(),
+            "like me".into(),
+        ],
         line_timings: None,
         has_timing: false,
     };
@@ -453,23 +504,34 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
                 start_ms: 2100,
                 end_ms: 3500,
             },
+            MtlLine {
+                text: "that saved a wretch".into(),
+                start_ms: 3600,
+                end_ms: 4900,
+            },
+            MtlLine {
+                text: "like me".into(),
+                start_ms: 5000,
+                end_ms: 6000,
+            },
         ],
         device: "cpu".into(),
         elapsed_s: 12.5,
     };
-    // 30s whole-song offset — must fail the gate regardless of matching
-    // algorithm specifics (the design's whole-song sanity check, #130
-    // 2026-09-12 design comment).
+    // Same words as the PASS fixture but the whole song is shifted +30 000 ms
+    // — must fail the gate on Offset regardless of matching algorithm
+    // specifics (the design's whole-song sanity check, #130 2026-09-12
+    // design comment).
     let words = vec![
         AsrWord {
             text: "amazing".into(),
-            start_ms: 31000,
+            start_ms: 31010,
             end_ms: 31500,
         },
         AsrWord {
             text: "grace".into(),
             start_ms: 31500,
-            end_ms: 32000,
+            end_ms: 31990,
         },
         AsrWord {
             text: "how".into(),
@@ -490,6 +552,36 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
             text: "sound".into(),
             start_ms: 32800,
             end_ms: 33480,
+        },
+        AsrWord {
+            text: "that".into(),
+            start_ms: 33610,
+            end_ms: 33900,
+        },
+        AsrWord {
+            text: "saved".into(),
+            start_ms: 33900,
+            end_ms: 34200,
+        },
+        AsrWord {
+            text: "a".into(),
+            start_ms: 34200,
+            end_ms: 34400,
+        },
+        AsrWord {
+            text: "wretch".into(),
+            start_ms: 34400,
+            end_ms: 34880,
+        },
+        AsrWord {
+            text: "like".into(),
+            start_ms: 35020,
+            end_ms: 35400,
+        },
+        AsrWord {
+            text: "me".into(),
+            start_ms: 35400,
+            end_ms: 35980,
         },
     ];
     let backend = FakeReferenceStageBackend {
