@@ -178,6 +178,17 @@ pub async fn post_clear_manual_queue() -> Result<serde_json::Value, String> {
     post_json("/api/v1/lyrics/clear-manual-queue", &serde_json::json!({})).await
 }
 
+/// POST "Nesedí" feedback on a ★-flagged song (#142). Server clears
+/// `lyrics_reference`, stamps the rejection timestamp, stores `note`, and
+/// re-queues the song for reprocessing. Replies `204 No Content`.
+pub async fn post_reference_feedback(video_id: i64, note: &str) -> Result<(), String> {
+    post_json_empty(
+        &format!("/api/v1/lyrics/songs/{video_id}/reference-feedback"),
+        &serde_json::json!({ "note": note }),
+    )
+    .await
+}
+
 // ── Live playlist API helpers ─────────────────────────────────────────────────
 
 /// GET all set-list items for a custom playlist.

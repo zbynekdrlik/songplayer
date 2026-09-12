@@ -43,6 +43,10 @@ pub struct LyricsSongEntry {
     pub has_lyrics: bool,
     pub is_stale: bool,
     pub manual_priority: bool,
+    /// `videos.lyrics_reference` (#142) — Claude's verified reference
+    /// lyrics; the row renders a ★ badge + „Nesedí" feedback button.
+    #[serde(default)]
+    pub lyrics_reference: bool,
 }
 
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).

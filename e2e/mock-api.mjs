@@ -333,6 +333,7 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       has_lyrics: true,
       is_stale: false,
       manual_priority: false,
+      lyrics_reference: true,
     },
     {
       video_id: 2,
@@ -346,8 +347,19 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       has_lyrics: false,
       is_stale: false,
       manual_priority: false,
+      lyrics_reference: false,
     },
   ]);
+});
+
+// #142: ★ reference marker feedback + admin toggle (test-only mocks —
+// just acknowledge the write, the dashboard's own optimistic state update
+// is what the e2e spec asserts).
+app.post('/api/v1/lyrics/songs/:id/reference-feedback', (_req, res) => {
+  res.status(204).end();
+});
+app.post('/api/v1/lyrics/songs/:id/reference', (_req, res) => {
+  res.status(204).end();
 });
 
 // Lyrics song detail
@@ -364,6 +376,7 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
       has_lyrics: true,
       is_stale: false,
       manual_priority: false,
+      lyrics_reference: false,
     },
     lyrics_json: { version: 2, source: 'ensemble:qwen3+autosub', lines: [] },
     audit_json: {
