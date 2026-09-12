@@ -168,7 +168,27 @@ use sp_core::lyrics::LyricsTrack;
 ///   against the new fast path; the smart-skip clause in
 ///   `reprocess.rs::fetch_bucket_stale` keeps pure-Gemini v19+ output
 ///   protected once generated.
-pub const LYRICS_PIPELINE_VERSION: u32 = 20;
+/// - v20: Genius text source (`genius.rs`, fallback behind lyrics.ovh) +
+///   the operator `lyrics_override_text` gather path added.
+/// - v21 (#143): Lever-2 reference regime. Owner directive 2026-09-12 on
+///   #130 ("vyber najlepšie dosiahnuteľné riešenie a začni
+///   reprocessovať") — for any song with an allowed text candidate + a
+///   preprocessed vocal WAV, `mtl_aligner::align` force-aligns the chosen
+///   candidate's lines to the isolated vocals with `lyrics-alignment-mtl`
+///   BEFORE the WhisperX/asr_path route below decides anything. The
+///   result is verified against an independent Gemini 3.5 Transcribe word
+///   transcript (`g35t_client::transcribe_words` + `reference_gate::
+///   evaluate`): pass → the mtl line timings ship directly, stamped
+///   `lyrics_source = "<candidate.source>+mtl@rev1/g35t-ok"` /
+///   `lyrics_alignment_model = ALIGNMENT_MODEL_MTL_REV1`, and
+///   `videos.lyrics_reference` is set so the wall shows a ★; fail/error →
+///   `videos.lyrics_reference` is cleared, the gate decision + stats are
+///   written to `{youtube_id}_alignment_audit.json`, and the song falls
+///   through to the existing WhisperX/asr_path route unchanged. The
+///   `reprocess.rs::fetch_bucket_stale` v18 Gemini smart-skip clause is
+///   dropped — that regime no longer exists, so those rows re-queue
+///   under v21 like everything else.
+pub const LYRICS_PIPELINE_VERSION: u32 = 21;
 
 /// Alignment-model identifier written to `lyrics_alignment_model` for the
 /// raw-ship-through path (line-timed text source, no whisperx alignment ran).
@@ -187,6 +207,13 @@ pub const ALIGNMENT_MODEL_WHISPERX_V3_REV1: &str = "whisperx-large-v3@rev1";
 /// bumps when the prompt or post-processing changes in a way that affects
 /// production output.
 pub const ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1: &str = "assemblyai-universal-3-pro@rev1";
+
+/// Alignment-model literal stamped on lyrics rows produced by the Lever-2
+/// (#143) forced-alignment reference stage: `lyrics-alignment-mtl`
+/// (MTL+BDR) timing verified by an independent Gemini 3.5 Transcribe word
+/// transcript. `rev1` bumps when the mtl subprocess wrapper or the gate
+/// thresholds change in a way that affects production output.
+pub const ALIGNMENT_MODEL_MTL_REV1: &str = "lyrics-alignment-mtl@rev1";
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -307,10 +334,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v20() {
+    fn lyrics_pipeline_version_is_v21() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 20,
-            "v20 = Genius text source + lyrics_override_text gather paths"
+            LYRICS_PIPELINE_VERSION, 21,
+            "v21 = Lever-2 forced-alignment reference regime (#143)"
         );
     }
 }
