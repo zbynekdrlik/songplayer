@@ -432,6 +432,10 @@ impl LyricsWorker {
         let youtube_id = row.youtube_id.clone();
         let song = row.song.clone();
         let artist = row.artist.clone();
+        // Duration cap (#144): reject > 30-min live sets before any GPU work.
+        if crate::lyrics::worker_outcome::exceeds_duration_cap(row.duration_ms) {
+            return self.mark_over_cap(&row).await;
+        }
 
         let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
         let start_instant = std::time::Instant::now();
@@ -570,6 +574,7 @@ impl LyricsWorker {
                 .run_asr_path_branch(
                     &ctx.candidate_texts,
                     row.audio_file_path.as_deref(),
+                    row.duration_ms,
                     video_id,
                     &youtube_id,
                     &song,
@@ -609,6 +614,7 @@ impl LyricsWorker {
                     &self.models_dir,
                     &audio_path,
                     &wav_path,
+                    aligner::isolation_timeout(row.duration_ms),
                 )
                 .await
                 {

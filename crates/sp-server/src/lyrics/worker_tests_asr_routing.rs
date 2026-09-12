@@ -113,6 +113,7 @@ async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
         .run_asr_path_branch(
             &[],
             None,
+            None,
             video_id,
             "test_yt_id",
             "Test Song",

@@ -192,6 +192,17 @@ use sp_core::lyrics::LyricsTrack;
 ///   under v21 like everything else.
 pub const LYRICS_PIPELINE_VERSION: u32 = 21;
 
+/// Upper duration bound for lyrics processing (#144, "Rollout blocker #3").
+///
+/// A row longer than this is not a real song: the catalog's five > 30-min
+/// videos (36–70 min) are live sets / mixes with no single lyric sheet, and
+/// each retry of one is a full ~1 h GPU burn on the shared live PC (isolation
+/// runs at ≈1× realtime). The longest actual song is 21 min and is already
+/// aligned. `process_song` stamps any row over this cap `unsupported_source`
+/// before any gather/network/GPU work runs; an operator can still force one
+/// with `lyrics_override_text` + manual priority if ever needed.
+pub const MAX_LYRICS_DURATION_MS: i64 = 30 * 60 * 1000;
+
 /// Alignment-model identifier written to `lyrics_alignment_model` for the
 /// raw-ship-through path (line-timed text source, no whisperx alignment ran).
 pub const ALIGNMENT_MODEL_NONE: &str = "none";

@@ -14,6 +14,14 @@ use tracing::warn;
 
 use super::worker::LyricsWorker;
 
+/// Whether a row's duration exceeds the lyrics processing cap
+/// ([`crate::lyrics::MAX_LYRICS_DURATION_MS`], #144). `None` (unknown
+/// duration) is treated as under the cap — an unknown-length row is still
+/// worth attempting; only a row we KNOW is over 30 min is rejected outright.
+pub(crate) fn exceeds_duration_cap(duration_ms: Option<i64>) -> bool {
+    matches!(duration_ms, Some(d) if d > crate::lyrics::MAX_LYRICS_DURATION_MS)
+}
+
 /// The result of `LyricsWorker::process_song` for a single row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SongOutcome {
@@ -52,5 +60,31 @@ impl LyricsWorker {
             "worker: deferring row — retry after backoff"
         );
         self.clear_processing().await;
+    }
+
+    /// Stamp an over-cap row (#144) `unsupported_source`, log it, clear the
+    /// in-flight processing marker, and report `Done`. Called from
+    /// `process_song` when [`exceeds_duration_cap`] is true — a > 30-min video
+    /// is a live set / mix, not a song, and each retry would burn ~1 h of GPU
+    /// on the shared live PC, so it terminates without gather/network/GPU work.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn mark_over_cap(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+    ) -> anyhow::Result<SongOutcome> {
+        let duration_s = row.duration_ms.unwrap_or(0) / 1000;
+        crate::db::models::mark_unsupported_source(
+            &self.pool,
+            row.id,
+            crate::lyrics::LYRICS_PIPELINE_VERSION,
+        )
+        .await?;
+        tracing::info!(
+            youtube_id = %row.youtube_id,
+            duration_s,
+            "lyrics: longer than 30 min — not a song, marking unsupported_source (#144)"
+        );
+        self.clear_processing().await;
+        Ok(SongOutcome::Done)
     }
 }

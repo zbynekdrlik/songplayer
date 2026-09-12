@@ -38,6 +38,7 @@ impl LyricsWorker {
         &self,
         candidate_texts: &[crate::lyrics::provider::CandidateText],
         audio_file_path: Option<&str>,
+        duration_ms: Option<i64>,
         video_id: i64,
         youtube_id: &str,
         song: &str,
@@ -88,6 +89,7 @@ impl LyricsWorker {
                     &self.models_dir,
                     audio,
                     &wav_path,
+                    crate::lyrics::aligner::isolation_timeout(duration_ms),
                 )
                 .await
                 {

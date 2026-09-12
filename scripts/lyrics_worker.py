@@ -91,6 +91,11 @@ def cmd_preprocess_vocals(args):
             model_file_dir=args.models_dir,
             output_format="WAV",
             output_dir=stem_dir,
+            # pydub's writer runs out of memory on long 24-bit stems
+            # (pydub#135; observed on an 827-s song 2026-09-12). Stems are
+            # intermediates resampled to 16 kHz float, so soundfile is
+            # strictly better here.
+            use_soundfile=True,
         )
         sep.load_model(MEL_ROFORMER_MODEL)
         out_files = sep.separate(args.audio)
@@ -102,6 +107,9 @@ def cmd_preprocess_vocals(args):
             model_file_dir=args.models_dir,
             output_format="WAV",
             output_dir=stem_dir,
+            # Same rationale as Step 1: soundfile writer avoids pydub's OOM
+            # on long 24-bit stems (pydub#135).
+            use_soundfile=True,
         )
         sep2.load_model(DEREVERB_MODEL)
         out_files2 = sep2.separate(vocal_path)
