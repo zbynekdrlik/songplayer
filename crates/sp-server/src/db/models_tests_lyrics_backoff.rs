@@ -84,7 +84,7 @@ async fn deferral_removes_manual_row_from_selector_until_due() {
     );
 
     // Backdate next_attempt_at → eligible again.
-    set_next_attempt_past(&pool, id);
+    set_next_attempt_past(&pool, id).await;
     let row = get_next_video_for_lyrics(&pool, LYRICS_PIPELINE_VERSION)
         .await
         .unwrap();
