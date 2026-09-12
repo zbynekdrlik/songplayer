@@ -572,7 +572,7 @@ fn emit_gate_100ns_lag_counts_slots_across_a_second() {
 #[test]
 fn emit_gate_100ns_returns_on_grid_boundaries_never_stale() {
     let interval = interval_100ns(30);
-    let cases: [(i64, i64, bool); 8] = [
+    let cases: [(i64, i64, bool); 9] = [
         (b(5) + 1000, 0, false),
         (b(7), b(7), false),
         (b(15) + 17, b(3), false),
@@ -581,6 +581,10 @@ fn emit_gate_100ns_returns_on_grid_boundaries_never_stale() {
         (b(18) + 11, b(7), true),
         (b(14) + 2, b(10), false),
         (b(29), b(29), false),
+        // A WAIT whose pending boundary is one 333_334-WIDE slot ahead
+        // (b(2)=666_666 -> b(3)=1_000_000): `next - now == 333_334 > interval`.
+        // The pre-fix `next <= now + interval` bound was off by one here.
+        (b(2), 0, false),
     ];
     for (now, nb, qhf) in cases {
         let (emit, next) = genlock_emit_gate_100ns(now, nb, 30, qhf);
@@ -608,9 +612,12 @@ fn emit_gate_100ns_returns_on_grid_boundaries_never_stale() {
             );
         } else {
             // A WAIT returns the IMMEDIATE pending boundary: strictly after
-            // `now`, never more than one interval ahead — never stale.
+            // `now`, never more than one grid SLOT ahead — never stale. Compare
+            // against the exact next boundary, not the nominal `interval`: ten
+            // slots per second are 333_334 wide, so `now + interval` was off by
+            // one on those (fix-lane-2 off-by-one).
             assert!(
-                now < next && next <= now + interval,
+                now < next && next <= strict_next_boundary_100ns(now, 30),
                 "pending boundary must be the immediate next: now={now} next={next}"
             );
         }

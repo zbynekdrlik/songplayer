@@ -366,6 +366,26 @@ fn late_by_twelve_with_nothing_pending_resyncs() {
         1,
         "lag>8 with nothing buffered resyncs"
     );
+
+    // Fix-lane-2 (§5.5): the resync repeat is stamped at the RESYNC service
+    // boundary (the grid boundary at/before now), NEVER the stale pre-stall
+    // boundary b(2) ~430 ms in the past. The old code left this un-asserted and
+    // shipped the stale stamp, which the receiver answers with
+    // late_holds/dropped_due (A8.1 requires 0).
+    let interval = sp_core::genlock::interval_100ns(30);
+    let now_floor = sp_core::genlock::floor_boundary_100ns(b(14), 30);
+    let stamp = *sink.video_tcs.last().unwrap();
+    assert!(
+        stamp >= now_floor - interval,
+        "resync repeat must be at the resync boundary, not stale: stamp={stamp} now_floor={now_floor}"
+    );
+    assert!(stamp <= b(14), "never future-dated: stamp={stamp}");
+    assert_eq!(
+        sp_core::genlock::floor_boundary_100ns(stamp, 30),
+        stamp,
+        "resync stamp on-grid"
+    );
+    assert_ne!(stamp, b(2), "must not be the stale pre-stall boundary");
 }
 
 #[test]
