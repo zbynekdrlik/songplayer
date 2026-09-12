@@ -339,34 +339,52 @@ pub fn probe_sample_rate_symphonia(audio_path: &Path) -> Option<u32> {
     }
 }
 
-/// Trigger a one-time playlist sync for every active playlist at startup.
-/// Legacy Python parity with `tools.py::trigger_startup_sync`.
-pub async fn startup_sync_active_playlists(
+/// Enqueue one [`SyncRequest`] for every currently active `kind = 'youtube'`
+/// playlist. Returns how many were enqueued.
+///
+/// This is the reusable core shared by [`startup_sync_active_playlists`]
+/// (fired once, after tools become ready) and the periodic re-sync loop
+/// spawned in `lib.rs` (#139) — both need the exact same "active youtube
+/// playlists only" selection, just on a different cadence.
+pub async fn enqueue_sync_all_active(
     pool: &SqlitePool,
     sync_tx: &tokio::sync::mpsc::Sender<SyncRequest>,
-) -> Result<(), sqlx::Error> {
+) -> anyhow::Result<usize> {
     let rows = sqlx::query(
         "SELECT id, youtube_url FROM playlists WHERE is_active = 1 AND kind = 'youtube'",
     )
     .fetch_all(pool)
     .await?;
-    tracing::info!(
-        count = rows.len(),
-        "startup sync: enqueueing one SyncRequest per active playlist"
-    );
+
+    let mut enqueued = 0usize;
     for row in rows {
         let playlist_id: i64 = row.get("id");
         let youtube_url: String = row.get("youtube_url");
-        if let Err(e) = sync_tx
+        match sync_tx
             .send(SyncRequest {
                 playlist_id,
                 youtube_url,
             })
             .await
         {
-            tracing::warn!(playlist_id, "startup sync enqueue failed: {e}");
+            Ok(()) => enqueued += 1,
+            Err(e) => tracing::warn!(playlist_id, "sync enqueue failed: {e}"),
         }
     }
+    Ok(enqueued)
+}
+
+/// Trigger a one-time playlist sync for every active playlist at startup.
+/// Legacy Python parity with `tools.py::trigger_startup_sync`.
+pub async fn startup_sync_active_playlists(
+    pool: &SqlitePool,
+    sync_tx: &tokio::sync::mpsc::Sender<SyncRequest>,
+) -> anyhow::Result<()> {
+    let count = enqueue_sync_all_active(pool, sync_tx).await?;
+    tracing::info!(
+        count,
+        "startup sync: enqueueing one SyncRequest per active playlist"
+    );
     Ok(())
 }
 

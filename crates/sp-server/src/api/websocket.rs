@@ -5,11 +5,12 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
+use sqlx::Row;
 use tracing::{debug, info, warn};
 
 use sp_core::ws::{ClientMsg, ServerMsg};
 
-use crate::{AppState, EngineCommand};
+use crate::{AppState, EngineCommand, SyncRequest};
 
 /// Axum handler that upgrades an HTTP request to a WebSocket connection.
 pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -161,10 +162,39 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
                 })
                 .await;
         }
-        ClientMsg::SyncPlaylist { playlist_id: _ } => {
-            // Playlist sync would be triggered via a dedicated channel.
-            // For now, log it.
-            debug!("sync playlist requested via WebSocket");
+        ClientMsg::SyncPlaylist { playlist_id } => {
+            // Forward to the same sync_tx the REST `POST
+            // /api/v1/playlists/{id}/sync` route uses (#139) — look up the
+            // playlist's youtube_url the same way that route does.
+            let row = sqlx::query("SELECT youtube_url FROM playlists WHERE id = ?")
+                .bind(playlist_id)
+                .fetch_optional(&state.pool)
+                .await;
+            match row {
+                Ok(Some(row)) => {
+                    let youtube_url: String = row.get("youtube_url");
+                    info!(playlist_id, "sync playlist requested via WebSocket");
+                    if let Err(e) = state
+                        .sync_tx
+                        .send(SyncRequest {
+                            playlist_id,
+                            youtube_url,
+                        })
+                        .await
+                    {
+                        warn!(playlist_id, "failed to queue sync via WebSocket: {e}");
+                    }
+                }
+                Ok(None) => {
+                    warn!(
+                        playlist_id,
+                        "sync playlist requested via WebSocket for unknown playlist id"
+                    );
+                }
+                Err(e) => {
+                    warn!(playlist_id, "sync playlist lookup failed: {e}");
+                }
+            }
         }
         ClientMsg::Ping => {
             // Pong is sent via the event channel — broadcast it.

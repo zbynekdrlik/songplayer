@@ -342,6 +342,9 @@ pub async fn start(
     let dl_gemini_model = gemini_model.clone();
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
+    let periodic_sync_pool = pool.clone();
+    let periodic_sync_tx = sync_tx.clone();
+    let periodic_sync_shutdown = shutdown_tx.clone();
     let lyrics_pool = pool.clone();
     let lyrics_cache_dir = config.cache_dir.clone();
     let lyrics_shutdown = shutdown_tx.clone();
@@ -385,6 +388,23 @@ pub async fn start(
                 {
                     tracing::warn!("startup sync enqueue failed: {e}");
                 }
+
+                // Periodic re-sync (#139): the one-shot startup sync above
+                // only ever fires once, so a video added to a YouTube
+                // playlist later would never be picked up without an
+                // operator manually hitting the sync button. Spawned only
+                // once tools are ready, same as the startup sync itself.
+                let periodic_interval_secs = playlist_sync_interval_secs();
+                tokio::spawn(periodic_playlist_sync(
+                    periodic_sync_pool,
+                    periodic_sync_tx,
+                    periodic_interval_secs,
+                    periodic_sync_shutdown.subscribe(),
+                ));
+                info!(
+                    interval_secs = periodic_interval_secs,
+                    "periodic playlist sync worker started"
+                );
 
                 let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
                 // Claude first (via CLIProxyAPI), Gemini as fallback
@@ -449,7 +469,7 @@ pub async fn start(
             let Some(ref tp) = *paths else {
                 warn!(
                     playlist_id = req.playlist_id,
-                    "sync request received but tools not yet available, dropping"
+                    "sync request received but tools not yet available, dropping — the periodic sync re-enqueues"
                 );
                 continue;
             };
@@ -727,6 +747,71 @@ async fn ai_proxy_watchdog(
                 match proxy.start().await {
                     Ok(()) => info!("ai_proxy watchdog: restart succeeded"),
                     Err(e) => warn!("ai_proxy watchdog: restart failed: {e}"),
+                }
+            }
+        }
+    }
+}
+
+/// Default interval, in seconds, between periodic playlist re-syncs — used
+/// whenever `PLAYLIST_SYNC_INTERVAL_SECS` is absent, unparseable, or zero.
+const DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS: u64 = 600;
+
+/// Pure parser for the periodic playlist re-sync interval override.
+/// Falls back to [`DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS`] on `None`, on a
+/// value that doesn't parse as a `u64`, or on `0` — `tokio::time::interval`
+/// panics on a zero-duration period, so zero is treated the same as absent.
+fn sync_interval_from(env_value: Option<&str>) -> u64 {
+    match env_value.and_then(|v| v.parse::<u64>().ok()) {
+        Some(secs) if secs > 0 => secs,
+        _ => DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS,
+    }
+}
+
+/// Read `PLAYLIST_SYNC_INTERVAL_SECS` from the environment, warning (but
+/// still falling back to the default) when the value is present but
+/// invalid, so a typo in an operator's env file is visible in the logs
+/// instead of silently defaulting.
+fn playlist_sync_interval_secs() -> u64 {
+    let raw = std::env::var("PLAYLIST_SYNC_INTERVAL_SECS").ok();
+    if let Some(v) = &raw {
+        let valid = v.parse::<u64>().is_ok_and(|n| n > 0);
+        if !valid {
+            warn!(
+                value = %v,
+                default_secs = DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS,
+                "PLAYLIST_SYNC_INTERVAL_SECS invalid or zero, using default"
+            );
+        }
+    }
+    sync_interval_from(raw.as_deref())
+}
+
+/// Periodically re-enqueue a [`SyncRequest`] for every active playlist
+/// (#139): the one-shot startup sync only ever fires once, so a video
+/// added to a YouTube playlist later would never be picked up otherwise.
+/// The first `interval.tick()` resolves immediately — that tick is
+/// deliberately consumed and discarded before entering the loop, since the
+/// startup sync already covered t=0. Exits on shutdown broadcast.
+async fn periodic_playlist_sync(
+    pool: SqlitePool,
+    sync_tx: mpsc::Sender<SyncRequest>,
+    interval_secs: u64,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await; // immediate first tick — startup sync already covered it
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = interval.tick() => {
+                match startup::enqueue_sync_all_active(&pool, &sync_tx).await {
+                    Ok(count) => info!(
+                        count,
+                        "periodic sync: enqueueing one SyncRequest per active playlist"
+                    ),
+                    Err(e) => warn!("periodic sync enqueue failed: {e}"),
                 }
             }
         }
