@@ -652,3 +652,164 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
         "the legacy path still calls set_frame_rate from the decoder"
     );
 }
+
+// ---------------------------------------------------------------------------
+// #147 fix-lane-2 — RED
+// ---------------------------------------------------------------------------
+
+// Change 2: the paused/idle standby planner fills EVERY grid boundary with a
+// frozen-last / black frame (on-grid, strictly increasing, never future-dated,
+// no audio) via the same Pacer machinery, and a resuming Play re-anchors.
+
+#[test]
+fn standby_planner_fills_one_boundary_per_interval_no_audio() {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+
+    // Seed a real frame so the frozen-last standby has a picture to repeat.
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1));
+    assert_eq!(
+        pacer.service(|| first.take(), &mut sink),
+        ServiceOutcome::Emitted
+    );
+
+    // PAUSED: fill every boundary with the frozen last frame.
+    let mut standby_emits = 0;
+    for k in 2..=101i64 {
+        clk.set(b(k));
+        let outcome = pacer.service_standby(Standby::FrozenLast, &mut sink);
+        assert_eq!(
+            outcome,
+            ServiceOutcome::Repeated,
+            "paused standby repeats the frozen frame"
+        );
+        standby_emits += 1;
+    }
+    assert_eq!(standby_emits, 100);
+    // One video stamp per boundary: 1 real + 100 standby.
+    assert_eq!(sink.video_tcs.len(), 101);
+    for w in sink.video_tcs.windows(2) {
+        let step = w[1] - w[0];
+        assert!(step == 333_333 || step == 333_334, "one grid slot: step={step}");
+    }
+    for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
+        assert!(*v <= *a, "never future-dated: video_tc={v} audio_tc={a}");
+        assert_eq!(
+            sp_core::genlock::floor_boundary_100ns(*v, 30),
+            *v,
+            "on-grid stamp"
+        );
+    }
+    // Standby submits NO audio.
+    assert!(
+        sink.audio_lens.iter().all(|&n| n == 0),
+        "standby emits no audio"
+    );
+    // Every frozen-frame repeat bumps `repeats`.
+    assert_eq!(pacer.stats().repeats, 100);
+}
+
+#[test]
+fn standby_black_fills_boundaries_without_a_last_frame() {
+    // Idle / no song: no frame was ever decoded, so FrozenLast would starve;
+    // Black fills the boundary with the supplied black frame instead.
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+    let black = mk_frame(0);
+
+    for k in 1..=50i64 {
+        clk.set(b(k));
+        let out = pacer.service_standby(Standby::Black(&black), &mut sink);
+        assert_eq!(out, ServiceOutcome::Emitted, "black idle frame is emitted");
+    }
+    assert_eq!(sink.video_tcs.len(), 50);
+    for w in sink.video_tcs.windows(2) {
+        assert!(w[1] > w[0], "black idle stamps strictly increase");
+    }
+    for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
+        assert!(*v <= *a, "never future-dated");
+    }
+    assert!(sink.audio_lens.iter().all(|&n| n == 0), "idle emits no audio");
+    // Black idle frames are NOT frozen-frame repeats.
+    assert_eq!(pacer.stats().repeats, 0);
+}
+
+#[test]
+fn standby_then_resume_play_reanchors_cleanly() {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1));
+    pacer.service(|| first.take(), &mut sink);
+    for k in 2..=5i64 {
+        clk.set(b(k));
+        pacer.service_standby(Standby::FrozenLast, &mut sink);
+    }
+
+    // Resume Play: re-anchor at a far-later instant, then a pts-0 frame is due
+    // at the new anchor boundary.
+    clk.set(b(200));
+    pacer.anchor();
+    let want = sp_core::genlock::strict_next_boundary_100ns(b(200), 30);
+    clk.set(want);
+    let mut nf = Some(mk_frame(0));
+    let out = pacer.service(|| nf.take(), &mut sink);
+    assert_eq!(out, ServiceOutcome::Emitted, "resume re-anchors and emits");
+    assert_eq!(
+        *sink.video_tcs.last().unwrap(),
+        want,
+        "stamped at the new anchor boundary"
+    );
+}
+
+// Change 4: anchor() clears last_frame so a cross-song repeat can never show
+// the previous song's frame.
+#[test]
+fn anchor_clears_last_frame_so_no_cross_song_repeat() {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = RecordingSink::default();
+
+    let mut first = Some(frame_due_at(b(1)));
+    clk.set(b(1));
+    assert_eq!(
+        pacer.service(|| first.take(), &mut sink),
+        ServiceOutcome::Emitted
+    );
+    clk.set(b(2));
+    assert_eq!(
+        pacer.service(|| None, &mut sink),
+        ServiceOutcome::Repeated,
+        "last_frame present -> repeat"
+    );
+
+    // New song boundary: anchor() must drop the previous song's last_frame.
+    clk.set(b(10));
+    pacer.anchor();
+    clk.set(sp_core::genlock::strict_next_boundary_100ns(b(10), 30));
+    assert_eq!(
+        pacer.service(|| None, &mut sink),
+        ServiceOutcome::Starved,
+        "anchor cleared last_frame -> no cross-song repeat"
+    );
+}
+
+// Change 3: plan_sleep_100ns must tolerate the exact 333_334-wide slot without
+// flagging a spurious backward-step relatch.
+#[test]
+fn plan_sleep_tolerates_the_exact_slot_width_on_wide_slots() {
+    let fps = 30;
+    let interval = sp_core::genlock::interval_100ns(fps); // 333_333
+    // A boundary that precedes one of the ten 333_334-wide slots per second.
+    let now = sp_core::genlock::floor_boundary_100ns(4_666_667, fps);
+    let until = sp_core::genlock::strict_next_boundary_100ns(now, fps);
+    assert_eq!(until - now, 333_334, "this is the wide slot");
+    assert!(until - now > interval, "wider than the nominal interval");
+    let d = plan_sleep_100ns(now, until, interval);
+    assert!(
+        !d.relatch,
+        "the exact slot width must NOT trigger a spurious relatch"
+    );
+    assert_eq!(d.sleep_100ns, 333_334);
+}
