@@ -315,7 +315,9 @@ mod tests {
             .iter()
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(joined[0], "/tools/lyrics_alignment_mtl_run.py");
+        // Compare as paths, not strings: `Path::join` yields backslashes on
+        // the Windows runner (CI run 34695364979).
+        assert_eq!(Path::new(&joined[0]), c.run_py.as_path());
         assert!(joined.contains(&"--wav".to_string()));
         assert!(joined.contains(&"/x/v.wav".to_string()));
         assert!(joined.contains(&"--text-json".to_string()));
@@ -323,7 +325,7 @@ mod tests {
         assert!(joined.contains(&"--out".to_string()));
         assert!(joined.contains(&"/x/o.json".to_string()));
         assert!(joined.contains(&"--repo-dir".to_string()));
-        assert!(joined.contains(&"/tools/LyricsAlignment-MTL".to_string()));
+        assert!(joined.iter().any(|s| Path::new(s) == c.repo_dir.as_path()));
         assert!(
             !joined.contains(&"--no-cuda".to_string()),
             "--no-cuda must be absent on the first (non-retry) attempt"
