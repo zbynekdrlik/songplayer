@@ -86,6 +86,10 @@ pub enum PipelineEvent {
         last_heartbeat_ts: std::time::Instant,
         consecutive_bad_polls: u32,
         reported_state: crate::playback::ndi_health::PlaybackStateLabel,
+        /// Boundary-paced emission telemetry (#147). Default (disabled, zeros)
+        /// from the SDK-clocked / idle heartbeat paths; the paced decode loop
+        /// fills it from the `Pacer`.
+        pacing: crate::playback::ndi_health::PacingStats,
     },
 }
 
@@ -118,6 +122,7 @@ impl PlaybackPipeline {
         ndi_backend: Option<SharedNdiBackend>,
         event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
         playlist_id: i64,
+        genlock_pacing: bool,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -125,7 +130,14 @@ impl PlaybackPipeline {
         let handle = thread::Builder::new()
             .name(format!("pipeline-{playlist_id}"))
             .spawn(move || {
-                run_loop(cmd_rx, &ndi_name, ndi_backend, event_tx, playlist_id);
+                run_loop(
+                    cmd_rx,
+                    &ndi_name,
+                    ndi_backend,
+                    event_tx,
+                    playlist_id,
+                    genlock_pacing,
+                );
             })
             .expect("failed to spawn pipeline thread");
 
@@ -146,6 +158,7 @@ impl PlaybackPipeline {
         _ndi_backend: Option<()>,
         event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
         playlist_id: i64,
+        _genlock_pacing: bool,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -214,9 +227,20 @@ fn run_loop(
     ndi_backend: Option<SharedNdiBackend>,
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
+    genlock_pacing: bool,
 ) {
-    info!(ndi_name, playlist_id, "pipeline thread started");
-    run_loop_windows(cmd_rx, ndi_name, ndi_backend, event_tx, playlist_id);
+    info!(
+        ndi_name,
+        playlist_id, genlock_pacing, "pipeline thread started"
+    );
+    run_loop_windows(
+        cmd_rx,
+        ndi_name,
+        ndi_backend,
+        event_tx,
+        playlist_id,
+        genlock_pacing,
+    );
     info!(playlist_id, "pipeline thread exited");
 }
 
@@ -284,7 +308,13 @@ fn run_loop_windows(
     ndi_backend: Option<SharedNdiBackend>,
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
+    genlock_pacing: bool,
 ) {
+    // 1 ms system timer for the boundary-paced sleep granularity (#147).
+    if genlock_pacing {
+        crate::playback::pipeline_paced::request_high_res_timer();
+    }
+
     let backend = match ndi_backend {
         Some(b) => b,
         None => {
@@ -298,10 +328,15 @@ fn run_loop_windows(
         }
     };
 
-    // clock_video = true lets NDI pace `send_video_async` on its internal
-    // high-resolution clock. clock_audio stays false because we submit both
-    // streams from a single thread; clocking both would deadlock on startup.
-    let sender = match sp_ndi::NdiSender::new_with_clocking(backend, ndi_name, true, false) {
+    // Genlock (#147): ON = the app owns the cadence (clock_video=false, paced on
+    // the wall-clock grid); OFF = today's SDK-clocked path (clock_video=true).
+    // clock_audio stays false either way (single submission thread).
+    let sender_result = if genlock_pacing {
+        sp_ndi::NdiSender::new_with_clocking(backend, ndi_name, false, false)
+    } else {
+        sp_ndi::NdiSender::new_with_clocking(backend, ndi_name, true, false)
+    };
+    let sender = match sender_result {
         Ok(s) => s,
         Err(e) => {
             error!(%e, "failed to create NDI sender");
@@ -314,13 +349,18 @@ fn run_loop_windows(
         }
     };
 
-    info!(ndi_name, "NDI sender created with clock_video=true");
+    info!(ndi_name, genlock_pacing, "NDI sender created");
 
-    // Initial black frame so the NDI source is visible immediately with a
-    // sane default frame rate. The FrameSubmitter's frame rate is updated
-    // per-file via `set_frame_rate` when real playback starts.
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
+    // Initial black frame. Genlock path emits on the fixed integer grid
+    // (GENLOCK_GRID_FPS/1) and skips the per-file `set_frame_rate`; the legacy
+    // path updates it per-file in `decode_and_send`.
+    let mut submitter = FrameSubmitter::new(sender, sp_core::genlock::GENLOCK_GRID_FPS as i32, 1);
     submitter.send_black_bgra(1920, 1080);
+
+    // The paced scheduler persists across songs (counters accumulate) and
+    // re-anchors per Play/Seek. Disabled + unused on the legacy path.
+    let mut pacer =
+        crate::playback::pacer::Pacer::new(sp_core::genlock::GENLOCK_GRID_FPS, genlock_pacing);
 
     let mut paused = false;
     let mut last_heartbeat = std::time::Instant::now();
@@ -380,18 +420,35 @@ fn run_loop_windows(
                     );
                     paused = false;
 
-                    match decode_and_send(
-                        &cmd_rx,
-                        &mut submitter,
-                        &current_video,
-                        &current_audio,
-                        &event_tx,
-                        playlist_id,
-                        &mut paused,
-                        &mut last_heartbeat,
-                        &mut consecutive_bad_polls,
-                        current_start_ms,
-                    ) {
+                    let decode_result = if genlock_pacing {
+                        crate::playback::pipeline_paced::decode_and_send_paced(
+                            &cmd_rx,
+                            &mut submitter,
+                            &mut pacer,
+                            &current_video,
+                            &current_audio,
+                            &event_tx,
+                            playlist_id,
+                            &mut paused,
+                            &mut last_heartbeat,
+                            &mut consecutive_bad_polls,
+                            current_start_ms,
+                        )
+                    } else {
+                        decode_and_send(
+                            &cmd_rx,
+                            &mut submitter,
+                            &current_video,
+                            &current_audio,
+                            &event_tx,
+                            playlist_id,
+                            &mut paused,
+                            &mut last_heartbeat,
+                            &mut consecutive_bad_polls,
+                            current_start_ms,
+                        )
+                    };
+                    match decode_result {
                         DecodeResult::Ended => {
                             paused = false;
                             info!(playlist_id, "video ended naturally");
@@ -468,7 +525,7 @@ fn run_loop_windows(
 
 /// Result of the inner decode loop.
 #[cfg(windows)]
-enum DecodeResult {
+pub(crate) enum DecodeResult {
     /// Video reached end of stream.
     Ended,
     /// Stop command received.
@@ -722,7 +779,7 @@ fn wait_for_shutdown(cmd_rx: &Receiver<PipelineCommand>, playlist_id: i64) {
 /// Pure predicate: should the pipeline thread run a heartbeat now?
 /// Extracted so the timing rule is unit-testable without a live decode loop.
 #[cfg(any(windows, test))]
-fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
+pub(crate) fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
     elapsed >= std::time::Duration::from_secs(5)
 }
 
@@ -791,6 +848,9 @@ fn run_heartbeat_outer(
         state,
         last_heartbeat,
         consecutive_bad_polls,
+        // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
+        // boundary-paced decode loop passes real `Pacer` stats (#147).
+        crate::playback::ndi_health::PacingStats::default(),
     );
 }
 
@@ -812,6 +872,9 @@ fn run_heartbeat_inner(
         crate::playback::ndi_health::PlaybackStateLabel::Playing,
         last_heartbeat,
         consecutive_bad_polls,
+        // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
+        // boundary-paced decode loop passes real `Pacer` stats (#147).
+        crate::playback::ndi_health::PacingStats::default(),
     );
 }
 
@@ -848,6 +911,9 @@ fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
         crate::playback::ndi_health::PlaybackStateLabel::Paused,
         last_heartbeat,
         consecutive_bad_polls,
+        // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
+        // boundary-paced decode loop passes real `Pacer` stats (#147).
+        crate::playback::ndi_health::PacingStats::default(),
     );
 }
 
@@ -862,13 +928,14 @@ fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
 // decode_and_send, both of which stay `#[cfg(windows)]`-only.
 #[cfg(any(windows, test))]
 #[cfg_attr(test, mutants::skip)]
-fn emit_heartbeat<B: sp_ndi::NdiBackend>(
+pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     submitter: &mut FrameSubmitter<B>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
     state: crate::playback::ndi_health::PlaybackStateLabel,
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
+    pacing: crate::playback::ndi_health::PacingStats,
 ) {
     let connections = submitter.sender().get_no_connections(0);
     let stats = submitter.drain_window();
@@ -902,6 +969,7 @@ fn emit_heartbeat<B: sp_ndi::NdiBackend>(
             last_heartbeat_ts: now,
             consecutive_bad_polls: *consecutive_bad_polls,
             reported_state: state,
+            pacing,
         },
     ));
     *last_heartbeat = now;

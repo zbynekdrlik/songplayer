@@ -84,6 +84,7 @@ fn install_pipeline(
         None,
         mpsc::unbounded_channel().0,
         playlist_id,
+        false,
     );
     let pp = PlaylistPipeline {
         pipeline,

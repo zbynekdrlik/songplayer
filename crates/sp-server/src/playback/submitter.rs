@@ -194,6 +194,58 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.sender.send_video(&frame);
     }
 
+    /// Submit one boundary-paced frame at EXPLICIT genlock timecodes (#147).
+    ///
+    /// Audio chunks first (stamped `audio_tc_100ns`, the raw wall clock — §6),
+    /// then the video frame async (stamped `video_tc_100ns`, the floored
+    /// boundary — §4). Unlike [`submit_nv12`](Self::submit_nv12) the `Pacer`
+    /// owns the wall clock and supplies both stamps, so this bypasses the
+    /// internal [`WallClock`]. The video buffer is copied for the async
+    /// double-buffer holdover (the pacer keeps its own clone for the starvation
+    /// repeat, so this takes a borrow).
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_frame_at_boundary(
+        &mut self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        video_data: &[u8],
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.frames_submitted_total += 1;
+        self.frames_in_window += 1;
+        self.last_submit_ts = Some(std::time::Instant::now());
+
+        // 1. Audio first — the boundary's chunks go into NDI's queue before
+        //    the video frame (the audio-first invariant, submitter.rs top).
+        for af in audio {
+            let mut stamped = af.clone();
+            stamped.timecode_100ns = Some(audio_tc_100ns);
+            self.sender.send_audio(&stamped);
+        }
+
+        // 2. Video async, stamped with the floored boundary.
+        let frame = VideoFrame {
+            data: video_data.to_vec(),
+            width,
+            height,
+            stride,
+            frame_rate_n: self.frame_rate_n,
+            frame_rate_d: self.frame_rate_d,
+            pixel_format: PixelFormat::Nv12,
+            timecode_100ns: Some(video_tc_100ns),
+        };
+        // SAFETY: `prev_frame` holds the previous async buffer until this
+        // async call releases the SDK's pointer to it; the new buffer is
+        // installed immediately after.
+        unsafe {
+            self.sender.send_video_async(&frame);
+        }
+        self.prev_frame = Some(frame.data);
+    }
+
     /// Borrow the underlying sender (mainly for tests).
     pub fn sender(&self) -> &NdiSender<B> {
         &self.sender
@@ -243,6 +295,27 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             return 0.0;
         }
         self.frame_rate_n as f32 / self.frame_rate_d as f32
+    }
+}
+
+/// The `FrameSubmitter` is the production [`PacedSink`](crate::playback::pacer::PacedSink)
+/// for the boundary-paced emission loop (#147).
+impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
+    fn emit(
+        &mut self,
+        frame: &crate::playback::pacer::PacedFrame,
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.submit_frame_at_boundary(
+            frame.width,
+            frame.height,
+            frame.stride,
+            &frame.video,
+            &frame.audio,
+            video_tc_100ns,
+            audio_tc_100ns,
+        );
     }
 }
 

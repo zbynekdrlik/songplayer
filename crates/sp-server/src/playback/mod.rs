@@ -10,7 +10,10 @@ mod engine_play;
 mod handle_pipeline_event;
 mod lyrics_loader;
 pub mod ndi_health;
+pub mod pacer;
 pub mod pipeline;
+#[cfg(windows)]
+pub(crate) mod pipeline_paced;
 mod position_update;
 mod recovery;
 pub mod state;
@@ -170,6 +173,11 @@ pub struct PlaybackEngine {
     /// poller (spawned in `lib.rs::start`); read when building each NDI health
     /// snapshot. Defaults to `no dantesync` until a handle is injected.
     clock_health: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
+    /// Boundary-paced emission staging flag (#147, DB setting `genlock_pacing`,
+    /// default OFF). Read once at startup (`lib.rs::start`) and passed to each
+    /// pipeline thread at spawn. OFF = today's SDK-clocked path; ON = the
+    /// wall-clock grid `Pacer`.
+    genlock_pacing: bool,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -238,7 +246,15 @@ impl PlaybackEngine {
             clock_health: std::sync::Arc::new(std::sync::RwLock::new(
                 crate::playback::clock_health::ClockHealth::default(),
             )),
+            genlock_pacing: false,
         }
+    }
+
+    /// Set the boundary-paced emission staging flag (#147), read from the DB
+    /// setting `genlock_pacing` at startup (`lib.rs::start`). Must be called
+    /// before pipelines are spawned; new pipelines pick it up at spawn.
+    pub fn set_genlock_pacing(&mut self, enabled: bool) {
+        self.genlock_pacing = enabled;
     }
 
     /// Inject the shared dantesync clock-health handle written by the poller
@@ -260,10 +276,19 @@ impl PlaybackEngine {
         #[cfg(not(windows))]
         let ndi_backend: Option<()> = None;
 
+        let genlock_pacing = self.genlock_pacing;
         self.pipelines.entry(playlist_id).or_insert_with(|| {
-            info!(playlist_id, ndi_name, "creating playback pipeline");
-            let pipeline =
-                PlaybackPipeline::spawn(ndi_name.to_string(), ndi_backend, event_tx, playlist_id);
+            info!(
+                playlist_id,
+                ndi_name, genlock_pacing, "creating playback pipeline"
+            );
+            let pipeline = PlaybackPipeline::spawn(
+                ndi_name.to_string(),
+                ndi_backend,
+                event_tx,
+                playlist_id,
+                genlock_pacing,
+            );
             PlaylistPipeline {
                 pipeline,
                 state: PlayState::Idle,

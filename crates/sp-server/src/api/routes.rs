@@ -843,3 +843,7 @@ mod tests_reference;
 #[cfg(test)]
 #[path = "routes_tests_clock.rs"]
 mod tests_clock;
+
+#[cfg(test)]
+#[path = "routes_tests_pacing.rs"]
+mod tests_pacing;

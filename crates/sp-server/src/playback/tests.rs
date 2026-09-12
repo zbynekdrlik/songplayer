@@ -131,6 +131,7 @@ fn cancel_title_timers_aborts_pending_handles() {
                 None,
                 mpsc::unbounded_channel().0,
                 1,
+                false,
             ),
             state: PlayState::Idle,
             mode: PlaybackMode::default(),

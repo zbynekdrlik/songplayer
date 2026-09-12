@@ -8,7 +8,7 @@
 
 use crate::playback::clock_health::ClockHealth;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{RwLock, atomic::Ordering};
 use std::time::Instant;
@@ -45,6 +45,36 @@ pub struct PipelineHealthSnapshot {
     /// stamped onto every pipeline's snapshot; `clock_ok` gates the genlock
     /// lock-state. Defaults to `no dantesync` until the poller reports.
     pub clock: ClockHealth,
+    /// Boundary-paced emission telemetry (#147). Default (`enabled=false`,
+    /// zeros) on the SDK-clocked (flag-OFF) path; filled from the `Pacer` when
+    /// `genlock_pacing` is on.
+    pub pacing: PacingStats,
+}
+
+/// Boundary-paced emission telemetry (#147), surfaced on
+/// `GET /api/v1/ndi/health` as `pacing`. `enabled=false` + all-zero is what an
+/// SDK-clocked (flag-OFF) or idle pipeline reports; the `Pacer`
+/// (`playback/pacer.rs`) fills real values on the paced path.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PacingStats {
+    /// Whether boundary-paced emission is active for this pipeline.
+    pub enabled: bool,
+    /// Monotonic count of boundaries serviced (one frame emitted per boundary).
+    pub seq: u64,
+    /// Emits that landed a full interval or more past their boundary.
+    pub late_frames: u64,
+    /// Worst emit lateness observed (µs).
+    pub max_late_us: u64,
+    /// 99th-percentile emit jitter (emit − boundary, µs) over the recent window.
+    pub jitter_p99_us: u64,
+    /// Last-frame repeats emitted on decoder underrun (one per starved boundary).
+    pub repeats: u64,
+    /// Grid resyncs — a lag beyond the catch-up bound with nothing buffered.
+    pub resyncs: u64,
+    /// Backward-clock-step re-latches.
+    pub relatches: u64,
+    /// Decoded frames dropped as older-than-boundary (e.g. 60→30 decimation).
+    pub dropped: u64,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from
@@ -173,6 +203,7 @@ impl crate::playback::PlaybackEngine {
             last_heartbeat_ts,
             consecutive_bad_polls,
             reported_state,
+            pacing,
         } = event
         else {
             return;
@@ -242,6 +273,7 @@ impl crate::playback::PlaybackEngine {
                 Ok(guard) => guard.clone(),
                 Err(_) => ClockHealth::default(),
             },
+            pacing,
         };
 
         // Transition logging: connection-count change, degradation, recovery.
@@ -407,6 +439,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
             },
         );
 
@@ -434,6 +467,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Idle,
+                pacing: Default::default(),
             },
         );
         assert_eq!(registry.snapshots().len(), 0);
@@ -455,6 +489,7 @@ mod tests {
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
             reported_state: state,
+            pacing: Default::default(),
         };
         engine.handle_health_snapshot(1, mk_event(PlaybackStateLabel::Playing));
         engine.handle_health_snapshot(2, mk_event(PlaybackStateLabel::Idle));
@@ -484,6 +519,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Idle,
+                pacing: Default::default(),
             },
         );
 
@@ -515,6 +551,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 2,
                 reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
             },
         );
         let snapshots = registry.snapshots();
@@ -593,6 +630,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 100,
                 reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
             },
         );
 
@@ -631,6 +669,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 5,
                 reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
             },
         );
         assert_eq!(
@@ -651,6 +690,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
             },
         );
         let snap = &registry.snapshots()[0];
@@ -713,6 +753,7 @@ mod tests {
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 5,
                 reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
             },
         );
         let snapshots = registry.snapshots();

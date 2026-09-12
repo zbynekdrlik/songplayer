@@ -9,7 +9,7 @@ use std::time::Instant;
 #[test]
 fn pipeline_spawn_and_shutdown() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let pipeline = PlaybackPipeline::spawn("test-ndi".into(), None, event_tx, 1);
+    let pipeline = PlaybackPipeline::spawn("test-ndi".into(), None, event_tx, 1, false);
     pipeline.shutdown();
     // If we get here, the thread joined successfully.
 }
@@ -18,7 +18,7 @@ fn pipeline_spawn_and_shutdown() {
 fn pipeline_drop_sends_shutdown() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     {
-        let _pipeline = PlaybackPipeline::spawn("test-drop".into(), None, event_tx, 2);
+        let _pipeline = PlaybackPipeline::spawn("test-drop".into(), None, event_tx, 2, false);
         // Pipeline dropped here — Drop impl should send Shutdown and join.
     }
     // If we get here without hanging, the Drop worked correctly.
@@ -27,7 +27,7 @@ fn pipeline_drop_sends_shutdown() {
 #[test]
 fn pipeline_send_command_before_shutdown() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let pipeline = PlaybackPipeline::spawn("test-cmd".into(), None, event_tx, 3);
+    let pipeline = PlaybackPipeline::spawn("test-cmd".into(), None, event_tx, 3, false);
     pipeline.send(PipelineCommand::Stop);
     pipeline.send(PipelineCommand::Pause);
     pipeline.send(PipelineCommand::Resume);
@@ -37,7 +37,7 @@ fn pipeline_send_command_before_shutdown() {
 #[test]
 fn pipeline_play_emits_event_on_non_windows() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let pipeline = PlaybackPipeline::spawn("test-play".into(), None, event_tx, 4);
+    let pipeline = PlaybackPipeline::spawn("test-play".into(), None, event_tx, 4, false);
 
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/test_video.mp4"),
@@ -94,7 +94,7 @@ fn seek_does_not_collide_with_other_variants() {
 #[test]
 fn pipeline_send_seek_command() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let pipeline = PlaybackPipeline::spawn("test-seek".into(), None, event_tx, 6);
+    let pipeline = PlaybackPipeline::spawn("test-seek".into(), None, event_tx, 6, false);
     pipeline.send(PipelineCommand::Seek { position_ms: 5000 });
     pipeline.shutdown();
     // No panic or hang means the Seek arm is handled in the loop.
@@ -110,7 +110,7 @@ fn pipeline_send_seek_command() {
 #[test]
 fn pipeline_processes_multiple_sequential_plays() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let pipeline = PlaybackPipeline::spawn("test-multi-play".into(), None, event_tx, 5);
+    let pipeline = PlaybackPipeline::spawn("test-multi-play".into(), None, event_tx, 5, false);
 
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/song-a_video.mp4"),
@@ -160,7 +160,7 @@ fn pipeline_processes_multiple_sequential_plays() {
 #[test]
 fn play_with_start_position_ms_is_accepted() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let pipeline = PlaybackPipeline::spawn("test-start-pos".into(), None, event_tx, 7);
+    let pipeline = PlaybackPipeline::spawn("test-start-pos".into(), None, event_tx, 7, false);
 
     pipeline.send(PipelineCommand::Play {
         video: PathBuf::from("/tmp/test_video.mp4"),
@@ -234,6 +234,7 @@ fn health_snapshot_variant_constructs_and_clones() {
         last_heartbeat_ts: now,
         consecutive_bad_polls: 0,
         reported_state: PlaybackStateLabel::Playing,
+        pacing: Default::default(),
     };
     let cloned = ev.clone();
     // Pattern-match to assert the variant exists and the fields round-trip.

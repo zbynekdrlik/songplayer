@@ -649,6 +649,20 @@ pub async fn start(
     // snapshot carries the current clock state (#146).
     engine.set_clock_health(clock_health);
 
+    // Boundary-paced emission staging flag (#147): DB setting `genlock_pacing`
+    // ("true"/"false"), default OFF. Read once before pipelines are spawned.
+    let genlock_pacing = db::models::get_setting(&pool, "genlock_pacing")
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    info!(
+        genlock_pacing,
+        "genlock boundary-paced emission staging flag"
+    );
+    engine.set_genlock_pacing(genlock_pacing);
+
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
