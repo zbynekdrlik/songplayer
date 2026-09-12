@@ -134,11 +134,21 @@ When Claude refuses via CLIProxyAPI:
 - Tune the prompt. A simple neutral prompt ("translate these lines to Slovak,
   preserve line numbering") works. NEVER mention "song lyrics", "worship",
   "church", "copyright", "karaoke" — these trip the content-policy classifier.
-- Model: use `claude-opus-4-20250514` (not the short-form `claude-opus-4-6`
-  which returns empty via OAuth). Always pass `max_tokens: 32000` for large
-  responses.
+- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-4-6` since
+  2026-09-12, #144). `claude-opus-4-20250514` is RETIRED upstream — Anthropic
+  answers `404 not_found_error` and CLIProxyAPI then parks the OAuth auth in
+  a cooldown (`auth_unavailable`) until the proxy restarts, so a retired id
+  looks like a dead login. Before blaming the token, probe with
+  `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` on win-resolume
+  (ids the installed proxy build does not know return 502 "unknown
+  provider"). Always pass `max_tokens: 32000` for large responses.
 - If a specific song still refuses after prompt tuning: surface it to the user.
   Do NOT auto-fallback.
+- OAuth re-login: CLIProxyAPI's own `-claude-login` expires 5 min after
+  printing the URL — too short for the owner's authorise-and-paste round
+  trip. Use `C:\ProgramData\SongPlayer\claude_pkce_login.py start` (prints
+  the URL) and `… finish "<pasted callback URL>"` (exchanges the code and
+  writes the auth JSON into `cache\.cli-proxy-api\`). Never echo the code.
 
 ## Pipeline version discipline
 
