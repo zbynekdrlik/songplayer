@@ -19,14 +19,18 @@ fn zero_candidate_songs_route_to_asr_path_blind() {
     // so — like `process_song_routes_through_should_resolve_spotify` above —
     // this is a structural guard on the gate `if` block in `process_song`
     // rather than a full integration test.
-    let src = include_str!("worker.rs");
+    // Normalise line endings first: the Windows CI checkout is CRLF, and a
+    // pattern with bare `\n` never matched there (run 34692890502).
+    let src = include_str!("worker.rs").replace("\r\n", "\n");
     let gate_start = src
         .find("GATE: per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md")
         .expect("gate comment must exist in process_song");
+    // The gate `if` block is the first brace closed at 8-space indent after
+    // the comment — independent of whatever stage follows it.
     let gate_end = src[gate_start..]
-        .find("\n        }\n\n        self.broadcast_stage(")
+        .find("\n        }\n")
         .map(|rel| gate_start + rel)
-        .expect("gate `if` block must close before the whisperx preprocessing stage");
+        .expect("gate `if` block must close at 8-space indent");
     let gate_block = &src[gate_start..gate_end];
 
     assert!(
