@@ -28,6 +28,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (17, MIGRATION_V17),
     (18, MIGRATION_V18),
     (19, MIGRATION_V19),
+    (20, MIGRATION_V20),
 ];
 
 const MIGRATION_V1: &str = "
@@ -260,6 +261,20 @@ ALTER TABLE videos ADD COLUMN lyrics_processed_at TEXT;
 ALTER TABLE videos ADD COLUMN lyrics_alignment_model TEXT;
 ";
 
+// V20 (#140) — per-row download retry bookkeeping. A video that fails
+// download/normalize used to sit at the front of `fetch_next_unprocessed`'s
+// `ORDER BY v.id` forever, blocking every video behind it in the queue.
+// `download_attempts` counts consecutive failures, `last_download_error`
+// carries the tail of the last error for operator visibility, and
+// `next_attempt_at` (RFC3339 UTC, NULL = eligible now) lets the selection
+// query skip a row until its exponential backoff elapses. All three reset
+// to (0, NULL, NULL) the moment a row succeeds.
+const MIGRATION_V20: &str = "
+ALTER TABLE videos ADD COLUMN download_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN last_download_error TEXT;
+ALTER TABLE videos ADD COLUMN next_attempt_at TEXT;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -344,3 +359,7 @@ mod tests_v18;
 #[path = "mod_tests_v19.rs"]
 #[cfg(test)]
 mod tests_v19;
+
+#[path = "mod_tests_v20.rs"]
+#[cfg(test)]
+mod tests_v20;

@@ -596,4 +596,229 @@ mod tests {
             );
         }
     }
+
+    // -----------------------------------------------------------------
+    // RED (#140): a failed row must back off instead of blocking the
+    // whole queue behind it forever.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn retry_backoff_is_5_min_at_attempt_1() {
+        assert_eq!(retry_backoff(1), std::time::Duration::from_secs(5 * 60));
+    }
+
+    #[test]
+    fn retry_backoff_is_10_min_at_attempt_2() {
+        assert_eq!(retry_backoff(2), std::time::Duration::from_secs(10 * 60));
+    }
+
+    #[test]
+    fn retry_backoff_is_40_min_at_attempt_4() {
+        assert_eq!(retry_backoff(4), std::time::Duration::from_secs(40 * 60));
+    }
+
+    #[test]
+    fn retry_backoff_caps_at_24h_by_attempt_20() {
+        assert_eq!(
+            retry_backoff(20),
+            std::time::Duration::from_secs(24 * 60 * 60)
+        );
+    }
+
+    #[test]
+    fn retry_backoff_caps_at_24h_without_overflow_at_u32_max() {
+        assert_eq!(
+            retry_backoff(u32::MAX),
+            std::time::Duration::from_secs(24 * 60 * 60)
+        );
+    }
+
+    async fn seed_pool_with_three_videos() -> (SqlitePool, i64, i64, i64) {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let now = chrono::Utc::now();
+        let future = (now + chrono::Duration::hours(1)).to_rfc3339();
+        let past = (now - chrono::Duration::hours(1)).to_rfc3339();
+
+        // A: due 1h from now — must never be picked while B/C are eligible.
+        let id_a: i64 = sqlx::query_scalar(
+            "INSERT INTO videos (playlist_id, youtube_id, title, next_attempt_at) \
+             VALUES (1, 'video_a', 'A', ?) RETURNING id",
+        )
+        .bind(&future)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        // B: never failed (NULL next_attempt_at) — eligible immediately.
+        let id_b: i64 = sqlx::query_scalar(
+            "INSERT INTO videos (playlist_id, youtube_id, title) \
+             VALUES (1, 'video_b', 'B') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        // C: due 1h ago — eligible, but behind B in id order.
+        let id_c: i64 = sqlx::query_scalar(
+            "INSERT INTO videos (playlist_id, youtube_id, title, next_attempt_at) \
+             VALUES (1, 'video_c', 'C', ?) RETURNING id",
+        )
+        .bind(&past)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        (pool, id_a, id_b, id_c)
+    }
+
+    #[tokio::test]
+    async fn fetch_next_unprocessed_skips_rows_not_yet_due_for_retry() {
+        let (pool, id_a, id_b, id_c) = seed_pool_with_three_videos().await;
+
+        let row = fetch_next_unprocessed(&pool)
+            .await
+            .unwrap()
+            .expect("B is eligible immediately");
+        assert_eq!(
+            row.id, id_b,
+            "B (NULL next_attempt_at, lowest eligible id) must be picked first"
+        );
+        assert_ne!(row.id, id_a, "A is not due yet");
+
+        sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+            .bind(id_b)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row = fetch_next_unprocessed(&pool)
+            .await
+            .unwrap()
+            .expect("C became due an hour ago");
+        assert_eq!(row.id, id_c, "C (due 1h ago) must be picked next");
+        assert_ne!(
+            row.id, id_a,
+            "A (due 1h from now) must never be picked while C is eligible"
+        );
+    }
+
+    async fn seed_single_video() -> (SqlitePool, i64) {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let video_id: i64 = sqlx::query_scalar(
+            "INSERT INTO videos (playlist_id, youtube_id, title) \
+             VALUES (1, 'vid', 't') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        (pool, video_id)
+    }
+
+    #[tokio::test]
+    async fn record_download_failure_increments_attempts_and_schedules_retry_then_success_resets() {
+        let (pool, video_id) = seed_single_video().await;
+        let before = chrono::Utc::now();
+
+        record_download_failure(&pool, video_id, "yt-dlp exited with 1: boom")
+            .await
+            .unwrap();
+
+        let attempts: i64 = sqlx::query_scalar("SELECT download_attempts FROM videos WHERE id = ?")
+            .bind(video_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let last_error: Option<String> =
+            sqlx::query_scalar("SELECT last_download_error FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let next_attempt_at: Option<String> =
+            sqlx::query_scalar("SELECT next_attempt_at FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(attempts, 1, "first failure -> 1 attempt");
+        assert_eq!(last_error.as_deref(), Some("yt-dlp exited with 1: boom"));
+        let next_attempt_at = next_attempt_at.expect("next_attempt_at must be set on failure");
+        let parsed = chrono::DateTime::parse_from_rfc3339(&next_attempt_at).expect("valid RFC3339");
+        assert!(
+            parsed.to_utc() > before,
+            "next_attempt_at must be scheduled in the future"
+        );
+
+        record_download_failure(&pool, video_id, "second failure")
+            .await
+            .unwrap();
+        let attempts: i64 = sqlx::query_scalar("SELECT download_attempts FROM videos WHERE id = ?")
+            .bind(video_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(attempts, 2, "second failure -> 2 attempts");
+
+        // The reset path: the same UPDATE mark_video_processed_pair issues
+        // on success zeroes the three bookkeeping columns back out.
+        crate::db::models::mark_video_processed_pair(
+            &pool, video_id, "Song", "Artist", "test", false, "/v.mp4", "/a.flac",
+        )
+        .await
+        .unwrap();
+
+        let attempts: i64 = sqlx::query_scalar("SELECT download_attempts FROM videos WHERE id = ?")
+            .bind(video_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let last_error: Option<String> =
+            sqlx::query_scalar("SELECT last_download_error FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let next_attempt_at: Option<String> =
+            sqlx::query_scalar("SELECT next_attempt_at FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(attempts, 0, "success resets download_attempts to 0");
+        assert!(last_error.is_none(), "success resets last_download_error");
+        assert!(next_attempt_at.is_none(), "success resets next_attempt_at");
+    }
+
+    #[tokio::test]
+    async fn record_download_failure_truncates_error_to_last_300_chars() {
+        let (pool, video_id) = seed_single_video().await;
+        let long_error = "x".repeat(500);
+
+        record_download_failure(&pool, video_id, &long_error)
+            .await
+            .unwrap();
+
+        let last_error: Option<String> =
+            sqlx::query_scalar("SELECT last_download_error FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            last_error.unwrap().len(),
+            300,
+            "last_download_error must be truncated to the last 300 chars"
+        );
+    }
 }
