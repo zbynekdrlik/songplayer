@@ -23,6 +23,15 @@ queue stalls (#141, #139, #140).
 | `WARNING: The provided YouTube account cookies are no longer valid` | the browser session rotated; re-export |
 | video stream OK but `audio download failed … Requested format is not available` | the box's yt-dlp is stale (2026.03 saw only HLS formats with cookies, no separate `bestaudio`); replace `cache\tools\yt-dlp.exe` with the latest release (#140 — the app never updates it itself) |
 
+**Operational knobs since 0.47.0-dev.3 (#139, #140):** playlists re-sync every
+`PLAYLIST_SYNC_INTERVAL_SECS` (default 600) — grep `periodic sync: enqueueing`;
+a failed download backs off `5 min · 2^(n-1)` (cap 24 h) per row instead of
+blocking the queue — grep `download failed, scheduled retry` / the `error!` at
+5 attempts, and the song row shows `⚠` with the error as tooltip; yt-dlp runs
+`--update` at startup and every `YTDLP_UPDATE_INTERVAL_SECS` (default 86400) —
+grep `yt-dlp self-update`. A retry that is not due yet does not block later
+rows (`next_attempt_at` column, migration V20).
+
 **The fix in code:** `downloader/mod.rs` passes `--cookies <data_dir>/cookies.txt`
 to both yt-dlp calls whenever `C:\ProgramData\SongPlayer\cookies.txt` exists
 (re-checked per download, no restart needed). yt-dlp REWRITES the jar it is
