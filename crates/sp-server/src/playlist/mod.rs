@@ -58,7 +58,7 @@ pub async fn sync_playlist(
 ///
 /// Used to bound how much of yt-dlp's stderr gets embedded in an error
 /// message (#139): the raw stream can run to many KB on a hard failure.
-fn tail(s: &str, max: usize) -> &str {
+pub(crate) fn tail(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
     }

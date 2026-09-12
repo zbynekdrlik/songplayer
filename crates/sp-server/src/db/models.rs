@@ -285,7 +285,8 @@ pub async fn mark_video_processed_pair(
     let result = sqlx::query(
         "UPDATE videos
          SET song = ?, artist = ?, metadata_source = ?,
-             gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1
+             gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1,
+             download_attempts = 0, last_download_error = NULL, next_attempt_at = NULL
          WHERE id = ?",
     )
     .bind(song)

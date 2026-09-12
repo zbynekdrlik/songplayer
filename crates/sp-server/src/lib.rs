@@ -345,6 +345,7 @@ pub async fn start(
     let periodic_sync_pool = pool.clone();
     let periodic_sync_tx = sync_tx.clone();
     let periodic_sync_shutdown = shutdown_tx.clone();
+    let ytdlp_update_shutdown = shutdown_tx.clone();
     let lyrics_pool = pool.clone();
     let lyrics_cache_dir = config.cache_dir.clone();
     let lyrics_shutdown = shutdown_tx.clone();
@@ -365,6 +366,39 @@ pub async fn start(
                 });
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
+
+                // yt-dlp self-update (#140): the download worker never
+                // updates its own yt-dlp binary, so a box that has been up
+                // for a while silently falls behind YouTube's format
+                // changes (observed: `audio download failed … Requested
+                // format is not available` on a stale 2026.03 build — see
+                // `.claude/rules/youtube-cookies.md`). One-shot update
+                // right after tools are ready, then a shutdown-aware
+                // periodic re-update — never fatal, a stale yt-dlp should
+                // degrade, not crash the server.
+                let version_before = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                match tools_mgr.update_ytdlp().await {
+                    Ok(()) => {
+                        let version_after = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                        info!(
+                            version_before = ?version_before,
+                            version_after = ?version_after,
+                            "yt-dlp self-update: startup check complete"
+                        );
+                    }
+                    Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
+                }
+                let ytdlp_update_interval_secs = ytdlp_update_interval_secs();
+                tokio::spawn(periodic_ytdlp_update(
+                    tools_mgr,
+                    paths.ytdlp.clone(),
+                    ytdlp_update_interval_secs,
+                    ytdlp_update_shutdown.subscribe(),
+                ));
+                info!(
+                    interval_secs = ytdlp_update_interval_secs,
+                    "periodic yt-dlp self-update worker started"
+                );
 
                 // Defensive self-heal for #40: any normalized=1 row whose
                 // FLAC is not at 48 kHz would explode in
@@ -757,15 +791,27 @@ async fn ai_proxy_watchdog(
 /// whenever `PLAYLIST_SYNC_INTERVAL_SECS` is absent, unparseable, or zero.
 const DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS: u64 = 600;
 
-/// Pure parser for the periodic playlist re-sync interval override.
-/// Falls back to [`DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS`] on `None`, on a
-/// value that doesn't parse as a `u64`, or on `0` — `tokio::time::interval`
-/// panics on a zero-duration period, so zero is treated the same as absent.
-fn sync_interval_from(env_value: Option<&str>) -> u64 {
+/// Default interval, in seconds, between periodic yt-dlp self-updates
+/// (#140) — used whenever `YTDLP_UPDATE_INTERVAL_SECS` is absent,
+/// unparseable, or zero.
+const DEFAULT_YTDLP_UPDATE_INTERVAL_SECS: u64 = 86400;
+
+/// Pure parser shared by every periodic-interval env override in this
+/// module: falls back to `default` on `None`, on a value that doesn't
+/// parse as a `u64`, or on `0` — `tokio::time::interval` panics on a
+/// zero-duration period, so zero is treated the same as absent.
+fn interval_from(env_value: Option<&str>, default: u64) -> u64 {
     match env_value.and_then(|v| v.parse::<u64>().ok()) {
         Some(secs) if secs > 0 => secs,
-        _ => DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS,
+        _ => default,
     }
+}
+
+/// Pure parser for the periodic playlist re-sync interval override.
+/// Falls back to [`DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS`] on `None`, on a
+/// value that doesn't parse as a `u64`, or on `0`.
+fn sync_interval_from(env_value: Option<&str>) -> u64 {
+    interval_from(env_value, DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS)
 }
 
 /// Read `PLAYLIST_SYNC_INTERVAL_SECS` from the environment, warning (but
@@ -812,6 +858,57 @@ async fn periodic_playlist_sync(
                         "periodic sync: enqueueing one SyncRequest per active playlist"
                     ),
                     Err(e) => warn!("periodic sync enqueue failed: {e}"),
+                }
+            }
+        }
+    }
+}
+
+/// Read `YTDLP_UPDATE_INTERVAL_SECS` from the environment (#140), warning
+/// (but still falling back to the default) when the value is present but
+/// invalid — same shape as [`playlist_sync_interval_secs`].
+fn ytdlp_update_interval_secs() -> u64 {
+    let raw = std::env::var("YTDLP_UPDATE_INTERVAL_SECS").ok();
+    if let Some(v) = &raw {
+        let valid = v.parse::<u64>().is_ok_and(|n| n > 0);
+        if !valid {
+            warn!(
+                value = %v,
+                default_secs = DEFAULT_YTDLP_UPDATE_INTERVAL_SECS,
+                "YTDLP_UPDATE_INTERVAL_SECS invalid or zero, using default"
+            );
+        }
+    }
+    interval_from(raw.as_deref(), DEFAULT_YTDLP_UPDATE_INTERVAL_SECS)
+}
+
+/// Periodically re-run `yt-dlp --update` (#140): the download worker never
+/// updates its own yt-dlp binary, so a long-running box falls behind
+/// YouTube's format changes over time (see
+/// `.claude/rules/youtube-cookies.md`). The startup one-shot update
+/// already covers t=0, so the first `interval.tick()` is deliberately
+/// consumed and discarded before entering the loop, same pattern as
+/// [`periodic_playlist_sync`]. Never fatal — a failed update just leaves
+/// the current binary in place. Exits on shutdown broadcast.
+async fn periodic_ytdlp_update(
+    tools_mgr: downloader::tools::ToolsManager,
+    ytdlp_path: PathBuf,
+    interval_secs: u64,
+    mut shutdown: broadcast::Receiver<()>,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await; // immediate first tick — startup update already covered it
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = interval.tick() => {
+                match tools_mgr.update_ytdlp().await {
+                    Ok(()) => {
+                        let version = tools_mgr.ytdlp_version(&ytdlp_path).await.ok();
+                        info!(version = ?version, "periodic yt-dlp self-update succeeded");
+                    }
+                    Err(e) => warn!("periodic yt-dlp self-update failed: {e}"),
                 }
             }
         }

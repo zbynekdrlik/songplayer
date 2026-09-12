@@ -204,7 +204,7 @@ impl DownloadWorker {
 
     /// Try to process the next un-normalized video.
     async fn process_next(&self) -> bool {
-        let row = match self.fetch_next_unprocessed().await {
+        let row = match fetch_next_unprocessed(&self.pool).await {
             Ok(Some(r)) => r,
             Ok(None) => return false,
             Err(e) => {
@@ -233,6 +233,8 @@ impl DownloadWorker {
         {
             tracing::error!(video_id = %row.youtube_id, "video download failed: {e}");
             cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
+            self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                .await;
             return false;
         }
 
@@ -244,6 +246,8 @@ impl DownloadWorker {
             Err(e) => {
                 tracing::error!(video_id = %row.youtube_id, "audio download failed: {e}");
                 cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
+                self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                    .await;
                 return false;
             }
         };
@@ -271,6 +275,8 @@ impl DownloadWorker {
             tracing::error!(video_id = %row.youtube_id, "normalization failed: {e}");
             let _ = tokio::fs::remove_file(&audio_temp).await;
             let _ = tokio::fs::remove_file(&video_temp).await;
+            self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                .await;
             return false;
         }
 
@@ -279,6 +285,8 @@ impl DownloadWorker {
             tracing::error!(video_id = %row.youtube_id, "video rename failed: {e}");
             let _ = tokio::fs::remove_file(&audio_final).await;
             let _ = tokio::fs::remove_file(&video_temp).await;
+            self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                .await;
             return false;
         }
 
@@ -298,6 +306,8 @@ impl DownloadWorker {
         .await
         {
             tracing::error!(video_id = %row.youtube_id, "DB update failed: {e}");
+            self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                .await;
             return false;
         }
 
@@ -306,19 +316,16 @@ impl DownloadWorker {
         true
     }
 
-    /// Fetch the next video that needs processing.
-    async fn fetch_next_unprocessed(&self) -> Result<Option<VideoRow>, sqlx::Error> {
-        let row = sqlx::query_as::<_, VideoRow>(
-            "SELECT v.id, v.youtube_id, COALESCE(v.title, '') as title
-             FROM videos v
-             JOIN playlists p ON p.id = v.playlist_id
-             WHERE v.normalized = 0 AND p.is_active = 1
-             ORDER BY v.id
-             LIMIT 1",
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row)
+    /// Record a download/normalize/DB failure for `video_id` (#140): bumps
+    /// `download_attempts`, stores the error tail, and schedules
+    /// `next_attempt_at` via exponential backoff — so one broken video
+    /// backs off instead of blocking every video behind it in the queue
+    /// forever. Swallows its own DB error (already in a failure path;
+    /// nothing more useful to do than log it).
+    async fn record_failure(&self, video_id: i64, youtube_id: &str, error: &str) {
+        if let Err(e) = record_download_failure(&self.pool, video_id, error).await {
+            tracing::error!(video_id = %youtube_id, "failed to record download failure: {e}");
+        }
     }
 
     /// Download the video stream only via yt-dlp.
@@ -421,6 +428,97 @@ impl DownloadWorker {
     }
 }
 
+/// Fetch the next video that needs processing (#140): eligible rows are
+/// `normalized = 0` on an active playlist whose `next_attempt_at` is either
+/// NULL (never failed) or already due. Rows with a NULL `next_attempt_at`
+/// sort before due-now rows so a fresh video is never starved behind a
+/// backlog of retries, and within each group the lowest `id` wins — same
+/// FIFO order as before #140 for the common (no-failure) case.
+pub(crate) async fn fetch_next_unprocessed(
+    pool: &SqlitePool,
+) -> Result<Option<VideoRow>, sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let row = sqlx::query_as::<_, VideoRow>(
+        "SELECT v.id, v.youtube_id, COALESCE(v.title, '') as title
+         FROM videos v
+         JOIN playlists p ON p.id = v.playlist_id
+         WHERE v.normalized = 0 AND p.is_active = 1
+           AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?)
+         ORDER BY (v.next_attempt_at IS NOT NULL), v.id
+         LIMIT 1",
+    )
+    .bind(&now)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Exponential retry backoff (#140): `5 min * 2^(attempts-1)`, capped at
+/// 24h. `attempts == 0` (defensive — callers always pass `>= 1`) is treated
+/// the same as `attempts == 1`. Uses checked/saturating math throughout so
+/// no `attempts` value (including `u32::MAX`) can panic on overflow — it
+/// just saturates at the 24h cap.
+pub(crate) fn retry_backoff(attempts: u32) -> std::time::Duration {
+    const BASE_SECS: u64 = 5 * 60;
+    const CAP_SECS: u64 = 24 * 60 * 60;
+
+    let exponent = attempts.saturating_sub(1).min(63);
+    let multiplier = 1u64.checked_shl(exponent).unwrap_or(u64::MAX);
+    let secs = BASE_SECS.checked_mul(multiplier).unwrap_or(u64::MAX);
+    std::time::Duration::from_secs(secs.min(CAP_SECS))
+}
+
+/// Record a download/normalize/DB-write failure for `video_id` (#140):
+/// increments `download_attempts`, stores the last 300 chars of `error`,
+/// and schedules `next_attempt_at` via [`retry_backoff`]. Returns the new
+/// attempt count. Logs a `warn!` on every call, plus an additional
+/// `error!` once attempts reach 5 (a video that has failed 5 times in a
+/// row is worth operator attention).
+pub(crate) async fn record_download_failure(
+    pool: &SqlitePool,
+    video_id: i64,
+    error: &str,
+) -> Result<i64, sqlx::Error> {
+    let current: i64 = sqlx::query_scalar("SELECT download_attempts FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_one(pool)
+        .await?;
+    let new_attempts = current + 1;
+    let backoff = retry_backoff(new_attempts as u32);
+    let next_attempt_at = (chrono::Utc::now()
+        + chrono::Duration::from_std(backoff).unwrap_or_else(|_| chrono::Duration::zero()))
+    .to_rfc3339();
+    let error_tail = crate::playlist::tail(error, 300);
+
+    sqlx::query(
+        "UPDATE videos
+         SET download_attempts = ?, last_download_error = ?, next_attempt_at = ?
+         WHERE id = ?",
+    )
+    .bind(new_attempts)
+    .bind(error_tail)
+    .bind(&next_attempt_at)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+
+    tracing::warn!(
+        video_id,
+        attempts = new_attempts,
+        next_attempt_at = %next_attempt_at,
+        "download failed, scheduled retry"
+    );
+    if new_attempts >= 5 {
+        tracing::error!(
+            video_id,
+            attempts = new_attempts,
+            "download has failed repeatedly — needs operator attention"
+        );
+    }
+
+    Ok(new_attempts)
+}
+
 fn cleanup_temps(video_temp: &Path, cache_dir: &Path, video_id: &str) {
     let _ = std::fs::remove_file(video_temp);
     // Remove any audio temp file with a matching prefix.
@@ -437,10 +535,10 @@ fn cleanup_temps(video_temp: &Path, cache_dir: &Path, video_id: &str) {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct VideoRow {
-    id: i64,
-    youtube_id: String,
-    title: String,
+pub(crate) struct VideoRow {
+    pub(crate) id: i64,
+    pub(crate) youtube_id: String,
+    pub(crate) title: String,
 }
 
 #[cfg(test)]
