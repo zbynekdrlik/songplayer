@@ -446,6 +446,54 @@ mod tests {
         assert!(cur_sk.is_some(), "current line has SK in test_track()");
     }
 
+    // ── #142 — ★ reference marker on the Resolume dual-line push ──────────
+
+    #[test]
+    fn resolume_lines_with_next_appends_star_to_all_four_when_reference() {
+        // is_reference=true: every non-empty EN/SK current+next line ends
+        // with " ★" so the LED wall shows which songs carry Claude's
+        // verified reference lyrics (#142).
+        let st = LyricsState::new(test_track());
+        let (cur_en, next_en, cur_sk, next_sk) =
+            st.resolume_lines_with_next(1500, true).expect("on line 0");
+        assert_eq!(cur_en, "Hello world \u{2605}");
+        assert_eq!(next_en, "Goodbye \u{2605}");
+        assert_eq!(cur_sk, Some("Ahoj svet \u{2605}".to_string()));
+        assert_eq!(next_sk, Some("Zbohom \u{2605}".to_string()));
+    }
+
+    #[test]
+    fn resolume_lines_with_next_no_star_when_not_reference() {
+        // is_reference=false: behavior is byte-identical to before #142.
+        let st = LyricsState::new(test_track());
+        let (cur_en, next_en, cur_sk, next_sk) =
+            st.resolume_lines_with_next(1500, false).expect("on line 0");
+        assert_eq!(cur_en, "Hello world");
+        assert_eq!(next_en, "Goodbye");
+        assert_eq!(cur_sk, Some("Ahoj svet".to_string()));
+        assert_eq!(next_sk, Some("Zbohom".to_string()));
+    }
+
+    #[test]
+    fn resolume_lines_with_next_no_star_on_empty_lines_when_reference() {
+        // Empty strings/None stay empty/None even when is_reference=true —
+        // a lone " ★" on an empty next-line slot would be worse than no
+        // marker at all.
+        let st = LyricsState::new(test_track());
+        // With 0 lead, position 3200 looks up at exactly 3200 ms, which is
+        // inside the last line (3000..5000) — no next line exists.
+        let (cur_en, next_en, cur_sk, next_sk) = st
+            .resolume_lines_with_next(3200, true)
+            .expect("on last line");
+        assert_eq!(
+            cur_en, "Goodbye \u{2605}",
+            "non-empty current line gets the star"
+        );
+        assert_eq!(next_en, "", "empty next_en must stay empty, no star");
+        assert_eq!(cur_sk, Some("Zbohom \u{2605}".to_string()));
+        assert_eq!(next_sk, None, "next_sk stays None, no star");
+    }
+
     #[test]
     fn resolume_lines_with_next_returns_empty_next_on_last_line() {
         let st = LyricsState::new(test_track());

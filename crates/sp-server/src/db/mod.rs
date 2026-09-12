@@ -363,3 +363,7 @@ mod tests_v19;
 #[path = "mod_tests_v20.rs"]
 #[cfg(test)]
 mod tests_v20;
+
+#[path = "mod_tests_v21.rs"]
+#[cfg(test)]
+mod tests_v21;
