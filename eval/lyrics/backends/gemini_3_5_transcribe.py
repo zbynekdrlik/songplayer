@@ -153,6 +153,20 @@ def request_with_retry(
         )
 
 
+def response_json(r: requests.Response, what: str) -> dict[str, Any]:
+    """Decode a 2xx response body as JSON, turning a non-JSON body (an HTML
+    error page from a proxy, an empty body) into a clear RuntimeError instead
+    of a bare JSONDecodeError. Never includes request headers."""
+    try:
+        payload = r.json()
+    except ValueError as e:
+        raise RuntimeError(
+            f"gemini_3_5_transcribe {what}: non-JSON body status={r.status_code} "
+            f"body={r.text[:200]!r}"
+        ) from e
+    return payload or {}
+
+
 def upload_audio(wav_path: Path, api_key: str) -> dict[str, Any]:
     """POST the raw WAV bytes to the Files API and return the file resource
     dict (`name`, `uri`, `mimeType`, `state`, ...)."""
@@ -173,7 +187,7 @@ def upload_audio(wav_path: Path, api_key: str) -> dict[str, Any]:
             data=fh.read(),
             timeout=300,
         )
-    payload = r.json() or {}
+    payload = response_json(r, "upload")
     file_info = payload.get("file") or {}
     name = file_info.get("name")
     if not name:
@@ -195,7 +209,7 @@ def poll_file_ready(file_name: str, api_key: str) -> dict[str, Any]:
     poll_count = 0
     while True:
         r = request_with_retry("GET", url, headers=auth_headers(api_key), timeout=30)
-        info = r.json() or {}
+        info = response_json(r, "file poll")
         state = info.get("state")
         poll_count += 1
         logger.debug(
@@ -266,7 +280,7 @@ def transcribe(
         json=body,
         timeout=600,
     )
-    result = r.json() or {}
+    result = response_json(r, "interactions")
     logger.info(
         "gemini_3_5_transcribe interactions ok: status=%s id=%s",
         result.get("status"),
