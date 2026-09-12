@@ -58,8 +58,22 @@ pub struct FrameSubmitter<B: NdiBackend> {
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
-    /// Create a submitter owning an already-constructed sender.
+    /// Create a submitter owning an already-constructed sender. Delegates to
+    /// [`new_with_wallclock`](Self::new_with_wallclock) with the production
+    /// system clock — no throwaway clock is constructed.
     pub fn new(sender: NdiSender<B>, frame_rate_n: i32, frame_rate_d: i32) -> Self {
+        Self::new_with_wallclock(sender, frame_rate_n, frame_rate_d, WallClock::system())
+    }
+
+    /// Construct with an injected [`WallClock`] so genlock timecodes are
+    /// deterministic in tests; [`new`](Self::new) delegates here with the
+    /// system clock. The injected clock is stored and used directly.
+    pub fn new_with_wallclock(
+        sender: NdiSender<B>,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        wall: WallClock,
+    ) -> Self {
         Self {
             sender,
             prev_frame: None,
@@ -69,22 +83,8 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frames_in_window: 0,
             window_start: std::time::Instant::now(),
             last_submit_ts: None,
-            wall: WallClock::system(),
+            wall,
         }
-    }
-
-    /// Test-only: construct with an injected [`WallClock`] so genlock
-    /// timecodes are deterministic without a real clock.
-    #[cfg(test)]
-    pub fn new_with_wallclock(
-        sender: NdiSender<B>,
-        frame_rate_n: i32,
-        frame_rate_d: i32,
-        wall: WallClock,
-    ) -> Self {
-        let mut s = Self::new(sender, frame_rate_n, frame_rate_d);
-        s.wall = wall;
-        s
     }
 
     /// Update the frame rate used for subsequent submissions. Call this when

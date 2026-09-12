@@ -43,6 +43,13 @@ pub fn interval_100ns(fps: i64) -> i64 {
 /// truncated (`b1 @ 30 = 333_333`, below the exact rational `333_333.33`),
 /// naive slot recovery under-counts on an exact boundary; the promotion adds
 /// the missing slot back. A non-positive `fps` returns `now_100ns` unchanged.
+///
+/// **Input domain:** `now_100ns` is a wall-clock reading in 100-ns units since
+/// the Unix epoch, so by contract it is non-negative and post-2020 (the
+/// receiver only ts-aligns values inside the 2020..2100 window, camera-box#1294
+/// §4). Negative inputs are out of scope and are NOT handled specially: integer
+/// division truncates toward zero, so a negative `now_100ns` would floor toward
+/// zero (the wrong direction). Production never supplies one.
 pub fn floor_boundary_100ns(now_100ns: i64, fps: i64) -> i64 {
     if fps <= 0 {
         return now_100ns;

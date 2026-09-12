@@ -38,6 +38,11 @@ impl ClockSource for SystemClock {
     fn sample(&self) -> (Instant, i64) {
         (Instant::now(), utc_now_100ns())
     }
+
+    fn now_monotonic(&self) -> Instant {
+        // Hot read path: monotonic ONLY — never `Utc::now()` (#146 follow-up).
+        Instant::now()
+    }
 }
 
 /// UTC now as 100-ns units since the Unix epoch. Uses the non-panicking
@@ -82,8 +87,12 @@ impl WallClock {
 
     /// Current wall time: `anchor_utc + elapsed_monotonic`, in 100-ns units
     /// since the Unix epoch.
+    ///
+    /// Hot read path: it reads the MONOTONIC clock only (`now_monotonic`) —
+    /// never `Utc::now()` (#146 follow-up). The realtime clock is sampled only
+    /// at anchor time (construction and every resample in [`tick`](Self::tick)).
     pub fn now_100ns(&self) -> i64 {
-        let (inst, _) = self.source.sample();
+        let inst = self.source.now_monotonic();
         let elapsed = inst.saturating_duration_since(self.anchor_instant);
         let elapsed_100ns = (elapsed.as_nanos() / 100) as i64;
         self.anchor_utc_100ns.saturating_add(elapsed_100ns)

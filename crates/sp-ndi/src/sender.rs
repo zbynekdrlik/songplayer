@@ -190,7 +190,7 @@ impl RealNdiBackend {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_video_frame(
+    pub(crate) fn build_video_frame(
         four_cc: FourCCVideoType,
         width: i32,
         height: i32,
