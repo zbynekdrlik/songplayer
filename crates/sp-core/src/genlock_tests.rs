@@ -100,3 +100,253 @@ fn should_resample_b7_vectors() {
     assert!(should_resample_mono_to_real_offset(100));
     assert!(should_resample_mono_to_real_offset(150));
 }
+
+// ===========================================================================
+// Boundary-paced emission vectors (#147) — digest §B, ported 1:1 from
+// camera-box `src/genlock_pacing.rs`. Pacing works in wall-clock ns.
+// ===========================================================================
+
+/// 30 fps pacing interval in ns (`I30 = 1e9 / 30`).
+const I30: i64 = 33_333_333;
+
+#[test]
+fn constants_and_interval_ns_match_contract() {
+    assert_eq!(GENLOCK_MAX_CATCHUP_INTERVALS, 8);
+    assert_eq!(NANOS_PER_SECOND, 1_000_000_000);
+    assert_eq!(interval_ns(30), I30);
+    assert_eq!(interval_ns(60), 16_666_666);
+    assert_eq!(interval_ns(0), 0);
+    assert_eq!(interval_ns(-5), 0);
+}
+
+// ---- B3: next_boundary_100ns (the CEIL twin — sleep target only) ----
+
+#[test]
+fn next_boundary_100ns_b3_vectors() {
+    assert_eq!(next_boundary_100ns(0, 30), 333_333);
+    assert_eq!(next_boundary_100ns(1, 60), 166_666);
+    assert_eq!(next_boundary_100ns(9_900_000, 60), 10_000_000);
+    assert_eq!(next_boundary_100ns(12_345, 0), 12_345); // fps <= 0 passthrough
+}
+
+// ---- B8: genlock_emit_gate (14 vectors) ----
+
+#[test]
+fn emit_gate_b8_1_init_never_emits() {
+    let now = 5 * I30 + 1000;
+    let (emit, next) = genlock_emit_gate(now, 0, I30, false);
+    assert!(!emit);
+    assert_eq!(next, now - (now % I30) + I30);
+    assert_eq!(next, 6 * I30);
+}
+
+#[test]
+fn emit_gate_b8_2_boundary_unmoved_before_boundary() {
+    let (emit, next) = genlock_emit_gate(10 * I30 - 5, 10 * I30, I30, false);
+    assert!(!emit);
+    assert_eq!(next, 10 * I30);
+}
+
+#[test]
+fn emit_gate_b8_3_at_boundary_emits() {
+    let (emit, next) = genlock_emit_gate(7 * I30, 7 * I30, I30, false);
+    assert!(emit);
+    assert_eq!(next, 8 * I30);
+}
+
+#[test]
+fn emit_gate_b8_4_just_after_boundary_emits() {
+    let (emit, next) = genlock_emit_gate(7 * I30 + 100, 7 * I30, I30, false);
+    assert!(emit);
+    assert_eq!(next, 8 * I30);
+}
+
+#[test]
+fn emit_gate_b8_5_zero_interval_no_panic() {
+    let (emit, next) = genlock_emit_gate(123_456_789, 0, 0, false);
+    assert!(!emit);
+    assert_eq!(next, 0);
+}
+
+#[test]
+fn emit_gate_b8_6_zero_interval_keeps_boundary() {
+    let (emit, next) = genlock_emit_gate(999, 555, 0, false);
+    assert!(!emit);
+    assert_eq!(next, 555);
+}
+
+#[test]
+fn emit_gate_b8_7_misaligned_advance_is_not_resync() {
+    let b = 7 * I30 + 5;
+    let (emit, next) = genlock_emit_gate(b, b, I30, false);
+    assert!(emit);
+    assert_eq!(next, b + I30);
+    // Must NOT equal the resync-realigned value.
+    assert_ne!(next, b - (b % I30) + I30);
+}
+
+#[test]
+fn emit_gate_b8_8_lag_twelve_resyncs() {
+    let b = 3 * I30;
+    let now = b + 12 * I30 + 17;
+    let (emit, next) = genlock_emit_gate(now, b, I30, false);
+    assert!(emit);
+    assert_eq!(next, now - (now % I30) + I30);
+}
+
+#[test]
+fn emit_gate_b8_9_lag_equal_bound_catches_up() {
+    // lag == 8 (the bound) still catches up: `>` is the resync gate.
+    let b = 7 * I30 + 5;
+    let now = b + 8 * I30 + 11;
+    let (emit, next) = genlock_emit_gate(now, b, I30, false);
+    assert!(emit);
+    assert_eq!(next, b + I30);
+}
+
+#[test]
+fn emit_gate_b8_10_backward_step_relatches() {
+    let b = 100 * I30;
+    let now = b - 90 * I30;
+    let (_emit, next) = genlock_emit_gate(now, b, I30, false);
+    assert!(next <= now + I30);
+    assert_ne!(next, b);
+}
+
+#[test]
+fn emit_gate_b8_11_buffered_never_resyncs() {
+    let b = 7 * I30 + 5;
+    let now = b + 11 * I30 + 11;
+    let (emit, next) = genlock_emit_gate(now, b, I30, true);
+    assert!(emit);
+    assert_eq!(next, b + I30);
+}
+
+#[test]
+fn emit_gate_b8_12_sixty_fps_decimates_to_thirty() {
+    let cap_interval = 16_666_666_i64;
+    let mut next_b = 0_i64;
+    let mut emitted = 0;
+    let start = 1_000_000_000_i64;
+    for k in 0..60 {
+        let now = start + k * cap_interval;
+        let (emit, nb) = genlock_emit_gate(now, next_b, I30, false);
+        next_b = nb;
+        if emit {
+            emitted += 1;
+        }
+    }
+    assert!((29..=31).contains(&emitted), "got {emitted}");
+}
+
+#[test]
+fn emit_gate_b8_13_buffered_drain_four_of_four() {
+    let b0 = 10 * I30;
+    let resume = b0 + 4 * I30;
+    let mut next_b = b0;
+    let mut emitted = 0;
+    for k in 0..4 {
+        let now = resume + k;
+        let (emit, nb) = genlock_emit_gate(now, next_b, I30, false);
+        next_b = nb;
+        if emit {
+            emitted += 1;
+        }
+    }
+    assert_eq!(emitted, 4, "every buffered frame in the drain must emit");
+}
+
+#[test]
+fn emit_gate_b8_14_buffered_drain_six_of_six_zero_skip() {
+    let b0 = 100 * I30;
+    let resume = b0 + 10 * I30;
+    let mut next_b = b0;
+    let mut emitted = 0;
+    let mut total_skip = 0;
+    for k in 0..6 {
+        let now = resume + k;
+        let prev = next_b;
+        let (emit, nb) = genlock_emit_gate(now, next_b, I30, true); // queue non-empty
+        total_skip += boundary_skip_count(prev, nb, I30);
+        next_b = nb;
+        if emit {
+            emitted += 1;
+        }
+    }
+    assert_eq!(emitted, 6);
+    assert_eq!(total_skip, 0);
+}
+
+// ---- B9: genlock_emit_on_time (7 vectors) ----
+
+#[test]
+fn emit_on_time_b9_vectors() {
+    let b7 = 7 * I30;
+    assert!(genlock_emit_on_time(b7, b7, I30));
+    assert!(genlock_emit_on_time(b7 + 5, b7, I30));
+    assert!(genlock_emit_on_time(b7 + I30 - 1, b7, I30));
+    let b10 = 10 * I30;
+    assert!(!genlock_emit_on_time(b10 - 5, b10, I30));
+    assert!(!genlock_emit_on_time(b10 + I30, b10, I30));
+    assert!(!genlock_emit_on_time(b10 + 3 * I30, b10, I30));
+    assert!(!genlock_emit_on_time(12_345, 6_789, 0));
+}
+
+// ---- B10: genlock_lag_intervals (7 vectors + equivalence) ----
+
+#[test]
+fn lag_intervals_b10_vectors() {
+    let b = 9 * I30;
+    assert_eq!(genlock_lag_intervals(b - 5, b, I30), 0);
+    assert_eq!(genlock_lag_intervals(b, b, I30), 0);
+    assert_eq!(genlock_lag_intervals(b + I30 - 1, b, I30), 0);
+    assert_eq!(genlock_lag_intervals(b + I30, b, I30), 1);
+    assert_eq!(genlock_lag_intervals(b + 2 * I30 + 7, b, I30), 2);
+    assert_eq!(genlock_lag_intervals(b + 5 * I30, b, I30), 5);
+    assert_eq!(genlock_lag_intervals(12_345, 6_789, 0), 0);
+}
+
+#[test]
+fn lag_zero_iff_on_time_or_before_boundary_b10() {
+    let b = 6 * I30;
+    for delta in [-3_i64, 0, 5, I30 - 1, I30, 3 * I30] {
+        let now = b + delta;
+        let lag = genlock_lag_intervals(now, b, I30);
+        let on_time = genlock_emit_on_time(now, b, I30);
+        let before = now < b;
+        assert_eq!(lag == 0, on_time || before, "delta={delta}");
+    }
+}
+
+// ---- B11: boundary_skip_count (6 vectors) ----
+
+#[test]
+fn boundary_skip_count_b11_vectors() {
+    assert_eq!(boundary_skip_count(0, 100 * I30, I30), 0); // old == 0 sentinel
+    assert_eq!(boundary_skip_count(5 * I30, 5 * I30, I30), 0); // unchanged
+    assert_eq!(boundary_skip_count(5 * I30, 6 * I30, I30), 0); // one interval
+    assert_eq!(boundary_skip_count(10 * I30, 16 * I30, I30), 5); // 6-interval leap
+    assert_eq!(boundary_skip_count(100 * I30, 40 * I30, I30), 0); // backward step
+    assert_eq!(boundary_skip_count(5 * I30, 200 * I30, 0), 0); // interval 0
+}
+
+// ---- B12: starvation_repeat_timecode_100ns (5 vectors) ----
+
+#[test]
+fn starvation_repeat_timecode_b12_vectors() {
+    let base = 123_456_789_i64;
+    assert_eq!(
+        starvation_repeat_timecode_100ns(base, 1, 60),
+        base - 166_666
+    );
+    assert_eq!(
+        starvation_repeat_timecode_100ns(base, 2, 60),
+        base - 333_332
+    );
+    assert_eq!(
+        starvation_repeat_timecode_100ns(base, 4, 60),
+        base - 666_664
+    );
+    assert_eq!(starvation_repeat_timecode_100ns(999, 3, 0), 999);
+    assert_eq!(starvation_repeat_timecode_100ns(999, 3, -5), 999);
+}
