@@ -355,6 +355,7 @@ fn run_loop_windows(
     // (GENLOCK_GRID_FPS/1) and skips the per-file `set_frame_rate`; the legacy
     // path updates it per-file in `decode_and_send`.
     let mut submitter = FrameSubmitter::new(sender, sp_core::genlock::GENLOCK_GRID_FPS as i32, 1);
+    submitter.set_paced(genlock_pacing); // paced: stamp standby frames on-grid (#147)
     submitter.send_black_bgra(1920, 1080);
 
     // The paced scheduler persists across songs (counters accumulate) and
@@ -376,6 +377,7 @@ fn run_loop_windows(
                     paused,
                     &mut last_heartbeat,
                     &mut consecutive_bad_polls,
+                    pacer.stats(), // idle/paused: report the pacing flag (#147)
                 );
                 continue;
             }
@@ -835,6 +837,7 @@ fn run_heartbeat_outer(
     paused: bool,
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
+    pacing: crate::playback::ndi_health::PacingStats,
 ) {
     let state = if paused {
         crate::playback::ndi_health::PlaybackStateLabel::Paused
@@ -848,9 +851,7 @@ fn run_heartbeat_outer(
         state,
         last_heartbeat,
         consecutive_bad_polls,
-        // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
-        // boundary-paced decode loop passes real `Pacer` stats (#147).
-        crate::playback::ndi_health::PacingStats::default(),
+        pacing,
     );
 }
 

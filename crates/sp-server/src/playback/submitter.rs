@@ -55,6 +55,11 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// Monotonic-to-UTC wall clock stamping genlock timecodes onto every real
     /// frame (#146). One clock per pipeline thread, owned here.
     wall: WallClock,
+    /// `genlock_pacing` for this pipeline (#147). ON = the app owns the cadence,
+    /// so a standby/black frame is stamped with its on-grid boundary rather than
+    /// `SYNTHESIZE` (contract §4.3 — a real send is never SYNTHESIZE; the legacy
+    /// SDK-clocked path keeps `None`). Default OFF.
+    paced: bool,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -84,7 +89,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             window_start: std::time::Instant::now(),
             last_submit_ts: None,
             wall,
+            paced: false,
         }
+    }
+
+    /// Set the `genlock_pacing` flag (#147). Called once at pipeline-thread
+    /// start with `genlock_pacing`; when ON, standby/black frames are stamped
+    /// with their on-grid boundary instead of `SYNTHESIZE`.
+    pub fn set_paced(&mut self, paced: bool) {
+        self.paced = paced;
     }
 
     /// Update the frame rate used for subsequent submissions. Call this when
@@ -179,6 +192,18 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     pub fn send_black_bgra(&mut self, width: u32, height: u32) {
         self.flush();
         let data = vec![0u8; (width * height * 4) as usize];
+        // Paced (#147): a real send is never SYNTHESIZE — stamp the standby
+        // frame with the floored on-grid boundary at the send instant (§4.3), so
+        // an idle→play transition does not drop the receiver out of `locked=`.
+        // The legacy SDK-clocked path keeps `None` (SYNTHESIZE, open question 7).
+        let timecode_100ns = if self.paced {
+            Some(floor_boundary_100ns(
+                self.wall.now_100ns(),
+                GENLOCK_GRID_FPS,
+            ))
+        } else {
+            None
+        };
         let frame = VideoFrame {
             data,
             width,
@@ -187,9 +212,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frame_rate_n: self.frame_rate_n,
             frame_rate_d: self.frame_rate_d,
             pixel_format: PixelFormat::Bgra,
-            // Standby black frame is NOT on the genlock grid yet, so it keeps
-            // SYNTHESIZE (None) — camera-box#1294 open question 7.
-            timecode_100ns: None,
+            timecode_100ns,
         };
         self.sender.send_video(&frame);
     }
@@ -303,16 +326,19 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
     fn emit(
         &mut self,
-        frame: &crate::playback::pacer::PacedFrame,
+        video: &crate::playback::pacer::PacedFrame,
+        audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
+        // `audio` is the boundary's batch (every consumed frame's chunks, §6.4),
+        // NOT `video.audio` — the pacer drains that into the batch on consume.
         self.submit_frame_at_boundary(
-            frame.width,
-            frame.height,
-            frame.stride,
-            &frame.video,
-            &frame.audio,
+            video.width,
+            video.height,
+            video.stride,
+            &video.video,
+            audio,
             video_tc_100ns,
             audio_tc_100ns,
         );

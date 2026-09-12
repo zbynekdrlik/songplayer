@@ -28,6 +28,20 @@ pub trait ClockSource: Send + Sync {
     fn now_monotonic(&self) -> Instant {
         self.sample().0
     }
+
+    /// Current wall time in 100-ns units since the Unix epoch, for the hot read
+    /// path. The default derives it from the monotonic clock: elapsed since the
+    /// `anchor_instant` plus `anchor_utc_100ns` — exactly the production formula,
+    /// so [`SystemClock`] keeps its `Utc::now()`-free read path. A fully
+    /// synthetic test clock (e.g. the boundary-paced `Pacer` fake) overrides
+    /// this to return a directly controllable value, so a test can advance the
+    /// wall clock between the scheduling read and the emit read (#147).
+    fn read_100ns(&self, anchor_instant: Instant, anchor_utc_100ns: i64) -> i64 {
+        let inst = self.now_monotonic();
+        let elapsed = inst.saturating_duration_since(anchor_instant);
+        let elapsed_100ns = (elapsed.as_nanos() / 100) as i64;
+        anchor_utc_100ns.saturating_add(elapsed_100ns)
+    }
 }
 
 /// Production clock source: `Instant::now()` paired with the UTC wall clock in
@@ -92,10 +106,8 @@ impl WallClock {
     /// never `Utc::now()` (#146 follow-up). The realtime clock is sampled only
     /// at anchor time (construction and every resample in [`tick`](Self::tick)).
     pub fn now_100ns(&self) -> i64 {
-        let inst = self.source.now_monotonic();
-        let elapsed = inst.saturating_duration_since(self.anchor_instant);
-        let elapsed_100ns = (elapsed.as_nanos() / 100) as i64;
-        self.anchor_utc_100ns.saturating_add(elapsed_100ns)
+        self.source
+            .read_100ns(self.anchor_instant, self.anchor_utc_100ns)
     }
 
     /// Advance the frame counter and re-anchor the monotonic-to-UTC mapping
@@ -136,6 +148,57 @@ impl WallClock {
             inst: Instant::now(),
             utc: utc_100ns,
         }))
+    }
+
+    /// Test-only: a fully synthetic clock whose `now_100ns()` returns whatever
+    /// the returned [`SettableClock`] handle was last `set` to. Unlike
+    /// [`fixed`](Self::fixed), it is driven directly (not off the monotonic
+    /// clock), so a test can advance the wall clock between two reads inside one
+    /// `Pacer::service` call — the scheduling read and the emit read — to prove
+    /// lateness includes decode time (#147). `tick`'s re-anchor is a no-op here
+    /// (`read_100ns` ignores the anchor).
+    pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
+        let handle = SettableClock(std::sync::Arc::new(std::sync::atomic::AtomicI64::new(
+            initial_100ns,
+        )));
+        let source = SettableClock(handle.0.clone());
+        (WallClock::new(Box::new(source)), handle)
+    }
+}
+
+/// Test-only handle over a settable wall clock (see [`WallClock::settable`]).
+/// Cloneable so a `pull` closure and the test body can both drive it.
+#[cfg(test)]
+#[derive(Clone)]
+pub struct SettableClock(std::sync::Arc<std::sync::atomic::AtomicI64>);
+
+#[cfg(test)]
+impl SettableClock {
+    /// Set the wall clock's current 100-ns reading.
+    pub fn set(&self, v_100ns: i64) {
+        self.0.store(v_100ns, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Advance the wall clock by `delta_100ns` (may be negative to step back).
+    pub fn advance(&self, delta_100ns: i64) {
+        self.0
+            .fetch_add(delta_100ns, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Current 100-ns reading.
+    pub fn get(&self) -> i64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+impl ClockSource for SettableClock {
+    fn sample(&self) -> (Instant, i64) {
+        (Instant::now(), self.get())
+    }
+
+    fn read_100ns(&self, _anchor_instant: Instant, _anchor_utc_100ns: i64) -> i64 {
+        self.get()
     }
 }
 

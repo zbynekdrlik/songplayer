@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, TryRecvError};
 use tracing::{debug, error, info, warn};
 
-use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
-use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome};
+use crate::playback::ndi_health::PlaybackStateLabel;
+use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, plan_sleep_100ns};
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
 };
@@ -68,18 +68,32 @@ fn to_paced_frame(
     }
 }
 
-/// Sleep the monotonic clock until ~2 ms before `until_ns` (wall-clock ns),
-/// then spin to the boundary. Bounded by one grid interval (~33 ms), so command
-/// latency stays low.
-fn sleep_to_boundary(pacer: &Pacer, until_ns: i64) {
-    let now = pacer.now_ns();
-    let delta_ns = until_ns - now;
-    const SPIN_MARGIN_NS: i64 = 2_000_000; // ~2 ms
-    if delta_ns > SPIN_MARGIN_NS {
-        std::thread::sleep(Duration::from_nanos((delta_ns - SPIN_MARGIN_NS) as u64));
+/// Sleep the monotonic clock until ~2 ms before `until_100ns` (wall-clock
+/// 100 ns), then spin to the boundary. The coarse wait is clamped to 1 s and a
+/// backward clock jump escapes without spinning (#147 change 4, via the pure
+/// [`plan_sleep_100ns`]), so a clock step never parks the send thread.
+fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
+    let interval = pacer.interval_100ns();
+    const SPIN_MARGIN_100NS: i64 = 20_000; // ~2 ms
+    let plan = plan_sleep_100ns(pacer.now_100ns(), until_100ns, interval);
+    if plan.relatch {
+        // Clock stepped backward — do not spin; return so the loop re-latches.
+        return;
     }
-    // Spin the last ~2 ms to hit the boundary precisely.
-    while pacer.now_ns() < until_ns {
+    if plan.sleep_100ns > SPIN_MARGIN_100NS {
+        let coarse_100ns = plan.sleep_100ns - SPIN_MARGIN_100NS;
+        std::thread::sleep(Duration::from_nanos((coarse_100ns * 100) as u64));
+    }
+    // Spin the last ~2 ms to hit the boundary precisely; bail on a backward jump
+    // (delta grows past one interval) so a clock step never spins forever.
+    loop {
+        let delta = until_100ns - pacer.now_100ns();
+        if delta <= 0 {
+            break;
+        }
+        if interval > 0 && delta > interval {
+            break;
+        }
         std::hint::spin_loop();
     }
 }
@@ -156,7 +170,7 @@ pub(crate) fn decode_and_send_paced(
     let _ = event_tx.send((playlist_id, PipelineEvent::Started { duration_ms }));
 
     // Anchor the wall grid at the first boundary after now (play/seek origin).
-    pacer.anchor(pacer.now_ns());
+    pacer.anchor();
 
     let mut eos = false;
     let mut last_decoded_ms: u64 = pts_offset_ms;
@@ -199,7 +213,7 @@ pub(crate) fn decode_and_send_paced(
                     last_decoded_ms = position_ms;
                     eos = false;
                     // Re-anchor the grid to the seek instant.
-                    pacer.anchor(pacer.now_ns());
+                    pacer.anchor();
                 }
                 Err(e) => {
                     warn!(?e, position_ms, "paced: seek failed");
@@ -213,6 +227,8 @@ pub(crate) fn decode_and_send_paced(
         }
 
         if *paused {
+            // Standby black frame is auto-stamped on the paced path (submitter
+            // `paced` flag) so the receiver stays `locked=` across a pause (§4.3).
             submitter.send_black_bgra(1920, 1080);
             if should_run_heartbeat(last_heartbeat.elapsed()) {
                 emit_heartbeat(
@@ -222,18 +238,20 @@ pub(crate) fn decode_and_send_paced(
                     PlaybackStateLabel::Paused,
                     last_heartbeat,
                     consecutive_bad_polls,
-                    PacingStats::default(),
+                    // Report the flag + accumulated counters, not default (#147
+                    // change 7): a paced pipeline is `enabled=true` while paused.
+                    pacer.stats(),
                 );
             }
             std::thread::sleep(Duration::from_millis(100));
             continue;
         }
 
-        // 2. One pacer scheduling step. The pull closure decodes forward; the
-        //    submitter is the sink (audio-before-video async NDI submit).
-        let now = pacer.now_ns();
+        // 2. One pacer scheduling step. The pacer reads its own wall clock (a
+        //    scheduling read, then an emit read after decode). The pull closure
+        //    decodes forward; the submitter is the sink (audio-before-video
+        //    async NDI submit).
         let outcome = pacer.service(
-            now,
             || {
                 if eos {
                     return None;
@@ -258,8 +276,8 @@ pub(crate) fn decode_and_send_paced(
         );
 
         match outcome {
-            ServiceOutcome::Wait { until_ns } => {
-                sleep_to_boundary(pacer, until_ns);
+            ServiceOutcome::Wait { until_100ns } => {
+                sleep_to_boundary(pacer, until_100ns);
             }
             ServiceOutcome::Emitted | ServiceOutcome::Repeated | ServiceOutcome::Starved => {
                 pacer.tick_wall();

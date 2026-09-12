@@ -138,6 +138,15 @@ pub fn interval_ns(fps: i64) -> i64 {
 /// **Sleep / pacing target ONLY, never a timecode stamp.** A stamp must FLOOR
 /// (§4); a future-dated ceil stamp arms the receiver's backward-step guard.
 /// A non-positive `fps` returns `now_100ns` unchanged (genlock off → zero wait).
+///
+/// **Idempotent on the promotion boundaries it produces.** This is a faithful
+/// port of the camera-box ceil twin, which lacks [`floor_boundary_100ns`]'s
+/// promotion fix. So for an input that sits EXACTLY on a boundary whose slot
+/// recovery under-counts (`b_1 @30 = 333_333`, below the rational `333_333.33`),
+/// `next_boundary_100ns(b) == b` rather than the next slot. When you need the
+/// grid boundary STRICTLY greater than a value that may already be on the grid
+/// (the emit gate's one-slot catch-up / resync / re-latch targets), use
+/// [`strict_next_boundary_100ns`], which advances even from an on-grid input.
 pub fn next_boundary_100ns(now_100ns: i64, fps: i64) -> i64 {
     if fps <= 0 {
         return now_100ns;
@@ -155,6 +164,102 @@ pub fn next_boundary_100ns(now_100ns: i64, fps: i64) -> i64 {
     }
 }
 
+/// The exact-rational grid boundary STRICTLY GREATER than `x_100ns`, always
+/// advancing — the on-grid-safe wrapper around [`next_boundary_100ns`].
+///
+/// [`next_boundary_100ns`] is idempotent on the promotion boundaries it itself
+/// produces (`next_boundary_100ns(333_333) == 333_333`), so feeding it a value
+/// that is already on the grid can stall. The exact-grid emit gate
+/// ([`genlock_emit_gate_100ns`]) advances a boundary it produced (the pending
+/// `next_boundary`) by ONE slot, and re-latches / resyncs from a possibly
+/// on-grid instant — every one of those needs a value STRICTLY greater than the
+/// input. This helper delivers it: it uses the plain ceil when that already
+/// advances, and otherwise nudges one 100-ns tick past `x` (landing inside the
+/// next slot) before ceiling, so an on-grid input yields the NEXT slot, never
+/// itself. A non-positive `fps` returns `x_100ns` unchanged.
+pub fn strict_next_boundary_100ns(x_100ns: i64, fps: i64) -> i64 {
+    if fps <= 0 {
+        return x_100ns;
+    }
+    let nb = next_boundary_100ns(x_100ns, fps);
+    if nb > x_100ns {
+        nb
+    } else {
+        // `x` is exactly on a promotion boundary (ceil was idempotent): step one
+        // tick into the next slot, then ceil back onto the grid.
+        next_boundary_100ns(x_100ns + 1, fps)
+    }
+}
+
+/// `true` iff `floor_now` sits MORE than [`GENLOCK_MAX_CATCHUP_INTERVALS`] grid
+/// slots past `boundary` — the exact-grid resync threshold. The exact-rational
+/// slots are 333_333 or 333_334 wide (at 30 fps), so a fixed-interval division
+/// miscounts across a second boundary; this STEPS the grid instead, exactly
+/// `GENLOCK_MAX_CATCHUP_INTERVALS + 1` times. If the stepped boundary is still
+/// at-or-before `floor_now`, the lag exceeds the bound. Bounded work (9 steps at
+/// 30 fps) — the whole count is never materialised, only "> bound?".
+fn lag_over_catchup_bound_100ns(boundary_100ns: i64, floor_now_100ns: i64, fps: i64) -> bool {
+    let mut b = boundary_100ns;
+    for _ in 0..=GENLOCK_MAX_CATCHUP_INTERVALS {
+        b = strict_next_boundary_100ns(b, fps);
+    }
+    b <= floor_now_100ns
+}
+
+/// The EXACT-100-ns-grid twin of [`genlock_emit_gate`] — the gate the `Pacer`
+/// actually uses, because SongPlayer GENERATES its own timing (it stamps and
+/// sleeps on the same second-anchored exact-rational grid, so pacing and stamps
+/// must share ONE grid). Same decision rules as the ns gate, but every boundary
+/// is produced by the exact-rational helpers, so the returned boundary is always
+/// on the grid, strictly increasing, and never future-dated.
+///
+/// - latched boundary = `if nb == 0 || nb > floor_boundary_100ns(now) +
+///   interval_100ns { strict_next_boundary_100ns(now) } else { nb }`
+///   (init / backward-step re-latch to the next grid boundary after `now`).
+/// - `now < boundary` → do not emit; keep the boundary.
+/// - crossed the boundary → emit; advance ONE grid slot
+///   ([`strict_next_boundary_100ns`] of the boundary), UNLESS the lag exceeds
+///   [`GENLOCK_MAX_CATCHUP_INTERVALS`] AND nothing is buffered
+///   (`!queue_had_frame`) → grid-resync to the next boundary after `now`.
+///   Lag is counted by STEPPING the grid (`lag_over_catchup_bound_100ns`), not
+///   by dividing by a nominal interval, because the slots are unequal
+///   (333_333 vs 333_334 wide within a second).
+///
+/// **Deviation from the ns port, documented deliberately:** the ns gate advances
+/// with `boundary + interval` and re-latches with `now - now % interval +
+/// interval`; the exact-grid twin uses [`strict_next_boundary_100ns`] rather
+/// than the bare [`next_boundary_100ns`] the naming would suggest, because the
+/// latter is idempotent on the promotion boundaries it produces and would stall
+/// the pacer (a one-slot catch-up from an on-grid `nb` would return `nb`).
+pub fn genlock_emit_gate_100ns(
+    now_100ns: i64,
+    next_boundary_100ns_in: i64,
+    fps: i64,
+    queue_had_frame: bool,
+) -> (bool, i64) {
+    let interval = interval_100ns(fps);
+    if interval == 0 {
+        return (false, next_boundary_100ns_in);
+    }
+    let floor_now = floor_boundary_100ns(now_100ns, fps);
+    let boundary = if next_boundary_100ns_in == 0 || next_boundary_100ns_in > floor_now + interval {
+        strict_next_boundary_100ns(now_100ns, fps)
+    } else {
+        next_boundary_100ns_in
+    };
+    if now_100ns < boundary {
+        return (false, boundary);
+    }
+    let next = if !queue_had_frame && lag_over_catchup_bound_100ns(boundary, floor_now, fps) {
+        // Genuine wall-clock step with nothing buffered → grid-resync.
+        strict_next_boundary_100ns(now_100ns, fps)
+    } else {
+        // Catch up exactly one grid slot (never leap past a buffered frame).
+        strict_next_boundary_100ns(boundary, fps)
+    };
+    (true, next)
+}
+
 /// The wall-clock boundary [`genlock_emit_gate`] latches for `now_ns`, factored
 /// out so [`genlock_emit_on_time`] and [`genlock_lag_intervals`] compute the
 /// IDENTICAL boundary. Initialises (`next_boundary_ns == 0`) or re-latches a
@@ -170,11 +275,19 @@ fn genlock_latched_boundary(now_ns: i64, next_boundary_ns: i64, interval_ns: i64
     }
 }
 
-/// The wall-clock emit gate: given the current wall time `now_ns`, the pending
-/// emit boundary `next_boundary_ns` (0 = uninitialised), the boundary
+/// The wall-clock (ns) emit gate: given the current wall time `now_ns`, the
+/// pending emit boundary `next_boundary_ns` (0 = uninitialised), the boundary
 /// `interval_ns` (`1e9 / fps`), and `queue_had_frame` (is a real frame still
 /// buffered/pending — #1131), decide whether THIS boundary emits and return the
 /// updated next boundary. camera-box `genlock_pacing.rs::genlock_emit_gate`.
+///
+/// This is the faithful **reference port** of camera-box (which decimates over
+/// grabber ARRIVALS on a uniform ns grid). SongPlayer's `Pacer` does NOT use it
+/// — it uses the exact-grid [`genlock_emit_gate_100ns`] twin, because SongPlayer
+/// GENERATES the timing itself and must pace on the same second-anchored
+/// exact-rational 100-ns grid it stamps on. This port is kept, with its 43
+/// contract vectors, so the SongPlayer twin can be diffed against the normative
+/// camera-box semantics.
 ///
 /// - `interval_ns == 0` → genlock off: never emit, boundary unchanged, no panic.
 /// - `now_ns < boundary` → between boundaries: do not emit; keep the boundary.
@@ -262,6 +375,15 @@ pub fn boundary_skip_count(old_boundary_ns: i64, new_boundary_ns: i64, interval_
 /// them into one slot. One send-fps frame is `1e7 / fps` in 100-ns units.
 /// `fps <= 0` returns the base unchanged (guarded divisor). `repeat_index` is
 /// 1-based. camera-box `genlock_pacing.rs::starvation_repeat_timecode_100ns`.
+///
+/// **Reference port — NOT used by SongPlayer's one-frame-per-boundary repeat.**
+/// SongPlayer stamps a starvation repeat with the SERVICED boundary itself
+/// (§5.5, on-grid and strictly increasing like any emit), not with a
+/// backward-decreasing burst-backfill stamp. This decreasing-stamp helper covers
+/// camera-box's burst backfill, which SongPlayer's pacer does not do; whether it
+/// applies to a one-frame-per-boundary repeat at all is camera-box open
+/// question 11 (camera-box#1294). Kept + tested so the two projects stay
+/// diffable.
 pub fn starvation_repeat_timecode_100ns(
     base_timecode_100ns: i64,
     repeat_index: i64,
