@@ -926,3 +926,7 @@ mod tests {
         assert_eq!(sender.get_no_connections(0), 7);
     }
 }
+
+#[cfg(test)]
+#[path = "sender_tests_timecode.rs"]
+mod sender_tests_timecode;

@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 mod clear_lyrics;
+pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
 mod lyrics_loader;
@@ -16,6 +17,7 @@ pub mod state;
 pub mod submitter;
 mod test_helpers;
 mod title;
+pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;

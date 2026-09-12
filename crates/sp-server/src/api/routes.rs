@@ -839,3 +839,7 @@ mod tests;
 #[cfg(test)]
 #[path = "routes_tests_reference.rs"]
 mod tests_reference;
+
+#[cfg(test)]
+#[path = "routes_tests_clock.rs"]
+mod tests_clock;

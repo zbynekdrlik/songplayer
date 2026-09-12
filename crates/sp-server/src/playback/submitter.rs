@@ -498,3 +498,7 @@ mod tests {
         assert_eq!(sub.frame_rate_d(), 1001);
     }
 }
+
+#[cfg(test)]
+#[path = "submitter_tests_timecode.rs"]
+mod submitter_tests_timecode;
