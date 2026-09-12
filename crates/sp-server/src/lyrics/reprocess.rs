@@ -428,10 +428,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_bucket_skips_songs_already_produced_by_gemini() {
-        // v18 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 18)`.
-        // Pre-v18 Gemini output is degraded (empty lines, autosub contamination,
-        // missing end_ms clip, or synthesized fake words). Only v18+ rows trusted.
+    async fn stale_bucket_no_longer_protects_legacy_gemini_rows() {
+        // #143: the v18 Gemini smart-skip clause (`NOT (source LIKE
+        // '%gemini%' AND version >= 18)`) is deleted — that regime no
+        // longer exists (see mod.rs::LYRICS_PIPELINE_VERSION history), so
+        // EVERY `ensemble:gemini` row, including the once-protected v18+
+        // ones, must re-queue for reprocessing under v21 like any other
+        // stale row.
         let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
@@ -445,26 +448,26 @@ mod tests {
         .await
         .unwrap();
 
-        // Running under v19 — only the v18 pure-Gemini row is protected; all
-        // pre-v18 rows must come back, including v17 (which had fake words).
-        let mut remaining = vec!["gemini_v17", "autosub_only", "old_gemini"];
+        // Running under v21 — every row (including the former v18
+        // "protected" one) must come back exactly once.
+        let mut remaining = vec!["gemini_v18", "gemini_v17", "autosub_only", "old_gemini"];
         while !remaining.is_empty() {
-            let row = fetch_bucket_stale(&pool, 19).await.unwrap().unwrap();
+            let row = fetch_bucket_stale(&pool, 21).await.unwrap().unwrap();
             assert!(
                 remaining.contains(&row.youtube_id.as_str()),
                 "unexpected row picked: {}",
                 row.youtube_id
             );
             remaining.retain(|&id| id != row.youtube_id.as_str());
-            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 19 WHERE youtube_id = ?")
+            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 21 WHERE youtube_id = ?")
                 .bind(&row.youtube_id)
                 .execute(&pool)
                 .await
                 .unwrap();
         }
         assert!(
-            fetch_bucket_stale(&pool, 19).await.unwrap().is_none(),
-            "v18+ pure-Gemini rows must not appear in stale bucket"
+            fetch_bucket_stale(&pool, 21).await.unwrap().is_none(),
+            "every row must be re-queued exactly once, none left behind"
         );
     }
 
