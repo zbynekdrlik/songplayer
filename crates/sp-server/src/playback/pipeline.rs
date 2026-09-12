@@ -649,6 +649,8 @@ fn decode_and_send(
                         data: af.data,
                         channels: af.channels,
                         sample_rate: af.sample_rate,
+                        // Stamped by FrameSubmitter at submission time (#146).
+                        timecode_100ns: None,
                     })
                     .collect();
 

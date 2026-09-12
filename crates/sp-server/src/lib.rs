@@ -240,6 +240,23 @@ pub async fn start(
     // (writer) and the AppState (reader) can hold an Arc to the same instance.
     let ndi_health_registry = Arc::new(playback::ndi_health::NdiHealthRegistry::new());
 
+    // 3b'. dantesync clock health (#146). Shared handle: the 1 Hz poller writes
+    // it, the playback engine reads it into every NDI health snapshot. Never
+    // blocks playback — a missing endpoint just reads `no dantesync`.
+    let clock_health = Arc::new(std::sync::RwLock::new(
+        playback::clock_health::ClockHealth::default(),
+    ));
+    {
+        let url = std::env::var("DANTESYNC_STATUS_URL")
+            .unwrap_or_else(|_| playback::clock_health::DANTESYNC_STATUS_URL_DEFAULT.to_string());
+        playback::clock_health::spawn_clock_health_poller(
+            reqwest::Client::new(),
+            url,
+            clock_health.clone(),
+            shutdown_tx.subscribe(),
+        );
+    }
+
     // 3c. Resolume registry — must be created before AppState so the Arc can
     // be stored in state and shared with the health endpoint.
     let resolume_rows =
@@ -628,6 +645,9 @@ pub async fn start(
         presenter_client,
         ndi_health_registry,
     });
+    // Inject the shared dantesync clock-health handle so every NDI health
+    // snapshot carries the current clock state (#146).
+    engine.set_clock_health(clock_health);
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)

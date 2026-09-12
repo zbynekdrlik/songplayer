@@ -6,6 +6,7 @@
 //! Mirrors `playback/recovery.rs` precedent and `resolume::ResolumeRegistry`
 //! shape from PR #54.
 
+use crate::playback::clock_health::ClockHealth;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -40,6 +41,10 @@ pub struct PipelineHealthSnapshot {
     /// network adapter); recovery requires a process restart or full NDI
     /// runtime re-init (tracked in #60).
     pub degraded_reason: Option<String>,
+    /// dantesync-derived clock health (#146). The same box-wide value is
+    /// stamped onto every pipeline's snapshot; `clock_ok` gates the genlock
+    /// lock-state. Defaults to `no dantesync` until the poller reports.
+    pub clock: ClockHealth,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from
@@ -233,6 +238,10 @@ impl crate::playback::PlaybackEngine {
             last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
             consecutive_bad_polls,
             degraded_reason: degraded_reason.clone(),
+            clock: match self.clock_health.read() {
+                Ok(guard) => guard.clone(),
+                Err(_) => ClockHealth::default(),
+            },
         };
 
         // Transition logging: connection-count change, degradation, recovery.

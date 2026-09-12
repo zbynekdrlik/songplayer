@@ -852,6 +852,7 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,
         degraded_reason: None,
+        clock: crate::playback::clock_health::ClockHealth::default(),
     });
     let resp = app(state)
         .oneshot(

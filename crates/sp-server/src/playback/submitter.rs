@@ -15,7 +15,10 @@
 //!    Shutdown / NewPlay / Error / Pause). Flush itself is a sync point that
 //!    releases the previous frame, after which the buffer may be dropped.
 
+use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat, VideoFrame};
+
+use crate::playback::wallclock::WallClock;
 
 /// Owns an `NdiSender` plus the previous frame's buffer for the async
 /// double-buffer pattern.
@@ -49,6 +52,9 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// Wall-clock instant of the last `submit_nv12` call. `None` means no
     /// real frame has been submitted (standby black frames are excluded).
     last_submit_ts: Option<std::time::Instant>,
+    /// Monotonic-to-UTC wall clock stamping genlock timecodes onto every real
+    /// frame (#146). One clock per pipeline thread, owned here.
+    wall: WallClock,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -63,7 +69,22 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frames_in_window: 0,
             window_start: std::time::Instant::now(),
             last_submit_ts: None,
+            wall: WallClock::system(),
         }
+    }
+
+    /// Test-only: construct with an injected [`WallClock`] so genlock
+    /// timecodes are deterministic without a real clock.
+    #[cfg(test)]
+    pub fn new_with_wallclock(
+        sender: NdiSender<B>,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        wall: WallClock,
+    ) -> Self {
+        let mut s = Self::new(sender, frame_rate_n, frame_rate_d);
+        s.wall = wall;
+        s
     }
 
     /// Update the frame rate used for subsequent submissions. Call this when
@@ -104,13 +125,25 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.frames_in_window += 1;
         self.last_submit_ts = Some(std::time::Instant::now());
 
+        // Genlock (#146): advance the wall clock once per submit, take ONE
+        // wall reading, and stamp both streams from it. Audio carries the raw
+        // wall clock (no snap, §6); video carries the floored grid boundary
+        // (§4, FLOOR never ceil).
+        self.wall.tick();
+        let now_100ns = self.wall.now_100ns();
+        let audio_tc = Some(now_100ns);
+        let video_tc = Some(floor_boundary_100ns(now_100ns, GENLOCK_GRID_FPS));
+
         // 1. Audio first — fast, non-blocking, goes straight into NDI's queue.
         for af in audio {
-            self.sender.send_audio(af);
+            let mut stamped = af.clone();
+            stamped.timecode_100ns = audio_tc;
+            self.sender.send_audio(&stamped);
         }
 
         // 2. Video async — may block on clock_video pacing, returns once NDI
-        //    has taken ownership of our pointer.
+        //    has taken ownership of our pointer. Pacing stays SDK-clocked in
+        //    #146; #147 replaces it with boundary-paced emission.
         let frame = VideoFrame {
             data: video_data,
             width,
@@ -119,6 +152,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frame_rate_n: self.frame_rate_n,
             frame_rate_d: self.frame_rate_d,
             pixel_format: PixelFormat::Nv12,
+            timecode_100ns: video_tc,
         };
         // SAFETY: the previous async frame's buffer is held in `prev_frame`
         // below; it will not be dropped until we install the new frame, which
@@ -153,6 +187,9 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frame_rate_n: self.frame_rate_n,
             frame_rate_d: self.frame_rate_d,
             pixel_format: PixelFormat::Bgra,
+            // Standby black frame is NOT on the genlock grid yet, so it keeps
+            // SYNTHESIZE (None) — camera-box#1294 open question 7.
+            timecode_100ns: None,
         };
         self.sender.send_video(&frame);
     }
@@ -220,6 +257,7 @@ mod tests {
             data: interleaved,
             channels,
             sample_rate: 48000,
+            timecode_100ns: None,
         }
     }
 

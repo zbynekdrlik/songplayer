@@ -39,6 +39,11 @@ pub struct VideoFrame {
     pub frame_rate_d: i32,
     /// Pixel format. Determines the FourCC sent to NDI and the stride semantic.
     pub pixel_format: PixelFormat,
+    /// Genlock video timecode: `floor_boundary_100ns(present_wall)` in 100-ns
+    /// units since the Unix epoch (camera-box#1294 §4). `None` keeps the NDI
+    /// SYNTHESIZE marker — used only for the standby black frame, which is not
+    /// on the grid yet (camera-box#1294 open question 7).
+    pub timecode_100ns: Option<i64>,
 }
 
 /// An audio frame ready to send over NDI. Data is interleaved f32 PCM — the
@@ -51,6 +56,10 @@ pub struct AudioFrame {
     pub channels: u32,
     /// Sample rate in Hz.
     pub sample_rate: u32,
+    /// Genlock audio timecode: the raw wall clock at submission in 100-ns
+    /// units since the Unix epoch, with NO boundary snap (camera-box#1294 §6).
+    /// `None` keeps the NDI SYNTHESIZE marker.
+    pub timecode_100ns: Option<i64>,
 }
 
 /// Tally state — whether this source is on program / preview.
@@ -90,6 +99,7 @@ pub trait NdiBackend: Send + Sync {
         frame_rate_n: i32,
         frame_rate_d: i32,
         data: &[u8],
+        timecode_100ns: Option<i64>,
     );
 
     /// Schedule a video frame for asynchronous send.
@@ -111,6 +121,7 @@ pub trait NdiBackend: Send + Sync {
         frame_rate_n: i32,
         frame_rate_d: i32,
         data: &[u8],
+        timecode_100ns: Option<i64>,
     );
 
     /// Flush the last async frame by calling `send_send_video_async_v2(NULL)`.
@@ -126,6 +137,7 @@ pub trait NdiBackend: Send + Sync {
         channels: i32,
         samples_per_channel: i32,
         interleaved: &[f32],
+        timecode_100ns: Option<i64>,
     );
 
     /// Query tally state. Returns `None` if the timeout expired with no change.
@@ -177,6 +189,7 @@ impl RealNdiBackend {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_video_frame(
         four_cc: FourCCVideoType,
         width: i32,
@@ -185,6 +198,7 @@ impl RealNdiBackend {
         frame_rate_n: i32,
         frame_rate_d: i32,
         data: *const u8,
+        timecode_100ns: Option<i64>,
     ) -> NDIlib_video_frame_v2_t {
         NDIlib_video_frame_v2_t {
             xres: width,
@@ -194,7 +208,10 @@ impl RealNdiBackend {
             frame_rate_d,
             picture_aspect_ratio: 0.0,
             frame_format_type: FRAME_FORMAT_PROGRESSIVE,
-            timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
+            // Genlock: real frames carry the floored wall-clock boundary
+            // (camera-box#1294 §4). `None` keeps SYNTHESIZE for the standby
+            // black frame only. `timestamp` stays 0.
+            timecode: timecode_100ns.unwrap_or(NDI_SEND_TIMECODE_SYNTHESIZE),
             p_data: data,
             line_stride_in_bytes: stride,
             p_metadata: ptr::null(),
@@ -265,6 +282,7 @@ impl NdiBackend for RealNdiBackend {
         frame_rate_n: i32,
         frame_rate_d: i32,
         data: &[u8],
+        timecode_100ns: Option<i64>,
     ) {
         let handles = self.handles.lock().unwrap();
         let Some(state) = handles.get(&handle) else {
@@ -278,6 +296,7 @@ impl NdiBackend for RealNdiBackend {
             frame_rate_n,
             frame_rate_d,
             data.as_ptr(),
+            timecode_100ns,
         );
         unsafe {
             (self.lib.send_send_video_v2)(state.ptr, &frame);
@@ -295,6 +314,7 @@ impl NdiBackend for RealNdiBackend {
         frame_rate_n: i32,
         frame_rate_d: i32,
         data: &[u8],
+        timecode_100ns: Option<i64>,
     ) {
         let handles = self.handles.lock().unwrap();
         let Some(state) = handles.get(&handle) else {
@@ -308,6 +328,7 @@ impl NdiBackend for RealNdiBackend {
             frame_rate_n,
             frame_rate_d,
             data.as_ptr(),
+            timecode_100ns,
         );
         unsafe {
             (self.lib.send_send_video_async_v2)(state.ptr, &frame);
@@ -333,6 +354,7 @@ impl NdiBackend for RealNdiBackend {
         channels: i32,
         samples_per_channel: i32,
         interleaved: &[f32],
+        timecode_100ns: Option<i64>,
     ) {
         if channels <= 0 || samples_per_channel <= 0 || interleaved.is_empty() {
             return;
@@ -349,7 +371,9 @@ impl NdiBackend for RealNdiBackend {
             sample_rate,
             no_channels: channels,
             no_samples: samples_per_channel,
-            timecode: NDI_SEND_TIMECODE_SYNTHESIZE,
+            // Genlock: raw wall clock at submission (camera-box#1294 §6),
+            // SYNTHESIZE only when unstamped. `timestamp` stays 0.
+            timecode: timecode_100ns.unwrap_or(NDI_SEND_TIMECODE_SYNTHESIZE),
             four_cc: FourCCAudioType::FLTP,
             p_data: state.audio_scratch.as_ptr(),
             channel_stride_in_bytes: samples_per_channel * std::mem::size_of::<f32>() as i32,
@@ -403,9 +427,14 @@ pub struct NdiSender<B: NdiBackend> {
 }
 
 impl<B: NdiBackend> NdiSender<B> {
-    /// Create a sender with explicit clocking flags. For single-threaded
-    /// video+audio submission, `clock_video=true, clock_audio=false` is the
-    /// SDK-recommended configuration.
+    /// Create a sender with explicit clocking flags.
+    ///
+    /// Genlock note (#146/#147): the genlock path drives cadence from the
+    /// wall-clock timecode carried on every real frame, not from the SDK
+    /// clock, and drops the SYNTHESIZE marker for real sends. `clock_video`
+    /// SDK pacing is retained as an interim measure and is replaced by
+    /// boundary-paced emission in #147; it is no longer "the recommended
+    /// configuration".
     ///
     /// Do NOT set both `clock_video` and `clock_audio` to `true` from a
     /// single submission thread: each clocked send blocks until the wall clock
@@ -437,6 +466,7 @@ impl<B: NdiBackend> NdiSender<B> {
             frame.frame_rate_n,
             frame.frame_rate_d,
             &frame.data,
+            frame.timecode_100ns,
         );
     }
 
@@ -463,6 +493,7 @@ impl<B: NdiBackend> NdiSender<B> {
                 frame.frame_rate_n,
                 frame.frame_rate_d,
                 &frame.data,
+                frame.timecode_100ns,
             );
         }
     }
@@ -485,6 +516,7 @@ impl<B: NdiBackend> NdiSender<B> {
             frame.channels as i32,
             samples_per_channel,
             &frame.data,
+            frame.timecode_100ns,
         );
     }
 
@@ -537,6 +569,13 @@ pub mod test_util {
         tally_response: StdMutex<Option<(bool, bool)>>,
         last_audio_planar: StdMutex<Vec<f32>>,
         connection_count: AtomicI32,
+        /// Resolved video timecodes recorded per `send_video{,_async}` call —
+        /// `Some(t) -> t`, `None -> NDI_SEND_TIMECODE_SYNTHESIZE` (exactly what
+        /// `RealNdiBackend` writes into the frame). Kept out of the `calls`
+        /// strings so existing exact-match assertions stay stable.
+        video_timecodes: StdMutex<Vec<i64>>,
+        /// Resolved audio timecodes, same convention as `video_timecodes`.
+        audio_timecodes: StdMutex<Vec<i64>>,
     }
 
     impl MockNdiBackend {
@@ -550,6 +589,16 @@ pub mod test_util {
 
         pub fn last_audio_planar(&self) -> Vec<f32> {
             self.last_audio_planar.lock().unwrap().clone()
+        }
+
+        /// Resolved video timecodes recorded so far (one per video send).
+        pub fn video_timecodes(&self) -> Vec<i64> {
+            self.video_timecodes.lock().unwrap().clone()
+        }
+
+        /// Resolved audio timecodes recorded so far (one per audio send).
+        pub fn audio_timecodes(&self) -> Vec<i64> {
+            self.audio_timecodes.lock().unwrap().clone()
         }
 
         pub fn set_tally(&self, on_program: bool, on_preview: bool) {
@@ -594,10 +643,13 @@ pub mod test_util {
             frame_rate_n: i32,
             frame_rate_d: i32,
             _data: &[u8],
+            timecode_100ns: Option<i64>,
         ) {
             self.calls.lock().unwrap().push(format!(
                 "send_video({handle},{four_cc:?},{width}x{height},stride={stride},{frame_rate_n}/{frame_rate_d})"
             ));
+            let tc = timecode_100ns.unwrap_or(crate::types::NDI_SEND_TIMECODE_SYNTHESIZE);
+            self.video_timecodes.lock().unwrap().push(tc);
         }
 
         unsafe fn send_video_async(
@@ -610,10 +662,13 @@ pub mod test_util {
             frame_rate_n: i32,
             frame_rate_d: i32,
             _data: &[u8],
+            timecode_100ns: Option<i64>,
         ) {
             self.calls.lock().unwrap().push(format!(
                 "send_video_async({handle},{four_cc:?},{width}x{height},stride={stride},{frame_rate_n}/{frame_rate_d})"
             ));
+            let tc = timecode_100ns.unwrap_or(crate::types::NDI_SEND_TIMECODE_SYNTHESIZE);
+            self.video_timecodes.lock().unwrap().push(tc);
         }
 
         fn send_video_flush(&self, handle: usize) {
@@ -630,10 +685,13 @@ pub mod test_util {
             channels: i32,
             samples_per_channel: i32,
             interleaved: &[f32],
+            timecode_100ns: Option<i64>,
         ) {
             self.calls.lock().unwrap().push(format!(
                 "send_audio({handle},sr={sample_rate},ch={channels},spc={samples_per_channel})"
             ));
+            let tc = timecode_100ns.unwrap_or(crate::types::NDI_SEND_TIMECODE_SYNTHESIZE);
+            self.audio_timecodes.lock().unwrap().push(tc);
             // Record the planar form for tests that want to verify layout.
             let mut scratch = Vec::new();
             crate::deinterleave::deinterleave(interleaved, channels as usize, &mut scratch);
@@ -696,6 +754,7 @@ mod tests {
             frame_rate_n: 30,
             frame_rate_d: 1,
             pixel_format: PixelFormat::Nv12,
+            timecode_100ns: None,
         };
         // SAFETY: `frame` outlives this call and a flush happens on drop.
         unsafe { sender.send_video_async(&frame) };
@@ -723,6 +782,7 @@ mod tests {
             frame_rate_n: 30,
             frame_rate_d: 1,
             pixel_format: PixelFormat::Nv12,
+            timecode_100ns: None,
         };
         let frame_b = VideoFrame {
             data: vec![0u8; 4 * 2 * 3 / 2],
@@ -732,6 +792,7 @@ mod tests {
             frame_rate_n: 30,
             frame_rate_d: 1,
             pixel_format: PixelFormat::Nv12,
+            timecode_100ns: None,
         };
 
         // SAFETY: the buffers in `frame_a` and `frame_b` outlive every call below,
@@ -762,6 +823,7 @@ mod tests {
             frame_rate_n: 30,
             frame_rate_d: 1,
             pixel_format: PixelFormat::Bgra,
+            timecode_100ns: None,
         };
         sender.send_video(&frame);
         let calls = backend.calls();
@@ -778,6 +840,7 @@ mod tests {
             data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
             channels: 2,
             sample_rate: 48000,
+            timecode_100ns: None,
         };
         sender.send_audio(&frame);
 
@@ -865,6 +928,7 @@ mod tests {
             data: vec![1.0, 2.0],
             channels: 0,
             sample_rate: 48000,
+            timecode_100ns: None,
         };
         sender.send_audio(&frame);
         // Only create + drop-flush + destroy — no send_audio recorded.

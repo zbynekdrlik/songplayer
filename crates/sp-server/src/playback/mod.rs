@@ -166,6 +166,10 @@ pub struct PlaybackEngine {
     /// Cloned into `AppState` so the API layer reads without going through
     /// the engine. Mirrors the `Arc<ResolumeRegistry>` pattern from PR #54.
     ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
+    /// Shared dantesync clock health (#146). Written by the clock-health
+    /// poller (spawned in `lib.rs::start`); read when building each NDI health
+    /// snapshot. Defaults to `no dantesync` until a handle is injected.
+    clock_health: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -231,7 +235,20 @@ impl PlaybackEngine {
             presenter_client,
             instant_origin,
             ndi_health_registry,
+            clock_health: std::sync::Arc::new(std::sync::RwLock::new(
+                crate::playback::clock_health::ClockHealth::default(),
+            )),
         }
+    }
+
+    /// Inject the shared dantesync clock-health handle written by the poller
+    /// spawned in `lib.rs::start` (#146). Until this is called, snapshots
+    /// carry the default `no dantesync` health.
+    pub fn set_clock_health(
+        &mut self,
+        handle: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
+    ) {
+        self.clock_health = handle;
     }
 
     /// Ensure a pipeline exists for the given playlist, creating one if needed.
