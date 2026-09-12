@@ -47,3 +47,30 @@ fn zero_candidate_songs_route_to_asr_path_blind() {
         "a zero-candidate song must log the blind-routing decision (#120)"
     );
 }
+
+#[test]
+fn gather_does_not_bail_on_zero_text_candidates() {
+    // Follow-up defect to #120: the gate block above routes zero-candidate
+    // songs to asr_path blind, but `gather_sources_impl` still `bail!`ed with
+    // "no text sources available" on an empty candidate list — so
+    // `process_song` returned Err BEFORE the gate and `process_next` stamped
+    // the row `no_source` at the current pipeline version, freezing it until
+    // the next version bump (126 songs observed on win-resolume 2026-09-12).
+    // gather must instead return Ok with an empty candidate list so the blind
+    // route can run.
+    //
+    // gather's populated paths are real network I/O (yt_subs / lrclib /
+    // genius / description), so — like the gate guard above — this is a
+    // structural guard on the zero-candidate tail of gather.rs rather than a
+    // full integration test. CRLF-normalised for the Windows CI checkout.
+    let src = include_str!("gather.rs").replace("\r\n", "\n");
+    assert!(
+        !src.contains("bail!(\"no text sources available"),
+        "gather must not bail on zero text candidates — it must return Ok with \
+         an empty candidate list for the blind asr_path route (#120)"
+    );
+    assert!(
+        src.contains("blind asr_path route"),
+        "gather's zero-candidate tail must log the blind-route decision (#120)"
+    );
+}

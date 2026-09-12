@@ -282,10 +282,12 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
 
 /// Regression: when Claude returns `{"lines": []}` for a song that has no
 /// lyrics in its description, the description block must NOT push an empty
-/// CandidateText. The match guard `!lines.is_empty()` prevents that. Replacing
-/// the guard with `true` would allow an empty description candidate through,
-/// but then candidate_texts would not be empty and the function would not bail.
-/// This test verifies that empty-array responses are correctly skipped.
+/// CandidateText. The match guard `!lines.is_empty()` prevents that. With
+/// every source missing, `gather_sources_impl` returns Ok with an EMPTY
+/// candidate list (#120 follow-up) — no longer a bail — so `process_song`'s
+/// gate can route the song to asr_path blind. This test verifies both: the
+/// empty-array description is skipped, and the zero-candidate result is a
+/// clean empty `SongContext`, not an error.
 #[tokio::test]
 async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     use crate::ai::AiSettings;
@@ -340,11 +342,12 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     let reqwest_client = reqwest::Client::new();
     let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
 
-    // gather_sources_impl should bail with "no text sources available" because:
+    // gather_sources_impl should return Ok with an EMPTY candidate list because:
     // - yt_subs: yt-dlp path bogus, returns None
     // - lrclib: artist empty, skipped
     // - description: Claude returns empty array, match guard skips push
-    // So candidate_texts is empty and the function bails.
+    // So candidate_texts is empty — the #120 follow-up returns Ok(empty) here
+    // (not a bail) so process_song's gate routes the song to asr_path blind.
     let result = gather_sources_impl(
         Some(&ai),
         &bogus_ytdlp,
@@ -355,15 +358,13 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     )
     .await;
 
-    assert!(
-        result.is_err(),
-        "expected bail on zero candidates, got: {:?}",
-        result
+    let ctx = result.expect(
+        "gather must return Ok with an empty candidate list on zero sources, not bail (#120)",
     );
-    let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("no text sources available"),
-        "expected 'no text sources available' error, got: {err_msg}"
+        ctx.candidate_texts.is_empty(),
+        "expected an empty candidate list for the blind asr_path route, got: {:?}",
+        ctx.candidate_texts
     );
 }
 
