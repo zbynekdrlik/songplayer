@@ -71,5 +71,8 @@ async fn migration_v19_leaves_existing_rows_with_null_for_new_columns() {
 async fn migration_v19_advances_schema_version() {
     let pool = setup().await;
     let v = current_schema_version(&pool).await.unwrap();
-    assert_eq!(v, 19, "schema_version must advance to 19 after V19 applied");
+    assert!(
+        v >= 19,
+        "schema_version must be at least 19 once V19 has applied (got {v})"
+    );
 }

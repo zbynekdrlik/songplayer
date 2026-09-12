@@ -464,7 +464,7 @@ pub(crate) fn retry_backoff(attempts: u32) -> std::time::Duration {
 
     let exponent = attempts.saturating_sub(1).min(63);
     let multiplier = 1u64.checked_shl(exponent).unwrap_or(u64::MAX);
-    let secs = BASE_SECS.checked_mul(multiplier).unwrap_or(u64::MAX);
+    let secs = BASE_SECS.saturating_mul(multiplier);
     std::time::Duration::from_secs(secs.min(CAP_SECS))
 }
 
