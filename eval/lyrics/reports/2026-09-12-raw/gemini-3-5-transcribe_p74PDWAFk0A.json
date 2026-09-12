@@ -1,0 +1,5380 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\p74PDWAFk0A_vocal16k.wav",
+  "duration_ms": 479700,
+  "lines": [
+    {
+      "text": "The enemy may take some things, but he can take my worship.",
+      "start_ms": 400,
+      "end_ms": 5000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 400,
+          "end_ms": 400,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 400,
+          "end_ms": 1100,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 1100,
+          "end_ms": 1300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 1300,
+          "end_ms": 1800,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 1800,
+          "end_ms": 2500,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 2500,
+          "end_ms": 2900,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 3300,
+          "end_ms": 3400,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 3400,
+          "end_ms": 3500,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 3500,
+          "end_ms": 3800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 3800,
+          "end_ms": 4100,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 4100,
+          "end_ms": 4400,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 4400,
+          "end_ms": 5000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 5800,
+      "end_ms": 7500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 5800,
+          "end_ms": 6000,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 6000,
+          "end_ms": 6300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 6300,
+          "end_ms": 6600,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 6600,
+          "end_ms": 7500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things, but he can take my worship. Can take my worship. Oh, the enemy may take some things, but he can take my worship. Can take my worship. Oh, the enemy may take some things,",
+      "start_ms": 8000,
+      "end_ms": 28500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 8000,
+          "end_ms": 8700,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 8700,
+          "end_ms": 9000,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 9000,
+          "end_ms": 9800,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 9800,
+          "end_ms": 10000,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 10000,
+          "end_ms": 10400,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 10400,
+          "end_ms": 10800,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 10800,
+          "end_ms": 11500,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 11900,
+          "end_ms": 12000,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 12000,
+          "end_ms": 12100,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 12100,
+          "end_ms": 12400,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 12400,
+          "end_ms": 12800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 12800,
+          "end_ms": 13000,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 13000,
+          "end_ms": 13800,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 14200,
+          "end_ms": 14500,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 14500,
+          "end_ms": 14800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 14800,
+          "end_ms": 15100,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 15100,
+          "end_ms": 16300,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 16500,
+          "end_ms": 17300,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 17300,
+          "end_ms": 17500,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 17500,
+          "end_ms": 18200,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 18200,
+          "end_ms": 18500,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 18500,
+          "end_ms": 19000,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 19000,
+          "end_ms": 19300,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 19300,
+          "end_ms": 20000,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 20400,
+          "end_ms": 20500,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 20500,
+          "end_ms": 20600,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 20600,
+          "end_ms": 21000,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 21000,
+          "end_ms": 21200,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 21200,
+          "end_ms": 21500,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 21500,
+          "end_ms": 22400,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 22800,
+          "end_ms": 23100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 23100,
+          "end_ms": 23400,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 23400,
+          "end_ms": 23700,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 23700,
+          "end_ms": 24800,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 25000,
+          "end_ms": 25900,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 25900,
+          "end_ms": 26100,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 26100,
+          "end_ms": 26800,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 26800,
+          "end_ms": 27000,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 27000,
+          "end_ms": 27500,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 27500,
+          "end_ms": 27900,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 27900,
+          "end_ms": 28500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "but he can take",
+      "start_ms": 29000,
+      "end_ms": 29900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 29000,
+          "end_ms": 29100,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 29100,
+          "end_ms": 29200,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 29200,
+          "end_ms": 29600,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 29600,
+          "end_ms": 29900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "can take my worship.",
+      "start_ms": 31400,
+      "end_ms": 33300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "can",
+          "start_ms": 31400,
+          "end_ms": 31700,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 31700,
+          "end_ms": 32000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 32000,
+          "end_ms": 32300,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 32300,
+          "end_ms": 33300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "So lungs",
+      "start_ms": 35400,
+      "end_ms": 36600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 35400,
+          "end_ms": 35600,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 35600,
+          "end_ms": 36600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "breathe",
+      "start_ms": 37800,
+      "end_ms": 38600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "breathe",
+          "start_ms": 37800,
+          "end_ms": 38600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "mouth",
+      "start_ms": 39900,
+      "end_ms": 40700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "mouth",
+          "start_ms": 39900,
+          "end_ms": 40700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "sing",
+      "start_ms": 42100,
+      "end_ms": 42800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sing",
+          "start_ms": 42100,
+          "end_ms": 42800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and hands",
+      "start_ms": 44000,
+      "end_ms": 45200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 44000,
+          "end_ms": 44100,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 44100,
+          "end_ms": 45200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach. This is my way to victory.",
+      "start_ms": 46300,
+      "end_ms": 51400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach.",
+          "start_ms": 46300,
+          "end_ms": 47200,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 47400,
+          "end_ms": 47800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 47800,
+          "end_ms": 48100,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 48100,
+          "end_ms": 48500,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 48500,
+          "end_ms": 49000,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 49000,
+          "end_ms": 49600,
+          "confidence": null
+        },
+        {
+          "text": "victory.",
+          "start_ms": 49600,
+          "end_ms": 51400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Lungs",
+      "start_ms": 52800,
+      "end_ms": 53800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lungs",
+          "start_ms": 52800,
+          "end_ms": 53800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "breathe",
+      "start_ms": 54900,
+      "end_ms": 55700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "breathe",
+          "start_ms": 54900,
+          "end_ms": 55700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "mouth",
+      "start_ms": 57000,
+      "end_ms": 57700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "mouth",
+          "start_ms": 57000,
+          "end_ms": 57700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "sing",
+      "start_ms": 59200,
+      "end_ms": 59900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sing",
+          "start_ms": 59200,
+          "end_ms": 59900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and hands",
+      "start_ms": 61100,
+      "end_ms": 62400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 61100,
+          "end_ms": 61300,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 61300,
+          "end_ms": 62400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach. This is my way to victory. Oh, lungs",
+      "start_ms": 63400,
+      "end_ms": 70700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach.",
+          "start_ms": 63400,
+          "end_ms": 64400,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 64600,
+          "end_ms": 65000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 65000,
+          "end_ms": 65300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 65300,
+          "end_ms": 65700,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 65700,
+          "end_ms": 66200,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 66200,
+          "end_ms": 66800,
+          "confidence": null
+        },
+        {
+          "text": "victory.",
+          "start_ms": 66800,
+          "end_ms": 68200,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 68400,
+          "end_ms": 69800,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 70000,
+          "end_ms": 70700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "breathe mouth sing mouth",
+      "start_ms": 72100,
+      "end_ms": 75000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "breathe",
+          "start_ms": 72100,
+          "end_ms": 72800,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 73200,
+          "end_ms": 73600,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 73600,
+          "end_ms": 74100,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 74300,
+          "end_ms": 75000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "sing. Oh, hey,",
+      "start_ms": 76300,
+      "end_ms": 78900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sing.",
+          "start_ms": 76300,
+          "end_ms": 77000,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 77100,
+          "end_ms": 77500,
+          "confidence": null
+        },
+        {
+          "text": "hey,",
+          "start_ms": 77500,
+          "end_ms": 78900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach. This is",
+      "start_ms": 79600,
+      "end_ms": 82000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach.",
+          "start_ms": 79600,
+          "end_ms": 80400,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 80700,
+          "end_ms": 81000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 81000,
+          "end_ms": 82000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory. Because the enemy may take some things,",
+      "start_ms": 85200,
+      "end_ms": 88200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 85200,
+          "end_ms": 85300,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 85300,
+          "end_ms": 85400,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 85400,
+          "end_ms": 85500,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 85500,
+          "end_ms": 85600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 85600,
+          "end_ms": 85700,
+          "confidence": null
+        },
+        {
+          "text": "victory.",
+          "start_ms": 85700,
+          "end_ms": 85900,
+          "confidence": null
+        },
+        {
+          "text": "Because",
+          "start_ms": 85200,
+          "end_ms": 85800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 85800,
+          "end_ms": 86100,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 86100,
+          "end_ms": 86800,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 86800,
+          "end_ms": 87100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 87100,
+          "end_ms": 87500,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 87500,
+          "end_ms": 87900,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 87900,
+          "end_ms": 88200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "but he can take my worship.",
+      "start_ms": 89000,
+      "end_ms": 90700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 89000,
+          "end_ms": 89100,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 89100,
+          "end_ms": 89200,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 89200,
+          "end_ms": 89500,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 89500,
+          "end_ms": 89800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 89800,
+          "end_ms": 90100,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 90100,
+          "end_ms": 90700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship. Oh, the enemy may take some things,",
+      "start_ms": 91400,
+      "end_ms": 96800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 91400,
+          "end_ms": 91600,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 91600,
+          "end_ms": 92000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 92000,
+          "end_ms": 92200,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 92200,
+          "end_ms": 93200,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 93500,
+          "end_ms": 94500,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 94500,
+          "end_ms": 94700,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 94700,
+          "end_ms": 95400,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 95400,
+          "end_ms": 95700,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 95700,
+          "end_ms": 96100,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 96100,
+          "end_ms": 96500,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 96500,
+          "end_ms": 96800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "but he can take my worship. There's so much for me. I cannot tell it all. Oh, the enemy may take some things.",
+      "start_ms": 97600,
+      "end_ms": 105400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 97600,
+          "end_ms": 97700,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 97700,
+          "end_ms": 97800,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 97800,
+          "end_ms": 98100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 98100,
+          "end_ms": 98400,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 98400,
+          "end_ms": 98500,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 98500,
+          "end_ms": 98800,
+          "confidence": null
+        },
+        {
+          "text": "There's",
+          "start_ms": 98900,
+          "end_ms": 99200,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 99200,
+          "end_ms": 99400,
+          "confidence": null
+        },
+        {
+          "text": "much",
+          "start_ms": 99400,
+          "end_ms": 99800,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 99800,
+          "end_ms": 99900,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 99900,
+          "end_ms": 100500,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 100800,
+          "end_ms": 101000,
+          "confidence": null
+        },
+        {
+          "text": "cannot",
+          "start_ms": 101000,
+          "end_ms": 101500,
+          "confidence": null
+        },
+        {
+          "text": "tell",
+          "start_ms": 101500,
+          "end_ms": 101800,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 101800,
+          "end_ms": 102000,
+          "confidence": null
+        },
+        {
+          "text": "all.",
+          "start_ms": 102000,
+          "end_ms": 102500,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 102700,
+          "end_ms": 103100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 103100,
+          "end_ms": 103300,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 103300,
+          "end_ms": 103900,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 103900,
+          "end_ms": 104200,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 104200,
+          "end_ms": 104600,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 104600,
+          "end_ms": 105000,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 105000,
+          "end_ms": 105400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 106300,
+      "end_ms": 108000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 106300,
+          "end_ms": 106500,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 106500,
+          "end_ms": 106800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 106800,
+          "end_ms": 107200,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 107200,
+          "end_ms": 108000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship. You sound good. Sing it out. The enemy may take some things.",
+      "start_ms": 108500,
+      "end_ms": 114000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 108500,
+          "end_ms": 108800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 108800,
+          "end_ms": 109000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 109000,
+          "end_ms": 109200,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 109200,
+          "end_ms": 109900,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 110100,
+          "end_ms": 110200,
+          "confidence": null
+        },
+        {
+          "text": "sound",
+          "start_ms": 110200,
+          "end_ms": 110500,
+          "confidence": null
+        },
+        {
+          "text": "good.",
+          "start_ms": 110500,
+          "end_ms": 111000,
+          "confidence": null
+        },
+        {
+          "text": "Sing",
+          "start_ms": 111000,
+          "end_ms": 111200,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 111200,
+          "end_ms": 111300,
+          "confidence": null
+        },
+        {
+          "text": "out.",
+          "start_ms": 111300,
+          "end_ms": 111500,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 111500,
+          "end_ms": 111600,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 111600,
+          "end_ms": 112400,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 112500,
+          "end_ms": 112800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 112800,
+          "end_ms": 113200,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 113200,
+          "end_ms": 113600,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 113600,
+          "end_ms": 114000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 114800,
+      "end_ms": 116500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 114800,
+          "end_ms": 115100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 115100,
+          "end_ms": 115400,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 115400,
+          "end_ms": 115700,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 115700,
+          "end_ms": 116500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 117100,
+      "end_ms": 118900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 117100,
+          "end_ms": 117300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 117300,
+          "end_ms": 117600,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 117600,
+          "end_ms": 117900,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 117900,
+          "end_ms": 118900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "So we say lungs lungs breathe breathe mouth mouth sing sing and hands hands",
+      "start_ms": 119500,
+      "end_ms": 130200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 119500,
+          "end_ms": 119900,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 119900,
+          "end_ms": 120000,
+          "confidence": null
+        },
+        {
+          "text": "say",
+          "start_ms": 120000,
+          "end_ms": 120400,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 120400,
+          "end_ms": 121300,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 121400,
+          "end_ms": 122000,
+          "confidence": null
+        },
+        {
+          "text": "breathe",
+          "start_ms": 122400,
+          "end_ms": 123400,
+          "confidence": null
+        },
+        {
+          "text": "breathe",
+          "start_ms": 123500,
+          "end_ms": 124100,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 124200,
+          "end_ms": 125400,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 125600,
+          "end_ms": 126200,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 126600,
+          "end_ms": 127600,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 127800,
+          "end_ms": 128300,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 128500,
+          "end_ms": 128800,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 128800,
+          "end_ms": 129800,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 130000,
+          "end_ms": 130200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach. I command my soul. This is my way to victory.",
+      "start_ms": 130900,
+      "end_ms": 135800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach.",
+          "start_ms": 130900,
+          "end_ms": 131700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 131800,
+          "end_ms": 132000,
+          "confidence": null
+        },
+        {
+          "text": "command",
+          "start_ms": 132000,
+          "end_ms": 132500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 132500,
+          "end_ms": 132800,
+          "confidence": null
+        },
+        {
+          "text": "soul.",
+          "start_ms": 132800,
+          "end_ms": 133800,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 134000,
+          "end_ms": 134100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 134100,
+          "end_ms": 134200,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 134200,
+          "end_ms": 134300,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 134300,
+          "end_ms": 134400,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 134800,
+          "end_ms": 135300,
+          "confidence": null
+        },
+        {
+          "text": "victory.",
+          "start_ms": 135300,
+          "end_ms": 135800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, lungs",
+      "start_ms": 137500,
+      "end_ms": 137700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 137500,
+          "end_ms": 137500,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 137500,
+          "end_ms": 137700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "lungs",
+      "start_ms": 138600,
+      "end_ms": 139000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "lungs",
+          "start_ms": 138600,
+          "end_ms": 139000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "breathe breathe and mouth mouth you will sing sing and hands hands",
+      "start_ms": 139500,
+      "end_ms": 147300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "breathe",
+          "start_ms": 139500,
+          "end_ms": 140400,
+          "confidence": null
+        },
+        {
+          "text": "breathe",
+          "start_ms": 140600,
+          "end_ms": 141300,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 141500,
+          "end_ms": 141800,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 141800,
+          "end_ms": 142600,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 142800,
+          "end_ms": 143300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 143400,
+          "end_ms": 143600,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 143600,
+          "end_ms": 143900,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 143900,
+          "end_ms": 144700,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 144900,
+          "end_ms": 145500,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 145800,
+          "end_ms": 146100,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 146100,
+          "end_ms": 147100,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 147100,
+          "end_ms": 147300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach. This is This is my way to victory.",
+      "start_ms": 148200,
+      "end_ms": 152800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach.",
+          "start_ms": 148200,
+          "end_ms": 148900,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 149200,
+          "end_ms": 149600,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 149600,
+          "end_ms": 149900,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 150300,
+          "end_ms": 150700,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 150700,
+          "end_ms": 151000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 151000,
+          "end_ms": 151400,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 151400,
+          "end_ms": 151900,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 151900,
+          "end_ms": 152400,
+          "confidence": null
+        },
+        {
+          "text": "victory.",
+          "start_ms": 152500,
+          "end_ms": 152800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Somebody pray",
+      "start_ms": 153500,
+      "end_ms": 154200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Somebody",
+          "start_ms": 153500,
+          "end_ms": 154100,
+          "confidence": null
+        },
+        {
+          "text": "pray",
+          "start_ms": 154100,
+          "end_ms": 154200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "tonight.",
+      "start_ms": 154900,
+      "end_ms": 155400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "tonight.",
+          "start_ms": 154900,
+          "end_ms": 155400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "One more time.",
+      "start_ms": 168400,
+      "end_ms": 169100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 168400,
+          "end_ms": 168600,
+          "confidence": null
+        },
+        {
+          "text": "more",
+          "start_ms": 168600,
+          "end_ms": 168700,
+          "confidence": null
+        },
+        {
+          "text": "time.",
+          "start_ms": 168700,
+          "end_ms": 169100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Tell your lungs to breathe. Lungs",
+      "start_ms": 169900,
+      "end_ms": 171400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Tell",
+          "start_ms": 169900,
+          "end_ms": 170100,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 170100,
+          "end_ms": 170300,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 170300,
+          "end_ms": 170600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 170600,
+          "end_ms": 170700,
+          "confidence": null
+        },
+        {
+          "text": "breathe.",
+          "start_ms": 170700,
+          "end_ms": 171100,
+          "confidence": null
+        },
+        {
+          "text": "Lungs",
+          "start_ms": 171200,
+          "end_ms": 171400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "lungs",
+      "start_ms": 172800,
+      "end_ms": 173400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "lungs",
+          "start_ms": 172800,
+          "end_ms": 173400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "breathe breathe and mouth",
+      "start_ms": 173900,
+      "end_ms": 176300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "breathe",
+          "start_ms": 173900,
+          "end_ms": 174600,
+          "confidence": null
+        },
+        {
+          "text": "breathe",
+          "start_ms": 174900,
+          "end_ms": 175500,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 175800,
+          "end_ms": 176100,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 176100,
+          "end_ms": 176300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "mouth",
+      "start_ms": 177100,
+      "end_ms": 177200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "mouth",
+          "start_ms": 177100,
+          "end_ms": 177200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "sing",
+      "start_ms": 178100,
+      "end_ms": 178300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sing",
+          "start_ms": 178100,
+          "end_ms": 178300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "sing and hands",
+      "start_ms": 179200,
+      "end_ms": 180700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sing",
+          "start_ms": 179200,
+          "end_ms": 179700,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 180100,
+          "end_ms": 180500,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 180500,
+          "end_ms": 180700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "hands",
+      "start_ms": 181400,
+      "end_ms": 181600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "hands",
+          "start_ms": 181400,
+          "end_ms": 181600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach. This is",
+      "start_ms": 182400,
+      "end_ms": 184000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach.",
+          "start_ms": 182400,
+          "end_ms": 183100,
+          "confidence": null
+        },
+        {
+          "text": "This",
+          "start_ms": 183500,
+          "end_ms": 183800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 183800,
+          "end_ms": 184000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is my way to victory. Oh,",
+      "start_ms": 184600,
+      "end_ms": 187500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 184600,
+          "end_ms": 185000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 185000,
+          "end_ms": 185300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 185300,
+          "end_ms": 185700,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 185700,
+          "end_ms": 186200,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 186200,
+          "end_ms": 186800,
+          "confidence": null
+        },
+        {
+          "text": "victory.",
+          "start_ms": 186800,
+          "end_ms": 187100,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 187400,
+          "end_ms": 187500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "The Bible says I will bless the Lord at all times,",
+      "start_ms": 190100,
+      "end_ms": 192800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 190100,
+          "end_ms": 190200,
+          "confidence": null
+        },
+        {
+          "text": "Bible",
+          "start_ms": 190200,
+          "end_ms": 190500,
+          "confidence": null
+        },
+        {
+          "text": "says",
+          "start_ms": 190500,
+          "end_ms": 190800,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 190800,
+          "end_ms": 191000,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 191000,
+          "end_ms": 191100,
+          "confidence": null
+        },
+        {
+          "text": "bless",
+          "start_ms": 191100,
+          "end_ms": 191400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 191400,
+          "end_ms": 191600,
+          "confidence": null
+        },
+        {
+          "text": "Lord",
+          "start_ms": 191600,
+          "end_ms": 191900,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 191900,
+          "end_ms": 192000,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 192000,
+          "end_ms": 192200,
+          "confidence": null
+        },
+        {
+          "text": "times,",
+          "start_ms": 192200,
+          "end_ms": 192800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and his praise will continually be in my mouth.",
+      "start_ms": 194500,
+      "end_ms": 197300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 194500,
+          "end_ms": 194600,
+          "confidence": null
+        },
+        {
+          "text": "his",
+          "start_ms": 194600,
+          "end_ms": 194800,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 194800,
+          "end_ms": 195200,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 195200,
+          "end_ms": 195400,
+          "confidence": null
+        },
+        {
+          "text": "continually",
+          "start_ms": 195400,
+          "end_ms": 196200,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 196200,
+          "end_ms": 196500,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 196500,
+          "end_ms": 196600,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 196600,
+          "end_ms": 196800,
+          "confidence": null
+        },
+        {
+          "text": "mouth.",
+          "start_ms": 196800,
+          "end_ms": 197300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Sometimes you got to encourage yourself. Can I prophesy? Some of you walked in weak, but you're about to walk out strong. You",
+      "start_ms": 197900,
+      "end_ms": 204700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Sometimes",
+          "start_ms": 197900,
+          "end_ms": 198400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 198400,
+          "end_ms": 198400,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 198400,
+          "end_ms": 198600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 198600,
+          "end_ms": 198700,
+          "confidence": null
+        },
+        {
+          "text": "encourage",
+          "start_ms": 198700,
+          "end_ms": 199200,
+          "confidence": null
+        },
+        {
+          "text": "yourself.",
+          "start_ms": 199200,
+          "end_ms": 200000,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 200100,
+          "end_ms": 200300,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 200300,
+          "end_ms": 200400,
+          "confidence": null
+        },
+        {
+          "text": "prophesy?",
+          "start_ms": 200400,
+          "end_ms": 201200,
+          "confidence": null
+        },
+        {
+          "text": "Some",
+          "start_ms": 201300,
+          "end_ms": 201500,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 201500,
+          "end_ms": 201600,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 201600,
+          "end_ms": 201700,
+          "confidence": null
+        },
+        {
+          "text": "walked",
+          "start_ms": 201700,
+          "end_ms": 202000,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 202000,
+          "end_ms": 202200,
+          "confidence": null
+        },
+        {
+          "text": "weak,",
+          "start_ms": 202200,
+          "end_ms": 202500,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 202500,
+          "end_ms": 202700,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 202700,
+          "end_ms": 202800,
+          "confidence": null
+        },
+        {
+          "text": "about",
+          "start_ms": 202800,
+          "end_ms": 203000,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 203000,
+          "end_ms": 203100,
+          "confidence": null
+        },
+        {
+          "text": "walk",
+          "start_ms": 203100,
+          "end_ms": 203400,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 203400,
+          "end_ms": 203900,
+          "confidence": null
+        },
+        {
+          "text": "strong.",
+          "start_ms": 204000,
+          "end_ms": 204500,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 204500,
+          "end_ms": 204700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You walked in depressed, but you're about to walk out with the joy of the Lord",
+      "start_ms": 205200,
+      "end_ms": 208800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 205200,
+          "end_ms": 205400,
+          "confidence": null
+        },
+        {
+          "text": "walked",
+          "start_ms": 205400,
+          "end_ms": 205700,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 205700,
+          "end_ms": 205800,
+          "confidence": null
+        },
+        {
+          "text": "depressed,",
+          "start_ms": 205800,
+          "end_ms": 206400,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 206400,
+          "end_ms": 206600,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 206600,
+          "end_ms": 206700,
+          "confidence": null
+        },
+        {
+          "text": "about",
+          "start_ms": 206700,
+          "end_ms": 206800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 206800,
+          "end_ms": 206900,
+          "confidence": null
+        },
+        {
+          "text": "walk",
+          "start_ms": 206900,
+          "end_ms": 207300,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 207300,
+          "end_ms": 207400,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 207400,
+          "end_ms": 207600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 207600,
+          "end_ms": 207700,
+          "confidence": null
+        },
+        {
+          "text": "joy",
+          "start_ms": 207700,
+          "end_ms": 208000,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 208000,
+          "end_ms": 208100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 208100,
+          "end_ms": 208200,
+          "confidence": null
+        },
+        {
+          "text": "Lord",
+          "start_ms": 208200,
+          "end_ms": 208800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "flowing through your heart. So we about to have a good old fashioned Atlanta praise break now. Is that all right? That's all right.",
+      "start_ms": 209700,
+      "end_ms": 215700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "flowing",
+          "start_ms": 209700,
+          "end_ms": 210100,
+          "confidence": null
+        },
+        {
+          "text": "through",
+          "start_ms": 210100,
+          "end_ms": 210300,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 210300,
+          "end_ms": 210400,
+          "confidence": null
+        },
+        {
+          "text": "heart.",
+          "start_ms": 210400,
+          "end_ms": 210800,
+          "confidence": null
+        },
+        {
+          "text": "So",
+          "start_ms": 211200,
+          "end_ms": 211400,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 211400,
+          "end_ms": 211500,
+          "confidence": null
+        },
+        {
+          "text": "about",
+          "start_ms": 211500,
+          "end_ms": 211600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 211600,
+          "end_ms": 211700,
+          "confidence": null
+        },
+        {
+          "text": "have",
+          "start_ms": 211700,
+          "end_ms": 211900,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 211900,
+          "end_ms": 212000,
+          "confidence": null
+        },
+        {
+          "text": "good",
+          "start_ms": 212000,
+          "end_ms": 212300,
+          "confidence": null
+        },
+        {
+          "text": "old",
+          "start_ms": 212300,
+          "end_ms": 212400,
+          "confidence": null
+        },
+        {
+          "text": "fashioned",
+          "start_ms": 212400,
+          "end_ms": 212900,
+          "confidence": null
+        },
+        {
+          "text": "Atlanta",
+          "start_ms": 212900,
+          "end_ms": 213400,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 213400,
+          "end_ms": 213800,
+          "confidence": null
+        },
+        {
+          "text": "break",
+          "start_ms": 213800,
+          "end_ms": 214000,
+          "confidence": null
+        },
+        {
+          "text": "now.",
+          "start_ms": 214000,
+          "end_ms": 214200,
+          "confidence": null
+        },
+        {
+          "text": "Is",
+          "start_ms": 214500,
+          "end_ms": 214600,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 214600,
+          "end_ms": 214700,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 214700,
+          "end_ms": 214800,
+          "confidence": null
+        },
+        {
+          "text": "right?",
+          "start_ms": 214800,
+          "end_ms": 215000,
+          "confidence": null
+        },
+        {
+          "text": "That's",
+          "start_ms": 215300,
+          "end_ms": 215400,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 215400,
+          "end_ms": 215500,
+          "confidence": null
+        },
+        {
+          "text": "right.",
+          "start_ms": 215500,
+          "end_ms": 215700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Let's do it again. The enemy may take some things. You ready?",
+      "start_ms": 217600,
+      "end_ms": 220500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 217600,
+          "end_ms": 217800,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 217800,
+          "end_ms": 217900,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 217900,
+          "end_ms": 218000,
+          "confidence": null
+        },
+        {
+          "text": "again.",
+          "start_ms": 218000,
+          "end_ms": 218400,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 218700,
+          "end_ms": 218800,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 218800,
+          "end_ms": 219100,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 219100,
+          "end_ms": 219300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 219300,
+          "end_ms": 219600,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 219600,
+          "end_ms": 219800,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 219800,
+          "end_ms": 220000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 220000,
+          "end_ms": 220100,
+          "confidence": null
+        },
+        {
+          "text": "ready?",
+          "start_ms": 220100,
+          "end_ms": 220500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "1 2 3 let's go. The enemy may take some things,",
+      "start_ms": 221000,
+      "end_ms": 225600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "1",
+          "start_ms": 221000,
+          "end_ms": 221400,
+          "confidence": null
+        },
+        {
+          "text": "2",
+          "start_ms": 221600,
+          "end_ms": 222000,
+          "confidence": null
+        },
+        {
+          "text": "3",
+          "start_ms": 222100,
+          "end_ms": 222300,
+          "confidence": null
+        },
+        {
+          "text": "let's",
+          "start_ms": 222300,
+          "end_ms": 222500,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 222500,
+          "end_ms": 222800,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 223000,
+          "end_ms": 223200,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 223200,
+          "end_ms": 223900,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 223900,
+          "end_ms": 224200,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 224200,
+          "end_ms": 224600,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 224600,
+          "end_ms": 225000,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 225000,
+          "end_ms": 225600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "but he can take my worship.",
+      "start_ms": 226100,
+      "end_ms": 227900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 226100,
+          "end_ms": 226300,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 226300,
+          "end_ms": 226400,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 226400,
+          "end_ms": 226600,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 226600,
+          "end_ms": 226900,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 226900,
+          "end_ms": 227200,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 227200,
+          "end_ms": 227900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 228500,
+      "end_ms": 229500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 228500,
+          "end_ms": 228700,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 228700,
+          "end_ms": 228800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 229200,
+          "end_ms": 229300,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 229300,
+          "end_ms": 229500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things.",
+      "start_ms": 230600,
+      "end_ms": 234000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 230600,
+          "end_ms": 231600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 231600,
+          "end_ms": 231800,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 231800,
+          "end_ms": 232500,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 232600,
+          "end_ms": 232800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 232800,
+          "end_ms": 233200,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 233200,
+          "end_ms": 233500,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 233500,
+          "end_ms": 234000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 234800,
+      "end_ms": 236300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 234800,
+          "end_ms": 235100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 235100,
+          "end_ms": 235300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 235600,
+          "end_ms": 235700,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 235700,
+          "end_ms": 236300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Let's take it up just a little more.",
+      "start_ms": 236900,
+      "end_ms": 238300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 236900,
+          "end_ms": 237100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 237100,
+          "end_ms": 237300,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 237300,
+          "end_ms": 237400,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 237400,
+          "end_ms": 237500,
+          "confidence": null
+        },
+        {
+          "text": "just",
+          "start_ms": 237500,
+          "end_ms": 237700,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 237700,
+          "end_ms": 237800,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 237800,
+          "end_ms": 238000,
+          "confidence": null
+        },
+        {
+          "text": "more.",
+          "start_ms": 238000,
+          "end_ms": 238300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "The enemy",
+      "start_ms": 239000,
+      "end_ms": 239400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 239000,
+          "end_ms": 239200,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 239200,
+          "end_ms": 239400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "may take may take some things. Can take my worship. Can take my worship. Can take my worship. Can take my worship. Don't take I made up my mind. The enemy may take some things.",
+      "start_ms": 240000,
+      "end_ms": 251200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "may",
+          "start_ms": 240000,
+          "end_ms": 240300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 240300,
+          "end_ms": 240900,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 241100,
+          "end_ms": 241300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 241300,
+          "end_ms": 241700,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 241700,
+          "end_ms": 242100,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 242100,
+          "end_ms": 242300,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 242500,
+          "end_ms": 242700,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 242700,
+          "end_ms": 243000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 243000,
+          "end_ms": 243300,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 243300,
+          "end_ms": 243600,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 243600,
+          "end_ms": 243700,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 243700,
+          "end_ms": 243800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 244200,
+          "end_ms": 244300,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 244300,
+          "end_ms": 244500,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 244700,
+          "end_ms": 244800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 244800,
+          "end_ms": 245200,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 245200,
+          "end_ms": 245400,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 245400,
+          "end_ms": 245700,
+          "confidence": null
+        },
+        {
+          "text": "Can",
+          "start_ms": 245700,
+          "end_ms": 245900,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 245900,
+          "end_ms": 246200,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 246200,
+          "end_ms": 246400,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 246400,
+          "end_ms": 246700,
+          "confidence": null
+        },
+        {
+          "text": "Don't",
+          "start_ms": 247000,
+          "end_ms": 247200,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 247200,
+          "end_ms": 247500,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 247500,
+          "end_ms": 247600,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 247600,
+          "end_ms": 247900,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 247900,
+          "end_ms": 248000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 248000,
+          "end_ms": 248100,
+          "confidence": null
+        },
+        {
+          "text": "mind.",
+          "start_ms": 248100,
+          "end_ms": 248500,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 248800,
+          "end_ms": 248900,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 248900,
+          "end_ms": 249500,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 249700,
+          "end_ms": 249900,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 249900,
+          "end_ms": 250400,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 250400,
+          "end_ms": 250700,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 250700,
+          "end_ms": 251200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship. 1 2 my worship. Everybody turn up",
+      "start_ms": 252100,
+      "end_ms": 256900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 252100,
+          "end_ms": 252300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 252300,
+          "end_ms": 252700,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 252700,
+          "end_ms": 252900,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 252900,
+          "end_ms": 253100,
+          "confidence": null
+        },
+        {
+          "text": "1",
+          "start_ms": 253300,
+          "end_ms": 253900,
+          "confidence": null
+        },
+        {
+          "text": "2",
+          "start_ms": 254200,
+          "end_ms": 254700,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 254800,
+          "end_ms": 254900,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 254900,
+          "end_ms": 255100,
+          "confidence": null
+        },
+        {
+          "text": "Everybody",
+          "start_ms": 255400,
+          "end_ms": 256400,
+          "confidence": null
+        },
+        {
+          "text": "turn",
+          "start_ms": 256400,
+          "end_ms": 256700,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 256700,
+          "end_ms": 256900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I need to see you turning up Atlanta. Let's go.",
+      "start_ms": 263400,
+      "end_ms": 265900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 263400,
+          "end_ms": 263500,
+          "confidence": null
+        },
+        {
+          "text": "need",
+          "start_ms": 263500,
+          "end_ms": 263700,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 263700,
+          "end_ms": 263800,
+          "confidence": null
+        },
+        {
+          "text": "see",
+          "start_ms": 263800,
+          "end_ms": 264000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 264000,
+          "end_ms": 264100,
+          "confidence": null
+        },
+        {
+          "text": "turning",
+          "start_ms": 264100,
+          "end_ms": 264500,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 264500,
+          "end_ms": 264600,
+          "confidence": null
+        },
+        {
+          "text": "Atlanta.",
+          "start_ms": 264600,
+          "end_ms": 265000,
+          "confidence": null
+        },
+        {
+          "text": "Let's",
+          "start_ms": 265400,
+          "end_ms": 265700,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 265700,
+          "end_ms": 265900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Enemy may take",
+      "start_ms": 272500,
+      "end_ms": 273800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Enemy",
+          "start_ms": 272500,
+          "end_ms": 272900,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 272900,
+          "end_ms": 273000,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 273300,
+          "end_ms": 273800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "The enemy may take some things,",
+      "start_ms": 274500,
+      "end_ms": 276800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 274500,
+          "end_ms": 274700,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 274700,
+          "end_ms": 275300,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 275300,
+          "end_ms": 275600,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 275600,
+          "end_ms": 276000,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 276000,
+          "end_ms": 276400,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 276400,
+          "end_ms": 276800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "but he can take my worship.",
+      "start_ms": 277500,
+      "end_ms": 279400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 277500,
+          "end_ms": 277700,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 277700,
+          "end_ms": 277800,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 277800,
+          "end_ms": 278100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 278100,
+          "end_ms": 278300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 278300,
+          "end_ms": 278600,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 278600,
+          "end_ms": 279400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 280000,
+      "end_ms": 280800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 280000,
+          "end_ms": 280200,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 280200,
+          "end_ms": 280500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 280500,
+          "end_ms": 280600,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 280600,
+          "end_ms": 280800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take some things.",
+      "start_ms": 282100,
+      "end_ms": 285200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 282100,
+          "end_ms": 283100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 283100,
+          "end_ms": 283300,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 283300,
+          "end_ms": 284000,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 284000,
+          "end_ms": 284200,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 284200,
+          "end_ms": 284600,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 284600,
+          "end_ms": 285000,
+          "confidence": null
+        },
+        {
+          "text": "things.",
+          "start_ms": 285000,
+          "end_ms": 285200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 286200,
+      "end_ms": 287900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 286200,
+          "end_ms": 286300,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 286500,
+          "end_ms": 286900,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 286900,
+          "end_ms": 287200,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 287200,
+          "end_ms": 287900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Can take my worship.",
+      "start_ms": 288600,
+      "end_ms": 289500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Can",
+          "start_ms": 288600,
+          "end_ms": 288700,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 288700,
+          "end_ms": 288800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 289200,
+          "end_ms": 289300,
+          "confidence": null
+        },
+        {
+          "text": "worship.",
+          "start_ms": 289300,
+          "end_ms": 289500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "We're going to turn up our praise just a little bit more. That's cool, chair?",
+      "start_ms": 292200,
+      "end_ms": 294700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "We're",
+          "start_ms": 292200,
+          "end_ms": 292300,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 292300,
+          "end_ms": 292400,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 292400,
+          "end_ms": 292500,
+          "confidence": null
+        },
+        {
+          "text": "turn",
+          "start_ms": 292500,
+          "end_ms": 292700,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 292700,
+          "end_ms": 292800,
+          "confidence": null
+        },
+        {
+          "text": "our",
+          "start_ms": 292800,
+          "end_ms": 292900,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 292900,
+          "end_ms": 293200,
+          "confidence": null
+        },
+        {
+          "text": "just",
+          "start_ms": 293200,
+          "end_ms": 293400,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 293400,
+          "end_ms": 293500,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 293500,
+          "end_ms": 293600,
+          "confidence": null
+        },
+        {
+          "text": "bit",
+          "start_ms": 293600,
+          "end_ms": 293800,
+          "confidence": null
+        },
+        {
+          "text": "more.",
+          "start_ms": 293800,
+          "end_ms": 294000,
+          "confidence": null
+        },
+        {
+          "text": "That's",
+          "start_ms": 294000,
+          "end_ms": 294200,
+          "confidence": null
+        },
+        {
+          "text": "cool,",
+          "start_ms": 294200,
+          "end_ms": 294400,
+          "confidence": null
+        },
+        {
+          "text": "chair?",
+          "start_ms": 294400,
+          "end_ms": 294700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I think Atlanta got a little bit more. You got a little bit more.",
+      "start_ms": 295600,
+      "end_ms": 298300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 295600,
+          "end_ms": 295700,
+          "confidence": null
+        },
+        {
+          "text": "think",
+          "start_ms": 295700,
+          "end_ms": 295900,
+          "confidence": null
+        },
+        {
+          "text": "Atlanta",
+          "start_ms": 295900,
+          "end_ms": 296300,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 296300,
+          "end_ms": 296500,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 296500,
+          "end_ms": 296600,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 296600,
+          "end_ms": 296800,
+          "confidence": null
+        },
+        {
+          "text": "bit",
+          "start_ms": 296800,
+          "end_ms": 297000,
+          "confidence": null
+        },
+        {
+          "text": "more.",
+          "start_ms": 297000,
+          "end_ms": 297200,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 297200,
+          "end_ms": 297400,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 297400,
+          "end_ms": 297600,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 297600,
+          "end_ms": 297600,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 297600,
+          "end_ms": 297800,
+          "confidence": null
+        },
+        {
+          "text": "bit",
+          "start_ms": 297800,
+          "end_ms": 298000,
+          "confidence": null
+        },
+        {
+          "text": "more.",
+          "start_ms": 298000,
+          "end_ms": 298300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Tell your neighbor give me a little room. Give me a little room. Give me a little room. Give me a little room.",
+      "start_ms": 300100,
+      "end_ms": 304000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Tell",
+          "start_ms": 300100,
+          "end_ms": 300200,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 300200,
+          "end_ms": 300400,
+          "confidence": null
+        },
+        {
+          "text": "neighbor",
+          "start_ms": 300400,
+          "end_ms": 300700,
+          "confidence": null
+        },
+        {
+          "text": "give",
+          "start_ms": 300700,
+          "end_ms": 300900,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 300900,
+          "end_ms": 301000,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 301000,
+          "end_ms": 301000,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 301000,
+          "end_ms": 301300,
+          "confidence": null
+        },
+        {
+          "text": "room.",
+          "start_ms": 301300,
+          "end_ms": 301600,
+          "confidence": null
+        },
+        {
+          "text": "Give",
+          "start_ms": 301600,
+          "end_ms": 301800,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 301800,
+          "end_ms": 301800,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 301800,
+          "end_ms": 301900,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 301900,
+          "end_ms": 302100,
+          "confidence": null
+        },
+        {
+          "text": "room.",
+          "start_ms": 302100,
+          "end_ms": 302400,
+          "confidence": null
+        },
+        {
+          "text": "Give",
+          "start_ms": 302400,
+          "end_ms": 302500,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 302500,
+          "end_ms": 302600,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 302600,
+          "end_ms": 302700,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 302700,
+          "end_ms": 303000,
+          "confidence": null
+        },
+        {
+          "text": "room.",
+          "start_ms": 303000,
+          "end_ms": 303200,
+          "confidence": null
+        },
+        {
+          "text": "Give",
+          "start_ms": 303200,
+          "end_ms": 303300,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 303300,
+          "end_ms": 303400,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 303400,
+          "end_ms": 303500,
+          "confidence": null
+        },
+        {
+          "text": "little",
+          "start_ms": 303500,
+          "end_ms": 303800,
+          "confidence": null
+        },
+        {
+          "text": "room.",
+          "start_ms": 303800,
+          "end_ms": 304000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "So we say lungs lungs",
+      "start_ms": 308100,
+      "end_ms": 310200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 308100,
+          "end_ms": 308400,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 308400,
+          "end_ms": 308600,
+          "confidence": null
+        },
+        {
+          "text": "say",
+          "start_ms": 308600,
+          "end_ms": 308900,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 308900,
+          "end_ms": 309600,
+          "confidence": null
+        },
+        {
+          "text": "lungs",
+          "start_ms": 310000,
+          "end_ms": 310200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "breathe breathe mouth mouth sing sing",
+      "start_ms": 311000,
+      "end_ms": 316600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "breathe",
+          "start_ms": 311000,
+          "end_ms": 311700,
+          "confidence": null
+        },
+        {
+          "text": "breathe",
+          "start_ms": 312100,
+          "end_ms": 312700,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 313100,
+          "end_ms": 313800,
+          "confidence": null
+        },
+        {
+          "text": "mouth",
+          "start_ms": 314200,
+          "end_ms": 314800,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 315200,
+          "end_ms": 315900,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 316300,
+          "end_ms": 316600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and hands hands",
+      "start_ms": 317200,
+      "end_ms": 318800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 317200,
+          "end_ms": 317500,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 317500,
+          "end_ms": 318600,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 318600,
+          "end_ms": 318800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "reach reach",
+      "start_ms": 319600,
+      "end_ms": 320800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "reach",
+          "start_ms": 319600,
+          "end_ms": 320300,
+          "confidence": null
+        },
+        {
+          "text": "reach",
+          "start_ms": 320600,
+          "end_ms": 320800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is my way to be to reach. Oh, this is my way to be to reach.",
+      "start_ms": 321800,
+      "end_ms": 329800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 321800,
+          "end_ms": 322100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 322100,
+          "end_ms": 322400,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 322400,
+          "end_ms": 322800,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 322800,
+          "end_ms": 323300,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 323300,
+          "end_ms": 323900,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 323900,
+          "end_ms": 324500,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 324700,
+          "end_ms": 324900,
+          "confidence": null
+        },
+        {
+          "text": "reach.",
+          "start_ms": 324900,
+          "end_ms": 325300,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 325300,
+          "end_ms": 325600,
+          "confidence": null
+        },
+        {
+          "text": "this",
+          "start_ms": 326000,
+          "end_ms": 326400,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 326400,
+          "end_ms": 326700,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 326700,
+          "end_ms": 327100,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 327100,
+          "end_ms": 327600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 327600,
+          "end_ms": 328200,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 328200,
+          "end_ms": 328800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 328900,
+          "end_ms": 329100,
+          "confidence": null
+        },
+        {
+          "text": "reach.",
+          "start_ms": 329100,
+          "end_ms": 329800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is my way to be",
+      "start_ms": 330400,
+      "end_ms": 332600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 330400,
+          "end_ms": 330700,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 330700,
+          "end_ms": 331000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 331000,
+          "end_ms": 331400,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 331400,
+          "end_ms": 331800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 331800,
+          "end_ms": 332500,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 332500,
+          "end_ms": 332600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "to reach. Oh, this is my way to be",
+      "start_ms": 333300,
+      "end_ms": 336900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 333300,
+          "end_ms": 333400,
+          "confidence": null
+        },
+        {
+          "text": "reach.",
+          "start_ms": 333400,
+          "end_ms": 334000,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 334400,
+          "end_ms": 334600,
+          "confidence": null
+        },
+        {
+          "text": "this",
+          "start_ms": 334600,
+          "end_ms": 335000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 335000,
+          "end_ms": 335400,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 335400,
+          "end_ms": 335700,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 335700,
+          "end_ms": 336200,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 336200,
+          "end_ms": 336800,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 336800,
+          "end_ms": 336900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "to reach.",
+      "start_ms": 337500,
+      "end_ms": 338200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 337500,
+          "end_ms": 337800,
+          "confidence": null
+        },
+        {
+          "text": "reach.",
+          "start_ms": 337800,
+          "end_ms": 338200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "One more time. Everybody turn up. Let's go. Let's go. Let's",
+      "start_ms": 339200,
+      "end_ms": 342800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 339200,
+          "end_ms": 339300,
+          "confidence": null
+        },
+        {
+          "text": "more",
+          "start_ms": 339300,
+          "end_ms": 339400,
+          "confidence": null
+        },
+        {
+          "text": "time.",
+          "start_ms": 339400,
+          "end_ms": 339800,
+          "confidence": null
+        },
+        {
+          "text": "Everybody",
+          "start_ms": 340000,
+          "end_ms": 341000,
+          "confidence": null
+        },
+        {
+          "text": "turn",
+          "start_ms": 341000,
+          "end_ms": 341300,
+          "confidence": null
+        },
+        {
+          "text": "up.",
+          "start_ms": 341600,
+          "end_ms": 341600,
+          "confidence": null
+        },
+        {
+          "text": "Let's",
+          "start_ms": 341600,
+          "end_ms": 341900,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 341900,
+          "end_ms": 342100,
+          "confidence": null
+        },
+        {
+          "text": "Let's",
+          "start_ms": 342100,
+          "end_ms": 342400,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 342400,
+          "end_ms": 342600,
+          "confidence": null
+        },
+        {
+          "text": "Let's",
+          "start_ms": 342600,
+          "end_ms": 342800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Enemy may take some things,",
+      "start_ms": 360300,
+      "end_ms": 362700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Enemy",
+          "start_ms": 360300,
+          "end_ms": 360700,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 360700,
+          "end_ms": 361100,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 361100,
+          "end_ms": 361800,
+          "confidence": null
+        },
+        {
+          "text": "some",
+          "start_ms": 361800,
+          "end_ms": 362200,
+          "confidence": null
+        },
+        {
+          "text": "things,",
+          "start_ms": 362200,
+          "end_ms": 362700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "but he can take my",
+      "start_ms": 363200,
+      "end_ms": 364400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "but",
+          "start_ms": 363200,
+          "end_ms": 363400,
+          "confidence": null
+        },
+        {
+          "text": "he",
+          "start_ms": 363400,
+          "end_ms": 363500,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 363500,
+          "end_ms": 363800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 363800,
+          "end_ms": 364100,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 364100,
+          "end_ms": 364400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "he can",
+      "start_ms": 364900,
+      "end_ms": 365600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "he",
+          "start_ms": 364900,
+          "end_ms": 365100,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 365100,
+          "end_ms": 365600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "He can",
+      "start_ms": 367000,
+      "end_ms": 367500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 367000,
+          "end_ms": 367300,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 367300,
+          "end_ms": 367500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "The joy that I have the world didn't give it. The world can't take it away.",
+      "start_ms": 370000,
+      "end_ms": 373400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 370000,
+          "end_ms": 370100,
+          "confidence": null
+        },
+        {
+          "text": "joy",
+          "start_ms": 370100,
+          "end_ms": 370400,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 370400,
+          "end_ms": 370600,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 370600,
+          "end_ms": 370700,
+          "confidence": null
+        },
+        {
+          "text": "have",
+          "start_ms": 370700,
+          "end_ms": 371000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 371000,
+          "end_ms": 371100,
+          "confidence": null
+        },
+        {
+          "text": "world",
+          "start_ms": 371100,
+          "end_ms": 371500,
+          "confidence": null
+        },
+        {
+          "text": "didn't",
+          "start_ms": 371500,
+          "end_ms": 371600,
+          "confidence": null
+        },
+        {
+          "text": "give",
+          "start_ms": 371600,
+          "end_ms": 371900,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 371900,
+          "end_ms": 372000,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 372000,
+          "end_ms": 372200,
+          "confidence": null
+        },
+        {
+          "text": "world",
+          "start_ms": 372200,
+          "end_ms": 372500,
+          "confidence": null
+        },
+        {
+          "text": "can't",
+          "start_ms": 372500,
+          "end_ms": 372800,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 372800,
+          "end_ms": 373000,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 373000,
+          "end_ms": 373100,
+          "confidence": null
+        },
+        {
+          "text": "away.",
+          "start_ms": 373100,
+          "end_ms": 373400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "All of you that one time.",
+      "start_ms": 374900,
+      "end_ms": 376000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "All",
+          "start_ms": 374900,
+          "end_ms": 375000,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 375000,
+          "end_ms": 375100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 375100,
+          "end_ms": 375200,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 375200,
+          "end_ms": 375400,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 375400,
+          "end_ms": 375600,
+          "confidence": null
+        },
+        {
+          "text": "time.",
+          "start_ms": 375600,
+          "end_ms": 376000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy may take",
+      "start_ms": 376600,
+      "end_ms": 379000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 376600,
+          "end_ms": 377500,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 377500,
+          "end_ms": 377700,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 377700,
+          "end_ms": 378400,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 378400,
+          "end_ms": 378600,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 378600,
+          "end_ms": 379000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "See, you're not going to have",
+      "start_ms": 390600,
+      "end_ms": 391500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "See,",
+          "start_ms": 390600,
+          "end_ms": 390800,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 390800,
+          "end_ms": 390900,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 390900,
+          "end_ms": 391100,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 391100,
+          "end_ms": 391200,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 391200,
+          "end_ms": 391300,
+          "confidence": null
+        },
+        {
+          "text": "have",
+          "start_ms": 391300,
+          "end_ms": 391500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "city in your bedroom.",
+      "start_ms": 392000,
+      "end_ms": 393000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "city",
+          "start_ms": 392000,
+          "end_ms": 392100,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 392100,
+          "end_ms": 392200,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 392200,
+          "end_ms": 392400,
+          "confidence": null
+        },
+        {
+          "text": "bedroom.",
+          "start_ms": 392400,
+          "end_ms": 393000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Sing it out. The enemy",
+      "start_ms": 393900,
+      "end_ms": 394600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 393900,
+          "end_ms": 394100,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 394100,
+          "end_ms": 394200,
+          "confidence": null
+        },
+        {
+          "text": "out.",
+          "start_ms": 394200,
+          "end_ms": 394400,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 394400,
+          "end_ms": 394500,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 394500,
+          "end_ms": 394600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This feels good, Norman.",
+      "start_ms": 400100,
+      "end_ms": 401200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 400100,
+          "end_ms": 400300,
+          "confidence": null
+        },
+        {
+          "text": "feels",
+          "start_ms": 400300,
+          "end_ms": 400500,
+          "confidence": null
+        },
+        {
+          "text": "good,",
+          "start_ms": 400500,
+          "end_ms": 400800,
+          "confidence": null
+        },
+        {
+          "text": "Norman.",
+          "start_ms": 400800,
+          "end_ms": 401200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Sing it out. The enemy",
+      "start_ms": 401800,
+      "end_ms": 403300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 401800,
+          "end_ms": 402000,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 402000,
+          "end_ms": 402100,
+          "confidence": null
+        },
+        {
+          "text": "out.",
+          "start_ms": 402100,
+          "end_ms": 402200,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 402200,
+          "end_ms": 402200,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 402200,
+          "end_ms": 403300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "One more time. The enemy",
+      "start_ms": 410300,
+      "end_ms": 411900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 410300,
+          "end_ms": 410500,
+          "confidence": null
+        },
+        {
+          "text": "more",
+          "start_ms": 410500,
+          "end_ms": 410800,
+          "confidence": null
+        },
+        {
+          "text": "time.",
+          "start_ms": 410800,
+          "end_ms": 411300,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 411300,
+          "end_ms": 411400,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 411400,
+          "end_ms": 411900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I tell you feel alive, yeah.",
+      "start_ms": 417800,
+      "end_ms": 419000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 417800,
+          "end_ms": 417900,
+          "confidence": null
+        },
+        {
+          "text": "tell",
+          "start_ms": 417900,
+          "end_ms": 418100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 418100,
+          "end_ms": 418200,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 418200,
+          "end_ms": 418500,
+          "confidence": null
+        },
+        {
+          "text": "alive,",
+          "start_ms": 418500,
+          "end_ms": 418800,
+          "confidence": null
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 418900,
+          "end_ms": 419000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Enemy may take",
+      "start_ms": 420000,
+      "end_ms": 421300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Enemy",
+          "start_ms": 420000,
+          "end_ms": 420700,
+          "confidence": null
+        },
+        {
+          "text": "may",
+          "start_ms": 420700,
+          "end_ms": 421000,
+          "confidence": null
+        },
+        {
+          "text": "take",
+          "start_ms": 421000,
+          "end_ms": 421300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "We got a fool, but you got 20 more seconds. You ready?",
+      "start_ms": 422800,
+      "end_ms": 425400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 422800,
+          "end_ms": 422900,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 422900,
+          "end_ms": 423100,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 423100,
+          "end_ms": 423200,
+          "confidence": null
+        },
+        {
+          "text": "fool,",
+          "start_ms": 423200,
+          "end_ms": 423500,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 423500,
+          "end_ms": 423700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 423700,
+          "end_ms": 423800,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 423800,
+          "end_ms": 424000,
+          "confidence": null
+        },
+        {
+          "text": "20",
+          "start_ms": 424000,
+          "end_ms": 424300,
+          "confidence": null
+        },
+        {
+          "text": "more",
+          "start_ms": 424300,
+          "end_ms": 424500,
+          "confidence": null
+        },
+        {
+          "text": "seconds.",
+          "start_ms": 424500,
+          "end_ms": 425000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 425000,
+          "end_ms": 425100,
+          "confidence": null
+        },
+        {
+          "text": "ready?",
+          "start_ms": 425100,
+          "end_ms": 425400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Turn up. Turn up. Turn up.",
+      "start_ms": 426300,
+      "end_ms": 427700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Turn",
+          "start_ms": 426300,
+          "end_ms": 426500,
+          "confidence": null
+        },
+        {
+          "text": "up.",
+          "start_ms": 426600,
+          "end_ms": 426800,
+          "confidence": null
+        },
+        {
+          "text": "Turn",
+          "start_ms": 426800,
+          "end_ms": 427100,
+          "confidence": null
+        },
+        {
+          "text": "up.",
+          "start_ms": 427100,
+          "end_ms": 427300,
+          "confidence": null
+        },
+        {
+          "text": "Turn",
+          "start_ms": 427300,
+          "end_ms": 427600,
+          "confidence": null
+        },
+        {
+          "text": "up.",
+          "start_ms": 427600,
+          "end_ms": 427700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Cuz it's been so good to me.",
+      "start_ms": 435600,
+      "end_ms": 437300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Cuz",
+          "start_ms": 435600,
+          "end_ms": 435700,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 435700,
+          "end_ms": 435900,
+          "confidence": null
+        },
+        {
+          "text": "been",
+          "start_ms": 435900,
+          "end_ms": 436100,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 436100,
+          "end_ms": 436400,
+          "confidence": null
+        },
+        {
+          "text": "good",
+          "start_ms": 436400,
+          "end_ms": 436700,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 436700,
+          "end_ms": 436900,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 436900,
+          "end_ms": 437300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's been so good to me.",
+      "start_ms": 437800,
+      "end_ms": 439200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 437800,
+          "end_ms": 438000,
+          "confidence": null
+        },
+        {
+          "text": "been",
+          "start_ms": 438000,
+          "end_ms": 438200,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 438200,
+          "end_ms": 438500,
+          "confidence": null
+        },
+        {
+          "text": "good",
+          "start_ms": 438500,
+          "end_ms": 438700,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 438700,
+          "end_ms": 438900,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 438900,
+          "end_ms": 439200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's been so good to me. Oh,",
+      "start_ms": 439800,
+      "end_ms": 441600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 439800,
+          "end_ms": 440000,
+          "confidence": null
+        },
+        {
+          "text": "been",
+          "start_ms": 440000,
+          "end_ms": 440300,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 440300,
+          "end_ms": 440600,
+          "confidence": null
+        },
+        {
+          "text": "good",
+          "start_ms": 440600,
+          "end_ms": 440800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 440800,
+          "end_ms": 441000,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 441000,
+          "end_ms": 441300,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 441500,
+          "end_ms": 441600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Joy of the Lord is my",
+      "start_ms": 452800,
+      "end_ms": 453400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Joy",
+          "start_ms": 452800,
+          "end_ms": 452900,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 452900,
+          "end_ms": 453000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 453000,
+          "end_ms": 453100,
+          "confidence": null
+        },
+        {
+          "text": "Lord",
+          "start_ms": 453100,
+          "end_ms": 453200,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 453200,
+          "end_ms": 453300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 453300,
+          "end_ms": 453400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Last time.",
+      "start_ms": 459900,
+      "end_ms": 460500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Last",
+          "start_ms": 459900,
+          "end_ms": 460100,
+          "confidence": null
+        },
+        {
+          "text": "time.",
+          "start_ms": 460100,
+          "end_ms": 460500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "The enemy The enemy",
+      "start_ms": 461000,
+      "end_ms": 463000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 461000,
+          "end_ms": 461200,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 461200,
+          "end_ms": 461900,
+          "confidence": null
+        },
+        {
+          "text": "The",
+          "start_ms": 462200,
+          "end_ms": 462300,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 462300,
+          "end_ms": 463000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I made up my mind, man.",
+      "start_ms": 472600,
+      "end_ms": 473700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 472600,
+          "end_ms": 472700,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 472700,
+          "end_ms": 472900,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 472900,
+          "end_ms": 473000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 473000,
+          "end_ms": 473100,
+          "confidence": null
+        },
+        {
+          "text": "mind,",
+          "start_ms": 473100,
+          "end_ms": 473400,
+          "confidence": null
+        },
+        {
+          "text": "man.",
+          "start_ms": 473400,
+          "end_ms": 473700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, the enemy",
+      "start_ms": 478900,
+      "end_ms": 479700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 478900,
+          "end_ms": 478900,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 478900,
+          "end_ms": 479100,
+          "confidence": null
+        },
+        {
+          "text": "enemy",
+          "start_ms": 479100,
+          "end_ms": 479700,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 19.1,
+    "upload_s": 4.8,
+    "transcribe_s": 13.1,
+    "word_count": 745,
+    "line_count": 106,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 12588,
+      "total_input_tokens": 12588,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 1
+        },
+        {
+          "modality": "audio",
+          "tokens": 12587
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 14651,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 2064
+            },
+            {
+              "modality": "audio",
+              "tokens": 12587
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 935
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_ChdDQktsYXBmX0tQem52ZElQdkxqYzBBZxIXQ0JLbGFwZl9LUHpudmRJUHZMamMwQWc"
+  }
+}

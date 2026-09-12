@@ -1,0 +1,1992 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\s8o2YuTBYk4_vocal16k.wav",
+  "duration_ms": 214800,
+  "lines": [
+    {
+      "text": "Got fame and not I willing to let go.",
+      "start_ms": 2600,
+      "end_ms": 5700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Got",
+          "start_ms": 2600,
+          "end_ms": 3000,
+          "confidence": null
+        },
+        {
+          "text": "fame",
+          "start_ms": 3000,
+          "end_ms": 3200,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 3200,
+          "end_ms": 3400,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 3400,
+          "end_ms": 3600,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 3600,
+          "end_ms": 3700,
+          "confidence": null
+        },
+        {
+          "text": "willing",
+          "start_ms": 3700,
+          "end_ms": 4400,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 4400,
+          "end_ms": 4600,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 4600,
+          "end_ms": 5000,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 5000,
+          "end_ms": 5700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Of everything that's weighing me down. Got to listen to the voice that I know. You speak to me",
+      "start_ms": 6400,
+      "end_ms": 15200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Of",
+          "start_ms": 6400,
+          "end_ms": 6600,
+          "confidence": null
+        },
+        {
+          "text": "everything",
+          "start_ms": 6600,
+          "end_ms": 7800,
+          "confidence": null
+        },
+        {
+          "text": "that's",
+          "start_ms": 8200,
+          "end_ms": 8400,
+          "confidence": null
+        },
+        {
+          "text": "weighing",
+          "start_ms": 8400,
+          "end_ms": 9000,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 9000,
+          "end_ms": 9300,
+          "confidence": null
+        },
+        {
+          "text": "down.",
+          "start_ms": 9300,
+          "end_ms": 10100,
+          "confidence": null
+        },
+        {
+          "text": "Got",
+          "start_ms": 10100,
+          "end_ms": 10300,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 10300,
+          "end_ms": 10400,
+          "confidence": null
+        },
+        {
+          "text": "listen",
+          "start_ms": 10400,
+          "end_ms": 10800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 10800,
+          "end_ms": 11000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 11000,
+          "end_ms": 11200,
+          "confidence": null
+        },
+        {
+          "text": "voice",
+          "start_ms": 11200,
+          "end_ms": 11800,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 11800,
+          "end_ms": 12200,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 12200,
+          "end_ms": 12400,
+          "confidence": null
+        },
+        {
+          "text": "know.",
+          "start_ms": 12400,
+          "end_ms": 13400,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 13800,
+          "end_ms": 13900,
+          "confidence": null
+        },
+        {
+          "text": "speak",
+          "start_ms": 13900,
+          "end_ms": 14300,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 14300,
+          "end_ms": 14500,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 14500,
+          "end_ms": 15200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and say I'm free.",
+      "start_ms": 15700,
+      "end_ms": 17900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 15700,
+          "end_ms": 15900,
+          "confidence": null
+        },
+        {
+          "text": "say",
+          "start_ms": 15900,
+          "end_ms": 16600,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 16600,
+          "end_ms": 16800,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 16800,
+          "end_ms": 17900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Nothing going to hold me down cuz you keep setting me free.",
+      "start_ms": 21000,
+      "end_ms": 25800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Nothing",
+          "start_ms": 21000,
+          "end_ms": 21300,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 21300,
+          "end_ms": 21500,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 21500,
+          "end_ms": 21500,
+          "confidence": null
+        },
+        {
+          "text": "hold",
+          "start_ms": 21500,
+          "end_ms": 21800,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 21800,
+          "end_ms": 22000,
+          "confidence": null
+        },
+        {
+          "text": "down",
+          "start_ms": 22000,
+          "end_ms": 22700,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 22800,
+          "end_ms": 23100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 23100,
+          "end_ms": 23200,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 23200,
+          "end_ms": 23500,
+          "confidence": null
+        },
+        {
+          "text": "setting",
+          "start_ms": 23500,
+          "end_ms": 23900,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 23900,
+          "end_ms": 24300,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 24400,
+          "end_ms": 25800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can feel it all around cuz in your presence I'm free.",
+      "start_ms": 28600,
+      "end_ms": 32400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 28600,
+          "end_ms": 28700,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 28700,
+          "end_ms": 28800,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 28800,
+          "end_ms": 29000,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 29000,
+          "end_ms": 29100,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 29100,
+          "end_ms": 29400,
+          "confidence": null
+        },
+        {
+          "text": "around",
+          "start_ms": 29400,
+          "end_ms": 30200,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 30200,
+          "end_ms": 30500,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 30500,
+          "end_ms": 30700,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 30700,
+          "end_ms": 30900,
+          "confidence": null
+        },
+        {
+          "text": "presence",
+          "start_ms": 30900,
+          "end_ms": 31500,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 31500,
+          "end_ms": 31800,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 31800,
+          "end_ms": 32400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm free.",
+      "start_ms": 39200,
+      "end_ms": 43100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 39200,
+          "end_ms": 39600,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 39600,
+          "end_ms": 43100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 50400,
+      "end_ms": 50800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 50400,
+          "end_ms": 50800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 54200,
+      "end_ms": 54500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 54200,
+          "end_ms": 54500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 61800,
+      "end_ms": 62000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 61800,
+          "end_ms": 62000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "When I think of how my life has been changed, it all comes down to being with you and I know that you are always with me. Though I believe with you I'm free.",
+      "start_ms": 62600,
+      "end_ms": 77600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 62600,
+          "end_ms": 62700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 62700,
+          "end_ms": 62800,
+          "confidence": null
+        },
+        {
+          "text": "think",
+          "start_ms": 62800,
+          "end_ms": 63100,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 63100,
+          "end_ms": 63300,
+          "confidence": null
+        },
+        {
+          "text": "how",
+          "start_ms": 63300,
+          "end_ms": 63500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 63500,
+          "end_ms": 63700,
+          "confidence": null
+        },
+        {
+          "text": "life",
+          "start_ms": 63700,
+          "end_ms": 64200,
+          "confidence": null
+        },
+        {
+          "text": "has",
+          "start_ms": 64200,
+          "end_ms": 64600,
+          "confidence": null
+        },
+        {
+          "text": "been",
+          "start_ms": 64600,
+          "end_ms": 65100,
+          "confidence": null
+        },
+        {
+          "text": "changed,",
+          "start_ms": 65100,
+          "end_ms": 66100,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 66400,
+          "end_ms": 66600,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 66600,
+          "end_ms": 66800,
+          "confidence": null
+        },
+        {
+          "text": "comes",
+          "start_ms": 66800,
+          "end_ms": 67100,
+          "confidence": null
+        },
+        {
+          "text": "down",
+          "start_ms": 67100,
+          "end_ms": 67900,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 68200,
+          "end_ms": 68400,
+          "confidence": null
+        },
+        {
+          "text": "being",
+          "start_ms": 68400,
+          "end_ms": 68900,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 68900,
+          "end_ms": 69400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 69400,
+          "end_ms": 69900,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 70100,
+          "end_ms": 70300,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 70300,
+          "end_ms": 70300,
+          "confidence": null
+        },
+        {
+          "text": "know",
+          "start_ms": 70300,
+          "end_ms": 70600,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 70600,
+          "end_ms": 70800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 70800,
+          "end_ms": 71100,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 71100,
+          "end_ms": 71300,
+          "confidence": null
+        },
+        {
+          "text": "always",
+          "start_ms": 71300,
+          "end_ms": 72200,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 72200,
+          "end_ms": 72600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 72600,
+          "end_ms": 73400,
+          "confidence": null
+        },
+        {
+          "text": "Though",
+          "start_ms": 73800,
+          "end_ms": 74000,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 74100,
+          "end_ms": 74300,
+          "confidence": null
+        },
+        {
+          "text": "believe",
+          "start_ms": 74300,
+          "end_ms": 75400,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 75700,
+          "end_ms": 76000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 76000,
+          "end_ms": 76500,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 76500,
+          "end_ms": 76800,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 76800,
+          "end_ms": 77600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Nothing going to hold me down cuz you keep setting me free.",
+      "start_ms": 81000,
+      "end_ms": 86100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Nothing",
+          "start_ms": 81000,
+          "end_ms": 81300,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 81300,
+          "end_ms": 81500,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 81500,
+          "end_ms": 81600,
+          "confidence": null
+        },
+        {
+          "text": "hold",
+          "start_ms": 81600,
+          "end_ms": 81800,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 81800,
+          "end_ms": 82000,
+          "confidence": null
+        },
+        {
+          "text": "down",
+          "start_ms": 82000,
+          "end_ms": 82600,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 82800,
+          "end_ms": 83000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 83000,
+          "end_ms": 83200,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 83200,
+          "end_ms": 83400,
+          "confidence": null
+        },
+        {
+          "text": "setting",
+          "start_ms": 83400,
+          "end_ms": 83900,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 83900,
+          "end_ms": 84300,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 84400,
+          "end_ms": 86100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can feel it all around cuz in your presence I'm free.",
+      "start_ms": 88500,
+      "end_ms": 94200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 88500,
+          "end_ms": 88700,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 88700,
+          "end_ms": 88800,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 88800,
+          "end_ms": 89000,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 89000,
+          "end_ms": 89200,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 89200,
+          "end_ms": 89300,
+          "confidence": null
+        },
+        {
+          "text": "around",
+          "start_ms": 89300,
+          "end_ms": 90200,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 90300,
+          "end_ms": 90500,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 90500,
+          "end_ms": 90700,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 90700,
+          "end_ms": 90900,
+          "confidence": null
+        },
+        {
+          "text": "presence",
+          "start_ms": 90900,
+          "end_ms": 91500,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 91500,
+          "end_ms": 91800,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 91800,
+          "end_ms": 94200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm free.",
+      "start_ms": 98900,
+      "end_ms": 102700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 98900,
+          "end_ms": 99500,
+          "confidence": null
+        },
+        {
+          "text": "free.",
+          "start_ms": 99500,
+          "end_ms": 102700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 110400,
+      "end_ms": 110800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 110400,
+          "end_ms": 110800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 114200,
+      "end_ms": 114400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 114200,
+          "end_ms": 114400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah.",
+      "start_ms": 118000,
+      "end_ms": 118200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 118000,
+          "end_ms": 118200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 122100,
+      "end_ms": 125200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 122100,
+          "end_ms": 122400,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 122400,
+          "end_ms": 122600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 122600,
+          "end_ms": 122700,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 122700,
+          "end_ms": 123100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 123100,
+          "end_ms": 123300,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 123300,
+          "end_ms": 123500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 123500,
+          "end_ms": 123800,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 123800,
+          "end_ms": 124200,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 124200,
+          "end_ms": 124700,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 124700,
+          "end_ms": 125200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high. I'm going to praise you with my hands raised high.",
+      "start_ms": 125900,
+      "end_ms": 132600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 125900,
+          "end_ms": 126100,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 126100,
+          "end_ms": 126400,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 126400,
+          "end_ms": 126500,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 126500,
+          "end_ms": 126900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 126900,
+          "end_ms": 127000,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 127000,
+          "end_ms": 127300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 127300,
+          "end_ms": 127500,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 127500,
+          "end_ms": 128000,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 128000,
+          "end_ms": 128500,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 128500,
+          "end_ms": 129300,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 129600,
+          "end_ms": 129800,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 129800,
+          "end_ms": 130200,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 130200,
+          "end_ms": 130300,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 130300,
+          "end_ms": 130600,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 130600,
+          "end_ms": 130800,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 130800,
+          "end_ms": 131000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 131000,
+          "end_ms": 131300,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 131300,
+          "end_ms": 131800,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 131800,
+          "end_ms": 132200,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 132200,
+          "end_ms": 132600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I going to praise you with my hands raised high.",
+      "start_ms": 133400,
+      "end_ms": 136400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 133400,
+          "end_ms": 133500,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 133500,
+          "end_ms": 133900,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 133900,
+          "end_ms": 134000,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 134000,
+          "end_ms": 134400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 134400,
+          "end_ms": 134600,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 134600,
+          "end_ms": 134800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 134800,
+          "end_ms": 135000,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 135000,
+          "end_ms": 135500,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 135500,
+          "end_ms": 136000,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 136000,
+          "end_ms": 136400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 152100,
+      "end_ms": 155200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 152100,
+          "end_ms": 152400,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 152400,
+          "end_ms": 152600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 152600,
+          "end_ms": 152700,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 152700,
+          "end_ms": 153200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 153200,
+          "end_ms": 153300,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 153300,
+          "end_ms": 153500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 153500,
+          "end_ms": 153700,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 153700,
+          "end_ms": 154200,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 154200,
+          "end_ms": 154800,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 154800,
+          "end_ms": 155200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 155900,
+      "end_ms": 158300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 155900,
+          "end_ms": 156000,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 156000,
+          "end_ms": 156300,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 156300,
+          "end_ms": 156400,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 156400,
+          "end_ms": 156900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 156900,
+          "end_ms": 157000,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 157000,
+          "end_ms": 157300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 157300,
+          "end_ms": 157500,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 157500,
+          "end_ms": 158000,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 158000,
+          "end_ms": 158200,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 158200,
+          "end_ms": 158300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 159700,
+      "end_ms": 162700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 159700,
+          "end_ms": 159800,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 159800,
+          "end_ms": 160000,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 160000,
+          "end_ms": 160100,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 160300,
+          "end_ms": 160600,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 160600,
+          "end_ms": 160800,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 160800,
+          "end_ms": 161000,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 161000,
+          "end_ms": 161100,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 161100,
+          "end_ms": 161800,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 161800,
+          "end_ms": 162200,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 162200,
+          "end_ms": 162700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 163500,
+      "end_ms": 166300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 163500,
+          "end_ms": 163600,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 163600,
+          "end_ms": 163800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 163800,
+          "end_ms": 164000,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 164000,
+          "end_ms": 164400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 164400,
+          "end_ms": 164500,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 164500,
+          "end_ms": 164800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 164800,
+          "end_ms": 165000,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 165000,
+          "end_ms": 165500,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 165500,
+          "end_ms": 166000,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 166000,
+          "end_ms": 166300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised",
+      "start_ms": 167200,
+      "end_ms": 169700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 167200,
+          "end_ms": 167400,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 167400,
+          "end_ms": 167600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 167600,
+          "end_ms": 167800,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 167800,
+          "end_ms": 168100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 168100,
+          "end_ms": 168300,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 168300,
+          "end_ms": 168500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 168500,
+          "end_ms": 168800,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 168800,
+          "end_ms": 169300,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 169300,
+          "end_ms": 169700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh yes we are.",
+      "start_ms": 173800,
+      "end_ms": 174900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 173800,
+          "end_ms": 174000,
+          "confidence": null
+        },
+        {
+          "text": "yes",
+          "start_ms": 174000,
+          "end_ms": 174300,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 174300,
+          "end_ms": 174600,
+          "confidence": null
+        },
+        {
+          "text": "are.",
+          "start_ms": 174600,
+          "end_ms": 174900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Hey.",
+      "start_ms": 177900,
+      "end_ms": 178500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Hey.",
+          "start_ms": 177900,
+          "end_ms": 178500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high. Hey.",
+      "start_ms": 182400,
+      "end_ms": 185900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 182400,
+          "end_ms": 182600,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 182600,
+          "end_ms": 182900,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 182900,
+          "end_ms": 183000,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 183000,
+          "end_ms": 183400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 183400,
+          "end_ms": 183600,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 183600,
+          "end_ms": 183800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 183800,
+          "end_ms": 184000,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 184000,
+          "end_ms": 184500,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 184500,
+          "end_ms": 185000,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 185000,
+          "end_ms": 185400,
+          "confidence": null
+        },
+        {
+          "text": "Hey.",
+          "start_ms": 185700,
+          "end_ms": 185900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Hey hey.",
+      "start_ms": 188900,
+      "end_ms": 189200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Hey",
+          "start_ms": 188900,
+          "end_ms": 189100,
+          "confidence": null
+        },
+        {
+          "text": "hey.",
+          "start_ms": 189100,
+          "end_ms": 189200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "One",
+      "start_ms": 193200,
+      "end_ms": 193500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "One",
+          "start_ms": 193200,
+          "end_ms": 193500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "two",
+      "start_ms": 194200,
+      "end_ms": 194400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "two",
+          "start_ms": 194200,
+          "end_ms": 194400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise. Hey hey.",
+      "start_ms": 194900,
+      "end_ms": 196400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 194900,
+          "end_ms": 195100,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 195100,
+          "end_ms": 195500,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 195500,
+          "end_ms": 195600,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 195600,
+          "end_ms": 196100,
+          "confidence": null
+        },
+        {
+          "text": "Hey",
+          "start_ms": 196200,
+          "end_ms": 196300,
+          "confidence": null
+        },
+        {
+          "text": "hey.",
+          "start_ms": 196300,
+          "end_ms": 196400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 197400,
+      "end_ms": 200400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 197400,
+          "end_ms": 197600,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 197600,
+          "end_ms": 197800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 197800,
+          "end_ms": 197900,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 197900,
+          "end_ms": 198400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 198400,
+          "end_ms": 198500,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 198500,
+          "end_ms": 198800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 198800,
+          "end_ms": 199000,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 199000,
+          "end_ms": 199500,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 199500,
+          "end_ms": 200000,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 200000,
+          "end_ms": 200400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 201100,
+      "end_ms": 203800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 201100,
+          "end_ms": 201300,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 201300,
+          "end_ms": 201500,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 201500,
+          "end_ms": 201600,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 201800,
+          "end_ms": 202200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 202200,
+          "end_ms": 202300,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 202300,
+          "end_ms": 202500,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 202500,
+          "end_ms": 202800,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 202800,
+          "end_ms": 203300,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 203300,
+          "end_ms": 203700,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 203700,
+          "end_ms": 203800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm going to praise you with my hands raised high.",
+      "start_ms": 208700,
+      "end_ms": 212400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 208700,
+          "end_ms": 208800,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 208800,
+          "end_ms": 209000,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 209000,
+          "end_ms": 209100,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 209400,
+          "end_ms": 209700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 209700,
+          "end_ms": 209900,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 209900,
+          "end_ms": 210100,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 210100,
+          "end_ms": 210300,
+          "confidence": null
+        },
+        {
+          "text": "hands",
+          "start_ms": 210300,
+          "end_ms": 211000,
+          "confidence": null
+        },
+        {
+          "text": "raised",
+          "start_ms": 211000,
+          "end_ms": 211600,
+          "confidence": null
+        },
+        {
+          "text": "high.",
+          "start_ms": 211600,
+          "end_ms": 212400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come on lift him up tonight.",
+      "start_ms": 213300,
+      "end_ms": 214800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 213300,
+          "end_ms": 213400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 213400,
+          "end_ms": 213700,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 213700,
+          "end_ms": 213900,
+          "confidence": null
+        },
+        {
+          "text": "him",
+          "start_ms": 213900,
+          "end_ms": 214100,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 214100,
+          "end_ms": 214300,
+          "confidence": null
+        },
+        {
+          "text": "tonight.",
+          "start_ms": 214300,
+          "end_ms": 214800,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 11.2,
+    "upload_s": 3.3,
+    "transcribe_s": 6.7,
+    "word_count": 275,
+    "line_count": 35,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 5969,
+      "total_input_tokens": 5969,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 1
+        },
+        {
+          "modality": "audio",
+          "tokens": 5968
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 6972,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 1004
+            },
+            {
+              "modality": "audio",
+              "tokens": 5968
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 353
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_ChdlaEtsYXYtYUc2aWEyOG9QLXViT29BcxIXZWhLbGF2LWFHNmlhMjhvUC11Yk9vQXM"
+  }
+}

@@ -79,6 +79,14 @@ discards cloudflared's real output.
   undocumented) and per-file MCP round trips are slow. To pull a BATCH of files
   back, start a temporary `python -m http.server` on the box, `curl` them from
   the dev side, then stop it.
+- **`Shell` + `Start-Process -RedirectStandardOutput` BLOCKS until the child
+  exits, and after the tool's timeout the server RE-RUNS the command with the
+  system `C:\Program Files\Python312\python.exe`** — a long eval batch was
+  running twice (double API calls, 429s) on 2026-09-12. Launch background work
+  with `Invoke-CimMethod -ClassName Win32_Process -MethodName Create
+  -Arguments @{CommandLine='cmd.exe /c ""<python>" -u "<script>" > "<log>" 2>&1"'}`,
+  which returns at once, then poll the log. Kill strays via
+  `Get-CimInstance Win32_Process | Where CommandLine -match '<script>'`.
 - MCP is the ONLY sanctioned channel here — never ssh/scp to this box. If an MCP
   call fails with a connection/timeout error, STOP and tell the user.
 

@@ -1,0 +1,2592 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\zVpDFHJtc_U_vocal16k.wav",
+  "duration_ms": 345400,
+  "lines": [
+    {
+      "text": "I hear your voice",
+      "start_ms": 12200,
+      "end_ms": 14200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 12200,
+          "end_ms": 12500,
+          "confidence": null
+        },
+        {
+          "text": "hear",
+          "start_ms": 12500,
+          "end_ms": 13000,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 13000,
+          "end_ms": 13300,
+          "confidence": null
+        },
+        {
+          "text": "voice",
+          "start_ms": 13300,
+          "end_ms": 14200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the distance",
+      "start_ms": 15000,
+      "end_ms": 17000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 15000,
+          "end_ms": 15400,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 15400,
+          "end_ms": 15600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 15600,
+          "end_ms": 15700,
+          "confidence": null
+        },
+        {
+          "text": "distance",
+          "start_ms": 15700,
+          "end_ms": 17000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the silence",
+      "start_ms": 18300,
+      "end_ms": 19900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 18300,
+          "end_ms": 18700,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 18700,
+          "end_ms": 18900,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 18900,
+          "end_ms": 19000,
+          "confidence": null
+        },
+        {
+          "text": "silence",
+          "start_ms": 19000,
+          "end_ms": 19900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the static",
+      "start_ms": 21600,
+      "end_ms": 23400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 21600,
+          "end_ms": 22000,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 22000,
+          "end_ms": 22200,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 22200,
+          "end_ms": 22300,
+          "confidence": null
+        },
+        {
+          "text": "static",
+          "start_ms": 22300,
+          "end_ms": 23400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I see you move",
+      "start_ms": 25300,
+      "end_ms": 27500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 25300,
+          "end_ms": 25600,
+          "confidence": null
+        },
+        {
+          "text": "see",
+          "start_ms": 25600,
+          "end_ms": 26100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 26100,
+          "end_ms": 26500,
+          "confidence": null
+        },
+        {
+          "text": "move",
+          "start_ms": 26500,
+          "end_ms": 27500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the dark night",
+      "start_ms": 28100,
+      "end_ms": 29900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 28100,
+          "end_ms": 28600,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 28600,
+          "end_ms": 28700,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 28700,
+          "end_ms": 28900,
+          "confidence": null
+        },
+        {
+          "text": "dark",
+          "start_ms": 28900,
+          "end_ms": 29600,
+          "confidence": null
+        },
+        {
+          "text": "night",
+          "start_ms": 29600,
+          "end_ms": 29900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the half light",
+      "start_ms": 31400,
+      "end_ms": 33300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 31400,
+          "end_ms": 31800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 31800,
+          "end_ms": 32000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 32000,
+          "end_ms": 32100,
+          "confidence": null
+        },
+        {
+          "text": "half",
+          "start_ms": 32100,
+          "end_ms": 32800,
+          "confidence": null
+        },
+        {
+          "text": "light",
+          "start_ms": 32800,
+          "end_ms": 33300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the stillness",
+      "start_ms": 34700,
+      "end_ms": 36700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 34700,
+          "end_ms": 35200,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 35200,
+          "end_ms": 35300,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 35300,
+          "end_ms": 35400,
+          "confidence": null
+        },
+        {
+          "text": "stillness",
+          "start_ms": 35400,
+          "end_ms": 36700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and after the fire",
+      "start_ms": 37800,
+      "end_ms": 40600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 37800,
+          "end_ms": 38100,
+          "confidence": null
+        },
+        {
+          "text": "after",
+          "start_ms": 38100,
+          "end_ms": 38800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 38800,
+          "end_ms": 39000,
+          "confidence": null
+        },
+        {
+          "text": "fire",
+          "start_ms": 39000,
+          "end_ms": 40600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and after the wind",
+      "start_ms": 41100,
+      "end_ms": 43100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 41100,
+          "end_ms": 41400,
+          "confidence": null
+        },
+        {
+          "text": "after",
+          "start_ms": 41400,
+          "end_ms": 42100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 42100,
+          "end_ms": 42400,
+          "confidence": null
+        },
+        {
+          "text": "wind",
+          "start_ms": 42500,
+          "end_ms": 43100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "when chaos subsides I listen again",
+      "start_ms": 44300,
+      "end_ms": 49600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "when",
+          "start_ms": 44300,
+          "end_ms": 44500,
+          "confidence": null
+        },
+        {
+          "text": "chaos",
+          "start_ms": 44500,
+          "end_ms": 45400,
+          "confidence": null
+        },
+        {
+          "text": "subsides",
+          "start_ms": 45500,
+          "end_ms": 47700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 47700,
+          "end_ms": 47800,
+          "confidence": null
+        },
+        {
+          "text": "listen",
+          "start_ms": 47800,
+          "end_ms": 48800,
+          "confidence": null
+        },
+        {
+          "text": "again",
+          "start_ms": 49000,
+          "end_ms": 49600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and after the earth shakes you're calling me in",
+      "start_ms": 51000,
+      "end_ms": 56500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 51000,
+          "end_ms": 51200,
+          "confidence": null
+        },
+        {
+          "text": "after",
+          "start_ms": 51200,
+          "end_ms": 52000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 52000,
+          "end_ms": 52300,
+          "confidence": null
+        },
+        {
+          "text": "earth",
+          "start_ms": 52500,
+          "end_ms": 53100,
+          "confidence": null
+        },
+        {
+          "text": "shakes",
+          "start_ms": 53100,
+          "end_ms": 54000,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 54200,
+          "end_ms": 54300,
+          "confidence": null
+        },
+        {
+          "text": "calling",
+          "start_ms": 54300,
+          "end_ms": 55300,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 55300,
+          "end_ms": 55800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 55800,
+          "end_ms": 56500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "a voice in the quiet a whisper within",
+      "start_ms": 57500,
+      "end_ms": 52800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "a",
+          "start_ms": 57500,
+          "end_ms": 57700,
+          "confidence": null
+        },
+        {
+          "text": "voice",
+          "start_ms": 57700,
+          "end_ms": 58200,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 58200,
+          "end_ms": 58600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 58600,
+          "end_ms": 58800,
+          "confidence": null
+        },
+        {
+          "text": "quiet",
+          "start_ms": 58800,
+          "end_ms": 50900,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 50900,
+          "end_ms": 50900,
+          "confidence": null
+        },
+        {
+          "text": "whisper",
+          "start_ms": 50900,
+          "end_ms": 51900,
+          "confidence": null
+        },
+        {
+          "text": "within",
+          "start_ms": 52000,
+          "end_ms": 52800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "When",
+      "start_ms": 64300,
+      "end_ms": 64400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 64300,
+          "end_ms": 64400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "you speak",
+      "start_ms": 65400,
+      "end_ms": 65600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 65400,
+          "end_ms": 65400,
+          "confidence": null
+        },
+        {
+          "text": "speak",
+          "start_ms": 65400,
+          "end_ms": 65600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I",
+      "start_ms": 67800,
+      "end_ms": 67900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 67800,
+          "end_ms": 67900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "am still",
+      "start_ms": 68400,
+      "end_ms": 69900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "am",
+          "start_ms": 68400,
+          "end_ms": 68600,
+          "confidence": null
+        },
+        {
+          "text": "still",
+          "start_ms": 68600,
+          "end_ms": 69900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I believe",
+      "start_ms": 70900,
+      "end_ms": 73100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 70900,
+          "end_ms": 71400,
+          "confidence": null
+        },
+        {
+          "text": "believe",
+          "start_ms": 71400,
+          "end_ms": 73100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "you are near",
+      "start_ms": 74100,
+      "end_ms": 76600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 74100,
+          "end_ms": 74800,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 74800,
+          "end_ms": 75100,
+          "confidence": null
+        },
+        {
+          "text": "near",
+          "start_ms": 75100,
+          "end_ms": 76600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Speak",
+      "start_ms": 77400,
+      "end_ms": 77800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Speak",
+          "start_ms": 77400,
+          "end_ms": 77800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "to me",
+      "start_ms": 78600,
+      "end_ms": 78800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 78600,
+          "end_ms": 78700,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 78700,
+          "end_ms": 78800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Draw me in",
+      "start_ms": 80600,
+      "end_ms": 83200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Draw",
+          "start_ms": 80600,
+          "end_ms": 81200,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 81200,
+          "end_ms": 82000,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 82100,
+          "end_ms": 83200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "where you are",
+      "start_ms": 84000,
+      "end_ms": 86400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "where",
+          "start_ms": 84000,
+          "end_ms": 84600,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 84600,
+          "end_ms": 85300,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 85300,
+          "end_ms": 86400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'll remain",
+      "start_ms": 87300,
+      "end_ms": 90500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 87300,
+          "end_ms": 87900,
+          "confidence": null
+        },
+        {
+          "text": "remain",
+          "start_ms": 87900,
+          "end_ms": 90500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I feel your love",
+      "start_ms": 91000,
+      "end_ms": 93100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 91000,
+          "end_ms": 91300,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 91300,
+          "end_ms": 91800,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 91800,
+          "end_ms": 92200,
+          "confidence": null
+        },
+        {
+          "text": "love",
+          "start_ms": 92200,
+          "end_ms": 93100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even in the heartache",
+      "start_ms": 93900,
+      "end_ms": 95600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 93900,
+          "end_ms": 94300,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 94300,
+          "end_ms": 94500,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 94500,
+          "end_ms": 94600,
+          "confidence": null
+        },
+        {
+          "text": "heartache",
+          "start_ms": 94600,
+          "end_ms": 95600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even though my heart breaks",
+      "start_ms": 97100,
+      "end_ms": 99200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 97100,
+          "end_ms": 97600,
+          "confidence": null
+        },
+        {
+          "text": "though",
+          "start_ms": 97600,
+          "end_ms": 97800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 97800,
+          "end_ms": 98000,
+          "confidence": null
+        },
+        {
+          "text": "heart",
+          "start_ms": 98000,
+          "end_ms": 98600,
+          "confidence": null
+        },
+        {
+          "text": "breaks",
+          "start_ms": 98600,
+          "end_ms": 99200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even then your words stay",
+      "start_ms": 100400,
+      "end_ms": 103200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 100400,
+          "end_ms": 100900,
+          "confidence": null
+        },
+        {
+          "text": "then",
+          "start_ms": 100900,
+          "end_ms": 101100,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 101100,
+          "end_ms": 101300,
+          "confidence": null
+        },
+        {
+          "text": "words",
+          "start_ms": 101300,
+          "end_ms": 101800,
+          "confidence": null
+        },
+        {
+          "text": "stay",
+          "start_ms": 101800,
+          "end_ms": 103200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I know you're here even when I'm broken",
+      "start_ms": 104200,
+      "end_ms": 109100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 104200,
+          "end_ms": 104500,
+          "confidence": null
+        },
+        {
+          "text": "know",
+          "start_ms": 104500,
+          "end_ms": 104900,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 104900,
+          "end_ms": 105300,
+          "confidence": null
+        },
+        {
+          "text": "here",
+          "start_ms": 105300,
+          "end_ms": 106600,
+          "confidence": null
+        },
+        {
+          "text": "even",
+          "start_ms": 107000,
+          "end_ms": 107500,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 107500,
+          "end_ms": 107700,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 107700,
+          "end_ms": 107900,
+          "confidence": null
+        },
+        {
+          "text": "broken",
+          "start_ms": 107900,
+          "end_ms": 109100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "even when I'm hopeless",
+      "start_ms": 110300,
+      "end_ms": 112400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "even",
+          "start_ms": 110300,
+          "end_ms": 110800,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 110800,
+          "end_ms": 111000,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 111000,
+          "end_ms": 111100,
+          "confidence": null
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 111100,
+          "end_ms": 112400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I know where my hope is",
+      "start_ms": 113600,
+      "end_ms": 116300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 113600,
+          "end_ms": 113800,
+          "confidence": null
+        },
+        {
+          "text": "know",
+          "start_ms": 113800,
+          "end_ms": 114000,
+          "confidence": null
+        },
+        {
+          "text": "where",
+          "start_ms": 114000,
+          "end_ms": 114200,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 114200,
+          "end_ms": 114400,
+          "confidence": null
+        },
+        {
+          "text": "hope",
+          "start_ms": 114400,
+          "end_ms": 115100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 115100,
+          "end_ms": 116300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "When you speak",
+      "start_ms": 116800,
+      "end_ms": 119700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 116800,
+          "end_ms": 117400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 117400,
+          "end_ms": 118000,
+          "confidence": null
+        },
+        {
+          "text": "speak",
+          "start_ms": 118000,
+          "end_ms": 119700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I",
+      "start_ms": 120200,
+      "end_ms": 120300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 120200,
+          "end_ms": 120300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "am still I believe",
+      "start_ms": 121000,
+      "end_ms": 126100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "am",
+          "start_ms": 121000,
+          "end_ms": 121200,
+          "confidence": null
+        },
+        {
+          "text": "still",
+          "start_ms": 121200,
+          "end_ms": 123100,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 123500,
+          "end_ms": 124000,
+          "confidence": null
+        },
+        {
+          "text": "believe",
+          "start_ms": 124000,
+          "end_ms": 126100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "you are near",
+      "start_ms": 126700,
+      "end_ms": 129400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 126700,
+          "end_ms": 127400,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 127400,
+          "end_ms": 127900,
+          "confidence": null
+        },
+        {
+          "text": "near",
+          "start_ms": 127900,
+          "end_ms": 129400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Speak to me",
+      "start_ms": 130000,
+      "end_ms": 131900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Speak",
+          "start_ms": 130000,
+          "end_ms": 130600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 130600,
+          "end_ms": 131200,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 131200,
+          "end_ms": 131900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Draw me in",
+      "start_ms": 133200,
+      "end_ms": 135800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Draw",
+          "start_ms": 133200,
+          "end_ms": 133900,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 133900,
+          "end_ms": 134500,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 134600,
+          "end_ms": 135800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "where you are",
+      "start_ms": 136500,
+      "end_ms": 138900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "where",
+          "start_ms": 136500,
+          "end_ms": 137300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 137300,
+          "end_ms": 138000,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 138000,
+          "end_ms": 138900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'll remain",
+      "start_ms": 139900,
+      "end_ms": 142300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 139900,
+          "end_ms": 140500,
+          "confidence": null
+        },
+        {
+          "text": "remain",
+          "start_ms": 140500,
+          "end_ms": 142300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There is",
+      "start_ms": 155800,
+      "end_ms": 156000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 155800,
+          "end_ms": 155900,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 155900,
+          "end_ms": 156000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "joy in your presence",
+      "start_ms": 156500,
+      "end_ms": 157000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "joy",
+          "start_ms": 156500,
+          "end_ms": 156600,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 156600,
+          "end_ms": 156700,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 156700,
+          "end_ms": 156800,
+          "confidence": null
+        },
+        {
+          "text": "presence",
+          "start_ms": 156800,
+          "end_ms": 157000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there is peace in your presence",
+      "start_ms": 159200,
+      "end_ms": 163400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there",
+          "start_ms": 159200,
+          "end_ms": 159500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 159500,
+          "end_ms": 159700,
+          "confidence": null
+        },
+        {
+          "text": "peace",
+          "start_ms": 159700,
+          "end_ms": 160600,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 160800,
+          "end_ms": 160900,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 160900,
+          "end_ms": 161000,
+          "confidence": null
+        },
+        {
+          "text": "presence",
+          "start_ms": 161000,
+          "end_ms": 163400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 171600,
+      "end_ms": 174100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 171600,
+          "end_ms": 172000,
+          "confidence": null
+        },
+        {
+          "text": "hope",
+          "start_ms": 172000,
+          "end_ms": 172400,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 172400,
+          "end_ms": 172700,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 172700,
+          "end_ms": 172800,
+          "confidence": null
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 172800,
+          "end_ms": 174100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's light in the darkest hour there's peace when I am restless",
+      "start_ms": 174800,
+      "end_ms": 180600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 174800,
+          "end_ms": 175300,
+          "confidence": null
+        },
+        {
+          "text": "light",
+          "start_ms": 175300,
+          "end_ms": 175700,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 175700,
+          "end_ms": 175800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 175800,
+          "end_ms": 176000,
+          "confidence": null
+        },
+        {
+          "text": "darkest",
+          "start_ms": 176000,
+          "end_ms": 176900,
+          "confidence": null
+        },
+        {
+          "text": "hour",
+          "start_ms": 176900,
+          "end_ms": 177800,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 178100,
+          "end_ms": 178500,
+          "confidence": null
+        },
+        {
+          "text": "peace",
+          "start_ms": 178500,
+          "end_ms": 178900,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 178900,
+          "end_ms": 179200,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 179200,
+          "end_ms": 179300,
+          "confidence": null
+        },
+        {
+          "text": "am",
+          "start_ms": 179300,
+          "end_ms": 179400,
+          "confidence": null
+        },
+        {
+          "text": "restless",
+          "start_ms": 179400,
+          "end_ms": 180600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over there's grace when I'm anxious",
+      "start_ms": 181200,
+      "end_ms": 187400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 181200,
+          "end_ms": 181400,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 181400,
+          "end_ms": 181900,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 181900,
+          "end_ms": 182700,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 182800,
+          "end_ms": 183000,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 183000,
+          "end_ms": 183500,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 183500,
+          "end_ms": 184300,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 184700,
+          "end_ms": 185100,
+          "confidence": null
+        },
+        {
+          "text": "grace",
+          "start_ms": 185100,
+          "end_ms": 185600,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 185600,
+          "end_ms": 185800,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 185800,
+          "end_ms": 186000,
+          "confidence": null
+        },
+        {
+          "text": "anxious",
+          "start_ms": 186000,
+          "end_ms": 187400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's joy when I'm brokenhearted there's power in Jesus",
+      "start_ms": 187900,
+      "end_ms": 193800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 187900,
+          "end_ms": 188400,
+          "confidence": null
+        },
+        {
+          "text": "joy",
+          "start_ms": 188400,
+          "end_ms": 188800,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 188800,
+          "end_ms": 189100,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 189100,
+          "end_ms": 189200,
+          "confidence": null
+        },
+        {
+          "text": "brokenhearted",
+          "start_ms": 189200,
+          "end_ms": 191000,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 191200,
+          "end_ms": 191700,
+          "confidence": null
+        },
+        {
+          "text": "power",
+          "start_ms": 191700,
+          "end_ms": 192400,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 192400,
+          "end_ms": 192600,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 192600,
+          "end_ms": 193800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over There's hope when I'm hopeless",
+      "start_ms": 194300,
+      "end_ms": 200500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 194300,
+          "end_ms": 194600,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 194600,
+          "end_ms": 195100,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 195100,
+          "end_ms": 195800,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 196000,
+          "end_ms": 196200,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 196200,
+          "end_ms": 196700,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 196700,
+          "end_ms": 197500,
+          "confidence": null
+        },
+        {
+          "text": "There's",
+          "start_ms": 197900,
+          "end_ms": 198300,
+          "confidence": null
+        },
+        {
+          "text": "hope",
+          "start_ms": 198300,
+          "end_ms": 198700,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 198700,
+          "end_ms": 198900,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 198900,
+          "end_ms": 199100,
+          "confidence": null
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 199100,
+          "end_ms": 200500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's light in the darkest hour there's peace when I'm restless",
+      "start_ms": 201100,
+      "end_ms": 206900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 201100,
+          "end_ms": 201500,
+          "confidence": null
+        },
+        {
+          "text": "light",
+          "start_ms": 201500,
+          "end_ms": 202000,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 202000,
+          "end_ms": 202100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 202100,
+          "end_ms": 202300,
+          "confidence": null
+        },
+        {
+          "text": "darkest",
+          "start_ms": 202300,
+          "end_ms": 203200,
+          "confidence": null
+        },
+        {
+          "text": "hour",
+          "start_ms": 203200,
+          "end_ms": 204100,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 204400,
+          "end_ms": 204800,
+          "confidence": null
+        },
+        {
+          "text": "peace",
+          "start_ms": 204800,
+          "end_ms": 205300,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 205300,
+          "end_ms": 205500,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 205500,
+          "end_ms": 205700,
+          "confidence": null
+        },
+        {
+          "text": "restless",
+          "start_ms": 205700,
+          "end_ms": 206900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over there's grace when I'm anxious",
+      "start_ms": 207500,
+      "end_ms": 213500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 207500,
+          "end_ms": 207800,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 207800,
+          "end_ms": 208200,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 208200,
+          "end_ms": 209000,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 209200,
+          "end_ms": 209400,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 209400,
+          "end_ms": 209900,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 209900,
+          "end_ms": 210700,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 211000,
+          "end_ms": 211400,
+          "confidence": null
+        },
+        {
+          "text": "grace",
+          "start_ms": 211400,
+          "end_ms": 211800,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 211800,
+          "end_ms": 212100,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 212100,
+          "end_ms": 212300,
+          "confidence": null
+        },
+        {
+          "text": "anxious",
+          "start_ms": 212300,
+          "end_ms": 213500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's joy when I'm brokenhearted",
+      "start_ms": 214200,
+      "end_ms": 216500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 214200,
+          "end_ms": 214700,
+          "confidence": null
+        },
+        {
+          "text": "joy",
+          "start_ms": 214700,
+          "end_ms": 215100,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 215100,
+          "end_ms": 215400,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 215400,
+          "end_ms": 215500,
+          "confidence": null
+        },
+        {
+          "text": "brokenhearted",
+          "start_ms": 215500,
+          "end_ms": 216500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's power in Jesus",
+      "start_ms": 217600,
+      "end_ms": 220100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 217600,
+          "end_ms": 218000,
+          "confidence": null
+        },
+        {
+          "text": "power",
+          "start_ms": 218000,
+          "end_ms": 218600,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 218600,
+          "end_ms": 218800,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 218800,
+          "end_ms": 220100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over There's hope when I am hopeless",
+      "start_ms": 220600,
+      "end_ms": 226700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 220600,
+          "end_ms": 220800,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 220800,
+          "end_ms": 221300,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 221300,
+          "end_ms": 222100,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 222300,
+          "end_ms": 222500,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 222500,
+          "end_ms": 223000,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 223000,
+          "end_ms": 223800,
+          "confidence": null
+        },
+        {
+          "text": "There's",
+          "start_ms": 224100,
+          "end_ms": 224500,
+          "confidence": null
+        },
+        {
+          "text": "hope",
+          "start_ms": 224500,
+          "end_ms": 225000,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 225000,
+          "end_ms": 225200,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 225200,
+          "end_ms": 225300,
+          "confidence": null
+        },
+        {
+          "text": "am",
+          "start_ms": 225300,
+          "end_ms": 225400,
+          "confidence": null
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 225400,
+          "end_ms": 226700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There's light in the darkest hour there's peace when I'm restless",
+      "start_ms": 227500,
+      "end_ms": 233200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 227500,
+          "end_ms": 227900,
+          "confidence": null
+        },
+        {
+          "text": "light",
+          "start_ms": 227900,
+          "end_ms": 228300,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 228300,
+          "end_ms": 228500,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 228500,
+          "end_ms": 228600,
+          "confidence": null
+        },
+        {
+          "text": "darkest",
+          "start_ms": 228600,
+          "end_ms": 229500,
+          "confidence": null
+        },
+        {
+          "text": "hour",
+          "start_ms": 229500,
+          "end_ms": 230400,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 230700,
+          "end_ms": 231100,
+          "confidence": null
+        },
+        {
+          "text": "peace",
+          "start_ms": 231100,
+          "end_ms": 231500,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 231500,
+          "end_ms": 231800,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 231800,
+          "end_ms": 232000,
+          "confidence": null
+        },
+        {
+          "text": "restless",
+          "start_ms": 232000,
+          "end_ms": 233200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over there's grace when I'm anxious",
+      "start_ms": 233800,
+      "end_ms": 239900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 233800,
+          "end_ms": 234000,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 234000,
+          "end_ms": 234500,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 234500,
+          "end_ms": 235300,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 235400,
+          "end_ms": 235700,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 235700,
+          "end_ms": 236200,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 236200,
+          "end_ms": 237000,
+          "confidence": null
+        },
+        {
+          "text": "there's",
+          "start_ms": 237300,
+          "end_ms": 237700,
+          "confidence": null
+        },
+        {
+          "text": "grace",
+          "start_ms": 237700,
+          "end_ms": 238200,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 238200,
+          "end_ms": 238400,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 238400,
+          "end_ms": 238500,
+          "confidence": null
+        },
+        {
+          "text": "anxious",
+          "start_ms": 238500,
+          "end_ms": 239900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's joy when I'm brokenhearted",
+      "start_ms": 240500,
+      "end_ms": 242700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 240500,
+          "end_ms": 241000,
+          "confidence": null
+        },
+        {
+          "text": "joy",
+          "start_ms": 241000,
+          "end_ms": 241400,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 241400,
+          "end_ms": 241700,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 241700,
+          "end_ms": 241800,
+          "confidence": null
+        },
+        {
+          "text": "brokenhearted",
+          "start_ms": 241800,
+          "end_ms": 242700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "there's power in Jesus",
+      "start_ms": 243900,
+      "end_ms": 246200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "there's",
+          "start_ms": 243900,
+          "end_ms": 244200,
+          "confidence": null
+        },
+        {
+          "text": "power",
+          "start_ms": 244200,
+          "end_ms": 244900,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 244900,
+          "end_ms": 245100,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 245100,
+          "end_ms": 246200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it not over",
+      "start_ms": 247000,
+      "end_ms": 250200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 247000,
+          "end_ms": 247200,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 247200,
+          "end_ms": 247600,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 247600,
+          "end_ms": 248400,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 248600,
+          "end_ms": 248800,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 248800,
+          "end_ms": 249300,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 249300,
+          "end_ms": 250200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's not over it's not over it's not over",
+      "start_ms": 251100,
+      "end_ms": 256600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 251100,
+          "end_ms": 251300,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 251300,
+          "end_ms": 251800,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 251800,
+          "end_ms": 253100,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 253500,
+          "end_ms": 253800,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 253800,
+          "end_ms": 254300,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 254300,
+          "end_ms": 255000,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 255200,
+          "end_ms": 255400,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 255400,
+          "end_ms": 255900,
+          "confidence": null
+        },
+        {
+          "text": "over",
+          "start_ms": 255900,
+          "end_ms": 256600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "When",
+      "start_ms": 261500,
+      "end_ms": 261600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "When",
+          "start_ms": 261500,
+          "end_ms": 261600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "you speak",
+      "start_ms": 262300,
+      "end_ms": 264100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 262300,
+          "end_ms": 262600,
+          "confidence": null
+        },
+        {
+          "text": "speak",
+          "start_ms": 262600,
+          "end_ms": 264100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "oh",
+      "start_ms": 264600,
+      "end_ms": 264700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "oh",
+          "start_ms": 264600,
+          "end_ms": 264700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I am still",
+      "start_ms": 265400,
+      "end_ms": 267400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 265400,
+          "end_ms": 265500,
+          "confidence": null
+        },
+        {
+          "text": "am",
+          "start_ms": 265500,
+          "end_ms": 266000,
+          "confidence": null
+        },
+        {
+          "text": "still",
+          "start_ms": 266000,
+          "end_ms": 267400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I believe",
+      "start_ms": 268000,
+      "end_ms": 270600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 268000,
+          "end_ms": 268600,
+          "confidence": null
+        },
+        {
+          "text": "believe",
+          "start_ms": 268600,
+          "end_ms": 270600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "you are near",
+      "start_ms": 271300,
+      "end_ms": 273700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "you",
+          "start_ms": 271300,
+          "end_ms": 272000,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 272000,
+          "end_ms": 272400,
+          "confidence": null
+        },
+        {
+          "text": "near",
+          "start_ms": 272400,
+          "end_ms": 273700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Speak",
+      "start_ms": 274600,
+      "end_ms": 275300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Speak",
+          "start_ms": 274600,
+          "end_ms": 275300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "to me",
+      "start_ms": 275800,
+      "end_ms": 277000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 275800,
+          "end_ms": 275800,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 275800,
+          "end_ms": 277000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Draw me in",
+      "start_ms": 277900,
+      "end_ms": 280300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Draw",
+          "start_ms": 277900,
+          "end_ms": 278500,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 278500,
+          "end_ms": 279200,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 279200,
+          "end_ms": 280300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "where you are",
+      "start_ms": 281100,
+      "end_ms": 283500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "where",
+          "start_ms": 281100,
+          "end_ms": 281900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 281900,
+          "end_ms": 282600,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 282600,
+          "end_ms": 283500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'll remain",
+      "start_ms": 284500,
+      "end_ms": 289300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'll",
+          "start_ms": 284500,
+          "end_ms": 285200,
+          "confidence": null
+        },
+        {
+          "text": "remain",
+          "start_ms": 285200,
+          "end_ms": 289300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 316200,
+      "end_ms": 319000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 316200,
+          "end_ms": 316600,
+          "confidence": null
+        },
+        {
+          "text": "hope",
+          "start_ms": 316600,
+          "end_ms": 317100,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 317100,
+          "end_ms": 317300,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 317300,
+          "end_ms": 317500,
+          "confidence": null
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 317500,
+          "end_ms": 319000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There's hope when I'm hopeless",
+      "start_ms": 342500,
+      "end_ms": 345400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There's",
+          "start_ms": 342500,
+          "end_ms": 343000,
+          "confidence": null
+        },
+        {
+          "text": "hope",
+          "start_ms": 343000,
+          "end_ms": 343300,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 343300,
+          "end_ms": 343600,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 343600,
+          "end_ms": 343800,
+          "confidence": null
+        },
+        {
+          "text": "hopeless",
+          "start_ms": 343800,
+          "end_ms": 345400,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 14.4,
+    "upload_s": 4.3,
+    "transcribe_s": 8.9,
+    "word_count": 327,
+    "line_count": 71,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 9863,
+      "total_input_tokens": 9863,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 1
+        },
+        {
+          "modality": "audio",
+          "tokens": 9862
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 11490,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 1628
+            },
+            {
+              "modality": "audio",
+              "tokens": 9862
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 437
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_Chc5UldsYXRqQkdaMmx2ZElQaW9mMzJRcxIXOVJXbGF0akJHWjJsdmRJUGlvZjMyUXM"
+  }
+}

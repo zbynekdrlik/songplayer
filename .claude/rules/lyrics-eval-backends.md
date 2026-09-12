@@ -67,6 +67,26 @@ if a call starts failing.
 - Known limitation: translated text carries only utterance-level timing; per-word
   timings exist for the source language only.
 
+**Gemini 3.5 Transcribe (`gemini-3.5-transcribe`, preview 2026-08; verified 2026-09-12)**
+- Upload `POST https://generativelanguage.googleapis.com/upload/v1beta/files`
+  (`x-goog-api-key`, `X-Goog-Upload-Protocol: raw`,
+  `X-Goog-Upload-Header-Content-Type: audio/wav`, body = WAV bytes) → `file.uri`;
+  poll `GET /v1beta/{file.name}` until `state != PROCESSING`; then
+  `POST /v1beta/interactions` with `{model, input:[{type:"audio",uri,mime_type}],
+  generation_config:{transcription_config:{language_codes:["en-US"],
+  mode:{type:"verbatim",timestamp_granularities:["word"]}}}}`.
+- Words: `steps[*].content[*].annotations[*]` with `type: "word_info"`,
+  `start_offset`/`end_offset` as STRINGS `"5.200s"` / `"9s"` (100 ms grid), no
+  per-word confidence. `DELETE /v1beta/{name}` afterwards.
+- `custom_vocabulary` is refused together with word timestamps — no text-guided
+  path. 30 min max per file with timestamps. ≈ $0.005/min; a free-tier key
+  returns `429 … exceeded your current quota` after ~14 songs and recovers in
+  minutes — rotate through the `gemini_api_key` CSV list (entry #1 of the
+  five is INVALID: `API key not valid`).
+- Result 2026-09-12: 19.7 % gold-normalized ≤400 ms own lines (best dedicated
+  ASR), 29.5 % as time source under Qwen lines — below mtl 31.6 %. Report:
+  `reports/2026-09-12-gemini-3-5-transcribe.md`.
+
 **Soniox stt-async-v5**
 - `POST /v1/files` (multipart) → `POST /v1/transcriptions` with
   `{"model":"stt-async-v5","file_id":...,"translation":{"type":"one_way","target_language":"sk"}}`

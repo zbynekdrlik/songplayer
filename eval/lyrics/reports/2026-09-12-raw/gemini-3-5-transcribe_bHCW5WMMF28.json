@@ -1,0 +1,1938 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\bHCW5WMMF28_vocal16k.wav",
+  "duration_ms": 155700,
+  "lines": [
+    {
+      "text": "One.",
+      "start_ms": 5000,
+      "end_ms": 5600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "One.",
+          "start_ms": 5000,
+          "end_ms": 5600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You made it out. You're",
+      "start_ms": 6800,
+      "end_ms": 7800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 6800,
+          "end_ms": 6800,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 7000,
+          "end_ms": 7300,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 7300,
+          "end_ms": 7300,
+          "confidence": null
+        },
+        {
+          "text": "out.",
+          "start_ms": 7700,
+          "end_ms": 7800,
+          "confidence": null
+        },
+        {
+          "text": "You're",
+          "start_ms": 7800,
+          "end_ms": 7800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "out of all and too.",
+      "start_ms": 8300,
+      "end_ms": 9600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "out",
+          "start_ms": 8300,
+          "end_ms": 8400,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 8400,
+          "end_ms": 8400,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 8400,
+          "end_ms": 8800,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 8800,
+          "end_ms": 9000,
+          "confidence": null
+        },
+        {
+          "text": "too.",
+          "start_ms": 9200,
+          "end_ms": 9600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm",
+      "start_ms": 11100,
+      "end_ms": 11300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 11100,
+          "end_ms": 11300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "in love so because of you.",
+      "start_ms": 11800,
+      "end_ms": 13700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 11800,
+          "end_ms": 11900,
+          "confidence": null
+        },
+        {
+          "text": "love",
+          "start_ms": 11900,
+          "end_ms": 11900,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 12100,
+          "end_ms": 12300,
+          "confidence": null
+        },
+        {
+          "text": "because",
+          "start_ms": 12300,
+          "end_ms": 12900,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 12900,
+          "end_ms": 13100,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 13100,
+          "end_ms": 13700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I've got so many reasons to praise. Then it's three.",
+      "start_ms": 16900,
+      "end_ms": 21700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I've",
+          "start_ms": 16900,
+          "end_ms": 17100,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 17100,
+          "end_ms": 17600,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 17600,
+          "end_ms": 18200,
+          "confidence": null
+        },
+        {
+          "text": "many",
+          "start_ms": 18200,
+          "end_ms": 19000,
+          "confidence": null
+        },
+        {
+          "text": "reasons",
+          "start_ms": 19200,
+          "end_ms": 19700,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 19700,
+          "end_ms": 19900,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 19900,
+          "end_ms": 20500,
+          "confidence": null
+        },
+        {
+          "text": "Then",
+          "start_ms": 20800,
+          "end_ms": 21000,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 21000,
+          "end_ms": 21200,
+          "confidence": null
+        },
+        {
+          "text": "three.",
+          "start_ms": 21200,
+          "end_ms": 21700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You're holding me. You set me free and four.",
+      "start_ms": 23000,
+      "end_ms": 25800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You're",
+          "start_ms": 23000,
+          "end_ms": 23200,
+          "confidence": null
+        },
+        {
+          "text": "holding",
+          "start_ms": 23200,
+          "end_ms": 23600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 23600,
+          "end_ms": 24100,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 24100,
+          "end_ms": 24200,
+          "confidence": null
+        },
+        {
+          "text": "set",
+          "start_ms": 24200,
+          "end_ms": 24500,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 24500,
+          "end_ms": 24600,
+          "confidence": null
+        },
+        {
+          "text": "free",
+          "start_ms": 24600,
+          "end_ms": 25000,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 25000,
+          "end_ms": 25300,
+          "confidence": null
+        },
+        {
+          "text": "four.",
+          "start_ms": 25300,
+          "end_ms": 25800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm not a slave to sin no more.",
+      "start_ms": 27300,
+      "end_ms": 30000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 27300,
+          "end_ms": 27700,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 27700,
+          "end_ms": 28100,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 28100,
+          "end_ms": 28200,
+          "confidence": null
+        },
+        {
+          "text": "slave",
+          "start_ms": 28200,
+          "end_ms": 28600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 28600,
+          "end_ms": 28700,
+          "confidence": null
+        },
+        {
+          "text": "sin",
+          "start_ms": 28700,
+          "end_ms": 29100,
+          "confidence": null
+        },
+        {
+          "text": "no",
+          "start_ms": 29100,
+          "end_ms": 29400,
+          "confidence": null
+        },
+        {
+          "text": "more.",
+          "start_ms": 29400,
+          "end_ms": 30000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I got so many reasons to praise.",
+      "start_ms": 33200,
+      "end_ms": 37400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 33200,
+          "end_ms": 33400,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 33400,
+          "end_ms": 33900,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 33900,
+          "end_ms": 34400,
+          "confidence": null
+        },
+        {
+          "text": "many",
+          "start_ms": 34400,
+          "end_ms": 35400,
+          "confidence": null
+        },
+        {
+          "text": "reasons",
+          "start_ms": 35400,
+          "end_ms": 36000,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 36000,
+          "end_ms": 36100,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 36100,
+          "end_ms": 37400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "In the morning, in the evening, every time of day.",
+      "start_ms": 38300,
+      "end_ms": 41500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 38300,
+          "end_ms": 38400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 38400,
+          "end_ms": 38500,
+          "confidence": null
+        },
+        {
+          "text": "morning,",
+          "start_ms": 38500,
+          "end_ms": 39100,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 39300,
+          "end_ms": 39400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 39400,
+          "end_ms": 39500,
+          "confidence": null
+        },
+        {
+          "text": "evening,",
+          "start_ms": 39500,
+          "end_ms": 40100,
+          "confidence": null
+        },
+        {
+          "text": "every",
+          "start_ms": 40300,
+          "end_ms": 40500,
+          "confidence": null
+        },
+        {
+          "text": "time",
+          "start_ms": 40500,
+          "end_ms": 40800,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 40800,
+          "end_ms": 40900,
+          "confidence": null
+        },
+        {
+          "text": "day.",
+          "start_ms": 40900,
+          "end_ms": 41500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "We got a reason to lift up Jesus and sing. Sing with me. We will lift you higher.",
+      "start_ms": 42200,
+      "end_ms": 48700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 42200,
+          "end_ms": 42300,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 42300,
+          "end_ms": 42500,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 42500,
+          "end_ms": 42500,
+          "confidence": null
+        },
+        {
+          "text": "reason",
+          "start_ms": 42500,
+          "end_ms": 43100,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 43300,
+          "end_ms": 43500,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 43500,
+          "end_ms": 43900,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 43900,
+          "end_ms": 44100,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 44100,
+          "end_ms": 44600,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 44600,
+          "end_ms": 44800,
+          "confidence": null
+        },
+        {
+          "text": "sing.",
+          "start_ms": 44800,
+          "end_ms": 45200,
+          "confidence": null
+        },
+        {
+          "text": "Sing",
+          "start_ms": 45300,
+          "end_ms": 45500,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 45500,
+          "end_ms": 45600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 45600,
+          "end_ms": 45900,
+          "confidence": null
+        },
+        {
+          "text": "We",
+          "start_ms": 46200,
+          "end_ms": 46500,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 46500,
+          "end_ms": 46700,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 46700,
+          "end_ms": 47200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 47200,
+          "end_ms": 47600,
+          "confidence": null
+        },
+        {
+          "text": "higher.",
+          "start_ms": 47700,
+          "end_ms": 48700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Cuz you are our desire. Oh, we will lift you higher.",
+      "start_ms": 49500,
+      "end_ms": 56900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Cuz",
+          "start_ms": 49500,
+          "end_ms": 49700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 49700,
+          "end_ms": 50100,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 50200,
+          "end_ms": 50800,
+          "confidence": null
+        },
+        {
+          "text": "our",
+          "start_ms": 50800,
+          "end_ms": 51200,
+          "confidence": null
+        },
+        {
+          "text": "desire.",
+          "start_ms": 51200,
+          "end_ms": 53200,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 53500,
+          "end_ms": 53800,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 53800,
+          "end_ms": 54100,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 54400,
+          "end_ms": 54800,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 54800,
+          "end_ms": 55300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 55300,
+          "end_ms": 55700,
+          "confidence": null
+        },
+        {
+          "text": "higher.",
+          "start_ms": 55800,
+          "end_ms": 56900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And we won't stop at no. We won't stop at no. Five.",
+      "start_ms": 57800,
+      "end_ms": 62600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 57800,
+          "end_ms": 57900,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 57900,
+          "end_ms": 58100,
+          "confidence": null
+        },
+        {
+          "text": "won't",
+          "start_ms": 58100,
+          "end_ms": 58500,
+          "confidence": null
+        },
+        {
+          "text": "stop",
+          "start_ms": 58500,
+          "end_ms": 59000,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 59000,
+          "end_ms": 59300,
+          "confidence": null
+        },
+        {
+          "text": "no.",
+          "start_ms": 59300,
+          "end_ms": 59800,
+          "confidence": null
+        },
+        {
+          "text": "We",
+          "start_ms": 59800,
+          "end_ms": 60200,
+          "confidence": null
+        },
+        {
+          "text": "won't",
+          "start_ms": 60200,
+          "end_ms": 60500,
+          "confidence": null
+        },
+        {
+          "text": "stop",
+          "start_ms": 60500,
+          "end_ms": 61000,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 61000,
+          "end_ms": 61300,
+          "confidence": null
+        },
+        {
+          "text": "no.",
+          "start_ms": 61300,
+          "end_ms": 61900,
+          "confidence": null
+        },
+        {
+          "text": "Five.",
+          "start_ms": 61900,
+          "end_ms": 62600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Every need you will provide. Six.",
+      "start_ms": 64000,
+      "end_ms": 66700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 64000,
+          "end_ms": 64300,
+          "confidence": null
+        },
+        {
+          "text": "need",
+          "start_ms": 64300,
+          "end_ms": 64700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 64700,
+          "end_ms": 64900,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 64900,
+          "end_ms": 65200,
+          "confidence": null
+        },
+        {
+          "text": "provide.",
+          "start_ms": 65200,
+          "end_ms": 65900,
+          "confidence": null
+        },
+        {
+          "text": "Six.",
+          "start_ms": 65900,
+          "end_ms": 66700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "God, you are the reason I exist.",
+      "start_ms": 68000,
+      "end_ms": 71000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "God,",
+          "start_ms": 68000,
+          "end_ms": 68300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 68300,
+          "end_ms": 68500,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 68500,
+          "end_ms": 68800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 68800,
+          "end_ms": 69000,
+          "confidence": null
+        },
+        {
+          "text": "reason",
+          "start_ms": 69000,
+          "end_ms": 69500,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 69500,
+          "end_ms": 69800,
+          "confidence": null
+        },
+        {
+          "text": "exist.",
+          "start_ms": 69800,
+          "end_ms": 71000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah, I've got so many reasons to praise. Yeah.",
+      "start_ms": 73300,
+      "end_ms": 78200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah,",
+          "start_ms": 73300,
+          "end_ms": 73900,
+          "confidence": null
+        },
+        {
+          "text": "I've",
+          "start_ms": 73900,
+          "end_ms": 74100,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 74100,
+          "end_ms": 74600,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 74600,
+          "end_ms": 75100,
+          "confidence": null
+        },
+        {
+          "text": "many",
+          "start_ms": 75100,
+          "end_ms": 75900,
+          "confidence": null
+        },
+        {
+          "text": "reasons",
+          "start_ms": 76100,
+          "end_ms": 76600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 76600,
+          "end_ms": 76800,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 76800,
+          "end_ms": 77600,
+          "confidence": null
+        },
+        {
+          "text": "Yeah.",
+          "start_ms": 77700,
+          "end_ms": 78200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "In the morning, in the evening, every time of day.",
+      "start_ms": 79000,
+      "end_ms": 82200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "In",
+          "start_ms": 79000,
+          "end_ms": 79100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 79100,
+          "end_ms": 79200,
+          "confidence": null
+        },
+        {
+          "text": "morning,",
+          "start_ms": 79200,
+          "end_ms": 79800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 79900,
+          "end_ms": 80100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 80100,
+          "end_ms": 80200,
+          "confidence": null
+        },
+        {
+          "text": "evening,",
+          "start_ms": 80200,
+          "end_ms": 80800,
+          "confidence": null
+        },
+        {
+          "text": "every",
+          "start_ms": 81000,
+          "end_ms": 81200,
+          "confidence": null
+        },
+        {
+          "text": "time",
+          "start_ms": 81200,
+          "end_ms": 81500,
+          "confidence": null
+        },
+        {
+          "text": "of",
+          "start_ms": 81500,
+          "end_ms": 81600,
+          "confidence": null
+        },
+        {
+          "text": "day.",
+          "start_ms": 81600,
+          "end_ms": 82200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "We got a reason to lift up Jesus name. Let's go. We will lift you higher.",
+      "start_ms": 82900,
+      "end_ms": 89600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "We",
+          "start_ms": 82900,
+          "end_ms": 83000,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 83000,
+          "end_ms": 83200,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 83200,
+          "end_ms": 83300,
+          "confidence": null
+        },
+        {
+          "text": "reason",
+          "start_ms": 83300,
+          "end_ms": 83800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 84000,
+          "end_ms": 84200,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 84200,
+          "end_ms": 84600,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 84600,
+          "end_ms": 84700,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 84700,
+          "end_ms": 85300,
+          "confidence": null
+        },
+        {
+          "text": "name.",
+          "start_ms": 85300,
+          "end_ms": 85600,
+          "confidence": null
+        },
+        {
+          "text": "Let's",
+          "start_ms": 85600,
+          "end_ms": 85800,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 85800,
+          "end_ms": 86300,
+          "confidence": null
+        },
+        {
+          "text": "We",
+          "start_ms": 86400,
+          "end_ms": 86800,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 86800,
+          "end_ms": 87300,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 87300,
+          "end_ms": 87900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 87900,
+          "end_ms": 88300,
+          "confidence": null
+        },
+        {
+          "text": "higher.",
+          "start_ms": 88400,
+          "end_ms": 89600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Cuz you are our desire.",
+      "start_ms": 90200,
+      "end_ms": 93700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Cuz",
+          "start_ms": 90200,
+          "end_ms": 90300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 90300,
+          "end_ms": 90800,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 90900,
+          "end_ms": 91300,
+          "confidence": null
+        },
+        {
+          "text": "our",
+          "start_ms": 91400,
+          "end_ms": 91800,
+          "confidence": null
+        },
+        {
+          "text": "desire.",
+          "start_ms": 91800,
+          "end_ms": 93700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh, we will lift you higher.",
+      "start_ms": 94200,
+      "end_ms": 97600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_ms": 94200,
+          "end_ms": 94500,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 94500,
+          "end_ms": 94800,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 94900,
+          "end_ms": 95400,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 95400,
+          "end_ms": 96000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 96000,
+          "end_ms": 96300,
+          "confidence": null
+        },
+        {
+          "text": "higher.",
+          "start_ms": 96500,
+          "end_ms": 97600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And we won't stop at no. We won't stop at no.",
+      "start_ms": 98500,
+      "end_ms": 102600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 98500,
+          "end_ms": 98500,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 98500,
+          "end_ms": 98800,
+          "confidence": null
+        },
+        {
+          "text": "won't",
+          "start_ms": 98800,
+          "end_ms": 99200,
+          "confidence": null
+        },
+        {
+          "text": "stop",
+          "start_ms": 99200,
+          "end_ms": 99700,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 99700,
+          "end_ms": 100000,
+          "confidence": null
+        },
+        {
+          "text": "no.",
+          "start_ms": 100000,
+          "end_ms": 100500,
+          "confidence": null
+        },
+        {
+          "text": "We",
+          "start_ms": 100500,
+          "end_ms": 100900,
+          "confidence": null
+        },
+        {
+          "text": "won't",
+          "start_ms": 100900,
+          "end_ms": 101200,
+          "confidence": null
+        },
+        {
+          "text": "stop",
+          "start_ms": 101200,
+          "end_ms": 101700,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 101700,
+          "end_ms": 102000,
+          "confidence": null
+        },
+        {
+          "text": "no.",
+          "start_ms": 102000,
+          "end_ms": 102600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "We're going to use all that we got to praise you on and on. Let everything that has breath give him praise. Let all the earth rejoice and make a joyful noise. Give him all the praise. Oh, yeah.",
+      "start_ms": 103300,
+      "end_ms": 118600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "We're",
+          "start_ms": 103300,
+          "end_ms": 103500,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 103500,
+          "end_ms": 103600,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 103600,
+          "end_ms": 103700,
+          "confidence": null
+        },
+        {
+          "text": "use",
+          "start_ms": 103700,
+          "end_ms": 104000,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 104000,
+          "end_ms": 104100,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 104100,
+          "end_ms": 104400,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 104400,
+          "end_ms": 104600,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 104600,
+          "end_ms": 105100,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 105300,
+          "end_ms": 105600,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 105600,
+          "end_ms": 106000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 106000,
+          "end_ms": 106200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 106200,
+          "end_ms": 106500,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 106500,
+          "end_ms": 106800,
+          "confidence": null
+        },
+        {
+          "text": "on.",
+          "start_ms": 106800,
+          "end_ms": 107200,
+          "confidence": null
+        },
+        {
+          "text": "Let",
+          "start_ms": 107400,
+          "end_ms": 107700,
+          "confidence": null
+        },
+        {
+          "text": "everything",
+          "start_ms": 107700,
+          "end_ms": 108500,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 108500,
+          "end_ms": 108700,
+          "confidence": null
+        },
+        {
+          "text": "has",
+          "start_ms": 108700,
+          "end_ms": 109200,
+          "confidence": null
+        },
+        {
+          "text": "breath",
+          "start_ms": 109200,
+          "end_ms": 109700,
+          "confidence": null
+        },
+        {
+          "text": "give",
+          "start_ms": 109700,
+          "end_ms": 110200,
+          "confidence": null
+        },
+        {
+          "text": "him",
+          "start_ms": 110200,
+          "end_ms": 110700,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 110700,
+          "end_ms": 111300,
+          "confidence": null
+        },
+        {
+          "text": "Let",
+          "start_ms": 111500,
+          "end_ms": 111800,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 111800,
+          "end_ms": 112000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 112000,
+          "end_ms": 112300,
+          "confidence": null
+        },
+        {
+          "text": "earth",
+          "start_ms": 112300,
+          "end_ms": 112500,
+          "confidence": null
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 112500,
+          "end_ms": 113400,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 113500,
+          "end_ms": 113800,
+          "confidence": null
+        },
+        {
+          "text": "make",
+          "start_ms": 113800,
+          "end_ms": 114100,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 114100,
+          "end_ms": 114200,
+          "confidence": null
+        },
+        {
+          "text": "joyful",
+          "start_ms": 114200,
+          "end_ms": 114800,
+          "confidence": null
+        },
+        {
+          "text": "noise.",
+          "start_ms": 114800,
+          "end_ms": 115400,
+          "confidence": null
+        },
+        {
+          "text": "Give",
+          "start_ms": 115800,
+          "end_ms": 116200,
+          "confidence": null
+        },
+        {
+          "text": "him",
+          "start_ms": 116200,
+          "end_ms": 116400,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 116400,
+          "end_ms": 116600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 116600,
+          "end_ms": 116800,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 116800,
+          "end_ms": 118100,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 118200,
+          "end_ms": 118300,
+          "confidence": null
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 118300,
+          "end_ms": 118600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "We're going to use all that we got to praise you on and on.",
+      "start_ms": 119600,
+      "end_ms": 123100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "We're",
+          "start_ms": 119600,
+          "end_ms": 119700,
+          "confidence": null
+        },
+        {
+          "text": "going",
+          "start_ms": 119700,
+          "end_ms": 119800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 119800,
+          "end_ms": 119900,
+          "confidence": null
+        },
+        {
+          "text": "use",
+          "start_ms": 119900,
+          "end_ms": 120200,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 120200,
+          "end_ms": 120400,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 120400,
+          "end_ms": 120600,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 120600,
+          "end_ms": 120800,
+          "confidence": null
+        },
+        {
+          "text": "got",
+          "start_ms": 120800,
+          "end_ms": 121400,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 121600,
+          "end_ms": 121800,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 121800,
+          "end_ms": 122200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 122200,
+          "end_ms": 122400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 122400,
+          "end_ms": 122600,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 122600,
+          "end_ms": 123000,
+          "confidence": null
+        },
+        {
+          "text": "on.",
+          "start_ms": 123000,
+          "end_ms": 123100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Let everything that has breath give him praise. Let all the earth rejoice and make a joyful noise and give him all the praise.",
+      "start_ms": 123700,
+      "end_ms": 133200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 123700,
+          "end_ms": 124000,
+          "confidence": null
+        },
+        {
+          "text": "everything",
+          "start_ms": 124000,
+          "end_ms": 124700,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 124700,
+          "end_ms": 125000,
+          "confidence": null
+        },
+        {
+          "text": "has",
+          "start_ms": 125000,
+          "end_ms": 125500,
+          "confidence": null
+        },
+        {
+          "text": "breath",
+          "start_ms": 125500,
+          "end_ms": 126000,
+          "confidence": null
+        },
+        {
+          "text": "give",
+          "start_ms": 126000,
+          "end_ms": 126500,
+          "confidence": null
+        },
+        {
+          "text": "him",
+          "start_ms": 126500,
+          "end_ms": 126900,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 126900,
+          "end_ms": 127600,
+          "confidence": null
+        },
+        {
+          "text": "Let",
+          "start_ms": 127700,
+          "end_ms": 128100,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 128100,
+          "end_ms": 128300,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 128300,
+          "end_ms": 128600,
+          "confidence": null
+        },
+        {
+          "text": "earth",
+          "start_ms": 128600,
+          "end_ms": 128800,
+          "confidence": null
+        },
+        {
+          "text": "rejoice",
+          "start_ms": 128800,
+          "end_ms": 129600,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 129800,
+          "end_ms": 130000,
+          "confidence": null
+        },
+        {
+          "text": "make",
+          "start_ms": 130000,
+          "end_ms": 130300,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 130300,
+          "end_ms": 130500,
+          "confidence": null
+        },
+        {
+          "text": "joyful",
+          "start_ms": 130500,
+          "end_ms": 131000,
+          "confidence": null
+        },
+        {
+          "text": "noise",
+          "start_ms": 131000,
+          "end_ms": 131700,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 131800,
+          "end_ms": 132000,
+          "confidence": null
+        },
+        {
+          "text": "give",
+          "start_ms": 132000,
+          "end_ms": 132400,
+          "confidence": null
+        },
+        {
+          "text": "him",
+          "start_ms": 132400,
+          "end_ms": 132600,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 132600,
+          "end_ms": 132800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 132800,
+          "end_ms": 133000,
+          "confidence": null
+        },
+        {
+          "text": "praise.",
+          "start_ms": 133000,
+          "end_ms": 133200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Sing. We will lift you higher.",
+      "start_ms": 138600,
+      "end_ms": 142400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Sing.",
+          "start_ms": 138600,
+          "end_ms": 139000,
+          "confidence": null
+        },
+        {
+          "text": "We",
+          "start_ms": 139200,
+          "end_ms": 139600,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 139600,
+          "end_ms": 140200,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 140200,
+          "end_ms": 140700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 140700,
+          "end_ms": 141100,
+          "confidence": null
+        },
+        {
+          "text": "higher.",
+          "start_ms": 141200,
+          "end_ms": 142400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You are our desire. Oh, we will lift you higher. Oh, and we won't stop at no. We won't stop at no.",
+      "start_ms": 143200,
+      "end_ms": 155700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 143200,
+          "end_ms": 143700,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 143800,
+          "end_ms": 144200,
+          "confidence": null
+        },
+        {
+          "text": "our",
+          "start_ms": 144300,
+          "end_ms": 144700,
+          "confidence": null
+        },
+        {
+          "text": "desire.",
+          "start_ms": 144700,
+          "end_ms": 146900,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 147000,
+          "end_ms": 147400,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 147400,
+          "end_ms": 147700,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 147800,
+          "end_ms": 148300,
+          "confidence": null
+        },
+        {
+          "text": "lift",
+          "start_ms": 148400,
+          "end_ms": 148900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 148900,
+          "end_ms": 149200,
+          "confidence": null
+        },
+        {
+          "text": "higher.",
+          "start_ms": 149400,
+          "end_ms": 150400,
+          "confidence": null
+        },
+        {
+          "text": "Oh,",
+          "start_ms": 150600,
+          "end_ms": 151300,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 151300,
+          "end_ms": 151400,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 151400,
+          "end_ms": 151700,
+          "confidence": null
+        },
+        {
+          "text": "won't",
+          "start_ms": 151700,
+          "end_ms": 152000,
+          "confidence": null
+        },
+        {
+          "text": "stop",
+          "start_ms": 152000,
+          "end_ms": 152600,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 152600,
+          "end_ms": 152900,
+          "confidence": null
+        },
+        {
+          "text": "no.",
+          "start_ms": 152900,
+          "end_ms": 153300,
+          "confidence": null
+        },
+        {
+          "text": "We",
+          "start_ms": 153500,
+          "end_ms": 153700,
+          "confidence": null
+        },
+        {
+          "text": "won't",
+          "start_ms": 153700,
+          "end_ms": 154100,
+          "confidence": null
+        },
+        {
+          "text": "stop",
+          "start_ms": 154100,
+          "end_ms": 154600,
+          "confidence": null
+        },
+        {
+          "text": "at",
+          "start_ms": 154600,
+          "end_ms": 154900,
+          "confidence": null
+        },
+        {
+          "text": "no.",
+          "start_ms": 154900,
+          "end_ms": 155700,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 12.1,
+    "upload_s": 2.8,
+    "transcribe_s": 7.9,
+    "word_count": 278,
+    "line_count": 26,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 3947,
+      "total_input_tokens": 3947,
+      "input_tokens_by_modality": [
+        {
+          "modality": "audio",
+          "tokens": 3946
+        },
+        {
+          "modality": "text",
+          "tokens": 1
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 4626,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 680
+            },
+            {
+              "modality": "audio",
+              "tokens": 3946
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 367
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_ChZYeFNsYXVWVHNJSGR1Z19lbDV2QUJ3EhZYeFNsYXVWVHNJSGR1Z19lbDV2QUJ3"
+  }
+}
