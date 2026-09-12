@@ -118,6 +118,14 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::get(lyrics::get_song_detail),
         )
         .route(
+            "/api/v1/lyrics/songs/{video_id}/reference-feedback",
+            axum::routing::post(lyrics::post_reference_feedback),
+        )
+        .route(
+            "/api/v1/lyrics/songs/{video_id}/reference",
+            axum::routing::post(lyrics::post_set_reference),
+        )
+        .route(
             "/api/v1/lyrics/reprocess",
             axum::routing::post(lyrics::post_reprocess),
         )

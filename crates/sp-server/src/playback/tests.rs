@@ -142,6 +142,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             cached_artist: String::new(),
             cached_duration_ms: 0,
             cached_suppress_en: false,
+            cached_lyrics_reference: false,
             last_now_playing_broadcast: None,
             history: std::collections::VecDeque::new(),
             lyrics_state: None,

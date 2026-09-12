@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::AppState;
 
@@ -98,6 +98,11 @@ pub struct SongListItem {
     /// pushing the English lyric line to Resolume's `#sp-subs` / `#sp-subs-next`
     /// clips. The /live setlist UI renders a checkbox bound to this field.
     pub suppress_resolume_en: bool,
+    /// `videos.lyrics_reference` (#142) — when true, this song carries
+    /// Claude's verified "reference" lyrics and the LED wall appends " ★"
+    /// to every displayed line. The lyrics dashboard renders a ★ badge and
+    /// a „Nesedí" feedback button bound to this field.
+    pub lyrics_reference: bool,
 }
 
 // HTTP handler: behavior covered by integration tests in Task 14 Playwright + is_stale/manual_priority cast logic verified via API shape tests.
@@ -110,7 +115,7 @@ pub async fn list_songs(
     let mut sql = String::from(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
          lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en \
+         suppress_resolume_en, lyrics_reference \
          FROM videos WHERE normalized = 1",
     );
     if q.playlist_id.is_some() {
@@ -136,6 +141,7 @@ pub async fn list_songs(
             let hl: i64 = r.get("has_lyrics");
             let mp: i64 = r.get("lyrics_manual_priority");
             let sre: i64 = r.get("suppress_resolume_en");
+            let lref: i64 = r.get("lyrics_reference");
             SongListItem {
                 video_id: r.get("id"),
                 youtube_id: r.get("youtube_id"),
@@ -149,6 +155,7 @@ pub async fn list_songs(
                 is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
                 manual_priority: mp == 1,
                 suppress_resolume_en: sre != 0,
+                lyrics_reference: lref != 0,
             }
         })
         .collect();
@@ -172,7 +179,7 @@ pub async fn get_song_detail(
     let row = match sqlx::query(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
          lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en \
+         suppress_resolume_en, lyrics_reference \
          FROM videos WHERE id = ? AND normalized = 1",
     )
     .bind(video_id)
@@ -190,6 +197,7 @@ pub async fn get_song_detail(
     let hl: i64 = row.get("has_lyrics");
     let mp: i64 = row.get("lyrics_manual_priority");
     let sre: i64 = row.get("suppress_resolume_en");
+    let lref: i64 = row.get("lyrics_reference");
     let youtube_id: String = row.get("youtube_id");
     let list_item = SongListItem {
         video_id: row.get("id"),
@@ -204,6 +212,7 @@ pub async fn get_song_detail(
         is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
         manual_priority: mp == 1,
         suppress_resolume_en: sre != 0,
+        lyrics_reference: lref != 0,
     };
     let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let audit_path = state
@@ -529,6 +538,78 @@ pub async fn post_probe_sources(
     .await;
 
     Json(report).into_response()
+}
+
+// ── #142 — ★ reference marker: feedback + admin toggle ────────────────────
+
+/// Request body for `POST /api/v1/lyrics/songs/{video_id}/reference-feedback`.
+#[derive(Debug, Deserialize)]
+pub struct ReferenceFeedbackRequest {
+    pub note: String,
+}
+
+/// The owner flags a starred ("★ reference") song as wrong from the
+/// dashboard ("Nesedí"). Clears `lyrics_reference`, stamps
+/// `lyrics_reference_rejected_at`, stores the note, and re-queues the song
+/// via `lyrics_manual_priority` — see `db::models::record_reference_feedback`.
+#[cfg_attr(test, mutants::skip)] // Thin glue mirroring quarantine_lyrics;
+// both branches (found/not-found) plus the JSON body shape are covered by
+// the reference_feedback_endpoint_* integration tests in routes_tests.rs.
+pub async fn post_reference_feedback(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<ReferenceFeedbackRequest>,
+) -> impl IntoResponse {
+    match crate::db::models::record_reference_feedback(&state.pool, video_id, &req.note).await {
+        Ok(0) => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Ok(_) => {
+            info!(
+                video_id,
+                note_len = req.note.len(),
+                "lyrics reference feedback recorded"
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => {
+            warn!("post_reference_feedback error for video {video_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+/// Request body for `POST /api/v1/lyrics/songs/{video_id}/reference`.
+#[derive(Debug, Deserialize)]
+pub struct SetReferenceRequest {
+    pub reference: bool,
+}
+
+/// Admin toggle for `videos.lyrics_reference`. Does NOT touch the rejection
+/// columns — see `db::models::set_video_lyrics_reference`.
+#[cfg_attr(test, mutants::skip)] // Thin glue mirroring patch_video; both
+// branches (found/not-found) plus both true/false directions are covered
+// by the set_reference_endpoint_* integration tests in routes_tests.rs.
+pub async fn post_set_reference(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<SetReferenceRequest>,
+) -> impl IntoResponse {
+    match crate::db::models::set_video_lyrics_reference(&state.pool, video_id, req.reference).await
+    {
+        Ok(0) => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            warn!("post_set_reference error for video {video_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
 }
 
 #[path = "lyrics_tests.rs"]

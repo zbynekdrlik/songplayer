@@ -29,6 +29,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (18, MIGRATION_V18),
     (19, MIGRATION_V19),
     (20, MIGRATION_V20),
+    (21, MIGRATION_V21),
 ];
 
 const MIGRATION_V1: &str = "
@@ -273,6 +274,20 @@ const MIGRATION_V20: &str = "
 ALTER TABLE videos ADD COLUMN download_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE videos ADD COLUMN last_download_error TEXT;
 ALTER TABLE videos ADD COLUMN next_attempt_at TEXT;
+";
+
+// V21 (#142) — ★ reference marker + owner feedback loop. `lyrics_reference`
+// flags a song as carrying Claude's verified "reference" lyrics; the LED
+// wall appends " ★" to every displayed line for such a song
+// (`lyrics::renderer::resolume_lines_with_next`). When the owner flags a
+// starred song as wrong from the dashboard ("Nesedí"), the feedback
+// endpoint clears the flag, stamps `lyrics_reference_rejected_at`, and
+// stores the owner's note in `lyrics_reference_note`. Existing rows default
+// to (0, NULL, NULL) — not a reference, no rejection on file.
+const MIGRATION_V21: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_reference INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_reference_rejected_at TEXT;
+ALTER TABLE videos ADD COLUMN lyrics_reference_note TEXT;
 ";
 
 /// Create a connection pool backed by a file.

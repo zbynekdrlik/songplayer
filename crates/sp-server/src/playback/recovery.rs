@@ -37,8 +37,8 @@ impl super::PlaybackEngine {
                 );
             }
             if let Some(state) = &pp.lyrics_state {
-                if let Some((en, next_en, sk, next_sk)) =
-                    state.resolume_lines_with_next(pp.cached_position_ms)
+                if let Some((en, next_en, sk, next_sk)) = state
+                    .resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
                 {
                     let _ = self
                         .resolume_tx

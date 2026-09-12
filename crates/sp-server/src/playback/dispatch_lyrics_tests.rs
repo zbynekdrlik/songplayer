@@ -97,6 +97,7 @@ fn install_pipeline(
         cached_artist: "Artist".into(),
         cached_duration_ms: 10_000,
         cached_suppress_en: false,
+        cached_lyrics_reference: false,
         last_now_playing_broadcast: None,
         history: VecDeque::new(),
         lyrics_state: lyrics,

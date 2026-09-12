@@ -90,6 +90,9 @@ struct PlaylistPipeline {
     cached_duration_ms: u64,
     /// v0.22.0: skip EN Resolume when true (baked-in video lyrics).
     cached_suppress_en: bool,
+    /// #142: song carries Claude's verified "reference" lyrics — the
+    /// renderer appends " ★" to every displayed line on the LED wall.
+    cached_lyrics_reference: bool,
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
     last_now_playing_broadcast: Option<Instant>,
@@ -254,6 +257,7 @@ impl PlaybackEngine {
                 cached_artist: String::new(),
                 cached_duration_ms: 0,
                 cached_suppress_en: false,
+                cached_lyrics_reference: false,
                 last_now_playing_broadcast: None,
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
@@ -666,12 +670,16 @@ impl PlaybackEngine {
         let suppress_en = crate::db::models::get_video_suppress_resolume_en(&self.pool, video_id)
             .await
             .unwrap_or(false);
+        let lyrics_reference = crate::db::models::get_video_lyrics_reference(&self.pool, video_id)
+            .await
+            .unwrap_or(false);
 
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.cached_song = song.clone();
             pp.cached_artist = artist.clone();
             pp.cached_duration_ms = duration_ms;
             pp.cached_suppress_en = suppress_en;
+            pp.cached_lyrics_reference = lyrics_reference;
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
