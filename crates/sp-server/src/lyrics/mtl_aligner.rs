@@ -109,21 +109,31 @@ struct OutFile {
 /// Build the `run.py` argv, in order. `no_cuda` appends `--no-cuda` — used
 /// only on the CUDA-OOM retry.
 fn build_args(
-    _cfg: &MtlConfig,
-    _wav: &Path,
-    _text_json: &Path,
-    _out_json: &Path,
-    _no_cuda: bool,
+    cfg: &MtlConfig,
+    wav: &Path,
+    text_json: &Path,
+    out_json: &Path,
+    no_cuda: bool,
 ) -> Vec<OsString> {
-    // TODO(#143 GREEN): construct the real --wav/--text-json/--out/--repo-dir/
-    // --no-cuda argv. RED stub — deliberately wrong so the arg-construction
-    // tests below fail until implemented.
-    Vec::new()
+    let mut args: Vec<OsString> = vec![
+        cfg.run_py.clone().into_os_string(),
+        "--wav".into(),
+        wav.as_os_str().to_owned(),
+        "--text-json".into(),
+        text_json.as_os_str().to_owned(),
+        "--out".into(),
+        out_json.as_os_str().to_owned(),
+        "--repo-dir".into(),
+        cfg.repo_dir.as_os_str().to_owned(),
+    ];
+    if no_cuda {
+        args.push("--no-cuda".into());
+    }
+    args
 }
 
-fn is_cuda_oom(_text: &str) -> bool {
-    // TODO(#143 GREEN): detect the CUDA-OOM stderr markers. RED stub.
-    false
+fn is_cuda_oom(text: &str) -> bool {
+    text.contains("CUDA out of memory") || text.contains("OutOfMemoryError")
 }
 
 async fn run_once(
@@ -196,9 +206,23 @@ async fn write_text_json(path: &Path, video_id: &str, lines: &[String]) -> Resul
     Ok(())
 }
 
-fn parse_output_str(_content: &str) -> Result<MtlOutput> {
-    // TODO(#143 GREEN): parse run.py's output JSON shape. RED stub.
-    bail!("parse_output_str not implemented yet (#143 RED)")
+fn parse_output_str(content: &str) -> Result<MtlOutput> {
+    let parsed: OutFile = serde_json::from_str(content)
+        .context("failed to parse lyrics-alignment-mtl output JSON")?;
+    let lines = parsed
+        .lines
+        .into_iter()
+        .map(|l| MtlLine {
+            text: l.text,
+            start_ms: l.start_ms.unwrap_or(0),
+            end_ms: l.end_ms.unwrap_or(0),
+        })
+        .collect();
+    Ok(MtlOutput {
+        lines,
+        device: parsed.metadata.device,
+        elapsed_s: parsed.metadata.runtime_sec,
+    })
 }
 
 async fn parse_output(path: &Path) -> Result<MtlOutput> {
