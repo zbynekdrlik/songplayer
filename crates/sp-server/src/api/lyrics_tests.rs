@@ -477,3 +477,51 @@ async fn probe_sources_returns_report_with_six_probes_for_known_video() {
         assert!(provider_names.contains(&expected), "missing {expected}");
     }
 }
+
+/// #144: an operator reprocess of a video (manual priority) must clear the
+/// durable retry backoff so the manual retry runs immediately, not after the
+/// exponential `lyrics_next_attempt_at` elapses.
+#[tokio::test]
+async fn reprocess_clears_lyrics_retry_backoff() {
+    let (state, _temp) = test_state_with_cache_dir().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    // A row the worker deferred: backed off into the future with attempts > 0.
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, \
+             lyrics_source, lyrics_attempts, lyrics_next_attempt_at) \
+             VALUES (10, 1, 'y10', 's', 'a', 1, 'no_source', 3, '2999-01-01T00:00:00.000Z')",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let app = crate::api::router(state.clone(), None);
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let req = Request::builder()
+        .uri("/api/v1/lyrics/reprocess")
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"video_ids":[10]}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+    let (attempts, next_attempt_at): (i64, Option<String>) =
+        sqlx::query_as("SELECT lyrics_attempts, lyrics_next_attempt_at FROM videos WHERE id = 10")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(attempts, 0, "reprocess must reset lyrics_attempts to 0");
+    assert!(
+        next_attempt_at.is_none(),
+        "reprocess must clear lyrics_next_attempt_at so the manual retry is immediate"
+    );
+}

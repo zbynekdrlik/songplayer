@@ -337,6 +337,10 @@ pub async fn ensure_ready(
     }
 }
 
+#[path = "bootstrap_tests_numpy_pin.rs"]
+#[cfg(test)]
+mod bootstrap_tests_numpy_pin;
+
 #[cfg(test)]
 mod tests {
     use super::*;

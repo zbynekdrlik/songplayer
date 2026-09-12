@@ -976,3 +976,7 @@ mod tests_asr_routing;
 #[path = "worker_tests_reference.rs"]
 #[cfg(test)]
 mod tests_reference;
+
+#[path = "worker_tests_deferral.rs"]
+#[cfg(test)]
+mod tests_deferral;

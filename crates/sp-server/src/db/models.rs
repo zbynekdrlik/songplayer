@@ -981,3 +981,7 @@ mod tests_video;
 #[path = "models_tests_lyrics.rs"]
 #[cfg(test)]
 mod tests_lyrics;
+
+#[path = "models_tests_lyrics_backoff.rs"]
+#[cfg(test)]
+mod tests_lyrics_backoff;
