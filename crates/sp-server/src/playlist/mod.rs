@@ -212,4 +212,30 @@ mod tests {
             .unwrap();
         assert_eq!(videos.len(), 2);
     }
+
+    // -----------------------------------------------------------------
+    // `tail` — char-boundary-safe last-N-bytes helper for stderr capture
+    // (#139)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn tail_returns_last_n_chars_when_string_is_longer() {
+        assert_eq!(tail("abcdef", 3), "def");
+    }
+
+    #[test]
+    fn tail_returns_whole_string_when_shorter_than_max() {
+        assert_eq!(tail("ab", 5), "ab");
+    }
+
+    #[test]
+    fn tail_cuts_multibyte_string_on_a_char_boundary() {
+        // "日本語" is 3 chars of 3 bytes each (9 bytes total). A naive
+        // `&s[len - max..]` at max=4 would slice at byte offset 5, which
+        // lands mid-character and panics. `tail` must round to the next
+        // char boundary instead.
+        let s = "日本語";
+        let result = tail(s, 4);
+        assert_eq!(result, "語");
+    }
 }

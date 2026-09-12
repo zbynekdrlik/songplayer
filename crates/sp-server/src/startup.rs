@@ -743,6 +743,56 @@ mod sync_filter_tests {
         assert_eq!(received_urls[0], "https://yt.com/fast");
     }
 
+    /// RED (#139): `enqueue_sync_all_active` is the reusable extraction
+    /// that both `startup_sync_active_playlists` and the new periodic
+    /// re-sync loop in `lib.rs` call. It must enqueue exactly the active
+    /// `kind = 'youtube'` playlists — never an inactive one, never an
+    /// active `kind = 'custom'` one (e.g. the pre-seeded `ytlive` row) —
+    /// and return how many it enqueued.
+    #[tokio::test]
+    async fn enqueue_sync_all_active_enqueues_every_active_youtube_playlist() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        let active1 = db::models::insert_playlist(&pool, "ytfast", "https://yt.com/fast")
+            .await
+            .unwrap();
+        let active2 = db::models::insert_playlist(&pool, "ytslow", "https://yt.com/slow")
+            .await
+            .unwrap();
+
+        let inactive = db::models::insert_playlist(&pool, "ytpaused", "https://yt.com/paused")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = ?")
+            .bind(inactive.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // An active *custom* playlist (the pre-seeded `ytlive` row) must
+        // never be enqueued — same filter as `startup_sync_active_playlists`.
+        ensure_live_playlist_exists(&pool).await.unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<SyncRequest>(8);
+        let enqueued = enqueue_sync_all_active(&pool, &tx).await.unwrap();
+        drop(tx);
+
+        assert_eq!(
+            enqueued, 2,
+            "only the 2 active youtube playlists should be enqueued"
+        );
+
+        let mut received_ids = Vec::new();
+        while let Some(req) = rx.recv().await {
+            received_ids.push(req.playlist_id);
+        }
+        received_ids.sort();
+        let mut expected_ids = vec![active1.id, active2.id];
+        expected_ids.sort();
+        assert_eq!(received_ids, expected_ids);
+    }
+
     #[tokio::test]
     async fn ensure_live_playlist_is_idempotent_and_creates_ytlive() {
         let pool = db::create_memory_pool().await.unwrap();
