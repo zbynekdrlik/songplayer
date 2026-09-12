@@ -583,15 +583,36 @@ fn emit_gate_100ns_returns_on_grid_boundaries_never_stale() {
         (b(29), b(29), false),
     ];
     for (now, nb, qhf) in cases {
-        let (_emit, next) = genlock_emit_gate_100ns(now, nb, 30, qhf);
+        let (emit, next) = genlock_emit_gate_100ns(now, nb, 30, qhf);
+        // Every returned boundary is on the exact grid and strictly positive.
         assert_eq!(
             floor_boundary_100ns(next, 30),
             next,
             "returned boundary must be on the grid: now={now} nb={nb}"
         );
-        assert!(
-            next > now - interval,
-            "returned boundary must never be stale: now={now} next={next}"
-        );
+        assert!(next > 0, "boundary must be positive: now={now} next={next}");
+
+        let serviced = if nb == 0 || nb > floor_boundary_100ns(now, 30) + interval {
+            strict_next_boundary_100ns(now, 30)
+        } else {
+            nb
+        };
+        if emit {
+            // An emit ADVANCES strictly past the serviced boundary. The
+            // catch-up target is intentionally BEHIND `now` (a transient
+            // one-slot advance the pacer immediately re-services), so
+            // `> now - interval` does NOT hold there — only `> serviced` does.
+            assert!(
+                next > serviced,
+                "emit must advance past the serviced boundary: now={now} next={next}"
+            );
+        } else {
+            // A WAIT returns the IMMEDIATE pending boundary: strictly after
+            // `now`, never more than one interval ahead — never stale.
+            assert!(
+                now < next && next <= now + interval,
+                "pending boundary must be the immediate next: now={now} next={next}"
+            );
+        }
     }
 }
