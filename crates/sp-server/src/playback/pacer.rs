@@ -93,6 +93,19 @@ pub enum ServiceOutcome {
     Starved,
 }
 
+/// What a STANDBY (paused / idle) boundary presents, for
+/// [`Pacer::service_standby`]. The paced pipeline fills EVERY grid boundary
+/// while paused/idle so the receiver stays `locked=` instead of seeing holes
+/// (#147 fix-lane-2).
+pub enum Standby<'a> {
+    /// Paused: repeat the last real emitted frame (the frozen picture). Counts
+    /// as a frozen-frame `repeat`; STARVES if nothing was ever emitted.
+    FrozenLast,
+    /// Idle / no song: present the supplied black frame. NOT a repeat (there is
+    /// no real last frame to hold).
+    Black(&'a PacedFrame),
+}
+
 /// The pure sleep-plan decision (#147 change 4), factored out so it is testable
 /// without a live decode loop. `SystemClock` jumps and bad boundaries must never
 /// park the send thread unboundedly, so the coarse sleep is clamped to
@@ -116,10 +129,15 @@ pub fn plan_sleep_100ns(now_100ns: i64, until_100ns: i64, interval_100ns: i64) -
     SleepDecision {
         sleep_100ns: delta.clamp(0, UNITS_PER_SECOND),
         // The pacer only ever waits to the IMMEDIATE next boundary, so a normal
-        // wait has `delta <= interval`. A larger gap means the clock jumped
-        // backward (the boundary is now far ahead). `interval == 0` (genlock
-        // off) never relatches — it just sleeps the clamped 1 s.
-        relatch: interval_100ns > 0 && delta > interval_100ns,
+        // wait has `delta` within ONE grid slot. The exact-rational grid has ten
+        // 333_334-wide slots per second (one tick wider than the nominal
+        // `interval_100ns`, 333_333 @30 fps), so the bound is `interval + 2`
+        // (slot width + a tick of margin) — NOT `> interval`, which mis-flagged
+        // every wide slot as a backward jump and burned a self-clearing spin
+        // (fix-lane-2 off-by-one). A larger gap is a genuine backward clock jump
+        // (boundary far ahead). `interval == 0` (genlock off) never relatches —
+        // it just sleeps the clamped 1 s.
+        relatch: interval_100ns > 0 && delta > interval_100ns + 2,
     }
 }
 
@@ -228,8 +246,10 @@ impl Pacer {
 
     /// Anchor playback at the current wall clock: the first grid boundary
     /// strictly after `now` becomes both `wall_start` (the PTS→grid origin) and
-    /// the next un-emitted boundary. Clears any parked frame (a fresh seek).
-    /// Called on play/seek.
+    /// the next un-emitted boundary. Clears any parked frame AND the last
+    /// emitted frame — a fresh seek / new song, so a starvation repeat can never
+    /// show the PREVIOUS song's frame (#147 fix-lane-2, change 4). Called on
+    /// play/seek.
     pub fn anchor(&mut self) {
         let now = self.now_100ns();
         let first = if self.interval_100ns == 0 {
@@ -240,6 +260,7 @@ impl Pacer {
         self.wall_start_100ns = first;
         self.next_boundary_100ns = first;
         self.pending = None;
+        self.last_frame = None;
     }
 
     /// Service one scheduling step. Reads the wall clock itself: a scheduling
@@ -321,38 +342,142 @@ impl Pacer {
             };
         }
 
-        // Audio carries the raw emit-instant wall clock (§6); video carries the
-        // serviced boundary itself (§4, already on-grid — no floor(now) here).
+        // Audio carries the raw emit-instant wall clock (§6). Resolve the stamp
+        // boundary + the advance via the exact-grid gate BEFORE emitting, so a
+        // resync stamps at the resync SERVICE boundary (the grid boundary
+        // at/before now) rather than the stale pending boundary (§5.5).
+        // `queue_had_frame` = a real frame is buffered (just consumed, or
+        // parked) so a large lag catches up rather than resyncing past buffered
+        // content (#1131).
         let audio_tc = emit_now;
         let had_frame = due.is_some();
+        let queue_had_frame = had_frame || self.pending.is_some();
+        let (stamp_boundary, next) =
+            self.resolve_emit_boundary(emit_now, boundary, queue_had_frame);
+
         let outcome = if let Some(frame) = due {
-            self.on_emit(emit_now, boundary);
-            sink.emit(&frame, &audio_batch, boundary, audio_tc);
+            self.on_emit(emit_now, stamp_boundary);
+            sink.emit(&frame, &audio_batch, stamp_boundary, audio_tc);
             self.last_frame = Some(frame);
             ServiceOutcome::Emitted
         } else if let Some(lf) = self.last_frame.take() {
-            self.on_emit(emit_now, boundary);
+            self.on_emit(emit_now, stamp_boundary);
             self.repeats += 1;
             // Starvation repeat: NO audio (§6.4).
-            sink.emit(&lf, &[], boundary, audio_tc);
+            sink.emit(&lf, &[], stamp_boundary, audio_tc);
             self.last_frame = Some(lf);
             ServiceOutcome::Repeated
         } else {
             ServiceOutcome::Starved
         };
 
-        // Advance the boundary via the exact-grid gate. `queue_had_frame` = a
-        // real frame is buffered (just consumed, or parked) so a large lag
-        // catches up rather than resyncing past buffered content (#1131).
-        let queue_had_frame = had_frame || self.pending.is_some();
+        self.next_boundary_100ns = next;
+        outcome
+    }
+
+    /// Resolve the video stamp boundary and the next pending boundary for an
+    /// emit at `emit_now` having latched `boundary`, given whether a real frame
+    /// is buffered. Shared by [`service`](Self::service) and
+    /// [`service_standby`](Self::service_standby).
+    ///
+    /// On a grid RESYNC — the gate leaped MORE than one slot past `boundary`
+    /// (lag > `GENLOCK_MAX_CATCHUP_INTERVALS` with nothing buffered) — the stale
+    /// pending `boundary` sits far in the past, so the stamp becomes the resync
+    /// service boundary `floor_boundary_100ns(emit_now)` (on-grid and `<= now`),
+    /// NEVER the stale boundary, and `resyncs` is bumped (§5.5, #147 fix-lane-2).
+    /// A normal one-slot advance keeps the serviced `boundary` as the stamp.
+    /// Returns `(stamp_boundary, next_boundary)`.
+    fn resolve_emit_boundary(
+        &mut self,
+        emit_now: i64,
+        boundary: i64,
+        queue_had_frame: bool,
+    ) -> (i64, i64) {
         let catch_up = strict_next_boundary_100ns(boundary, self.grid_fps);
         let (_, next) = genlock_emit_gate_100ns(emit_now, boundary, self.grid_fps, queue_had_frame);
         if next > catch_up {
             // Advanced more than one slot → a grid resync (skipped boundaries).
             self.resyncs += 1;
+            (floor_boundary_100ns(emit_now, self.grid_fps), next)
+        } else {
+            (boundary, next)
         }
-        self.next_boundary_100ns = next;
+    }
 
+    /// Service one STANDBY scheduling step: fill the current grid boundary with
+    /// the frozen last frame (paused) or a black frame (idle / no song), stamped
+    /// on-grid via the SAME machinery as [`service`](Self::service) but with NO
+    /// audio and NO decode pull. The paced pipeline's paused branch and the
+    /// paced idle loop call this once per boundary so EVERY boundary carries a
+    /// frame while paused/idle — the receiver stays `locked=` instead of seeing
+    /// holes (#147 fix-lane-2, change 2). Play/Seek re-anchor via
+    /// [`anchor`](Self::anchor). Returns [`ServiceOutcome::Wait`] until the
+    /// boundary is due, then [`ServiceOutcome::Repeated`] (frozen) /
+    /// [`ServiceOutcome::Emitted`] (black), or [`ServiceOutcome::Starved`] when
+    /// a frozen standby has no last frame yet.
+    pub fn service_standby<S>(&mut self, standby: Standby, sink: &mut S) -> ServiceOutcome
+    where
+        S: PacedSink,
+    {
+        if self.interval_100ns == 0 {
+            // Genlock off — never spin: wait a full second (#147 change 8).
+            let now = self.now_100ns();
+            return ServiceOutcome::Wait {
+                until_100ns: now.saturating_add(UNITS_PER_SECOND),
+            };
+        }
+
+        let sched_now = self.now_100ns();
+        let boundary = latched_boundary_100ns(sched_now, self.next_boundary_100ns, self.grid_fps);
+        if self.next_boundary_100ns != 0 && boundary < self.next_boundary_100ns {
+            self.relatches += 1;
+        }
+        if sched_now < boundary {
+            self.next_boundary_100ns = boundary;
+            return ServiceOutcome::Wait {
+                until_100ns: boundary,
+            };
+        }
+
+        let emit_now = self.now_100ns();
+        if emit_now < boundary {
+            // Backward clock step during the scheduling read — re-latch, never
+            // future-date (mirrors `service`).
+            self.relatches += 1;
+            let relatched =
+                latched_boundary_100ns(emit_now, self.next_boundary_100ns, self.grid_fps);
+            self.next_boundary_100ns = relatched;
+            return ServiceOutcome::Wait {
+                until_100ns: relatched,
+            };
+        }
+
+        // Standby has no decode queue (`queue_had_frame = false`), so a long
+        // stall resyncs and the stamp lands on the resync service boundary,
+        // exactly like the active underrun path.
+        let (stamp_boundary, next) = self.resolve_emit_boundary(emit_now, boundary, false);
+        let audio_tc = emit_now;
+
+        let outcome = match standby {
+            Standby::FrozenLast => {
+                if let Some(lf) = self.last_frame.take() {
+                    self.on_emit(emit_now, stamp_boundary);
+                    self.repeats += 1;
+                    sink.emit(&lf, &[], stamp_boundary, audio_tc);
+                    self.last_frame = Some(lf);
+                    ServiceOutcome::Repeated
+                } else {
+                    ServiceOutcome::Starved
+                }
+            }
+            Standby::Black(frame) => {
+                self.on_emit(emit_now, stamp_boundary);
+                sink.emit(frame, &[], stamp_boundary, audio_tc);
+                ServiceOutcome::Emitted
+            }
+        };
+
+        self.next_boundary_100ns = next;
         outcome
     }
 

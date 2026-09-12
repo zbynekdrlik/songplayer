@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use tracing::{debug, error, info, warn};
 
 use crate::playback::ndi_health::PlaybackStateLabel;
-use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, plan_sleep_100ns};
+use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, plan_sleep_100ns};
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
 };
@@ -72,7 +72,7 @@ fn to_paced_frame(
 /// 100 ns), then spin to the boundary. The coarse wait is clamped to 1 s and a
 /// backward clock jump escapes without spinning (#147 change 4, via the pure
 /// [`plan_sleep_100ns`]), so a clock step never parks the send thread.
-fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
+pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
     let interval = pacer.interval_100ns();
     const SPIN_MARGIN_100NS: i64 = 20_000; // ~2 ms
     let plan = plan_sleep_100ns(pacer.now_100ns(), until_100ns, interval);
@@ -227,9 +227,15 @@ pub(crate) fn decode_and_send_paced(
         }
 
         if *paused {
-            // Standby black frame is auto-stamped on the paced path (submitter
-            // `paced` flag) so the receiver stays `locked=` across a pause (§4.3).
-            submitter.send_black_bgra(1920, 1080);
+            // Fill EVERY grid boundary with the frozen last real frame so the
+            // receiver stays `locked=` across a pause instead of dropping into
+            // holes/underruns — one on-grid stamped frame per boundary via the
+            // same Pacer sleep/emit machinery, no audio (#147 fix-lane-2,
+            // change 2). Commands are serviced at the loop top every iteration.
+            match pacer.service_standby(Standby::FrozenLast, submitter) {
+                ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
+                _ => pacer.tick_wall(),
+            }
             if should_run_heartbeat(last_heartbeat.elapsed()) {
                 emit_heartbeat(
                     submitter,
@@ -243,7 +249,6 @@ pub(crate) fn decode_and_send_paced(
                     pacer.stats(),
                 );
             }
-            std::thread::sleep(Duration::from_millis(100));
             continue;
         }
 

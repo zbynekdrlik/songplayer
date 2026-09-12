@@ -14,6 +14,8 @@ pub mod pacer;
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;
+#[cfg(windows)]
+pub(crate) mod pipeline_paced_idle;
 mod position_update;
 mod recovery;
 pub mod state;

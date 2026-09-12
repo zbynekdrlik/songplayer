@@ -370,14 +370,19 @@ fn run_loop_windows(
     loop {
         match cmd_rx.recv_timeout(std::time::Duration::from_secs(5)) {
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                run_heartbeat_outer(
+                // Idle wait: paced ON fills every grid boundary with black while
+                // no song is loaded; OFF keeps the plain 5 s heartbeat. All the
+                // logic lives in the sibling module (#147 fix-lane-2).
+                crate::playback::pipeline_paced_idle::run_idle_wait(
+                    genlock_pacing,
                     &mut submitter,
+                    &mut pacer,
+                    &cmd_rx,
                     &event_tx,
                     playlist_id,
                     paused,
                     &mut last_heartbeat,
                     &mut consecutive_bad_polls,
-                    pacer.stats(), // idle/paused: report the pacing flag (#147)
                 );
                 continue;
             }
@@ -825,35 +830,9 @@ fn classify_bad_poll(
 // Windows heartbeat helpers
 // ---------------------------------------------------------------------------
 
-// mutants::skip — Windows-only plumbing for emit_heartbeat (which is also
-// skipped); no Linux test path. State assignment from `paused` flag is a
-// trivial branch with no cross-platform observable behaviour.
-#[cfg(windows)]
-#[cfg_attr(test, mutants::skip)]
-fn run_heartbeat_outer(
-    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
-    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
-    playlist_id: i64,
-    paused: bool,
-    last_heartbeat: &mut std::time::Instant,
-    consecutive_bad_polls: &mut u32,
-    pacing: crate::playback::ndi_health::PacingStats,
-) {
-    let state = if paused {
-        crate::playback::ndi_health::PlaybackStateLabel::Paused
-    } else {
-        crate::playback::ndi_health::PlaybackStateLabel::Idle
-    };
-    emit_heartbeat(
-        submitter,
-        event_tx,
-        playlist_id,
-        state,
-        last_heartbeat,
-        consecutive_bad_polls,
-        pacing,
-    );
-}
+// The idle/no-song heartbeat (`run_heartbeat_outer`) moved into the sibling
+// `pipeline_paced_idle::run_idle_wait` (#147 fix-lane-2), which now owns the
+// whole idle wait for BOTH flag states — paced fill vs plain heartbeat.
 
 // mutants::skip — Windows-only plumbing for emit_heartbeat (which is also
 // skipped); no Linux test path. Always emits with state=Playing.
@@ -880,9 +859,10 @@ fn run_heartbeat_inner(
 }
 
 /// #133: sibling of `run_heartbeat_inner` for `decode_and_send`'s paused
-/// branch. Always reports `PlaybackStateLabel::Paused` — unlike
-/// `run_heartbeat_outer` (used only when no song is loaded at all, where
-/// Idle-vs-Paused is ambiguous), this call site knows for certain a song is
+/// branch. Always reports `PlaybackStateLabel::Paused` — unlike the idle
+/// heartbeat in `pipeline_paced_idle::run_idle_wait` (used only when no song is
+/// loaded at all, where Idle-vs-Paused is ambiguous), this call site knows for
+/// certain a song is
 /// mid-decode and simply not advancing, so there is no Idle case to
 /// distinguish. Unlike `run_heartbeat_inner` (whose 5s-cadence gate lives at
 /// the call site, `if should_run_heartbeat(...) { run_heartbeat_inner(...) }`),

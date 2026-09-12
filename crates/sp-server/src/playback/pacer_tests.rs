@@ -711,7 +711,10 @@ fn standby_planner_fills_one_boundary_per_interval_no_audio() {
     assert_eq!(sink.video_tcs.len(), 101);
     for w in sink.video_tcs.windows(2) {
         let step = w[1] - w[0];
-        assert!(step == 333_333 || step == 333_334, "one grid slot: step={step}");
+        assert!(
+            step == 333_333 || step == 333_334,
+            "one grid slot: step={step}"
+        );
     }
     for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
         assert!(*v <= *a, "never future-dated: video_tc={v} audio_tc={a}");
@@ -750,7 +753,10 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
     for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
         assert!(*v <= *a, "never future-dated");
     }
-    assert!(sink.audio_lens.iter().all(|&n| n == 0), "idle emits no audio");
+    assert!(
+        sink.audio_lens.iter().all(|&n| n == 0),
+        "idle emits no audio"
+    );
     // Black idle frames are NOT frozen-frame repeats.
     assert_eq!(pacer.stats().repeats, 0);
 }
