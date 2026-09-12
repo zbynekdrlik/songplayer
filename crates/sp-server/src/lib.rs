@@ -388,15 +388,15 @@ pub async fn start(
                     }
                     Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
                 }
-                let ytdlp_update_interval_secs = ytdlp_update_interval_secs();
+                let ytdlp_interval_secs = ytdlp_update_interval_secs();
                 tokio::spawn(periodic_ytdlp_update(
                     tools_mgr,
                     paths.ytdlp.clone(),
-                    ytdlp_update_interval_secs,
+                    ytdlp_interval_secs,
                     ytdlp_update_shutdown.subscribe(),
                 ));
                 info!(
-                    interval_secs = ytdlp_update_interval_secs,
+                    interval_secs = ytdlp_interval_secs,
                     "periodic yt-dlp self-update worker started"
                 );
 
