@@ -60,6 +60,46 @@ route is two independent stages:
    exceptions. YouTube autosub produces wrong timing and contaminates
    ensemble output.
 
+## Reference regime (v21, #143)
+
+A NEW stage runs BEFORE step 2 (WhisperX/asr_path) decides anything, for
+any song with an allowed text candidate + a preprocessed vocal WAV. Owner
+directive 2026-09-12 on #130: "vyber najlepšie dosiahnuteľné riešenie a
+začni reprocessovať" — the forced aligner `lyrics-alignment-mtl` (MTL+BDR)
+leads every measurement (31.6% gold-norm, 83–92% on clean songs) but has a
+known catastrophic failure mode (locking onto the wrong repetition of a
+repetitive worship arrangement, shifting a whole song 22–42s), so it ships
+gated by an independent second opinion rather than on its own:
+
+1. **Align** — `mtl_aligner::align` (production wrapper around the eval
+   script `eval/lyrics/aligners/lyrics_alignment_mtl/run.py`) force-aligns
+   `claude_merge::best_authoritative_candidate`'s lines (the SAME selector
+   step 1 above uses — any source, timed or not) to the isolated vocals.
+   BELOW_NORMAL priority + no console window on Windows, `PYTHONUTF8=1`
+   (#137), 15-min timeout, one `--no-cuda` retry on a CUDA-OOM stderr tail.
+2. **Verify** — `g35t_client::transcribe_words` (Gemini 3.5 Transcribe
+   word timings, keys from `gemini_api_key`) + `reference_gate::evaluate`
+   gate BOTH conditions: whole-song sanity (`|median signed Δstart| <=
+   400ms` — this is what catches the wrong-repetition failure mode) AND
+   agreement (`>=70%` of matched lines within 400ms, `>=60%` of lines
+   matched).
+3. **Pass** → mtl line timings ship directly (`words: None`, no word
+   synthesis — same v18 rule as everywhere else), `lyrics_source =
+   "<candidate.source>+mtl@rev1/g35t-ok"`, `lyrics_alignment_model =
+   ALIGNMENT_MODEL_MTL_REV1`, `videos.lyrics_reference = 1` (the wall ★).
+   **Fail/error** → `videos.lyrics_reference = 0`, the gate decision +
+   stats land in `{youtube_id}_alignment_audit.json`, and the song falls
+   through to step 2 (WhisperX/asr_path) unchanged — never a regression
+   versus what production shipped before this stage existed.
+4. Skip conditions (info-logged per song, never fatal): mtl tooling not
+   installed (`MtlConfig::is_available()` — WARNed ONCE at worker start,
+   not per song), no preprocessed vocal WAV, no text candidate, or a
+   candidate under 4 lines.
+5. The injection seam is `orchestrator::ReferenceStageBackend`
+   (`mtl_align` + `asr_transcribe`); production wires
+   `RealReferenceStageBackend`, tests inject a fake — never make a real
+   subprocess/HTTP call from a unit test.
+
 ## Gemini API discipline
 
 - `gemini_api_key` is a **comma-separated list** (multi-key rotation, v14).
