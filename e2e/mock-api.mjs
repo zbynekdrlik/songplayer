@@ -74,6 +74,8 @@ const videos = [
     cached: true,
     normalized: true,
     gemini_failed: false,
+    download_attempts: 0,
+    last_download_error: null,
   },
   {
     id: 2,
@@ -85,6 +87,10 @@ const videos = [
     cached: false,
     normalized: false,
     gemini_failed: false,
+    // #140: exercises the VideoList "⚠" hint on an un-normalized row that
+    // has failed and is backing off.
+    download_attempts: 2,
+    last_download_error: "yt-dlp exited with 1: Requested format is not available",
   },
 ];
 

@@ -83,7 +83,8 @@ pub async fn get_videos_for_playlist(
     let rows = sqlx::query(
         "SELECT id, playlist_id, youtube_id, title, song, artist,
                 duration_ms, file_path, normalized, gemini_failed,
-                suppress_resolume_en, spotify_track_id
+                suppress_resolume_en, spotify_track_id,
+                download_attempts, last_download_error
          FROM videos WHERE playlist_id = ? ORDER BY id",
     )
     .bind(playlist_id)
@@ -112,7 +113,8 @@ pub async fn upsert_video(
          ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title
          RETURNING id, playlist_id, youtube_id, title, song, artist,
                    duration_ms, file_path, normalized, gemini_failed,
-                   suppress_resolume_en, spotify_track_id",
+                   suppress_resolume_en, spotify_track_id,
+                   download_attempts, last_download_error",
     )
     .bind(playlist_id)
     .bind(youtube_id)
@@ -137,6 +139,8 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         gemini_failed: r.get::<i32, _>("gemini_failed") != 0,
         suppress_resolume_en: r.get::<i32, _>("suppress_resolume_en") != 0,
         spotify_track_id: r.get("spotify_track_id"),
+        download_attempts: r.get("download_attempts"),
+        last_download_error: r.get("last_download_error"),
     }
 }
 

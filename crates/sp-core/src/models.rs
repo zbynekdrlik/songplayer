@@ -77,6 +77,16 @@ pub struct Video {
     /// when not set; fetcher silently skips when None.
     #[serde(default)]
     pub spotify_track_id: Option<String>,
+    /// V20 (#140): consecutive download/normalize failure count, reset to
+    /// 0 on success. Drives the retry-backoff selection query so a broken
+    /// video no longer blocks the whole queue behind it forever.
+    #[serde(default)]
+    pub download_attempts: i64,
+    /// V20 (#140): the last 300 chars of the most recent failure, or
+    /// `None` when the video has never failed / last succeeded. Surfaced
+    /// in the UI as a `⚠` hint on un-normalized rows.
+    #[serde(default)]
+    pub last_download_error: Option<String>,
 }
 
 /// A record of a video that was played.
