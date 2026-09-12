@@ -441,7 +441,9 @@ async fn zero_fetchers_falls_back_to_backend_only() {
 // Lever 2 (#143) — `run_reference_stage` tests
 // -----------------------------------------------------------------------
 
-use crate::lyrics::orchestrator::{ReferenceStageBackend, ReferenceStageResult, run_reference_stage};
+use crate::lyrics::orchestrator::{
+    ReferenceStageBackend, ReferenceStageResult, run_reference_stage,
+};
 
 /// Single-use fake `ReferenceStageBackend` — the mtl/asr results are
 /// consumed exactly once via `Mutex<Option<..>>::take()`, mirroring the
@@ -591,7 +593,10 @@ async fn run_reference_stage_pass_ships_mtl_lines_with_words_none() {
         &backend,
         Path::new("/x.wav"),
         "vid1",
-        &["amazing grace".to_string(), "how sweet the sound".to_string()],
+        &[
+            "amazing grace".to_string(),
+            "how sweet the sound".to_string(),
+        ],
     )
     .await;
     match result {
@@ -678,7 +683,10 @@ async fn run_reference_stage_fail_carries_mtl_device_and_elapsed() {
         &backend,
         Path::new("/x.wav"),
         "vid1",
-        &["amazing grace".to_string(), "how sweet the sound".to_string()],
+        &[
+            "amazing grace".to_string(),
+            "how sweet the sound".to_string(),
+        ],
     )
     .await;
     match result {

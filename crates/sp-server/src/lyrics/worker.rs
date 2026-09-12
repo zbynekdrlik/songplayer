@@ -699,12 +699,11 @@ impl LyricsWorker {
         } else {
             // Build the WhisperX backend using the Replicate API token from settings.
             // Read per-song so operators can add the token without restarting.
-            let replicate_token =
-                crate::db::models::get_setting(&self.pool, "replicate_api_token")
-                    .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
+            let replicate_token = crate::db::models::get_setting(&self.pool, "replicate_api_token")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             if replicate_token.trim().is_empty() {
                 warn!(
                     youtube_id = %youtube_id,
@@ -915,7 +914,10 @@ impl LyricsWorker {
                     provenance: format!("{}+mtl@rev1/g35t-ok", best.source),
                     raw_confidence: 1.0,
                 };
-                Some(align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION))
+                Some(align_track_to_lyrics_track(
+                    aligned,
+                    LYRICS_PIPELINE_VERSION,
+                ))
             }
             crate::lyrics::orchestrator::ReferenceStageResult::Fail {
                 reason,
@@ -943,9 +945,8 @@ impl LyricsWorker {
                     ),
                 )
                 .await;
-                let _ =
-                    crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
-                        .await;
+                let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
+                    .await;
                 None
             }
             crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
@@ -961,9 +962,8 @@ impl LyricsWorker {
                     &reference_gate_audit_json("error", Some(&reason), None, None, None, 0),
                 )
                 .await;
-                let _ =
-                    crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
-                        .await;
+                let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
+                    .await;
                 None
             }
         }

@@ -176,8 +176,7 @@ async fn run_once(
         // Best-effort capture; a read failure just leaves an empty tail.
         let _ = stderr.read_to_end(&mut stderr_buf).await;
     }
-    let status = match tokio::time::timeout(Duration::from_secs(TIMEOUT_SECS), child.wait()).await
-    {
+    let status = match tokio::time::timeout(Duration::from_secs(TIMEOUT_SECS), child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => bail!("lyrics-alignment-mtl wait failed: {e}"),
         Err(_) => {
@@ -312,7 +311,10 @@ mod tests {
             Path::new("/x/o.json"),
             false,
         );
-        let joined: Vec<String> = args.iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let joined: Vec<String> = args
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(joined[0], "/tools/lyrics_alignment_mtl_run.py");
         assert!(joined.contains(&"--wav".to_string()));
         assert!(joined.contains(&"/x/v.wav".to_string()));
@@ -338,13 +340,18 @@ mod tests {
             Path::new("/x/o.json"),
             true,
         );
-        let joined: Vec<String> = args.iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let joined: Vec<String> = args
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(joined.last().unwrap(), "--no-cuda");
     }
 
     #[test]
     fn is_cuda_oom_detects_both_markers() {
-        assert!(is_cuda_oom("RuntimeError: CUDA out of memory. Tried to allocate"));
+        assert!(is_cuda_oom(
+            "RuntimeError: CUDA out of memory. Tried to allocate"
+        ));
         assert!(is_cuda_oom("torch.cuda.OutOfMemoryError: ..."));
         assert!(!is_cuda_oom("RuntimeError: something else entirely"));
     }
@@ -353,7 +360,12 @@ mod tests {
     fn text_json_serializes_video_id_and_line_text_only() {
         let file = TextJsonFile {
             video_id: "abc123",
-            lines: vec![TextJsonLine { text: "hello world" }, TextJsonLine { text: "line two" }],
+            lines: vec![
+                TextJsonLine {
+                    text: "hello world",
+                },
+                TextJsonLine { text: "line two" },
+            ],
         };
         let v: serde_json::Value = serde_json::to_value(&file).unwrap();
         assert_eq!(v["video_id"], "abc123");

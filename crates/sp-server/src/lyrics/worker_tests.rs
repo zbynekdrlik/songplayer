@@ -1062,7 +1062,11 @@ impl crate::lyrics::orchestrator::ReferenceStageBackend for FakeReferenceStageBa
         _video_id: &str,
         _lines: &[String],
     ) -> anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput> {
-        self.mtl.lock().unwrap().take().expect("mtl_align called twice")
+        self.mtl
+            .lock()
+            .unwrap()
+            .take()
+            .expect("mtl_align called twice")
     }
     async fn asr_transcribe(
         &self,
@@ -1107,10 +1111,17 @@ async fn run_mtl_reference_stage_skips_when_tooling_unavailable() {
     let _ = std::fs::create_dir_all(&cache_dir);
     let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
     // new_for_test's hardcoded "/tmp/tools" has no mtl tooling installed.
-    let worker = crate::lyrics::worker::LyricsWorker::new_for_test(pool, cache_dir.clone(), events_tx);
+    let worker =
+        crate::lyrics::worker::LyricsWorker::new_for_test(pool, cache_dir.clone(), events_tx);
     let cand = ref_candidate("description", 6);
     let result = worker
-        .run_mtl_reference_stage(1, "yt1", Some(&cand), Some(Path::new("/x.wav")), &UnreachableBackend)
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            Some(&cand),
+            Some(Path::new("/x.wav")),
+            &UnreachableBackend,
+        )
         .await;
     assert!(result.is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
@@ -1153,7 +1164,13 @@ async fn run_mtl_reference_stage_skips_when_no_candidate() {
         events_tx,
     );
     let result = worker
-        .run_mtl_reference_stage(1, "yt1", None, Some(Path::new("/x.wav")), &UnreachableBackend)
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            None,
+            Some(Path::new("/x.wav")),
+            &UnreachableBackend,
+        )
         .await;
     assert!(result.is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
@@ -1175,7 +1192,13 @@ async fn run_mtl_reference_stage_skips_when_candidate_too_short() {
     );
     let cand = ref_candidate("description", 3); // below the 4-line floor
     let result = worker
-        .run_mtl_reference_stage(1, "yt1", Some(&cand), Some(Path::new("/x.wav")), &UnreachableBackend)
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            Some(&cand),
+            Some(Path::new("/x.wav")),
+            &UnreachableBackend,
+        )
         .await;
     assert!(result.is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
@@ -1419,7 +1442,10 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(reference, 0, "lyrics_reference must be cleared on gate FAIL");
+    assert_eq!(
+        reference, 0,
+        "lyrics_reference must be cleared on gate FAIL"
+    );
 
     let audit_path = cache_dir.join("yt_fail_alignment_audit.json");
     let content = tokio::fs::read_to_string(&audit_path)

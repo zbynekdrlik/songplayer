@@ -478,8 +478,14 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
         video_id: &str,
         lines: &[String],
     ) -> anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput> {
-        crate::lyrics::mtl_aligner::align(&self.mtl_cfg, vocals_wav, video_id, lines, &self.work_dir)
-            .await
+        crate::lyrics::mtl_aligner::align(
+            &self.mtl_cfg,
+            vocals_wav,
+            video_id,
+            lines,
+            &self.work_dir,
+        )
+        .await
     }
 
     async fn asr_transcribe(
