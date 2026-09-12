@@ -295,6 +295,22 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   comma-separated `gemini_api_key` list, advancing on error so a 429 on
   one key does not kill translation for the song. Wired into both
   `translate_track` and `retry_missing_translations`.
+- v20 (current `LYRICS_PIPELINE_VERSION`): the Gemini chunked-alignment
+  regime (`gemini_provider.rs` + qwen3/autosub aligners) is deleted —
+  `orchestrator.rs` imports none of the legacy providers. Text gathering
+  (`gather.rs`) gains Genius.com scraping (`genius.rs`, fallback behind
+  lyrics.ovh) and the operator `lyrics_override_text` field (highest
+  gather priority) alongside the pre-existing yt_subs/LRCLIB/Spotify/
+  description sources. The sole `AlignmentBackend` is now **WhisperX
+  large-v3 on Replicate** (`whisperx_replicate.rs`), with **`asr_path`**
+  (AssemblyAI Universal-3 Pro + Claude regroup, line-level) as the
+  fallback when the gathered text is untimed-only and fails the
+  WhisperX gate. `ALIGNMENT_MODEL_*` constants in `lyrics/mod.rs` name
+  the alignment method actually used per song
+  (`ALIGNMENT_MODEL_WHISPERX_V3_REV1`,
+  `ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1`, etc.). See the
+  `lyrics-pipeline` skill's "Provider hierarchy" section for the full
+  route map.
 
 ## Disabled subsystems (do not re-enable without redesign)
 

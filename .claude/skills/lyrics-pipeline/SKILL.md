@@ -23,16 +23,42 @@ triggers:
 
 # Songplayer Lyrics Pipeline Rules
 
-## Provider hierarchy (current production state)
+## Provider hierarchy (current production state, v20)
 
-1. **yt_subs** — registered FIRST as `AlignmentProvider`; short-circuits when
-   `has_timing=true`. Ground truth — never judge or override with ASR output.
-2. **Gemini 3.x Pro (gemini-3.1-pro-preview or newer)** — sole alignment
-   provider after yt_subs. Never downgrade to 2.5-pro, Flash, or any older
-   model even when preview is capacity-exhausted — wait.
-3. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again, no
-   exceptions. YouTube autosub produces wrong timing and contaminates ensemble
-   output.
+The Gemini chunked-transcription regime (`gemini_provider.rs`) and the
+qwen3/autosub aligners are DELETED (`orchestrator.rs`'s own doc comment:
+"imports NONE of the legacy providers ... deleted in Phase G"). The real
+route is two independent stages:
+
+1. **Text gathering** (`gather.rs::gather_sources_impl`) — fetched in this
+   order, all best-effort: manual **yt_subs** captions → **LRCLIB** →
+   **lyrics.ovh** (community lyrics API; **Genius** is the fallback ONLY
+   when lyrics.ovh misses, both labelled source `"genius"`) → **Spotify**
+   (operator-pasted `spotify_track_id`, LINE_SYNCED) → operator
+   **`lyrics_override_text`** → **YouTube description** LLM-extracted via
+   Claude (`description_provider.rs`). The authoritative candidate among
+   whatever gathering found is picked by `claude_merge::priority_with_timing`
+   (override=6 highest; timed spotify/lrclib=5, timed yt_subs=4; text
+   description=3, text lrclib=2, text genius=1; everything else=0).
+2. **Timing** (`orchestrator.rs`) — **WhisperX large-v3 on Replicate**
+   (`whisperx_replicate.rs::WhisperXReplicateBackend`) is the sole
+   `AlignmentBackend`. Tier-1 `LineSynced` (yt_subs/lrclib/spotify already
+   timed) runs a per-caption-window Claude split with WhisperX anchors
+   (`timed_reference_merge`); Tier-1 `TextOnly` runs WhisperX against the
+   best text candidate (`timed_reference_merge` when coverage is good,
+   else `text_reference_merge`); Tier-1 `None` ships raw WhisperX + line
+   split.
+3. **`asr_path`** (`asr_path/mod.rs` — AssemblyAI Universal-3 Pro + Claude
+   regroup, line-level only) — the fallback when
+   `orchestrator::is_allowed_text_source` rejects every gathered candidate
+   (untimed-only, WhisperX gate would reject it) but at least one text
+   candidate exists.
+4. **Zero candidates at all** → `db::models::mark_unsupported_source`
+   (`lyrics_source = 'unsupported_source'`); an `asr_path` transcription
+   failure quarantines as `asr_gap` instead.
+5. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again, no
+   exceptions. YouTube autosub produces wrong timing and contaminates
+   ensemble output.
 
 ## Gemini API discipline
 
