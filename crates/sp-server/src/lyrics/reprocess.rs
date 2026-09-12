@@ -114,19 +114,15 @@ async fn fetch_bucket_stale(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // v18 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 18)`.
-    // Pre-v18 Gemini output is degraded in one or more ways:
-    //   - v11-v14: sanitize_track dropped wordless lines → empty JSONs.
-    //   - v15: sanitize fixed, but AutoSubProvider still registered →
-    //     autosub contamination.
-    //   - v16: AutoSub removed, but no end_ms clip / no merge break.
-    //   - v17: end_ms clip + merge break added, but also synthesized
-    //     per-word timings by even-distribution. The fake timings
-    //     animated wrong on the karaoke wall; user asked for
-    //     line-level focus only.
-    //   - v18+: `words: None` for wordless providers; end_ms clip
-    //     and merge break retained. Line timing is clean; no fake
-    //     per-word data.
+    // The v18 smart-skip clause (`NOT (source LIKE '%gemini%' AND version >=
+    // 18)`) that used to live here is DELETED (#143). It protected the
+    // Gemini chunked-alignment regime's v18+ output from unnecessary
+    // reprocessing — but that whole regime (`gemini_provider.rs` +
+    // qwen3/autosub aligners) no longer exists as of v20 (see
+    // `mod.rs::LYRICS_PIPELINE_VERSION` history); every `ensemble:gemini`
+    // row on the catalog is stale legacy output now, and must re-queue
+    // under v21's Lever-2 reference regime like everything else instead of
+    // being permanently protected from ever being touched again.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -136,7 +132,6 @@ async fn fetch_bucket_stale(
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 \
-               AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 18) \
                AND p.is_active = 1 AND v.normalized = 1 \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
     )
