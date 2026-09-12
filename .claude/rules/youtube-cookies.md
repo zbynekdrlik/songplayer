@@ -21,6 +21,7 @@ queue stalls (#141, #139, #140).
 | dashboard shows the song but it never becomes playable; `normalized=0` rows pile up | download path, not sync — grep the log for `video download failed` |
 | log line ends with `Sign in to confirm you're not a bot` | cookie file missing / expired |
 | `WARNING: The provided YouTube account cookies are no longer valid` | the browser session rotated; re-export |
+| video stream OK but `audio download failed … Requested format is not available` | the box's yt-dlp is stale (2026.03 saw only HLS formats with cookies, no separate `bestaudio`); replace `cache\tools\yt-dlp.exe` with the latest release (#140 — the app never updates it itself) |
 
 **The fix in code:** `downloader/mod.rs` passes `--cookies <data_dir>/cookies.txt`
 to both yt-dlp calls whenever `C:\ProgramData\SongPlayer\cookies.txt` exists
