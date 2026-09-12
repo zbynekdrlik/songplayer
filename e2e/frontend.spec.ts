@@ -95,3 +95,39 @@ test("dashboard navbar shows version label matching backend (#85)", async ({
   expect(status).toHaveProperty("version");
   expect(text).toBe(`v${status.version}`);
 });
+
+test("navigating away from the Dashboard does not panic a disposed signal", async ({
+  page,
+}) => {
+  // Regression for the reactive_graph "access a reactive value that has
+  // already been disposed" panic. The Dashboard's ResolumeHealthCard polls
+  // /api/v1/resolume/health every 5 s from a spawn_local loop; navigating
+  // away disposes the page (and the loop's page-owned signals) while the
+  // loop is parked in its 5 s timer, and the loop then read a disposed
+  // signal on its next wake and panicked the WASM runtime. The panic
+  // surfaces via console_error_panic_hook as a console.error, which the
+  // beforeEach/afterEach console collector asserts is absent.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+    timeout: 10000,
+  });
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.locator("text=OBS WebSocket")).toBeVisible({
+    timeout: 5000,
+  });
+
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await expect(page).toHaveURL(/\/lyrics$/);
+
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+    timeout: 5000,
+  });
+
+  // Wait LONGER than the 5 s poll interval: the disposed Dashboard's loop
+  // fires its timer ~5 s after that page first mounted, so a shorter wait
+  // (e.g. 2 s) would finish before the panic and pass falsely. 7 s guarantees
+  // the disposed loop's timer fires inside the console-collection window.
+  await page.waitForTimeout(7000);
+});

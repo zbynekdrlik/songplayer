@@ -307,6 +307,16 @@ app.delete("/api/v1/resolume/hosts/:id", (_req, res) => {
   res.status(204).end();
 });
 
+// Resolume push-chain health — polled every 5 s by the dashboard's
+// ResolumeHealthCard on a spawn_local loop. An empty array means no
+// configured hosts / no alerts, which keeps the quiet-by-default card
+// hidden. The endpoint must exist so the frontend's async completion
+// (snapshot.set) actually runs in the E2E instead of failing to
+// deserialize the SPA-fallback index.html.
+app.get("/api/v1/resolume/health", (_req, res) => {
+  res.json([]);
+});
+
 // Lyrics pipeline queue
 app.get('/api/v1/lyrics/queue', (_req, res) => {
   res.json({
