@@ -30,3 +30,29 @@ pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
 /// `404 not_found_error`, which also puts the proxy's OAuth auth into a
 /// cooldown) — observed on win-resolume 2026-09-12 (#144).
 pub const DEFAULT_AI_MODEL: &str = "claude-opus-4-6";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The default translation / cleanup model must be the current Claude
+    /// flagship that the upgraded CLIProxyAPI actually routes (#145) — never
+    /// the `claude-opus-4-6` stop-gap the #144 workaround pinned while the
+    /// installed proxy build didn't know the newer ids, and never the long-
+    /// retired `claude-opus-4-20250514`. `claude-opus-5` was verified live on
+    /// win-resolume against CLIProxyAPI 7.3.1 (`/v1/models` lists it and a
+    /// `/v1/chat/completions` call returns HTTP 200 on the existing OAuth
+    /// login).
+    #[test]
+    fn default_ai_model_is_current_flagship() {
+        assert_eq!(DEFAULT_AI_MODEL, "claude-opus-5");
+        assert_ne!(
+            DEFAULT_AI_MODEL, "claude-opus-4-6",
+            "must not remain pinned to the #144 opus-4-6 stop-gap"
+        );
+        assert_ne!(
+            DEFAULT_AI_MODEL, "claude-opus-4-20250514",
+            "must not use the retired opus-4 snapshot"
+        );
+    }
+}
