@@ -31,3 +31,18 @@ paths:
   SongPlayer restart (= a deploy). Box test 2026-09-13 01:43: idle/paused
   outputs hold 30/s, but a PLAYING output ran ~27/s with every frame late
   (p99 15 s, max 40 s) — read #147 before flipping the flag again.
+- Playback ≠ capture (lane 3, 0.47.0-dev.13): catch-up advances the serviced
+  boundary ONE slot per `service()` call, but each emitting call also costs one
+  decoder `pull`; when a file's per-frame `iter_cost >= interval` the boundary
+  can never gain on the wall clock, so lag (and the negative stamp skew) grows
+  without bound. camera-box's A5.6 "buffered never resyncs" is a CAPTURE-side
+  rule (a live grabber can't outrun the wall clock) — for FILE playback lag is
+  bounded by a wall RE-ANCHOR: lag > `GENLOCK_MAX_CATCHUP_INTERVALS` sustained
+  > `LAG_REANCHOR_AFTER_100NS` (1 s) with a frame buffered re-anchors
+  `wall_start` so the buffered frame is due at the next boundary (content
+  continues, no skip; `resyncs += 1`, `ServiceOutcome::Reanchored`). The video
+  then plays slightly slow but the stamps stay near `now` (FIFO stays locked).
+  Health gauges: `pacing.lag_slots` (whole slots behind at the last emit) and
+  `pacing.iter_p99_us` (decode+submit cost; `>= interval` = decoder can't keep
+  up) are the honest signals; `jitter_p99_us` only mirrored the lag.
+  `late_frames` counts an emit > 2 ms past its boundary.
