@@ -151,6 +151,12 @@ function Stop-Gateway {
 }
 
 # Launch a fresh stateful gateway, detached, at BELOW_NORMAL priority.
+#
+# stdout/stderr MUST be redirected: a detached process launched with no console
+# and no redirect blocks on its first large write to the dead inherited handle,
+# which stalled supergateway startup for >120s (measured). Redirecting to files
+# makes it bind in ~2-3s and gives a debuggable log. The files are truncated on
+# each launch (Start-Process overwrites), so they only grow between restarts.
 function Start-Gateway {
     $env:OBS_WEBSOCKET_URL = $ObsWsUrl
     $common = "--stdio `"npx -y obs-mcp`" --port $GwPort --outputTransport streamableHttp --stateful --sessionTimeout $SessionTimeoutMs --healthEndpoint $HealthPath --cors"
@@ -162,7 +168,10 @@ function Start-Gateway {
         $file = "cmd.exe"
         $argline = "/c npx -y supergateway $common"
     }
-    $proc = Start-Process -FilePath $file -ArgumentList $argline -WindowStyle Hidden -PassThru
+    $outLog = Join-Path $ScriptRoot "gateway-out.log"
+    $errLog = Join-Path $ScriptRoot "gateway-err.log"
+    $proc = Start-Process -FilePath $file -ArgumentList $argline -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $outLog -RedirectStandardError $errLog
     try { $proc.PriorityClass = 'BelowNormal' } catch {}
     return $proc
 }
