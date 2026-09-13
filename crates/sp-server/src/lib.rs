@@ -8,6 +8,7 @@ pub mod lyrics;
 pub mod metadata;
 pub mod obs;
 mod obs_bridge;
+pub mod panic_hook;
 pub mod playback;
 pub mod playlist;
 pub mod presenter;
@@ -15,6 +16,8 @@ pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
 pub mod startup;
+
+pub use panic_hook::install_panic_hook;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
