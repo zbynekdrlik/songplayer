@@ -80,13 +80,34 @@ pub enum NudgeDecision {
 /// * `now_100ns` — the heartbeat's monotonic timestamp (engine `Instant`
 ///   origin, 100 ns units).
 pub fn decide(
-    _state: &NudgeState,
-    _is_dark: bool,
-    _consecutive_bad_polls: u32,
-    _now_100ns: i64,
+    state: &NudgeState,
+    is_dark: bool,
+    consecutive_bad_polls: u32,
+    now_100ns: i64,
 ) -> NudgeDecision {
-    // RED stub — always skips. The real policy lands in the GREEN fix.
-    NudgeDecision::Skip(SkipReason::BelowThreshold)
+    // Not dark → the outage (if any) is over; reset so the next one gets a
+    // fresh attempt budget.
+    if !is_dark {
+        return NudgeDecision::Reset;
+    }
+    // Dark, but give a normally-reconnecting receiver time before the first
+    // nudge.
+    if consecutive_bad_polls < NUDGE_THRESHOLD_BAD_POLLS {
+        return NudgeDecision::Skip(SkipReason::BelowThreshold);
+    }
+    // Don't nudge forever — a genuinely misconfigured/absent OBS input should
+    // fall back to log-only after a bounded number of attempts.
+    if state.attempts >= NUDGE_MAX_ATTEMPTS {
+        return NudgeDecision::Skip(SkipReason::MaxAttempts);
+    }
+    // Space nudges out so DistroAV's re-discovery from the previous nudge can
+    // land before we try again.
+    if let Some(last) = state.last_nudge_100ns
+        && now_100ns.saturating_sub(last) < NUDGE_COOLDOWN_100NS
+    {
+        return NudgeDecision::Skip(SkipReason::Cooldown);
+    }
+    NudgeDecision::Nudge
 }
 
 /// Shared, interior-mutability tracker holding one `NudgeState` per pipeline.

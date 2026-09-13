@@ -40,6 +40,29 @@ pub fn get_scene_items_request(request_id: &str, scene_name: &str) -> serde_json
     })
 }
 
+/// Build a `SetInputSettings` request that writes an NDI input's
+/// `ndi_source_name` (#127 receiver recovery). Used to clear (`""`) then
+/// restore the field so DistroAV re-runs discovery for a stranded receiver.
+/// The default merge semantics (`overlay` unset ⇒ merge) leave every other
+/// input setting untouched.
+pub fn set_ndi_source_name_request(
+    request_id: &str,
+    input_name: &str,
+    ndi_source_name: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "SetInputSettings",
+            "requestId": request_id,
+            "requestData": {
+                "inputName": input_name,
+                "inputSettings": { "ndi_source_name": ndi_source_name }
+            }
+        }
+    })
+}
+
 /// Build a `GetInputList` request filtered to NDI source inputs.
 pub fn get_input_list_request(request_id: &str) -> serde_json::Value {
     serde_json::json!({
@@ -125,6 +148,27 @@ mod tests {
         assert_eq!(req["d"]["requestType"], "GetInputList");
         assert_eq!(req["d"]["requestId"], "inputs-req-1");
         assert_eq!(req["d"]["requestData"]["inputKind"], "ndi_source");
+    }
+
+    #[test]
+    fn test_set_ndi_source_name_request_structure() {
+        let req = set_ndi_source_name_request("nudge-1", "sp-slow_video", "");
+        assert_eq!(req["op"], 6);
+        assert_eq!(req["d"]["requestType"], "SetInputSettings");
+        assert_eq!(req["d"]["requestId"], "nudge-1");
+        assert_eq!(req["d"]["requestData"]["inputName"], "sp-slow_video");
+        // Clearing writes an empty string (the proven force-rediscovery step).
+        assert_eq!(
+            req["d"]["requestData"]["inputSettings"]["ndi_source_name"],
+            ""
+        );
+        // Restore writes the full network-visible sender name back.
+        let restore =
+            set_ndi_source_name_request("nudge-2", "sp-slow_video", "RESOLUME-SNV (SP-slow)");
+        assert_eq!(
+            restore["d"]["requestData"]["inputSettings"]["ndi_source_name"],
+            "RESOLUME-SNV (SP-slow)"
+        );
     }
 
     #[test]

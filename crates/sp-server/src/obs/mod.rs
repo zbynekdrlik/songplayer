@@ -94,8 +94,20 @@ pub(crate) type SharedWrite = std::sync::Arc<
 >;
 
 /// Commands that can be sent to the OBS WebSocket connection loop.
+#[derive(Debug, Clone)]
 pub enum ObsCommand {
-    SetTextSource { source_name: String, text: String },
+    SetTextSource {
+        source_name: String,
+        text: String,
+    },
+    /// #127: nudge OBS to re-subscribe a stranded NDI receiver. The handler
+    /// finds the NDI input advertising `ndi_name` (the bare stream, e.g.
+    /// `"SP-slow"`) and clears + restores its `ndi_source_name` so DistroAV
+    /// re-runs discovery. Receiver-side over the healthy OBS WebSocket — never
+    /// a per-sender `RecreateSender` (CLAUDE.md "Disabled subsystems", #60).
+    NudgeNdiReceiver {
+        ndi_name: String,
+    },
 }
 
 /// Events emitted by the OBS WebSocket connection loop.
@@ -539,6 +551,28 @@ async fn connect_and_run(
                                     warn!(source_name, "SetTextSource: timed out");
                                 }
                             }
+                        });
+                    }
+                    ObsCommand::NudgeNdiReceiver { ndi_name } => {
+                        // #127: SongPlayer detected a stranded DistroAV receiver
+                        // (dark wall while Playing). Re-subscribe it by clearing
+                        // + restoring the matching input's ndi_source_name over
+                        // this healthy OBS WebSocket. Spawned so the main loop
+                        // does not block on the OBS round-trips.
+                        let write = std::sync::Arc::clone(&write);
+                        let dispatcher = dispatcher.clone();
+                        spawned_tasks.spawn(async move {
+                            let outcome = crate::obs::ndi_discovery::reapply_ndi_input(
+                                &write,
+                                &dispatcher,
+                                &ndi_name,
+                            )
+                            .await;
+                            debug!(
+                                ndi_name = %ndi_name,
+                                ?outcome,
+                                "ndi-recovery: nudge outcome"
+                            );
                         });
                     }
                 }
