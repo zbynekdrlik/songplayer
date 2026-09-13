@@ -32,8 +32,8 @@ const GIT_SHA: &str = match option_env!("SP_GIT_SHA") {
 /// bounds machinery produces).
 fn panic_message(info: &PanicHookInfo<'_>) -> String {
     let payload = info.payload();
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
+    if let Some(&s) = payload.downcast_ref::<&str>() {
+        s.to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
         s.clone()
     } else {
