@@ -26,9 +26,9 @@ export type OutputHealth = "live" | "dark" | "never_polled";
 
 /** Classify a pipeline's NDI receiver connection count. */
 export function classifyConnections(connections: number): OutputHealth {
-  // RED stub — every count reads as live; the real classifier lands in GREEN.
-  void connections;
-  return "live";
+  if (connections > 0) return "live";
+  if (connections === 0) return "dark";
+  return "never_polled"; // -1 = heartbeat has not run yet
 }
 
 /** An on-program output that does not (yet) have a live receiver. */
@@ -53,8 +53,31 @@ export function unhealthyOnProgramOutputs(
   activePlaylistIds: number[],
   health: HealthSnapshot[],
 ): UnhealthyOutput[] {
-  // RED stub — never flags anything; the real gate lands in GREEN.
-  void activePlaylistIds;
-  void health;
-  return [];
+  const byId = new Map<number, HealthSnapshot>();
+  for (const s of health) byId.set(s.playlist_id, s);
+
+  const out: UnhealthyOutput[] = [];
+  for (const id of activePlaylistIds) {
+    const snap = byId.get(id);
+    if (!snap) {
+      // On program but not present in the health array — never observed.
+      out.push({
+        playlist_id: id,
+        ndi_name: `playlist ${id}`,
+        connections: -1,
+        health: "never_polled",
+      });
+      continue;
+    }
+    const health_ = classifyConnections(snap.connections);
+    if (health_ !== "live") {
+      out.push({
+        playlist_id: snap.playlist_id,
+        ndi_name: snap.ndi_name,
+        connections: snap.connections,
+        health: health_,
+      });
+    }
+  }
+  return out;
 }

@@ -42,8 +42,12 @@ test.describe("NDI dark-wall gate logic (#127)", () => {
   });
 
   test("does not flag an off-program output that is dark (normal idle)", () => {
-    const health = [{ playlist_id: 4, ndi_name: "SP-slow", connections: 0 }];
-    // playlist 4 is NOT on program → connections=0 is normal; gate ignores it.
+    const health = [
+      { playlist_id: 4, ndi_name: "SP-slow", connections: 0 }, // off program, dark
+      { playlist_id: 7, ndi_name: "SP-fast", connections: 2 }, // on program, live
+    ];
+    // Only playlist 7 is on program (and live). Playlist 4 is dark but NOT on
+    // program → connections=0 is normal there; the gate must ignore it.
     expect(unhealthyOnProgramOutputs([7], health)).toHaveLength(0);
   });
 

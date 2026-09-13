@@ -30,6 +30,11 @@
 
 import { test, expect } from "@playwright/test";
 import { ObsDriver } from "./obs-driver";
+import {
+  unhealthyOnProgramOutputs,
+  type HealthSnapshot,
+  type UnhealthyOutput,
+} from "./ndi-health-gate";
 
 const OBS_WS_URL = process.env.OBS_WS_URL || "ws://localhost:4455";
 
@@ -184,6 +189,69 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #127 — on-program NDI output must have a live receiver.
+   *
+   * The worst failure this project has: SongPlayer reports `state=Playing`
+   * at full fps while OBS's DistroAV receiver is stranded on a dead endpoint,
+   * so `connections=0` and the video plate is black — yet every other check
+   * passes green. This gate reads the on-program playlist(s) from
+   * `/api/v1/status.active_playlist_ids`, then polls `/api/v1/ndi/health`
+   * until each has `connections > 0` (`0` = dark wall; `-1` = never polled
+   * yet, so keep waiting), and FAILS if any stays dark.
+   *
+   * Note: SongPlayer does NOT silently self-heal this state (CLAUDE.md
+   * "Disabled subsystems" — per-sender recreate was removed). It now
+   * best-effort nudges OBS over its WebSocket to re-subscribe the stranded
+   * receiver (#127), but a wall that stays dark is a real failure this gate
+   * must catch, not paper over.
+   */
+  test("on-program NDI output has a live receiver — wall is not dark (#127)", async ({
+    request,
+  }) => {
+    // Park on a baseline scene (sp-slow / another non-fast sp-*), per CLAUDE.md
+    // "E2E must not switch to disruptive OBS scenes". SongPlayer then registers
+    // that scene's playlist as on program.
+    if (obs) {
+      const scenes = await obs.listScenes();
+      await obs.switchScene(pickBaselineScene(scenes));
+    }
+
+    // Poll until every on-program output has a live receiver, giving the full
+    // detect → spawn → DistroAV-connect chain time to settle after the deploy's
+    // SongPlayer restart.
+    const deadline = Date.now() + 60_000;
+    let active: number[] = [];
+    let unhealthy: UnhealthyOutput[] = [];
+    for (;;) {
+      const statusResp = await request.get("/api/v1/status");
+      expect(statusResp.status()).toBe(200);
+      const status = (await statusResp.json()) as {
+        active_playlist_ids: number[];
+      };
+      active = status.active_playlist_ids ?? [];
+
+      const healthResp = await request.get("/api/v1/ndi/health");
+      expect(healthResp.status()).toBe(200);
+      const health = (await healthResp.json()) as HealthSnapshot[];
+      expect(Array.isArray(health)).toBe(true);
+
+      unhealthy = unhealthyOnProgramOutputs(active, health);
+      if (active.length > 0 && unhealthy.length === 0) break;
+      if (Date.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+
+    expect(
+      active.length,
+      "no playlist registered as on program after parking on the baseline sp-* scene — scene detection did not fire (active_playlist_ids stayed empty)",
+    ).toBeGreaterThan(0);
+    expect(
+      unhealthy,
+      `on-program NDI output(s) had no live receiver — dark wall (#127): ${JSON.stringify(unhealthy)}`,
+    ).toHaveLength(0);
+  });
+
+  /**
    * Issue #8 — dashboard Play button.
    * Click the Play button on any playlist that has videos and assert
    * that SongPlayer responds with a 2xx (not 405). Playwright waits
@@ -204,14 +272,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // Wait for the WASM bundle to mount and the card to appear.
     await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
 
-    // NDI Tier-1 visibility — the endpoint is the public surface; the
-    // dashboard card was removed in favour of structured logs +
-    // auto-recovery (no operator-facing alert needed when the system
-    // self-heals).
-    const ndiHealthResp = await request.get("/api/v1/ndi/health");
-    expect(ndiHealthResp.status()).toBe(200);
-    const ndiHealth = await ndiHealthResp.json();
-    expect(Array.isArray(ndiHealth)).toBe(true);
+    // (The NDI dark-wall gate — `connections > 0` for the on-program output —
+    // lives in its own dedicated test below, "on-program NDI output has a live
+    // receiver (#127)", so this Play-button test stays focused on the button.)
 
     const card = page.locator(".playlist-card", { hasText: pl.name });
     await expect(card).toBeVisible();
