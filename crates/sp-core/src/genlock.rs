@@ -417,6 +417,12 @@ pub fn starvation_repeat_timecode_100ns(
     base_timecode_100ns - repeat_index * frame_interval_100ns
 }
 
+/// Audio clock-discipline math (#148): `samples_per_boundary`, the buffer-level
+/// → file-clock `residual_ppm` conversion, and the slow-resample [`audio::AudioPll`].
+/// WASM-safe pure `f64`/integer math, mirroring camera-box#1294 §6.
+#[path = "genlock_audio.rs"]
+pub mod audio;
+
 #[cfg(test)]
 #[path = "genlock_tests.rs"]
 mod genlock_tests;

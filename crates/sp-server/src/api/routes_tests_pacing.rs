@@ -13,7 +13,9 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn ndi_health_endpoint_includes_pacing() {
-    use crate::playback::ndi_health::{PacingStats, PipelineHealthSnapshot, PlaybackStateLabel};
+    use crate::playback::ndi_health::{
+        AudioStats, PacingStats, PipelineHealthSnapshot, PlaybackStateLabel,
+    };
 
     let state = test_state().await;
     state.ndi_health_registry.update(PipelineHealthSnapshot {
@@ -43,6 +45,15 @@ async fn ndi_health_endpoint_includes_pacing() {
             lag_slots: 3,
             iter_p99_us: 4200,
         },
+        audio: AudioStats {
+            enabled: true,
+            residual_ppm: -12.5,
+            applied_ppm: 8.0,
+            samples_per_boundary: 1600,
+            underruns: 4,
+            overflows: 1,
+            buffer_ms: 66,
+        },
     });
 
     let resp = app(state)
@@ -71,4 +82,20 @@ async fn ndi_health_endpoint_includes_pacing() {
     assert_eq!(arr[0]["pacing"]["dropped"].as_u64(), Some(30));
     assert_eq!(arr[0]["pacing"]["lag_slots"].as_i64(), Some(3));
     assert_eq!(arr[0]["pacing"]["iter_p99_us"].as_u64(), Some(4200));
+
+    // #148: the audio clock-discipline telemetry serialises with its full key set.
+    assert_eq!(
+        arr[0]["audio"]["enabled"],
+        serde_json::json!(true),
+        "the health snapshot must carry audio.enabled"
+    );
+    assert_eq!(arr[0]["audio"]["samples_per_boundary"].as_u64(), Some(1600));
+    assert_eq!(arr[0]["audio"]["underruns"].as_u64(), Some(4));
+    assert_eq!(arr[0]["audio"]["overflows"].as_u64(), Some(1));
+    assert_eq!(arr[0]["audio"]["buffer_ms"].as_u64(), Some(66));
+    assert_eq!(arr[0]["audio"]["applied_ppm"].as_f64(), Some(8.0));
+    assert!(
+        arr[0]["audio"]["residual_ppm"].as_f64().is_some(),
+        "audio.residual_ppm must serialise"
+    );
 }
