@@ -27,8 +27,21 @@ never ssh/scp to this box.
 1. **Back-off gate** — if the previous restarts kept failing, wait (5→10→20→40→60 min cap) instead of hammering.
 2. **OBS dependency gate** — if OBS WebSocket 4455 is not listening, do nothing (obs-mcp only connects at startup); the scheduler retries next cycle.
 3. **Leak guard** — if more than `NodeCap` (10) obs-mcp/supergateway `node` processes exist, tear the gateway down fully and start one fresh.
-4. **Liveness** — if supergateway is listening on 8091 and `/healthz` returns `ok`, the gateway is healthy → no-op.
-5. **(Re)start + verify** — otherwise tree-kill the old gateway and start a fresh **stateful** supergateway, then verify `/healthz` **and** a real MCP `obs-get-scene-list` identify probe before declaring success; on failure, record a back-off.
+4. **Liveness** — if supergateway is listening on 8091, the gateway is healthy → no-op.
+5. **(Re)start** — otherwise tree-kill the old gateway and start a fresh **stateful** supergateway, then wait (up to 45s) for it to listen on 8091; on failure, record a back-off.
+
+### Health signals are TcpClient-only (on purpose)
+
+`Invoke-WebRequest` to localhost is **unreliable in the Task Scheduler / detached
+session on this box** — it hangs for the full timeout even when the endpoint is
+up (measured live: the HTTP health probe stalled 120s while `/healthz` answered
+`ok` from an interactive shell; no proxy is configured). A raw `TcpClient` socket
+connect works in every context, so the watchdog decides purely on **"port
+listening"**, never on an HTTP call. With `--stateful` and the 4455 dependency
+gate, a supergateway that is listening on 8091 identifies obs-mcp for its clients
+on the first call, so "listening" is a sufficient health signal. `obs-mcp`'s
+identify is confirmed **out-of-band** — an interactive MCP `obs-get-scene-list`
+call, or the real `obs-resolume` clients — not by the watchdog.
 
 ### Why `--stateful` matters (issue #128)
 
