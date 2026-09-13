@@ -56,6 +56,18 @@ pub(crate) fn app(state: AppState) -> axum::Router {
     crate::api::router(state, None)
 }
 
+/// #132: like `test_state`, but keeps the engine-command receiver alive so a
+/// test can assert which `EngineCommand` a CRUD handler sent. (`test_state`
+/// drops the receiver, so its `try_send` would silently no-op.) Shared with
+/// the sibling `routes_tests_runtime_pipeline.rs` via `super::tests`.
+pub(crate) async fn test_state_with_engine_rx() -> (AppState, mpsc::Receiver<crate::EngineCommand>)
+{
+    let mut state = test_state().await;
+    let (engine_tx, engine_rx) = mpsc::channel(16);
+    state.engine_tx = engine_tx;
+    (state, engine_rx)
+}
+
 #[tokio::test]
 async fn status_returns_200() {
     let state = test_state().await;

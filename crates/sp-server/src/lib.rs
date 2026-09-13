@@ -121,6 +121,19 @@ pub enum EngineCommand {
     ResolumeRecovered {
         host: String,
     },
+    /// #132: Register a playback pipeline for a playlist created or activated
+    /// at runtime via the API, so scene detection can start it without a
+    /// process restart. The engine reconciles from the DB (creates only when
+    /// the playlist is active and has a non-empty NDI name); idempotent and
+    /// safe to over-send.
+    EnsurePipeline {
+        playlist_id: i64,
+    },
+    /// #132: Tear down a playlist's pipeline after a runtime delete or
+    /// deactivate. No-op if the engine has no pipeline for it.
+    RemovePipeline {
+        playlist_id: i64,
+    },
 }
 
 /// Status of external tool availability.
@@ -756,6 +769,16 @@ pub async fn start(
                         }
                         EngineCommand::ResolumeRecovered { host } => {
                             engine.handle_resolume_recovery(&host).await;
+                        }
+                        EngineCommand::EnsurePipeline { playlist_id } => {
+                            // #132: a playlist created/activated at runtime
+                            // registers its pipeline the same way startup does.
+                            engine.ensure_pipeline_for_playlist(playlist_id).await;
+                        }
+                        EngineCommand::RemovePipeline { playlist_id } => {
+                            // #132: a playlist deleted/deactivated at runtime
+                            // tears its pipeline down symmetrically.
+                            engine.remove_pipeline(playlist_id);
                         }
                     }
                 }

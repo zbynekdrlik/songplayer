@@ -22,6 +22,7 @@ pub(crate) mod pipeline_paced;
 pub(crate) mod pipeline_paced_idle;
 mod position_update;
 mod recovery;
+mod runtime_pipeline;
 pub mod state;
 pub mod submitter;
 mod test_helpers;
@@ -350,23 +351,6 @@ impl PlaybackEngine {
             }
         });
     }
-
-    /// #132: Ensure a pipeline exists for a playlist created or activated at
-    /// runtime (via the API), so scene detection can start playback without a
-    /// process restart. Reconciles from the DB — a pipeline is (idempotently)
-    /// created only when the playlist is active and has a non-empty NDI output
-    /// name, mirroring the startup pre-create loop in `lib.rs::start`.
-    ///
-    /// RED STUB (#132): no-op — reproduces the current defect (nothing
-    /// registers a pipeline at runtime). Implemented in the following commit.
-    pub async fn ensure_pipeline_for_playlist(&mut self, _playlist_id: i64) {}
-
-    /// #132: Tear down a playlist's pipeline after a runtime delete/deactivate.
-    /// Dropping the `PlaybackPipeline` sends `Shutdown` to its thread, which
-    /// destroys the NDI sender. No-op if no pipeline exists.
-    ///
-    /// RED STUB (#132): no-op. Implemented in the following commit.
-    pub fn remove_pipeline(&mut self, _playlist_id: i64) {}
 
     /// Receive the next pipeline event (for use in external select! loops).
     pub async fn recv_pipeline_event(&mut self) -> Option<(i64, PipelineEvent)> {
