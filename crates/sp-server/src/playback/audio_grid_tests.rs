@@ -139,6 +139,55 @@ fn fractional_reader_resamples_a_sine_up_by_three_hundred_ppm_without_discontinu
 }
 
 #[test]
+fn underrun_keeps_the_remaining_fifo_samples_and_frac_pos() {
+    // A fractional reader (step 1.5) starving on the interpolation partner must
+    // KEEP the last real sample + frac_pos, not clear the FIFO (#148 rework).
+    let mut buf = AudioGridBuffer::new(48_000, 3200);
+    buf.set_applied_ppm(500_000.0); // step = 1.5
+    buf.push(&[vec![10.0, 20.0]]); // two samples
+    let out = buf.take_boundary_chunk(3);
+    assert_eq!(buf.underruns(), 1, "starved mid-chunk = one underrun");
+    assert!(
+        (out[0][0] - 10.0).abs() < 1e-6,
+        "first output is the real sample"
+    );
+    assert_eq!(out[0][1], 0.0, "the missing tail is zero-filled");
+    assert_eq!(out[0][2], 0.0, "the missing tail is zero-filled");
+    // The FIFO kept its last sample instead of clearing to empty.
+    assert_eq!(
+        buf.level_samples(),
+        1,
+        "the last (partner) sample must survive the underrun"
+    );
+}
+
+#[test]
+fn overflow_warning_fires_once_per_song_and_rearms_on_clear() {
+    let mut buf = AudioGridBuffer::new(48_000, 3200);
+    // No overflow yet → no warning.
+    assert!(!buf.take_overflow_warning());
+    // Flood past the 2 s cap to force overflows.
+    for _ in 0..60 {
+        buf.push(&const_chunk(0.1, 2000));
+    }
+    assert!(buf.overflows() > 0, "flooding overflows");
+    assert!(buf.take_overflow_warning(), "first warning fires");
+    assert!(
+        !buf.take_overflow_warning(),
+        "latched — no second warning this song"
+    );
+    // A new song (clear/anchor) re-arms the warning.
+    buf.clear();
+    for _ in 0..60 {
+        buf.push(&const_chunk(0.1, 2000));
+    }
+    assert!(
+        buf.take_overflow_warning(),
+        "clear re-arms the per-song warning"
+    );
+}
+
+#[test]
 fn clear_empties_the_buffer_and_resets_the_reader() {
     let mut buf = AudioGridBuffer::new(48_000, 3200);
     buf.push(&const_chunk(1.0, 5000));

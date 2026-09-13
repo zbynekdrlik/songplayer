@@ -11,7 +11,7 @@
 use super::*;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 const B1: i64 = 333_333;
@@ -154,21 +154,29 @@ fn audio_stats_report_the_grid_and_enabled_flag() {
 }
 
 #[test]
-fn anchor_clears_the_buffer_and_resets_the_pll() {
+fn sustained_growth_drives_applied_positive_and_anchor_resets() {
+    // Rework (#148): the servo is a SLOW TRIM off the 60 s rate residual, so a
+    // real correction needs > 2 min of sustained drift, not the old 1 Hz loop.
+    // Feed a mild over-rate (1608 samples/frame vs 1600 taken → the buffer grows
+    // ~8 samples/boundary): the 60 s means read a large positive drift, so the
+    // slow trim drives applied_ppm POSITIVE (drain faster). 5 min at 30 fps;
+    // frames generated on demand (no huge preallocation), and push-before-take
+    // keeps the level ≥ 1600 at every take (no startup underrun).
     let (mut pacer, clk) = anchored_pacer();
-    // Over-feed so the buffer grows and the PLL eventually corrects.
-    let frames = RefCell::new(VecDeque::new());
-    for j in 0..700i64 {
-        frames
-            .borrow_mut()
-            .push_back(frame_due_with_audio(b(j + 1), 1650));
-    }
+    let next = Cell::new(0i64);
     let mut sink = AudioRecordingSink::default();
-    for k in 1..=600i64 {
+    for k in 1..=9000i64 {
         clk.set(b(k));
-        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+        pacer.service(
+            || {
+                let j = next.get();
+                next.set(j + 1);
+                Some(frame_due_with_audio(b(j + 1), 1608))
+            },
+            &mut sink,
+        );
     }
-    // A sustained growing buffer (file clock fast) must engage a POSITIVE
+    // A sustained growing buffer (file/audio clock fast) must engage a POSITIVE
     // applied_ppm (drain faster) — the correcting direction.
     assert!(
         pacer.audio_stats().applied_ppm > 0.0,
@@ -176,13 +184,84 @@ fn anchor_clears_the_buffer_and_resets_the_pll() {
         pacer.audio_stats().applied_ppm
     );
 
-    // anchor() must clear the buffer and reset the PLL back to 0.
-    clk.set(b(601));
+    // anchor() must clear the buffer, the averager, and reset the PLL back to 0.
+    clk.set(b(9001));
     pacer.anchor();
     let stats = pacer.audio_stats();
     assert_eq!(stats.applied_ppm, 0.0, "anchor resets the PLL");
     assert_eq!(stats.residual_ppm, 0.0, "anchor clears the residual");
     assert_eq!(stats.buffer_ms, 0, "anchor empties the buffer");
+}
+
+#[test]
+fn audio_resume_reset_clears_audio_but_keeps_the_video_pending() {
+    // Build up some buffered audio and park a video frame, then Resume: the audio
+    // buffer + PLL are flushed (item 4) while the VIDEO pending/anchor survive.
+    let (mut pacer, clk) = anchored_pacer();
+    let next = Cell::new(0i64);
+    let mut sink = AudioRecordingSink::default();
+    for k in 1..=300i64 {
+        clk.set(b(k));
+        pacer.service(
+            || {
+                let j = next.get();
+                next.set(j + 1);
+                Some(frame_due_with_audio(b(j + 1), 1608))
+            },
+            &mut sink,
+        );
+    }
+    assert!(
+        pacer.audio_stats().buffer_ms > 0,
+        "buffer should hold audio"
+    );
+    let had_pending = pacer.has_pending();
+
+    pacer.audio_resume_reset();
+    let stats = pacer.audio_stats();
+    assert_eq!(stats.buffer_ms, 0, "Resume empties the audio buffer");
+    assert_eq!(stats.applied_ppm, 0.0, "Resume resets the PLL");
+    assert_eq!(stats.residual_ppm, 0.0, "Resume clears the residual");
+    assert_eq!(
+        pacer.has_pending(),
+        had_pending,
+        "Resume must NOT touch the video pending/anchor"
+    );
+}
+
+#[test]
+fn take_eos_tail_flushes_remaining_audio_zero_filled_to_a_full_boundary() {
+    // Leave a residual in the audio buffer (over-rate feed), then flush the tail:
+    // one final chunk of exactly samples_per_boundary, then nothing (item 4).
+    let (mut pacer, clk) = anchored_pacer();
+    let next = Cell::new(0i64);
+    let mut sink = AudioRecordingSink::default();
+    for k in 1..=400i64 {
+        clk.set(b(k));
+        pacer.service(
+            || {
+                let j = next.get();
+                next.set(j + 1);
+                Some(frame_due_with_audio(b(j + 1), 1608))
+            },
+            &mut sink,
+        );
+    }
+    let tail = pacer.take_eos_tail();
+    assert_eq!(tail.len(), 1, "one final tail chunk");
+    let spc = tail[0].data.len() / tail[0].channels as usize;
+    assert_eq!(spc, 1600, "tail is zero-filled to a full boundary");
+
+    // Drain to empty; the tail must eventually stop producing chunks.
+    let mut guard = 0;
+    while !pacer.take_eos_tail().is_empty() {
+        guard += 1;
+        assert!(guard < 100, "EOS tail must terminate");
+    }
+    assert!(
+        pacer.take_eos_tail().is_empty(),
+        "an empty buffer yields no tail chunk"
+    );
 }
 
 #[test]
