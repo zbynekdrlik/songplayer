@@ -915,6 +915,9 @@ mod dispatch_lyrics_tests;
 #[path = "tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "tests_engine_setters.rs"]
+mod tests_engine_setters;
+#[cfg(test)]
 #[path = "tests_history.rs"]
 mod tests_history;
 #[cfg(test)]

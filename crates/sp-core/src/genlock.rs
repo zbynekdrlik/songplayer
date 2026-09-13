@@ -448,3 +448,11 @@ mod genlock_burn_tests;
 #[cfg(test)]
 #[path = "genlock_lock_state_tests.rs"]
 mod genlock_lock_state_tests;
+
+#[cfg(test)]
+#[path = "genlock_tests_mutants.rs"]
+mod genlock_tests_mutants;
+
+#[cfg(test)]
+#[path = "genlock_lock_state_tests_mutants.rs"]
+mod genlock_lock_state_tests_mutants;

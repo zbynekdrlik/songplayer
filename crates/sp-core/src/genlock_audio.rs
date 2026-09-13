@@ -309,3 +309,7 @@ impl AudioPll {
 #[cfg(test)]
 #[path = "genlock_audio_tests.rs"]
 mod genlock_audio_tests;
+
+#[cfg(test)]
+#[path = "genlock_audio_tests_mutants.rs"]
+mod genlock_audio_tests_mutants;
