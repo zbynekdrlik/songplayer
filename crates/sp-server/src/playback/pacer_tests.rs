@@ -61,19 +61,15 @@ fn frame_due_at_audio(target_100ns: i64) -> PacedFrame {
     mk_frame_with_audio((target_100ns - B1) * 100)
 }
 
-/// A recording sink: captures per emit the video/audio timecodes and the size
-/// of the audio batch (every consumed frame's chunks, §6.4).
+/// A recording sink: captures per emit the video/audio timecodes and the
+/// per-channel sample count of the boundary audio chunk (#148 — audio is the
+/// wall-clock buffer's boundary chunk, no longer one chunk per consumed frame).
 #[derive(Default)]
 struct RecordingSink {
     video_tcs: Vec<i64>,
     audio_tcs: Vec<i64>,
-    audio_lens: Vec<usize>,
-}
-
-impl RecordingSink {
-    fn audio_chunks_total(&self) -> usize {
-        self.audio_lens.iter().sum()
-    }
+    /// Per-channel sample count of the audio batch handed to each emit.
+    audio_samples: Vec<usize>,
 }
 
 impl PacedSink for RecordingSink {
@@ -86,7 +82,17 @@ impl PacedSink for RecordingSink {
     ) {
         self.video_tcs.push(video_tc_100ns);
         self.audio_tcs.push(audio_tc_100ns);
-        self.audio_lens.push(audio.len());
+        let samples: usize = audio
+            .iter()
+            .map(|a| {
+                if a.channels > 0 {
+                    a.data.len() / a.channels as usize
+                } else {
+                    0
+                }
+            })
+            .sum();
+        self.audio_samples.push(samples);
     }
 }
 
@@ -161,10 +167,21 @@ fn stamp_is_the_serviced_boundary_never_floor_of_now() {
 // Audio decoupled from the video decision (#147 change 3).
 // ---------------------------------------------------------------------------
 
+// CORRECTED for #148: audio is no longer one chunk per consumed frame — the
+// pacer pushes every consumed frame's audio into its wall-clock AudioGridBuffer
+// and submits exactly `samples_per_boundary` (1600 @ 48 kHz/30) per boundary,
+// decoupled from the video frame rate. These two tests hard-coded the pre-#148
+// per-frame pass-through (chunk count == consumed frames; a repeat submits no
+// audio) — both premises are gone. See `pacer_tests_audio.rs` for the full
+// audio-clock wiring coverage.
+
 #[test]
-fn sixty_fps_submits_all_audio_chunks_not_just_emitted_frames() {
+fn every_emit_submits_exactly_one_boundary_audio_chunk_over_a_60fps_source() {
     let (mut pacer, clk) = anchored_pacer();
-    // 60 fps frames every 166_666 (100 ns), each with one audio chunk.
+    // 60 fps frames every 166_666 (100 ns): two consumed per 30-fps boundary
+    // (one emitted, one dropped/decimated). Audio is the buffer's boundary
+    // chunk, so each emit submits ONE 1600-sample chunk regardless of how many
+    // frames were consumed.
     let cap = 166_666i64;
     let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
     for j in 0..60i64 {
@@ -184,26 +201,20 @@ fn sixty_fps_submits_all_audio_chunks_not_just_emitted_frames() {
 
     let dropped = pacer.stats().dropped;
     assert!((29..=31).contains(&emits), "60->30 emits: {emits}");
-    // Every CONSUMED frame's audio ships (emitted AND dropped), so the total
-    // audio-chunk count equals decoded frames, NOT emitted frames.
-    assert_eq!(
-        sink.audio_chunks_total(),
-        dropped as usize + emits as usize,
-        "audio chunks == consumed frames (dropped + emitted)"
-    );
-    assert!(
-        sink.audio_chunks_total() >= 55,
-        "≈60 chunks for ≈60 decoded frames, got {}",
-        sink.audio_chunks_total()
-    );
     assert!(dropped >= 25, "≈30 frames decimated, got {dropped}");
+    // Video decimation is unchanged, but audio is one boundary chunk per emit.
+    for (i, &s) in sink.audio_samples.iter().enumerate() {
+        assert_eq!(s, 1600, "boundary {i}: exactly samples_per_boundary");
+    }
 }
 
 #[test]
-fn sub_grid_repeats_submit_no_audio() {
+fn sub_grid_repeats_still_submit_a_boundary_audio_chunk() {
     let (mut pacer, clk) = anchored_pacer();
     // 23.976 fps frames (interval ~417_083 100 ns > one 30-fps slot) so some
-    // boundaries have no due frame and REPEAT — those must submit no audio.
+    // boundaries have no due frame and REPEAT the video. Audio is DECOUPLED from
+    // the video decision (#148), so a repeat still submits the boundary's
+    // 1600-sample chunk from the buffer.
     let cap = 417_083i64;
     let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
     for j in 0..40i64 {
@@ -220,9 +231,9 @@ fn sub_grid_repeats_submit_no_audio() {
         if outcome == ServiceOutcome::Repeated {
             repeats += 1;
             assert_eq!(
-                *sink.audio_lens.last().unwrap(),
-                0,
-                "a repeat must submit NO audio (§6.4)"
+                *sink.audio_samples.last().unwrap(),
+                1600,
+                "a video repeat still submits a 1600-sample audio chunk (#148)"
             );
         }
     }
