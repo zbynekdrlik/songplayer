@@ -898,6 +898,10 @@ mod pacer_tests;
 mod pacer_tests_lane3;
 
 #[cfg(test)]
+#[path = "pacer_tests_lane4.rs"]
+mod pacer_tests_lane4;
+
+#[cfg(test)]
 #[path = "pacer_tests_audio.rs"]
 mod pacer_tests_audio;
 
