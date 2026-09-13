@@ -11,6 +11,7 @@ Commands:
 """
 
 import argparse
+import contextlib
 import gc
 import json
 import os
@@ -74,47 +75,184 @@ def _free_vram(sep):
         torch.cuda.empty_cache()
 
 
+def _set_wddm_gpu_priority():
+    """Drop this process's WDDM GPU scheduling priority to BELOW_NORMAL on
+    Windows (#154) so vocal isolation leaves GPU-scheduling headroom for the
+    live Media Foundation decoder + OBS/Resolume on the shared event PC.
+    Best-effort: logs to stderr, never raises. No-op off Windows."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        # D3DKMT_SCHEDULINGPRIORITYCLASS: IDLE=0, BELOW_NORMAL=1, NORMAL=2,
+        # ABOVE_NORMAL=3, HIGH=4, REALTIME=5.
+        D3DKMT_SCHEDULINGPRIORITYCLASS_BELOW_NORMAL = 1
+        kernel32 = ctypes.WinDLL("kernel32")
+        gdi32 = ctypes.WinDLL("gdi32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        # NTSTATUS D3DKMTSetProcessSchedulingPriorityClass(HANDLE, enum): the
+        # argument is the priority enum value directly.
+        gdi32.D3DKMTSetProcessSchedulingPriorityClass.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        gdi32.D3DKMTSetProcessSchedulingPriorityClass.restype = ctypes.c_long
+        status = gdi32.D3DKMTSetProcessSchedulingPriorityClass(
+            kernel32.GetCurrentProcess(),
+            D3DKMT_SCHEDULINGPRIORITYCLASS_BELOW_NORMAL,
+        )
+        if status == 0:
+            print("gpu_polite: WDDM GPU priority set to BELOW_NORMAL", file=sys.stderr)
+        else:
+            print(
+                "gpu_polite: D3DKMTSetProcessSchedulingPriorityClass returned "
+                f"NTSTATUS 0x{status & 0xFFFFFFFF:08x} (non-fatal)",
+                file=sys.stderr,
+            )
+    except Exception as e:  # never fatal — priority is only an optimisation
+        print(
+            f"gpu_polite: WDDM GPU priority call failed (non-fatal): {e}",
+            file=sys.stderr,
+        )
+
+
+def _gpu_mem_fraction():
+    """LYRICS_GPU_MEM_FRACTION env → clamped float in [0.2, 0.95], default 0.7."""
+    try:
+        frac = float(os.environ.get("LYRICS_GPU_MEM_FRACTION", "0.7"))
+    except (TypeError, ValueError):
+        frac = 0.7
+    return min(0.95, max(0.2, frac))
+
+
+def gpu_polite():
+    """GPU discipline for the shared win-resolume event PC (#154): BELOW_NORMAL
+    WDDM scheduling priority + a per-process VRAM cap so vocal isolation leaves
+    GPU headroom for the live MF decoder and OBS/Resolume. Model parameters are
+    untouched — separation quality is unchanged; only scheduling priority and
+    the VRAM ceiling move. Best-effort — never raises."""
+    _set_wddm_gpu_priority()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            frac = _gpu_mem_fraction()
+            torch.cuda.set_per_process_memory_fraction(frac)
+            print(
+                f"gpu_polite: CUDA per-process memory fraction capped at {frac}",
+                file=sys.stderr,
+            )
+    except Exception as e:  # never fatal — the cap is only headroom insurance
+        print(f"gpu_polite: VRAM cap failed (non-fatal): {e}", file=sys.stderr)
+
+
+def _is_cuda_oom(exc):
+    """True if `exc` is a CUDA out-of-memory error (typed or by message).
+
+    torch is always imported before this is reached (the separator needs it),
+    so a plain import is safe — no swallowed-exception path.
+    """
+    import torch
+
+    return isinstance(exc, torch.cuda.OutOfMemoryError) or (
+        "out of memory" in str(exc).lower()
+    )
+
+
+@contextlib.contextmanager
+def _force_cpu():
+    """Temporarily make torch report no CUDA device so audio-separator's device
+    autodetection builds the model on CPU for the OOM-retry run (#154).
+    audio-separator has no `use_cpu` flag, and setting CUDA_VISIBLE_DEVICES after
+    the CUDA runtime is already initialised does not take effect in-process —
+    patching the availability probe is the reliable in-process CPU force. Same
+    model + same parameters ⇒ identical output, only slower. Restored on exit."""
+    import torch
+
+    orig_available = torch.cuda.is_available
+    orig_count = torch.cuda.device_count
+    orig_env = os.environ.get("CUDA_VISIBLE_DEVICES")
+    torch.cuda.is_available = lambda: False
+    torch.cuda.device_count = lambda: 0
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    try:
+        yield
+    finally:
+        torch.cuda.is_available = orig_available
+        torch.cuda.device_count = orig_count
+        if orig_env is None:
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = orig_env
+
+
 def cmd_preprocess_vocals(args):
     """Mel-Roformer isolate → anvuew dereverb → 16 kHz mono float32 WAV.
 
     Writes a FLOAT WAV to --output. Exits 0 on success.
+
+    GPU discipline (#154): `gpu_polite()` sets a BELOW_NORMAL WDDM scheduling
+    priority + a per-process VRAM cap before any model loads. On a CUDA OOM the
+    isolation re-runs on CPU (same model + parameters → identical output, only
+    slower) — the separator's model parameters are never changed.
     """
     import numpy as np
     import librosa
     import soundfile as sf
+    import torch
     from audio_separator.separator import Separator
 
-    stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
-    try:
-        # Step 1: Mel-Roformer vocal isolation.
-        sep = Separator(
-            model_file_dir=args.models_dir,
-            output_format="WAV",
-            output_dir=stem_dir,
-            # pydub's writer runs out of memory on long 24-bit stems
-            # (pydub#135; observed on an 827-s song 2026-09-12). Stems are
-            # intermediates resampled to 16 kHz float, so soundfile is
-            # strictly better here.
-            use_soundfile=True,
-        )
-        sep.load_model(MEL_ROFORMER_MODEL)
-        out_files = sep.separate(args.audio)
-        vocal_path = _pick_vocal_stem(out_files, stem_dir)
-        _free_vram(sep)
+    gpu_polite()
 
-        # Step 2: anvuew mel-band roformer dereverb on the isolated vocal.
-        sep2 = Separator(
-            model_file_dir=args.models_dir,
-            output_format="WAV",
-            output_dir=stem_dir,
-            # Same rationale as Step 1: soundfile writer avoids pydub's OOM
-            # on long 24-bit stems (pydub#135).
-            use_soundfile=True,
-        )
-        sep2.load_model(DEREVERB_MODEL)
-        out_files2 = sep2.separate(vocal_path)
-        dry_path = _pick_dereverbed_stem(out_files2, stem_dir)
-        _free_vram(sep2)
+    stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
+
+    def _isolate(force_cpu):
+        """Mel-Roformer isolate + anvuew dereverb, on GPU (force_cpu=False) or
+        CPU (force_cpu=True). Returns the dereverbed vocal path."""
+        cpu_ctx = _force_cpu() if force_cpu else contextlib.nullcontext()
+        with cpu_ctx:
+            # Step 1: Mel-Roformer vocal isolation. The soundfile writer avoids
+            # pydub's OOM on long 24-bit stems (pydub#135; 827-s song 2026-09-12).
+            sep = Separator(
+                model_file_dir=args.models_dir,
+                output_format="WAV",
+                output_dir=stem_dir,
+                use_soundfile=True,
+            )
+            sep.load_model(MEL_ROFORMER_MODEL)
+            out_files = sep.separate(args.audio)
+            vocal_path = _pick_vocal_stem(out_files, stem_dir)
+            _free_vram(sep)
+
+            # Step 2: anvuew mel-band roformer dereverb on the isolated vocal.
+            sep2 = Separator(
+                model_file_dir=args.models_dir,
+                output_format="WAV",
+                output_dir=stem_dir,
+                use_soundfile=True,
+            )
+            sep2.load_model(DEREVERB_MODEL)
+            out_files2 = sep2.separate(vocal_path)
+            dry_path = _pick_dereverbed_stem(out_files2, stem_dir)
+            _free_vram(sep2)
+        return dry_path
+
+    try:
+        try:
+            dry_path = _isolate(force_cpu=False)
+        except Exception as e:
+            if not _is_cuda_oom(e):
+                raise
+            print(
+                "gpu_polite: CUDA OOM during vocal isolation — retrying on CPU "
+                "(identical model + parameters, only slower) [#154]",
+                file=sys.stderr,
+            )
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            dry_path = _isolate(force_cpu=True)
 
         # Step 3: resample to exactly 16 kHz mono float32, peak-clamp.
         audio, _ = librosa.load(dry_path, sr=16000, mono=True)

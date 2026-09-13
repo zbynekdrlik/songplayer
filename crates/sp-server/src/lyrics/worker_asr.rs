@@ -78,6 +78,7 @@ impl LyricsWorker {
         .await;
 
         // Vocal isolation — reuse existing preprocess_vocals.
+        let gpu_mem = self.gpu_mem_setting().await; // #154 VRAM cap
         let venv_python = self.venv_python.read().await.clone();
         let audio_path: Option<PathBuf> = audio_file_path.map(PathBuf::from);
         let clean_vocal: Option<PathBuf> = match (&venv_python, &audio_path) {
@@ -90,6 +91,7 @@ impl LyricsWorker {
                     audio,
                     &wav_path,
                     crate::lyrics::aligner::isolation_timeout(duration_ms),
+                    gpu_mem.as_deref(),
                 )
                 .await
                 {

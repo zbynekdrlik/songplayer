@@ -573,9 +573,8 @@ impl LyricsWorker {
         )
         .await;
 
-        // Preprocess vocals — UNCHANGED path (Mel-Roformer + anvuew dereverb).
-        // Per feedback_winresolume_is_shared_event_machine.md this uses
-        // BELOW_NORMAL priority subprocesses; not modified here.
+        // Preprocess vocals (Mel-Roformer + anvuew); #154 passes the VRAM cap.
+        let gpu_mem = self.gpu_mem_setting().await;
         let venv_python = self.venv_python.read().await.clone();
         let clean_vocal: Option<PathBuf> = if let (Some(python), Some(audio_path)) = (
             venv_python.as_ref(),
@@ -590,6 +589,7 @@ impl LyricsWorker {
                     &audio_path,
                     &wav_path,
                     aligner::isolation_timeout(row.duration_ms),
+                    gpu_mem.as_deref(),
                 )
                 .await
                 {
@@ -644,6 +644,7 @@ impl LyricsWorker {
             work_dir: self.cache_dir.clone(),
             http_client: self.client.clone(),
             gemini_keys: crate::lyrics::g35t_client::gemini_keys_from_setting(&gemini_csv),
+            gpu_mem_setting: gpu_mem.clone(),
         };
         let mtl_track = self
             .run_mtl_reference_stage(

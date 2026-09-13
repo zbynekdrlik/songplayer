@@ -468,6 +468,9 @@ pub struct RealReferenceStageBackend {
     pub work_dir: PathBuf,
     pub http_client: reqwest::Client,
     pub gemini_keys: Vec<String>,
+    /// Raw `lyrics_gpu_mem_fraction` DB setting (#154), passed to the mtl
+    /// subprocess as the VRAM cap. `None` → the child applies the default.
+    pub gpu_mem_setting: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -484,6 +487,7 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
             video_id,
             lines,
             &self.work_dir,
+            self.gpu_mem_setting.as_deref(),
         )
         .await
     }

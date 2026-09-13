@@ -101,6 +101,75 @@ FILTER_CHARS = set("abcdefghijklmnopqrstuvwxyz' ")
 RESOLUTION_SEC_PER_FRAME = 256 / 22050 * 3
 
 
+def _set_wddm_gpu_priority() -> None:
+    """Drop this process's WDDM GPU scheduling priority to BELOW_NORMAL on
+    Windows (#154) so forced alignment leaves GPU-scheduling headroom for the
+    live Media Foundation decoder + OBS/Resolume on the shared event PC.
+    Best-effort: logs the result, never raises. No-op off Windows."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        # D3DKMT_SCHEDULINGPRIORITYCLASS: IDLE=0, BELOW_NORMAL=1, NORMAL=2,
+        # ABOVE_NORMAL=3, HIGH=4, REALTIME=5.
+        below_normal = 1
+        kernel32 = ctypes.WinDLL("kernel32")
+        gdi32 = ctypes.WinDLL("gdi32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        # NTSTATUS D3DKMTSetProcessSchedulingPriorityClass(HANDLE, enum): the
+        # argument is the priority enum value directly.
+        gdi32.D3DKMTSetProcessSchedulingPriorityClass.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        gdi32.D3DKMTSetProcessSchedulingPriorityClass.restype = ctypes.c_long
+        status = gdi32.D3DKMTSetProcessSchedulingPriorityClass(
+            kernel32.GetCurrentProcess(), below_normal
+        )
+        if status == 0:
+            logger.info("gpu_polite: WDDM GPU priority set to BELOW_NORMAL")
+        else:
+            logger.warning(
+                "gpu_polite: D3DKMTSetProcessSchedulingPriorityClass NTSTATUS "
+                "0x%08x (non-fatal)",
+                status & 0xFFFFFFFF,
+            )
+    except Exception:
+        logger.warning(
+            "gpu_polite: WDDM GPU priority call failed (non-fatal)", exc_info=True
+        )
+
+
+def _gpu_mem_fraction() -> float:
+    """LYRICS_GPU_MEM_FRACTION env → clamped float in [0.2, 0.95], default 0.7."""
+    try:
+        frac = float(os.environ.get("LYRICS_GPU_MEM_FRACTION", "0.7"))
+    except (TypeError, ValueError):
+        frac = 0.7
+    return min(0.95, max(0.2, frac))
+
+
+def gpu_polite() -> None:
+    """GPU discipline for the shared win-resolume event PC (#154): BELOW_NORMAL
+    WDDM scheduling priority + a per-process VRAM cap before the alignment
+    models load. Model parameters are untouched — alignment quality is
+    unchanged; only scheduling priority and the VRAM ceiling move. Best-effort —
+    never raises. Only called on the CUDA path (`--no-cuda` skips it)."""
+    _set_wddm_gpu_priority()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            frac = _gpu_mem_fraction()
+            torch.cuda.set_per_process_memory_fraction(frac)
+            logger.info(
+                "gpu_polite: CUDA per-process memory fraction capped at %s", frac
+            )
+    except Exception:
+        logger.warning("gpu_polite: VRAM cap failed (non-fatal)", exc_info=True)
+
+
 def filter_word(word: str) -> str:
     """Same per-character filter as upstream preprocess_lyrics(), applied to
     a single already-whitespace-split word instead of a whole line. Filtering
@@ -422,6 +491,12 @@ def main(argv: list[str] | None = None) -> int:
         len(lines_text),
         args.wav,
     )
+
+    # #154: below-normal WDDM GPU priority + VRAM cap on the CUDA path so
+    # alignment leaves headroom for live playback on the shared event PC. The
+    # existing in-process CUDA-OOM→CPU retry in align_fixture() is unchanged.
+    if not args.no_cuda:
+        gpu_polite()
 
     out_lines, timing = align_fixture(
         wav_path=args.wav,

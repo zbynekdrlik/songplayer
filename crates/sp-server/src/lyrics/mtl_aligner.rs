@@ -136,18 +136,28 @@ fn is_cuda_oom(text: &str) -> bool {
     text.contains("CUDA out of memory") || text.contains("OutOfMemoryError")
 }
 
+// Spawn wrapper: integration-tested against the real subprocess on the box,
+// not unit-tested here — skip mutation so the added env plumbing does not leave
+// a survivor cargo-mutants can never kill without a live GPU.
+#[cfg_attr(test, mutants::skip)]
 async fn run_once(
     cfg: &MtlConfig,
     wav: &Path,
     text_json: &Path,
     out_json: &Path,
     no_cuda: bool,
+    gpu_mem_setting: Option<&str>,
 ) -> Result<()> {
     let mut cmd = Command::new(&cfg.python);
     cmd.args(build_args(cfg, wav, text_json, out_json, no_cuda));
     // Python on Windows defaults stdio to the console codepage; #137 hit
     // mangled non-ASCII lyric text without this.
     cmd.env("PYTHONUTF8", "1");
+    // #154: pass the VRAM cap; run.py's gpu_polite() applies the WDDM
+    // below-normal priority + the memory fraction when CUDA is used.
+    for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
+        cmd.env(k, v);
+    }
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
 
@@ -237,12 +247,17 @@ async fn parse_output(path: &Path) -> Result<MtlOutput> {
 /// `{video_id}_mtl_text.json` (input) and `{video_id}_mtl_out.json`
 /// (output) — left on disk for debugging, same convention as the vocals
 /// WAV cache in `aligner.rs`.
+// Orchestration wrapper around the spawn: integration-tested only (the gate /
+// control flow needs a live subprocess). Skip mutation so the #154 arg
+// threading does not introduce an unkillable survivor.
+#[cfg_attr(test, mutants::skip)]
 pub async fn align(
     cfg: &MtlConfig,
     vocals_wav: &Path,
     video_id: &str,
     lines: &[String],
     work_dir: &Path,
+    gpu_mem_setting: Option<&str>,
 ) -> Result<MtlOutput> {
     tokio::fs::create_dir_all(work_dir)
         .await
@@ -251,7 +266,16 @@ pub async fn align(
     let out_json = work_dir.join(format!("{video_id}_mtl_out.json"));
     write_text_json(&text_json, video_id, lines).await?;
 
-    match run_once(cfg, vocals_wav, &text_json, &out_json, false).await {
+    match run_once(
+        cfg,
+        vocals_wav,
+        &text_json,
+        &out_json,
+        false,
+        gpu_mem_setting,
+    )
+    .await
+    {
         Ok(()) => {}
         Err(e) if is_cuda_oom(&e.to_string()) => {
             warn!(
@@ -259,7 +283,15 @@ pub async fn align(
                 error = %e,
                 "mtl_aligner: CUDA OOM — retrying with --no-cuda"
             );
-            run_once(cfg, vocals_wav, &text_json, &out_json, true).await?;
+            run_once(
+                cfg,
+                vocals_wav,
+                &text_json,
+                &out_json,
+                true,
+                gpu_mem_setting,
+            )
+            .await?;
         }
         Err(e) => return Err(e),
     }

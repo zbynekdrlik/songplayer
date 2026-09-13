@@ -111,6 +111,7 @@ pub async fn preprocess_vocals(
     audio_in: &Path,
     wav_out: &Path,
     timeout: std::time::Duration,
+    gpu_mem_setting: Option<&str>,
 ) -> Result<PathBuf> {
     // Cache check: reuse an existing vocals WAV if it looks complete.
     // 1 MB minimum avoids reusing truncated/aborted files from a previous
@@ -145,6 +146,11 @@ pub async fn preprocess_vocals(
             "PATH",
             crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
+    }
+    // #154: carry the operator-tunable VRAM cap to the GPU child so vocal
+    // isolation leaves headroom for the live MF decoder on the shared PC.
+    for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
+        cmd.env(k, v);
     }
 
     #[cfg(windows)]

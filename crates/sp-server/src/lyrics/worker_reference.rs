@@ -146,6 +146,18 @@ impl LyricsWorker {
             }
         }
     }
+
+    /// #154: raw `lyrics_gpu_mem_fraction` DB setting (the operator-tunable
+    /// VRAM cap for the GPU workers; clamped later by
+    /// `gpu_policy::env_for_child`). `None` when unset → the child uses the
+    /// default cap. Defined here to keep `worker.rs` under the 1000-line cap.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn gpu_mem_setting(&self) -> Option<String> {
+        crate::db::models::get_setting(&self.pool, "lyrics_gpu_mem_fraction")
+            .await
+            .ok()
+            .flatten()
+    }
 }
 
 /// Chooses the `lyrics_alignment_model` literal from a persisted
