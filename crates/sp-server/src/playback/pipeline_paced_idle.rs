@@ -79,6 +79,7 @@ pub(crate) fn run_idle_wait(
             last_heartbeat,
             consecutive_bad_polls,
             pacer.stats(),
+            pacer.audio_stats(),
         );
         return;
     }
@@ -100,6 +101,7 @@ pub(crate) fn run_idle_wait(
                 consecutive_bad_polls,
                 // A paced pipeline is `enabled=true` while idle (#147 change 7).
                 pacer.stats(),
+                pacer.audio_stats(),
             );
         }
     }

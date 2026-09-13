@@ -94,7 +94,9 @@ fn each_boundary_submits_exactly_samples_per_boundary_from_the_buffer() {
     // grid consumption (1600/boundary) is balanced.
     let frames = RefCell::new(VecDeque::new());
     for j in 0..31i64 {
-        frames.borrow_mut().push_back(frame_due_with_audio(b(j + 1), 1600));
+        frames
+            .borrow_mut()
+            .push_back(frame_due_with_audio(b(j + 1), 1600));
     }
     let mut sink = AudioRecordingSink::default();
     for k in 1..=30i64 {
@@ -157,7 +159,9 @@ fn anchor_clears_the_buffer_and_resets_the_pll() {
     // Over-feed so the buffer grows and the PLL eventually corrects.
     let frames = RefCell::new(VecDeque::new());
     for j in 0..700i64 {
-        frames.borrow_mut().push_back(frame_due_with_audio(b(j + 1), 1650));
+        frames
+            .borrow_mut()
+            .push_back(frame_due_with_audio(b(j + 1), 1650));
     }
     let mut sink = AudioRecordingSink::default();
     for k in 1..=600i64 {
@@ -195,7 +199,9 @@ fn frame_submitter_sink_sends_one_1600_sample_audio_chunk_before_each_video() {
     let (mut pacer, clk) = anchored_pacer();
     let frames = RefCell::new(VecDeque::new());
     for j in 0..10i64 {
-        frames.borrow_mut().push_back(frame_due_with_audio(b(j + 1), 1600));
+        frames
+            .borrow_mut()
+            .push_back(frame_due_with_audio(b(j + 1), 1600));
     }
     for k in 1..=10i64 {
         clk.set(b(k));
@@ -216,5 +222,8 @@ fn frame_submitter_sink_sends_one_1600_sample_audio_chunk_before_each_video() {
             );
         }
     }
-    assert!(video_count >= 9, "expected ~10 boundary emits, got {video_count}");
+    assert!(
+        video_count >= 9,
+        "expected ~10 boundary emits, got {video_count}"
+    );
 }

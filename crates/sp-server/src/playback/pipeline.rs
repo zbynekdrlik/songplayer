@@ -90,6 +90,9 @@ pub enum PipelineEvent {
         /// from the SDK-clocked / idle heartbeat paths; the paced decode loop
         /// fills it from the `Pacer`.
         pacing: crate::playback::ndi_health::PacingStats,
+        /// Audio clock-discipline telemetry (#148); default off the SDK-clocked /
+        /// idle paths, filled from the `Pacer`'s audio buffer + PLL when paced.
+        audio: crate::playback::ndi_health::AudioStats,
     },
 }
 
@@ -855,6 +858,7 @@ fn run_heartbeat_inner(
         // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
         // boundary-paced decode loop passes real `Pacer` stats (#147).
         crate::playback::ndi_health::PacingStats::default(),
+        crate::playback::ndi_health::AudioStats::default(),
     );
 }
 
@@ -895,6 +899,7 @@ fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
         // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
         // boundary-paced decode loop passes real `Pacer` stats (#147).
         crate::playback::ndi_health::PacingStats::default(),
+        crate::playback::ndi_health::AudioStats::default(),
     );
 }
 
@@ -917,6 +922,7 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
     pacing: crate::playback::ndi_health::PacingStats,
+    audio: crate::playback::ndi_health::AudioStats,
 ) {
     let connections = submitter.sender().get_no_connections(0);
     let stats = submitter.drain_window();
@@ -951,6 +957,7 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
             consecutive_bad_polls: *consecutive_bad_polls,
             reported_state: state,
             pacing,
+            audio,
         },
     ));
     *last_heartbeat = now;

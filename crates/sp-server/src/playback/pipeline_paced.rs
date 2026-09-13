@@ -112,6 +112,7 @@ fn log_song_summary(
     reason: &str,
 ) {
     let s = pacer.stats();
+    let a = pacer.audio_stats();
     info!(
         playlist_id,
         reason,
@@ -123,6 +124,11 @@ fn log_song_summary(
         max_lag_slots = pacer.max_lag_slots(),
         iter_p50_us = pacer.iter_p50_us(),
         iter_p99_us = pacer.iter_p99_us(),
+        // Audio clock discipline (#148): the file-clock residual, the applied
+        // slow-resample correction, and the cumulative buffer underruns.
+        audio_residual_ppm = a.residual_ppm,
+        audio_applied_ppm = a.applied_ppm,
+        audio_underruns = a.underruns,
         duration_s = song_start.elapsed().as_secs_f32(),
         "paced: song summary"
     );
@@ -293,6 +299,7 @@ pub(crate) fn decode_and_send_paced(
                     // Report the flag + accumulated counters, not default (#147
                     // change 7): a paced pipeline is `enabled=true` while paused.
                     pacer.stats(),
+                    pacer.audio_stats(),
                 );
             }
             continue;
@@ -354,6 +361,7 @@ pub(crate) fn decode_and_send_paced(
                         last_heartbeat,
                         consecutive_bad_polls,
                         pacer.stats(),
+                        pacer.audio_stats(),
                     );
                 }
 

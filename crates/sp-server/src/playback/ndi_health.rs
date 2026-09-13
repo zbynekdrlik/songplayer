@@ -49,6 +49,10 @@ pub struct PipelineHealthSnapshot {
     /// zeros) on the SDK-clocked (flag-OFF) path; filled from the `Pacer` when
     /// `genlock_pacing` is on.
     pub pacing: PacingStats,
+    /// Audio clock-discipline telemetry (#148). Default (`enabled=false`, zeros)
+    /// on the SDK-clocked / idle path; filled from the `Pacer`'s
+    /// `AudioGridBuffer` + `AudioPll` on the paced path.
+    pub audio: AudioStats,
 }
 
 /// Boundary-paced emission telemetry (#147), surfaced on
@@ -88,6 +92,32 @@ pub struct PacingStats {
     /// is the honest "can the decoder keep up?" signal, distinct from
     /// `jitter_p99_us` (emit − boundary lateness).
     pub iter_p99_us: u64,
+}
+
+/// Audio clock-discipline telemetry (#148), surfaced on `GET /api/v1/ndi/health`
+/// as `audio`. `enabled=false` + all-zero is what an SDK-clocked (flag-OFF) or
+/// idle pipeline reports; the `Pacer` fills real values from its
+/// `AudioGridBuffer` + `AudioPll` on the paced path.
+///
+/// `f64` residual/applied so it cannot derive `Eq` (only `PartialEq`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct AudioStats {
+    /// Whether audio clock discipline is active for this pipeline.
+    pub enabled: bool,
+    /// The measured file-clock-vs-wall residual (ppm) at the last 1 Hz update.
+    /// Negative when the audio buffer is above target (file clock fast).
+    pub residual_ppm: f64,
+    /// The slow-resample correction (ppm) the `AudioPll` is applying to the
+    /// fractional read step (`1 + applied_ppm · 1e-6`).
+    pub applied_ppm: f64,
+    /// Samples delivered per grid boundary (1600 @ 48 kHz / 30 fps).
+    pub samples_per_boundary: u64,
+    /// Boundary chunks that ran the FIFO dry and were zero-filled (cumulative).
+    pub underruns: u64,
+    /// Times the 2 s cap dropped the oldest audio (cumulative).
+    pub overflows: u64,
+    /// Current buffered audio (ms) — servoed toward ~66 ms (2 boundaries).
+    pub buffer_ms: u64,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from
@@ -217,6 +247,7 @@ impl crate::playback::PlaybackEngine {
             consecutive_bad_polls,
             reported_state,
             pacing,
+            audio,
         } = event
         else {
             return;
@@ -287,6 +318,7 @@ impl crate::playback::PlaybackEngine {
                 Err(_) => ClockHealth::default(),
             },
             pacing,
+            audio,
         };
 
         // Transition logging: connection-count change, degradation, recovery.
@@ -453,6 +485,7 @@ mod tests {
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Playing,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
 
@@ -481,6 +514,7 @@ mod tests {
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Idle,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
         assert_eq!(registry.snapshots().len(), 0);
@@ -503,6 +537,7 @@ mod tests {
             consecutive_bad_polls: 0,
             reported_state: state,
             pacing: Default::default(),
+            audio: Default::default(),
         };
         engine.handle_health_snapshot(1, mk_event(PlaybackStateLabel::Playing));
         engine.handle_health_snapshot(2, mk_event(PlaybackStateLabel::Idle));
@@ -533,6 +568,7 @@ mod tests {
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Idle,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
 
@@ -565,6 +601,7 @@ mod tests {
                 consecutive_bad_polls: 2,
                 reported_state: PlaybackStateLabel::Playing,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
         let snapshots = registry.snapshots();
@@ -644,6 +681,7 @@ mod tests {
                 consecutive_bad_polls: 100,
                 reported_state: PlaybackStateLabel::Playing,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
 
@@ -683,6 +721,7 @@ mod tests {
                 consecutive_bad_polls: 5,
                 reported_state: PlaybackStateLabel::Playing,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
         assert_eq!(
@@ -704,6 +743,7 @@ mod tests {
                 consecutive_bad_polls: 0,
                 reported_state: PlaybackStateLabel::Playing,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
         let snap = &registry.snapshots()[0];
@@ -767,6 +807,7 @@ mod tests {
                 consecutive_bad_polls: 5,
                 reported_state: PlaybackStateLabel::Playing,
                 pacing: Default::default(),
+                audio: Default::default(),
             },
         );
         let snapshots = registry.snapshots();

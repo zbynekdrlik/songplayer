@@ -30,7 +30,11 @@ fn every_boundary_yields_exactly_the_requested_samples_and_level_stays_bounded()
         }
         let out = buf.take_boundary_chunk(1600);
         assert_eq!(out.len(), 1, "one channel");
-        assert_eq!(out[0].len(), 1600, "each boundary yields exactly 1600 (k={k})");
+        assert_eq!(
+            out[0].len(),
+            1600,
+            "each boundary yields exactly 1600 (k={k})"
+        );
         assert!(
             buf.level_samples() < buf.cap_samples(),
             "level must stay below the 2 s cap (k={k}, level={})",
@@ -63,7 +67,10 @@ fn flooding_past_the_two_second_cap_counts_overflows_and_bounds_the_level() {
     for _ in 0..60 {
         buf.push(&const_chunk(0.1, 2000));
     }
-    assert!(buf.overflows() > 0, "flooding past the cap must count overflows");
+    assert!(
+        buf.overflows() > 0,
+        "flooding past the cap must count overflows"
+    );
     assert!(
         buf.level_samples() <= buf.cap_samples(),
         "level must never exceed the cap: {} > {}",
@@ -125,7 +132,10 @@ fn fractional_reader_resamples_a_sine_up_by_three_hundred_ppm_without_discontinu
     for w in out_all.windows(2) {
         max_delta = max_delta.max((w[1] - w[0]).abs());
     }
-    assert!(max_delta < 0.15, "discontinuity detected: max delta {max_delta}");
+    assert!(
+        max_delta < 0.15,
+        "discontinuity detected: max delta {max_delta}"
+    );
 }
 
 #[test]
@@ -138,5 +148,9 @@ fn clear_empties_the_buffer_and_resets_the_reader() {
     assert_eq!(buf.level_samples(), 0, "clear empties the FIFO");
     // A take on the empty buffer is a clean underrun of silence.
     let out = buf.take_boundary_chunk(1600);
-    assert_eq!(out.len(), 0, "no channels seen yet after clear → empty chunk");
+    assert_eq!(
+        out.len(),
+        0,
+        "no channels seen yet after clear → empty chunk"
+    );
 }

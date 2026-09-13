@@ -40,6 +40,7 @@ async fn ndi_health_endpoint_includes_clock() {
         degraded_reason: None,
         clock,
         pacing: Default::default(),
+        audio: Default::default(),
     });
 
     let resp = app(state)

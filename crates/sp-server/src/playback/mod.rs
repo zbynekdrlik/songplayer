@@ -4,8 +4,8 @@
 //! transitions through the pure [`PlayState`] state machine.  Title timing
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
-mod clear_lyrics;
 pub mod audio_grid;
+mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
