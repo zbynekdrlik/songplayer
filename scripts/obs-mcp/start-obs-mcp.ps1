@@ -41,7 +41,9 @@ $SessionTimeoutMs  = 300000                        # 5 min idle session cleanup 
 
 $NodeCap           = 10                            # obs-mcp/supergateway node procs before a forced teardown
 $IdentifyTimeoutSec = 45                           # how long to wait for obs-identify after a (re)start
-$HealthWaitSec     = 20                            # how long to wait for /healthz after a (re)start
+$HealthWaitSec     = 60                            # how long to wait for /healthz after a (re)start
+                                                   # (cold start after teardown/reboot can be ~25s while
+                                                   #  node/supergateway modules are cache-cold + AV-scanned)
 
 $BaseBackoffMin    = 5                             # 5 -> 10 -> 20 -> 40 -> 60 (cap)
 $CapBackoffMin     = 60
