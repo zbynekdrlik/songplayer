@@ -196,6 +196,10 @@ const JITTER_RING: usize = 256;
 /// The iteration-cost ring capacity (decode+submit per emit, µs) — #147 lane 3.
 const ITER_RING: usize = 256;
 
+/// The pre-decode-cost ring capacity (`prepare` duration per boundary, µs) —
+/// #147 lane 4.
+const PREP_RING: usize = 256;
+
 /// The exact-grid boundary the emit gate latches for `now_100ns` — the same
 /// decision [`genlock_emit_gate_100ns`] makes internally, computed here so the
 /// pacer's Wait/emit split and its relatch counter use the IDENTICAL boundary
@@ -227,6 +231,12 @@ pub struct Pacer {
     /// A decoded frame parked because its presentation time is beyond the
     /// current boundary — serviced at a later boundary.
     pending: Option<PacedFrame>,
+    /// The frame decoded FORWARD by [`prepare`](Self::prepare) to be due at the
+    /// boundary about to be serviced — emitted by the next [`service`](Self::service)
+    /// (#147 lane 4). Distinct from `pending` (the first frame BEYOND that
+    /// boundary). `None` when nothing was prepared (a test driving `service`
+    /// inline with `pull`).
+    prepared: Option<PacedFrame>,
     /// The last emitted frame (video only; its audio was drained on emit),
     /// re-sent on an underrun (§5.5).
     last_frame: Option<PacedFrame>,
@@ -256,6 +266,15 @@ pub struct Pacer {
     iter_ring: [u64; ITER_RING],
     iter_len: usize,
     iter_idx: usize,
+    /// The most recent `prepare` (pre-decode) duration in 100-ns units, folded
+    /// into the next emit's `iter` sample so `iter_p99` keeps measuring
+    /// decode+submit per boundary even though the decode now happens off the
+    /// critical path (#147 lane 4). Reset to 0 once consumed.
+    last_prep_100ns: i64,
+    // pre-decode (`prepare`) duration ring (µs), for `prep_p99_us` (#147 lane 4).
+    prep_ring: [u64; PREP_RING],
+    prep_len: usize,
+    prep_idx: usize,
 
     // --- audio clock discipline (#148) ---
     /// Samples delivered per grid boundary (1600 @ 48 kHz / 30 fps).
@@ -293,6 +312,7 @@ impl Pacer {
             next_boundary_100ns: 0,
             wall_start_100ns: 0,
             pending: None,
+            prepared: None,
             last_frame: None,
             enabled,
             seq: 0,
@@ -311,6 +331,10 @@ impl Pacer {
             iter_ring: [0; ITER_RING],
             iter_len: 0,
             iter_idx: 0,
+            last_prep_100ns: 0,
+            prep_ring: [0; PREP_RING],
+            prep_len: 0,
+            prep_idx: 0,
             samples_per_boundary: spb,
             audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ, spb * AUDIO_TARGET_BOUNDARIES),
             audio_pll: AudioPll::new(),
@@ -329,6 +353,14 @@ impl Pacer {
     /// One grid interval in 100-ns units (`1e7 / grid_fps`); 0 = genlock off.
     pub fn interval_100ns(&self) -> i64 {
         self.interval_100ns
+    }
+
+    /// The next un-emitted boundary (wall-clock 100 ns), the boundary the next
+    /// [`service`](Self::service) will latch. The paced pipeline reads it to
+    /// [`prepare`](Self::prepare) the decode-ahead toward it before sleeping
+    /// (#147 lane 4). 0 before the first `anchor`.
+    pub fn next_boundary_100ns(&self) -> i64 {
+        self.next_boundary_100ns
     }
 
     /// Advance the wall-clock resample counter (call once per serviced boundary).
@@ -356,6 +388,10 @@ impl Pacer {
         self.wall_start_100ns = first;
         self.next_boundary_100ns = first;
         self.pending = None;
+        // A fresh seek / new song: drop any frame decoded ahead for the OLD grid
+        // (#147 lane 4) — the pipeline re-`prepare`s against the new anchor.
+        self.prepared = None;
+        self.last_prep_100ns = 0;
         self.last_frame = None;
         // Fresh origin (play/seek/new song): the lag gauge + the re-anchor
         // sustain timer are per-song (#147 lane 3). Cumulative counters (seq,
@@ -421,10 +457,19 @@ impl Pacer {
         if lag > GENLOCK_MAX_CATCHUP_INTERVALS {
             let since = *self.lag_exceeded_since.get_or_insert(sched_now);
             if sched_now.saturating_sub(since) > LAG_REANCHOR_AFTER_100NS {
-                if self.pending.is_none() {
+                if self.prepared.is_none() && self.pending.is_none() {
                     self.pending = pull();
                 }
-                if let Some(pts) = self.pending.as_ref().map(|f| f.pts_100ns()) {
+                // Re-anchor onto the next un-emitted frame — the one `prepare`
+                // decoded ahead (`prepared`), or the parked `pending` when
+                // `service` decoded inline (#147 lane 4). It becomes due at the
+                // next real boundary; content resumes from it (no skip).
+                let buffered_pts = self
+                    .prepared
+                    .as_ref()
+                    .map(|f| f.pts_100ns())
+                    .or_else(|| self.pending.as_ref().map(|f| f.pts_100ns()));
+                if let Some(pts) = buffered_pts {
                     let new_boundary = strict_next_boundary_100ns(sched_now, self.grid_fps);
                     self.wall_start_100ns = new_boundary - pts;
                     self.next_boundary_100ns = new_boundary;
@@ -444,11 +489,13 @@ impl Pacer {
             self.lag_exceeded_since = None;
         }
 
-        // Decode-forward: keep the last frame whose presentation time is at/before
-        // this boundary; drop the older ones; park the first future frame. Audio
-        // of EVERY consumed frame is PUSHED into the wall-clock buffer (#148) —
-        // it is delivered on the audio grid, not batched onto this video frame.
-        let mut due: Option<PacedFrame> = None;
+        // The due frame is normally the one [`prepare`](Self::prepare) decoded
+        // ahead of this boundary (its audio already pushed there — #147 lane 4).
+        // With nothing prepared (a test driving `service` inline with `pull`) the
+        // loop below decodes inline as before: keep the last frame at/before the
+        // boundary, drop older ones, park the first future frame, push each
+        // consumed frame's audio into the wall-clock buffer (#148).
+        let mut due: Option<PacedFrame> = self.prepared.take();
         loop {
             if self.pending.is_none() {
                 self.pending = pull();
@@ -550,7 +597,14 @@ impl Pacer {
             self.last_lag_slots = emit_lag;
             self.max_lag_slots = self.max_lag_slots.max(emit_lag);
             let done = self.now_100ns();
-            self.push_iter((done.saturating_sub(sched_now).max(0) / 10) as u64);
+            // iter = the decode-ahead (`prepare`) cost that fed this boundary plus
+            // the in-service submit cost, so `iter_p99` keeps measuring
+            // decode+submit per boundary though the decode now happens off the
+            // critical path (#147 lane 4). Inline `service` (no prior `prepare`)
+            // has `last_prep_100ns == 0` — the pre-lane-4 measure. Reset after use.
+            let iter_100ns = self.last_prep_100ns + done.saturating_sub(sched_now).max(0);
+            self.push_iter((iter_100ns / 10) as u64);
+            self.last_prep_100ns = 0;
         }
 
         self.next_boundary_100ns = next;
@@ -749,6 +803,7 @@ impl Pacer {
             dropped: self.dropped,
             lag_slots: self.last_lag_slots,
             iter_p99_us: self.iter_p99_us(),
+            prep_p99_us: self.prep_p99_us(),
         }
     }
 
@@ -888,6 +943,11 @@ impl Pacer {
         }
     }
 }
+
+// Decode-ahead: `prepare` + the pre-decode-cost ring live in a sibling to keep
+// this file under the 1000-line cap (#147 lane 4).
+#[path = "pacer_prepare.rs"]
+mod pacer_prepare;
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]

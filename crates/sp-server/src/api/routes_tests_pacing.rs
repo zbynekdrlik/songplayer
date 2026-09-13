@@ -44,6 +44,7 @@ async fn ndi_health_endpoint_includes_pacing() {
             dropped: 30,
             lag_slots: 3,
             iter_p99_us: 4200,
+            prep_p99_us: 210,
         },
         audio: AudioStats {
             enabled: true,
@@ -85,6 +86,8 @@ async fn ndi_health_endpoint_includes_pacing() {
     assert_eq!(arr[0]["pacing"]["dropped"].as_u64(), Some(30));
     assert_eq!(arr[0]["pacing"]["lag_slots"].as_i64(), Some(3));
     assert_eq!(arr[0]["pacing"]["iter_p99_us"].as_u64(), Some(4200));
+    // #147 lane 4: the pre-decode duration gauge serialises on the endpoint too.
+    assert_eq!(arr[0]["pacing"]["prep_p99_us"].as_u64(), Some(210));
 
     // #148: the audio clock-discipline telemetry serialises with its full key set.
     assert_eq!(

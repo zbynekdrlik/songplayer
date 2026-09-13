@@ -311,36 +311,45 @@ pub(crate) fn decode_and_send_paced(
             continue;
         }
 
-        // 2. One pacer scheduling step. The pacer reads its own wall clock (a
-        //    scheduling read, then an emit read after decode). The pull closure
-        //    decodes forward; the submitter is the sink (audio-before-video
-        //    async NDI submit).
-        let outcome = pacer.service(
-            || {
-                if eos {
-                    return None;
+        // 2. Decode AHEAD of the boundary (#147 lane 4). Right after the previous
+        //    emit — and BEFORE sleeping — decode forward to the frame due at the
+        //    NEXT boundary and push its audio into the wall-clock buffer. Box test
+        //    2 showed the old sleep-THEN-decode order left every frame 10-27 ms
+        //    after its stamp (decode inside the slot); moving the decode off the
+        //    critical path makes the boundary emit immediate and keeps the audio
+        //    chunk already buffered.
+        let target = pacer.next_boundary_100ns();
+        pacer.prepare(target, || {
+            if eos {
+                return None;
+            }
+            match decoder.next_synced() {
+                Ok(Some((video_frame, audio_frames))) => {
+                    last_decoded_ms = video_frame.timestamp_ms;
+                    Some(to_paced_frame(video_frame, audio_frames, pts_offset_ms))
                 }
-                match decoder.next_synced() {
-                    Ok(Some((video_frame, audio_frames))) => {
-                        last_decoded_ms = video_frame.timestamp_ms;
-                        Some(to_paced_frame(video_frame, audio_frames, pts_offset_ms))
-                    }
-                    Ok(None) => {
-                        eos = true;
-                        None
-                    }
-                    Err(e) => {
-                        error!(playlist_id, %e, "paced: decode error");
-                        eos = true;
-                        None
-                    }
+                Ok(None) => {
+                    eos = true;
+                    None
                 }
-            },
-            submitter,
-        );
+                Err(e) => {
+                    error!(playlist_id, %e, "paced: decode error");
+                    eos = true;
+                    None
+                }
+            }
+        });
+
+        // 3. Sleep to the boundary, then submit the pre-decoded frame. `service`
+        //    now only takes the boundary audio chunk and submits audio-before-video
+        //    with the on-grid stamp — no decode on the critical path (`|| None`).
+        sleep_to_boundary(pacer, target);
+        let outcome = pacer.service(|| None, submitter);
 
         match outcome {
             ServiceOutcome::Wait { until_100ns } => {
+                // A backward clock step re-latched the boundary; sleep to it and
+                // re-`prepare` on the next iteration.
                 sleep_to_boundary(pacer, until_100ns);
             }
             ServiceOutcome::Reanchored {
@@ -348,7 +357,7 @@ pub(crate) fn decode_and_send_paced(
                 until_100ns,
             } => {
                 // Playback fell irrecoverably behind (decoder slower than the
-                // grid). The pacer re-anchored so the buffered frame is due at
+                // grid). The pacer re-anchored so the pre-decoded frame is due at
                 // `until_100ns`; sleep to it and continue from that frame (#147
                 // lane 3, change 2). The pacer has no `playlist_id`, so the WARN
                 // lands here.

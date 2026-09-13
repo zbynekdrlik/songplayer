@@ -102,6 +102,15 @@ pub struct PacingStats {
     /// is the honest "can the decoder keep up?" signal, distinct from
     /// `jitter_p99_us` (emit − boundary lateness).
     pub iter_p99_us: u64,
+    /// 99th-percentile pre-decode (`prepare`) duration (µs) over the recent
+    /// window (#147 lane 4). Decode moved AHEAD of the boundary — `prepare`
+    /// decodes the next due frame right after each emit, off the critical path,
+    /// so `late_frames` collapses to ~0 while this gauges whether the decoder can
+    /// still produce a frame inside one slot. `prep_p99_us >= interval`
+    /// (≈ 33_333 µs @30 fps) means it cannot keep up and lag will grow until the
+    /// re-anchor bounds it (the same signal `iter_p99_us` was, now measured where
+    /// the decode actually happens).
+    pub prep_p99_us: u64,
 }
 
 /// Audio clock-discipline telemetry (#148), surfaced on `GET /api/v1/ndi/health`

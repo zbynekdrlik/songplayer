@@ -329,10 +329,9 @@ fn decode_cost_over_interval_catches_up_and_reanchors_stamps_le_now() {
         guard += 1;
         let target = pacer.next_boundary_100ns();
         clk.set(target.max(clk.get()));
-        let out = pacer.service(|| None, &mut sink);
-        // On a re-anchor the pacer emits nothing this call; the loop just
-        // continues (the next prepare + service resume from the buffered frame).
-        let _ = out;
+        // The outcome (emit / repeat / re-anchor) is exercised via the counters +
+        // stamps below; the loop just keeps servicing every boundary.
+        let _ = pacer.service(|| None, &mut sink);
         let next = pacer.next_boundary_100ns();
         pacer.prepare(next, || pull(&frames));
     }

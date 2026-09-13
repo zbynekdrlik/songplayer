@@ -130,6 +130,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             dropped: 7,
             lag_slots: 4,
             iter_p99_us: 4200,
+            prep_p99_us: 3800,
         },
         audio: AudioStats {
             enabled: true,
