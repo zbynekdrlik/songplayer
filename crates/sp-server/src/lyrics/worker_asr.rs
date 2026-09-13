@@ -181,7 +181,9 @@ impl LyricsWorker {
                     started_at_unix_ms,
                 )
                 .await;
-                self.translate_track(&mut track, youtube_id).await;
+                // #152: gender picks masculine (default) / feminine SK forms.
+                let gender = self.resolve_gender(video_id).await;
+                self.translate_track(&mut track, youtube_id, gender).await;
 
                 self.broadcast_stage(
                     video_id,
@@ -214,6 +216,15 @@ impl LyricsWorker {
                         "asr_path: mark_video_lyrics_complete failed"
                     );
                 }
+
+                // #152: stamp the translation version so the stale-translation
+                // pass skips this freshly-translated asr_path song.
+                let _ = crate::db::models::stamp_translation_version(
+                    &self.pool,
+                    video_id,
+                    crate::lyrics::LYRICS_TRANSLATION_VERSION,
+                )
+                .await;
 
                 tracing::info!(
                     youtube_id = %youtube_id,

@@ -33,6 +33,7 @@ pub mod worker;
 pub mod worker_asr;
 pub mod worker_outcome;
 pub mod worker_reference;
+pub mod worker_translation;
 pub mod youtube_subs;
 pub mod yt_subs_split;
 pub use worker::LyricsWorker;
@@ -191,6 +192,17 @@ use sp_core::lyrics::LyricsTrack;
 ///   dropped — that regime no longer exists, so those rows re-queue
 ///   under v21 like everything else.
 pub const LYRICS_PIPELINE_VERSION: u32 = 21;
+
+/// Monotonic version of the SK **translation** output (#152), INDEPENDENT of
+/// `LYRICS_PIPELINE_VERSION`. Bump ONLY when the translation prompt changes in
+/// a way that alters the Slovak wording (e.g. the gender framing added in
+/// #152). A bump re-translates existing songs — one Claude call each, the `sk`
+/// lines rewritten in place by the same JSON writer the pipeline uses — via the
+/// stale-translation selector in `models_translation::fetch_next_stale_translation`,
+/// and NEVER re-runs alignment or touches `lyrics_pipeline_version`. Every
+/// `videos` row starts at `lyrics_translation_version = 0`, so the first
+/// non-zero value re-translates the whole catalog under the current prompt.
+pub const LYRICS_TRANSLATION_VERSION: u32 = 1;
 
 /// Upper duration bound for lyrics processing (#144, "Rollout blocker #3").
 ///

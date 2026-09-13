@@ -413,6 +413,10 @@ app.get('/api/v1/lyrics/queue', (_req, res) => {
   });
 });
 
+// #152: per-song SK translation gender override, kept mutable so the PATCH
+// handler below echoes the value back in the songs list.
+const translationGenders = {};
+
 // Lyrics songs list (supports ?playlist_id=N filter)
 app.get('/api/v1/lyrics/songs', (req, res) => {
   res.json([
@@ -429,6 +433,7 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       is_stale: false,
       manual_priority: false,
       lyrics_reference: true,
+      translation_gender: translationGenders[1] ?? null,
     },
     {
       video_id: 2,
@@ -443,6 +448,7 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       is_stale: false,
       manual_priority: false,
       lyrics_reference: false,
+      translation_gender: translationGenders[2] ?? null,
     },
   ]);
 });
@@ -454,6 +460,17 @@ app.post('/api/v1/lyrics/songs/:id/reference-feedback', (_req, res) => {
   res.status(204).end();
 });
 app.post('/api/v1/lyrics/songs/:id/reference', (_req, res) => {
+  res.status(204).end();
+});
+// #152: per-song translation gender toggle. Validates m/f/null, stores it so
+// the songs list echoes it, and replies 204 (mirrors the real handler).
+app.patch('/api/v1/lyrics/songs/:id/translation-gender', (req, res) => {
+  const gender = req.body?.gender ?? null;
+  if (gender !== null && gender !== 'm' && gender !== 'f') {
+    res.status(400).end();
+    return;
+  }
+  translationGenders[Number(req.params.id)] = gender;
   res.status(204).end();
 });
 

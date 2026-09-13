@@ -49,6 +49,11 @@ pub struct LyricsSongEntry {
     /// lyrics; the row renders a ★ badge + „Nesedí" feedback button.
     #[serde(default)]
     pub lyrics_reference: bool,
+    /// `videos.lyrics_translation_gender` (#152) — per-song SK translation
+    /// gender override: `None` = auto (masculine default), `"m"`, or `"f"`.
+    /// The row renders a ♂/♀ toggle bound to this value.
+    #[serde(default)]
+    pub translation_gender: Option<String>,
 }
 
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).

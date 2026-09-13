@@ -279,6 +279,18 @@ pub async fn post_reference_feedback(video_id: i64, note: &str) -> Result<(), St
     .await
 }
 
+/// PATCH the per-song SK translation gender override (#152). `gender` is
+/// `Some("m")`, `Some("f")`, or `None` (auto — clears the override back to the
+/// masculine default). The server resets the song's translation version so the
+/// worker re-translates it under the new gender. Replies `204 No Content`.
+pub async fn patch_translation_gender(video_id: i64, gender: Option<&str>) -> Result<(), String> {
+    patch_json_empty(
+        &format!("/api/v1/lyrics/songs/{video_id}/translation-gender"),
+        &serde_json::json!({ "gender": gender }),
+    )
+    .await
+}
+
 // ── Live playlist API helpers ─────────────────────────────────────────────────
 
 /// GET all set-list items for a custom playlist.

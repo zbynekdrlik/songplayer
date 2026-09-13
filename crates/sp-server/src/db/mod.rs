@@ -31,6 +31,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (20, MIGRATION_V20),
     (21, MIGRATION_V21),
     (22, MIGRATION_V22),
+    (23, MIGRATION_V23),
 ];
 
 const MIGRATION_V1: &str = "
@@ -303,6 +304,20 @@ ALTER TABLE videos ADD COLUMN lyrics_reference_note TEXT;
 const MIGRATION_V22: &str = "
 ALTER TABLE videos ADD COLUMN lyrics_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE videos ADD COLUMN lyrics_next_attempt_at TEXT;
+";
+
+// V23 (#152) — per-song SK translation gender override + translation version.
+// `lyrics_translation_gender` (NULL = auto/default, 'm' = masculine, 'f' =
+// feminine) selects which grandparent framing the translator prompt uses so
+// first-person Slovak forms carry the right grammatical gender (owner report
+// 2026-09-13: a male-sung song came out female). `lyrics_translation_version`
+// (default 0) tracks which LYRICS_TRANSLATION_VERSION the persisted SK lines
+// were produced under; a stale row (< current) is re-translated (translation
+// only, no re-alignment, no lyrics_pipeline_version change). Existing rows
+// default to (NULL, 0) so every song re-translates once under the new prompt.
+const MIGRATION_V23: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_translation_gender TEXT;
+ALTER TABLE videos ADD COLUMN lyrics_translation_version INTEGER NOT NULL DEFAULT 0;
 ";
 
 /// Create a connection pool backed by a file.

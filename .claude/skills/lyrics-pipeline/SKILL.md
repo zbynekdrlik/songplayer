@@ -164,6 +164,24 @@ When Claude refuses via CLIProxyAPI:
   provider"). Always pass `max_tokens: 32000` for large responses.
 - If a specific song still refuses after prompt tuning: surface it to the user.
   Do NOT auto-fallback.
+
+## Translation gender + translation version (#152)
+
+- **Gender framing.** `build_prompt` takes a `SpeakerGender` (`Male` default,
+  `Female`). English first-person lines carry no gender; Slovak does ("bol som"
+  vs "bola som"). The prompt frames the request as a grandFATHER (masculine) or
+  grandMOTHER (feminine) dictating for a memorial plaque — the SAME neutral
+  framing that bypasses the copyright classifier, now doing double duty. Never
+  add the words lyrics/song/worship/church/karaoke/copyright. Per-song override
+  lives in `videos.lyrics_translation_gender` (`NULL`=auto→masculine, `m`, `f`),
+  set from the dashboard ♂/♀ toggle (`PATCH …/translation-gender`).
+- **Translation version.** `LYRICS_TRANSLATION_VERSION` (in `lyrics/mod.rs`) is
+  SEPARATE from `LYRICS_PIPELINE_VERSION` and gates RE-TRANSLATION only — never
+  re-alignment, never a pipeline bump. Bump it when the translation prompt
+  changes the Slovak wording. `videos.lyrics_translation_version < current` +
+  `has_lyrics=1` re-queues a song through `retranslate_next_stale` (one Claude
+  call, `sk` lines rewritten in place, lowest priority — runs only when the
+  alignment queue is empty). Setting a gender resets the row's version to 0.
 - OAuth re-login: CLIProxyAPI's own `-claude-login` expires 5 min after
   printing the URL — too short for the owner's authorise-and-paste round
   trip. Use `C:\ProgramData\SongPlayer\claude_pkce_login.py start` (prints

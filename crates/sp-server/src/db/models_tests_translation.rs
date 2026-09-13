@@ -71,7 +71,9 @@ async fn set_translation_gender_null_clears_to_auto() {
 #[tokio::test]
 async fn set_translation_gender_missing_row_reports_false() {
     let (pool, _id) = setup_translated_video().await;
-    let affected = set_translation_gender(&pool, 9999, Some("m")).await.unwrap();
+    let affected = set_translation_gender(&pool, 9999, Some("m"))
+        .await
+        .unwrap();
     assert!(!affected, "no such video → no change");
 }
 
@@ -124,7 +126,10 @@ async fn fetch_next_stale_translation_skips_songs_without_lyrics() {
     .await
     .unwrap();
     let row = fetch_next_stale_translation(&pool, 1).await.unwrap();
-    assert!(row.is_none(), "songs without lyrics have nothing to translate");
+    assert!(
+        row.is_none(),
+        "songs without lyrics have nothing to translate"
+    );
 }
 
 #[tokio::test]
@@ -168,6 +173,12 @@ async fn fetch_next_stale_translation_oldest_first() {
     .execute(&pool)
     .await
     .unwrap();
-    let row = fetch_next_stale_translation(&pool, 1).await.unwrap().unwrap();
-    assert_eq!(row.id, first, "oldest (lowest id) stale row is chosen first");
+    let row = fetch_next_stale_translation(&pool, 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.id, first,
+        "oldest (lowest id) stale row is chosen first"
+    );
 }

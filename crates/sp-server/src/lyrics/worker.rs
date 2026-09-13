@@ -38,7 +38,9 @@ pub struct LyricsWorker {
     /// None if CLIProxyAPI is not configured.
     pub(crate) ai_client: Option<Arc<AiClient>>,
     pub(crate) venv_python: tokio::sync::RwLock<Option<PathBuf>>,
-    retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+    // pub(crate) so the sibling `worker_translation` module (#152) shares the
+    // same Claude-translation backoff gate as `retry_missing_translations`.
+    pub(crate) retry_backoff: tokio::sync::Mutex<RetryBackoff>,
     /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
     /// event channel so messages reach all dashboard WS subscribers.
     pub(crate) events_tx: broadcast::Sender<ServerMsg>,
@@ -53,8 +55,8 @@ pub struct LyricsWorker {
 
 #[derive(Default)]
 pub(crate) struct RetryBackoff {
-    silent_until: Option<Instant>,
-    consecutive_failures: u32,
+    pub(crate) silent_until: Option<Instant>,
+    pub(crate) consecutive_failures: u32,
 }
 
 /// Re-export so `worker_tests` can keep importing from
@@ -318,6 +320,8 @@ impl LyricsWorker {
             Ok(Some(r)) => r,
             Ok(None) => {
                 self.retry_missing_translations().await;
+                // #152: queue empty → advance one stale-translation row (no alignment).
+                self.retranslate_next_stale().await;
                 debug!("worker: nothing in priority queue");
                 return;
             }
@@ -386,36 +390,7 @@ impl LyricsWorker {
         .await
     }
 
-    /// Apply per-line translations to `track`. Empty strings leave `sk = None`.
-    #[cfg_attr(test, mutants::skip)]
-    fn apply_translations(track: &mut LyricsTrack, translations: Vec<String>) {
-        for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-            line.sk = if sk_text.is_empty() {
-                None
-            } else {
-                Some(sk_text)
-            };
-        }
-        track.language_translation = "sk".into();
-    }
-
-    /// EN→SK step of `process_song`. Silent on failure — UI degrades
-    /// gracefully to English-only. Claude-only by design: the user pays a
-    /// Max Plus subscription (unlimited at that tier) and Gemini quota is
-    /// expensive + reserved for alignment. If Claude refuses with a policy
-    /// response, the fix is to tune the prompt (see `translator::build_prompt`
-    /// for the grandmother framing that defeats the copyright classifier),
-    /// NOT to fall back to Gemini.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
-        let Some(ai_client) = &self.ai_client else {
-            return;
-        };
-        match translator::translate_via_claude(ai_client, track).await {
-            Ok(translations) => Self::apply_translations(track, translations),
-            Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
-        }
-    }
+    // `apply_translations` + `translate_track` live in `worker_translation.rs` (#152, cap).
 
     #[cfg_attr(test, mutants::skip)]
     async fn process_song(
@@ -769,7 +744,9 @@ impl LyricsWorker {
         .await;
 
         // EN→SK translation — Claude-only (per feedback_claude_only_translation.md).
-        self.translate_track(&mut track, &youtube_id).await;
+        // #152: gender picks masculine (default) / feminine Slovak first-person forms.
+        let gender = self.resolve_gender(video_id).await;
+        self.translate_track(&mut track, &youtube_id, gender).await;
 
         self.broadcast_stage(
             video_id,
@@ -804,6 +781,16 @@ impl LyricsWorker {
             alignment_model,
         )
         .await?;
+
+        // #152: mark this song translated under the current translation version
+        // so the stale-translation retranslate pass skips it (independent of
+        // lyrics_pipeline_version — no re-alignment).
+        let _ = crate::db::models::stamp_translation_version(
+            &self.pool,
+            video_id,
+            crate::lyrics::LYRICS_TRANSLATION_VERSION,
+        )
+        .await;
 
         tracing::info!(
             "worker: persisted {} (source={}, version={})",
@@ -841,7 +828,7 @@ impl LyricsWorker {
             }
         }
         let result = get_next_video_missing_translation(&self.pool, &self.cache_dir).await;
-        let (_video_id, youtube_id) = match result {
+        let (video_id, youtube_id) = match result {
             Ok(Some(pair)) => pair,
             _ => return,
         };
@@ -865,19 +852,30 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        // Claude-only by design (see `translate_track` doc comment).
-        let result: Result<()> = match translator::translate_via_claude(ai_client, &track).await {
-            Ok(t) => {
-                Self::apply_translations(&mut track, t);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        };
+        // Claude-only by design (see `translate_track` doc comment). #152: the
+        // song's gender picks masculine (default) / feminine Slovak forms.
+        let gender = self.resolve_gender(video_id).await;
+        let result: Result<()> =
+            match translator::translate_via_claude(ai_client, &track, gender).await {
+                Ok(t) => {
+                    Self::apply_translations(&mut track, t);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            };
 
         match result {
             Ok(()) => {
                 let json = serde_json::to_vec(&track).unwrap_or_default();
                 let _ = tokio::fs::write(&lyrics_path, &json).await;
+                // #152: stamp the translation version so the stale-translation
+                // pass does not re-pick a song we just filled in.
+                let _ = crate::db::models::stamp_translation_version(
+                    &self.pool,
+                    video_id,
+                    crate::lyrics::LYRICS_TRANSLATION_VERSION,
+                )
+                .await;
                 info!("lyrics_worker: translation retry succeeded for {youtube_id}");
                 let mut backoff = self.retry_backoff.lock().await;
                 backoff.consecutive_failures = 0;

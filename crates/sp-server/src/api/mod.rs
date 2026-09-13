@@ -126,6 +126,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::post(lyrics::post_set_reference),
         )
         .route(
+            "/api/v1/lyrics/songs/{video_id}/translation-gender",
+            axum::routing::patch(lyrics::patch_translation_gender),
+        )
+        .route(
             "/api/v1/lyrics/reprocess",
             axum::routing::post(lyrics::post_reprocess),
         )
