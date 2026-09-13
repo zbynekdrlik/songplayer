@@ -625,6 +625,35 @@ jobs:
           #   is read, so engaged ⇒ level ≠ target ⇒ signum ∈ {−1,+1}; and
           #   `20 * s == 20 / s` for s ∈ {−1,+1} (divide-by-zero unreachable) →
           #   equivalent.
+          # === shards 3-7 additions (audit 2026-09-13, PR #153) ===
+          # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
+          #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux
+          #   mutation runner; every mutant lands in dead code, builds, and no
+          #   test runs it -> MISSED. Same class as the sp-decoder/{audio,video}
+          #   file exclusions above (target-only code).
+          # pipeline.rs:239:5 run_loop -> (): the #[cfg(windows)] run_loop twin
+          #   (the #[cfg(not(windows))] run_loop is compiled + covered). Windows
+          #   dead code on Linux, as above.
+          # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the
+          #   Python LyricsAlignment-MTL tool (tokio::process::Command) which is
+          #   not installed on the runner; run_once/align/write_text_json are
+          #   subprocess/file glue and is_available/TIMEOUT_SECS are std::fs/const
+          #   trivia around it -- integration-tested against the real tool, like
+          #   the reprocess/ + downloader/ exclusions.
+          # orchestrator.rs:495 asr_transcribe: the RealReferenceStageBackend ASR
+          #   call hits the live AssemblyAI HTTP API; network-bound, no local unit
+          #   test (same class as g35t_client's #[mutants::skip] HTTP helpers).
+          # === TIMEOUTs (non-terminating under mutation; not catchable by a
+          #     terminating test, like the apply_greedy / LevelAverager pins) ===
+          # pacer.rs:94 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
+          #   decode-advance loop (decode until the frame is due); a constant/zero
+          #   pts never advances it, so the pacer-drive test spins -> 300 s TIMEOUT.
+          # audio_grid.rs:74 push -> (), 77:26 ==->!= in push, 158 level_samples
+          #   ->0/1: the buffer-fill test loops `while level_samples() < N { push }`;
+          #   a no-op push or a constant level never reaches N -> TIMEOUT.
+          # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain
+          #   guard so eviction never makes progress under the window-fill test
+          #   -> TIMEOUT.
           # Enumerate this shard's mutants FIRST so debugging is possible
           # even when the runner SIGTERMs mid-run (the upload-artifact step
           # gets skipped on cancellation). Survives in the live log.
@@ -665,7 +694,16 @@ jobs:
             --exclude-re 'genlock_audio\.rs:129:31: replace > with <' \
             --exclude-re 'genlock_audio\.rs:254:32: replace \* with \+' \
             --exclude-re 'genlock_audio\.rs:254:32: replace \* with /' \
-            --exclude-re 'genlock_audio\.rs:296:32: replace \* with /'
+            --exclude-re 'genlock_audio\.rs:296:32: replace \* with /' \
+            --exclude-re 'sp-server/src/playback/pipeline_paced' \
+            --exclude-re 'pipeline\.rs:239:5: replace run_loop with \(\)' \
+            --exclude-re 'sp-server/src/lyrics/mtl_aligner' \
+            --exclude-re 'orchestrator\.rs:495:9' \
+            --exclude-re 'pacer\.rs:94:' \
+            --exclude-re 'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)' \
+            --exclude-re 'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push' \
+            --exclude-re 'audio_grid\.rs:158:9: replace AudioGridBuffer::level_samples' \
+            --exclude-re 'lock_state\.rs:96:31: replace > with < in EventWindow::evict'
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
