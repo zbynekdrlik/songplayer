@@ -20,12 +20,7 @@ use tower::ServiceExt;
 
 /// Seed one playlist + one video with the given song/artist; the caller
 /// clones `state.pool` for post-PATCH assertions.
-async fn seed_video(
-    state: &crate::AppState,
-    id: i64,
-    song: &str,
-    artist: &str,
-) {
+async fn seed_video(state: &crate::AppState, id: i64, song: &str, artist: &str) {
     sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
         .execute(&state.pool)
         .await
@@ -79,7 +74,11 @@ async fn patch_video_sets_song_and_artist() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(song.as_deref(), Some("Break!"), "song column must be corrected");
+    assert_eq!(
+        song.as_deref(),
+        Some("Break!"),
+        "song column must be corrected"
+    );
     assert_eq!(
         artist.as_deref(),
         Some("planetboom"),
@@ -135,8 +134,16 @@ async fn patch_video_sanitizes_emoji_from_song_and_artist() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(song.as_deref(), Some("Way Maker"), "emoji stripped from song");
-    assert_eq!(artist.as_deref(), Some("Sinach"), "emoji stripped from artist");
+    assert_eq!(
+        song.as_deref(),
+        Some("Way Maker"),
+        "emoji stripped from song"
+    );
+    assert_eq!(
+        artist.as_deref(),
+        Some("Sinach"),
+        "emoji stripped from artist"
+    );
 }
 
 /// An empty artist clears the column to NULL (some songs have no artist),

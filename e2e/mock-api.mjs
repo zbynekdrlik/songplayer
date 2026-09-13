@@ -92,6 +92,24 @@ const videos = [
     download_attempts: 2,
     last_download_error: "yt-dlp exited with 1: Requested format is not available",
   },
+  {
+    // #136 T1: a row with the exact Gemini-failed swap shape the ytalex
+    // playlist hit (song holds the wrong half, artist the initialized
+    // band). Owned by video-list-edit.spec.ts so correcting it in place
+    // does not disturb the id=1/id=2 play-button specs.
+    id: 3,
+    playlist_id: 1,
+    youtube_id: "nwmrD1k6yNE",
+    title: "planetboom - Break Every Chain",
+    song: "planetboom",
+    artist: "P. Break!",
+    duration_ms: 201000,
+    cached: true,
+    normalized: true,
+    gemini_failed: true,
+    download_attempts: 0,
+    last_download_error: null,
+  },
 ];
 
 const settings = {
@@ -132,6 +150,28 @@ app.delete("/api/v1/playlists/:id", (_req, res) => {
 app.get("/api/v1/playlists/:id/videos", (req, res) => {
   const pid = Number(req.params.id);
   res.json(videos.filter((v) => v.playlist_id === pid));
+});
+
+// #136 T1: operator metadata correction. Mirrors the real patch_video —
+// rejects a whitespace-only `song` with 400, clears an empty artist to
+// NULL, and mutates the in-memory fixture so the dashboard's reload shows
+// the corrected value (the E2E asserts the round-trip in the real browser).
+app.patch("/api/v1/videos/:id", (req, res) => {
+  const v = videos.find((x) => x.id === Number(req.params.id));
+  if (!v) {
+    res.status(404).end();
+    return;
+  }
+  const body = req.body || {};
+  if (typeof body.song === "string" && body.song.trim() === "") {
+    res.status(400).end();
+    return;
+  }
+  if (typeof body.song === "string") v.song = body.song.trim();
+  if (typeof body.artist === "string") {
+    v.artist = body.artist.trim() === "" ? null : body.artist.trim();
+  }
+  res.status(204).end();
 });
 
 // Playlist sync

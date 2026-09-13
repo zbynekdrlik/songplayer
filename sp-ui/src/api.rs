@@ -403,6 +403,16 @@ pub async fn patch_video_suppress_en(video_id: i64, suppress: bool) -> Result<()
     patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
 }
 
+/// PATCH `/api/v1/videos/{id}` with corrected `song` + `artist` (#136 T1).
+/// The server sanitizes both, rejects a whitespace-only song with 400, and
+/// clears an empty artist to NULL. Server replies 204 on success. Used by
+/// the dashboard video-list inline metadata editor so operators can fix the
+/// wall title/subtitle for rows the metadata pipeline wrote wrong.
+pub async fn patch_video_metadata(video_id: i64, song: &str, artist: &str) -> Result<(), String> {
+    let body = serde_json::json!({ "song": song, "artist": artist });
+    patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
+}
+
 /// PATCH JSON to `path` and discard the response body. Mirror of
 /// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
 /// Content`.

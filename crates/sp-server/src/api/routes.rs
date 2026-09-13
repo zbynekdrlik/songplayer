@@ -338,18 +338,58 @@ pub struct PatchVideoReq {
     /// `Some("")` to clear the override.
     #[serde(default)]
     pub lyrics_override_text: Option<String>,
+    /// Operator correction of the wall song title (#136 T1). Sanitized
+    /// through the same central choke point as an ingested title; a
+    /// whitespace-only value is rejected 400 (a blank song has no
+    /// meaningful wall display).
+    #[serde(default)]
+    pub song: Option<String>,
+    /// Operator correction of the wall artist (#136 T1). Sanitized like
+    /// `song`; an empty value clears the column to NULL (some songs have no
+    /// artist), mirroring the `lyrics_override_text` empty->NULL convention.
+    #[serde(default)]
+    pub artist: Option<String>,
 }
 
-/// Update mutable per-video flags. Currently supports `suppress_resolume_en`
-/// and `lyrics_override_text`. Returns 204 on success, 404 if the video
-/// id doesn't exist, 400 if the request body has no actionable fields.
+/// Update mutable per-video flags. Supports `suppress_resolume_en`,
+/// `lyrics_override_text`, and the `song` / `artist` metadata correction
+/// levers (#136 T1). Returns 204 on success, 404 if the video id doesn't
+/// exist, 400 if the request body has no actionable fields or carries a
+/// whitespace-only `song`.
 pub async fn patch_video(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
     Json(req): Json<PatchVideoReq>,
 ) -> impl IntoResponse {
+    // Sanitize operator-provided metadata through the SAME central choke
+    // point (`metadata::sanitize::strip_emoji`) that `metadata::get_metadata`
+    // applies to every ingested provider/fallback title, so a manual
+    // correction is cleaned identically (emoji / high-plane junk stripped,
+    // whitespace collapsed and trimmed). `strip_emoji` already returns a
+    // trimmed, whitespace-collapsed string, so `is_empty()` == whitespace-only.
+    let song = req
+        .song
+        .as_ref()
+        .map(|s| crate::metadata::sanitize::strip_emoji(s));
+    let artist = req
+        .artist
+        .as_ref()
+        .map(|a| crate::metadata::sanitize::strip_emoji(a));
+
+    // A whitespace-only (empty-after-sanitize) song is a clear operator
+    // error — a blank title has nothing to show on the wall.
+    if let Some(s) = &song {
+        if s.is_empty() {
+            return (StatusCode::BAD_REQUEST, "song must not be whitespace-only").into_response();
+        }
+    }
+
     // Require at least one field so empty-body PATCHes are a clear error.
-    if req.suppress_resolume_en.is_none() && req.lyrics_override_text.is_none() {
+    if req.suppress_resolume_en.is_none()
+        && req.lyrics_override_text.is_none()
+        && song.is_none()
+        && artist.is_none()
+    {
         return (
             StatusCode::BAD_REQUEST,
             "request body must include at least one patchable field",
@@ -366,6 +406,12 @@ pub async fn patch_video(
     if req.lyrics_override_text.is_some() {
         sets.push("lyrics_override_text = ?");
     }
+    if song.is_some() {
+        sets.push("song = ?");
+    }
+    if artist.is_some() {
+        sets.push("artist = ?");
+    }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
 
     let mut q = sqlx::query(&sql);
@@ -379,6 +425,18 @@ pub async fn patch_video(
             q = q.bind::<Option<String>>(None);
         } else {
             q = q.bind::<Option<String>>(Some(text.clone()));
+        }
+    }
+    if let Some(s) = song.as_ref() {
+        // Validated non-empty above.
+        q = q.bind::<Option<String>>(Some(s.clone()));
+    }
+    if let Some(a) = artist.as_ref() {
+        // Empty artist clears the column (some songs legitimately have none).
+        if a.is_empty() {
+            q = q.bind::<Option<String>>(None);
+        } else {
+            q = q.bind::<Option<String>>(Some(a.clone()));
         }
     }
     q = q.bind(video_id);
