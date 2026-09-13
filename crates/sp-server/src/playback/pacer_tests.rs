@@ -739,7 +739,7 @@ fn standby_planner_fills_one_boundary_per_interval_no_audio() {
     }
     // Standby submits NO audio.
     assert!(
-        sink.audio_lens.iter().all(|&n| n == 0),
+        sink.audio_samples.iter().all(|&n| n == 0),
         "standby emits no audio"
     );
     // Every frozen-frame repeat bumps `repeats`.
@@ -767,7 +767,7 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
         assert!(*v <= *a, "never future-dated");
     }
     assert!(
-        sink.audio_lens.iter().all(|&n| n == 0),
+        sink.audio_samples.iter().all(|&n| n == 0),
         "idle emits no audio"
     );
     // Black idle frames are NOT frozen-frame repeats.
