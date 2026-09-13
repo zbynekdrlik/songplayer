@@ -63,9 +63,10 @@ fn prep_p99_index_is_len_times_99_div_100_clamped_len150() {
 // ---------------------------------------------------------------------------
 
 // #156: with an EMPTY ring the `if prep_len == 0` guard must return 0. Without
-// it, `.min(prep_len - 1)` would wrap in release (overflow checks off) so the
-// `.min` never clamps and `v[huge]` on an empty vec panics — a candidate for
-// the 0xc0000409 abort. Locks the guard the len=150/200 tests never exercise.
+// it, `prep_len - 1` panics either way — in debug (this test profile) on
+// subtraction overflow, in release by wrapping so `.min` never clamps and
+// `v[huge]` indexes an empty vec (the 0xc0000409 abort). Locks the guard the
+// len=150/200 tests never exercise.
 #[test]
 fn prep_p99_us_on_empty_ring_returns_zero_without_panicking() {
     let pacer = pacer_with_prep_ring(0);

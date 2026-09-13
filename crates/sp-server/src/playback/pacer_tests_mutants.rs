@@ -652,9 +652,11 @@ fn audio_overflow_warn_needed_reflects_the_buffer() {
 
 // ---------------------------------------------------------------------------
 // Empty-ring percentile guards (#156): jitter_p99_us / iter_percentile_us each
-// open with `if <len> == 0 { return 0 }`. Without the guard, `.min(len - 1)`
-// wraps in release and indexing an empty vec panics — the abort mechanism #156
-// was filed for. The index-math tests above all use full rings (len=100/200);
+// open with `if <len> == 0 { return 0 }`. Without the guard, `len - 1` on an
+// empty ring panics either way — in debug (this test profile) on subtraction
+// overflow, in release by wrapping to usize::MAX so `.min` never clamps and
+// `v[huge]` indexes past an empty vec (the 0xc0000409 abort mechanism #156 was
+// filed for). The index-math tests above all use full rings (len=100/200);
 // these lock the untested empty case so a future refactor can't drop the guard.
 // ---------------------------------------------------------------------------
 

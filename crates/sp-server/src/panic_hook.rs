@@ -67,6 +67,11 @@ fn format_panic_record(
 /// crash records across restarts, mirroring the rolling log's never-truncate
 /// discipline.
 fn write_crash_record(path: &Path, record: &str) -> std::io::Result<()> {
+    // Best-effort: ensure the crash dir exists so a very-early panic (before
+    // the logger created the data dir) still lands a durable record.
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
