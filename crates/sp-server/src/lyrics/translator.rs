@@ -197,7 +197,10 @@ mod tests {
 
     #[test]
     fn build_prompt_stays_clear_of_policy_triggers() {
-        let out = build_prompt(3, "1: a\n2: b\n3: c");
+        // #152: build_prompt gained a SpeakerGender parameter. The neutral-
+        // framing + line-count guarantees this test pins are gender-agnostic;
+        // pass the default (Male) to exercise the production default path.
+        let out = build_prompt(3, "1: a\n2: b\n3: c", SpeakerGender::Male);
         // Must NOT contain the terms that flip Claude's "copyrighted lyrics"
         // classifier. Empirically verified on 2026-04-23 against Elevation
         // Worship's "Jesus Be The Name": any of these in the prompt yields
@@ -227,7 +230,7 @@ mod tests {
         // stilted Slovak output (user feedback 2026-04-23). Natural Slovak
         // speakers expect Ježiš / Haleluja / Hosana / Amen — let Claude
         // translate the name instead of pinning it to English.
-        let out = build_prompt(1, "1: Jesus");
+        let out = build_prompt(1, "1: Jesus", SpeakerGender::Male);
         let low = out.to_lowercase();
         assert!(
             !low.contains("stays as") && !low.contains("stay unchanged"),
@@ -332,7 +335,7 @@ mod tests {
         });
 
         let track = make_track(&["Line one", "Line two", "Line three"]);
-        let result = translate_via_claude(&client, &track).await;
+        let result = translate_via_claude(&client, &track, SpeakerGender::Male).await;
 
         assert!(
             result.is_ok(),
@@ -372,7 +375,7 @@ mod tests {
         });
 
         let track = make_track(&["Line one", "Line two"]);
-        let result = translate_via_claude(&client, &track).await;
+        let result = translate_via_claude(&client, &track, SpeakerGender::Male).await;
 
         assert!(
             result.is_err(),
@@ -387,7 +390,7 @@ mod tests {
 
         let client = AiClient::new(AiSettings::default());
         let track = make_track(&[]);
-        let result = translate_via_claude(&client, &track).await.unwrap();
+        let result = translate_via_claude(&client, &track, SpeakerGender::Male).await.unwrap();
         assert!(result.is_empty());
     }
 }
