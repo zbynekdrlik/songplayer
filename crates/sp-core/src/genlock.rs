@@ -430,9 +430,20 @@ pub mod audio;
 #[path = "genlock_lock_state.rs"]
 pub mod lock_state;
 
+/// Burn-id payload + QR corner geometry (#151): the `P{run}.{frame}.{ts}.{crc}`
+/// wire format, CRC-32, and bottom-right burn placement, ported 1:1 from
+/// camera-box `src/probe/payload.rs` + `vendor/distroav/src/burn-geom.hpp`. Pure
+/// numbers only — the QR encode + NV12 compositing live in `sp-server`.
+#[path = "genlock_burn.rs"]
+pub mod burn;
+
 #[cfg(test)]
 #[path = "genlock_tests.rs"]
 mod genlock_tests;
+
+#[cfg(test)]
+#[path = "genlock_burn_tests.rs"]
+mod genlock_burn_tests;
 
 #[cfg(test)]
 #[path = "genlock_lock_state_tests.rs"]
