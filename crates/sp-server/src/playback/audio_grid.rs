@@ -124,8 +124,8 @@ impl AudioGridBuffer {
         } else {
             let consumed = self.frac_pos.floor() as usize;
             for ch in &mut self.fifo {
-                let drop = consumed.min(ch.len());
-                ch.drain(..drop);
+                let take_n = consumed.min(ch.len());
+                ch.drain(..take_n);
             }
             self.frac_pos -= consumed as f64;
         }
@@ -137,9 +137,9 @@ impl AudioGridBuffer {
     fn enforce_cap(&mut self) {
         let level = self.fifo.first().map(|c| c.len()).unwrap_or(0);
         if level > self.cap_samples {
-            let drop = level - self.cap_samples;
+            let excess = level - self.cap_samples;
             for ch in &mut self.fifo {
-                let d = drop.min(ch.len());
+                let d = excess.min(ch.len());
                 ch.drain(..d);
             }
             self.frac_pos = 0.0;
