@@ -154,14 +154,20 @@ When Claude refuses via CLIProxyAPI:
 - Tune the prompt. A simple neutral prompt ("translate these lines to Slovak,
   preserve line numbering") works. NEVER mention "song lyrics", "worship",
   "church", "copyright", "karaoke" — these trip the content-policy classifier.
-- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-4-6` since
-  2026-09-12, #144). `claude-opus-4-20250514` is RETIRED upstream — Anthropic
-  answers `404 not_found_error` and CLIProxyAPI then parks the OAuth auth in
-  a cooldown (`auth_unavailable`) until the proxy restarts, so a retired id
-  looks like a dead login. Before blaming the token, probe with
+- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-5` since
+  2026-09-13, #145 — the newest flagship the upgraded CLIProxyAPI **7.3.1**
+  on win-resolume routes). The proxy binary was upgraded 6.9.27 → 7.3.1
+  because the old build's model registry predated the Claude-5 ids and
+  `502 unknown provider`'d them; `claude-opus-4-6` was the #144 stop-gap it
+  forced (and `claude-opus-4-20250514` before that is fully retired — a
+  `404 not_found_error` upstream that also parks the OAuth auth in a
+  cooldown until the proxy restarts, so a retired id looks like a dead
+  login). Before switching the model or blaming the token, probe with
   `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` on win-resolume
-  (ids the installed proxy build does not know return 502 "unknown
-  provider"). Always pass `max_tokens: 32000` for large responses.
+  and use only ids the proxy's `/v1/models` actually lists (an unlisted id
+  returns 502 "unknown provider"). Proxy upgrade + rollback procedure:
+  `scripts/cliproxy/README.md`. Always pass `max_tokens: 32000` for large
+  responses.
 - If a specific song still refuses after prompt tuning: surface it to the user.
   Do NOT auto-fallback.
 
