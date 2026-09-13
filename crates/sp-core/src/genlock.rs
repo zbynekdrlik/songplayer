@@ -426,3 +426,7 @@ pub mod audio;
 #[cfg(test)]
 #[path = "genlock_tests.rs"]
 mod genlock_tests;
+
+#[cfg(test)]
+#[path = "genlock_lock_state_tests.rs"]
+mod genlock_lock_state_tests;

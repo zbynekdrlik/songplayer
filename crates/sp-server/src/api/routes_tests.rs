@@ -838,6 +838,7 @@ async fn ndi_health_endpoint_returns_array() {
 #[tokio::test]
 async fn ndi_health_endpoint_returns_seeded_pipeline() {
     use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
+    use sp_core::genlock::lock_state::LockState;
     let state = test_state().await;
     state.ndi_health_registry.update(PipelineHealthSnapshot {
         playlist_id: 11,
@@ -855,6 +856,9 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         clock: crate::playback::clock_health::ClockHealth::default(),
         pacing: Default::default(),
         audio: Default::default(),
+        // #149 Lane 1: flag-OFF (pacing disabled) reports UNLOCKED by contract.
+        lock_state: LockState::Unlocked,
+        lock_reason: "pacing disabled".to_string(),
     });
     let resp = app(state)
         .oneshot(
@@ -875,6 +879,10 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
     assert_eq!(arr[0]["playlist_id"].as_i64(), Some(11));
     assert_eq!(arr[0]["ndi_name"].as_str(), Some("SP-test"));
     assert_eq!(arr[0]["state"], serde_json::json!("Playing"));
+    // #149 Lane 1: lock_state + lock_reason are on the wire; a pacing-disabled
+    // (flag-OFF) pipeline reports the three-state UNLOCKED vocabulary.
+    assert_eq!(arr[0]["lock_state"].as_str(), Some("UNLOCKED"));
+    assert_eq!(arr[0]["lock_reason"].as_str(), Some("pacing disabled"));
 }
 
 #[tokio::test]

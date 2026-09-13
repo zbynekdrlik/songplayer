@@ -41,6 +41,9 @@ async fn ndi_health_endpoint_includes_clock() {
         clock,
         pacing: Default::default(),
         audio: Default::default(),
+        // #149 Lane 1: clock is NANO/ok but pacing is default-OFF → UNLOCKED.
+        lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
+        lock_reason: "pacing disabled".to_string(),
     });
 
     let resp = app(state)

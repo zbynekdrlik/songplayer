@@ -439,6 +439,10 @@ fn compute_degraded_reason(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[path = "lock_state_tests.rs"]
+mod lock_state_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::playback::state::PlayState;

@@ -54,6 +54,9 @@ async fn ndi_health_endpoint_includes_pacing() {
             overflows: 1,
             buffer_ms: 66,
         },
+        // #149 Lane 1: an enabled, receiver-connected, event-free pipeline is LOCKED.
+        lock_state: sp_core::genlock::lock_state::LockState::Locked,
+        lock_reason: "locked".to_string(),
     });
 
     let resp = app(state)
@@ -98,4 +101,8 @@ async fn ndi_health_endpoint_includes_pacing() {
         arr[0]["audio"]["residual_ppm"].as_f64().is_some(),
         "audio.residual_ppm must serialise"
     );
+
+    // #149 Lane 1: lock_state/lock_reason serialise; this snapshot is LOCKED.
+    assert_eq!(arr[0]["lock_state"].as_str(), Some("LOCKED"));
+    assert_eq!(arr[0]["lock_reason"].as_str(), Some("locked"));
 }
