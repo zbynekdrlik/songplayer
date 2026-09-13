@@ -7,6 +7,7 @@
 //! shape from PR #54.
 
 use crate::playback::clock_health::ClockHealth;
+use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -53,6 +54,15 @@ pub struct PipelineHealthSnapshot {
     /// on the SDK-clocked / idle path; filled from the `Pacer`'s
     /// `AudioGridBuffer` + `AudioPll` on the paced path.
     pub audio: AudioStats,
+    /// Derived three-state genlock lock (#149, contract §7 A7.3): the same
+    /// LOCKED / DEGRADED / UNLOCKED vocabulary the OBS indicator uses
+    /// (camera-box#1298). Computed at snapshot time from `clock.clock_ok`,
+    /// `pacing.enabled`, `connections`, and the last-60-s event window; flag
+    /// OFF (pacing disabled) ⇒ `Unlocked`.
+    pub lock_state: sp_core::genlock::lock_state::LockState,
+    /// Human reason for `lock_state` (e.g. `"pacing disabled"`, `"no receiver"`,
+    /// `"locked"`). Rendered verbatim by the dashboard / log.
+    pub lock_reason: String,
 }
 
 /// Boundary-paced emission telemetry (#147), surfaced on
@@ -304,6 +314,40 @@ impl crate::playback::PlaybackEngine {
         let prev_connections = prev.as_ref().map(|s| s.connections);
         let prev_degraded = prev.as_ref().and_then(|s| s.degraded_reason.clone());
 
+        // Lock-state derivation (#149, Lane 1). Read the box-wide clock health,
+        // push this heartbeat's cumulative pacing counters into the per-pipeline
+        // 60 s window (a monotonic timestamp off the engine's `Instant` origin —
+        // the window is purely relative, so no wall clock is needed), then
+        // derive the three-state lock from clock_ok + pacing.enabled +
+        // connections + the differenced window counts. A `-1` "never polled"
+        // connection count maps to 0 receivers.
+        let clock = match self.clock_health.read() {
+            Ok(guard) => guard.clone(),
+            Err(_) => ClockHealth::default(),
+        };
+        let heartbeat_100ns = (last_heartbeat_ts
+            .saturating_duration_since(self.instant_origin.0)
+            .as_nanos()
+            / 100) as i64;
+        let (late_w, repeats_w, resyncs_w) = {
+            let window = self.lock_windows.entry(playlist_id).or_default();
+            window.push(
+                heartbeat_100ns,
+                pacing.late_frames,
+                pacing.repeats,
+                pacing.resyncs,
+            );
+            window.counts_in_window(heartbeat_100ns, LOCK_WINDOW_100NS)
+        };
+        let (lock_state, lock_reason) = sp_core::genlock::lock_state::derive(
+            clock.clock_ok,
+            pacing.enabled,
+            connections.max(0) as u32,
+            late_w,
+            repeats_w,
+            resyncs_w,
+        );
+
         let snapshot = PipelineHealthSnapshot {
             playlist_id,
             ndi_name: ndi_name.clone(),
@@ -317,12 +361,11 @@ impl crate::playback::PlaybackEngine {
             last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
             consecutive_bad_polls,
             degraded_reason: degraded_reason.clone(),
-            clock: match self.clock_health.read() {
-                Ok(guard) => guard.clone(),
-                Err(_) => ClockHealth::default(),
-            },
+            clock,
             pacing,
             audio,
+            lock_state,
+            lock_reason: lock_reason.to_string(),
         };
 
         // Transition logging: connection-count change, degradation, recovery.
@@ -375,6 +418,9 @@ impl crate::playback::PlaybackEngine {
                     scene_active,
                     "ndi: heartbeat"
                 );
+                // #149 item 2: a second, grep-stable genlock telemetry line
+                // beside the heartbeat, same once-per-UTC-minute cadence.
+                info!("{}", format_genlock_line(&snapshot));
             }
         }
 
@@ -397,6 +443,30 @@ fn should_log_periodic_heartbeat(prev: Option<DateTime<Utc>>, cur: DateTime<Utc>
         None => true,
         Some(p) => p.timestamp() / 60 != cur.timestamp() / 60,
     }
+}
+
+/// Render the once-per-minute structured genlock telemetry line (#149 item 2,
+/// contract §7 vocabulary). Emitted as a second line beside `ndi: heartbeat`
+/// with grep-stable `key=value` tokens. Pure so the exact shape is
+/// unit-testable; the periodic INFO path logs the returned string verbatim.
+pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
+    format!(
+        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} audio_ppm={ppm:.1} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
+        pid = s.playlist_id,
+        name = s.ndi_name,
+        seq = s.pacing.seq,
+        late = s.pacing.late_frames,
+        p99 = s.pacing.jitter_p99_us,
+        repeats = s.pacing.repeats,
+        resyncs = s.pacing.resyncs,
+        relatches = s.pacing.relatches,
+        lag = s.pacing.lag_slots,
+        ppm = s.audio.residual_ppm,
+        underruns = s.audio.underruns,
+        clock_ok = s.clock.clock_ok,
+        lock = s.lock_state.as_str(),
+        reason = s.lock_reason,
+    )
 }
 
 /// Pure helper: convert canonical state + per-poll values + consecutive

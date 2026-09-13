@@ -423,6 +423,13 @@ pub fn starvation_repeat_timecode_100ns(
 #[path = "genlock_audio.rs"]
 pub mod audio;
 
+/// Genlock lock-state vocabulary (#149): the `LockState` three-state enum
+/// (LOCKED / DEGRADED / UNLOCKED) + its pure [`lock_state::derive`], shared with
+/// the API health snapshot, the per-minute log line, and (#150) the dashboard
+/// badge.
+#[path = "genlock_lock_state.rs"]
+pub mod lock_state;
+
 #[cfg(test)]
 #[path = "genlock_tests.rs"]
 mod genlock_tests;

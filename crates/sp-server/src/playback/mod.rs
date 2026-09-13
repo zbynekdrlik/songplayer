@@ -9,6 +9,7 @@ mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
+pub mod lock_state;
 mod lyrics_loader;
 pub mod ndi_health;
 pub mod pacer;
@@ -181,6 +182,11 @@ pub struct PlaybackEngine {
     /// pipeline thread at spawn. OFF = today's SDK-clocked path; ON = the
     /// wall-clock grid `Pacer`.
     genlock_pacing: bool,
+    /// Per-pipeline genlock lock-state event windows (#149, Lane 1). One 60 s
+    /// ring of cumulative pacing counters per playlist, pushed at each
+    /// heartbeat; the snapshot's `lock_state` / `lock_reason` are derived from
+    /// the differenced counts. Engine-thread-local, not shared.
+    lock_windows: HashMap<i64, crate::playback::lock_state::EventWindow>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -250,6 +256,7 @@ impl PlaybackEngine {
                 crate::playback::clock_health::ClockHealth::default(),
             )),
             genlock_pacing: false,
+            lock_windows: HashMap::new(),
         }
     }
 
