@@ -7,6 +7,8 @@ use sp_core::models::*;
 use sp_core::playback::*;
 use sp_core::ws::ServerMsg;
 
+use crate::api::NdiOutputHealth;
+
 /// Lyrics pipeline queue state reflected from server WebSocket updates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LyricsQueueInfo {
@@ -100,6 +102,10 @@ pub struct DashboardStore {
     pub lyrics_queue: RwSignal<Option<LyricsQueueInfo>>,
     pub lyrics_songs: RwSignal<Vec<LyricsSongEntry>>,
     pub last_reprocess: RwSignal<Option<ReprocessOutcome>>,
+    /// Per-output NDI genlock health (#150), refreshed ~1 Hz by the
+    /// dashboard's `GlobalLockBadge` poll loop and read by every per-card
+    /// `LockBadge`.
+    pub ndi_health: RwSignal<Vec<NdiOutputHealth>>,
 }
 
 impl DashboardStore {
@@ -117,6 +123,7 @@ impl DashboardStore {
             lyrics_queue: RwSignal::new(None),
             lyrics_songs: RwSignal::new(vec![]),
             last_reprocess: RwSignal::new(None),
+            ndi_health: RwSignal::new(vec![]),
         }
     }
 

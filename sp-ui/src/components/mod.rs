@@ -8,6 +8,7 @@ pub mod lyrics_queue_card;
 pub mod lyrics_scroller;
 pub mod lyrics_song_detail;
 pub mod lyrics_song_row;
+pub mod ndi_health;
 pub mod now_playing_card;
 pub mod obs_status;
 pub mod playback_controls;

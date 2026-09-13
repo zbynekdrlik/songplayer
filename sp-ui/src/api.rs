@@ -6,6 +6,7 @@
 use gloo_net::http::Request;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use sp_core::genlock::lock_state::LockState;
 
 /// GET `path` and deserialise the JSON response.
 pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, String> {
@@ -124,6 +125,95 @@ pub async fn post_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), S
         return Err(format!("POST {} → {}", path, resp.status()));
     }
     Ok(())
+}
+
+// ── NDI genlock health (#150) ─────────────────────────────────────────────────
+
+/// Serde default for [`NdiOutputHealth::lock_state`] — an absent field means
+/// "not yet locked", the safe/honest fallback.
+fn default_lock_state() -> LockState {
+    LockState::Unlocked
+}
+
+/// dantesync clock health, the subset the badge tooltip shows. Every field
+/// `#[serde(default)]` for forward compatibility; the server's `clock` object
+/// carries more keys, which serde ignores.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct ClockView {
+    #[serde(default)]
+    pub is_locked: bool,
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub offset_ns: Option<i64>,
+    #[serde(default)]
+    pub clock_ok: bool,
+}
+
+/// Boundary-pacing telemetry, the subset the badge tooltip shows.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct PacingView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub late_frames: u64,
+    #[serde(default)]
+    pub jitter_p99_us: u64,
+    #[serde(default)]
+    pub repeats: u64,
+    #[serde(default)]
+    pub resyncs: u64,
+    #[serde(default)]
+    pub lag_slots: i64,
+}
+
+/// Audio clock-discipline telemetry, the subset the badge tooltip shows.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct AudioView {
+    #[serde(default)]
+    pub residual_ppm: f64,
+    #[serde(default)]
+    pub underruns: u64,
+}
+
+/// One NDI output's health as consumed by the dashboard's genlock badges
+/// (#150). A read-only view over the server's `PipelineHealthSnapshot`; every
+/// field `#[serde(default)]` so a partial or newer payload still deserialises
+/// and unknown server fields are ignored.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct NdiOutputHealth {
+    #[serde(default)]
+    pub ndi_name: String,
+    #[serde(default)]
+    pub playlist_id: i64,
+    /// Wire playback state (`Idle` / `WaitingForScene` / `Playing` / `Paused`).
+    /// An output is LIVE on the wall iff this is `Playing`.
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub connections: i32,
+    #[serde(default = "default_lock_state")]
+    pub lock_state: LockState,
+    #[serde(default)]
+    pub lock_reason: String,
+    #[serde(default)]
+    pub clock: ClockView,
+    #[serde(default)]
+    pub pacing: PacingView,
+    #[serde(default)]
+    pub audio: AudioView,
+}
+
+impl NdiOutputHealth {
+    /// Whether this output is LIVE on the wall (`state == "Playing"`).
+    pub fn is_live(&self) -> bool {
+        self.state == "Playing"
+    }
+}
+
+/// GET the per-output NDI genlock health snapshot.
+pub async fn get_ndi_health() -> Result<Vec<NdiOutputHealth>, String> {
+    get("/api/v1/ndi/health").await
 }
 
 // ── Lyrics API helpers ────────────────────────────────────────────────────────
