@@ -96,17 +96,21 @@ Copy-Item C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-6.9.27.exe C:\Progra
 7.x **dropped** the top-level `claude-oauth` block that 6.9.x used to force
 `cloak: never`. Cloak is now on by default (disabled only via
 `disable-claude-cloak-mode`), which is the safer mode for Claude OAuth (requests
-look like Claude Code). `write_config` no longer emits the block; both 6.x and
-7.x tolerate the resulting text. `auth-dir`, `host`, `port`, `request-retry`,
-`debug`, `logging-to-file`, and `claude-api-key` are unchanged. 7.x also fetches
-a **live remote model catalog** on startup, so `/v1/models` tracks current ids
-without a binary rebuild.
+look like Claude Code). `write_config` no longer emits the block. 7.x **ignores**
+the now-unknown key (verified live — completions returned 200 while the old
+binary was still feeding it the block). A rollback to a 6.9.x build parses the
+block-less config fine too, but would fall back to that build's *default* cloak
+rather than the old explicit `never` — the rollback procedure above re-checks a
+completion so any resulting difference surfaces immediately. `auth-dir`, `host`,
+`port`, `request-retry`, `debug`, `logging-to-file`, and `claude-api-key` are
+unchanged. 7.x also fetches a **live remote model catalog** on startup, so
+`/v1/models` tracks current ids without a binary rebuild.
 
 ## Auth note
 
 The auth store may hold several `claude-<email>.json` credentials. Only the
-active owner login (currently `drlik.zbynek@gmail.com`) is used; a decommissioned
-account's token (e.g. `drlik.marek@gmail.com`, expired) will log a harmless
-`Token refresh attempt failed: Refresh token expired` at startup — the router
-routes around it to a healthy credential. Do not print token contents; inspect
-only non-secret fields (`email`, `expired`, `type`).
+active owner login is used; a decommissioned account's token (expired) will log
+a harmless `Token refresh attempt failed: Refresh token expired` at startup —
+the router routes around it to a healthy credential. Do not print token contents
+or the account addresses; inspect only non-secret fields (`email`, `expired`,
+`type`).
