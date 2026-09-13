@@ -25,6 +25,10 @@ pub async fn sync_playlist(
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
     crate::downloader::hide_console_window(&mut cmd);
+    // yt-dlp `--dump-json` title text must arrive as UTF-8, not the Windows
+    // ANSI codepage — otherwise titles like "Vámonos" reach the DB mangled
+    // and become wrong song/artist on the wall (#136 T4).
+    crate::downloader::apply_utf8_env(&mut cmd);
     let output = cmd.output().await?;
 
     if !output.status.success() {

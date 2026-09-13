@@ -41,8 +41,8 @@ pub fn hide_console_window(cmd: &mut tokio::process::Command) {
 /// pipe additionally honors `PYTHONIOENCODING=utf-8` for the stream
 /// encoding. Same mechanism `lyrics::mtl_aligner` already uses (#137).
 pub fn apply_utf8_env(cmd: &mut tokio::process::Command) {
-    // RED stub (#136 T4) — env not applied yet.
-    let _ = cmd;
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONIOENCODING", "utf-8");
 }
 
 /// Maximum video resolution height for downloads.
@@ -383,6 +383,7 @@ impl DownloadWorker {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut cmd);
+        apply_utf8_env(&mut cmd);
         let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
@@ -427,6 +428,7 @@ impl DownloadWorker {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut cmd);
+        apply_utf8_env(&mut cmd);
         let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
