@@ -26,10 +26,18 @@ pub const SETTING_AI_API_URL: &str = "ai_api_url";
 pub const SETTING_AI_MODEL: &str = "ai_model";
 pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
 /// Claude model used for translation / text cleanup through CLIProxyAPI.
-/// `claude-opus-4-20250514` was retired upstream (Anthropic returns
-/// `404 not_found_error`, which also puts the proxy's OAuth auth into a
-/// cooldown) — observed on win-resolume 2026-09-12 (#144).
-pub const DEFAULT_AI_MODEL: &str = "claude-opus-4-6";
+/// `claude-opus-5` is the newest Claude flagship the CLIProxyAPI 7.3.1 build
+/// on win-resolume routes (#145, proxy upgraded 2026-09-13) — verified live:
+/// it is listed by `/v1/models` and a `/v1/chat/completions` call returns
+/// HTTP 200 on the existing OAuth login. Supersedes the `claude-opus-4-6`
+/// #144 stop-gap, which was itself only needed because the retired 6.9.27
+/// proxy build's model registry predated the Claude-5 ids (a request for an
+/// unknown id returned `502 unknown provider`; the still-older
+/// `claude-opus-4-20250514` also 404'd upstream and cooled down the OAuth
+/// auth). Probe a candidate with
+/// `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` before changing
+/// this — only ids the proxy's `/v1/models` lists will route.
+pub const DEFAULT_AI_MODEL: &str = "claude-opus-5";
 
 #[cfg(test)]
 mod tests {
