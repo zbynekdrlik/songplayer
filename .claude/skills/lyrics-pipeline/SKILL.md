@@ -144,6 +144,17 @@ failure — calm instrumental passages are legitimate.
   the reprocess endpoint) — never re-picked on the next 5-s tick. Monitors
   on the box: `lyrics_progress.py` (buckets, ★, gate tally) and
   `lyrics_recent.py <min>` (per-song lines/sk/source + Claude failures).
+- **GPU discipline (#154).** `gpu_polite()` in `lyrics_worker.py` (and the mtl
+  `run.py`) sets a **BELOW_NORMAL WDDM GPU scheduling priority** (ctypes
+  `D3DKMTSetProcessSchedulingPriorityClass`) and a **per-process VRAM cap** via
+  `torch.cuda.set_per_process_memory_fraction` — default **0.7**, tunable by the
+  `lyrics_gpu_mem_fraction` DB setting (clamp 0.2–0.95, plumbed to the child as
+  `LYRICS_GPU_MEM_FRACTION`). Model parameters are UNCHANGED, so separation
+  quality is identical; only priority + VRAM headroom move. On a CUDA OOM under
+  the cap the isolation re-runs on CPU (same model → identical output, slower).
+  Expected effect: playback keeps nominal fps during isolation at some
+  isolation-time cost — exact slowdown is **measurement-pending on the box**
+  (owner: "rýchlosť je nepodstatná").
 
 ## Translation — Claude only, never Gemini fallback
 
