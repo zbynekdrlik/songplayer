@@ -252,6 +252,35 @@ integer PCM (`wave.Error: unknown format: 3`). Switched to `soundfile.info()`
 (already a hard dependency of the upstream repo itself, so no new
 dependency), which reads the format-3 header without issue.
 
+### Trap 7 — upstream `open()` uses the Windows ANSI codepage (#137)
+
+Upstream `wrapper.py::preprocess_lyrics()` opens the reference-text file with
+a bare `open(lyrics_file)` — no `encoding=`. On Windows that defaults to the
+process ANSI codepage (cp1252 on `win-resolume`), so any reference text with
+a smart quote / em-dash / other non-cp1252 punctuation crashes the whole
+alignment call before it produces any output:
+
+```
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d in position 1526
+```
+
+The production spawn (`crates/sp-server/src/lyrics/mtl_aligner.rs`) already
+sets `PYTHONUTF8=1` in the child env, which fixes this process-wide. A DIRECT
+`python run.py` invocation (eval / manual) has no such env. **The issue's
+own `os.environ.setdefault("PYTHONUTF8","1")` idea is a NO-OP** — PEP 540
+reads `PYTHONUTF8` only at interpreter startup, so setting it from inside the
+already-running process does nothing.
+
+**Fix** — `run.py::install_compat_shims()` monkeypatches `builtins.open` to
+default TEXT-mode reads/writes to `encoding="utf-8"` (binary mode untouched,
+any caller-supplied encoding respected). This is caller-independent — it
+fixes the bare upstream `open()` no matter which upstream function opens the
+file — and mirrors process-wide exactly what `PYTHONUTF8=1` does on the
+production path, consistent with `run.py`'s policy of calling `wrapper.*`
+UNMODIFIED. A structural guard test
+(`crates/sp-server/src/lyrics/mtl_encoding_guard_tests.rs`) pins both the env
+line and this shim in place.
+
 ## Confirming `MTL+BDR`
 
 The upstream README's own "Inference" section gives the exact incantation
