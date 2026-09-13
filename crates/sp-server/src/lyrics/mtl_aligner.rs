@@ -426,3 +426,7 @@ mod tests {
         assert!(parse_output_str("not json").is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "mtl_encoding_guard_tests.rs"]
+mod mtl_encoding_guard_tests;
