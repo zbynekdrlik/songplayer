@@ -2,6 +2,7 @@
 
 pub mod dispatcher;
 pub mod ndi_discovery;
+pub mod ndi_recovery;
 pub mod scene;
 pub mod text;
 
