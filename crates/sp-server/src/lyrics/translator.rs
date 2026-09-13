@@ -235,6 +235,74 @@ mod tests {
         );
     }
 
+    // ── #152: gender-aware framing ────────────────────────────────────────
+    // A first-person Slovak line carries grammatical gender ("bol som" vs
+    // "bola som"); English has none, so the prompt must tell Claude which
+    // singular form the speaker uses. Default is Male (owner report
+    // 2026-09-13: male-sung songs are the catalog norm).
+
+    #[test]
+    fn speaker_gender_defaults_to_male() {
+        assert_eq!(SpeakerGender::default(), SpeakerGender::Male);
+    }
+
+    #[test]
+    fn build_prompt_male_uses_grandfather_and_masculine() {
+        let out = build_prompt(3, "1: a\n2: b\n3: c", SpeakerGender::Male);
+        let low = out.to_lowercase();
+        assert!(
+            low.contains("grandfather"),
+            "male prompt must use the grandfather framing:\n{out}"
+        );
+        assert!(
+            low.contains("masculine"),
+            "male prompt must request masculine forms:\n{out}"
+        );
+        assert!(
+            !low.contains("grandmother"),
+            "male prompt must not mention grandmother:\n{out}"
+        );
+        assert!(
+            !low.contains("feminine"),
+            "male prompt must not request feminine forms:\n{out}"
+        );
+    }
+
+    #[test]
+    fn build_prompt_female_uses_grandmother_and_feminine() {
+        let out = build_prompt(3, "1: a\n2: b\n3: c", SpeakerGender::Female);
+        let low = out.to_lowercase();
+        assert!(
+            low.contains("grandmother"),
+            "female prompt must use the grandmother framing:\n{out}"
+        );
+        assert!(
+            low.contains("feminine"),
+            "female prompt must request feminine forms:\n{out}"
+        );
+        assert!(
+            !low.contains("grandfather"),
+            "female prompt must not mention grandfather:\n{out}"
+        );
+        assert!(
+            !low.contains("masculine"),
+            "female prompt must not request masculine forms:\n{out}"
+        );
+    }
+
+    #[test]
+    fn build_prompt_both_genders_stay_clear_of_policy_triggers() {
+        for gender in [SpeakerGender::Male, SpeakerGender::Female] {
+            let out = build_prompt(3, "1: a\n2: b\n3: c", gender);
+            for bad in ["lyrics", "song", "worship", "karaoke", "church", "copyright"] {
+                assert!(
+                    !out.to_lowercase().contains(bad),
+                    "prompt must stay neutral; found `{bad}` for {gender:?}:\n{out}"
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn translate_via_claude_returns_parsed_translations() {
         use crate::ai::AiSettings;

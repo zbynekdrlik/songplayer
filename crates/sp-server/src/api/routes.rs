@@ -841,6 +841,10 @@ mod tests;
 mod tests_reference;
 
 #[cfg(test)]
+#[path = "routes_tests_translation.rs"]
+mod tests_translation;
+
+#[cfg(test)]
 #[path = "routes_tests_clock.rs"]
 mod tests_clock;
 

@@ -230,3 +230,47 @@ test("global genlock badge flips to LOCKED after an all-locked fixture (#150)", 
   await expect(global).toHaveText("● LOCKED", { timeout: 3500 });
   await expect(global).toHaveClass(/lock-locked/);
 });
+
+// ── #152: per-song SK translation gender toggle ───────────────────────────────
+
+test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)", async ({
+  page,
+}) => {
+  // The translator prompt frames first-person lines as spoken by a specific
+  // grandparent so gendered Slovak forms come out right; the per-song toggle
+  // overrides that gender. Navigate via the Dashboard nav — a direct /lyrics
+  // deep link renders no sections (the page iterates store.playlists, seeded
+  // by the Dashboard's own fetch — see .claude/rules/sp-ui-frontend.md).
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+    timeout: 10000,
+  });
+
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await expect(page).toHaveURL(/\/lyrics$/);
+
+  const toggle = page.locator(".translation-gender-btn").first();
+  await expect(toggle).toBeVisible({ timeout: 5000 });
+  // Auto (no override yet) shows both glyphs.
+  await expect(toggle).toHaveText("♂♀");
+
+  // First click → masculine; a PATCH must fire with gender "m".
+  const [maleReq] = await Promise.all([
+    page.waitForRequest(
+      (r) => r.url().includes("/translation-gender") && r.method() === "PATCH",
+    ),
+    toggle.click(),
+  ]);
+  expect(JSON.parse(maleReq.postData() || "{}").gender).toBe("m");
+  await expect(toggle).toHaveText("♂");
+
+  // Second click → feminine.
+  const [femaleReq] = await Promise.all([
+    page.waitForRequest(
+      (r) => r.url().includes("/translation-gender") && r.method() === "PATCH",
+    ),
+    toggle.click(),
+  ]);
+  expect(JSON.parse(femaleReq.postData() || "{}").gender).toBe("f");
+  await expect(toggle).toHaveText("♀");
+});

@@ -18,6 +18,9 @@ pub use models_reference::*;
 #[path = "models_lyrics_backoff.rs"]
 mod models_lyrics_backoff;
 pub use models_lyrics_backoff::*;
+#[path = "models_translation.rs"] // #152 translation gender/version queries
+mod models_translation;
+pub use models_translation::*;
 
 // ---------------------------------------------------------------------------
 // Playlists
