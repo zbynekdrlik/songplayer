@@ -41,9 +41,12 @@ $SessionTimeoutMs  = 300000                        # 5 min idle session cleanup 
 
 $NodeCap           = 10                            # obs-mcp/supergateway node procs before a forced teardown
 $IdentifyTimeoutSec = 45                           # how long to wait for obs-identify after a (re)start
-$HealthWaitSec     = 60                            # how long to wait for /healthz after a (re)start
-                                                   # (cold start after teardown/reboot can be ~25s while
-                                                   #  node/supergateway modules are cache-cold + AV-scanned)
+$HealthWaitSec     = 120                           # how long to wait for /healthz after a (re)start.
+                                                   # Cold start is normally ~2-3s but can spike to >60s
+                                                   # while node/supergateway modules are cache-cold +
+                                                   # AV-scanned under load; a late bind is still handled
+                                                   # (see the final-verdict recheck below), so this only
+                                                   # bounds how long a genuinely dead launch waits.
 
 $BaseBackoffMin    = 5                             # 5 -> 10 -> 20 -> 40 -> 60 (cap)
 $CapBackoffMin     = 60
@@ -231,12 +234,26 @@ $identOk = $false
 if ($healthOk) { $identOk = Test-ObsIdentify }
 
 if ($healthOk -and $identOk) {
+    # Full success: supergateway serving /healthz AND obs-mcp identified with OBS.
     Log "Gateway up: /healthz ok, OBS identified"
     Write-State 0 0
-} else {
+} elseif ($healthOk -and -not $identOk) {
+    # supergateway is up but obs-mcp did not identify within the retry window -> a real
+    # obs-mcp/OBS problem a restart storm would not fix. Back off.
     $fc = [int]$state.failCount + 1
     $backoffMin = [int][Math]::Min($CapBackoffMin, $BaseBackoffMin * [Math]::Pow(2, $fc - 1))
     Write-State $fc ((Now-Epoch) + ($backoffMin * 60))
-    Log "Gateway restart incomplete (healthz=$healthOk, identified=$identOk) - backing off ~$backoffMin min (failCount=$fc)"
+    Log "Gateway up (/healthz ok) but obs-mcp did not identify within ${IdentifyTimeoutSec}s - backing off ~$backoffMin min (failCount=$fc)"
+} elseif (Test-Healthz) {
+    # /healthz did not come up within the wait window but is ok NOW: a slow cold start that
+    # bound late. The gateway is up; the next cycle's liveness check confirms it. Not a failure.
+    Log "Gateway up (/healthz ok after a slow cold start) - will confirm on the next cycle"
+    Write-State 0 0
+} else {
+    # supergateway never came up -> genuine launch failure. Back off.
+    $fc = [int]$state.failCount + 1
+    $backoffMin = [int][Math]::Min($CapBackoffMin, $BaseBackoffMin * [Math]::Pow(2, $fc - 1))
+    Write-State $fc ((Now-Epoch) + ($backoffMin * 60))
+    Log "Gateway failed to start (/healthz not ok) - backing off ~$backoffMin min (failCount=$fc)"
 }
 exit 0
