@@ -160,7 +160,10 @@ pub async fn list_songs(
                 manual_priority: mp == 1,
                 suppress_resolume_en: sre != 0,
                 lyrics_reference: lref != 0,
-                translation_gender: r.try_get("lyrics_translation_gender").ok(),
+                translation_gender: r
+                    .try_get::<Option<String>, _>("lyrics_translation_gender")
+                    .ok()
+                    .flatten(),
             }
         })
         .collect();
@@ -218,7 +221,10 @@ pub async fn get_song_detail(
         manual_priority: mp == 1,
         suppress_resolume_en: sre != 0,
         lyrics_reference: lref != 0,
-        translation_gender: row.try_get("lyrics_translation_gender").ok(),
+        translation_gender: row
+            .try_get::<Option<String>, _>("lyrics_translation_gender")
+            .ok()
+            .flatten(),
     };
     let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let audit_path = state
