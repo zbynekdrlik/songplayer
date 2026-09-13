@@ -533,3 +533,7 @@ impl Pacer {
 #[cfg(test)]
 #[path = "pacer_tests.rs"]
 mod pacer_tests;
+
+#[cfg(test)]
+#[path = "pacer_tests_lane3.rs"]
+mod pacer_tests_lane3;

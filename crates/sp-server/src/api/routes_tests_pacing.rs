@@ -40,6 +40,8 @@ async fn ndi_health_endpoint_includes_pacing() {
             resyncs: 0,
             relatches: 0,
             dropped: 30,
+            lag_slots: 3,
+            iter_p99_us: 4200,
         },
     });
 
@@ -67,4 +69,6 @@ async fn ndi_health_endpoint_includes_pacing() {
     );
     assert_eq!(arr[0]["pacing"]["seq"].as_u64(), Some(42));
     assert_eq!(arr[0]["pacing"]["dropped"].as_u64(), Some(30));
+    assert_eq!(arr[0]["pacing"]["lag_slots"].as_i64(), Some(3));
+    assert_eq!(arr[0]["pacing"]["iter_p99_us"].as_u64(), Some(4200));
 }

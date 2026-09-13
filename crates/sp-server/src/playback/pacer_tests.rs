@@ -559,6 +559,8 @@ fn counters_serialise_on_the_snapshot() {
         "resyncs",
         "relatches",
         "dropped",
+        "lag_slots",
+        "iter_p99_us",
     ] {
         assert!(json.get(field).is_some(), "missing pacing field {field}");
     }
