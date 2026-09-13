@@ -85,6 +85,7 @@ fn install_pipeline(
         mpsc::unbounded_channel().0,
         playlist_id,
         false,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     let pp = PlaylistPipeline {
         pipeline,

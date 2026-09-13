@@ -132,6 +132,7 @@ fn cancel_title_timers_aborts_pending_handles() {
                 mpsc::unbounded_channel().0,
                 1,
                 false,
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             ),
             state: PlayState::Idle,
             mode: PlaybackMode::default(),
