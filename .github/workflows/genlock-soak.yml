@@ -1,0 +1,325 @@
+name: Genlock soak (receiver ground-truth)
+
+# Genlock 4/6 lane 2 (songplayer#149): a RECEIVER-side ground-truth soak.
+#
+# It plays a fixed test playlist on the live win-resolume box for N minutes,
+# samples SongPlayer's own /api/v1/ndi/health once per minute into a CSV (send-side
+# evidence, NOT the gate), dumps the cg OBS (RESOLUME-SNV) log tail, then runs
+# camera-box's receiver-side chain verifier (scripts/cg-chain-verify.sh, camera-box#1300)
+# over the `cg-obs` hop. The job's PASS/FAIL IS the verifier's exit code (exit 3 = FAIL),
+# NEVER SongPlayer's own counters.
+#
+# This is a cron/dispatch soak, deliberately NOT wired to push/pull_request: it waits
+# `minutes` (allowed only outside the PR pipeline, per CLAUDE.md "CI architecture").
+# Until camera-box#1295 puts cg OBS on the genlock build there are no `genlock-fifo audit`
+# lines in the receiver log, so every run is the honest count-gate BEFORE picture (FAIL,
+# NO SOURCES). The daily `schedule` line below is commented until then.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Soak duration in minutes (playback window + per-minute /api/v1/ndi/health sampling)."
+        type: number
+        default: 20
+      skew_bound_ms:
+        description: "ts_head_skew_ms bound for the receiver FIFO verdict (--skew-bound-ms)."
+        type: number
+        default: 20
+      hops:
+        description: "Chain hops to verify. Only `cg-obs` is wired today; `strih`/`stream` need the ssh/bundle-state reader (camera-box#1294 open question 10)."
+        type: string
+        default: cg-obs
+  # schedule:
+  #   - cron: "17 3 * * *"   # enable when camera-box#1295 puts cg OBS on the genlock build (see songplayer#149)
+
+permissions:
+  contents: read
+
+# Serialize soak runs so two never share the win-resolume runner at once. No cancel: a
+# running soak has already taken the playback window, so let it finish rather than kill it.
+concurrency:
+  group: genlock-soak
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: Genlock receiver soak
+    runs-on: [self-hosted, windows, resolume]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout SongPlayer
+        uses: actions/checkout@v4
+
+      # Pinned to camera-box dev head fdd68e47c (fdd68e47c29067e3c2001bc75cda3ce1eded435b).
+      # To bump: pick a newer camera-box commit that still ships scripts/cg-chain-verify.sh +
+      # scripts/lib/cg-chain-verify.sh with the CG_CHAIN_<HOP>_LOG reader seam, and replace the
+      # full 40-char SHA below (a full SHA is required for actions/checkout fetch-by-commit).
+      - name: Checkout camera-box (verifier, pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: zbynekdrlik/camera-box
+          ref: fdd68e47c29067e3c2001bc75cda3ce1eded435b
+          path: camera-box
+
+      - name: Runner bash toolchain check
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "bash: ${BASH_VERSION:-unknown}"
+          missing=0
+          for t in awk sed grep tr date cat head tail printf; do
+            if command -v "$t" >/dev/null 2>&1; then
+              echo "OK: $t -> $(command -v "$t")"
+            else
+              echo "MISSING: $t"
+              missing=1
+            fi
+          done
+          awk --version 2>/dev/null | head -1 || true
+          if [ "$missing" -ne 0 ]; then
+            echo "FAIL: the verifier needs bash + coreutils (awk/sed/grep/tr/date) and one is missing on this runner" >&2
+            exit 1
+          fi
+          echo "OK: verifier toolchain present"
+
+      - name: Preflight (SongPlayer + OBS + genlock_pacing)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $api = "http://127.0.0.1:8920"
+
+          Write-Host "=== CHECK 1: SongPlayer /api/v1/status ==="
+          try {
+            $status = Invoke-RestMethod -Uri "$api/api/v1/status" -TimeoutSec 5
+          } catch {
+            Write-Error "FAIL: SongPlayer /api/v1/status not reachable on 127.0.0.1:8920 - is SongPlayer running? ($_)"
+            exit 1
+          }
+          Write-Host "OK: version=$($status.version) obs_connected=$($status.obs_connected) scene=$($status.active_scene)"
+
+          Write-Host "=== CHECK 2: OBS WebSocket 4455 listening ==="
+          $listening = netstat -an | Select-String ":4455 " | Select-String "LISTENING"
+          if (-not $listening) {
+            Write-Error "FAIL: OBS WebSocket port 4455 is not LISTENING - OBS must be running for a receiver-side soak."
+            exit 1
+          }
+          Write-Host "OK: OBS WebSocket 4455 listening"
+
+          # genlock_pacing is a raw DB flag (default OFF) surfaced by /api/v1/settings only when set.
+          $settings = Invoke-RestMethod -Uri "$api/api/v1/settings" -TimeoutSec 5
+          if ($settings.PSObject.Properties.Name -contains 'genlock_pacing') {
+            $gp = $settings.genlock_pacing
+          } else {
+            $gp = "(unset - default OFF)"
+          }
+          Write-Host "genlock_pacing = $gp"
+
+          # Current lock_state per output (the honest send-side truth for the summary).
+          $health = Invoke-RestMethod -Uri "$api/api/v1/ndi/health" -TimeoutSec 5
+
+          $sb = New-Object System.Text.StringBuilder
+          [void]$sb.AppendLine("## Genlock soak preflight")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("- SongPlayer version: ``$($status.version)``")
+          [void]$sb.AppendLine("- OBS connected: ``$($status.obs_connected)`` (scene ``$($status.active_scene)``)")
+          [void]$sb.AppendLine("- OBS WebSocket 4455: listening")
+          [void]$sb.AppendLine("- ``genlock_pacing`` setting: ``$gp``")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("### lock_state at preflight (per output)")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("| ndi_name | lock_state | lock_reason |")
+          [void]$sb.AppendLine("|---|---|---|")
+          if ($health.Count -eq 0) {
+            [void]$sb.AppendLine("| (no outputs) | - | - |")
+          } else {
+            foreach ($o in $health) {
+              [void]$sb.AppendLine("| $($o.ndi_name) | $($o.lock_state) | $($o.lock_reason) |")
+            }
+          }
+          [void]$sb.AppendLine("")
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $sb.ToString() -Encoding UTF8
+          Write-Host "Preflight notes written to job summary."
+
+      - name: Play test playlist and soak (per-minute health CSV)
+        shell: powershell
+        env:
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $api = "http://127.0.0.1:8920"
+
+          $minutes = 20
+          $parsed = 0
+          if ($env:MINUTES -and [int]::TryParse($env:MINUTES, [ref]$parsed)) { $minutes = $parsed }
+          if ($minutes -lt 1) { $minutes = 1 }
+          Write-Host "Soak window: $minutes minute(s)"
+
+          # Pick the first playlist that has videos - mirrors the ci.yml E2E "play a playlist"
+          # mechanics exactly. We do NOT switch the OBS program scene: playing a playlist makes
+          # SongPlayer emit NDI on that playlist's SP-* stream, which the cg OBS ingests as an
+          # input regardless of the live program scene - so the wall is untouched (off-program-safe).
+          $playlists = Invoke-RestMethod -Uri "$api/api/v1/playlists"
+          $testPl = $null
+          foreach ($pl in $playlists) {
+            $videos = Invoke-RestMethod -Uri "$api/api/v1/playlists/$($pl.id)/videos"
+            if ($videos.Count -gt 0) { $testPl = $pl; break }
+          }
+          if (-not $testPl) {
+            Write-Error "FAIL: no playlist has any videos to play. Cannot generate NDI output for the receiver soak."
+            exit 1
+          }
+          Write-Host "Playing '$($testPl.name)' (id=$($testPl.id), ndi=$($testPl.ndi_output_name))"
+          Invoke-WebRequest -Uri "$api/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+
+          $csv = Join-Path $env:RUNNER_TEMP "sp-health.csv"
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($csv, "ts_utc,minute,ndi_name,seq,late_frames,lag_slots,repeats,resyncs,audio_residual_ppm,lock_state,lock_reason`n", $utf8)
+
+          function Append-Row($line) {
+            [System.IO.File]::AppendAllText($csv, $line + "`n", $utf8)
+          }
+          function Csv-Field($v) {
+            if ($null -eq $v) { return "" }
+            return ([string]$v).Replace(",", ";")
+          }
+
+          # Bounded wait = the allowed cron-soak wait. Sample /api/v1/ndi/health once per minute
+          # so the wait produces EVIDENCE, not just sleep. One CSV row per output per minute.
+          $deadline = (Get-Date).AddMinutes($minutes)
+          $m = 0
+          while ((Get-Date) -lt $deadline) {
+            $m++
+            $ts = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            try {
+              $health = Invoke-RestMethod -Uri "$api/api/v1/ndi/health" -TimeoutSec 5
+            } catch {
+              Write-Host "minute $m: /api/v1/ndi/health error: $_"
+              Append-Row "$ts,$m,(health-error),,,,,,,,$(Csv-Field $_)"
+              $health = @()
+            }
+            if ($health.Count -eq 0) {
+              Append-Row "$ts,$m,(no outputs),,,,,,,,"
+              Write-Host "minute $m: no outputs in /api/v1/ndi/health"
+            } else {
+              foreach ($o in $health) {
+                $row = @(
+                  $ts, $m,
+                  (Csv-Field $o.ndi_name),
+                  (Csv-Field $o.pacing.seq),
+                  (Csv-Field $o.pacing.late_frames),
+                  (Csv-Field $o.pacing.lag_slots),
+                  (Csv-Field $o.pacing.repeats),
+                  (Csv-Field $o.pacing.resyncs),
+                  (Csv-Field $o.audio.residual_ppm),
+                  (Csv-Field $o.lock_state),
+                  (Csv-Field $o.lock_reason)
+                ) -join ","
+                Append-Row $row
+              }
+              Write-Host "minute $m: sampled $($health.Count) output(s)"
+            }
+            $remain = ($deadline - (Get-Date)).TotalSeconds
+            if ($remain -le 0) { break }
+            $sleep = [int][Math]::Min(60, [Math]::Ceiling($remain))
+            if ($sleep -lt 1) { $sleep = 1 }
+            Start-Sleep -Seconds $sleep
+          }
+
+          # Cleanup: pause playback so we always release the player (mirrors the E2E suite).
+          try {
+            Invoke-WebRequest -Uri "$api/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+            Write-Host "Paused playback on '$($testPl.name)'"
+          } catch {
+            Write-Host "WARN: pause request failed (non-fatal): $_"
+          }
+          Write-Host "Soak sampling done: $csv"
+
+      - name: Dump cg OBS (RESOLUME-SNV) log tail
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $logDir = "C:\Users\Resolume\AppData\Roaming\obs-studio\logs"
+          $newest = Get-ChildItem -Path $logDir -Filter *.txt -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $newest) {
+            Write-Error "FAIL: no OBS log .txt found in $logDir - OBS log is the receiver ground-truth source."
+            exit 1
+          }
+          $dest = Join-Path $env:RUNNER_TEMP "cg-obs.log"
+          Get-Content -Path $newest.FullName -Tail 4000 -Encoding UTF8 | Out-File -FilePath $dest -Encoding UTF8
+          $lines = (Get-Content -Path $dest).Count
+          Write-Host "Dumped newest OBS log '$($newest.Name)' (last 4000 lines, $lines written) -> $dest"
+
+      - name: CG-chain receiver verdict (bash) - THIS is the job's pass/fail
+        shell: bash
+        env:
+          HOPS: ${{ inputs.hops }}
+          SKEW_BOUND_MS: ${{ inputs.skew_bound_ms }}
+        run: |
+          set -uo pipefail
+          HOPS="${HOPS:-cg-obs}"
+          SKEW_BOUND_MS="${SKEW_BOUND_MS:-20}"
+          RT="${RUNNER_TEMP//\\//}"           # normalize D:\a\_temp -> D:/a/_temp for MSYS
+          OBS_LOG="$RT/cg-obs.log"
+          CSV="$RT/cg-chain.csv"
+          VERDICT="$RT/cg-verdict.txt"
+          echo "hops='$HOPS' skew-bound=${SKEW_BOUND_MS}ms log=$OBS_LOG"
+          if [ ! -f "$OBS_LOG" ]; then
+            echo "FAIL: receiver log $OBS_LOG missing (dump step should have produced it)" >&2
+            exit 1
+          fi
+          rc=0
+          CG_CHAIN_CG_OBS_LOG="$OBS_LOG" \
+            bash camera-box/scripts/cg-chain-verify.sh \
+              --hops "$HOPS" \
+              --skew-bound-ms "$SKEW_BOUND_MS" \
+              --csv "$CSV" \
+            | tee "$VERDICT" || rc=${PIPESTATUS[0]}
+          echo "verifier exit code: $rc  (0=PASS, 3=FAIL/UNREADABLE)"
+          exit "$rc"
+
+      - name: Write verdict + health tables to job summary
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          RT="${RUNNER_TEMP//\\//}"
+          {
+            echo "## CG-chain receiver verdict"
+            echo ""
+            echo "Verifier: \`camera-box/scripts/cg-chain-verify.sh --hops '${HOPS:-cg-obs}' --skew-bound-ms '${SKEW_BOUND_MS:-20}'\` (job PASS/FAIL = its exit code)."
+            echo ""
+            echo '```'
+            if [ -f "$RT/cg-verdict.txt" ]; then cat "$RT/cg-verdict.txt"; else echo "(no verdict output captured)"; fi
+            echo '```'
+            echo ""
+            echo "### sp-health.csv (send-side evidence, NOT the gate)"
+            echo ""
+            if [ -f "$RT/sp-health.csv" ]; then
+              echo '```'
+              echo "-- header + first 3 rows --"
+              head -n 4 "$RT/sp-health.csv"
+              echo "-- last 3 rows --"
+              tail -n 3 "$RT/sp-health.csv"
+              echo '```'
+            else
+              echo "(sp-health.csv not produced)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          HOPS: ${{ inputs.hops }}
+          SKEW_BOUND_MS: ${{ inputs.skew_bound_ms }}
+
+      - name: Upload soak artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genlock-soak-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/sp-health.csv
+            ${{ runner.temp }}/cg-chain.csv
+            ${{ runner.temp }}/cg-obs.log
+            ${{ runner.temp }}/cg-verdict.txt
+          retention-days: 14
+          if-no-files-found: warn

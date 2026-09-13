@@ -213,3 +213,54 @@ When the user gives a new prompt, win-resolume is ALWAYS free. Never defer
 interactive work citing "wall idle window" or "event might be in progress".
 If the user wanted to stop, they would stop Claude. CI uses the machine without
 an idle check; Claude during active prompts can too.
+
+## Genlock soak workflow (`.github/workflows/genlock-soak.yml`, #149)
+
+Receiver-side ground-truth soak for the genlock chain (Genlock 4/6 lane 2).
+`workflow_dispatch`-only for now (the daily `schedule` line is committed
+commented-out; enable it when camera-box#1295 puts cg OBS on the genlock
+build). It is NOT wired to push/PR — it deliberately waits `minutes`, which is
+allowed only outside the PR pipeline (CLAUDE.md "CI architecture").
+
+**Run it:**
+```bash
+gh workflow run genlock-soak.yml --ref dev -f minutes=5
+# inputs: minutes (default 20), skew_bound_ms (default 20), hops (default cg-obs)
+```
+One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
+1. checks out camera-box at a PINNED commit (`fdd68e47c…`) for the verifier;
+2. preflights SongPlayer `/api/v1/status` + OBS WebSocket 4455, notes the
+   `genlock_pacing` setting + per-output `lock_state` into the job summary;
+3. plays the first playlist with videos (no OBS scene switch — SongPlayer just
+   emits NDI on that SP-* stream, which cg OBS ingests; the live wall is
+   untouched) and, during the `minutes` window, samples `/api/v1/ndi/health`
+   once per minute into `sp-health.csv`;
+4. dumps the newest RESOLUME-SNV OBS log tail (last 4000 lines, byte-safe) to
+   `cg-obs.log`;
+5. runs `camera-box/scripts/cg-chain-verify.sh --hops cg-obs` against that log
+   with `CG_CHAIN_CG_OBS_LOG=…`. **The job PASS/FAIL IS the verifier's exit
+   code (exit 3 = FAIL), never SongPlayer's own counters.**
+
+**Artifacts** (`genlock-soak-<run_id>`, uploaded `if: always()`):
+- `sp-health.csv` — send-side evidence only (NOT the gate): per output per
+  minute `seq, late_frames, lag_slots, repeats, resyncs, audio.residual_ppm,
+  lock_state, lock_reason`.
+- `cg-chain.csv` — the verifier's per-hop/per-source verdict rows.
+- `cg-obs.log` — the receiver log tail the verdict was computed from.
+- `cg-verdict.txt` — the verifier's printed per-hop table + OVERALL PASS/FAIL.
+
+**Expected result TODAY = FAIL (count-gate BEFORE picture).** Until
+camera-box#1295 lands, cg OBS is not on the genlock build, so its log carries
+NO `genlock-fifo audit 'sp-*_video'` lines. The verifier reports the `cg-obs`
+hop as `NO SOURCES` / `UNREADABLE` and exits 3 → the job is RED. Equivalently:
+`locked=0` on every `sp-*` input is the honest count-gate signal that there is
+no genlock picture yet — that is the correct, expected state, not a regression.
+The workflow flips to a real PASS/FAIL verdict only once the receiver is on the
+genlock build (add the `schedule` line then and add the `strih`/`stream` hops
+once the runner has the ssh/bundle-state reader, camera-box#1294 Q10).
+
+**Bumping the pinned camera-box ref:** replace the full 40-char SHA in the
+`Checkout camera-box` step with a newer camera-box commit that still ships
+`scripts/cg-chain-verify.sh` + `scripts/lib/cg-chain-verify.sh` with the
+`CG_CHAIN_<HOP>_LOG` reader seam (a full SHA is required for checkout's
+fetch-by-commit).
