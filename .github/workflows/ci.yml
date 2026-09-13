@@ -606,6 +606,25 @@ jobs:
           #   Col-pinned because it is indistinguishable from the end_idx guard
           #   on the same line, which IS tested
           #   (group_with_end_idx_equal_to_len_is_rejected).
+          # === genlock #146–#151 additions (audit 2026-09-13, PR #153) ===
+          # genlock_audio.rs:129:31 `> → <` in LevelAverager::record: the ring
+          #   drain `while ring.len() > 2*window { pop_front }` becomes
+          #   `while len < 2*window`, which pops until empty then spins on an
+          #   empty deque forever → non-terminating on the FIRST record() call,
+          #   not catchable by a terminating test (mirrors the apply_greedy
+          #   loop-counter TIMEOUT pins above).
+          # genlock_audio.rs:254:32 `* → +` and `* → /` in AudioPll::update: the
+          #   rate step `(-residual * 0.5).clamp(±5)` only runs when |residual|
+          #   > 50 (dead-band gate), so |−residual·0.5| > 25 and the clamp always
+          #   saturates to ±5 with sign = sign(−residual). `-residual + 0.5` and
+          #   `-residual / 0.5` (= −2·residual) keep that same sign and saturate
+          #   to the SAME ±5 for every reachable residual → equivalent.
+          # genlock_audio.rs:296:32 `* → /` in AudioPll::update_level: bias_target
+          #   `BIAS_PPM * signum(level − target)` is only evaluated when engaged,
+          #   and level == target is `near`, which clears far_since BEFORE engaged
+          #   is read, so engaged ⇒ level ≠ target ⇒ signum ∈ {−1,+1}; and
+          #   `20 * s == 20 / s` for s ∈ {−1,+1} (divide-by-zero unreachable) →
+          #   equivalent.
           # Enumerate this shard's mutants FIRST so debugging is possible
           # even when the runner SIGTERMs mid-run (the upload-artifact step
           # gets skipped on cancellation). Survives in the live log.
@@ -642,7 +661,11 @@ jobs:
             --exclude-re 'text_reference_merge_phantom\.rs:49:20: replace < with <= in drop_phantom_clusters' \
             --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with == in drop_phantom_clusters' \
             --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with < in drop_phantom_clusters' \
-            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters'
+            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters' \
+            --exclude-re 'genlock_audio\.rs:129:31: replace > with <' \
+            --exclude-re 'genlock_audio\.rs:254:32: replace \* with \+' \
+            --exclude-re 'genlock_audio\.rs:254:32: replace \* with /' \
+            --exclude-re 'genlock_audio\.rs:296:32: replace \* with /'
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
