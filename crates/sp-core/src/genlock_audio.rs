@@ -182,11 +182,12 @@ pub struct AudioPll {
     rate_ppm: f64,
     /// The position-trim bias.
     bias_ppm: f64,
-    /// Wall clock (100 ns) of the last rate update; 0 = unseeded (first call
-    /// seeds without acting so a long first `dt` never yields a giant step).
-    last_rate_100ns: i64,
-    /// Wall clock (100 ns) of the last position update; 0 = unseeded.
-    last_bias_100ns: i64,
+    /// Wall clock (100 ns) of the last rate update; `None` = unseeded (first call
+    /// seeds without acting so a long first `dt` never yields a giant step). An
+    /// `Option`, not a 0 sentinel, so a legitimate `now == 0` seed sticks.
+    last_rate_100ns: Option<i64>,
+    /// Wall clock (100 ns) of the last position update; `None` = unseeded.
+    last_bias_100ns: Option<i64>,
     /// Wall clock (100 ns) at which the level first left the ±2-boundary band and
     /// has stayed out since; `None` while inside it. Tracked every call.
     far_since_100ns: Option<i64>,
@@ -205,8 +206,8 @@ impl AudioPll {
             applied_ppm: 0.0,
             rate_ppm: 0.0,
             bias_ppm: 0.0,
-            last_rate_100ns: 0,
-            last_bias_100ns: 0,
+            last_rate_100ns: None,
+            last_bias_100ns: None,
             far_since_100ns: None,
         }
     }
@@ -222,8 +223,8 @@ impl AudioPll {
         self.applied_ppm = 0.0;
         self.rate_ppm = 0.0;
         self.bias_ppm = 0.0;
-        self.last_rate_100ns = 0;
-        self.last_bias_100ns = 0;
+        self.last_rate_100ns = None;
+        self.last_bias_100ns = None;
         self.far_since_100ns = None;
     }
 
@@ -237,14 +238,17 @@ impl AudioPll {
     /// `rate_ppm += clamp(−residual · 0.5, ±5)`, clamped to ±500. Returns the
     /// updated total `applied_ppm`.
     pub fn update(&mut self, residual_ppm: f64, now_100ns: i64) -> f64 {
-        if self.last_rate_100ns == 0 {
-            self.last_rate_100ns = now_100ns;
+        let last = match self.last_rate_100ns {
+            None => {
+                self.last_rate_100ns = Some(now_100ns);
+                return self.applied_ppm;
+            }
+            Some(l) => l,
+        };
+        if now_100ns - last < AUDIO_PLL_UPDATE_100NS {
             return self.applied_ppm;
         }
-        if now_100ns - self.last_rate_100ns < AUDIO_PLL_UPDATE_100NS {
-            return self.applied_ppm;
-        }
-        self.last_rate_100ns = now_100ns;
+        self.last_rate_100ns = Some(now_100ns);
         if residual_ppm.abs() > AUDIO_PLL_BAND_PPM {
             let step =
                 (-residual_ppm * AUDIO_PLL_GAIN).clamp(-AUDIO_PLL_SLEW_PPM, AUDIO_PLL_SLEW_PPM);
@@ -273,14 +277,17 @@ impl AudioPll {
         // In the hysteresis band (target/2 < |dev| ≤ target) keep the current
         // far_since so an engaged trim rides through it back to "near".
 
-        if self.last_bias_100ns == 0 {
-            self.last_bias_100ns = now_100ns;
+        let last = match self.last_bias_100ns {
+            None => {
+                self.last_bias_100ns = Some(now_100ns);
+                return self.applied_ppm;
+            }
+            Some(l) => l,
+        };
+        if now_100ns - last < AUDIO_PLL_UPDATE_100NS {
             return self.applied_ppm;
         }
-        if now_100ns - self.last_bias_100ns < AUDIO_PLL_UPDATE_100NS {
-            return self.applied_ppm;
-        }
-        self.last_bias_100ns = now_100ns;
+        self.last_bias_100ns = Some(now_100ns);
 
         let engaged = self
             .far_since_100ns
