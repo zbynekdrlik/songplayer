@@ -11,6 +11,7 @@ pub mod description_provider;
 pub mod g35t_client;
 pub mod gather;
 pub mod genius;
+pub mod gpu_policy;
 pub mod line_splitter;
 pub mod lrclib;
 pub mod lyrics_ovh;
