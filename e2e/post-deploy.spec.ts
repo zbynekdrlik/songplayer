@@ -273,7 +273,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
 
     // (The NDI dark-wall gate — `connections > 0` for the on-program output —
-    // lives in its own dedicated test below, "on-program NDI output has a live
+    // lives in its own dedicated test above, "on-program NDI output has a live
     // receiver (#127)", so this Play-button test stays focused on the button.)
 
     const card = page.locator(".playlist-card", { hasText: pl.name });

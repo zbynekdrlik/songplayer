@@ -952,7 +952,15 @@ jobs:
       - name: Restart SongPlayer (pick up OBS connection after OBS start)
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
+          # Continue (NOT Stop) — matches the "Deploy SongPlayer" twin. Under
+          # Stop, a native `taskkill ... 2>&1 | Out-Null` of an ABSENT process
+          # writes "ERROR: process not found" to stderr, which the 2>&1 merge
+          # turns into a terminating NativeCommandError. That would abort this
+          # step AFTER SongPlayer is killed but BEFORE the relaunch/verify/
+          # fallback runs — leaving the box dark, the exact failure this step
+          # exists to prevent. The relaunch-verify logic below does not need
+          # Stop: it uses explicit exit codes + try/catch.
+          $ErrorActionPreference = "Continue"
 
           # SongPlayer may have been started before OBS and be in backoff.
           # Restart it now that OBS is confirmed running so it connects immediately.
