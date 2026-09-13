@@ -654,6 +654,26 @@ jobs:
           # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain
           #   guard so eviction never makes progress under the window-fill test
           #   -> TIMEOUT.
+          # === provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
+          # pacer_prepare.rs:85:66 and pacer.rs:788:70 (- -> + / /) in the p99
+          #   index `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for
+          #   every len>=1, so the `.min(len-1)` clamp never binds; replacing
+          #   `len-1` with `len+1` or `len/1` cannot change the index. (The same
+          #   clamp in iter_percentile_us IS killable because there `p` is a
+          #   parameter and the tests pass p=100, where floor(len*100/100)=len
+          #   makes the clamp load-bearing.)
+          # pacer.rs:731:20 > -> >= in on_emit: the guarded body is only
+          #   `max_late_us = late_us`; the two operators differ solely at
+          #   `late_us == max_late_us`, where the assignment writes the value it
+          #   just compared -- a no-op. Output identical for all inputs.
+          # pacer.rs:682:28 += -> *= / -= in service_standby: the mutated
+          #   `relatches += 1` sits in the `if emit_now < boundary` backward-step
+          #   net, but service_standby takes both `now_100ns()` reads with no
+          #   decode pull between them and only reaches this point after
+          #   `sched_now >= boundary`, so on a monotonic clock emit_now ==
+          #   sched_now >= boundary and the branch is unreachable by any
+          #   terminating deterministic test. (The analogous `service` mutant at
+          #   532:28 IS killable -- its decode `pull` closure can step the clock.)
           # Enumerate this shard's mutants FIRST so debugging is possible
           # even when the runner SIGTERMs mid-run (the upload-artifact step
           # gets skipped on cancellation). Survives in the live log.
@@ -703,7 +723,14 @@ jobs:
             --exclude-re 'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)' \
             --exclude-re 'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push' \
             --exclude-re 'audio_grid\.rs:158:9: replace AudioGridBuffer::level_samples' \
-            --exclude-re 'lock_state\.rs:96:31: replace > with < in EventWindow::evict'
+            --exclude-re 'lock_state\.rs:96:31: replace > with < in EventWindow::evict' \
+            --exclude-re 'pacer_prepare\.rs:85:66: replace - with \+ in Pacer::prep_p99_us' \
+            --exclude-re 'pacer_prepare\.rs:85:66: replace - with / in Pacer::prep_p99_us' \
+            --exclude-re 'pacer\.rs:788:70: replace - with \+ in Pacer::jitter_p99_us' \
+            --exclude-re 'pacer\.rs:788:70: replace - with / in Pacer::jitter_p99_us' \
+            --exclude-re 'pacer\.rs:731:20: replace > with >= in Pacer::on_emit' \
+            --exclude-re 'pacer\.rs:682:28: replace \+= with \*= in Pacer::service_standby' \
+            --exclude-re 'pacer\.rs:682:28: replace \+= with -= in Pacer::service_standby'
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
