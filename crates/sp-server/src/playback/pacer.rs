@@ -23,7 +23,9 @@
 //! synthetic frame stream over a settable clock, so every
 //! emit/repeat/drop/catch-up/resync/re-latch decision is Linux-testable.
 
-use sp_core::genlock::audio::{AudioPll, residual_ppm, samples_per_boundary};
+use sp_core::genlock::audio::{
+    AUDIO_PLL_UPDATE_100NS, AudioPll, LevelAverager, rate_residual_ppm, samples_per_boundary,
+};
 use sp_core::genlock::{
     GENLOCK_MAX_CATCHUP_INTERVALS, UNITS_PER_SECOND, floor_boundary_100ns, genlock_emit_gate_100ns,
     interval_100ns, lag_slots_100ns, strict_next_boundary_100ns,
@@ -34,10 +36,19 @@ use sp_ndi::AudioFrame;
 /// (`split_sync.rs`); the audio buffer + PLL run at this fixed rate (#148).
 const AUDIO_GRID_RATE_HZ: u32 = 48_000;
 
-/// The audio buffer's steady target level, in whole grid boundaries. 2 boundaries
-/// (3200 samples @ 1600/boundary) gives the fractional reader ~66 ms of slack
-/// against decode jitter without adding audible latency (#148).
+/// The audio buffer's steady POST-take setpoint, in whole grid boundaries. 2
+/// boundaries (3200 samples @ 1600/boundary ≈ 66 ms) is the level the PLL servos
+/// toward — measured AFTER each take, so `buffer_ms` reports ~66 ms at steady
+/// state (#148 rework, item 3). Gives the fractional reader slack against decode
+/// jitter without adding audible latency.
 const AUDIO_TARGET_BOUNDARIES: usize = 2;
+
+/// Windows for the same-phase level averager: 60 s of boundaries per window,
+/// derived from the grid fps (1800 @ 30 fps). The rate residual reads
+/// `mean(last 60 s) − mean(the 60 s before)` (#148 rework, item 1).
+fn level_avg_window(grid_fps: i64) -> usize {
+    (grid_fps.max(0) * 60) as usize
+}
 
 /// A playing lag beyond [`GENLOCK_MAX_CATCHUP_INTERVALS`] must persist this long
 /// (100-ns units, 1 s) before the pacer re-anchors (#147 lane 3, change 2). A
@@ -252,12 +263,16 @@ pub struct Pacer {
     /// Wall-clock planar FIFO: decode pushes into it, each boundary drains
     /// exactly `samples_per_boundary` through the fractional reader.
     audio_buf: AudioGridBuffer,
-    /// Slow-resample controller driving the buffer's fractional read rate.
+    /// Slow-trim controller driving the buffer's fractional read rate.
     audio_pll: AudioPll,
-    /// Wall clock (100 ns) of the last PLL update; 0 = not yet started. The PLL
-    /// runs at 1 Hz off the productive-boundary emit reads.
+    /// Same-phase 60 s means of the POST-take level; feeds the true rate residual
+    /// (#148 rework, item 1).
+    level_avg: LevelAverager,
+    /// Wall clock (100 ns) of the last rate-residual recompute; 0 = not yet
+    /// seeded. The residual is measured over a 60 s window, once per 60 s.
     last_pll_100ns: i64,
-    /// The most recent residual (ppm) fed to the PLL, for the health doc.
+    /// The most recent rate residual (ppm) — the reported drift, for the health
+    /// doc. Positive = buffer growing (file/audio clock fast).
     last_residual_ppm: f64,
 }
 
@@ -299,6 +314,7 @@ impl Pacer {
             samples_per_boundary: spb,
             audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ, spb * AUDIO_TARGET_BOUNDARIES),
             audio_pll: AudioPll::new(),
+            level_avg: LevelAverager::new(level_avg_window(grid_fps)),
             last_pll_100ns: 0,
             last_residual_ppm: 0.0,
         }
@@ -348,10 +364,12 @@ impl Pacer {
         self.max_lag_slots = 0;
         self.lag_exceeded_since = None;
         // Audio clock discipline (#148): a fresh song starts with an empty
-        // buffer and no correction. Cumulative underruns/overflows survive
-        // (lifetime telemetry, like the pacing counters).
+        // buffer, no correction, and no level history. Cumulative
+        // underruns/overflows survive (lifetime telemetry, like the pacing
+        // counters).
         self.audio_buf.clear();
         self.audio_pll.reset();
+        self.level_avg.clear();
         self.last_pll_100ns = 0;
         self.last_residual_ppm = 0.0;
     }
@@ -487,13 +505,15 @@ impl Pacer {
             self.resolve_emit_boundary(emit_now, boundary, queue_had_frame);
 
         // Audio clock discipline (#148): every PRODUCTIVE boundary (a fresh emit
-        // OR a video repeat — audio is decoupled from the video decision) runs
-        // the 1 Hz PLL and drains exactly `samples_per_boundary` from the buffer,
-        // submitted BEFORE the video frame (§6). A pre-roll STARVE (nothing ever
-        // emitted) delivers no audio and does not touch the buffer.
+        // OR a video repeat — audio is decoupled from the video decision) drains
+        // exactly `samples_per_boundary` from the buffer, submitted BEFORE the
+        // video frame (§6), then runs the slow-trim control off the POST-take
+        // level. A pre-roll STARVE (nothing ever emitted) delivers no audio and
+        // does not touch the buffer.
         let audio_frames = if had_frame || self.last_frame.is_some() {
-            self.maybe_update_audio_pll(emit_now);
-            self.take_boundary_audio()
+            let frames = self.take_boundary_audio();
+            self.run_audio_control(emit_now);
+            frames
         } else {
             Vec::new()
         };
@@ -783,31 +803,76 @@ impl Pacer {
         }]
     }
 
-    /// Run the audio PLL at its 1 Hz cadence off the productive-boundary emit
-    /// reads. The residual is the file-clock error implied by the buffer level
-    /// vs target: `residual_ppm(target, level, …)` is NEGATIVE when the buffer is
-    /// above target (file clock fast), so the PLL's `−residual` correction is
-    /// POSITIVE — a faster fractional read that drains the excess (negative
-    /// feedback), and vice-versa. The correction is copied onto the buffer.
-    fn maybe_update_audio_pll(&mut self, now_100ns: i64) {
+    /// Slow-trim audio control off the POST-take buffer level (#148 rework). Runs
+    /// on every productive boundary AFTER the take: records the post-take level
+    /// into the same-phase averager, recomputes the true 60 s rate residual
+    /// (drift) once per 60 s, and steps the PLL. Because the pacer consumes video
+    /// AND audio by wall time, the only genuine residual is the file's own
+    /// audio-vs-video disagreement (a few ppm) — a SLOW TRIM, never a fast
+    /// position loop.
+    ///
+    /// A GROWING buffer (drift > 0, file/audio clock fast) is fed to the rate
+    /// term NEGATED (`update(−drift, …)`) so `applied_ppm` goes POSITIVE — a
+    /// faster fractional read that drains the excess (negative feedback). The
+    /// position trim independently walks a level that has sat far from target
+    /// back, on the level's own sign. The correction is copied onto the buffer
+    /// for the NEXT take.
+    fn run_audio_control(&mut self, now_100ns: i64) {
+        let post = self.audio_buf.level_samples() as i64;
+        self.level_avg.record(post);
+
+        // Recompute the drift on the 60 s cadence; hold it between updates. The
+        // PLL's own 60 s gate steps on the same tick (both seed on the first
+        // productive boundary).
         if self.last_pll_100ns == 0 {
             self.last_pll_100ns = now_100ns;
-            return;
+        } else if now_100ns - self.last_pll_100ns >= AUDIO_PLL_UPDATE_100NS {
+            if self.level_avg.windows_full() {
+                self.last_residual_ppm = rate_residual_ppm(
+                    self.level_avg.mean_now(),
+                    self.level_avg.mean_prev(),
+                    AUDIO_GRID_RATE_HZ as i64,
+                    60.0,
+                );
+            }
+            self.last_pll_100ns = now_100ns;
         }
-        let elapsed = now_100ns - self.last_pll_100ns;
-        if elapsed < UNITS_PER_SECOND {
-            return;
-        }
-        let residual = residual_ppm(
-            self.audio_buf.target_level() as i64,
-            self.audio_buf.level_samples() as i64,
-            elapsed,
-            AUDIO_GRID_RATE_HZ as i64,
-        );
-        let applied = self.audio_pll.update(residual, now_100ns);
+
+        let target = self.audio_buf.target_level() as i64;
+        self.audio_pll.update(-self.last_residual_ppm, now_100ns);
+        let applied = self.audio_pll.update_level(post, target, now_100ns);
         self.audio_buf.set_applied_ppm(applied);
-        self.last_residual_ppm = residual;
-        self.last_pll_100ns = now_100ns;
+    }
+
+    /// Reset the audio buffer + PLL on a Resume (#148 rework, item 4). The VIDEO
+    /// anchor is intentionally left untouched: Resume continues the same song on
+    /// the same wall grid (the video frozen-standby already held every boundary),
+    /// so only the audio path — whose backlog would otherwise overflow and lag
+    /// the video — is flushed and re-seeded.
+    pub fn audio_resume_reset(&mut self) {
+        self.audio_buf.clear();
+        self.audio_pll.reset();
+        self.level_avg.clear();
+        self.last_pll_100ns = 0;
+        self.last_residual_ppm = 0.0;
+    }
+
+    /// Drain the remaining buffered audio at EOS as one final chunk, zero-filled
+    /// to `samples_per_boundary` (#148 rework, item 4). Returns an empty `Vec`
+    /// when the buffer is already empty. The caller stamps it with the raw wall
+    /// timecode and submits it before returning.
+    pub fn take_eos_tail(&mut self) -> Vec<AudioFrame> {
+        if self.audio_buf.level_samples() == 0 {
+            return Vec::new();
+        }
+        self.take_boundary_audio()
+    }
+
+    /// One-per-song overflow WARN signal (#148 rework, item 4): `true` exactly
+    /// once after the audio buffer first overflows, re-armed on `anchor`. The
+    /// pipeline emits the actual WARN (keeps the buffer pure).
+    pub fn audio_overflow_warn_needed(&mut self) -> bool {
+        self.audio_buf.take_overflow_warning()
     }
 
     /// Snapshot the audio clock-discipline telemetry for the health document.
@@ -835,3 +900,7 @@ mod pacer_tests_lane3;
 #[cfg(test)]
 #[path = "pacer_tests_audio.rs"]
 mod pacer_tests_audio;
+
+#[cfg(test)]
+#[path = "pacer_sim_audio.rs"]
+mod pacer_sim_audio;

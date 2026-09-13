@@ -104,11 +104,14 @@ pub struct PacingStats {
 pub struct AudioStats {
     /// Whether audio clock discipline is active for this pipeline.
     pub enabled: bool,
-    /// The measured file-clock-vs-wall residual (ppm) at the last 1 Hz update.
-    /// Negative when the audio buffer is above target (file clock fast).
+    /// The TRUE file-clock-vs-wall rate residual (ppm) from the last 60 s window
+    /// (#148 rework): `(mean_now − mean_prev) / (rate · 60 s) · 1e6` over
+    /// same-phase means of the POST-take level. POSITIVE when the buffer is
+    /// GROWING (file/audio clock fast).
     pub residual_ppm: f64,
-    /// The slow-resample correction (ppm) the `AudioPll` is applying to the
-    /// fractional read step (`1 + applied_ppm · 1e-6`).
+    /// The slow-trim correction (ppm) the `AudioPll` is applying to the
+    /// fractional read step (`1 + applied_ppm · 1e-6`). POSITIVE drains a growing
+    /// buffer faster (negative feedback).
     pub applied_ppm: f64,
     /// Samples delivered per grid boundary (1600 @ 48 kHz / 30 fps).
     pub samples_per_boundary: u64,
@@ -116,7 +119,8 @@ pub struct AudioStats {
     pub underruns: u64,
     /// Times the 2 s cap dropped the oldest audio (cumulative).
     pub overflows: u64,
-    /// Current buffered audio (ms) — servoed toward ~66 ms (2 boundaries).
+    /// Current buffered audio (ms) — the POST-take setpoint is ~66 ms
+    /// (2 boundaries, `AUDIO_TARGET_BOUNDARIES`).
     pub buffer_ms: u64,
 }
 

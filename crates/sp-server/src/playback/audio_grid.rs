@@ -11,10 +11,12 @@
 //! resampler, no added block latency, camera-box#1294 §6.5 — never a step or a
 //! drop/insert burst).
 //!
-//! Underrun → the remainder of the chunk is zero-filled (silence, never a repeat
-//! of stale audio) and `underruns` is bumped. Overflow past a hard 2 s cap →
-//! the oldest audio is dropped and `overflows` is bumped (the pacer's lane-3
-//! re-anchor normally keeps the level near target; the cap is the last line).
+//! Underrun → ONLY the missing tail of the chunk is zero-filled (silence, never a
+//! repeat of stale audio); the FIFO contents and `frac_pos` are KEPT (#148
+//! rework, item 4 — clearing the whole FIFO dropped up to a boundary of valid
+//! samples and guaranteed a second underrun) and `underruns` is bumped. Overflow
+//! past a hard 2 s cap → the oldest audio is dropped, `overflows` is bumped, and
+//! a one-per-song WARN is armed (`take_overflow_warning`).
 //!
 //! Pure: no clock calls, no I/O. Fully unit-tested on Linux CI.
 
@@ -42,6 +44,9 @@ pub struct AudioGridBuffer {
     cap_samples: usize,
     underruns: u64,
     overflows: u64,
+    /// True once an overflow WARN has been emitted this song; a latch so the log
+    /// carries at most one overflow warning per song. Cleared by [`clear`].
+    warned_overflow: bool,
 }
 
 impl AudioGridBuffer {
@@ -58,6 +63,7 @@ impl AudioGridBuffer {
             cap_samples: (rate_hz as usize) * 2,
             underruns: 0,
             overflows: 0,
+            warned_overflow: false,
         }
     }
 
@@ -115,20 +121,20 @@ impl AudioGridBuffer {
             self.frac_pos += step;
         }
 
+        // Drain only the samples fully consumed by the reader; KEEP the rest of
+        // the FIFO and the fractional pointer. On a starve this preserves the
+        // last (interpolation-partner) samples and `frac_pos` so the next chunk
+        // resumes cleanly once more audio arrives — the missing tail of THIS
+        // chunk stays zero-filled (#148 rework, item 4).
         if starved {
             self.underruns += 1;
-            for ch in &mut self.fifo {
-                ch.clear();
-            }
-            self.frac_pos = 0.0;
-        } else {
-            let consumed = self.frac_pos.floor() as usize;
-            for ch in &mut self.fifo {
-                let take_n = consumed.min(ch.len());
-                ch.drain(..take_n);
-            }
-            self.frac_pos -= consumed as f64;
         }
+        let consumed = self.frac_pos.floor() as usize;
+        for ch in &mut self.fifo {
+            let take_n = consumed.min(ch.len());
+            ch.drain(..take_n);
+        }
+        self.frac_pos -= consumed as f64;
         out
     }
 
@@ -181,6 +187,18 @@ impl AudioGridBuffer {
         self.overflows
     }
 
+    /// Returns `true` exactly once per song after the first overflow, so the
+    /// caller emits a single WARN per song rather than one per dropped chunk
+    /// (#148 rework, item 4). Re-armed by [`clear`](Self::clear) (anchor).
+    pub fn take_overflow_warning(&mut self) -> bool {
+        if self.overflows > 0 && !self.warned_overflow {
+            self.warned_overflow = true;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Empty the FIFO and reset the reader + correction (called on play / seek /
     /// new song via the pacer's `anchor`). Cumulative `underruns` / `overflows`
     /// survive — they are lifetime telemetry, like the pacing counters.
@@ -189,6 +207,7 @@ impl AudioGridBuffer {
         self.fifo = Vec::new();
         self.frac_pos = 0.0;
         self.applied_ppm = 0.0;
+        self.warned_overflow = false;
     }
 }
 

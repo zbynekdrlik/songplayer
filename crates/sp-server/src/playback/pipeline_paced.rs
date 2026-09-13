@@ -250,7 +250,13 @@ pub(crate) fn decode_and_send_paced(
             }
             Ok(PipelineCommand::Resume) => {
                 *paused = false;
-                debug!(playlist_id, "paced: resumed");
+                // Flush the audio buffer + reset the PLL (#148 rework, item 4):
+                // the pause backlog would otherwise overflow and leave audio
+                // seconds behind the video. The VIDEO anchor is left untouched —
+                // the frozen-standby held every boundary through the pause, so
+                // playback continues on the same wall grid.
+                pacer.audio_resume_reset();
+                debug!(playlist_id, "paced: resumed (audio buffer + PLL reset)");
             }
             Ok(PipelineCommand::Seek { position_ms }) => match decoder.seek(position_ms) {
                 Ok(()) => {
@@ -352,6 +358,16 @@ pub(crate) fn decode_and_send_paced(
             ServiceOutcome::Emitted | ServiceOutcome::Repeated | ServiceOutcome::Starved => {
                 pacer.tick_wall();
 
+                // One WARN per song when the audio buffer first overflows its 2 s
+                // cap (#148 rework, item 4) — kept in the pipeline layer so the
+                // buffer stays pure.
+                if pacer.audio_overflow_warn_needed() {
+                    warn!(
+                        playlist_id,
+                        "paced: audio buffer overflowed its 2 s cap — dropping oldest audio"
+                    );
+                }
+
                 if should_run_heartbeat(last_heartbeat.elapsed()) {
                     emit_heartbeat(
                         submitter,
@@ -380,6 +396,14 @@ pub(crate) fn decode_and_send_paced(
                 // last frame has been shown; do not repeat past end of stream.
                 if eos && !pacer.has_pending() {
                     info!(playlist_id, "paced: video decode complete");
+                    // Flush the remaining buffered audio as one final chunk
+                    // (zero-filled to a full boundary) with the raw wall timecode
+                    // before returning, so the last <1 boundary of audio is not
+                    // dropped (#148 rework, item 4).
+                    let tail = pacer.take_eos_tail();
+                    if !tail.is_empty() {
+                        submitter.submit_audio_tail(&tail, pacer.now_100ns());
+                    }
                     log_song_summary(pacer, &summary_base, song_start, playlist_id, "ended");
                     submitter.flush();
                     return DecodeResult::Ended;
