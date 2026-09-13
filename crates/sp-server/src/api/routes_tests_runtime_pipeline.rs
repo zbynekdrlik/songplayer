@@ -43,6 +43,10 @@ async fn create_playlist_sends_ensure_pipeline() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let id = json["id"].as_i64().unwrap();
+    // A newly created playlist is active by default (schema `is_active DEFAULT 1`),
+    // which is why `create` must ensure its pipeline. Asserting the flag also pins
+    // the `!= 0` decode in the response body.
+    assert_eq!(json["is_active"], serde_json::json!(true));
 
     match engine_rx.try_recv() {
         Ok(crate::EngineCommand::EnsurePipeline { playlist_id }) => assert_eq!(playlist_id, id),
