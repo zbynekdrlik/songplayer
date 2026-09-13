@@ -57,3 +57,22 @@ fn prep_p99_index_is_len_times_99_div_100_clamped_len150() {
         "p99 of 150 ascending samples [0,7,…,1043] is the value at index 148"
     );
 }
+
+// ---------------------------------------------------------------------------
+// prep_p99_us empty-ring guard (line 80): if prep_len == 0 { return 0 }
+// ---------------------------------------------------------------------------
+
+// #156: with an EMPTY ring the `if prep_len == 0` guard must return 0. Without
+// it, `.min(prep_len - 1)` would wrap in release (overflow checks off) so the
+// `.min` never clamps and `v[huge]` on an empty vec panics — a candidate for
+// the 0xc0000409 abort. Locks the guard the len=150/200 tests never exercise.
+#[test]
+fn prep_p99_us_on_empty_ring_returns_zero_without_panicking() {
+    let pacer = pacer_with_prep_ring(0);
+    assert_eq!(pacer.prep_len, 0);
+    assert_eq!(
+        pacer.prep_p99_us(),
+        0,
+        "an empty prep ring must return 0, never index-panic"
+    );
+}
