@@ -205,3 +205,7 @@ impl ClockSource for SettableClock {
 #[cfg(test)]
 #[path = "wallclock_tests.rs"]
 mod wallclock_tests;
+
+#[cfg(test)]
+#[path = "wallclock_tests_mutants.rs"]
+mod wallclock_tests_mutants;

@@ -221,3 +221,7 @@ fn reference_gate_audit_json(
         "asr_words": asr_words,
     })
 }
+
+#[cfg(test)]
+#[path = "worker_reference_tests_mutants.rs"]
+mod worker_reference_tests_mutants;

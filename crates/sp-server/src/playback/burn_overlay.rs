@@ -287,3 +287,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "burn_overlay_tests_mutants.rs"]
+mod burn_overlay_tests_mutants;

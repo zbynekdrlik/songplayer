@@ -968,3 +968,7 @@ mod pacer_tests_audio;
 #[cfg(test)]
 #[path = "pacer_sim_audio.rs"]
 mod pacer_sim_audio;
+
+#[cfg(test)]
+#[path = "pacer_tests_mutants.rs"]
+mod pacer_tests_mutants;

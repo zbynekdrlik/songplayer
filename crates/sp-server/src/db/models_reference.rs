@@ -65,3 +65,7 @@ pub async fn record_reference_feedback(
     .await?;
     Ok(res.rows_affected())
 }
+
+#[cfg(test)]
+#[path = "models_reference_tests_mutants.rs"]
+mod models_reference_tests_mutants;

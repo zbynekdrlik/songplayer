@@ -86,3 +86,7 @@ impl Pacer {
         v[idx]
     }
 }
+
+#[cfg(test)]
+#[path = "pacer_prepare_tests_mutants.rs"]
+mod pacer_prepare_tests_mutants;

@@ -546,3 +546,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "g35t_client_tests_mutants.rs"]
+mod g35t_client_tests_mutants;

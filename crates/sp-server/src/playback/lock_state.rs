@@ -127,3 +127,7 @@ impl EventWindow {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "lock_state_tests_mutants.rs"]
+mod lock_state_tests_mutants;

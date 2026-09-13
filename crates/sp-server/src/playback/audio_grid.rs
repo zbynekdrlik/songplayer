@@ -214,3 +214,7 @@ impl AudioGridBuffer {
 #[cfg(test)]
 #[path = "audio_grid_tests.rs"]
 mod audio_grid_tests;
+
+#[cfg(test)]
+#[path = "audio_grid_tests_mutants.rs"]
+mod audio_grid_tests_mutants;

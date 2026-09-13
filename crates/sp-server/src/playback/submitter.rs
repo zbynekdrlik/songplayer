@@ -766,3 +766,7 @@ mod tests {
 #[cfg(test)]
 #[path = "submitter_tests_timecode.rs"]
 mod submitter_tests_timecode;
+
+#[cfg(test)]
+#[path = "submitter_tests_mutants.rs"]
+mod submitter_tests_mutants;
