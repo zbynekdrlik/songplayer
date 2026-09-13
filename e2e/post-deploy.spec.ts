@@ -500,6 +500,92 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #150 — LIVE-LOCKED genlock indicator consistency.
+   *
+   * The dashboard's global genlock badge and the per-card lock badges must
+   * AGREE with whatever `GET /api/v1/ndi/health` reports at that moment —
+   * a consistency check, NOT a hard-coded LOCKED. With `genlock_pacing` OFF
+   * the honest value is `UNLOCKED — pacing disabled` until #149 lane 2
+   * flips the default, so this test recomputes the expected summary from
+   * the live health and asserts the badge matches it. No scene switching,
+   * no sleep loops (a single settle so the 1 s poll lands, per file style).
+   */
+  test("genlock badges agree with /api/v1/ndi/health (#150)", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/");
+    await expect(page.locator(".playlist-card").first()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // The global summary badge must exist.
+    const global = page.locator(".genlock-status .lock-badge");
+    await expect(global).toBeVisible({ timeout: 15_000 });
+
+    // Let the 1 s poll land so the badge reflects a fresh snapshot, then
+    // read the health and the badge close together.
+    await page.waitForTimeout(1_500);
+
+    const resp = await request.get("/api/v1/ndi/health");
+    expect(resp.status()).toBe(200);
+    const health = (await resp.json()) as Array<{
+      ndi_name: string;
+      state: string;
+      lock_state: string;
+      clock?: { clock_ok?: boolean };
+    }>;
+    expect(Array.isArray(health)).toBe(true);
+
+    // Recompute the summary exactly as
+    // sp_core::genlock::lock_state::summarize: a LOCKED output whose clock
+    // is not ok is demoted to UNLOCKED; LOCKED iff every LIVE
+    // (state==="Playing") output is LOCKED and clock ok; else the worst
+    // live state (UNLOCKED > DEGRADED > LOCKED); no live output → clock-only.
+    const sev = (s: string) => (s === "UNLOCKED" ? 2 : s === "DEGRADED" ? 1 : 0);
+    const eff = (o: { lock_state: string; clock?: { clock_ok?: boolean } }) =>
+      o.lock_state === "LOCKED" && !o.clock?.clock_ok ? "UNLOCKED" : o.lock_state;
+    const live = health.filter((o) => o.state === "Playing");
+    let expectedState: string;
+    if (live.length === 0) {
+      const clockOk = health.every((o) => !!o.clock?.clock_ok);
+      expectedState = clockOk ? "LOCKED" : "UNLOCKED";
+    } else {
+      expectedState = live
+        .map(eff)
+        .reduce((a, b) => (sev(b) > sev(a) ? b : a), "LOCKED");
+    }
+
+    const cls = (await global.getAttribute("class")) ?? "";
+    expect(
+      cls,
+      `global badge class "${cls}" must match the summarized state ${expectedState} for health ${JSON.stringify(health)}`,
+    ).toContain(`lock-${expectedState.toLowerCase()}`);
+
+    // At least one per-card badge exists and its colour class agrees with
+    // that output's raw lock_state (the per-card badge shows the output's
+    // own state, not the summary).
+    const playlists = (await (
+      await request.get("/api/v1/playlists")
+    ).json()) as Array<{ name: string; ndi_output_name: string }>;
+    const nameByNdi = new Map(
+      playlists.map((p) => [p.ndi_output_name, p.name]),
+    );
+    const matched = health.find((h) => nameByNdi.has(h.ndi_name));
+    if (matched) {
+      const cardBadge = page
+        .locator(".playlist-card", { hasText: nameByNdi.get(matched.ndi_name)! })
+        .locator(".lock-badge");
+      await expect(cardBadge).toBeVisible({ timeout: 10_000 });
+      const ccls = (await cardBadge.getAttribute("class")) ?? "";
+      expect(
+        ccls,
+        `card badge for ${matched.ndi_name} class "${ccls}" must match its lock_state ${matched.lock_state}`,
+      ).toContain(`lock-${matched.lock_state.toLowerCase()}`);
+    }
+  });
+
+  /**
    * Zero browser console errors/warnings. Runs last so it observes the
    * state after all other tests have interacted with the dashboard.
    *

@@ -317,6 +317,91 @@ app.get("/api/v1/resolume/health", (_req, res) => {
   res.json([]);
 });
 
+// NDI genlock health (#150) — polled every 1 s by the dashboard's
+// GlobalLockBadge (which fills store.ndi_health for the per-card LockBadges).
+// Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
+// per output `lock_state` (#149) / `lock_reason`, `clock` (#146),
+// `pacing` (#147), `audio` (#148). Mutable so a test can drive all three
+// states via `POST /__mock/ndi-health`.
+//
+// Default fixture exercises the three badges at once:
+//   - SP-worship   → LOCKED   (live, receiver present, clock ok)
+//   - SP-background → DEGRADED (live, "no receiver")
+//   - SP-live       → UNLOCKED (Idle → non-live, "pacing disabled")
+// The global summary counts only LIVE outputs, so it resolves to
+// `DEGRADED — SP-background` (the non-live UNLOCKED SP-live is ignored).
+let ndiHealth = [
+  {
+    ndi_name: "SP-worship",
+    playlist_id: 1,
+    state: "Playing",
+    connections: 2,
+    lock_state: "LOCKED",
+    lock_reason: "locked",
+    clock: { is_locked: true, mode: "LOCK", offset_ns: 1200, clock_ok: true },
+    pacing: {
+      enabled: true,
+      late_frames: 0,
+      jitter_p99_us: 40,
+      repeats: 0,
+      resyncs: 0,
+      lag_slots: 0,
+    },
+    audio: { residual_ppm: 1.2, underruns: 0 },
+  },
+  {
+    ndi_name: "SP-background",
+    playlist_id: 2,
+    state: "Playing",
+    connections: 0,
+    lock_state: "DEGRADED",
+    lock_reason: "no receiver",
+    clock: { is_locked: true, mode: "LOCK", offset_ns: 950, clock_ok: true },
+    pacing: {
+      enabled: true,
+      late_frames: 0,
+      jitter_p99_us: 55,
+      repeats: 0,
+      resyncs: 0,
+      lag_slots: 0,
+    },
+    audio: { residual_ppm: -0.4, underruns: 0 },
+  },
+  {
+    ndi_name: "SP-live",
+    playlist_id: 184,
+    state: "Idle",
+    connections: 0,
+    lock_state: "UNLOCKED",
+    lock_reason: "pacing disabled",
+    clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+    pacing: {
+      enabled: false,
+      late_frames: 0,
+      jitter_p99_us: 0,
+      repeats: 0,
+      resyncs: 0,
+      lag_slots: 0,
+    },
+    audio: { residual_ppm: 0, underruns: 0 },
+  },
+];
+
+app.get("/api/v1/ndi/health", (_req, res) => {
+  res.json(ndiHealth);
+});
+
+// Admin: replace the NDI health fixture with the posted JSON array.
+// Test-only — used by the frontend spec to flip the global badge to LOCKED.
+app.post("/__mock/ndi-health", (req, res) => {
+  if (!Array.isArray(req.body)) {
+    res.status(400).json({ error: "expected a JSON array" });
+    return;
+  }
+  ndiHealth = req.body;
+  res.json({ status: "set", count: ndiHealth.length });
+});
+
 // Lyrics pipeline queue
 app.get('/api/v1/lyrics/queue', (_req, res) => {
   res.json({
