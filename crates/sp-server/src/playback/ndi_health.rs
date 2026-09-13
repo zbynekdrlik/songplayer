@@ -75,6 +75,19 @@ pub struct PacingStats {
     pub relatches: u64,
     /// Decoded frames dropped as older-than-boundary (e.g. 60→30 decimation).
     pub dropped: u64,
+    /// Current lag at the last emit: whole grid slots the serviced boundary sat
+    /// behind `floor(now)` (#147 lane 3). A slow file decoder (`iter_cost >=
+    /// interval`) drives this up until the playback re-anchor bounds it; a
+    /// growing `lag_slots` is the direct signal of the box-test-1 failure, where
+    /// `jitter_p99_us` (which measures emit − boundary lateness) merely mirrored
+    /// it. Signed because it is a gauge, always `>= 0` in practice.
+    pub lag_slots: i64,
+    /// 99th-percentile per-iteration decode+submit cost (µs) over the recent
+    /// window (#147 lane 3). `iter_cost >= interval` (≈ 33_333 µs @30 fps) is the
+    /// condition under which catch-up can never gain on the wall clock, so this
+    /// is the honest "can the decoder keep up?" signal, distinct from
+    /// `jitter_p99_us` (emit − boundary lateness).
+    pub iter_p99_us: u64,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from

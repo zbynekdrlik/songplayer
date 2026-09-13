@@ -368,6 +368,27 @@ pub fn boundary_skip_count(old_boundary_ns: i64, new_boundary_ns: i64, interval_
     (advanced / interval_ns - 1).max(0)
 }
 
+/// How many whole grid slots `floor_now_100ns` sits PAST `boundary_100ns` — a
+/// division-based lag GAUGE for telemetry and the #147 playback re-anchor
+/// threshold. `0` when `floor_now <= boundary` (never negative), and `0` for a
+/// non-positive `fps` (guarded divisor).
+///
+/// Unlike the STAMP grid — which must stay exact-rational (`floor_boundary_100ns`
+/// / `strict_next_boundary_100ns`) because a 10 ns/s phase error compounds over
+/// hours — this is a coarse count: it divides by the nominal `interval_100ns`
+/// (333_333 @30 fps), so across a second boundary (where slots are 333_334 wide)
+/// it can be off by one slot. That is immaterial for a gauge and for a
+/// "> GENLOCK_MAX_CATCHUP_INTERVALS" threshold gated by a 1 s sustain window
+/// (#147 lane 3, change 2). The exact resync decision still uses the stepping
+/// gate inside [`genlock_emit_gate_100ns`].
+pub fn lag_slots_100ns(boundary_100ns: i64, floor_now_100ns: i64, fps: i64) -> i64 {
+    let interval = interval_100ns(fps);
+    if interval == 0 || floor_now_100ns <= boundary_100ns {
+        return 0;
+    }
+    (floor_now_100ns - boundary_100ns) / interval
+}
+
 /// The NDI emit timecode (100-ns units) for the `repeat_index`-th STARVATION
 /// last-frame repeat — the boundary `repeat_index` whole send-fps frames BEFORE
 /// the current frame's boundary `base_timecode_100ns`. Each repeat MUST carry

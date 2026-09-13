@@ -24,10 +24,24 @@
 //! emit/repeat/drop/catch-up/resync/re-latch decision is Linux-testable.
 
 use sp_core::genlock::{
-    UNITS_PER_SECOND, floor_boundary_100ns, genlock_emit_gate_100ns, interval_100ns,
-    strict_next_boundary_100ns,
+    GENLOCK_MAX_CATCHUP_INTERVALS, UNITS_PER_SECOND, floor_boundary_100ns, genlock_emit_gate_100ns,
+    interval_100ns, lag_slots_100ns, strict_next_boundary_100ns,
 };
 use sp_ndi::AudioFrame;
+
+/// A playing lag beyond [`GENLOCK_MAX_CATCHUP_INTERVALS`] must persist this long
+/// (100-ns units, 1 s) before the pacer re-anchors (#147 lane 3, change 2). A
+/// short catch-up burst (a slow keyframe, a scheduling hiccup) is absorbed by
+/// the one-slot-per-iteration catch-up; only a decoder that stays behind
+/// (`iter_cost >= interval`) trips the re-anchor.
+const LAG_REANCHOR_AFTER_100NS: i64 = 10_000_000;
+
+/// An emit lands "late" for [`PacingStats::late_frames`] only when it is more
+/// than this (100-ns units, 2 ms) past its boundary (#147 lane 3, change 3). The
+/// old gate counted a full interval late — so a decoder that drifts 3 ms/frame
+/// registered ZERO late frames while lag grew unbounded. 2 ms is the receiver's
+/// latency floor, so anything later genuinely risks the present deadline.
+const LATE_THRESHOLD_100NS: i64 = 20_000;
 
 use crate::playback::ndi_health::PacingStats;
 use crate::playback::wallclock::WallClock;
@@ -91,6 +105,16 @@ pub enum ServiceOutcome {
     /// A boundary came due before the first frame was ever decoded — nothing to
     /// emit or repeat yet (pre-roll). The boundary still advances.
     Starved,
+    /// Playback fell behind by more than [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots
+    /// for over [`LAG_REANCHOR_AFTER_100NS`] continuously with a frame buffered
+    /// (a decoder that cannot keep up): the grid was RE-ANCHORED so the buffered
+    /// frame is due at `until_100ns` (the next real boundary), keeping stamps
+    /// near `now` instead of drifting arbitrarily far behind. No frame is emitted
+    /// or skipped on this call — content resumes from the buffered frame at
+    /// `until_100ns`. The caller sleeps to `until_100ns` and WARNs with
+    /// `lag_slots` (it holds the `playlist_id`). Counted as a `resync` (#147
+    /// lane 3, change 2).
+    Reanchored { lag_slots: i64, until_100ns: i64 },
 }
 
 /// What a STANDBY (paused / idle) boundary presents, for
@@ -144,6 +168,9 @@ pub fn plan_sleep_100ns(now_100ns: i64, until_100ns: i64, interval_100ns: i64) -
 /// The jitter ring capacity (emit − boundary, µs).
 const JITTER_RING: usize = 256;
 
+/// The iteration-cost ring capacity (decode+submit per emit, µs) — #147 lane 3.
+const ITER_RING: usize = 256;
+
 /// The exact-grid boundary the emit gate latches for `now_100ns` — the same
 /// decision [`genlock_emit_gate_100ns`] makes internally, computed here so the
 /// pacer's Wait/emit split and its relatch counter use the IDENTICAL boundary
@@ -191,6 +218,19 @@ pub struct Pacer {
     resyncs: u64,
     relatches: u64,
     dropped: u64,
+    /// Lag (whole grid slots the serviced boundary sat behind `floor(now)`) at
+    /// the last emit — the health gauge and the re-anchor input (#147 lane 3).
+    last_lag_slots: i64,
+    /// Worst `last_lag_slots` this song, for the per-song summary.
+    max_lag_slots: i64,
+    /// Wall clock (100 ns) at which the lag first exceeded the catch-up bound and
+    /// has stayed over it since; `None` while lag is within bound. Drives the
+    /// 1 s sustain gate before a playback re-anchor (change 2).
+    lag_exceeded_since: Option<i64>,
+    // per-iteration decode+submit cost ring (µs), for iter_p50/p99.
+    iter_ring: [u64; ITER_RING],
+    iter_len: usize,
+    iter_idx: usize,
 }
 
 impl Pacer {
@@ -221,6 +261,12 @@ impl Pacer {
             resyncs: 0,
             relatches: 0,
             dropped: 0,
+            last_lag_slots: 0,
+            max_lag_slots: 0,
+            lag_exceeded_since: None,
+            iter_ring: [0; ITER_RING],
+            iter_len: 0,
+            iter_idx: 0,
         }
     }
 
@@ -261,6 +307,12 @@ impl Pacer {
         self.next_boundary_100ns = first;
         self.pending = None;
         self.last_frame = None;
+        // Fresh origin (play/seek/new song): the lag gauge + the re-anchor
+        // sustain timer are per-song (#147 lane 3). Cumulative counters (seq,
+        // repeats, …) intentionally survive — the health doc reads them.
+        self.last_lag_slots = 0;
+        self.max_lag_slots = 0;
+        self.lag_exceeded_since = None;
     }
 
     /// Service one scheduling step. Reads the wall clock itself: a scheduling
@@ -293,6 +345,44 @@ impl Pacer {
             return ServiceOutcome::Wait {
                 until_100ns: boundary,
             };
+        }
+
+        // Bounded-lag re-anchor for PLAYBACK (#147 lane 3, change 2). Catch-up
+        // advances the serviced boundary one slot per call, but each emitting
+        // call also costs one decoder `pull`; when the file's per-frame cost is
+        // >= interval the boundary can never gain on the wall clock and the stamp
+        // drifts arbitrarily far behind `now`. camera-box's "buffered never
+        // resyncs" is a capture-side rule (a live grabber can't outrun the wall
+        // clock); a file decoder can, so a lag over the catch-up bound sustained
+        // > 1 s WITH a frame buffered re-anchors the grid: the buffered frame
+        // becomes due at the next real boundary, content resumes from it (no
+        // skip, no burst), and the stamps snap back to `now`.
+        let floor_now = floor_boundary_100ns(sched_now, self.grid_fps);
+        let lag = lag_slots_100ns(boundary, floor_now, self.grid_fps);
+        if lag > GENLOCK_MAX_CATCHUP_INTERVALS {
+            let since = *self.lag_exceeded_since.get_or_insert(sched_now);
+            if sched_now.saturating_sub(since) > LAG_REANCHOR_AFTER_100NS {
+                if self.pending.is_none() {
+                    self.pending = pull();
+                }
+                if let Some(pts) = self.pending.as_ref().map(|f| f.pts_100ns()) {
+                    let new_boundary = strict_next_boundary_100ns(sched_now, self.grid_fps);
+                    self.wall_start_100ns = new_boundary - pts;
+                    self.next_boundary_100ns = new_boundary;
+                    self.resyncs += 1;
+                    self.lag_exceeded_since = None;
+                    self.last_lag_slots = lag;
+                    self.max_lag_slots = self.max_lag_slots.max(lag);
+                    return ServiceOutcome::Reanchored {
+                        lag_slots: lag,
+                        until_100ns: new_boundary,
+                    };
+                }
+                // No frame buffered → not a re-anchor case; the underrun/resync
+                // path (below) handles it via `!queue_had_frame`.
+            }
+        } else {
+            self.lag_exceeded_since = None;
         }
 
         // Decode-forward: keep the last frame whose presentation time is at/before
@@ -370,6 +460,26 @@ impl Pacer {
         } else {
             ServiceOutcome::Starved
         };
+
+        // Telemetry for a productive boundary (#147 lane 3, change 3): the lag
+        // gauge at THIS emit — how many whole slots the STAMPED boundary sat
+        // behind `floor(now)`. On a slow-decode catch-up (the box-test-1 bug)
+        // the stamp is the past serviced boundary, so the growing lag is visible;
+        // on a resync the stamp is `floor(now)`, so lag reads ~0 (we jumped to
+        // now — the `resyncs` counter already records it). Plus the decode+submit
+        // iteration cost from the scheduling read to after the send: `iter_p99 >=
+        // interval` is the honest "decoder can't keep up" signal.
+        if matches!(outcome, ServiceOutcome::Emitted | ServiceOutcome::Repeated) {
+            let emit_lag = lag_slots_100ns(
+                stamp_boundary,
+                floor_boundary_100ns(emit_now, self.grid_fps),
+                self.grid_fps,
+            );
+            self.last_lag_slots = emit_lag;
+            self.max_lag_slots = self.max_lag_slots.max(emit_lag);
+            let done = self.now_100ns();
+            self.push_iter((done.saturating_sub(sched_now).max(0) / 10) as u64);
+        }
 
         self.next_boundary_100ns = next;
         outcome
@@ -486,12 +596,51 @@ impl Pacer {
         let late_100ns = (now_100ns - boundary_100ns).max(0);
         let late_us = (late_100ns / 10) as u64; // 100 ns → µs
         self.push_jitter(late_us);
-        if late_100ns >= self.interval_100ns {
+        // #147 lane 3, change 3: an emit is "late" past the 2 ms threshold, not
+        // only a full interval late — a decoder drifting a few ms/frame used to
+        // register ZERO late frames while its lag grew unbounded.
+        if late_100ns > LATE_THRESHOLD_100NS {
             self.late_frames += 1;
         }
         if late_us > self.max_late_us {
             self.max_late_us = late_us;
         }
+    }
+
+    /// Record one per-iteration decode+submit cost sample (µs) in the ring.
+    fn push_iter(&mut self, cost_us: u64) {
+        self.iter_ring[self.iter_idx] = cost_us;
+        self.iter_idx = (self.iter_idx + 1) % ITER_RING;
+        if self.iter_len < ITER_RING {
+            self.iter_len += 1;
+        }
+    }
+
+    /// The `p`-th percentile (0..=100) of the iteration-cost ring (µs).
+    fn iter_percentile_us(&self, p: usize) -> u64 {
+        if self.iter_len == 0 {
+            return 0;
+        }
+        let mut v: Vec<u64> = self.iter_ring[..self.iter_len].to_vec();
+        v.sort_unstable();
+        let idx = ((self.iter_len * p) / 100).min(self.iter_len - 1);
+        v[idx]
+    }
+
+    /// 50th-percentile iteration cost (µs) — the per-song-summary median.
+    pub fn iter_p50_us(&self) -> u64 {
+        self.iter_percentile_us(50)
+    }
+
+    /// 99th-percentile iteration cost (µs). `>= interval` (≈ 33_333 µs @30 fps)
+    /// means the decoder cannot keep up and lag will grow until the re-anchor.
+    pub fn iter_p99_us(&self) -> u64 {
+        self.iter_percentile_us(99)
+    }
+
+    /// Worst per-emit lag (whole grid slots) this song, for the summary.
+    pub fn max_lag_slots(&self) -> i64 {
+        self.max_lag_slots
     }
 
     fn push_jitter(&mut self, late_us: u64) {
@@ -526,6 +675,8 @@ impl Pacer {
             resyncs: self.resyncs,
             relatches: self.relatches,
             dropped: self.dropped,
+            lag_slots: self.last_lag_slots,
+            iter_p99_us: self.iter_p99_us(),
         }
     }
 }

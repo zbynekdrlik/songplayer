@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, TryRecvError};
 use tracing::{debug, error, info, warn};
 
-use crate::playback::ndi_health::PlaybackStateLabel;
+use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
 use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, plan_sleep_100ns};
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
@@ -98,6 +98,36 @@ pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
     }
 }
 
+/// One INFO line summarising a song's paced emission (#147 lane 3, change 4):
+/// per-song DELTAS of the accumulating pacer counters (the health doc keeps the
+/// cumulative values) plus the per-song lag/iteration gauges. Emitted once at
+/// every song-end (EOS / stop / next / shutdown). `iter_p99_us >= interval`
+/// (≈ 33_333 µs @30 fps) is the "decoder couldn't keep up" signal that drives
+/// `max_lag_slots` up and forces the re-anchor.
+fn log_song_summary(
+    pacer: &Pacer,
+    base: &PacingStats,
+    song_start: Instant,
+    playlist_id: i64,
+    reason: &str,
+) {
+    let s = pacer.stats();
+    info!(
+        playlist_id,
+        reason,
+        emits = s.seq.saturating_sub(base.seq),
+        repeats = s.repeats.saturating_sub(base.repeats),
+        dropped = s.dropped.saturating_sub(base.dropped),
+        resyncs = s.resyncs.saturating_sub(base.resyncs),
+        relatches = s.relatches.saturating_sub(base.relatches),
+        max_lag_slots = pacer.max_lag_slots(),
+        iter_p50_us = pacer.iter_p50_us(),
+        iter_p99_us = pacer.iter_p99_us(),
+        duration_s = song_start.elapsed().as_secs_f32(),
+        "paced: song summary"
+    );
+}
+
 /// Boundary-paced inner decode loop. Same command / event contract as
 /// `pipeline::decode_and_send`, but the cadence is the wall-clock grid.
 #[cfg_attr(test, mutants::skip)]
@@ -172,6 +202,12 @@ pub(crate) fn decode_and_send_paced(
     // Anchor the wall grid at the first boundary after now (play/seek origin).
     pacer.anchor();
 
+    // Baseline for the per-song summary (#147 lane 3, change 4): the pacer's
+    // counters accumulate across songs for the health doc, so the summary
+    // reports this song's DELTAS from here.
+    let summary_base = pacer.stats();
+    let song_start = Instant::now();
+
     let mut eos = false;
     let mut last_decoded_ms: u64 = pts_offset_ms;
     let mut last_position_report = Instant::now();
@@ -180,10 +216,12 @@ pub(crate) fn decode_and_send_paced(
         // 1. Commands between boundaries (non-blocking).
         match cmd_rx.try_recv() {
             Ok(PipelineCommand::Shutdown) => {
+                log_song_summary(pacer, &summary_base, song_start, playlist_id, "shutdown");
                 submitter.flush();
                 return DecodeResult::Shutdown;
             }
             Ok(PipelineCommand::Stop) => {
+                log_song_summary(pacer, &summary_base, song_start, playlist_id, "stop");
                 submitter.flush();
                 return DecodeResult::Stopped;
             }
@@ -192,6 +230,7 @@ pub(crate) fn decode_and_send_paced(
                 audio,
                 start_position_ms,
             }) => {
+                log_song_summary(pacer, &summary_base, song_start, playlist_id, "next");
                 submitter.flush();
                 return DecodeResult::NewPlay {
                     video,
@@ -221,6 +260,13 @@ pub(crate) fn decode_and_send_paced(
             },
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
+                log_song_summary(
+                    pacer,
+                    &summary_base,
+                    song_start,
+                    playlist_id,
+                    "disconnected",
+                );
                 submitter.flush();
                 return DecodeResult::Shutdown;
             }
@@ -284,6 +330,18 @@ pub(crate) fn decode_and_send_paced(
             ServiceOutcome::Wait { until_100ns } => {
                 sleep_to_boundary(pacer, until_100ns);
             }
+            ServiceOutcome::Reanchored {
+                lag_slots,
+                until_100ns,
+            } => {
+                // Playback fell irrecoverably behind (decoder slower than the
+                // grid). The pacer re-anchored so the buffered frame is due at
+                // `until_100ns`; sleep to it and continue from that frame (#147
+                // lane 3, change 2). The pacer has no `playlist_id`, so the WARN
+                // lands here.
+                warn!(playlist_id, lag_slots, "paced: lag exceeded — re-anchored");
+                sleep_to_boundary(pacer, until_100ns);
+            }
             ServiceOutcome::Emitted | ServiceOutcome::Repeated | ServiceOutcome::Starved => {
                 pacer.tick_wall();
 
@@ -314,6 +372,7 @@ pub(crate) fn decode_and_send_paced(
                 // last frame has been shown; do not repeat past end of stream.
                 if eos && !pacer.has_pending() {
                     info!(playlist_id, "paced: video decode complete");
+                    log_song_summary(pacer, &summary_base, song_start, playlist_id, "ended");
                     submitter.flush();
                     return DecodeResult::Ended;
                 }
