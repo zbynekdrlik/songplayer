@@ -881,3 +881,7 @@ mod tests_pacing;
 #[cfg(test)]
 #[path = "routes_tests_burn.rs"]
 mod tests_burn;
+
+#[cfg(test)]
+#[path = "routes_tests_patch_metadata.rs"]
+mod tests_patch_metadata;
