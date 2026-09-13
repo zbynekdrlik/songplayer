@@ -5,12 +5,14 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 pub mod audio_grid;
+pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
 pub mod lock_state;
 mod lyrics_loader;
+pub mod ndi_burn;
 pub mod ndi_health;
 pub mod pacer;
 pub mod pipeline;
@@ -187,6 +189,12 @@ pub struct PlaybackEngine {
     /// heartbeat; the snapshot's `lock_state` / `lock_reason` are derived from
     /// the differenced counts. Engine-thread-local, not shared.
     lock_windows: HashMap<i64, crate::playback::lock_state::EventWindow>,
+    /// Runtime burn-id overlay toggle registry (#151). Cloned into `AppState`
+    /// so the HTTP handler reads/writes it synchronously (404/409/204); each
+    /// pipeline gets a shared `Arc<AtomicBool>` from it at spawn; read here when
+    /// building each health snapshot (`burn_on`). Defaults to an empty registry
+    /// until `set_ndi_burn_registry` shares the one `lib.rs::start` owns.
+    ndi_burn_registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -257,7 +265,21 @@ impl PlaybackEngine {
             )),
             genlock_pacing: false,
             lock_windows: HashMap::new(),
+            ndi_burn_registry: std::sync::Arc::new(
+                crate::playback::ndi_burn::NdiBurnRegistry::new(),
+            ),
         }
+    }
+
+    /// Inject the shared burn-id toggle registry (#151) that `lib.rs::start`
+    /// also hands to `AppState`, so the HTTP `POST /api/v1/ndi/burn` handler and
+    /// the pipeline threads share one registry. Must be called before pipelines
+    /// are spawned (new pipelines register into it at spawn).
+    pub fn set_ndi_burn_registry(
+        &mut self,
+        registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
+    ) {
+        self.ndi_burn_registry = registry;
     }
 
     /// Set the boundary-paced emission staging flag (#147), read from the DB
@@ -287,17 +309,22 @@ impl PlaybackEngine {
         let ndi_backend: Option<()> = None;
 
         let genlock_pacing = self.genlock_pacing;
+        let ndi_burn_registry = self.ndi_burn_registry.clone();
         self.pipelines.entry(playlist_id).or_insert_with(|| {
             info!(
                 playlist_id,
                 ndi_name, genlock_pacing, "creating playback pipeline"
             );
+            // #151: register this output's burn flag (default OFF, never
+            // persisted) and hand the shared Arc to the pipeline's submitter.
+            let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
             let pipeline = PlaybackPipeline::spawn(
                 ndi_name.to_string(),
                 ndi_backend,
                 event_tx,
                 playlist_id,
                 genlock_pacing,
+                burn_on,
             );
             PlaylistPipeline {
                 pipeline,

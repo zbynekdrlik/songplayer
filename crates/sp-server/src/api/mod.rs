@@ -92,6 +92,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/ndi/health",
             axum::routing::get(routes::get_ndi_health),
         )
+        .route(
+            "/api/v1/ndi/burn",
+            axum::routing::post(routes::set_ndi_burn),
+        )
         // Lyrics
         .route(
             "/api/v1/videos/{id}/lyrics",

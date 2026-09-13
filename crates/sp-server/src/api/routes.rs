@@ -721,6 +721,32 @@ pub async fn get_ndi_health(
     Json(state.ndi_health_registry.snapshots())
 }
 
+/// Body for `POST /api/v1/ndi/burn` (#151).
+#[derive(Debug, Deserialize)]
+pub struct SetBurnRequest {
+    /// The NDI output name (e.g. `"SP-fast"`) to toggle.
+    pub output: String,
+    /// Turn the burn-id QR overlay on (`true`) or off (`false`).
+    pub on: bool,
+}
+
+/// POST /api/v1/ndi/burn — toggle the runtime burn-id QR overlay for one NDI
+/// output (#151). `204` on success; `404` if the output is unknown; `409`
+/// ("pacing disabled") when the output exists but `genlock_pacing` is off (the
+/// burn is only painted on the paced path — the fleet's TEST mode runs with
+/// pacing on). Default OFF, never persisted.
+pub async fn set_ndi_burn(
+    State(state): State<AppState>,
+    Json(body): Json<SetBurnRequest>,
+) -> impl IntoResponse {
+    use crate::playback::ndi_burn::BurnSetResult;
+    match state.ndi_burn_registry.set(&body.output, body.on) {
+        BurnSetResult::Ok => StatusCode::NO_CONTENT.into_response(),
+        BurnSetResult::NotFound => StatusCode::NOT_FOUND.into_response(),
+        BurnSetResult::PacingDisabled => (StatusCode::CONFLICT, "pacing disabled").into_response(),
+    }
+}
+
 pub async fn delete_resolume_host(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -851,3 +877,7 @@ mod tests_clock;
 #[cfg(test)]
 #[path = "routes_tests_pacing.rs"]
 mod tests_pacing;
+
+#[cfg(test)]
+#[path = "routes_tests_burn.rs"]
+mod tests_burn;

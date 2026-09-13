@@ -63,6 +63,10 @@ pub struct PipelineHealthSnapshot {
     /// Human reason for `lock_state` (e.g. `"pacing disabled"`, `"no receiver"`,
     /// `"locked"`). Rendered verbatim by the dashboard / log.
     pub lock_reason: String,
+    /// Whether the runtime burn-id QR overlay (#151) is currently ON for this
+    /// output. Default `false`; toggled via `POST /api/v1/ndi/burn`; the fleet's
+    /// burn-leak guard sweeps this to confirm no QR was left on the LED wall.
+    pub burn_on: bool,
 }
 
 /// Boundary-paced emission telemetry (#147), surfaced on
@@ -375,6 +379,9 @@ impl crate::playback::PlaybackEngine {
             audio,
             lock_state,
             lock_reason: lock_reason.to_string(),
+            // #151: read the shared burn flag by output name so the health JSON
+            // reflects the current toggle state (false unless the API set it).
+            burn_on: self.ndi_burn_registry.is_on(&ndi_name),
         };
 
         // Transition logging: connection-count change, degradation, recovery.

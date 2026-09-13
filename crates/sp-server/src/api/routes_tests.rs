@@ -48,6 +48,7 @@ async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
     }
 }
 
@@ -347,6 +348,7 @@ async fn post_seek_returns_204_and_forwards_to_engine() {
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
     };
 
     let body = serde_json::json!({"position_ms": 45000});
@@ -859,6 +861,7 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         // #149 Lane 1: flag-OFF (pacing disabled) reports UNLOCKED by contract.
         lock_state: LockState::Unlocked,
         lock_reason: "pacing disabled".to_string(),
+        burn_on: false,
     });
     let resp = app(state)
         .oneshot(

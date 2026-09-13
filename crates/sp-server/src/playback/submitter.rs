@@ -15,6 +15,9 @@
 //!    Shutdown / NewPlay / Error / Pause). Flush itself is a sync point that
 //!    releases the previous frame, after which the buffer may be dropped.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat, VideoFrame};
 
@@ -60,6 +63,12 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// `SYNTHESIZE` (contract §4.3 — a real send is never SYNTHESIZE; the legacy
     /// SDK-clocked path keeps `None`). Default OFF.
     paced: bool,
+    /// Runtime burn-id QR overlay toggle (#151), shared with the API via
+    /// `NdiBurnRegistry`. Read fresh on every paced boundary emit
+    /// ([`submit_frame_at_boundary`](Self::submit_frame_at_boundary)) so a toggle
+    /// takes effect within one frame. Default OFF; never persisted; only the
+    /// paced path paints (the legacy `submit_nv12` path never reads it).
+    burn_on: Arc<AtomicBool>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -90,7 +99,22 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             last_submit_ts: None,
             wall,
             paced: false,
+            burn_on: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Install the shared burn-id overlay flag (#151) for this pipeline. Called
+    /// once at paced-pipeline start with the `Arc<AtomicBool>` the
+    /// `NdiBurnRegistry` also holds, so the runtime API toggle and this
+    /// submitter read the same atomic. The default flag from
+    /// [`new`](Self::new) is OFF, so a submitter that never gets one never burns.
+    pub fn set_burn_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.burn_on = flag;
+    }
+
+    /// Whether the burn-id overlay is currently ON for this pipeline (#151).
+    pub fn burn_active(&self) -> bool {
+        self.burn_on.load(Ordering::Relaxed)
     }
 
     /// Set the `genlock_pacing` flag (#147). Called once at pipeline-thread
@@ -250,8 +274,28 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         }
 
         // 2. Video async, stamped with the floored boundary.
+        //
+        // #151 burn-id overlay: paint the QR into OUR owned copy of the frame
+        // (the `to_vec` below), NEVER the decoder's / pacer's buffer — the pacer
+        // keeps its own clone for the starvation repeat, so mutating this copy is
+        // safe and re-derives a fresh payload every boundary. Paced path only;
+        // read the shared flag fresh so a toggle-off clears within one frame.
+        // `frame_id` = the pacing `seq` (== `frames_submitted_total`, bumped
+        // above); `gen_ts_ns` = the serviced boundary wall time in ns
+        // (`video_tc_100ns` is in 100-ns units).
+        let mut data = video_data.to_vec();
+        if self.burn_on.load(Ordering::Relaxed) {
+            crate::playback::burn_overlay::paint_burn(
+                &mut data,
+                width,
+                height,
+                stride,
+                self.frames_submitted_total as u32,
+                video_tc_100ns.saturating_mul(100),
+            );
+        }
         let frame = VideoFrame {
-            data: video_data.to_vec(),
+            data,
             width,
             height,
             stride,
@@ -646,6 +690,76 @@ mod tests {
         let sender = NdiSender::new_with_clocking(backend, "Rd", true, false).unwrap();
         let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30000, 1001);
         assert_eq!(sub.frame_rate_d(), 1001);
+    }
+
+    // ---- #151 burn-id overlay wiring ----
+
+    #[test]
+    fn burn_is_off_by_default() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "B0", true, false).unwrap();
+        let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30, 1);
+        assert!(
+            !sub.burn_active(),
+            "#151: burn overlay defaults OFF (never persisted)"
+        );
+    }
+
+    #[test]
+    fn set_burn_flag_shares_the_atomic_toggle() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "B1", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        let flag = Arc::new(AtomicBool::new(false));
+        sub.set_burn_flag(flag.clone());
+        assert!(!sub.burn_active());
+        flag.store(true, Ordering::Relaxed);
+        assert!(
+            sub.burn_active(),
+            "the API's shared flag drives burn_active within one frame"
+        );
+        flag.store(false, Ordering::Relaxed);
+        assert!(!sub.burn_active());
+    }
+
+    #[test]
+    fn paced_submit_with_burn_on_still_emits_one_video_frame() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "B2", false, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        sub.set_burn_flag(Arc::new(AtomicBool::new(true)));
+        // 1080p NV12 so the burn geometry fits; the paint runs on our owned copy.
+        let (w, h, stride) = (1920u32, 1080u32, 1920u32);
+        let data = vec![0u8; (stride * h * 3 / 2) as usize];
+        sub.submit_frame_at_boundary(w, h, stride, &data, &[], 3_333_300, 3_333_300);
+        let async_calls: Vec<_> = backend
+            .calls()
+            .into_iter()
+            .filter(|c| c.starts_with("send_video_async"))
+            .collect();
+        assert_eq!(
+            async_calls.len(),
+            1,
+            "a burn-on paced submit must still emit exactly one video frame"
+        );
+        assert_eq!(sub.frames_submitted_total(), 1);
+    }
+
+    /// #151 structural guard: the burn overlay is paced-path ONLY. The file that
+    /// hosts the legacy SDK-clocked `decode_and_send` loop (`pipeline.rs`) must
+    /// never reference the overlay — a QR must never reach a non-genlock output.
+    /// Static `include_str!` guard; fires red if the overlay leaks into it.
+    #[test]
+    fn legacy_pipeline_path_never_references_burn_overlay() {
+        let src = include_str!("pipeline.rs");
+        assert!(
+            !src.contains("burn_overlay"),
+            "the legacy pipeline path must never reference burn_overlay"
+        );
+        assert!(
+            !src.contains("paint_burn"),
+            "the legacy pipeline path must never call paint_burn"
+        );
     }
 }
 

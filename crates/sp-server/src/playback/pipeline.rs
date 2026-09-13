@@ -126,6 +126,7 @@ impl PlaybackPipeline {
         event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
         playlist_id: i64,
         genlock_pacing: bool,
+        burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -140,6 +141,7 @@ impl PlaybackPipeline {
                     event_tx,
                     playlist_id,
                     genlock_pacing,
+                    burn_on,
                 );
             })
             .expect("failed to spawn pipeline thread");
@@ -162,6 +164,7 @@ impl PlaybackPipeline {
         event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
         playlist_id: i64,
         _genlock_pacing: bool,
+        _burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -231,6 +234,7 @@ fn run_loop(
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
     genlock_pacing: bool,
+    burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     info!(
         ndi_name,
@@ -243,6 +247,7 @@ fn run_loop(
         event_tx,
         playlist_id,
         genlock_pacing,
+        burn_on,
     );
     info!(playlist_id, "pipeline thread exited");
 }
@@ -312,6 +317,7 @@ fn run_loop_windows(
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
     genlock_pacing: bool,
+    burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     // 1 ms system timer for the boundary-paced sleep granularity (#147).
     if genlock_pacing {
@@ -359,6 +365,9 @@ fn run_loop_windows(
     // path updates it per-file in `decode_and_send`.
     let mut submitter = FrameSubmitter::new(sender, sp_core::genlock::GENLOCK_GRID_FPS as i32, 1);
     submitter.set_paced(genlock_pacing); // paced: stamp standby frames on-grid (#147)
+    // #151: install the shared burn flag so the runtime API toggle drives the
+    // paced-emit overlay. Default OFF; only the paced path ever paints.
+    submitter.set_burn_flag(burn_on);
     submitter.send_black_bgra(1920, 1080);
 
     // The paced scheduler persists across songs (counters accumulate) and

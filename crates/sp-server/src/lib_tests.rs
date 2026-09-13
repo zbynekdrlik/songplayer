@@ -71,6 +71,7 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
+            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
         };
 
         // Verify the router can be built.
@@ -350,6 +351,7 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
+            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
         };
 
         // Verify clone works.

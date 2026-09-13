@@ -46,3 +46,14 @@ paths:
   `pacing.iter_p99_us` (decode+submit cost; `>= interval` = decoder can't keep
   up) are the honest signals; `jitter_p99_us` only mirrored the lag.
   `late_frames` counts an emit > 2 ms past its boundary.
+- Burn-id QR overlay (#151, run_id **911014**): the paced emit paints a QR of
+  `P{run_id}.{frame_id}.{gen_ts_ns}.{crc32}` bottom-right (side `0.28·h`, margin
+  `40/1080·h` — camera-box `payload.rs` + `burn-geom.hpp`, ported into
+  `sp_core::genlock::burn`; luma-only 16/235, chroma neutral 128) so the fleet's
+  `recording-verdict` proves contiguity for SP-originated frames.
+- The burn is **default OFF, NEVER persisted, paced-path ONLY**: toggled per
+  output via `POST /api/v1/ndi/burn {output,on}` (204 / 404 / 409 "pacing
+  disabled"), read fresh every boundary through a shared `Arc<AtomicBool>`
+  (`NdiBurnRegistry`), surfaced as `burn_on` in `/api/v1/ndi/health`. A QR must
+  never reach the LED wall in production — a structural guard keeps the legacy
+  `decode_and_send` path from ever referencing the overlay.

@@ -53,6 +53,7 @@ async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
     };
     (state, tmp)
 }

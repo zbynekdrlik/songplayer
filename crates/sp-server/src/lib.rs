@@ -63,6 +63,10 @@ pub struct AppState {
     pub resolume_registry: Arc<resolume::ResolumeRegistry>,
     /// NDI health registry exposing per-pipeline health snapshots.
     pub ndi_health_registry: Arc<playback::ndi_health::NdiHealthRegistry>,
+    /// Runtime burn-id overlay toggle registry (#151). `POST /api/v1/ndi/burn`
+    /// reads/writes it synchronously; the playback engine + pipeline threads
+    /// share the same registry (default OFF, never persisted).
+    pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -239,6 +243,9 @@ pub async fn start(
     // 3b. NDI health registry — constructed before AppState so both the engine
     // (writer) and the AppState (reader) can hold an Arc to the same instance.
     let ndi_health_registry = Arc::new(playback::ndi_health::NdiHealthRegistry::new());
+    // #151: one burn-id toggle registry shared by AppState (API) + the engine
+    // (pipeline spawn + health). Default OFF, never persisted.
+    let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
 
     // 3b'. dantesync clock health (#146). Shared handle: the 1 Hz poller writes
     // it, the playback engine reads it into every NDI health snapshot. Never
@@ -291,6 +298,7 @@ pub async fn start(
         presenter_client: presenter_client.clone(),
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
+        ndi_burn_registry: ndi_burn_registry.clone(),
     };
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
@@ -662,6 +670,9 @@ pub async fn start(
         "genlock boundary-paced emission staging flag"
     );
     engine.set_genlock_pacing(genlock_pacing);
+    // #151: share the burn-id toggle registry BEFORE pipelines spawn (each
+    // pipeline registers its output into it at spawn).
+    engine.set_ndi_burn_registry(ndi_burn_registry.clone());
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)
