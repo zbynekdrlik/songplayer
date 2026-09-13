@@ -154,7 +154,7 @@ When Claude refuses via CLIProxyAPI:
 - Tune the prompt. A simple neutral prompt ("translate these lines to Slovak,
   preserve line numbering") works. NEVER mention "song lyrics", "worship",
   "church", "copyright", "karaoke" — these trip the content-policy classifier.
-- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-5` since
+- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-fable-5-1` since
   2026-09-13, #145 — the newest flagship the upgraded CLIProxyAPI **7.3.1**
   on win-resolume routes). The proxy binary was upgraded 6.9.27 → 7.3.1
   because the old build's model registry predated the Claude-5 ids and

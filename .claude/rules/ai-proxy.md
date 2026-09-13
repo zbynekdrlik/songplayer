@@ -38,4 +38,4 @@ absence. `auth-dir` / `host` / `port` / `request-retry` / `claude-api-key` uncha
   `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` on win-resolume before changing
   it. **Never** probe an unlisted id — a `404` from Anthropic parks the OAuth auth in a
   cooldown until the proxy restarts (#144).
-- Current: `claude-opus-5` (CLIProxyAPI 7.3.1, #145). Pinned by the `config.rs` test.
+- Current: `claude-fable-5-1` (CLIProxyAPI 7.3.1, #145). Pinned by the `config.rs` test.

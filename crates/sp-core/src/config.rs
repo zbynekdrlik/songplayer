@@ -26,7 +26,7 @@ pub const SETTING_AI_API_URL: &str = "ai_api_url";
 pub const SETTING_AI_MODEL: &str = "ai_model";
 pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
 /// Claude model used for translation / text cleanup through CLIProxyAPI.
-/// `claude-opus-5` is the newest Claude flagship the CLIProxyAPI 7.3.1 build
+/// `claude-fable-5-1` is the newest Claude flagship the CLIProxyAPI 7.3.1 build
 /// on win-resolume routes (#145, proxy upgraded 2026-09-13) — verified live:
 /// it is listed by `/v1/models` and a `/v1/chat/completions` call returns
 /// HTTP 200 on the existing OAuth login. Supersedes the `claude-opus-4-6`
@@ -37,7 +37,7 @@ pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
 /// auth). Probe a candidate with
 /// `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` before changing
 /// this — only ids the proxy's `/v1/models` lists will route.
-pub const DEFAULT_AI_MODEL: &str = "claude-opus-5";
+pub const DEFAULT_AI_MODEL: &str = "claude-fable-5-1";
 
 #[cfg(test)]
 mod tests {
@@ -47,13 +47,13 @@ mod tests {
     /// flagship that the upgraded CLIProxyAPI actually routes (#145) — never
     /// the `claude-opus-4-6` stop-gap the #144 workaround pinned while the
     /// installed proxy build didn't know the newer ids, and never the long-
-    /// retired `claude-opus-4-20250514`. `claude-opus-5` was verified live on
+    /// retired `claude-opus-4-20250514`. `claude-fable-5-1` was verified live on
     /// win-resolume against CLIProxyAPI 7.3.1 (`/v1/models` lists it and a
     /// `/v1/chat/completions` call returns HTTP 200 on the existing OAuth
     /// login).
     #[test]
     fn default_ai_model_is_current_flagship() {
-        assert_eq!(DEFAULT_AI_MODEL, "claude-opus-5");
+        assert_eq!(DEFAULT_AI_MODEL, "claude-fable-5-1");
         assert_ne!(
             DEFAULT_AI_MODEL, "claude-opus-4-6",
             "must not remain pinned to the #144 opus-4-6 stop-gap"

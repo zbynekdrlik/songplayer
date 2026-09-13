@@ -36,7 +36,7 @@ binary swapped in ahead of a SongPlayer deploy must accept the config that
 
 ```powershell
 python C:\ProgramData\SongPlayer\proxy_probe.py                 # lists Claude ids + tries the default candidates
-python C:\ProgramData\SongPlayer\proxy_probe.py claude-opus-5   # probe a specific id
+python C:\ProgramData\SongPlayer\proxy_probe.py claude-fable-5-1   # probe a specific id
 ```
 
 Only ids the proxy's `GET /v1/models` lists will route — an unknown id returns
