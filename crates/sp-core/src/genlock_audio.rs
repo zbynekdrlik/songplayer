@@ -284,7 +284,7 @@ impl AudioPll {
 
         let engaged = self
             .far_since_100ns
-            .map_or(false, |s| now_100ns - s > AUDIO_PLL_UPDATE_100NS);
+            .is_some_and(|s| now_100ns - s > AUDIO_PLL_UPDATE_100NS);
         let bias_target = if engaged {
             AUDIO_PLL_BIAS_PPM * (post_take_level - target).signum() as f64
         } else if near {
