@@ -10,40 +10,126 @@
 //! with an explicit flush, in addition to a best-effort `tracing::error!`, so
 //! the next occurrence leaves a diagnosable record.
 
+use std::backtrace::Backtrace;
+use std::io::Write;
 use std::panic::PanicHookInfo;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
+
+/// Crate version, embedded at compile time.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Short git sha, embedded by `build.rs` (`SP_GIT_SHA`). Falls back to
+/// `"unknown"` when the build script could not resolve one (e.g. git absent),
+/// via `option_env!` so the module compiles with or without the build script.
+const GIT_SHA: &str = match option_env!("SP_GIT_SHA") {
+    Some(s) => s,
+    None => "unknown",
+};
+
+/// Extract the human-readable message from a panic payload (`&str` and
+/// `String` payloads, the two the standard `panic!`/`assert!`/index-out-of-
+/// bounds machinery produces).
+fn panic_message(info: &PanicHookInfo<'_>) -> String {
+    let payload = info.payload();
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "<non-string panic payload>".to_string()
+    }
+}
 
 /// Format one crash record from already-extracted fields. Pure — no clock, no
 /// I/O, no real panic — so it is directly unit-testable.
 fn format_panic_record(
-    _timestamp: &str,
-    _thread: &str,
-    _location: Option<&str>,
-    _message: &str,
-    _backtrace: &str,
+    timestamp: &str,
+    thread: &str,
+    location: Option<&str>,
+    message: &str,
+    backtrace: &str,
 ) -> String {
-    // RED stub (#156): not implemented yet — returns nothing so the field
-    // assertions fail before the GREEN implementation lands.
-    String::new()
+    format!(
+        "==== PANIC {timestamp} ====\n\
+         version: {VERSION} ({GIT_SHA})\n\
+         thread: {thread}\n\
+         location: {loc}\n\
+         message: {message}\n\
+         backtrace:\n{backtrace}\n\
+         ================================\n",
+        loc = location.unwrap_or("<unknown>"),
+    )
 }
 
 /// Append `record` to the crash file (creating it if needed) and flush so the
-/// bytes reach the OS before the caller aborts.
-fn write_crash_record(_path: &Path, _record: &str) -> std::io::Result<()> {
-    // RED stub (#156): does not write, so the read-back assertion fails.
-    Ok(())
+/// bytes reach the OS before the caller aborts. Append mode preserves earlier
+/// crash records across restarts, mirroring the rolling log's never-truncate
+/// discipline.
+fn write_crash_record(path: &Path, record: &str) -> std::io::Result<()> {
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    f.write_all(record.as_bytes())?;
+    f.flush()
 }
 
-/// The body run for every panic: build the record, write it durably, and emit
-/// a best-effort tracing error.
-fn handle_panic(_info: &PanicHookInfo<'_>, _crash_log_path: &Path) {
-    // RED stub (#156): captures nothing, so the crash file is never written.
+/// The body run for every panic: build the record, write it durably to
+/// `crash_log_path`, and emit a best-effort tracing error.
+fn handle_panic(info: &PanicHookInfo<'_>, crash_log_path: &Path) {
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let thread = std::thread::current()
+        .name()
+        .unwrap_or("<unnamed>")
+        .to_string();
+    let location = info
+        .location()
+        .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
+    let message = panic_message(info);
+    let backtrace = Backtrace::force_capture().to_string();
+    let record = format_panic_record(
+        &timestamp,
+        &thread,
+        location.as_deref(),
+        &message,
+        &backtrace,
+    );
+
+    // 1. Durable synchronous write — survives `panic = "abort"`, unlike the
+    //    non_blocking tracing writer whose flush-on-Drop the abort skips.
+    let _ = write_crash_record(crash_log_path, &record);
+
+    // 2. Best-effort structured tracing — the record operators watching the
+    //    main log will see whenever the writer does drain (unwind/debug, or a
+    //    lucky flush before abort). Greppable via `target=panic`.
+    let log_line = format!(
+        "SongPlayer panic: thread={thread} location={} message={message} (crash record: {})",
+        location.as_deref().unwrap_or("<unknown>"),
+        crash_log_path.display(),
+    );
+    tracing::error!(target: "panic", "{}", log_line);
 }
 
 /// Install the process-global panic hook (idempotent). Records every panic to
-/// `crash_log_path` before the process aborts.
-pub fn install_panic_hook(_crash_log_path: PathBuf) {
-    // RED stub (#156): installs nothing.
+/// `crash_log_path` before the process aborts, chaining the previous hook so
+/// the default stderr output is preserved. Emits a one-time startup INFO line
+/// carrying the version + git sha.
+pub fn install_panic_hook(crash_log_path: PathBuf) {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            handle_panic(info, &crash_log_path);
+            prev(info);
+        }));
+        tracing::info!(
+            target: "panic",
+            "SongPlayer v{} ({}) — panic hook installed",
+            VERSION,
+            GIT_SHA
+        );
+    });
 }
 
 #[cfg(test)]
@@ -63,8 +149,14 @@ mod tests {
             "index out of bounds: the len is 0 but the index is 18446744073709551615",
             "0: some::frame\n1: another::frame",
         );
-        assert!(record.contains("ndi-pipeline-7"), "thread name present: {record}");
-        assert!(record.contains("pacer.rs:789:9"), "location present: {record}");
+        assert!(
+            record.contains("ndi-pipeline-7"),
+            "thread name present: {record}"
+        );
+        assert!(
+            record.contains("pacer.rs:789:9"),
+            "location present: {record}"
+        );
         assert!(
             record.contains("index out of bounds"),
             "message present: {record}"
