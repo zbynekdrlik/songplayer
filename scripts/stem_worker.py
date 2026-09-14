@@ -178,7 +178,14 @@ def _free_vram(sep):
 def _write_stem_48k_stereo(src_path, out_path):
     """Load a separated stem, resample to 48 kHz STEREO, peak-clamp to [-1, 1],
     and write a FLAC. Keeps stereo (mono=False); mono sources are duplicated to
-    two channels so every stem matches the mix's channel layout."""
+    two channels so every stem matches the mix's channel layout.
+
+    ATOMIC (#14): write to a sibling temp file first, then `os.replace` it into
+    place. `os.replace` is atomic on the same filesystem (POSIX + Windows), so a
+    killed/timed-out subprocess (`kill_on_drop` on a server restart) never leaves
+    a HALF-WRITTEN FLAC at the FINAL sidecar path — the live playback reader keys
+    on the sidecar's existence, and a torn file there would corrupt the wall's
+    NDI audio. A crash leaves only the discardable `.tmp` beside it."""
     import librosa
     import numpy as np
     import soundfile as sf
@@ -194,7 +201,15 @@ def _write_stem_48k_stereo(src_path, out_path):
         y = y[:2, :]  # keep the first two channels
     # (n, ch) for soundfile; clamp to avoid FLAC integer clipping.
     out = np.clip(y.T, -1.0, 1.0)
-    sf.write(out_path, out, OUTPUT_SAMPLE_RATE, subtype="PCM_24")
+    tmp_path = f"{out_path}.tmp"
+    try:
+        sf.write(tmp_path, out, OUTPUT_SAMPLE_RATE, subtype="PCM_24")
+        os.replace(tmp_path, out_path)  # atomic on the same filesystem
+    finally:
+        # If os.replace never ran (write failed), don't leave the temp behind.
+        if os.path.exists(tmp_path):
+            with contextlib.suppress(OSError):
+                os.remove(tmp_path)
 
 
 def cmd_separate(args):

@@ -525,7 +525,7 @@ pub async fn start(
                     stem_obs_state,
                 );
                 tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
-                info!("stem worker started");
+                // (StemWorker::run logs "stem worker started" once it is live.)
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");

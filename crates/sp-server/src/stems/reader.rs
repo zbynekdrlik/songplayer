@@ -82,22 +82,54 @@ pub fn open_audio_stream(
             Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
         }
         AudioSource::Stems => {
-            let vocals = SymphoniaAudioReader::open(&vpath)?;
-            let instrumental = SymphoniaAudioReader::open(&ipath)?;
-            let (vg, ig) = gain_atomics_for(mode, control);
-            info!(
-                ?mode,
-                vocals = %vpath.display(),
-                "karaoke: mixing stems"
-            );
-            Ok(Box::new(KaraokeAudioReader::new(
-                Box::new(vocals),
-                Box::new(instrumental),
-                vg,
-                ig,
-            )?))
+            // Defence in depth: a stem may EXIST yet fail to open — a torn file
+            // from a killed separator (the worker now writes atomically, so this
+            // is the residual case), a stem deleted between the exists() check
+            // above and here, or a rate/channel disagreement in
+            // KaraokeAudioReader::new. Any such failure degrades to FullMix (the
+            // real mix always plays) rather than erroring the whole pipeline and
+            // taking the wall dark for that song.
+            match build_stem_reader(&vpath, &ipath, mode, control) {
+                Ok(reader) => {
+                    info!(
+                        ?mode,
+                        vocals = %vpath.display(),
+                        "karaoke: mixing stems"
+                    );
+                    Ok(reader)
+                }
+                Err(e) => {
+                    warn!(
+                        audio = %audio_path.display(),
+                        ?mode,
+                        %e,
+                        "karaoke: stems present but unreadable — falling back to FullMix"
+                    );
+                    Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
+                }
+            }
         }
     }
+}
+
+/// Open both stem readers and wrap them in a [`KaraokeAudioReader`]. Any error
+/// (open failure, rate/channel mismatch) is returned so [`open_audio_stream`]
+/// can fall back to the full mix instead of failing the pipeline.
+fn build_stem_reader(
+    vpath: &Path,
+    ipath: &Path,
+    mode: KaraokeMode,
+    control: &KaraokeControl,
+) -> Result<Box<dyn AudioStream>, DecoderError> {
+    let vocals = SymphoniaAudioReader::open(vpath)?;
+    let instrumental = SymphoniaAudioReader::open(ipath)?;
+    let (vg, ig) = gain_atomics_for(mode, control);
+    Ok(Box::new(KaraokeAudioReader::new(
+        Box::new(vocals),
+        Box::new(instrumental),
+        vg,
+        ig,
+    )?))
 }
 
 #[cfg(test)]
@@ -168,5 +200,67 @@ mod tests {
         assert_eq!((read(&vg), read(&ig)), (1.0, 0.0));
         let (vg2, ig2) = gain_atomics_for(KaraokeMode::InstrumentalOnly, &ctrl);
         assert_eq!((read(&vg2), read(&ig2)), (0.0, 1.0));
+    }
+
+    // ── open_audio_stream I/O behaviour (real decodable fixture) ──────────────
+    // A real 48 kHz stereo FLAC lives in sp-decoder's test fixtures; reuse it as
+    // both the mix and (copied) the stems so these tests exercise the actual
+    // SymphoniaAudioReader open + KaraokeAudioReader path on Linux CI.
+    const FIXTURE_FLAC: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sp-decoder/tests/fixtures/silent_3s.flac"
+    );
+
+    /// Both stems are real, decodable FLACs → the stem-mixing reader is built and
+    /// reports the shared 48 kHz stereo format.
+    #[test]
+    fn stems_present_and_readable_builds_karaoke_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let mix = dir.path().join("Song_Artist_id_normalized_audio.flac");
+        std::fs::copy(FIXTURE_FLAC, &mix).unwrap();
+        let (vpath, ipath) = crate::stems::stem_paths(&mix);
+        std::fs::copy(FIXTURE_FLAC, &vpath).unwrap();
+        std::fs::copy(FIXTURE_FLAC, &ipath).unwrap();
+
+        let ctrl = KaraokeControl::new_for_test(KaraokeMode::KaraokeLow, 0.3);
+        let stream = open_audio_stream(&mix, &ctrl).expect("stems should open");
+        assert_eq!(stream.sample_rate(), 48_000);
+        assert_eq!(stream.channels(), 2);
+    }
+
+    /// Stems EXIST but are corrupt (garbage bytes, not valid FLAC). The reader
+    /// must NOT error the pipeline — it falls back to the real mix so the wall
+    /// keeps playing. This is the #14 review 🟡 defence-in-depth guard.
+    #[test]
+    fn corrupt_stems_fall_back_to_full_mix() {
+        let dir = tempfile::tempdir().unwrap();
+        let mix = dir.path().join("Song_Artist_id_normalized_audio.flac");
+        std::fs::copy(FIXTURE_FLAC, &mix).unwrap();
+        let (vpath, ipath) = crate::stems::stem_paths(&mix);
+        // A torn/half-written file: exists (so choose_source picks Stems) but is
+        // not a decodable FLAC.
+        std::fs::write(&vpath, b"not a flac, torn write").unwrap();
+        std::fs::write(&ipath, b"not a flac, torn write").unwrap();
+
+        let ctrl = KaraokeControl::new_for_test(KaraokeMode::InstrumentalOnly, 0.3);
+        // Must succeed (fell back to the mix), NOT return Err.
+        let stream = open_audio_stream(&mix, &ctrl).expect("must fall back to FullMix, not error");
+        assert_eq!(stream.sample_rate(), 48_000);
+        assert_eq!(stream.channels(), 2);
+    }
+
+    /// A missing stem (only one of the pair present) also degrades to FullMix via
+    /// `choose_source`, and `open_audio_stream` opens the real mix.
+    #[test]
+    fn one_missing_stem_opens_full_mix() {
+        let dir = tempfile::tempdir().unwrap();
+        let mix = dir.path().join("Song_Artist_id_normalized_audio.flac");
+        std::fs::copy(FIXTURE_FLAC, &mix).unwrap();
+        let (vpath, _ipath) = crate::stems::stem_paths(&mix);
+        std::fs::copy(FIXTURE_FLAC, &vpath).unwrap(); // instrumental absent
+
+        let ctrl = KaraokeControl::new_for_test(KaraokeMode::KaraokeLow, 0.3);
+        let stream = open_audio_stream(&mix, &ctrl).expect("full mix should open");
+        assert_eq!(stream.sample_rate(), 48_000);
     }
 }

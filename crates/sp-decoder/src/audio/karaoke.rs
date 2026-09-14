@@ -164,7 +164,11 @@ impl AudioStream for KaraokeAudioReader {
             (true, false) => self.ibuf.len(),
             (true, true) => return Ok(None), // both drained and at EOS
         };
-        // Emit whole sample-frames only.
+        // Emit whole sample-frames only. Both buffers only ever grow by whole
+        // interleaved packets and shrink by the same `n` (a multiple of `ch`), so
+        // a buffer never carries a partial frame across calls — `n == 0` here
+        // therefore means genuinely nothing is available yet, never a stranded
+        // sub-frame remainder, so returning `Ok(None)` is a true end-of-input.
         let n = (avail / ch) * ch;
         if n == 0 {
             return Ok(None);

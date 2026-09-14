@@ -1,6 +1,6 @@
 //! Karaoke stem-separation queries (#14) — split out of `models.rs` to keep
-//! it under the 1000-line airuleset cap. Re-exported via
-//! `pub use models_stems::*;` so call sites use `crate::db::models::…`.
+//! it under the 1000-line airuleset cap. Call sites use the module path
+//! directly (`crate::db::models_stems::…`).
 //!
 //! Mirrors the V22 lyrics retry-backoff bookkeeping: the stem worker selects the
 //! next normalized song that has no stems yet (or whose last attempt failed and
