@@ -68,6 +68,11 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                         // refresh (the child captured them by value). Folding
                         // song+artist into the key recreates just the corrected
                         // row when its stored metadata changes (#136 T1).
+                        // Safe because `videos` is only ever REPLACED by
+                        // `load()` (mount + post-save, after `editing_id` is
+                        // cleared), never mutated mid-edit: if live/WebSocket
+                        // refresh is ever added here, revisit — a key change
+                        // while a row is being typed into would drop focus.
                         key=|v| (v.id, v.song.clone(), v.artist.clone())
                         children=move |video| {
                             let video_id = video.id;
