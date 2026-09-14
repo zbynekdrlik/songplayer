@@ -63,7 +63,7 @@ jobs:
           path: camera-box
 
       - name: Runner bash toolchain check
-        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}'
+        shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -eo pipefail {0}'
         run: |
           set -euo pipefail
           echo "bash: ${BASH_VERSION:-unknown}"
@@ -252,7 +252,7 @@ jobs:
           Write-Host "Dumped newest OBS log '$($newest.Name)' (last 4000 lines, $lines written) -> $dest"
 
       - name: CG-chain receiver verdict (bash) - THIS is the job's pass/fail
-        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}'
+        shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -eo pipefail {0}'
         env:
           HOPS: ${{ inputs.hops }}
           SKEW_BOUND_MS: ${{ inputs.skew_bound_ms }}
@@ -281,7 +281,7 @@ jobs:
 
       - name: Write verdict + health tables to job summary
         if: always()
-        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail {0}'
+        shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -eo pipefail {0}'
         run: |
           set -uo pipefail
           RT="${RUNNER_TEMP//\\//}"
