@@ -968,7 +968,7 @@ pub async fn get_lyrics_status(State(state): State<AppState>) -> impl IntoRespon
 
 #[cfg(test)]
 #[path = "routes_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "routes_tests_reference.rs"]
