@@ -640,7 +640,7 @@ jobs:
           #   subprocess/file glue and is_available/TIMEOUT_SECS are std::fs/const
           #   trivia around it -- integration-tested against the real tool, like
           #   the reprocess/ + downloader/ exclusions.
-          # orchestrator.rs:495 asr_transcribe: the RealReferenceStageBackend ASR
+          # orchestrator.rs asr_transcribe (line-agnostic — the line shifted 495→499 and the pin missed, shard 3/8 on run 34784800346): the RealReferenceStageBackend ASR
           #   call hits the live AssemblyAI HTTP API; network-bound, no local unit
           #   test (same class as g35t_client's #[mutants::skip] HTTP helpers).
           # === TIMEOUTs (non-terminating under mutation; not catchable by a
@@ -718,7 +718,7 @@ jobs:
             --exclude-re 'sp-server/src/playback/pipeline_paced' \
             --exclude-re 'pipeline\.rs:239:5: replace run_loop with \(\)' \
             --exclude-re 'sp-server/src/lyrics/mtl_aligner' \
-            --exclude-re 'orchestrator\.rs:495:9' \
+            --exclude-re 'orchestrator\.rs:[0-9]+:[0-9]+: replace <impl ReferenceStageBackend for RealReferenceStageBackend>::asr_transcribe' \
             --exclude-re 'pacer\.rs:94:' \
             --exclude-re 'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)' \
             --exclude-re 'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push' \
