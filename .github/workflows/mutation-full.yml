@@ -1,0 +1,118 @@
+name: Mutation (full tree, on-demand)
+
+# On-demand full-tree mutation sweep — NOT scheduled / push / pull_request. The
+# user develops nonstop, so a multi-hour heavy job must never collide with active
+# dev for runners (mutation-testing.md → "Full-tree catch-up — ON-DEMAND, never
+# cron"). Fired via the /mutation-sweep skill when there is capacity. Surviving
+# mutants across the whole tree become ONE tracked `test-quality` issue per run;
+# the job fails only on a genuine tooling error, never on survivors (its contract
+# is "ran + filed"). The diff-scoped ≤20-min PR gate lives in ci.yml (#123).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: mutation-full-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: Full-tree mutants (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['0/8', '1/8', '2/8', '3/8', '4/8', '5/8', '6/8', '7/8']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mutants-full-${{ strategy.job-index }}
+      - name: Install cargo-mutants + cargo-nextest (prebuilt binaries)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0,cargo-nextest@0.9.140
+      - name: Full-tree mutation sweep (shard ${{ matrix.shard }})
+        run: |
+          set +e
+          cargo mutants --shard ${{ matrix.shard }} --baseline=skip \
+            --test-tool=nextest --jobs 2 --timeout 300 --build-timeout 600 \
+            --output mutants-out
+          code=$?
+          set -e
+          echo "cargo mutants exit code: $code"
+          # 0 = all caught, 2 = survivors, 3 = timeouts — all EXPECTED for a full
+          # sweep (survivors are filed as an issue, not failed). 1 = usage error,
+          # 4 = the unmutated tree fails to build/test — genuine tooling errors
+          # that must fail the job.
+          case "$code" in
+            0 | 2 | 3) echo "sweep completed (survivors, if any, filed by the report job)" ;;
+            *) echo "TOOLING FAILURE (exit $code) — failing the job"; exit "$code" ;;
+          esac
+      - name: Upload shard survivors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-full-shard-${{ strategy.job-index }}
+          path: mutants-out/
+          if-no-files-found: warn
+
+  report:
+    name: File survivors issue
+    needs: [sweep]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all shard reports
+        uses: actions/download-artifact@v4
+        with:
+          path: shard-reports
+      - name: Aggregate survivors and file one test-quality issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A shard that hit a tooling error (exit 1/4) fails and its survivors
+          # list is unreliable — do not file a false "0 survivors" from a partial
+          # run; surface the failure and go red instead.
+          if [ "${{ needs.sweep.result }}" != "success" ]; then
+            echo "One or more sweep shards hit a tooling error (result: ${{ needs.sweep.result }})."
+            echo "Not filing a survivors issue from a partial run."
+            exit 1
+          fi
+          # Collect missed + timeout mutants across every shard.
+          : > survivors.txt
+          find shard-reports -name missed.txt -exec cat {} + >> survivors.txt 2>/dev/null || true
+          find shard-reports -name timeout.txt -exec cat {} + >> survivors.txt 2>/dev/null || true
+          sed '/^[[:space:]]*$/d' survivors.txt | sort -u > survivors.clean || true
+          count=$(wc -l < survivors.clean | tr -d ' ')
+          echo "total surviving/timed-out mutants across all shards: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "No surviving mutants — nothing to file."
+            exit 0
+          fi
+          # Ensure the label exists (idempotent — create needs issues:write).
+          gh label create test-quality \
+            --color FBCA04 \
+            --description "Surviving mutants from the on-demand full-tree mutation sweep" \
+            2>/dev/null || true
+          {
+            echo "The on-demand full-tree mutation sweep (\`mutation-full.yml\`, run ${{ github.run_id }}) found $count surviving / timed-out mutant(s). Each is a behaviour that no test verifies — add assertions that kill it, or record a documented equivalent in \`.cargo/mutants.toml\`."
+            echo
+            echo "Sweep run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '```'
+            cat survivors.clean
+            echo '```'
+          } > body.md
+          gh issue create \
+            --title "Mutation sweep survivors ($count) — run ${{ github.run_id }}" \
+            --label test-quality \
+            --body-file body.md

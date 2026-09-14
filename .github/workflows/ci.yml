@@ -467,261 +467,54 @@ jobs:
 
   mutation-testing:
     name: Mutation Testing
+    # PR-specific gate: runs on the pull_request event only (#124). Diff-scoped
+    # and HARD-bounded to 20 min per mutation-testing.md (#123). The cargo
+    # profile (`mutants`, debuginfo off), the nextest wiring and the documented
+    # STRUCTURAL + provably-equivalent/TIMEOUT mutant exclusions live in
+    # .cargo/mutants.toml — shared with the on-demand mutation-full.yml sweep.
+    # `needs: [lint]` was dropped with the #124 de-dup: lint is now push-only so
+    # it is skipped on the pull_request event, and `--baseline=skip` means this
+    # gate needs no pre-proven green baseline anyway.
     if: github.event_name == 'pull_request'
-    needs: [lint]
     runs-on: ubuntu-latest
-    timeout-minutes: 240
-    # Sharded across 4 parallel jobs. Each job runs ~1/4 of the mutants,
-    # so wall time on a large-diff PR drops from ~4h on a single runner
-    # (which was hitting GitHub's runner kill at exactly 4h01m and never
-    # uploading logs) to under 2h per shard. cargo-mutants `--shard k/n`
-    # is 0-indexed (k must be < n), randomises within each shard, and
-    # assignment is deterministic so a surviving mutant surfaces in
-    # exactly one shard's failure.
-    strategy:
-      fail-fast: false
-      matrix:
-        # 8 shards instead of 4 — large-diff PRs (#82's #78 lyrics work
-        # added 17K lines / 24 files / ~600 mutants) had shard 2/4 hitting
-        # GitHub's runner-shutdown signal at ~2h consistently. 8 shards
-        # halves per-shard wall time to <1h, well under the runner cap.
-        shard: ['0/8', '1/8', '2/8', '3/8', '4/8', '5/8', '6/8', '7/8']
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants + cargo-nextest (prebuilt binaries)
+        # Prebuilt release binaries instead of `cargo install … --locked`
+        # (which recompiled cargo-mutants from source every run).
+        uses: taiki-e/install-action@v2
         with:
-          # Cache key per shard — workspace contents identical, but the
-          # cargo-mutants build artifact directory is per-shard so a
-          # shared key would deadlock concurrent shards on cache write.
-          key: mutants-shard-${{ strategy.job-index }}
-      - name: Install cargo-mutants
-        run: cargo install cargo-mutants --version 27.1.0 --locked
-      # GitHub-hosted ubuntu-latest has 16GB RAM and no swap. cargo-mutants
-      # compiling rustc + linking sqlx/wiremock/tokio/reqwest for each mutant
-      # pushes peak memory past 16GB, triggering runner OOM-kill that
-      # surfaces as `The runner has received a shutdown signal.` and
-      # `Error: interrupted` (signal 143). Workaround from
-      # actions/runner-images#6680: add a 12GB swap file.
-      - name: Free disk space and add 24G swap (16GB RAM runner OOM)
-        run: |
-          # Swap with 12G wasn't enough (still OOM-killed). Drop bloat the
-          # runner image carries (dotnet, android SDK, CodeQL, GHC — none
-          # used by a Rust mutation-testing job) to free ~30GB, then allocate
-          # 24G swap on /mnt's data disk. Sum should comfortably hold the
-          # full-diff mutant compile/test peak for this repo.
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
-          sudo apt-get clean
-          sudo docker image prune -af 2>/dev/null || true
-          sudo swapoff /swapfile 2>/dev/null || true
-          sudo rm -f /swapfile
-          # /mnt/swapfile may already exist on the runner image with an
-          # active swap, which makes `fallocate` fail with "Text file
-          # busy" (observed twice on PR #97 shards 3/8 and 5/8). Swap
-          # it off + remove before reallocating.
-          sudo swapoff /mnt/swapfile 2>/dev/null || true
-          sudo rm -f /mnt/swapfile
-          sudo fallocate -l 24G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          echo "--- memory ---"
-          free -h
-          echo "--- disk ---"
-          df -h /
+          tool: cargo-mutants@27.1.0,cargo-nextest@0.9.140
       - name: "Mutation testing: zero survivors in changed code"
-        env:
-          # Limit rustc parallelism so each mutant build's peak memory stays
-          # well under (RAM + swap). Default CARGO_BUILD_JOBS = #CPUs (4),
-          # which lets 4 rustc instances link large crates (reqwest, sqlx,
-          # tokio, wiremock) simultaneously — the exact peak that was OOMing
-          # the 16GB runner.
-          CARGO_BUILD_JOBS: "1"
         run: |
           git diff origin/main...HEAD > pr.diff
           if [ ! -s pr.diff ]; then
             echo "No source changes in diff -- skipping"
             exit 0
           fi
-          # Exclusions:
-          # - sp-server/src/lib.rs: orchestration glue, integration-tested only
-          # - sp-server/src/obs/: requires live OBS WebSocket, integration-tested only
-          # - sp-server/src/downloader/: shells out to yt-dlp, integration-tested only
-          # - sp-server/src/reprocess/: requires live Gemini API
-          # - sp-server/src/api/websocket: WS upgrade flow, integration-tested
-          # - sp-server/src/playlist/: shells out to yt-dlp
-          # NOTE: sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
-          # NOTE: sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
-          # NOTE: sp-ndi/, sp-decoder/, and sp-server/src/playback/pipeline.rs are NOT
-          # excluded — covered by MockNdiBackend unit tests in sp-ndi + FrameSubmitter
-          # cross-platform tests in sp-server/playback/submitter.rs. The Windows-gated
-          # decoder code in sp-decoder/reader.rs is skipped by cargo-mutants on Linux
-          # automatically (cfg(windows) functions aren't compiled in the mutation build).
-          # sp-decoder/src/audio/ (Symphonia wrapper) and sp-decoder/src/video/
-          # (Windows-only MF wrapper) are excluded because their arithmetic and
-          # helper functions are glue around external library APIs that can only
-          # be validated against real files on the target platform. Both are
-          # exercised by integration tests against committed fixtures.
-          # Post-PR #48: dev now equals main, so --in-diff pr.diff is back
-          # to a normal small-diff scope on future PRs. The swap + disk
-          # cleanup + CARGO_BUILD_JOBS=1 stay as belt-and-braces for any
-          # future large-diff PR that might OOM the 16GB runner.
-          # Dropped 2 → 1 after PR #84 shards 5+6 hit SIGTERM at 24 min
-          # with two parallel rustc on heavy crates still peaking > RAM.
-          #
-          # === documented equivalent mutations (audit 2026-05-06, PR #82;
-          # line numbers re-anchored after PR #84 refactor) ===
-          # text_reference_merge.rs:827 < ↔ <= in apply_cap_and_monotonic.
-          #   At boundary start_ms == floor: original is no-op; <= clamps
-          #   to floor which equals start_ms — no observable change.
-          # text_reference_merge.rs:851 > ↔ >= in apply_cap_and_monotonic.
-          #   At boundary new_end == end_ms: assigning the same value is
-          #   a no-op.
-          # text_reference_merge_trim.rs:26 > ↔ >= in trim_outlier_indices.
-          #   At len=1 with >=: body computes span=0 from a single element;
-          #   the inner `if span <= LONG_LINE_CAP_MS { break }` guard exits
-          #   the loop. Same outcome as len=1 not entering with >.
-          # text_reference_merge_phantom.rs:49 < ↔ ==/<= in drop_phantom_clusters.
-          #   Early-return is an optimization. At len < 2 the while-loop in
-          #   the non-early-return path also produces no drops (same (0,0)).
-          # text_reference_merge_phantom.rs:137 > ↔ ==/</>= in drop_phantom_clusters.
-          #   `if clusters_dropped > 0` gates an info!() log only. Function
-          #   return value is the same regardless.
-          # === asr_path additions (audit 2026-05-24, PR #121) ===
-          # Matched semantically (function + op, no line numbers) so the
-          # mutants::skip doc-comments above can't shift them out of range.
-          # split_one_lyrics_line `|| → &&` / `> → <|==|>=`: mirrors split_line
-          #   (97/102/131/141/164 excluded above) — the empty-side guard never
-          #   fires (find_split_index returns a word boundary, both halves
-          #   non-empty) and the recursion `>` boundary is a no-op (a half exactly
-          #   == max_chars yields find_split_index None, no further split).
-          # regroup `!groups.lines.is_empty()` guard ↔ true: empty groups →
-          #   apply_greedy with no by_start entries → every line passes through →
-          #   identical to the else branch (raw split).
-          # regroup apply_greedy `+ → */-` and `+= → -=`: the loop-counter
-          #   arithmetic (i = end + 1, i += 1) stops advancing → infinite loop →
-          #   300s TIMEOUT, not catchable by a terminating test.
-          # regroup.rs:157:24 start_idx `< → <=` in apply_greedy: a group with
-          #   start_idx == n is unreachable (loop runs i in 0..n, never looks up
-          #   key n; end_idx >= start_idx == n also contradicts end_idx < n).
-          #   Col-pinned because it is indistinguishable from the end_idx guard
-          #   on the same line, which IS tested
-          #   (group_with_end_idx_equal_to_len_is_rejected).
-          # === genlock #146–#151 additions (audit 2026-09-13, PR #153) ===
-          # genlock_audio.rs:129:31 `> → <` in LevelAverager::record: the ring
-          #   drain `while ring.len() > 2*window { pop_front }` becomes
-          #   `while len < 2*window`, which pops until empty then spins on an
-          #   empty deque forever → non-terminating on the FIRST record() call,
-          #   not catchable by a terminating test (mirrors the apply_greedy
-          #   loop-counter TIMEOUT pins above).
-          # genlock_audio.rs:254:32 `* → +` and `* → /` in AudioPll::update: the
-          #   rate step `(-residual * 0.5).clamp(±5)` only runs when |residual|
-          #   > 50 (dead-band gate), so |−residual·0.5| > 25 and the clamp always
-          #   saturates to ±5 with sign = sign(−residual). `-residual + 0.5` and
-          #   `-residual / 0.5` (= −2·residual) keep that same sign and saturate
-          #   to the SAME ±5 for every reachable residual → equivalent.
-          # genlock_audio.rs:296:32 `* → /` in AudioPll::update_level: bias_target
-          #   `BIAS_PPM * signum(level − target)` is only evaluated when engaged,
-          #   and level == target is `near`, which clears far_since BEFORE engaged
-          #   is read, so engaged ⇒ level ≠ target ⇒ signum ∈ {−1,+1}; and
-          #   `20 * s == 20 / s` for s ∈ {−1,+1} (divide-by-zero unreachable) →
-          #   equivalent.
-          # === shards 3-7 additions (audit 2026-09-13, PR #153) ===
-          # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
-          #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux
-          #   mutation runner; every mutant lands in dead code, builds, and no
-          #   test runs it -> MISSED. Same class as the sp-decoder/{audio,video}
-          #   file exclusions above (target-only code).
-          # pipeline.rs:239:5 run_loop -> (): the #[cfg(windows)] run_loop twin
-          #   (the #[cfg(not(windows))] run_loop is compiled + covered). Windows
-          #   dead code on Linux, as above.
-          # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the
-          #   Python LyricsAlignment-MTL tool (tokio::process::Command) which is
-          #   not installed on the runner; run_once/align/write_text_json are
-          #   subprocess/file glue and is_available/TIMEOUT_SECS are std::fs/const
-          #   trivia around it -- integration-tested against the real tool, like
-          #   the reprocess/ + downloader/ exclusions.
-          # orchestrator.rs asr_transcribe (line-agnostic — the line shifted 495→499 and the pin missed, shard 3/8 on run 34784800346): the RealReferenceStageBackend ASR
-          #   call hits the live AssemblyAI HTTP API; network-bound, no local unit
-          #   test (same class as g35t_client's #[mutants::skip] HTTP helpers).
-          # === TIMEOUTs (non-terminating under mutation; not catchable by a
-          #     terminating test, like the apply_greedy / LevelAverager pins) ===
-          # pacer.rs:94 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
-          #   decode-advance loop (decode until the frame is due); a constant/zero
-          #   pts never advances it, so the pacer-drive test spins -> 300 s TIMEOUT.
-          # audio_grid.rs:74 push -> (), 77:26 ==->!= in push, 158 level_samples
-          #   ->0/1: the buffer-fill test loops `while level_samples() < N { push }`;
-          #   a no-op push or a constant level never reaches N -> TIMEOUT.
-          # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain
-          #   guard so eviction never makes progress under the window-fill test
-          #   -> TIMEOUT.
-          # === provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
-          # pacer_prepare.rs:85:66 and pacer.rs:788:70 (- -> + / /) in the p99
-          #   index `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for
-          #   every len>=1, so the `.min(len-1)` clamp never binds; replacing
-          #   `len-1` with `len+1` or `len/1` cannot change the index. (The same
-          #   clamp in iter_percentile_us IS killable because there `p` is a
-          #   parameter and the tests pass p=100, where floor(len*100/100)=len
-          #   makes the clamp load-bearing.)
-          # pacer.rs:731:20 > -> >= in on_emit: the guarded body is only
-          #   `max_late_us = late_us`; the two operators differ solely at
-          #   `late_us == max_late_us`, where the assignment writes the value it
-          #   just compared -- a no-op. Output identical for all inputs.
-          # pacer.rs:682:28 += -> *= / -= in service_standby: the mutated
-          #   `relatches += 1` sits in the `if emit_now < boundary` backward-step
-          #   net, but service_standby takes both `now_100ns()` reads with no
-          #   decode pull between them and only reaches this point after
-          #   `sched_now >= boundary`, so on a monotonic clock emit_now ==
-          #   sched_now >= boundary and the branch is unreachable by any
-          #   terminating deterministic test. (The analogous `service` mutant at
-          #   532:28 IS killable -- its decode `pull` closure can step the clock.)
-          # Enumerate this shard's mutants FIRST so debugging is possible
-          # even when the runner SIGTERMs mid-run (the upload-artifact step
-          # gets skipped on cancellation). Survives in the live log.
-          echo "=== shard ${{ matrix.shard }} mutant list ==="
-          cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --list 2>&1 || true
-          echo "=== end shard ${{ matrix.shard }} mutant list ==="
-          cargo mutants --in-diff pr.diff --shard ${{ matrix.shard }} --timeout 300 --build-timeout 600 --jobs 1 --output mutants-out \
-            --exclude-re 'sp-server/src/lib.rs' \
-            --exclude-re 'sp-server/src/obs/' \
-            --exclude-re 'sp-server/src/downloader/' \
-            --exclude-re 'sp-server/src/reprocess/' \
-            --exclude-re 'sp-server/src/api/websocket' \
-            --exclude-re 'sp-server/src/playlist/' \
-            --exclude-re 'sp-decoder/src/audio/' \
-            --exclude-re 'sp-decoder/src/video/' \
-            --exclude-re 'replace match guard !w\.is_empty\(\) with true in build_phrases' \
-            --exclude-re 'replace match guard in_string with true in try_parse_balanced' \
-            --exclude-re 'replace [+\-*] with [+\-*] in try_all_lines_positions' \
-            --exclude-re 'replace \|\| with && in split_one_lyrics_line' \
-            --exclude-re 'replace > with (<|==|>=) in split_one_lyrics_line' \
-            --exclude-re 'genlock_audio\.rs:129:31: replace > with <' \
-            --exclude-re 'genlock_audio\.rs:254:32: replace \* with \+' \
-            --exclude-re 'genlock_audio\.rs:254:32: replace \* with /' \
-            --exclude-re 'genlock_audio\.rs:296:32: replace \* with /' \
-            --exclude-re 'sp-server/src/playback/pipeline_paced' \
-            --exclude-re 'pipeline\.rs:239:5: replace run_loop with \(\)' \
-            --exclude-re 'sp-server/src/lyrics/mtl_aligner' \
-            --exclude-re 'orchestrator\.rs:[0-9]+:[0-9]+: replace <impl ReferenceStageBackend for RealReferenceStageBackend>::asr_transcribe' \
-            --exclude-re 'pacer\.rs:94:' \
-            --exclude-re 'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)' \
-            --exclude-re 'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push' \
-            --exclude-re 'audio_grid\.rs:158:9: replace AudioGridBuffer::level_samples' \
-            --exclude-re 'lock_state\.rs:96:31: replace > with < in EventWindow::evict' \
-            --exclude-re 'pacer_prepare\.rs:85:66: replace - with \+ in Pacer::prep_p99_us' \
-            --exclude-re 'pacer_prepare\.rs:85:66: replace - with / in Pacer::prep_p99_us' \
-            --exclude-re 'pacer\.rs:788:70: replace - with \+ in Pacer::jitter_p99_us' \
-            --exclude-re 'pacer\.rs:788:70: replace - with / in Pacer::jitter_p99_us' \
-            --exclude-re 'pacer\.rs:731:20: replace > with >= in Pacer::on_emit' \
-            --exclude-re 'pacer\.rs:682:28: replace \+= with \*= in Pacer::service_standby' \
-            --exclude-re 'pacer\.rs:682:28: replace \+= with -= in Pacer::service_standby'
+          # List the diff's mutants first (cheap; aids debugging if the run is
+          # interrupted). Then test them: diff-scoped, no baseline rebuild, under
+          # nextest, 2 mutants in parallel. The `mutants` profile drops debuginfo
+          # so peak memory stays under the 16 G GitHub runner without the swap
+          # file / disk-cleanup hacks the old job needed. A MISSED mutant is a
+          # HARD failure (never continue-on-error) — write assertions that kill
+          # it. If a legit diff ever overruns 20 min, that is a cadence signal
+          # (smaller PRs), NOT a reason to raise the cap (no-timeout-band-aids.md).
+          echo "=== mutant list (in-diff) ==="
+          cargo mutants --in-diff pr.diff --list 2>&1 || true
+          echo "=== end mutant list ==="
+          cargo mutants --in-diff pr.diff --baseline=skip --test-tool=nextest \
+            --jobs 2 --timeout 300 --build-timeout 600 --output mutants-out
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-report-shard-${{ strategy.job-index }}
+          name: mutants-report
           path: mutants-out/
           if-no-files-found: warn
 
