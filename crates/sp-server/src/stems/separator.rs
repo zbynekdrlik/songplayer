@@ -18,6 +18,7 @@ use tracing::debug;
 /// re-generated). `timeout` bounds the subprocess; callers pass
 /// `aligner::isolation_timeout(duration_ms)`.
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)] // spawn helper: paths + timeout + cap, same shape as the lyrics workers
 pub async fn separate_stems(
     python_path: &Path,
     script_path: &Path,
