@@ -63,13 +63,20 @@ pub fn KaraokeControl() -> impl IntoView {
         push();
     };
 
-    // Live label on drag; POST on release (`change`).
-    let on_gain_input = move |ev: leptos::ev::Event| {
-        if let Ok(pct) = event_target_value(&ev).parse::<f32>() {
+    // Live label on drag (`input`); POST on release (`change`). The change
+    // handler re-reads the slider's own value so the POST never depends on a
+    // preceding input event (keyboard / programmatic value changes fire only
+    // `change`).
+    let set_gain_from = move |ev: &leptos::ev::Event| {
+        if let Ok(pct) = event_target_value(ev).parse::<f32>() {
             vocal_gain.set((pct / 100.0).clamp(0.0, 1.0));
         }
     };
-    let on_gain_change = move |_ev: leptos::ev::Event| push();
+    let on_gain_input = move |ev: leptos::ev::Event| set_gain_from(&ev);
+    let on_gain_change = move |ev: leptos::ev::Event| {
+        set_gain_from(&ev);
+        push();
+    };
 
     view! {
         <div class="karaoke-control">
