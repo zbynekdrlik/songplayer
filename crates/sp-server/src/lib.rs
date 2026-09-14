@@ -1,6 +1,7 @@
 //! SongPlayer server — all business logic.
 
 pub mod ai;
+mod ai_proxy_watchdog;
 pub mod api;
 pub mod db;
 pub mod downloader;
@@ -73,6 +74,11 @@ pub struct AppState {
     /// reads/writes it synchronously; the playback engine + pipeline threads
     /// share the same registry (default OFF, never persisted).
     pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
+    /// Per-playlist live preview tap registry (#15 part 2).
+    /// `GET /api/v1/playback/{id}/preview.jpg` reads it; the playback engine +
+    /// pipeline decode loops share the same registry (an idle tap costs one
+    /// atomic load per decoded frame, and never touches the NDI submit path).
+    pub preview_registry: Arc<playback::preview::PreviewRegistry>,
     /// LAN `sp.local` advertisement status (#51) — written by the mDNS task,
     /// read by `/api/v1/status` so the dashboard shows the offline-LAN URL.
     pub lan_status: mdns::LanStatusHandle,
@@ -212,6 +218,10 @@ pub async fn start(
     // #151: one burn-id toggle registry shared by AppState (API) + the engine
     // (pipeline spawn + health). Default OFF, never persisted.
     let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
+    // #15 part 2: one live-preview tap registry shared by AppState (route) +
+    // the engine (registers a tap per pipeline at spawn; the decode loops feed
+    // it). Idle taps cost one atomic load per decoded frame.
+    let preview_registry = Arc::new(playback::preview::PreviewRegistry::new());
 
     // #51: shared LAN sp.local status — the mDNS task (spawned after AppState)
     // writes it, `/api/v1/status` reads it. Starts empty until the task
@@ -270,6 +280,7 @@ pub async fn start(
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
         ndi_burn_registry: ndi_burn_registry.clone(),
+        preview_registry: preview_registry.clone(),
         lan_status: lan_status.clone(),
     };
 
@@ -298,7 +309,7 @@ pub async fn start(
         }
         let watchdog_proxy = state.ai_proxy.clone();
         let watchdog_shutdown = shutdown_tx.subscribe();
-        tokio::spawn(ai_proxy_watchdog(watchdog_proxy, watchdog_shutdown));
+        tokio::spawn(ai_proxy_watchdog::run(watchdog_proxy, watchdog_shutdown));
     } else {
         info!("ai_proxy: not authenticated, skipping auto-start + watchdog");
     }
@@ -684,6 +695,9 @@ pub async fn start(
     // #151: share the burn-id toggle registry BEFORE pipelines spawn (each
     // pipeline registers its output into it at spawn).
     engine.set_ndi_burn_registry(ndi_burn_registry.clone());
+    // #15 part 2: share the preview registry BEFORE pipelines spawn (each
+    // pipeline registers a preview tap into it at spawn).
+    engine.set_preview_registry(preview_registry.clone());
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)
@@ -829,37 +843,6 @@ pub async fn start(
     info!("server stopped");
 
     Ok(())
-}
-
-/// Interval between ai_proxy health checks.
-const AI_PROXY_WATCHDOG_INTERVAL_SECS: u64 = 30;
-
-/// Poll the CLIProxyAPI child every `AI_PROXY_WATCHDOG_INTERVAL_SECS` and
-/// restart it if it died. Without this, a proxy crash mid-processing
-/// leaves the worker silently falling through to "no text sources
-/// available" for every subsequent song (2026-04-19 event). Exits on
-/// shutdown broadcast.
-async fn ai_proxy_watchdog(
-    proxy: Arc<ai::proxy::ProxyManager>,
-    mut shutdown: tokio::sync::broadcast::Receiver<()>,
-) {
-    let interval = std::time::Duration::from_secs(AI_PROXY_WATCHDOG_INTERVAL_SECS);
-    loop {
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(interval) => {
-                let status = proxy.status().await;
-                if status.running {
-                    continue;
-                }
-                warn!("ai_proxy watchdog: proxy is down, attempting restart");
-                match proxy.start().await {
-                    Ok(()) => info!("ai_proxy watchdog: restart succeeded"),
-                    Err(e) => warn!("ai_proxy watchdog: restart failed: {e}"),
-                }
-            }
-        }
-    }
 }
 
 /// Default interval, in seconds, between periodic playlist re-syncs — used

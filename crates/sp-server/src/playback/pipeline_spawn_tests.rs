@@ -21,6 +21,7 @@ fn spawn_stores_ndi_name_for_accessor() {
         42,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
     );
     assert_eq!(
         pp.ndi_name(),
