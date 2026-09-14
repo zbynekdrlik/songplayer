@@ -479,18 +479,21 @@ jobs:
         run: cargo tarpaulin --workspace --exclude-files "src-tauri/*" --exclude-files "sp-ui/*" --fail-under 40 --skip-clean --timeout 300
 
   mutation-testing:
-    name: Mutation Testing
-    # PR-specific gate: runs on the pull_request event only (#124). Diff-scoped
-    # and HARD-bounded to 20 min per mutation-testing.md (#123). The cargo
-    # profile (`mutants`, debuginfo off), the nextest wiring and the documented
-    # STRUCTURAL + provably-equivalent/TIMEOUT mutant exclusions live in
-    # .cargo/mutants.toml — shared with the on-demand mutation-full.yml sweep.
-    # `needs: [lint]` was dropped with the #124 de-dup: lint is now push-only so
-    # it is skipped on the pull_request event, and `--baseline=skip` means this
-    # gate needs no pre-proven green baseline anyway.
-    if: github.event_name == 'pull_request'
+    name: Mutation Testing (${{ matrix.shard }})
+    # Diff-scoped mutation gate on EVERY dev push, scoped to the pushed range
+    # (each push = one integrated unit); HARD-bounded to 20 min per shard per
+    # mutation-testing.md (#123). It does NOT run on the release pull_request:
+    # a dev→main PR carries the whole accumulated dev diff and can never fit a
+    # bounded gate — every commit in it was already gated here when it landed
+    # on dev. Config (`mutants` profile, nextest, documented exclusions) lives in
+    # .cargo/mutants.toml, shared with the on-demand mutation-full.yml sweep.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['0/4', '1/4', '2/4', '3/4']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -505,29 +508,39 @@ jobs:
           tool: cargo-mutants@27.1.0,cargo-nextest@0.9.140
       - name: "Mutation testing: zero survivors in changed code"
         run: |
-          git diff origin/main...HEAD > pr.diff
-          if [ ! -s pr.diff ]; then
-            echo "No source changes in diff -- skipping"
+          # The pushed range: github.event.before..github.sha. On a first push
+          # / force-push / unreachable `before` (all-zeros or not an ancestor)
+          # fall back LOUDLY to HEAD~1..HEAD — never a silent skip.
+          BEFORE='${{ github.event.before }}'
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+             || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
+            echo "::warning::push range base unavailable ($BEFORE) — falling back to HEAD~1..HEAD"
+            BEFORE="$(git rev-parse HEAD~1)"
+          fi
+          echo "Mutation range: $BEFORE..${{ github.sha }}"
+          git diff "$BEFORE" HEAD > push.diff
+          if [ ! -s push.diff ]; then
+            echo "No source changes in the pushed range -- nothing to mutate"
             exit 0
           fi
-          # List the diff's mutants first (cheap; aids debugging if the run is
-          # interrupted). Then test them: diff-scoped, no baseline rebuild, under
-          # nextest, 2 mutants in parallel. The `mutants` profile drops debuginfo
-          # so peak memory stays under the 16 G GitHub runner without the swap
-          # file / disk-cleanup hacks the old job needed. A MISSED mutant is a
-          # HARD failure (never continue-on-error) — write assertions that kill
-          # it. If a legit diff ever overruns 20 min, that is a cadence signal
-          # (smaller PRs), NOT a reason to raise the cap (no-timeout-band-aids.md).
-          echo "=== mutant list (in-diff) ==="
-          cargo mutants --in-diff pr.diff --list 2>&1 || true
+          echo "=== mutant list (in-diff, shard ${{ matrix.shard }}) ==="
+          cargo mutants --in-diff push.diff --shard ${{ matrix.shard }} --list 2>&1 || true
           echo "=== end mutant list ==="
-          cargo mutants --in-diff pr.diff --baseline=skip --test-tool=nextest \
+          # Diff-scoped, no baseline rebuild, nextest, 2 mutants in parallel; the
+          # `mutants` profile drops debuginfo so peak memory stays under the 16 G
+          # runner. A MISSED mutant is a HARD failure (never continue-on-error) —
+          # write assertions that kill it. If a legit unit overruns 20 min per
+          # shard, that is a "split the unit" signal, NOT a reason to raise the
+          # cap (no-timeout-band-aids.md).
+          cargo mutants --in-diff push.diff --shard ${{ matrix.shard }} \
+            --baseline=skip --test-tool=nextest \
             --jobs 2 --timeout 300 --build-timeout 600 --output mutants-out
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-report
+          name: mutants-report-shard-${{ strategy.job-index }}
           path: mutants-out/
           if-no-files-found: warn
 
@@ -558,8 +571,9 @@ jobs:
           results='${{ toJSON(needs) }}'
           echo "Job results: $results"
           # De-dup (#124): the shared build/test jobs run on the `push` event, the
-          # PR-specific gates (version-check, mutation-testing, red-green-order) on
-          # `pull_request`. So on EITHER event some needed jobs are SKIPPED here —
+          # PR-specific gates (version-check and red-green-order on pull_request;
+          # mutation-testing on the dev push, pushed-range scoped). So on EITHER
+          # event some needed jobs are SKIPPED here —
           # they ran (and gated) on the sibling event for the same commit SHA. The
           # invariant that holds on both events: no needed job may FAIL/cancel;
           # `skipped` and `success` are both acceptable, anything else is not.
