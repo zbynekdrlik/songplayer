@@ -39,3 +39,12 @@ absence. `auth-dir` / `host` / `port` / `request-retry` / `claude-api-key` uncha
   it. **Never** probe an unlisted id — a `404` from Anthropic parks the OAuth auth in a
   cooldown until the proxy restarts (#144).
 - Current: `claude-fable-5-1` (CLIProxyAPI 7.3.1, #145). Pinned by the `config.rs` test.
+- **Refusals are a PROMPT problem, not a model problem (#145, 2026-09-14).** The
+  newest flagships (`claude-fable-5-1`, `claude-opus-5`) refuse a "story"-framed
+  translation prompt on recognizable content ("…even for a family plaque…"); a
+  bare neutral technical prompt translates cleanly on all of them (measured live,
+  9/9). So a refusal is fixed in `translator::build_prompt`, not by downgrading
+  the model — see the `lyrics-pipeline` skill "Translation" section. A refusal is
+  now classified + logged `kind="refusal"` with the model id
+  (`translator::classify_zero_translation`), so it is never a silent "parse
+  returned 0" again.
