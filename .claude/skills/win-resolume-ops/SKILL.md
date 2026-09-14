@@ -136,9 +136,17 @@ CI activity. The window still paints but the REST server at
 When user reports "no lyrics on Resolume" / "no title" in the morning:
 1. Check Arena REST FIRST: `Invoke-WebRequest http://127.0.0.1:8090/api/v1/composition -UseBasicParsing -TimeoutSec 3`
 2. Check process: `Get-Process Arena | Format-List Name, Id, Responding`
-3. If `Responding=False` or REST is down — Arena is hung. Report to user.
-4. Never force-kill Arena without asking. It is the user's live VJ tool.
-5. After Arena restart, SongPlayer clip mapping refreshes automatically every 10s.
+3. If `Responding=False` or REST is down (connect refused / timeout with a
+   live listener on 8090) — Arena's REST is hung.
+4. Owner directive 2026-09-14: in a window where Claude is allowed to work,
+   a hung Arena MAY be killed without asking (`Stop-Process -Name Arena -Force`
+   via MCP). A hotkey script normally relaunches it — wait ~30 s and check
+   `Get-Process Arena` before starting it yourself (`Start-Process
+   'C:\Program Files\Resolume Arena*\Arena.exe'`). Never a second instance.
+   OBS stays never-kill. Root cause of the hang: #157 (light polling).
+5. After Arena restart, SongPlayer clip mapping refreshes automatically every 10s —
+   confirm `/api/v1/product` answers and the `no Resolume subtitle clips found`
+   warnings stop before re-running E2E.
 
 When E2E CI cancels mid-step: default first hypothesis is Resolume Arena stuck.
 Diagnose with `Get-Process Arena | Format-List Responding` and
