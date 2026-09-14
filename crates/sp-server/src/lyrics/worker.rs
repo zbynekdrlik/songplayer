@@ -507,7 +507,7 @@ impl LyricsWorker {
         // v22 (#159): one regime. Every song with vocals + a text candidate
         // (≥4 lines) tries the v21 mtl reference stage below; songs it does
         // not ship (no usable text, gate fail, mtl skip/error) take the g35t
-        // base tier. The old `is_allowed_text_source` gate that routed to the
+        // base tier. The old text-source eligibility gate that routed to the
         // now-deleted asr_path / WhisperX routes is gone.
         self.broadcast_stage(
             video_id,

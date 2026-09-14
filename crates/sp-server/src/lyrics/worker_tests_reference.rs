@@ -154,6 +154,65 @@ impl crate::lyrics::orchestrator::ReferenceStageBackend for FakeReferenceStageBa
     }
 }
 
+// Direct `run_reference_stage` transport-error coverage (re-homed from the
+// deleted orchestrator_tests.rs — this is SURVIVING code): an `mtl_align` or
+// `asr_transcribe` failure returns `ReferenceStageResult::Error` naming the
+// failing stage, so the worker falls through to the g35t base tier.
+#[tokio::test]
+async fn run_reference_stage_mtl_align_error_returns_error_stage() {
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("mtl boom")))),
+        asr: std::sync::Mutex::new(None), // asr_transcribe must NOT be reached
+    };
+    let lines = vec!["a".to_string(), "b".to_string()];
+    let result = crate::lyrics::orchestrator::run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "yt1",
+        &lines,
+    )
+    .await;
+    match result {
+        crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
+            assert_eq!(stage, "mtl_align");
+            assert!(message.contains("mtl boom"), "message: {message}");
+        }
+        _ => panic!("expected Error stage=mtl_align"),
+    }
+}
+
+#[tokio::test]
+async fn run_reference_stage_asr_transcribe_error_returns_error_stage() {
+    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(MtlOutput {
+            lines: vec![MtlLine {
+                text: "a".into(),
+                start_ms: 0,
+                end_ms: 1000,
+            }],
+            device: "cpu".into(),
+            elapsed_s: 1.0,
+        }))),
+        asr: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("asr boom")))),
+    };
+    let lines = vec!["a".to_string()];
+    let result = crate::lyrics::orchestrator::run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "yt1",
+        &lines,
+    )
+    .await;
+    match result {
+        crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
+            assert_eq!(stage, "asr_transcribe");
+            assert!(message.contains("asr boom"), "message: {message}");
+        }
+        _ => panic!("expected Error stage=asr_transcribe"),
+    }
+}
+
 fn ref_candidate(source: &str, n_lines: usize) -> crate::lyrics::tier1::CandidateText {
     crate::lyrics::tier1::CandidateText {
         source: source.to_string(),
