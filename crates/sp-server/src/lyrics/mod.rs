@@ -8,14 +8,18 @@ pub mod bootstrap;
 pub mod chunking;
 pub mod claude_merge;
 pub mod description_provider;
+pub mod g35t_client;
 pub mod gather;
 pub mod genius;
+pub mod gpu_policy;
 pub mod line_splitter;
 pub mod lrclib;
 pub mod lyrics_ovh;
+pub mod mtl_aligner;
 pub mod orchestrator;
 pub mod probe;
 pub mod provider;
+pub mod reference_gate;
 pub mod renderer;
 pub mod replicate_client;
 pub mod reprocess;
@@ -28,6 +32,9 @@ pub mod translator;
 pub mod whisperx_replicate;
 pub mod worker;
 pub mod worker_asr;
+pub mod worker_outcome;
+pub mod worker_reference;
+pub mod worker_translation;
 pub mod youtube_subs;
 pub mod yt_subs_split;
 pub use worker::LyricsWorker;
@@ -165,7 +172,49 @@ use sp_core::lyrics::LyricsTrack;
 ///   against the new fast path; the smart-skip clause in
 ///   `reprocess.rs::fetch_bucket_stale` keeps pure-Gemini v19+ output
 ///   protected once generated.
-pub const LYRICS_PIPELINE_VERSION: u32 = 20;
+/// - v20: Genius text source (`genius.rs`, fallback behind lyrics.ovh) +
+///   the operator `lyrics_override_text` gather path added.
+/// - v21 (#143): Lever-2 reference regime. Owner directive 2026-09-12 on
+///   #130 ("vyber najlepšie dosiahnuteľné riešenie a začni
+///   reprocessovať") — for any song with an allowed text candidate + a
+///   preprocessed vocal WAV, `mtl_aligner::align` force-aligns the chosen
+///   candidate's lines to the isolated vocals with `lyrics-alignment-mtl`
+///   BEFORE the WhisperX/asr_path route below decides anything. The
+///   result is verified against an independent Gemini 3.5 Transcribe word
+///   transcript (`g35t_client::transcribe_words` + `reference_gate::
+///   evaluate`): pass → the mtl line timings ship directly, stamped
+///   `lyrics_source = "<candidate.source>+mtl@rev1/g35t-ok"` /
+///   `lyrics_alignment_model = ALIGNMENT_MODEL_MTL_REV1`, and
+///   `videos.lyrics_reference` is set so the wall shows a ★; fail/error →
+///   `videos.lyrics_reference` is cleared, the gate decision + stats are
+///   written to `{youtube_id}_alignment_audit.json`, and the song falls
+///   through to the existing WhisperX/asr_path route unchanged. The
+///   `reprocess.rs::fetch_bucket_stale` v18 Gemini smart-skip clause is
+///   dropped — that regime no longer exists, so those rows re-queue
+///   under v21 like everything else.
+pub const LYRICS_PIPELINE_VERSION: u32 = 21;
+
+/// Monotonic version of the SK **translation** output (#152), INDEPENDENT of
+/// `LYRICS_PIPELINE_VERSION`. Bump ONLY when the translation prompt changes in
+/// a way that alters the Slovak wording (e.g. the gender framing added in
+/// #152). A bump re-translates existing songs — one Claude call each, the `sk`
+/// lines rewritten in place by the same JSON writer the pipeline uses — via the
+/// stale-translation selector in `models_translation::fetch_next_stale_translation`,
+/// and NEVER re-runs alignment or touches `lyrics_pipeline_version`. Every
+/// `videos` row starts at `lyrics_translation_version = 0`, so the first
+/// non-zero value re-translates the whole catalog under the current prompt.
+pub const LYRICS_TRANSLATION_VERSION: u32 = 1;
+
+/// Upper duration bound for lyrics processing (#144, "Rollout blocker #3").
+///
+/// A row longer than this is not a real song: the catalog's five > 30-min
+/// videos (36–70 min) are live sets / mixes with no single lyric sheet, and
+/// each retry of one is a full ~1 h GPU burn on the shared live PC (isolation
+/// runs at ≈1× realtime). The longest actual song is 21 min and is already
+/// aligned. `process_song` stamps any row over this cap `unsupported_source`
+/// before any gather/network/GPU work runs; an operator can still force one
+/// with `lyrics_override_text` + manual priority if ever needed.
+pub const MAX_LYRICS_DURATION_MS: i64 = 30 * 60 * 1000;
 
 /// Alignment-model identifier written to `lyrics_alignment_model` for the
 /// raw-ship-through path (line-timed text source, no whisperx alignment ran).
@@ -184,6 +233,13 @@ pub const ALIGNMENT_MODEL_WHISPERX_V3_REV1: &str = "whisperx-large-v3@rev1";
 /// bumps when the prompt or post-processing changes in a way that affects
 /// production output.
 pub const ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1: &str = "assemblyai-universal-3-pro@rev1";
+
+/// Alignment-model literal stamped on lyrics rows produced by the Lever-2
+/// (#143) forced-alignment reference stage: `lyrics-alignment-mtl`
+/// (MTL+BDR) timing verified by an independent Gemini 3.5 Transcribe word
+/// transcript. `rev1` bumps when the mtl subprocess wrapper or the gate
+/// thresholds change in a way that affects production output.
+pub const ALIGNMENT_MODEL_MTL_REV1: &str = "lyrics-alignment-mtl@rev1";
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -304,10 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v20() {
+    fn lyrics_pipeline_version_is_v21() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 20,
-            "v20 = Genius text source + lyrics_override_text gather paths"
+            LYRICS_PIPELINE_VERSION, 21,
+            "v21 = Lever-2 forced-alignment reference regime (#143)"
         );
     }
 }
@@ -318,3 +374,7 @@ mod probe_tests;
 #[cfg(test)]
 #[path = "canonical_source_regression_tests.rs"]
 mod canonical_source_regression_tests;
+
+#[cfg(test)]
+#[path = "worker_tests_duration_cap.rs"]
+mod worker_tests_duration_cap;

@@ -30,6 +30,17 @@ struct — or before wiring a previously-unused component into a page for the
 first time — grep `e2e/mock-api.mjs` for that struct's fixtures and update
 them.**
 
+## A `spawn_local` poll loop must read page-owned signals with `try_*`
+
+`spawn_local` tasks are NOT tied to the reactive owner: a poll loop keeps
+running after navigation, and its next `get()`/`get_untracked()`/`with()` on
+the disposed signal panics (`Tried to access a reactive value that has already
+been disposed` + `RuntimeError: unreachable` — `resolume_health.rs`, fixed
+2026-09-12). `set()` is safe (`try_update` underneath); reads are not. In a
+loop that outlives a mount: `if sig.try_get_untracked() != Some(false) { break }`
+and `if sig.try_set(v).is_some() { break }`. The frontend spec's nav round-trip
+test (7 s wait — the timer fires at 5 s) guards this.
+
 ## Root `cargo fmt` / `cargo clippy` do NOT check `sp-ui` or `src-tauri`
 
 Both are excluded from the root `Cargo.toml` workspace (different toolchain

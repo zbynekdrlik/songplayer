@@ -6,6 +6,7 @@
 use gloo_net::http::Request;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use sp_core::genlock::lock_state::LockState;
 
 /// GET `path` and deserialise the JSON response.
 pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, String> {
@@ -126,6 +127,95 @@ pub async fn post_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), S
     Ok(())
 }
 
+// ── NDI genlock health (#150) ─────────────────────────────────────────────────
+
+/// Serde default for [`NdiOutputHealth::lock_state`] — an absent field means
+/// "not yet locked", the safe/honest fallback.
+fn default_lock_state() -> LockState {
+    LockState::Unlocked
+}
+
+/// dantesync clock health, the subset the badge tooltip shows. Every field
+/// `#[serde(default)]` for forward compatibility; the server's `clock` object
+/// carries more keys, which serde ignores.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct ClockView {
+    #[serde(default)]
+    pub is_locked: bool,
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub offset_ns: Option<i64>,
+    #[serde(default)]
+    pub clock_ok: bool,
+}
+
+/// Boundary-pacing telemetry, the subset the badge tooltip shows.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct PacingView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub late_frames: u64,
+    #[serde(default)]
+    pub jitter_p99_us: u64,
+    #[serde(default)]
+    pub repeats: u64,
+    #[serde(default)]
+    pub resyncs: u64,
+    #[serde(default)]
+    pub lag_slots: i64,
+}
+
+/// Audio clock-discipline telemetry, the subset the badge tooltip shows.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct AudioView {
+    #[serde(default)]
+    pub residual_ppm: f64,
+    #[serde(default)]
+    pub underruns: u64,
+}
+
+/// One NDI output's health as consumed by the dashboard's genlock badges
+/// (#150). A read-only view over the server's `PipelineHealthSnapshot`; every
+/// field `#[serde(default)]` so a partial or newer payload still deserialises
+/// and unknown server fields are ignored.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct NdiOutputHealth {
+    #[serde(default)]
+    pub ndi_name: String,
+    #[serde(default)]
+    pub playlist_id: i64,
+    /// Wire playback state (`Idle` / `WaitingForScene` / `Playing` / `Paused`).
+    /// An output is LIVE on the wall iff this is `Playing`.
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub connections: i32,
+    #[serde(default = "default_lock_state")]
+    pub lock_state: LockState,
+    #[serde(default)]
+    pub lock_reason: String,
+    #[serde(default)]
+    pub clock: ClockView,
+    #[serde(default)]
+    pub pacing: PacingView,
+    #[serde(default)]
+    pub audio: AudioView,
+}
+
+impl NdiOutputHealth {
+    /// Whether this output is LIVE on the wall (`state == "Playing"`).
+    pub fn is_live(&self) -> bool {
+        self.state == "Playing"
+    }
+}
+
+/// GET the per-output NDI genlock health snapshot.
+pub async fn get_ndi_health() -> Result<Vec<NdiOutputHealth>, String> {
+    get("/api/v1/ndi/health").await
+}
+
 // ── Lyrics API helpers ────────────────────────────────────────────────────────
 
 /// GET the lyrics pipeline queue status.
@@ -176,6 +266,29 @@ pub async fn post_reprocess_all_stale() -> Result<serde_json::Value, String> {
 /// POST to clear the manual (bucket 0) lyrics queue.
 pub async fn post_clear_manual_queue() -> Result<serde_json::Value, String> {
     post_json("/api/v1/lyrics/clear-manual-queue", &serde_json::json!({})).await
+}
+
+/// POST "Nesedí" feedback on a ★-flagged song (#142). Server clears
+/// `lyrics_reference`, stamps the rejection timestamp, stores `note`, and
+/// re-queues the song for reprocessing. Replies `204 No Content`.
+pub async fn post_reference_feedback(video_id: i64, note: &str) -> Result<(), String> {
+    post_json_empty(
+        &format!("/api/v1/lyrics/songs/{video_id}/reference-feedback"),
+        &serde_json::json!({ "note": note }),
+    )
+    .await
+}
+
+/// PATCH the per-song SK translation gender override (#152). `gender` is
+/// `Some("m")`, `Some("f")`, or `None` (auto — clears the override back to the
+/// masculine default). The server resets the song's translation version so the
+/// worker re-translates it under the new gender. Replies `204 No Content`.
+pub async fn patch_translation_gender(video_id: i64, gender: Option<&str>) -> Result<(), String> {
+    patch_json_empty(
+        &format!("/api/v1/lyrics/songs/{video_id}/translation-gender"),
+        &serde_json::json!({ "gender": gender }),
+    )
+    .await
 }
 
 // ── Live playlist API helpers ─────────────────────────────────────────────────

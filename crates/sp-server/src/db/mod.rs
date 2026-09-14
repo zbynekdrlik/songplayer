@@ -28,6 +28,10 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (17, MIGRATION_V17),
     (18, MIGRATION_V18),
     (19, MIGRATION_V19),
+    (20, MIGRATION_V20),
+    (21, MIGRATION_V21),
+    (22, MIGRATION_V22),
+    (23, MIGRATION_V23),
 ];
 
 const MIGRATION_V1: &str = "
@@ -260,6 +264,62 @@ ALTER TABLE videos ADD COLUMN lyrics_processed_at TEXT;
 ALTER TABLE videos ADD COLUMN lyrics_alignment_model TEXT;
 ";
 
+// V20 (#140) — per-row download retry bookkeeping. A video that fails
+// download/normalize used to sit at the front of `fetch_next_unprocessed`'s
+// `ORDER BY v.id` forever, blocking every video behind it in the queue.
+// `download_attempts` counts consecutive failures, `last_download_error`
+// carries the tail of the last error for operator visibility, and
+// `next_attempt_at` (RFC3339 UTC, NULL = eligible now) lets the selection
+// query skip a row until its exponential backoff elapses. All three reset
+// to (0, NULL, NULL) the moment a row succeeds.
+const MIGRATION_V20: &str = "
+ALTER TABLE videos ADD COLUMN download_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN last_download_error TEXT;
+ALTER TABLE videos ADD COLUMN next_attempt_at TEXT;
+";
+
+// V21 (#142) — ★ reference marker + owner feedback loop. `lyrics_reference`
+// flags a song as carrying Claude's verified "reference" lyrics; the LED
+// wall appends " ★" to every displayed line for such a song
+// (`lyrics::renderer::resolume_lines_with_next`). When the owner flags a
+// starred song as wrong from the dashboard ("Nesedí"), the feedback
+// endpoint clears the flag, stamps `lyrics_reference_rejected_at`, and
+// stores the owner's note in `lyrics_reference_note`. Existing rows default
+// to (0, NULL, NULL) — not a reference, no rejection on file.
+const MIGRATION_V21: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_reference INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_reference_rejected_at TEXT;
+ALTER TABLE videos ADD COLUMN lyrics_reference_note TEXT;
+";
+
+// V22 (#144) — per-row lyrics retry backoff, mirroring the download retry
+// bookkeeping added in V20 (#140). A song the lyrics worker cannot process
+// this pass (missing AAI key, vocal isolation failed, transient ASR error)
+// used to leave the row unstamped, so `get_next_video_for_lyrics` re-selected
+// it every 5 s tick (37-min hot-loop observed on 3_ccqgwVZYM, 2026-09-12).
+// `lyrics_attempts` counts consecutive deferrals; `lyrics_next_attempt_at`
+// (strftime '%Y-%m-%dT%H:%M:%fZ' UTC, NULL = eligible now) lets every bucket
+// query skip a row until its exponential backoff elapses. Both reset to
+// (0, NULL) the moment a row succeeds or reaches a terminal stamp.
+const MIGRATION_V22: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_next_attempt_at TEXT;
+";
+
+// V23 (#152) — per-song SK translation gender override + translation version.
+// `lyrics_translation_gender` (NULL = auto/default, 'm' = masculine, 'f' =
+// feminine) selects which grandparent framing the translator prompt uses so
+// first-person Slovak forms carry the right grammatical gender (owner report
+// 2026-09-13: a male-sung song came out female). `lyrics_translation_version`
+// (default 0) tracks which LYRICS_TRANSLATION_VERSION the persisted SK lines
+// were produced under; a stale row (< current) is re-translated (translation
+// only, no re-alignment, no lyrics_pipeline_version change). Existing rows
+// default to (NULL, 0) so every song re-translates once under the new prompt.
+const MIGRATION_V23: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_translation_gender TEXT;
+ALTER TABLE videos ADD COLUMN lyrics_translation_version INTEGER NOT NULL DEFAULT 0;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -344,3 +404,19 @@ mod tests_v18;
 #[path = "mod_tests_v19.rs"]
 #[cfg(test)]
 mod tests_v19;
+
+#[path = "mod_tests_v20.rs"]
+#[cfg(test)]
+mod tests_v20;
+
+#[path = "mod_tests_v21.rs"]
+#[cfg(test)]
+mod tests_v21;
+
+#[path = "mod_tests_v22.rs"]
+#[cfg(test)]
+mod tests_v22;
+
+#[path = "mod_tests_v23.rs"]
+#[cfg(test)]
+mod tests_v23;

@@ -15,7 +15,13 @@
 //!    Shutdown / NewPlay / Error / Pause). Flush itself is a sync point that
 //!    releases the previous frame, after which the buffer may be dropped.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat, VideoFrame};
+
+use crate::playback::wallclock::WallClock;
 
 /// Owns an `NdiSender` plus the previous frame's buffer for the async
 /// double-buffer pattern.
@@ -49,11 +55,39 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// Wall-clock instant of the last `submit_nv12` call. `None` means no
     /// real frame has been submitted (standby black frames are excluded).
     last_submit_ts: Option<std::time::Instant>,
+    /// Monotonic-to-UTC wall clock stamping genlock timecodes onto every real
+    /// frame (#146). One clock per pipeline thread, owned here.
+    wall: WallClock,
+    /// `genlock_pacing` for this pipeline (#147). ON = the app owns the cadence,
+    /// so a standby/black frame is stamped with its on-grid boundary rather than
+    /// `SYNTHESIZE` (contract §4.3 — a real send is never SYNTHESIZE; the legacy
+    /// SDK-clocked path keeps `None`). Default OFF.
+    paced: bool,
+    /// Runtime burn-id QR overlay toggle (#151), shared with the API via
+    /// `NdiBurnRegistry`. Read fresh on every paced boundary emit
+    /// ([`submit_frame_at_boundary`](Self::submit_frame_at_boundary)) so a toggle
+    /// takes effect within one frame. Default OFF; never persisted; only the
+    /// paced path paints (the legacy `submit_nv12` path never reads it).
+    burn_on: Arc<AtomicBool>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
-    /// Create a submitter owning an already-constructed sender.
+    /// Create a submitter owning an already-constructed sender. Delegates to
+    /// [`new_with_wallclock`](Self::new_with_wallclock) with the production
+    /// system clock — no throwaway clock is constructed.
     pub fn new(sender: NdiSender<B>, frame_rate_n: i32, frame_rate_d: i32) -> Self {
+        Self::new_with_wallclock(sender, frame_rate_n, frame_rate_d, WallClock::system())
+    }
+
+    /// Construct with an injected [`WallClock`] so genlock timecodes are
+    /// deterministic in tests; [`new`](Self::new) delegates here with the
+    /// system clock. The injected clock is stored and used directly.
+    pub fn new_with_wallclock(
+        sender: NdiSender<B>,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        wall: WallClock,
+    ) -> Self {
         Self {
             sender,
             prev_frame: None,
@@ -63,7 +97,31 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frames_in_window: 0,
             window_start: std::time::Instant::now(),
             last_submit_ts: None,
+            wall,
+            paced: false,
+            burn_on: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Install the shared burn-id overlay flag (#151) for this pipeline. Called
+    /// once at paced-pipeline start with the `Arc<AtomicBool>` the
+    /// `NdiBurnRegistry` also holds, so the runtime API toggle and this
+    /// submitter read the same atomic. The default flag from
+    /// [`new`](Self::new) is OFF, so a submitter that never gets one never burns.
+    pub fn set_burn_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.burn_on = flag;
+    }
+
+    /// Whether the burn-id overlay is currently ON for this pipeline (#151).
+    pub fn burn_active(&self) -> bool {
+        self.burn_on.load(Ordering::Relaxed)
+    }
+
+    /// Set the `genlock_pacing` flag (#147). Called once at pipeline-thread
+    /// start with `genlock_pacing`; when ON, standby/black frames are stamped
+    /// with their on-grid boundary instead of `SYNTHESIZE`.
+    pub fn set_paced(&mut self, paced: bool) {
+        self.paced = paced;
     }
 
     /// Update the frame rate used for subsequent submissions. Call this when
@@ -104,13 +162,25 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.frames_in_window += 1;
         self.last_submit_ts = Some(std::time::Instant::now());
 
+        // Genlock (#146): advance the wall clock once per submit, take ONE
+        // wall reading, and stamp both streams from it. Audio carries the raw
+        // wall clock (no snap, §6); video carries the floored grid boundary
+        // (§4, FLOOR never ceil).
+        self.wall.tick();
+        let now_100ns = self.wall.now_100ns();
+        let audio_tc = Some(now_100ns);
+        let video_tc = Some(floor_boundary_100ns(now_100ns, GENLOCK_GRID_FPS));
+
         // 1. Audio first — fast, non-blocking, goes straight into NDI's queue.
         for af in audio {
-            self.sender.send_audio(af);
+            let mut stamped = af.clone();
+            stamped.timecode_100ns = audio_tc;
+            self.sender.send_audio(&stamped);
         }
 
         // 2. Video async — may block on clock_video pacing, returns once NDI
-        //    has taken ownership of our pointer.
+        //    has taken ownership of our pointer. Pacing stays SDK-clocked in
+        //    #146; #147 replaces it with boundary-paced emission.
         let frame = VideoFrame {
             data: video_data,
             width,
@@ -119,6 +189,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frame_rate_n: self.frame_rate_n,
             frame_rate_d: self.frame_rate_d,
             pixel_format: PixelFormat::Nv12,
+            timecode_100ns: video_tc,
         };
         // SAFETY: the previous async frame's buffer is held in `prev_frame`
         // below; it will not be dropped until we install the new frame, which
@@ -145,6 +216,18 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     pub fn send_black_bgra(&mut self, width: u32, height: u32) {
         self.flush();
         let data = vec![0u8; (width * height * 4) as usize];
+        // Paced (#147): a real send is never SYNTHESIZE — stamp the standby
+        // frame with the floored on-grid boundary at the send instant (§4.3), so
+        // an idle→play transition does not drop the receiver out of `locked=`.
+        // The legacy SDK-clocked path keeps `None` (SYNTHESIZE, open question 7).
+        let timecode_100ns = if self.paced {
+            Some(floor_boundary_100ns(
+                self.wall.now_100ns(),
+                GENLOCK_GRID_FPS,
+            ))
+        } else {
+            None
+        };
         let frame = VideoFrame {
             data,
             width,
@@ -153,8 +236,94 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frame_rate_n: self.frame_rate_n,
             frame_rate_d: self.frame_rate_d,
             pixel_format: PixelFormat::Bgra,
+            timecode_100ns,
         };
         self.sender.send_video(&frame);
+    }
+
+    /// Submit one boundary-paced frame at EXPLICIT genlock timecodes (#147).
+    ///
+    /// Audio chunks first (stamped `audio_tc_100ns`, the raw wall clock — §6),
+    /// then the video frame async (stamped `video_tc_100ns`, the floored
+    /// boundary — §4). Unlike [`submit_nv12`](Self::submit_nv12) the `Pacer`
+    /// owns the wall clock and supplies both stamps, so this bypasses the
+    /// internal [`WallClock`]. The video buffer is copied for the async
+    /// double-buffer holdover (the pacer keeps its own clone for the starvation
+    /// repeat, so this takes a borrow).
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_frame_at_boundary(
+        &mut self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        video_data: &[u8],
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.frames_submitted_total += 1;
+        self.frames_in_window += 1;
+        self.last_submit_ts = Some(std::time::Instant::now());
+
+        // 1. Audio first — the boundary's chunks go into NDI's queue before
+        //    the video frame (the audio-first invariant, submitter.rs top).
+        for af in audio {
+            let mut stamped = af.clone();
+            stamped.timecode_100ns = Some(audio_tc_100ns);
+            self.sender.send_audio(&stamped);
+        }
+
+        // 2. Video async, stamped with the floored boundary.
+        //
+        // #151 burn-id overlay: paint the QR into OUR owned copy of the frame
+        // (the `to_vec` below), NEVER the decoder's / pacer's buffer — the pacer
+        // keeps its own clone for the starvation repeat, so mutating this copy is
+        // safe and re-derives a fresh payload every boundary. Paced path only;
+        // read the shared flag fresh so a toggle-off clears within one frame.
+        // `frame_id` = the pacing `seq` (== `frames_submitted_total`, bumped
+        // above); `gen_ts_ns` = the serviced boundary wall time in ns
+        // (`video_tc_100ns` is in 100-ns units).
+        let mut data = video_data.to_vec();
+        if self.burn_on.load(Ordering::Relaxed) {
+            crate::playback::burn_overlay::paint_burn(
+                &mut data,
+                width,
+                height,
+                stride,
+                self.frames_submitted_total as u32,
+                video_tc_100ns.saturating_mul(100),
+            );
+        }
+        let frame = VideoFrame {
+            data,
+            width,
+            height,
+            stride,
+            frame_rate_n: self.frame_rate_n,
+            frame_rate_d: self.frame_rate_d,
+            pixel_format: PixelFormat::Nv12,
+            timecode_100ns: Some(video_tc_100ns),
+        };
+        // SAFETY: `prev_frame` holds the previous async buffer until this
+        // async call releases the SDK's pointer to it; the new buffer is
+        // installed immediately after.
+        unsafe {
+            self.sender.send_video_async(&frame);
+        }
+        self.prev_frame = Some(frame.data);
+    }
+
+    /// Submit an audio-only tail chunk at an explicit timecode (#148 rework,
+    /// item 4). Used at EOS to flush the last partial boundary of buffered audio
+    /// (zero-filled to `samples_per_boundary`) — there is no accompanying video
+    /// frame, so this does NOT touch the video double-buffer or the frame
+    /// counters; it only stamps and sends the audio chunk(s).
+    pub fn submit_audio_tail(&mut self, audio: &[AudioFrame], audio_tc_100ns: i64) {
+        for af in audio {
+            let mut stamped = af.clone();
+            stamped.timecode_100ns = Some(audio_tc_100ns);
+            self.sender.send_audio(&stamped);
+        }
     }
 
     /// Borrow the underlying sender (mainly for tests).
@@ -209,6 +378,30 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     }
 }
 
+/// The `FrameSubmitter` is the production [`PacedSink`](crate::playback::pacer::PacedSink)
+/// for the boundary-paced emission loop (#147).
+impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
+    fn emit(
+        &mut self,
+        video: &crate::playback::pacer::PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        // `audio` is the boundary's batch (every consumed frame's chunks, §6.4),
+        // NOT `video.audio` — the pacer drains that into the batch on consume.
+        self.submit_frame_at_boundary(
+            video.width,
+            video.height,
+            video.stride,
+            &video.video,
+            audio,
+            video_tc_100ns,
+            audio_tc_100ns,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +413,7 @@ mod tests {
             data: interleaved,
             channels,
             sample_rate: 48000,
+            timecode_100ns: None,
         }
     }
 
@@ -497,4 +691,82 @@ mod tests {
         let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30000, 1001);
         assert_eq!(sub.frame_rate_d(), 1001);
     }
+
+    // ---- #151 burn-id overlay wiring ----
+
+    #[test]
+    fn burn_is_off_by_default() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "B0", true, false).unwrap();
+        let sub: FrameSubmitter<_> = FrameSubmitter::new(sender, 30, 1);
+        assert!(
+            !sub.burn_active(),
+            "#151: burn overlay defaults OFF (never persisted)"
+        );
+    }
+
+    #[test]
+    fn set_burn_flag_shares_the_atomic_toggle() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "B1", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        let flag = Arc::new(AtomicBool::new(false));
+        sub.set_burn_flag(flag.clone());
+        assert!(!sub.burn_active());
+        flag.store(true, Ordering::Relaxed);
+        assert!(
+            sub.burn_active(),
+            "the API's shared flag drives burn_active within one frame"
+        );
+        flag.store(false, Ordering::Relaxed);
+        assert!(!sub.burn_active());
+    }
+
+    #[test]
+    fn paced_submit_with_burn_on_still_emits_one_video_frame() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "B2", false, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        sub.set_burn_flag(Arc::new(AtomicBool::new(true)));
+        // 1080p NV12 so the burn geometry fits; the paint runs on our owned copy.
+        let (w, h, stride) = (1920u32, 1080u32, 1920u32);
+        let data = vec![0u8; (stride * h * 3 / 2) as usize];
+        sub.submit_frame_at_boundary(w, h, stride, &data, &[], 3_333_300, 3_333_300);
+        let async_calls: Vec<_> = backend
+            .calls()
+            .into_iter()
+            .filter(|c| c.starts_with("send_video_async"))
+            .collect();
+        assert_eq!(
+            async_calls.len(),
+            1,
+            "a burn-on paced submit must still emit exactly one video frame"
+        );
+        assert_eq!(sub.frames_submitted_total(), 1);
+    }
+
+    /// #151 structural guard: the burn overlay is paced-path ONLY. The file that
+    /// hosts the legacy SDK-clocked `decode_and_send` loop (`pipeline.rs`) must
+    /// never reference the overlay — a QR must never reach a non-genlock output.
+    /// Static `include_str!` guard; fires red if the overlay leaks into it.
+    #[test]
+    fn legacy_pipeline_path_never_references_burn_overlay() {
+        let src = include_str!("pipeline.rs");
+        assert!(
+            !src.contains("burn_overlay"),
+            "the legacy pipeline path must never reference burn_overlay"
+        );
+        assert!(
+            !src.contains("paint_burn"),
+            "the legacy pipeline path must never call paint_burn"
+        );
+    }
 }
+
+#[cfg(test)]
+#[path = "submitter_tests_timecode.rs"]
+mod submitter_tests_timecode;
+
+#[cfg(test)]
+#[path = "submitter_tests_mutants.rs"]
+mod submitter_tests_mutants;

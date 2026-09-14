@@ -475,6 +475,8 @@ body {
 }
 .source-chip { background: #333; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; }
 .quality-text { color: #999; font-size: 0.85em; }
+.reference-badge { color: #ffc857; font-size: 1.1em; }
+.reference-reject-btn { background: #3a2a00; color: #ffc857; border: 1px solid #ffc857; }
 
 /* ---- Live Page ---- */
 
@@ -928,3 +930,29 @@ body {
     background: var(--warning);
     flex-shrink: 0;
 }
+
+/* ---- Genlock LIVE-LOCKED indicator (#150) — per-output + global badge,
+   same LOCKED / DEGRADED / UNLOCKED vocabulary + colours as the fleet OBS
+   (camera-box#1298). Indication only; the colour carries the whole signal. */
+
+.genlock-status {
+    display: flex;
+    align-items: center;
+    margin-left: 16px;
+}
+
+.lock-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.card-header .lock-badge { margin-left: 8px; }
+
+.lock-locked { color: var(--success); }
+.lock-degraded { color: var(--warning); }
+.lock-unlocked { color: var(--error); }

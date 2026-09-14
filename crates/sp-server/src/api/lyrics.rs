@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::AppState;
 
@@ -98,6 +98,15 @@ pub struct SongListItem {
     /// pushing the English lyric line to Resolume's `#sp-subs` / `#sp-subs-next`
     /// clips. The /live setlist UI renders a checkbox bound to this field.
     pub suppress_resolume_en: bool,
+    /// `videos.lyrics_reference` (#142) — when true, this song carries
+    /// Claude's verified "reference" lyrics and the LED wall appends " ★"
+    /// to every displayed line. The lyrics dashboard renders a ★ badge and
+    /// a „Nesedí" feedback button bound to this field.
+    pub lyrics_reference: bool,
+    /// `videos.lyrics_translation_gender` (#152) — the per-song SK translation
+    /// gender override: `None` = auto (masculine default), `"m"`, or `"f"`.
+    /// The song row renders a ♂/♀ toggle bound to this value.
+    pub translation_gender: Option<String>,
 }
 
 // HTTP handler: behavior covered by integration tests in Task 14 Playwright + is_stale/manual_priority cast logic verified via API shape tests.
@@ -110,7 +119,7 @@ pub async fn list_songs(
     let mut sql = String::from(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
          lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en \
+         suppress_resolume_en, lyrics_reference, lyrics_translation_gender \
          FROM videos WHERE normalized = 1",
     );
     if q.playlist_id.is_some() {
@@ -136,6 +145,7 @@ pub async fn list_songs(
             let hl: i64 = r.get("has_lyrics");
             let mp: i64 = r.get("lyrics_manual_priority");
             let sre: i64 = r.get("suppress_resolume_en");
+            let lref: i64 = r.get("lyrics_reference");
             SongListItem {
                 video_id: r.get("id"),
                 youtube_id: r.get("youtube_id"),
@@ -149,6 +159,11 @@ pub async fn list_songs(
                 is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
                 manual_priority: mp == 1,
                 suppress_resolume_en: sre != 0,
+                lyrics_reference: lref != 0,
+                translation_gender: r
+                    .try_get::<Option<String>, _>("lyrics_translation_gender")
+                    .ok()
+                    .flatten(),
             }
         })
         .collect();
@@ -172,7 +187,7 @@ pub async fn get_song_detail(
     let row = match sqlx::query(
         "SELECT id, youtube_id, title, song, artist, lyrics_source, \
          lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en \
+         suppress_resolume_en, lyrics_reference, lyrics_translation_gender \
          FROM videos WHERE id = ? AND normalized = 1",
     )
     .bind(video_id)
@@ -190,6 +205,7 @@ pub async fn get_song_detail(
     let hl: i64 = row.get("has_lyrics");
     let mp: i64 = row.get("lyrics_manual_priority");
     let sre: i64 = row.get("suppress_resolume_en");
+    let lref: i64 = row.get("lyrics_reference");
     let youtube_id: String = row.get("youtube_id");
     let list_item = SongListItem {
         video_id: row.get("id"),
@@ -204,6 +220,11 @@ pub async fn get_song_detail(
         is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
         manual_priority: mp == 1,
         suppress_resolume_en: sre != 0,
+        lyrics_reference: lref != 0,
+        translation_gender: row
+            .try_get::<Option<String>, _>("lyrics_translation_gender")
+            .ok()
+            .flatten(),
     };
     let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let audit_path = state
@@ -272,6 +293,7 @@ pub async fn post_reprocess(
             };
             let sql = format!(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
+                        lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
                         lyrics_source = CASE \
                             WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
@@ -311,6 +333,7 @@ pub async fn post_reprocess(
             };
             match sqlx::query(
                 "UPDATE videos SET lyrics_manual_priority = 1, \
+                        lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
                         lyrics_source = CASE \
                             WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
@@ -370,7 +393,8 @@ pub async fn post_reprocess_all_stale(State(state): State<AppState>) -> impl Int
     };
 
     let res = sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 1 \
+        "UPDATE videos SET lyrics_manual_priority = 1, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
          WHERE has_lyrics = 1 AND lyrics_pipeline_version < ? \
          AND lyrics_manual_priority = 0",
     )
@@ -529,6 +553,132 @@ pub async fn post_probe_sources(
     .await;
 
     Json(report).into_response()
+}
+
+// ── #142 — ★ reference marker: feedback + admin toggle ────────────────────
+
+/// Request body for `POST /api/v1/lyrics/songs/{video_id}/reference-feedback`.
+#[derive(Debug, Deserialize)]
+pub struct ReferenceFeedbackRequest {
+    pub note: String,
+}
+
+/// The owner flags a starred ("★ reference") song as wrong from the
+/// dashboard ("Nesedí"). Clears `lyrics_reference`, stamps
+/// `lyrics_reference_rejected_at`, stores the note, and re-queues the song
+/// via `lyrics_manual_priority` — see `db::models::record_reference_feedback`.
+#[cfg_attr(test, mutants::skip)] // Thin glue mirroring quarantine_lyrics;
+// both branches (found/not-found) plus the JSON body shape are covered by
+// the reference_feedback_endpoint_* integration tests in routes_tests.rs.
+pub async fn post_reference_feedback(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<ReferenceFeedbackRequest>,
+) -> impl IntoResponse {
+    match crate::db::models::record_reference_feedback(&state.pool, video_id, &req.note).await {
+        Ok(0) => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Ok(_) => {
+            info!(
+                video_id,
+                note_len = req.note.len(),
+                "lyrics reference feedback recorded"
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => {
+            warn!("post_reference_feedback error for video {video_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+/// Request body for `POST /api/v1/lyrics/songs/{video_id}/reference`.
+#[derive(Debug, Deserialize)]
+pub struct SetReferenceRequest {
+    pub reference: bool,
+}
+
+/// Admin toggle for `videos.lyrics_reference`. Does NOT touch the rejection
+/// columns — see `db::models::set_video_lyrics_reference`.
+#[cfg_attr(test, mutants::skip)] // Thin glue mirroring patch_video; both
+// branches (found/not-found) plus both true/false directions are covered
+// by the set_reference_endpoint_* integration tests in routes_tests.rs.
+pub async fn post_set_reference(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<SetReferenceRequest>,
+) -> impl IntoResponse {
+    match crate::db::models::set_video_lyrics_reference(&state.pool, video_id, req.reference).await
+    {
+        Ok(0) => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            warn!("post_set_reference error for video {video_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+// ── #152 — per-song SK translation gender override ────────────────────────
+
+/// Request body for `PATCH /api/v1/lyrics/songs/{video_id}/translation-gender`.
+/// `gender` is `"m"` (masculine), `"f"` (feminine), or `null`/absent (auto —
+/// clears the override back to the masculine default).
+#[derive(Debug, Deserialize)]
+pub struct TranslationGenderRequest {
+    #[serde(default)]
+    pub gender: Option<String>,
+}
+
+/// Set the per-song SK translation gender override (#152). Validates the value,
+/// writes `videos.lyrics_translation_gender`, and resets the song's translation
+/// version to 0 so the worker re-translates it under the new gender on the next
+/// pass — see `db::models::set_translation_gender`. 400 on a bad value, 404 when
+/// no such video, 204 on success.
+#[cfg_attr(test, mutants::skip)] // Thin glue: validate → call helper → map
+// success to 204, no-such-row to 404, bad value to 400. All three branches
+// covered by the translation_gender_endpoint_* integration tests.
+pub async fn patch_translation_gender(
+    State(state): State<AppState>,
+    Path(video_id): Path<i64>,
+    Json(req): Json<TranslationGenderRequest>,
+) -> impl IntoResponse {
+    // Only None (auto) / "m" / "f" are valid; anything else is a client error.
+    match req.gender.as_deref() {
+        None | Some("m") | Some("f") => {}
+        Some(other) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("gender must be \"m\", \"f\", or null; got {other:?}"),
+            )
+                .into_response();
+        }
+    }
+    match crate::db::models::set_translation_gender(&state.pool, video_id, req.gender.as_deref())
+        .await
+    {
+        Ok(true) => {
+            info!(video_id, gender = ?req.gender, "lyrics translation gender set");
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            format!("no video with id {video_id}"),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!("patch_translation_gender error for video {video_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
 }
 
 #[path = "lyrics_tests.rs"]

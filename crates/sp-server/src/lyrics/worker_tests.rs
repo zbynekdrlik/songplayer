@@ -282,10 +282,12 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
 
 /// Regression: when Claude returns `{"lines": []}` for a song that has no
 /// lyrics in its description, the description block must NOT push an empty
-/// CandidateText. The match guard `!lines.is_empty()` prevents that. Replacing
-/// the guard with `true` would allow an empty description candidate through,
-/// but then candidate_texts would not be empty and the function would not bail.
-/// This test verifies that empty-array responses are correctly skipped.
+/// CandidateText. The match guard `!lines.is_empty()` prevents that. With
+/// every source missing, `gather_sources_impl` returns Ok with an EMPTY
+/// candidate list (#120 follow-up) — no longer a bail — so `process_song`'s
+/// gate can route the song to asr_path blind. This test verifies both: the
+/// empty-array description is skipped, and the zero-candidate result is a
+/// clean empty `SongContext`, not an error.
 #[tokio::test]
 async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     use crate::ai::AiSettings;
@@ -340,11 +342,12 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     let reqwest_client = reqwest::Client::new();
     let bogus_ytdlp = std::path::PathBuf::from("/definitely/does/not/exist/ytdlp");
 
-    // gather_sources_impl should bail with "no text sources available" because:
+    // gather_sources_impl should return Ok with an EMPTY candidate list because:
     // - yt_subs: yt-dlp path bogus, returns None
     // - lrclib: artist empty, skipped
     // - description: Claude returns empty array, match guard skips push
-    // So candidate_texts is empty and the function bails.
+    // So candidate_texts is empty — the #120 follow-up returns Ok(empty) here
+    // (not a bail) so process_song's gate routes the song to asr_path blind.
     let result = gather_sources_impl(
         Some(&ai),
         &bogus_ytdlp,
@@ -355,15 +358,13 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     )
     .await;
 
-    assert!(
-        result.is_err(),
-        "expected bail on zero candidates, got: {:?}",
-        result
+    let ctx = result.expect(
+        "gather must return Ok with an empty candidate list on zero sources, not bail (#120)",
     );
-    let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("no text sources available"),
-        "expected 'no text sources available' error, got: {err_msg}"
+        ctx.candidate_texts.is_empty(),
+        "expected an empty candidate list for the blind asr_path route, got: {:?}",
+        ctx.candidate_texts
     );
 }
 
@@ -854,121 +855,4 @@ fn process_song_routes_through_should_resolve_spotify() {
         "process_song must route the Spotify pre-gather decision through \
          should_resolve_spotify so #76's guard-pinning unit tests apply"
     );
-}
-
-#[test]
-fn timed_yt_subs_skips_asr_path_entirely() {
-    // Regression guard: a song with a timed yt_subs candidate MUST go through
-    // the existing whisperx path, not the new asr_path branch added for
-    // bucket-1 (`unsupported_source`) songs.
-    //
-    // The worker decision tree (worker.rs::process_song gate block):
-    //   1. is_allowed_text_source(cands) == true  → whisperx path
-    //   2. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == true
-    //      → asr_path branch
-    //   3. is_allowed_text_source(cands) == false AND has_any_text_candidate(cands) == false
-    //      → mark_unsupported_source
-    //
-    // This test asserts that a timed yt_subs candidate triggers path 1, never
-    // path 2. If `is_allowed_text_source` were ever modified to reject timed
-    // yt_subs, this assertion would catch the regression.
-
-    use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
-    use crate::lyrics::provider::CandidateText;
-
-    let timed = CandidateText {
-        source: "yt_subs".to_string(),
-        lines: vec!["hello".into(), "world".into()],
-        line_timings: Some(vec![(0, 1000), (1200, 2000)]),
-        has_timing: true,
-    };
-    let cands = vec![timed];
-
-    // Gate predicate must accept timed yt_subs → whisperx path.
-    assert!(
-        is_allowed_text_source(&cands),
-        "timed yt_subs must be accepted by the gate; if not, regression introduced"
-    );
-    // And has_any_text_candidate is also true here (proves the test exercises
-    // a candidate that would otherwise be eligible for asr_path if the gate
-    // ever falsely rejected it).
-    assert!(has_any_text_candidate(&cands));
-}
-
-#[test]
-fn untimed_genius_passes_gate_to_asr_path() {
-    // Mirror regression: a song with ONLY untimed genius MUST be rejected by
-    // the gate but accepted by `has_any_text_candidate`, putting it on path 2
-    // (asr_path). If `is_allowed_text_source` ever started accepting untimed
-    // sources, this test would catch that — and asr_path would no longer be
-    // reachable for these songs.
-
-    use crate::lyrics::orchestrator::{has_any_text_candidate, is_allowed_text_source};
-    use crate::lyrics::provider::CandidateText;
-
-    let untimed = CandidateText {
-        source: "genius".to_string(),
-        lines: vec!["hello".into(), "world".into()],
-        line_timings: None,
-        has_timing: false,
-    };
-    let cands = vec![untimed];
-
-    assert!(
-        !is_allowed_text_source(&cands),
-        "untimed genius must be gate-rejected"
-    );
-    assert!(
-        has_any_text_candidate(&cands),
-        "untimed genius must still trigger has_any_text_candidate → asr_path branch"
-    );
-}
-
-// asr_path end-to-end integration test (#116 review 🟡 #6): real in-memory
-// SQLite + minimal LyricsWorker, no AAI key → branch exits Ok(()) without
-// mutating the row.
-#[tokio::test]
-async fn run_asr_path_branch_returns_ok_when_aai_key_missing() {
-    use std::time::Instant;
-
-    let pool = crate::db::create_memory_pool().await.expect("pool");
-    crate::db::run_migrations(&pool).await.expect("migrate");
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'test', 'https://youtube.com/playlist?list=test', '')",
-    )
-    .execute(&pool)
-    .await
-    .expect("insert playlist");
-    let video_id: i64 = sqlx::query_scalar(
-        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized) \
-         VALUES (1, 'test_yt_id', 'Test Title', 'Test Song', 'Test Artist', 1) RETURNING id",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("insert video");
-
-    let cache_dir = std::env::temp_dir().join("sp_asr_branch_test");
-    let _ = std::fs::create_dir_all(&cache_dir);
-    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
-    let worker = crate::lyrics::worker::LyricsWorker::new_for_test(
-        pool.clone(),
-        cache_dir.clone(),
-        events_tx,
-    );
-
-    let result = worker
-        .run_asr_path_branch(
-            &[],
-            None,
-            video_id,
-            "test_yt_id",
-            "Test Song",
-            "Test Artist",
-            chrono::Utc::now().timestamp_millis(),
-            Instant::now(),
-        )
-        .await;
-    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
-    let _ = std::fs::remove_dir_all(&cache_dir);
 }

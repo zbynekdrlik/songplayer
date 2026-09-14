@@ -45,6 +45,12 @@ impl AuditContext<'_> {
         self.cache_dir
             .join(format!("{}_descmerge_audit.json", self.youtube_id))
     }
+
+    /// #143 — Lever-2 forced-alignment reference-gate decision sidecar.
+    pub fn alignment_audit_path(&self) -> PathBuf {
+        self.cache_dir
+            .join(format!("{}_alignment_audit.json", self.youtube_id))
+    }
 }
 
 /// Write the raw `AlignedTrack` returned by the alignment backend to
@@ -88,6 +94,29 @@ pub async fn write_descmerge_audit<T: Serialize + ?Sized>(
     }
 }
 
+/// Write the Lever-2 (#143) reference-gate decision to
+/// `{cache_dir}/{youtube_id}_alignment_audit.json` — the reviewable record
+/// for a `Fail`/`Error` reference-stage outcome (a `Pass` needs no audit;
+/// the stamped `+mtl@rev1/g35t-ok` source IS the record). Best-effort: a
+/// write failure is logged, never propagated.
+pub async fn write_alignment_audit<T: Serialize + ?Sized>(
+    audit: Option<&AuditContext<'_>>,
+    payload: &T,
+) {
+    let Some(ctx) = audit else { return };
+    let path = ctx.alignment_audit_path();
+    match serde_json::to_string_pretty(payload) {
+        Ok(json) => {
+            if let Err(e) = tokio::fs::write(&path, json).await {
+                warn!(path = %path.display(), %e, "audit: write alignment_audit failed");
+            }
+        }
+        Err(e) => {
+            warn!(path = %path.display(), %e, "audit: serialize alignment_audit failed");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +153,40 @@ mod tests {
             "must contain id+suffix; got {s}"
         );
         assert!(path.parent().is_some_and(|p| p == Path::new("/var/data")));
+    }
+
+    #[test]
+    fn alignment_audit_path_includes_youtube_id_and_extension() {
+        let dir = Path::new("/cache");
+        let path = ctx(dir, "ref001").alignment_audit_path();
+        let s = path.to_string_lossy();
+        assert!(
+            s.contains("ref001_alignment_audit.json"),
+            "must contain id+suffix; got {s}"
+        );
+        assert!(path.parent().is_some_and(|p| p == Path::new("/cache")));
+    }
+
+    #[tokio::test]
+    async fn write_alignment_audit_creates_file_with_pretty_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = "ref-test";
+        let audit_ctx = ctx(tmp.path(), id);
+        let payload = serde_json::json!({"verdict": "fail", "reason": "offset"});
+        write_alignment_audit(Some(&audit_ctx), &payload).await;
+        let content = tokio::fs::read_to_string(audit_ctx.alignment_audit_path())
+            .await
+            .expect("file must exist");
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["verdict"], "fail");
+    }
+
+    #[tokio::test]
+    async fn write_alignment_audit_is_noop_when_audit_is_none() {
+        let payload = serde_json::json!({"verdict": "fail"});
+        // Must not panic and must not write anywhere — nothing to assert on
+        // disk since there is no path; absence of a panic IS the assertion.
+        write_alignment_audit::<serde_json::Value>(None, &payload).await;
     }
 
     #[tokio::test]

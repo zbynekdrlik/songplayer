@@ -606,6 +606,74 @@ jobs:
           #   Col-pinned because it is indistinguishable from the end_idx guard
           #   on the same line, which IS tested
           #   (group_with_end_idx_equal_to_len_is_rejected).
+          # === genlock #146–#151 additions (audit 2026-09-13, PR #153) ===
+          # genlock_audio.rs:129:31 `> → <` in LevelAverager::record: the ring
+          #   drain `while ring.len() > 2*window { pop_front }` becomes
+          #   `while len < 2*window`, which pops until empty then spins on an
+          #   empty deque forever → non-terminating on the FIRST record() call,
+          #   not catchable by a terminating test (mirrors the apply_greedy
+          #   loop-counter TIMEOUT pins above).
+          # genlock_audio.rs:254:32 `* → +` and `* → /` in AudioPll::update: the
+          #   rate step `(-residual * 0.5).clamp(±5)` only runs when |residual|
+          #   > 50 (dead-band gate), so |−residual·0.5| > 25 and the clamp always
+          #   saturates to ±5 with sign = sign(−residual). `-residual + 0.5` and
+          #   `-residual / 0.5` (= −2·residual) keep that same sign and saturate
+          #   to the SAME ±5 for every reachable residual → equivalent.
+          # genlock_audio.rs:296:32 `* → /` in AudioPll::update_level: bias_target
+          #   `BIAS_PPM * signum(level − target)` is only evaluated when engaged,
+          #   and level == target is `near`, which clears far_since BEFORE engaged
+          #   is read, so engaged ⇒ level ≠ target ⇒ signum ∈ {−1,+1}; and
+          #   `20 * s == 20 / s` for s ∈ {−1,+1} (divide-by-zero unreachable) →
+          #   equivalent.
+          # === shards 3-7 additions (audit 2026-09-13, PR #153) ===
+          # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
+          #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux
+          #   mutation runner; every mutant lands in dead code, builds, and no
+          #   test runs it -> MISSED. Same class as the sp-decoder/{audio,video}
+          #   file exclusions above (target-only code).
+          # pipeline.rs:239:5 run_loop -> (): the #[cfg(windows)] run_loop twin
+          #   (the #[cfg(not(windows))] run_loop is compiled + covered). Windows
+          #   dead code on Linux, as above.
+          # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the
+          #   Python LyricsAlignment-MTL tool (tokio::process::Command) which is
+          #   not installed on the runner; run_once/align/write_text_json are
+          #   subprocess/file glue and is_available/TIMEOUT_SECS are std::fs/const
+          #   trivia around it -- integration-tested against the real tool, like
+          #   the reprocess/ + downloader/ exclusions.
+          # orchestrator.rs asr_transcribe (line-agnostic — the line shifted 495→499 and the pin missed, shard 3/8 on run 34784800346): the RealReferenceStageBackend ASR
+          #   call hits the live AssemblyAI HTTP API; network-bound, no local unit
+          #   test (same class as g35t_client's #[mutants::skip] HTTP helpers).
+          # === TIMEOUTs (non-terminating under mutation; not catchable by a
+          #     terminating test, like the apply_greedy / LevelAverager pins) ===
+          # pacer.rs:94 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
+          #   decode-advance loop (decode until the frame is due); a constant/zero
+          #   pts never advances it, so the pacer-drive test spins -> 300 s TIMEOUT.
+          # audio_grid.rs:74 push -> (), 77:26 ==->!= in push, 158 level_samples
+          #   ->0/1: the buffer-fill test loops `while level_samples() < N { push }`;
+          #   a no-op push or a constant level never reaches N -> TIMEOUT.
+          # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain
+          #   guard so eviction never makes progress under the window-fill test
+          #   -> TIMEOUT.
+          # === provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
+          # pacer_prepare.rs:85:66 and pacer.rs:788:70 (- -> + / /) in the p99
+          #   index `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for
+          #   every len>=1, so the `.min(len-1)` clamp never binds; replacing
+          #   `len-1` with `len+1` or `len/1` cannot change the index. (The same
+          #   clamp in iter_percentile_us IS killable because there `p` is a
+          #   parameter and the tests pass p=100, where floor(len*100/100)=len
+          #   makes the clamp load-bearing.)
+          # pacer.rs:731:20 > -> >= in on_emit: the guarded body is only
+          #   `max_late_us = late_us`; the two operators differ solely at
+          #   `late_us == max_late_us`, where the assignment writes the value it
+          #   just compared -- a no-op. Output identical for all inputs.
+          # pacer.rs:682:28 += -> *= / -= in service_standby: the mutated
+          #   `relatches += 1` sits in the `if emit_now < boundary` backward-step
+          #   net, but service_standby takes both `now_100ns()` reads with no
+          #   decode pull between them and only reaches this point after
+          #   `sched_now >= boundary`, so on a monotonic clock emit_now ==
+          #   sched_now >= boundary and the branch is unreachable by any
+          #   terminating deterministic test. (The analogous `service` mutant at
+          #   532:28 IS killable -- its decode `pull` closure can step the clock.)
           # Enumerate this shard's mutants FIRST so debugging is possible
           # even when the runner SIGTERMs mid-run (the upload-artifact step
           # gets skipped on cancellation). Survives in the live log.
@@ -642,7 +710,27 @@ jobs:
             --exclude-re 'text_reference_merge_phantom\.rs:49:20: replace < with <= in drop_phantom_clusters' \
             --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with == in drop_phantom_clusters' \
             --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with < in drop_phantom_clusters' \
-            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters'
+            --exclude-re 'text_reference_merge_phantom\.rs:137:25: replace > with >= in drop_phantom_clusters' \
+            --exclude-re 'genlock_audio\.rs:129:31: replace > with <' \
+            --exclude-re 'genlock_audio\.rs:254:32: replace \* with \+' \
+            --exclude-re 'genlock_audio\.rs:254:32: replace \* with /' \
+            --exclude-re 'genlock_audio\.rs:296:32: replace \* with /' \
+            --exclude-re 'sp-server/src/playback/pipeline_paced' \
+            --exclude-re 'pipeline\.rs:239:5: replace run_loop with \(\)' \
+            --exclude-re 'sp-server/src/lyrics/mtl_aligner' \
+            --exclude-re 'orchestrator\.rs:[0-9]+:[0-9]+: replace <impl ReferenceStageBackend for RealReferenceStageBackend>::asr_transcribe' \
+            --exclude-re 'pacer\.rs:94:' \
+            --exclude-re 'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)' \
+            --exclude-re 'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push' \
+            --exclude-re 'audio_grid\.rs:158:9: replace AudioGridBuffer::level_samples' \
+            --exclude-re 'lock_state\.rs:96:31: replace > with < in EventWindow::evict' \
+            --exclude-re 'pacer_prepare\.rs:85:66: replace - with \+ in Pacer::prep_p99_us' \
+            --exclude-re 'pacer_prepare\.rs:85:66: replace - with / in Pacer::prep_p99_us' \
+            --exclude-re 'pacer\.rs:788:70: replace - with \+ in Pacer::jitter_p99_us' \
+            --exclude-re 'pacer\.rs:788:70: replace - with / in Pacer::jitter_p99_us' \
+            --exclude-re 'pacer\.rs:731:20: replace > with >= in Pacer::on_emit' \
+            --exclude-re 'pacer\.rs:682:28: replace \+= with \*= in Pacer::service_standby' \
+            --exclude-re 'pacer\.rs:682:28: replace \+= with -= in Pacer::service_standby'
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4

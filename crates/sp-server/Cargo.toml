@@ -39,6 +39,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 urlencoding = "2"
 socket2 = "0.6.3"
 tempfile = "3.27.0"
+# #151 burn-id QR overlay. Pure-Rust encoder; `default-features = false` drops
+# the optional `image`/`svg` output renderers (no extra runtime deps, no
+# advisories) — the core `QrCode`/`into_colors` API is not feature-gated and is
+# all we need for the module matrix.
+qrcode = { version = "0.14.1", default-features = false }
 
 [dev-dependencies]
 tower = "0.5"

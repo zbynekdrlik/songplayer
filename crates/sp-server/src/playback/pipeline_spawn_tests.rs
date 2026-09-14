@@ -14,7 +14,14 @@ fn spawn_stores_ndi_name_for_accessor() {
     // - "" substitution on ndi_name() → assertion fails
     // - "xyzzy" substitution on ndi_name() → assertion fails
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel::<(i64, PipelineEvent)>();
-    let pp = PlaybackPipeline::spawn("SP-fixture-name".to_string(), None, event_tx, 42);
+    let pp = PlaybackPipeline::spawn(
+        "SP-fixture-name".to_string(),
+        None,
+        event_tx,
+        42,
+        false,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
     assert_eq!(
         pp.ndi_name(),
         "SP-fixture-name",

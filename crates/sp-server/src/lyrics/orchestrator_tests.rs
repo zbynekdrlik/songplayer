@@ -436,3 +436,271 @@ async fn zero_fetchers_falls_back_to_backend_only() {
     assert_eq!(call_count.load(Ordering::SeqCst), 1);
     assert!(!result.provenance.contains("+claude-merge"));
 }
+
+// -----------------------------------------------------------------------
+// Lever 2 (#143) — `run_reference_stage` tests
+// -----------------------------------------------------------------------
+
+use crate::lyrics::orchestrator::{
+    ReferenceStageBackend, ReferenceStageResult, run_reference_stage,
+};
+
+/// Single-use fake `ReferenceStageBackend` — the mtl/asr results are
+/// consumed exactly once via `Mutex<Option<..>>::take()`, mirroring the
+/// production seam's one-call-per-song contract.
+struct FakeReferenceStageBackend {
+    mtl: std::sync::Mutex<Option<anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput>>>,
+    asr: std::sync::Mutex<Option<anyhow::Result<Vec<crate::lyrics::g35t_client::AsrWord>>>>,
+}
+
+#[async_trait]
+impl ReferenceStageBackend for FakeReferenceStageBackend {
+    async fn mtl_align(
+        &self,
+        _vocals_wav: &Path,
+        _video_id: &str,
+        _lines: &[String],
+    ) -> anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput> {
+        self.mtl
+            .lock()
+            .unwrap()
+            .take()
+            .expect("mtl_align called more than once")
+    }
+
+    async fn asr_transcribe(
+        &self,
+        _vocals_wav: &Path,
+    ) -> anyhow::Result<Vec<crate::lyrics::g35t_client::AsrWord>> {
+        self.asr
+            .lock()
+            .unwrap()
+            .take()
+            .expect("asr_transcribe called more than once")
+    }
+}
+
+#[tokio::test]
+async fn run_reference_stage_returns_error_on_mtl_align_failure() {
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("subprocess exploded")))),
+        asr: std::sync::Mutex::new(Some(Ok(vec![]))),
+    };
+    let result = run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "vid1",
+        &["line one".to_string()],
+    )
+    .await;
+    match result {
+        ReferenceStageResult::Error { stage, message } => {
+            assert_eq!(stage, "mtl_align");
+            assert!(message.contains("subprocess exploded"));
+        }
+        _ => panic!("expected Error(mtl_align)"),
+    }
+}
+
+#[tokio::test]
+async fn run_reference_stage_returns_error_on_asr_transcribe_failure() {
+    let mtl_out = crate::lyrics::mtl_aligner::MtlOutput {
+        lines: vec![],
+        device: "cpu".into(),
+        elapsed_s: 1.0,
+    };
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
+        asr: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("gemini 429")))),
+    };
+    let result = run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "vid1",
+        &["line one".to_string()],
+    )
+    .await;
+    match result {
+        ReferenceStageResult::Error { stage, message } => {
+            assert_eq!(stage, "asr_transcribe");
+            assert!(message.contains("gemini 429"));
+        }
+        _ => panic!("expected Error(asr_transcribe)"),
+    }
+}
+
+#[tokio::test]
+async fn run_reference_stage_pass_ships_mtl_lines_with_words_none() {
+    use crate::lyrics::g35t_client::AsrWord;
+    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
+
+    let mtl_out = MtlOutput {
+        lines: vec![
+            MtlLine {
+                text: "amazing grace".into(),
+                start_ms: 1000,
+                end_ms: 2000,
+            },
+            MtlLine {
+                text: "how sweet the sound".into(),
+                start_ms: 2100,
+                end_ms: 3500,
+            },
+        ],
+        device: "cuda".into(),
+        elapsed_s: 42.0,
+    };
+    // Independent ASR agrees closely on both line starts — a clean pass
+    // under the design's thresholds (median |Δstart| <= 400ms, >=70%
+    // within 400ms, >=60% lines matched; #130 2026-09-12 design comment).
+    let words = vec![
+        AsrWord {
+            text: "amazing".into(),
+            start_ms: 1010,
+            end_ms: 1500,
+        },
+        AsrWord {
+            text: "grace".into(),
+            start_ms: 1500,
+            end_ms: 1990,
+        },
+        AsrWord {
+            text: "how".into(),
+            start_ms: 2120,
+            end_ms: 2300,
+        },
+        AsrWord {
+            text: "sweet".into(),
+            start_ms: 2300,
+            end_ms: 2600,
+        },
+        AsrWord {
+            text: "the".into(),
+            start_ms: 2600,
+            end_ms: 2800,
+        },
+        AsrWord {
+            text: "sound".into(),
+            start_ms: 2800,
+            end_ms: 3480,
+        },
+    ];
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
+        asr: std::sync::Mutex::new(Some(Ok(words))),
+    };
+    let result = run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "vid1",
+        &[
+            "amazing grace".to_string(),
+            "how sweet the sound".to_string(),
+        ],
+    )
+    .await;
+    match result {
+        ReferenceStageResult::Pass { lines, stats } => {
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0].text, "amazing grace");
+            assert_eq!(lines[0].start_ms, 1000);
+            assert_eq!(lines[0].end_ms, 2000);
+            assert!(
+                lines.iter().all(|l| l.words.is_none()),
+                "mtl ships line-level timing only, never synthesized words"
+            );
+            assert_eq!(stats.lines_total, 2);
+        }
+        ReferenceStageResult::Fail { .. } => panic!("expected Pass, got Fail"),
+        ReferenceStageResult::Error { stage, message } => {
+            panic!("expected Pass, got Error({stage}): {message}")
+        }
+    }
+}
+
+#[tokio::test]
+async fn run_reference_stage_fail_carries_mtl_device_and_elapsed() {
+    use crate::lyrics::g35t_client::AsrWord;
+    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
+
+    let mtl_out = MtlOutput {
+        lines: vec![
+            MtlLine {
+                text: "amazing grace".into(),
+                start_ms: 1000,
+                end_ms: 2000,
+            },
+            MtlLine {
+                text: "how sweet the sound".into(),
+                start_ms: 2100,
+                end_ms: 3500,
+            },
+        ],
+        device: "cpu".into(),
+        elapsed_s: 12.5,
+    };
+    // Independent ASR agrees on the WORDS but the whole song is displaced
+    // by 30s — the catastrophic "wrong repetition" failure mode measured on
+    // #130 (2 of 8 ytalex songs shifted 22-42s). Must fail the whole-song
+    // sanity check regardless of per-line text agreement.
+    let words = vec![
+        AsrWord {
+            text: "amazing".into(),
+            start_ms: 31000,
+            end_ms: 31500,
+        },
+        AsrWord {
+            text: "grace".into(),
+            start_ms: 31500,
+            end_ms: 32000,
+        },
+        AsrWord {
+            text: "how".into(),
+            start_ms: 32120,
+            end_ms: 32300,
+        },
+        AsrWord {
+            text: "sweet".into(),
+            start_ms: 32300,
+            end_ms: 32600,
+        },
+        AsrWord {
+            text: "the".into(),
+            start_ms: 32600,
+            end_ms: 32800,
+        },
+        AsrWord {
+            text: "sound".into(),
+            start_ms: 32800,
+            end_ms: 33480,
+        },
+    ];
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
+        asr: std::sync::Mutex::new(Some(Ok(words))),
+    };
+    let result = run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "vid1",
+        &[
+            "amazing grace".to_string(),
+            "how sweet the sound".to_string(),
+        ],
+    )
+    .await;
+    match result {
+        ReferenceStageResult::Fail {
+            mtl_device,
+            mtl_elapsed_s,
+            ..
+        } => {
+            assert_eq!(mtl_device, "cpu");
+            assert_eq!(mtl_elapsed_s, 12.5);
+        }
+        ReferenceStageResult::Pass { .. } => panic!("expected Fail (30s offset), got Pass"),
+        ReferenceStageResult::Error { stage, message } => {
+            panic!("expected Fail, got Error({stage}): {message}")
+        }
+    }
+}

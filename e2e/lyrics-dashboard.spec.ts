@@ -163,3 +163,33 @@ test.describe("Lyrics dashboard — status badges", () => {
     await expect(page.locator(".lyrics-song-row").nth(1)).toHaveClass(/status-none/);
   });
 });
+
+// #142: ★ reference marker badge + „Nesedí" feedback.
+test.describe("Lyrics dashboard — ★ reference marker", () => {
+  test("starred song shows ★ badge; Nesedí feedback posts a note and clears the star", async ({
+    page,
+  }) => {
+    await navigateToLyrics(page);
+    await expect(page.locator(".lyrics-song-row").first()).toBeVisible({ timeout: 10000 });
+
+    // Mock video_id 1 ("Song One") carries lyrics_reference: true.
+    const starredRow = page.locator(".lyrics-song-row").nth(0);
+    await expect(starredRow.locator(".reference-badge")).toBeVisible();
+
+    // The un-referenced row (video_id 2) must never show the star/button.
+    const otherRow = page.locator(".lyrics-song-row").nth(1);
+    await expect(otherRow.locator(".reference-badge")).toHaveCount(0);
+    await expect(otherRow.locator("button", { hasText: "Nesedí" })).toHaveCount(0);
+
+    page.once("dialog", (dialog) => dialog.accept("refrén nesedí s videom"));
+    const postPromise = page.waitForRequest(
+      (req) => req.url().includes("/reference-feedback") && req.method() === "POST",
+    );
+    await starredRow.locator("button").filter({ hasText: "Nesedí" }).click();
+    const req = await postPromise;
+    const body = JSON.parse(req.postData() ?? "{}");
+    expect(body.note).toBe("refrén nesedí s videom");
+
+    await expect(starredRow.locator(".reference-badge")).toHaveCount(0);
+  });
+});

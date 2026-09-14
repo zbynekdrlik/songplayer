@@ -1,0 +1,3914 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\Xvm4_fWkXe8_vocal16k.wav",
+  "duration_ms": 272800,
+  "lines": [
+    {
+      "text": "You know it's crazy. I woke up this morning",
+      "start_ms": 12800,
+      "end_ms": 16000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 12800,
+          "end_ms": 12900,
+          "confidence": null
+        },
+        {
+          "text": "know",
+          "start_ms": 12900,
+          "end_ms": 13200,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 13200,
+          "end_ms": 13400,
+          "confidence": null
+        },
+        {
+          "text": "crazy.",
+          "start_ms": 13400,
+          "end_ms": 14200,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 14200,
+          "end_ms": 14400,
+          "confidence": null
+        },
+        {
+          "text": "woke",
+          "start_ms": 14400,
+          "end_ms": 14800,
+          "confidence": null
+        },
+        {
+          "text": "up",
+          "start_ms": 14800,
+          "end_ms": 15100,
+          "confidence": null
+        },
+        {
+          "text": "this",
+          "start_ms": 15100,
+          "end_ms": 15300,
+          "confidence": null
+        },
+        {
+          "text": "morning",
+          "start_ms": 15300,
+          "end_ms": 16000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "to grace and mercy that just keep on going.",
+      "start_ms": 16600,
+      "end_ms": 19800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "to",
+          "start_ms": 16600,
+          "end_ms": 16700,
+          "confidence": null
+        },
+        {
+          "text": "grace",
+          "start_ms": 17000,
+          "end_ms": 17200,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 17200,
+          "end_ms": 17300,
+          "confidence": null
+        },
+        {
+          "text": "mercy",
+          "start_ms": 17300,
+          "end_ms": 18000,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 18000,
+          "end_ms": 18200,
+          "confidence": null
+        },
+        {
+          "text": "just",
+          "start_ms": 18200,
+          "end_ms": 18600,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 18600,
+          "end_ms": 19000,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 19000,
+          "end_ms": 19200,
+          "confidence": null
+        },
+        {
+          "text": "going.",
+          "start_ms": 19200,
+          "end_ms": 19800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "My heart is beating. My eyes are wide open. Thank you, Lord.",
+      "start_ms": 20400,
+      "end_ms": 26000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "My",
+          "start_ms": 20400,
+          "end_ms": 20600,
+          "confidence": null
+        },
+        {
+          "text": "heart",
+          "start_ms": 20600,
+          "end_ms": 21000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 21000,
+          "end_ms": 21100,
+          "confidence": null
+        },
+        {
+          "text": "beating.",
+          "start_ms": 21100,
+          "end_ms": 21800,
+          "confidence": null
+        },
+        {
+          "text": "My",
+          "start_ms": 21800,
+          "end_ms": 22100,
+          "confidence": null
+        },
+        {
+          "text": "eyes",
+          "start_ms": 22100,
+          "end_ms": 22500,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 22500,
+          "end_ms": 22800,
+          "confidence": null
+        },
+        {
+          "text": "wide",
+          "start_ms": 22800,
+          "end_ms": 23200,
+          "confidence": null
+        },
+        {
+          "text": "open.",
+          "start_ms": 23200,
+          "end_ms": 23700,
+          "confidence": null
+        },
+        {
+          "text": "Thank",
+          "start_ms": 24100,
+          "end_ms": 25000,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 25000,
+          "end_ms": 25800,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 25900,
+          "end_ms": 26000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's so amazing that someone so perfect",
+      "start_ms": 28100,
+      "end_ms": 31400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 28100,
+          "end_ms": 28300,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 28300,
+          "end_ms": 28600,
+          "confidence": null
+        },
+        {
+          "text": "amazing",
+          "start_ms": 28600,
+          "end_ms": 29500,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 29500,
+          "end_ms": 29800,
+          "confidence": null
+        },
+        {
+          "text": "someone",
+          "start_ms": 29800,
+          "end_ms": 30400,
+          "confidence": null
+        },
+        {
+          "text": "so",
+          "start_ms": 30400,
+          "end_ms": 30700,
+          "confidence": null
+        },
+        {
+          "text": "perfect",
+          "start_ms": 30700,
+          "end_ms": 31400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "would show me love when I didn't deserve it.",
+      "start_ms": 32000,
+      "end_ms": 35300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "would",
+          "start_ms": 32000,
+          "end_ms": 32100,
+          "confidence": null
+        },
+        {
+          "text": "show",
+          "start_ms": 32100,
+          "end_ms": 32400,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 32400,
+          "end_ms": 32700,
+          "confidence": null
+        },
+        {
+          "text": "love",
+          "start_ms": 32700,
+          "end_ms": 33000,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 33000,
+          "end_ms": 33400,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 33400,
+          "end_ms": 33600,
+          "confidence": null
+        },
+        {
+          "text": "didn't",
+          "start_ms": 33600,
+          "end_ms": 34300,
+          "confidence": null
+        },
+        {
+          "text": "deserve",
+          "start_ms": 34300,
+          "end_ms": 35000,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 35000,
+          "end_ms": 35300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You gave your life just to show me I'm worth it. Thank you, Lord.",
+      "start_ms": 35800,
+      "end_ms": 42100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 35800,
+          "end_ms": 35900,
+          "confidence": null
+        },
+        {
+          "text": "gave",
+          "start_ms": 35900,
+          "end_ms": 36200,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 36200,
+          "end_ms": 36400,
+          "confidence": null
+        },
+        {
+          "text": "life",
+          "start_ms": 36400,
+          "end_ms": 36800,
+          "confidence": null
+        },
+        {
+          "text": "just",
+          "start_ms": 36800,
+          "end_ms": 37200,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 37200,
+          "end_ms": 37400,
+          "confidence": null
+        },
+        {
+          "text": "show",
+          "start_ms": 37400,
+          "end_ms": 37800,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 37800,
+          "end_ms": 38200,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 38200,
+          "end_ms": 38400,
+          "confidence": null
+        },
+        {
+          "text": "worth",
+          "start_ms": 38400,
+          "end_ms": 38800,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 38800,
+          "end_ms": 39200,
+          "confidence": null
+        },
+        {
+          "text": "Thank",
+          "start_ms": 39400,
+          "end_ms": 40400,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 40400,
+          "end_ms": 41200,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 41300,
+          "end_ms": 42100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 44000,
+      "end_ms": 44700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 44000,
+          "end_ms": 44200,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 44200,
+          "end_ms": 44600,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 44600,
+          "end_ms": 44700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it today.",
+      "start_ms": 46000,
+      "end_ms": 47100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 46000,
+          "end_ms": 46100,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 46100,
+          "end_ms": 46300,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 46300,
+          "end_ms": 46400,
+          "confidence": null
+        },
+        {
+          "text": "today.",
+          "start_ms": 46400,
+          "end_ms": 47100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "He only is God.",
+      "start_ms": 47800,
+      "end_ms": 49000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 47800,
+          "end_ms": 48000,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 48000,
+          "end_ms": 48400,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 48400,
+          "end_ms": 48500,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 48500,
+          "end_ms": 49000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's his",
+      "start_ms": 49700,
+      "end_ms": 50100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 49700,
+          "end_ms": 50000,
+          "confidence": null
+        },
+        {
+          "text": "his",
+          "start_ms": 50000,
+          "end_ms": 50100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle what you did for me. Thank you, Lord. You made a way. Let's go.",
+      "start_ms": 51300,
+      "end_ms": 59600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 51300,
+          "end_ms": 51600,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 51600,
+          "end_ms": 51700,
+          "confidence": null
+        },
+        {
+          "text": "miracle",
+          "start_ms": 51700,
+          "end_ms": 52800,
+          "confidence": null
+        },
+        {
+          "text": "what",
+          "start_ms": 53200,
+          "end_ms": 53500,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 53500,
+          "end_ms": 53700,
+          "confidence": null
+        },
+        {
+          "text": "did",
+          "start_ms": 53700,
+          "end_ms": 54000,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 54000,
+          "end_ms": 54200,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 54200,
+          "end_ms": 54700,
+          "confidence": null
+        },
+        {
+          "text": "Thank",
+          "start_ms": 54700,
+          "end_ms": 55800,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 55800,
+          "end_ms": 56600,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 56700,
+          "end_ms": 57100,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 57100,
+          "end_ms": 57400,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 57400,
+          "end_ms": 57700,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 57700,
+          "end_ms": 57800,
+          "confidence": null
+        },
+        {
+          "text": "way.",
+          "start_ms": 57800,
+          "end_ms": 58600,
+          "confidence": null
+        },
+        {
+          "text": "Let's",
+          "start_ms": 58900,
+          "end_ms": 59100,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 59100,
+          "end_ms": 59600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come on.",
+      "start_ms": 65000,
+      "end_ms": 65300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 65000,
+          "end_ms": 65200,
+          "confidence": null
+        },
+        {
+          "text": "on.",
+          "start_ms": 65200,
+          "end_ms": 65300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You saw a mountain and I watched you move it.",
+      "start_ms": 66600,
+      "end_ms": 69800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 66600,
+          "end_ms": 66700,
+          "confidence": null
+        },
+        {
+          "text": "saw",
+          "start_ms": 66700,
+          "end_ms": 67100,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 67100,
+          "end_ms": 67100,
+          "confidence": null
+        },
+        {
+          "text": "mountain",
+          "start_ms": 67100,
+          "end_ms": 68000,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 68000,
+          "end_ms": 68300,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 68300,
+          "end_ms": 68500,
+          "confidence": null
+        },
+        {
+          "text": "watched",
+          "start_ms": 68500,
+          "end_ms": 68900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 68900,
+          "end_ms": 69100,
+          "confidence": null
+        },
+        {
+          "text": "move",
+          "start_ms": 69100,
+          "end_ms": 69500,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 69500,
+          "end_ms": 69800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You took my place when no one else could do it.",
+      "start_ms": 70300,
+      "end_ms": 73700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 70300,
+          "end_ms": 70500,
+          "confidence": null
+        },
+        {
+          "text": "took",
+          "start_ms": 70500,
+          "end_ms": 70800,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 70800,
+          "end_ms": 71000,
+          "confidence": null
+        },
+        {
+          "text": "place",
+          "start_ms": 71000,
+          "end_ms": 71400,
+          "confidence": null
+        },
+        {
+          "text": "when",
+          "start_ms": 71400,
+          "end_ms": 71800,
+          "confidence": null
+        },
+        {
+          "text": "no",
+          "start_ms": 71800,
+          "end_ms": 72000,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 72000,
+          "end_ms": 72400,
+          "confidence": null
+        },
+        {
+          "text": "else",
+          "start_ms": 72400,
+          "end_ms": 72800,
+          "confidence": null
+        },
+        {
+          "text": "could",
+          "start_ms": 72800,
+          "end_ms": 73000,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 73000,
+          "end_ms": 73300,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 73300,
+          "end_ms": 73700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "The least I can do is sing hallelujah. Thank you, Lord. Don't go.",
+      "start_ms": 74200,
+      "end_ms": 81700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "The",
+          "start_ms": 74200,
+          "end_ms": 74300,
+          "confidence": null
+        },
+        {
+          "text": "least",
+          "start_ms": 74300,
+          "end_ms": 74700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 74700,
+          "end_ms": 74800,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 74800,
+          "end_ms": 75200,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 75200,
+          "end_ms": 75600,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 75600,
+          "end_ms": 75800,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 75800,
+          "end_ms": 76200,
+          "confidence": null
+        },
+        {
+          "text": "hallelujah.",
+          "start_ms": 76200,
+          "end_ms": 77500,
+          "confidence": null
+        },
+        {
+          "text": "Thank",
+          "start_ms": 77800,
+          "end_ms": 78800,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 78800,
+          "end_ms": 79600,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 79600,
+          "end_ms": 80600,
+          "confidence": null
+        },
+        {
+          "text": "Don't",
+          "start_ms": 80900,
+          "end_ms": 81100,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 81100,
+          "end_ms": 81700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 82300,
+      "end_ms": 83500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 82300,
+          "end_ms": 82500,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 82500,
+          "end_ms": 83000,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 83000,
+          "end_ms": 83500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it today.",
+      "start_ms": 84300,
+      "end_ms": 85600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 84300,
+          "end_ms": 84400,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 84400,
+          "end_ms": 84700,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 84700,
+          "end_ms": 84800,
+          "confidence": null
+        },
+        {
+          "text": "today.",
+          "start_ms": 84800,
+          "end_ms": 85600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "He only is God.",
+      "start_ms": 86200,
+      "end_ms": 87400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 86200,
+          "end_ms": 86500,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 86500,
+          "end_ms": 86800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 86800,
+          "end_ms": 86900,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 86900,
+          "end_ms": 87400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "He only is God.",
+      "start_ms": 88000,
+      "end_ms": 89200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 88000,
+          "end_ms": 88300,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 88300,
+          "end_ms": 88500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 88500,
+          "end_ms": 88600,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 88600,
+          "end_ms": 89200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's a",
+      "start_ms": 89800,
+      "end_ms": 90100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 89800,
+          "end_ms": 90000,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 90000,
+          "end_ms": 90100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "What you did for me.",
+      "start_ms": 91700,
+      "end_ms": 93200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 91700,
+          "end_ms": 91900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 91900,
+          "end_ms": 92100,
+          "confidence": null
+        },
+        {
+          "text": "did",
+          "start_ms": 92100,
+          "end_ms": 92400,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 92400,
+          "end_ms": 92600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 92600,
+          "end_ms": 93200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Thank you, Lord. You made a way. I'm living it. I'm living it. I'm living it. I'm living it today. He only is God. He only is God.",
+      "start_ms": 94100,
+      "end_ms": 102600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 94100,
+          "end_ms": 94200,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 94200,
+          "end_ms": 95000,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 95000,
+          "end_ms": 95600,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 95600,
+          "end_ms": 95700,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 95700,
+          "end_ms": 96100,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 96100,
+          "end_ms": 96200,
+          "confidence": null
+        },
+        {
+          "text": "way.",
+          "start_ms": 96200,
+          "end_ms": 96800,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 96900,
+          "end_ms": 97000,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 97000,
+          "end_ms": 97400,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 97400,
+          "end_ms": 97700,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 97800,
+          "end_ms": 97900,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 97900,
+          "end_ms": 98300,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 98300,
+          "end_ms": 98600,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 98900,
+          "end_ms": 99000,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 99000,
+          "end_ms": 99200,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 99200,
+          "end_ms": 99500,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 99700,
+          "end_ms": 99800,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 99800,
+          "end_ms": 100100,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 100100,
+          "end_ms": 100200,
+          "confidence": null
+        },
+        {
+          "text": "today.",
+          "start_ms": 100200,
+          "end_ms": 100800,
+          "confidence": null
+        },
+        {
+          "text": "He",
+          "start_ms": 100900,
+          "end_ms": 101000,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 101000,
+          "end_ms": 101100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 101100,
+          "end_ms": 101300,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 101300,
+          "end_ms": 101800,
+          "confidence": null
+        },
+        {
+          "text": "He",
+          "start_ms": 102000,
+          "end_ms": 102000,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 102000,
+          "end_ms": 102100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 102100,
+          "end_ms": 102200,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 102200,
+          "end_ms": 102600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's his It's a miracle",
+      "start_ms": 103300,
+      "end_ms": 105600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 103300,
+          "end_ms": 103600,
+          "confidence": null
+        },
+        {
+          "text": "his",
+          "start_ms": 103600,
+          "end_ms": 103800,
+          "confidence": null
+        },
+        {
+          "text": "It's",
+          "start_ms": 104200,
+          "end_ms": 104400,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 104400,
+          "end_ms": 104500,
+          "confidence": null
+        },
+        {
+          "text": "miracle",
+          "start_ms": 104500,
+          "end_ms": 105600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "what you did for me.",
+      "start_ms": 106200,
+      "end_ms": 106700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "what",
+          "start_ms": 106200,
+          "end_ms": 106300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 106300,
+          "end_ms": 106400,
+          "confidence": null
+        },
+        {
+          "text": "did",
+          "start_ms": 106400,
+          "end_ms": 106500,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 106500,
+          "end_ms": 106600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 106600,
+          "end_ms": 106700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Thank you, Lord. You made a way.",
+      "start_ms": 108300,
+      "end_ms": 112400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 108300,
+          "end_ms": 109500,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 109500,
+          "end_ms": 110400,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 110400,
+          "end_ms": 110900,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 110900,
+          "end_ms": 111100,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 111100,
+          "end_ms": 111400,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 111400,
+          "end_ms": 111500,
+          "confidence": null
+        },
+        {
+          "text": "way.",
+          "start_ms": 111500,
+          "end_ms": 112400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And he's been a way maker,",
+      "start_ms": 114100,
+      "end_ms": 115500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 114100,
+          "end_ms": 114200,
+          "confidence": null
+        },
+        {
+          "text": "he's",
+          "start_ms": 114200,
+          "end_ms": 114400,
+          "confidence": null
+        },
+        {
+          "text": "been",
+          "start_ms": 114400,
+          "end_ms": 114600,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 114600,
+          "end_ms": 114700,
+          "confidence": null
+        },
+        {
+          "text": "way",
+          "start_ms": 114700,
+          "end_ms": 114900,
+          "confidence": null
+        },
+        {
+          "text": "maker,",
+          "start_ms": 114900,
+          "end_ms": 115500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "a chain breaker. I need you to praise tonight.",
+      "start_ms": 116400,
+      "end_ms": 118700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "a",
+          "start_ms": 116400,
+          "end_ms": 116500,
+          "confidence": null
+        },
+        {
+          "text": "chain",
+          "start_ms": 116500,
+          "end_ms": 116800,
+          "confidence": null
+        },
+        {
+          "text": "breaker.",
+          "start_ms": 116800,
+          "end_ms": 117400,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 117400,
+          "end_ms": 117500,
+          "confidence": null
+        },
+        {
+          "text": "need",
+          "start_ms": 117500,
+          "end_ms": 117700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 117700,
+          "end_ms": 117800,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 117800,
+          "end_ms": 118000,
+          "confidence": null
+        },
+        {
+          "text": "praise",
+          "start_ms": 118000,
+          "end_ms": 118400,
+          "confidence": null
+        },
+        {
+          "text": "tonight.",
+          "start_ms": 118400,
+          "end_ms": 118700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Every single debt I owed, you canceled it. Every sin I ever chose, you covered it. When the fight was getting close, you handled it.",
+      "start_ms": 120100,
+      "end_ms": 131400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Every",
+          "start_ms": 120100,
+          "end_ms": 120400,
+          "confidence": null
+        },
+        {
+          "text": "single",
+          "start_ms": 120400,
+          "end_ms": 121000,
+          "confidence": null
+        },
+        {
+          "text": "debt",
+          "start_ms": 121000,
+          "end_ms": 121300,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 121300,
+          "end_ms": 121500,
+          "confidence": null
+        },
+        {
+          "text": "owed,",
+          "start_ms": 121500,
+          "end_ms": 122100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 122400,
+          "end_ms": 122600,
+          "confidence": null
+        },
+        {
+          "text": "canceled",
+          "start_ms": 122600,
+          "end_ms": 123200,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 123200,
+          "end_ms": 123600,
+          "confidence": null
+        },
+        {
+          "text": "Every",
+          "start_ms": 123900,
+          "end_ms": 124300,
+          "confidence": null
+        },
+        {
+          "text": "sin",
+          "start_ms": 124300,
+          "end_ms": 124600,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 124600,
+          "end_ms": 124800,
+          "confidence": null
+        },
+        {
+          "text": "ever",
+          "start_ms": 124800,
+          "end_ms": 125200,
+          "confidence": null
+        },
+        {
+          "text": "chose,",
+          "start_ms": 125200,
+          "end_ms": 126000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 126200,
+          "end_ms": 126400,
+          "confidence": null
+        },
+        {
+          "text": "covered",
+          "start_ms": 126400,
+          "end_ms": 126900,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 126900,
+          "end_ms": 127400,
+          "confidence": null
+        },
+        {
+          "text": "When",
+          "start_ms": 127700,
+          "end_ms": 128000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 128000,
+          "end_ms": 128100,
+          "confidence": null
+        },
+        {
+          "text": "fight",
+          "start_ms": 128100,
+          "end_ms": 128400,
+          "confidence": null
+        },
+        {
+          "text": "was",
+          "start_ms": 128400,
+          "end_ms": 128600,
+          "confidence": null
+        },
+        {
+          "text": "getting",
+          "start_ms": 128600,
+          "end_ms": 129100,
+          "confidence": null
+        },
+        {
+          "text": "close,",
+          "start_ms": 129100,
+          "end_ms": 129800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 130100,
+          "end_ms": 130300,
+          "confidence": null
+        },
+        {
+          "text": "handled",
+          "start_ms": 130300,
+          "end_ms": 130800,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 130800,
+          "end_ms": 131400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You stepped right in",
+      "start_ms": 132000,
+      "end_ms": 133200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 132000,
+          "end_ms": 132200,
+          "confidence": null
+        },
+        {
+          "text": "stepped",
+          "start_ms": 132200,
+          "end_ms": 132600,
+          "confidence": null
+        },
+        {
+          "text": "right",
+          "start_ms": 132600,
+          "end_ms": 132800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 132800,
+          "end_ms": 133200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "and finished it. Every single debt I owed, you canceled it. Every sin I ever chose, you covered it. When the fight was getting close, you handled it.",
+      "start_ms": 133900,
+      "end_ms": 146800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "and",
+          "start_ms": 133900,
+          "end_ms": 134100,
+          "confidence": null
+        },
+        {
+          "text": "finished",
+          "start_ms": 134100,
+          "end_ms": 134700,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 134700,
+          "end_ms": 135200,
+          "confidence": null
+        },
+        {
+          "text": "Every",
+          "start_ms": 135400,
+          "end_ms": 135800,
+          "confidence": null
+        },
+        {
+          "text": "single",
+          "start_ms": 135800,
+          "end_ms": 136300,
+          "confidence": null
+        },
+        {
+          "text": "debt",
+          "start_ms": 136300,
+          "end_ms": 136600,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 136600,
+          "end_ms": 136700,
+          "confidence": null
+        },
+        {
+          "text": "owed,",
+          "start_ms": 136700,
+          "end_ms": 137500,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 137800,
+          "end_ms": 138000,
+          "confidence": null
+        },
+        {
+          "text": "canceled",
+          "start_ms": 138000,
+          "end_ms": 138500,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 138500,
+          "end_ms": 139000,
+          "confidence": null
+        },
+        {
+          "text": "Every",
+          "start_ms": 139200,
+          "end_ms": 139700,
+          "confidence": null
+        },
+        {
+          "text": "sin",
+          "start_ms": 139700,
+          "end_ms": 140000,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 140000,
+          "end_ms": 140200,
+          "confidence": null
+        },
+        {
+          "text": "ever",
+          "start_ms": 140200,
+          "end_ms": 140600,
+          "confidence": null
+        },
+        {
+          "text": "chose,",
+          "start_ms": 140600,
+          "end_ms": 141400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 141600,
+          "end_ms": 141800,
+          "confidence": null
+        },
+        {
+          "text": "covered",
+          "start_ms": 141800,
+          "end_ms": 142400,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 142400,
+          "end_ms": 142800,
+          "confidence": null
+        },
+        {
+          "text": "When",
+          "start_ms": 143000,
+          "end_ms": 143300,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 143300,
+          "end_ms": 143500,
+          "confidence": null
+        },
+        {
+          "text": "fight",
+          "start_ms": 143500,
+          "end_ms": 143800,
+          "confidence": null
+        },
+        {
+          "text": "was",
+          "start_ms": 143800,
+          "end_ms": 144000,
+          "confidence": null
+        },
+        {
+          "text": "getting",
+          "start_ms": 144000,
+          "end_ms": 144500,
+          "confidence": null
+        },
+        {
+          "text": "close,",
+          "start_ms": 144500,
+          "end_ms": 145200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 145400,
+          "end_ms": 145700,
+          "confidence": null
+        },
+        {
+          "text": "handled",
+          "start_ms": 145700,
+          "end_ms": 146200,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 146200,
+          "end_ms": 146800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You never fail.",
+      "start_ms": 147400,
+      "end_ms": 148700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 147400,
+          "end_ms": 147600,
+          "confidence": null
+        },
+        {
+          "text": "never",
+          "start_ms": 147600,
+          "end_ms": 148000,
+          "confidence": null
+        },
+        {
+          "text": "fail.",
+          "start_ms": 148000,
+          "end_ms": 148700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You never wear. Every single word you spoke is turning true. Every lie that devil told must bow to you. To me it's impossible, but not for you.",
+      "start_ms": 149200,
+      "end_ms": 162100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 149200,
+          "end_ms": 149500,
+          "confidence": null
+        },
+        {
+          "text": "never",
+          "start_ms": 149500,
+          "end_ms": 149900,
+          "confidence": null
+        },
+        {
+          "text": "wear.",
+          "start_ms": 150000,
+          "end_ms": 150600,
+          "confidence": null
+        },
+        {
+          "text": "Every",
+          "start_ms": 150800,
+          "end_ms": 151200,
+          "confidence": null
+        },
+        {
+          "text": "single",
+          "start_ms": 151200,
+          "end_ms": 151700,
+          "confidence": null
+        },
+        {
+          "text": "word",
+          "start_ms": 151700,
+          "end_ms": 152000,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 152000,
+          "end_ms": 152100,
+          "confidence": null
+        },
+        {
+          "text": "spoke",
+          "start_ms": 152100,
+          "end_ms": 152700,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 153100,
+          "end_ms": 153400,
+          "confidence": null
+        },
+        {
+          "text": "turning",
+          "start_ms": 153400,
+          "end_ms": 153800,
+          "confidence": null
+        },
+        {
+          "text": "true.",
+          "start_ms": 153800,
+          "end_ms": 154400,
+          "confidence": null
+        },
+        {
+          "text": "Every",
+          "start_ms": 154600,
+          "end_ms": 155000,
+          "confidence": null
+        },
+        {
+          "text": "lie",
+          "start_ms": 155000,
+          "end_ms": 155300,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 155300,
+          "end_ms": 155600,
+          "confidence": null
+        },
+        {
+          "text": "devil",
+          "start_ms": 155600,
+          "end_ms": 156000,
+          "confidence": null
+        },
+        {
+          "text": "told",
+          "start_ms": 156000,
+          "end_ms": 156600,
+          "confidence": null
+        },
+        {
+          "text": "must",
+          "start_ms": 156900,
+          "end_ms": 157200,
+          "confidence": null
+        },
+        {
+          "text": "bow",
+          "start_ms": 157200,
+          "end_ms": 157500,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 157500,
+          "end_ms": 157800,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 157800,
+          "end_ms": 158200,
+          "confidence": null
+        },
+        {
+          "text": "To",
+          "start_ms": 158400,
+          "end_ms": 158600,
+          "confidence": null
+        },
+        {
+          "text": "me",
+          "start_ms": 158600,
+          "end_ms": 158900,
+          "confidence": null
+        },
+        {
+          "text": "it's",
+          "start_ms": 158900,
+          "end_ms": 159200,
+          "confidence": null
+        },
+        {
+          "text": "impossible,",
+          "start_ms": 159200,
+          "end_ms": 160400,
+          "confidence": null
+        },
+        {
+          "text": "but",
+          "start_ms": 160800,
+          "end_ms": 161000,
+          "confidence": null
+        },
+        {
+          "text": "not",
+          "start_ms": 161000,
+          "end_ms": 161300,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 161300,
+          "end_ms": 161500,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 161500,
+          "end_ms": 162100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's what you do. It's what you keep on doing it.",
+      "start_ms": 162700,
+      "end_ms": 166200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 162700,
+          "end_ms": 163000,
+          "confidence": null
+        },
+        {
+          "text": "what",
+          "start_ms": 163000,
+          "end_ms": 163200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 163200,
+          "end_ms": 163400,
+          "confidence": null
+        },
+        {
+          "text": "do.",
+          "start_ms": 163400,
+          "end_ms": 164200,
+          "confidence": null
+        },
+        {
+          "text": "It's",
+          "start_ms": 164400,
+          "end_ms": 164600,
+          "confidence": null
+        },
+        {
+          "text": "what",
+          "start_ms": 164600,
+          "end_ms": 164800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 164800,
+          "end_ms": 165000,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 165000,
+          "end_ms": 165400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 165400,
+          "end_ms": 165600,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 165600,
+          "end_ms": 166000,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 166000,
+          "end_ms": 166200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 168700,
+      "end_ms": 170200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 168700,
+          "end_ms": 168900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 168900,
+          "end_ms": 169000,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 169000,
+          "end_ms": 169200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 169200,
+          "end_ms": 169400,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 169400,
+          "end_ms": 169800,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 169800,
+          "end_ms": 170200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah. And you keep on doing it.",
+      "start_ms": 171100,
+      "end_ms": 173900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 171100,
+          "end_ms": 172400,
+          "confidence": null
+        },
+        {
+          "text": "And",
+          "start_ms": 172600,
+          "end_ms": 172800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 172800,
+          "end_ms": 172800,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 172800,
+          "end_ms": 173100,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 173100,
+          "end_ms": 173300,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 173300,
+          "end_ms": 173700,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 173700,
+          "end_ms": 173900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 176500,
+      "end_ms": 177800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 176500,
+          "end_ms": 176600,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 176600,
+          "end_ms": 176700,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 176700,
+          "end_ms": 177000,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 177000,
+          "end_ms": 177100,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 177100,
+          "end_ms": 177500,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 177500,
+          "end_ms": 177800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh.",
+      "start_ms": 178800,
+      "end_ms": 178900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh.",
+          "start_ms": 178800,
+          "end_ms": 178900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Sing it",
+      "start_ms": 180200,
+      "end_ms": 180500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Sing",
+          "start_ms": 180200,
+          "end_ms": 180400,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 180400,
+          "end_ms": 180500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "all.",
+      "start_ms": 181000,
+      "end_ms": 181100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "all.",
+          "start_ms": 181000,
+          "end_ms": 181100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it.",
+      "start_ms": 182200,
+      "end_ms": 183300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 182200,
+          "end_ms": 182400,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 182400,
+          "end_ms": 182900,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 182900,
+          "end_ms": 183300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it today.",
+      "start_ms": 184100,
+      "end_ms": 185300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 184100,
+          "end_ms": 184300,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 184300,
+          "end_ms": 184600,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 184600,
+          "end_ms": 184700,
+          "confidence": null
+        },
+        {
+          "text": "today.",
+          "start_ms": 184700,
+          "end_ms": 185300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "He only is God.",
+      "start_ms": 186000,
+      "end_ms": 187300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 186000,
+          "end_ms": 186400,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 186400,
+          "end_ms": 186600,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 186600,
+          "end_ms": 186800,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 186800,
+          "end_ms": 187300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "He only is God.",
+      "start_ms": 187900,
+      "end_ms": 189000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "He",
+          "start_ms": 187900,
+          "end_ms": 188100,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 188100,
+          "end_ms": 188400,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 188400,
+          "end_ms": 188500,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 188500,
+          "end_ms": 189000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's a",
+      "start_ms": 189600,
+      "end_ms": 190000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 189600,
+          "end_ms": 189900,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 189900,
+          "end_ms": 190000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "What you did for me. Thank you, Lord. You made a way.",
+      "start_ms": 191600,
+      "end_ms": 196200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "What",
+          "start_ms": 191600,
+          "end_ms": 191800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 191800,
+          "end_ms": 192000,
+          "confidence": null
+        },
+        {
+          "text": "did",
+          "start_ms": 192000,
+          "end_ms": 192200,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 192200,
+          "end_ms": 192400,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 192400,
+          "end_ms": 192800,
+          "confidence": null
+        },
+        {
+          "text": "Thank",
+          "start_ms": 193000,
+          "end_ms": 194000,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 194000,
+          "end_ms": 195000,
+          "confidence": null
+        },
+        {
+          "text": "Lord.",
+          "start_ms": 195300,
+          "end_ms": 195400,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 195400,
+          "end_ms": 195600,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 195600,
+          "end_ms": 196000,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 196000,
+          "end_ms": 196000,
+          "confidence": null
+        },
+        {
+          "text": "way.",
+          "start_ms": 196000,
+          "end_ms": 196200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it. I'm living it.",
+      "start_ms": 196800,
+      "end_ms": 198200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 196800,
+          "end_ms": 196900,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 196900,
+          "end_ms": 197300,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 197300,
+          "end_ms": 197500,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 197800,
+          "end_ms": 197900,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 197900,
+          "end_ms": 198100,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 198100,
+          "end_ms": 198200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I'm living it. I'm living it today. He only is God. He only is God. It's his",
+      "start_ms": 198700,
+      "end_ms": 202800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I'm",
+          "start_ms": 198700,
+          "end_ms": 198800,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 198800,
+          "end_ms": 199100,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 199100,
+          "end_ms": 199400,
+          "confidence": null
+        },
+        {
+          "text": "I'm",
+          "start_ms": 199600,
+          "end_ms": 199700,
+          "confidence": null
+        },
+        {
+          "text": "living",
+          "start_ms": 199700,
+          "end_ms": 200000,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 200000,
+          "end_ms": 200100,
+          "confidence": null
+        },
+        {
+          "text": "today.",
+          "start_ms": 200100,
+          "end_ms": 200500,
+          "confidence": null
+        },
+        {
+          "text": "He",
+          "start_ms": 200700,
+          "end_ms": 200800,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 200800,
+          "end_ms": 201100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 201100,
+          "end_ms": 201200,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 201200,
+          "end_ms": 201600,
+          "confidence": null
+        },
+        {
+          "text": "He",
+          "start_ms": 201700,
+          "end_ms": 201800,
+          "confidence": null
+        },
+        {
+          "text": "only",
+          "start_ms": 201800,
+          "end_ms": 202000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 202000,
+          "end_ms": 202100,
+          "confidence": null
+        },
+        {
+          "text": "God.",
+          "start_ms": 202100,
+          "end_ms": 202400,
+          "confidence": null
+        },
+        {
+          "text": "It's",
+          "start_ms": 202500,
+          "end_ms": 202700,
+          "confidence": null
+        },
+        {
+          "text": "his",
+          "start_ms": 202700,
+          "end_ms": 202800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It is his",
+      "start_ms": 203300,
+      "end_ms": 203700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It",
+          "start_ms": 203300,
+          "end_ms": 203400,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 203400,
+          "end_ms": 203500,
+          "confidence": null
+        },
+        {
+          "text": "his",
+          "start_ms": 203500,
+          "end_ms": 203700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "It's a miracle",
+      "start_ms": 204400,
+      "end_ms": 205100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "It's",
+          "start_ms": 204400,
+          "end_ms": 204500,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 204500,
+          "end_ms": 204600,
+          "confidence": null
+        },
+        {
+          "text": "miracle",
+          "start_ms": 204600,
+          "end_ms": 205100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "what you did for me.",
+      "start_ms": 206200,
+      "end_ms": 206700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "what",
+          "start_ms": 206200,
+          "end_ms": 206300,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 206300,
+          "end_ms": 206400,
+          "confidence": null
+        },
+        {
+          "text": "did",
+          "start_ms": 206400,
+          "end_ms": 206500,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 206500,
+          "end_ms": 206600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 206600,
+          "end_ms": 206700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Thank you,",
+      "start_ms": 208400,
+      "end_ms": 209900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 208400,
+          "end_ms": 209200,
+          "confidence": null
+        },
+        {
+          "text": "you,",
+          "start_ms": 209200,
+          "end_ms": 209900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Lord. You made a way.",
+      "start_ms": 210600,
+      "end_ms": 212200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord.",
+          "start_ms": 210600,
+          "end_ms": 210700,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 210700,
+          "end_ms": 210900,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 210900,
+          "end_ms": 211300,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 211300,
+          "end_ms": 211400,
+          "confidence": null
+        },
+        {
+          "text": "way.",
+          "start_ms": 211400,
+          "end_ms": 212200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 218600,
+      "end_ms": 220000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 218600,
+          "end_ms": 218800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 218800,
+          "end_ms": 218900,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 218900,
+          "end_ms": 219200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 219200,
+          "end_ms": 219300,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 219300,
+          "end_ms": 219800,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 219800,
+          "end_ms": 220000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah. So you keep on doing it. And you keep on doing it. You keep on doing it.",
+      "start_ms": 221500,
+      "end_ms": 224700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah.",
+          "start_ms": 221500,
+          "end_ms": 221600,
+          "confidence": null
+        },
+        {
+          "text": "So",
+          "start_ms": 221600,
+          "end_ms": 221700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 221700,
+          "end_ms": 221800,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 221800,
+          "end_ms": 222000,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 222000,
+          "end_ms": 222200,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 222200,
+          "end_ms": 222400,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 222400,
+          "end_ms": 222500,
+          "confidence": null
+        },
+        {
+          "text": "And",
+          "start_ms": 222600,
+          "end_ms": 222700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 222700,
+          "end_ms": 222800,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 222800,
+          "end_ms": 223000,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 223000,
+          "end_ms": 223200,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 223200,
+          "end_ms": 223600,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 223600,
+          "end_ms": 223900,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 224200,
+          "end_ms": 224300,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 224300,
+          "end_ms": 224400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 224400,
+          "end_ms": 224500,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 224500,
+          "end_ms": 224600,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 224600,
+          "end_ms": 224700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it. Yeah.",
+      "start_ms": 226400,
+      "end_ms": 227900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 226400,
+          "end_ms": 226500,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 226500,
+          "end_ms": 226600,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 226600,
+          "end_ms": 226800,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 226800,
+          "end_ms": 227000,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 227000,
+          "end_ms": 227400,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 227400,
+          "end_ms": 227600,
+          "confidence": null
+        },
+        {
+          "text": "Yeah.",
+          "start_ms": 227800,
+          "end_ms": 227900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on doing it. And you keep on doing it. Yeah.",
+      "start_ms": 229600,
+      "end_ms": 231700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 229600,
+          "end_ms": 229700,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 229700,
+          "end_ms": 229800,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 229800,
+          "end_ms": 229900,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 229900,
+          "end_ms": 230100,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 230100,
+          "end_ms": 230200,
+          "confidence": null
+        },
+        {
+          "text": "And",
+          "start_ms": 230300,
+          "end_ms": 230400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 230400,
+          "end_ms": 230400,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 230400,
+          "end_ms": 230700,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 230700,
+          "end_ms": 230900,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 230900,
+          "end_ms": 231300,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 231300,
+          "end_ms": 231500,
+          "confidence": null
+        },
+        {
+          "text": "Yeah.",
+          "start_ms": 231600,
+          "end_ms": 231700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on doing it. You keep on doing it. You keep on You keep on You keep on",
+      "start_ms": 233300,
+      "end_ms": 237300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 233300,
+          "end_ms": 233400,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 233400,
+          "end_ms": 233500,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 233500,
+          "end_ms": 233600,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 233600,
+          "end_ms": 233800,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 233800,
+          "end_ms": 233900,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 234200,
+          "end_ms": 234300,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 234300,
+          "end_ms": 234500,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 234500,
+          "end_ms": 234700,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 234700,
+          "end_ms": 235100,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 235100,
+          "end_ms": 235300,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 235500,
+          "end_ms": 235600,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 235600,
+          "end_ms": 235800,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 235800,
+          "end_ms": 236000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 236200,
+          "end_ms": 236300,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 236300,
+          "end_ms": 236400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 236400,
+          "end_ms": 236500,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 236900,
+          "end_ms": 237000,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 237000,
+          "end_ms": 237200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 237200,
+          "end_ms": 237300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it. You keep on You keep on You know",
+      "start_ms": 238000,
+      "end_ms": 241000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 238000,
+          "end_ms": 238100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 238100,
+          "end_ms": 238100,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 238100,
+          "end_ms": 238400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 238400,
+          "end_ms": 238600,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 238600,
+          "end_ms": 238900,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 238900,
+          "end_ms": 239000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 239400,
+          "end_ms": 239500,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 239500,
+          "end_ms": 239700,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 239700,
+          "end_ms": 239900,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 240100,
+          "end_ms": 240200,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 240200,
+          "end_ms": 240400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 240400,
+          "end_ms": 240500,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 240800,
+          "end_ms": 240900,
+          "confidence": null
+        },
+        {
+          "text": "know",
+          "start_ms": 240900,
+          "end_ms": 241000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it. You keep on You keep on You keep on",
+      "start_ms": 241700,
+      "end_ms": 244900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 241700,
+          "end_ms": 241800,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 241800,
+          "end_ms": 241900,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 241900,
+          "end_ms": 242200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 242200,
+          "end_ms": 242400,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 242400,
+          "end_ms": 242800,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 242800,
+          "end_ms": 243000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 243200,
+          "end_ms": 243300,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 243300,
+          "end_ms": 243400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 243400,
+          "end_ms": 243500,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 243800,
+          "end_ms": 243900,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 243900,
+          "end_ms": 244100,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 244100,
+          "end_ms": 244200,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 244600,
+          "end_ms": 244700,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 244700,
+          "end_ms": 244800,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 244800,
+          "end_ms": 244900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on doing it.",
+      "start_ms": 245600,
+      "end_ms": 246600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 245600,
+          "end_ms": 245700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 245700,
+          "end_ms": 245800,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 245800,
+          "end_ms": 246000,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 246000,
+          "end_ms": 246200,
+          "confidence": null
+        },
+        {
+          "text": "doing",
+          "start_ms": 246200,
+          "end_ms": 246500,
+          "confidence": null
+        },
+        {
+          "text": "it.",
+          "start_ms": 246500,
+          "end_ms": 246600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on",
+      "start_ms": 247100,
+      "end_ms": 247400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 247100,
+          "end_ms": 247200,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 247200,
+          "end_ms": 247300,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 247300,
+          "end_ms": 247400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on",
+      "start_ms": 248600,
+      "end_ms": 248900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 248600,
+          "end_ms": 248700,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 248700,
+          "end_ms": 248800,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 248800,
+          "end_ms": 248900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on",
+      "start_ms": 249500,
+      "end_ms": 249900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 249500,
+          "end_ms": 249600,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 249600,
+          "end_ms": 249800,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 249800,
+          "end_ms": 249900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You know",
+      "start_ms": 250800,
+      "end_ms": 251100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 250800,
+          "end_ms": 251000,
+          "confidence": null
+        },
+        {
+          "text": "know",
+          "start_ms": 251000,
+          "end_ms": 251100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on You keep on So you You keep on",
+      "start_ms": 251600,
+      "end_ms": 254000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 251600,
+          "end_ms": 251700,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 251700,
+          "end_ms": 251900,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 251900,
+          "end_ms": 252000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 252300,
+          "end_ms": 252400,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 252400,
+          "end_ms": 252600,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 252600,
+          "end_ms": 252700,
+          "confidence": null
+        },
+        {
+          "text": "So",
+          "start_ms": 253100,
+          "end_ms": 253200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 253200,
+          "end_ms": 253300,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 253700,
+          "end_ms": 253800,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 253800,
+          "end_ms": 253900,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 253900,
+          "end_ms": 254000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on",
+      "start_ms": 254600,
+      "end_ms": 255200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 254600,
+          "end_ms": 254800,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 254800,
+          "end_ms": 255000,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 255000,
+          "end_ms": 255200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on",
+      "start_ms": 256000,
+      "end_ms": 256300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 256000,
+          "end_ms": 256100,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 256100,
+          "end_ms": 256200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 256200,
+          "end_ms": 256300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And you keep on",
+      "start_ms": 257100,
+      "end_ms": 257600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 257100,
+          "end_ms": 257200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 257200,
+          "end_ms": 257300,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 257300,
+          "end_ms": 257500,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 257500,
+          "end_ms": 257600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You keep on You keep on You keep on",
+      "start_ms": 258500,
+      "end_ms": 260300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 258500,
+          "end_ms": 258600,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 258600,
+          "end_ms": 258700,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 258700,
+          "end_ms": 258800,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 259200,
+          "end_ms": 259300,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 259300,
+          "end_ms": 259500,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 259500,
+          "end_ms": 259600,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 260000,
+          "end_ms": 260100,
+          "confidence": null
+        },
+        {
+          "text": "keep",
+          "start_ms": 260100,
+          "end_ms": 260200,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 260200,
+          "end_ms": 260300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Thank you. You made a way.",
+      "start_ms": 262100,
+      "end_ms": 265400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Thank",
+          "start_ms": 262100,
+          "end_ms": 263100,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 263100,
+          "end_ms": 264000,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 264400,
+          "end_ms": 264800,
+          "confidence": null
+        },
+        {
+          "text": "made",
+          "start_ms": 264800,
+          "end_ms": 265200,
+          "confidence": null
+        },
+        {
+          "text": "a",
+          "start_ms": 265200,
+          "end_ms": 265300,
+          "confidence": null
+        },
+        {
+          "text": "way.",
+          "start_ms": 265300,
+          "end_ms": 265400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 268200,
+      "end_ms": 269200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 268200,
+          "end_ms": 269200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Hallelujah.",
+      "start_ms": 271700,
+      "end_ms": 272800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Hallelujah.",
+          "start_ms": 271700,
+          "end_ms": 272800,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 24.0,
+    "upload_s": 3.8,
+    "transcribe_s": 19.0,
+    "word_count": 546,
+    "line_count": 72,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 7019,
+      "total_input_tokens": 7019,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 1
+        },
+        {
+          "modality": "audio",
+          "tokens": 7018
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 8190,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 1172
+            },
+            {
+              "modality": "audio",
+              "tokens": 7018
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 724
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_ChcxeEtsYXRPTkplS1QzYm9QLXBLczBBVRIXMXhLbGF0T05KZUtUM2JvUC1wS3MwQVU"
+  }
+}

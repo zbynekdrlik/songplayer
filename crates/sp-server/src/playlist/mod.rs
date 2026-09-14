@@ -23,15 +23,18 @@ pub async fn sync_playlist(
         youtube_url,
     ])
     .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::null());
+    .stderr(std::process::Stdio::piped());
     crate::downloader::hide_console_window(&mut cmd);
     let output = cmd.output().await?;
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_tail = tail(stderr.trim(), 500);
         anyhow::bail!(
-            "yt-dlp exited with status {} for playlist {}",
+            "yt-dlp exited with status {} for playlist {}: {}",
             output.status,
-            youtube_url
+            youtube_url,
+            stderr_tail
         );
     }
 
@@ -47,6 +50,23 @@ pub async fn sync_playlist(
     }
 
     Ok(new_count)
+}
+
+/// Return the last (at most) `max` bytes of `s`, rounded forward to the
+/// nearest char boundary so the result is always a valid `&str` slice —
+/// never panics on a multibyte character straddling the cut point.
+///
+/// Used to bound how much of yt-dlp's stderr gets embedded in an error
+/// message (#139): the raw stream can run to many KB on a hard failure.
+pub(crate) fn tail(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut start = s.len() - max;
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
 }
 
 /// A single entry parsed from yt-dlp's NDJSON output.
@@ -211,5 +231,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(videos.len(), 2);
+    }
+
+    // -----------------------------------------------------------------
+    // `tail` — char-boundary-safe last-N-bytes helper for stderr capture
+    // (#139)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn tail_returns_last_n_chars_when_string_is_longer() {
+        assert_eq!(tail("abcdef", 3), "def");
+    }
+
+    #[test]
+    fn tail_returns_whole_string_when_shorter_than_max() {
+        assert_eq!(tail("ab", 5), "ab");
+    }
+
+    #[test]
+    fn tail_cuts_multibyte_string_on_a_char_boundary() {
+        // "日本語" is 3 chars of 3 bytes each (9 bytes total). A naive
+        // `&s[len - max..]` at max=4 would slice at byte offset 5, which
+        // lands mid-character and panics. `tail` must round to the next
+        // char boundary instead.
+        let s = "日本語";
+        let result = tail(s, 4);
+        assert_eq!(result, "語");
     }
 }

@@ -9,7 +9,12 @@ pub mod error;
 pub mod ndi_sdk;
 pub(crate) mod network_ready;
 pub mod sender;
+pub mod sender_real;
 pub mod types;
+
+// The mock backend is compiled only for tests / downstream test binaries.
+#[cfg(any(test, feature = "test-util"))]
+pub mod sender_mock;
 
 // Re-export key public types for convenience.
 pub use error::NdiError;
@@ -17,6 +22,8 @@ pub use ndi_sdk::NdiLib;
 #[cfg(any(test, feature = "test-util"))]
 pub use sender::test_util;
 pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
+#[cfg(any(test, feature = "test-util"))]
+pub use sender_mock::MockNdiBackend;
 pub use types::{
     FRAME_FORMAT_PROGRESSIVE, FourCCAudioType, FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE,
     PixelFormat,

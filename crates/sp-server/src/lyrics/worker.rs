@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     ai::client::AiClient,
     db::models::get_next_video_missing_translation,
-    lyrics::{aligner, translator},
+    lyrics::{aligner, translator, worker_outcome::SongOutcome},
 };
 
 pub struct LyricsWorker {
@@ -31,14 +31,16 @@ pub struct LyricsWorker {
     pub(crate) cache_dir: PathBuf,
     ytdlp_path: PathBuf,
     python_path: Option<PathBuf>,
-    tools_dir: PathBuf,
+    pub(crate) tools_dir: PathBuf,
     pub(crate) script_path: PathBuf,
     pub(crate) models_dir: PathBuf,
     /// Claude AI client for EN→SK translation (CLIProxyAPI).
     /// None if CLIProxyAPI is not configured.
     pub(crate) ai_client: Option<Arc<AiClient>>,
     pub(crate) venv_python: tokio::sync::RwLock<Option<PathBuf>>,
-    retry_backoff: tokio::sync::Mutex<RetryBackoff>,
+    // pub(crate) so the sibling `worker_translation` module (#152) shares the
+    // same Claude-translation backoff gate as `retry_missing_translations`.
+    pub(crate) retry_backoff: tokio::sync::Mutex<RetryBackoff>,
     /// Broadcast sender for lyrics-related WS events. Cloned from the app-wide
     /// event channel so messages reach all dashboard WS subscribers.
     pub(crate) events_tx: broadcast::Sender<ServerMsg>,
@@ -53,8 +55,8 @@ pub struct LyricsWorker {
 
 #[derive(Default)]
 pub(crate) struct RetryBackoff {
-    silent_until: Option<Instant>,
-    consecutive_failures: u32,
+    pub(crate) silent_until: Option<Instant>,
+    pub(crate) consecutive_failures: u32,
 }
 
 /// Re-export so `worker_tests` can keep importing from
@@ -211,6 +213,21 @@ impl LyricsWorker {
         .await?;
         tracing::info!("lyrics_worker: wrote {}", measure_path.display());
 
+        // Lever 2 (#143): deploy the mtl-alignment eval wrapper into the
+        // tools dir the same way — embedded via `include_str!` at compile
+        // time, written out on every worker startup so a version bump always
+        // ships the latest wrapper. `MtlConfig::from_tools_dir` reads it
+        // back from here; the venv (`mtl_aligner_venv`) and the vendored
+        // `LyricsAlignment-MTL` repo are installed separately (win-resolume
+        // ops, not this deploy path — see the `lyrics-pipeline` skill).
+        let mtl_run_py_path = self.tools_dir.join("lyrics_alignment_mtl_run.py");
+        tokio::fs::write(
+            &mtl_run_py_path,
+            include_str!("../../../../eval/lyrics/aligners/lyrics_alignment_mtl/run.py"),
+        )
+        .await?;
+        tracing::info!("lyrics_worker: wrote {}", mtl_run_py_path.display());
+
         Ok(())
     }
 
@@ -251,6 +268,20 @@ impl LyricsWorker {
             warn!("lyrics_worker: no system Python, alignment disabled");
         }
 
+        // Lever 2 (#143): one-time startup check, not per-song — a per-song
+        // WARN would spam the log every 5s poll while tooling is absent.
+        // `run_mtl_reference_stage` re-checks (cheap file-exists calls) and
+        // logs at INFO per song when still unavailable.
+        let mtl_cfg = crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir);
+        if !mtl_cfg.is_available() {
+            warn!(
+                "lyrics_worker: reference stage (#143) disabled — mtl tooling not found under {} \
+                 (expected mtl_aligner_venv/Scripts/python.exe, lyrics_alignment_mtl_run.py, \
+                 LyricsAlignment-MTL)",
+                self.tools_dir.display()
+            );
+        }
+
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => break,
@@ -289,6 +320,8 @@ impl LyricsWorker {
             Ok(Some(r)) => r,
             Ok(None) => {
                 self.retry_missing_translations().await;
+                // #152: queue empty → advance one stale-translation row (no alignment).
+                self.retranslate_next_stale().await;
                 debug!("worker: nothing in priority queue");
                 return;
             }
@@ -305,17 +338,26 @@ impl LyricsWorker {
             row.artist,
             row.song
         );
-        if let Err(e) = self.process_song(row).await {
-            debug!("worker: processing failed for {youtube_id}: {e}");
-            let _ = crate::db::models::mark_video_lyrics(
-                &self.pool,
-                video_id,
-                false,
-                Some("no_source"),
-                crate::lyrics::LYRICS_PIPELINE_VERSION,
-            )
-            .await;
-            self.clear_processing().await;
+        match self.process_song(row).await {
+            Ok(SongOutcome::Done) => {}
+            // #144: durable retry backoff (mirrors downloader #140) so the
+            // selector skips this unprocessable row until due instead of
+            // re-picking it every 5 s tick (37-min hot-loop on 3_ccqgwVZYM).
+            Ok(SongOutcome::Deferred(reason)) => {
+                self.defer_song(video_id, &youtube_id, reason).await
+            }
+            Err(e) => {
+                debug!("worker: processing failed for {youtube_id}: {e}");
+                let _ = crate::db::models::mark_video_lyrics(
+                    &self.pool,
+                    video_id,
+                    false,
+                    Some("no_source"),
+                    crate::lyrics::LYRICS_PIPELINE_VERSION,
+                )
+                .await;
+                self.clear_processing().await;
+            }
         }
     }
 
@@ -348,39 +390,13 @@ impl LyricsWorker {
         .await
     }
 
-    /// Apply per-line translations to `track`. Empty strings leave `sk = None`.
-    #[cfg_attr(test, mutants::skip)]
-    fn apply_translations(track: &mut LyricsTrack, translations: Vec<String>) {
-        for (line, sk_text) in track.lines.iter_mut().zip(translations) {
-            line.sk = if sk_text.is_empty() {
-                None
-            } else {
-                Some(sk_text)
-            };
-        }
-        track.language_translation = "sk".into();
-    }
-
-    /// EN→SK step of `process_song`. Silent on failure — UI degrades
-    /// gracefully to English-only. Claude-only by design: the user pays a
-    /// Max Plus subscription (unlimited at that tier) and Gemini quota is
-    /// expensive + reserved for alignment. If Claude refuses with a policy
-    /// response, the fix is to tune the prompt (see `translator::build_prompt`
-    /// for the grandmother framing that defeats the copyright classifier),
-    /// NOT to fall back to Gemini.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn translate_track(&self, track: &mut LyricsTrack, youtube_id: &str) {
-        let Some(ai_client) = &self.ai_client else {
-            return;
-        };
-        match translator::translate_via_claude(ai_client, track).await {
-            Ok(translations) => Self::apply_translations(track, translations),
-            Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
-        }
-    }
+    // `apply_translations` + `translate_track` live in `worker_translation.rs` (#152, cap).
 
     #[cfg_attr(test, mutants::skip)]
-    async fn process_song(&self, mut row: crate::db::models::VideoLyricsRow) -> Result<()> {
+    async fn process_song(
+        &self,
+        mut row: crate::db::models::VideoLyricsRow,
+    ) -> Result<SongOutcome> {
         use crate::lyrics::{
             LYRICS_PIPELINE_VERSION,
             orchestrator::{Orchestrator, OrchestratorInput},
@@ -391,6 +407,10 @@ impl LyricsWorker {
         let youtube_id = row.youtube_id.clone();
         let song = row.song.clone();
         let artist = row.artist.clone();
+        // Duration cap (#144): reject > 30-min live sets before any GPU work.
+        if crate::lyrics::worker_outcome::exceeds_duration_cap(row.duration_ms) {
+            return self.mark_over_cap(&row).await;
+        }
 
         let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
         let start_instant = std::time::Instant::now();
@@ -489,10 +509,14 @@ impl LyricsWorker {
         // GATE: per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md,
         // refuse to run expensive alignment (Demucs + whisperx, ~3 min/song) on
         // text sources we know produce poor wall output. Allowed set is
-        // yt_subs/lrclib/spotify (line-timed) and description (curated). Anything
-        // else (genius, lrclib-plain-without-timing, no_source) gets routed to
-        // asr_path (AAI U3-Pro transcribe + silence-gap split) if any text
-        // candidate exists. Songs with zero candidates are marked unsupported_source.
+        // yt_subs/lrclib/spotify (line-timed) and description (curated).
+        // Anything else (genius, lrclib-plain-without-timing, no candidates at
+        // all) gets routed to asr_path (AAI U3-Pro transcribe + silence-gap
+        // split). A song WITH a rejected candidate passes it as AAI keyterms
+        // bias; a song with ZERO candidates runs asr_path BLIND with empty
+        // keyterms instead of being marked unsupported_source (#120) — AAI
+        // transcribes unbiased, and the existing empty-transcript quarantine
+        // (`asr_gap`, see asr_path::run) is the safety net for instrumentals.
         if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
             let names: Vec<&str> = ctx
                 .candidate_texts
@@ -500,11 +524,13 @@ impl LyricsWorker {
                 .map(|c| c.source.as_str())
                 .collect();
 
-            // asr_path branch — only when there IS a candidate (just untimed).
             // Whisperx gate rejected this song; asr_path uses AAI ASR +
-            // silence-gap split + a drop-safe index-level Claude regroup. The
-            // candidate text is passed in as AAI keyterms (helper bias) and as
-            // the regroup phrasing reference — it never adds or drops lines.
+            // silence-gap split + a drop-safe index-level Claude regroup. Any
+            // gathered candidate text is passed in as AAI keyterms (helper
+            // bias) and as the regroup phrasing reference — it never adds or
+            // drops lines. Zero candidates means empty keyterms, i.e. a blind
+            // run (#120) — `build_transcript_body` already omits
+            // `keyterms_prompt` when the slice is empty.
             if crate::lyrics::orchestrator::has_any_text_candidate(&ctx.candidate_texts) {
                 tracing::info!(
                     video_id,
@@ -512,40 +538,28 @@ impl LyricsWorker {
                     candidate_sources = ?names,
                     "lyrics: no allowed text source — routing to asr_path"
                 );
-                let result = self
-                    .run_asr_path_branch(
-                        &ctx.candidate_texts,
-                        row.audio_file_path.as_deref(),
-                        video_id,
-                        &youtube_id,
-                        &song,
-                        &artist,
-                        started_at_unix_ms,
-                        start_instant,
-                    )
-                    .await;
-                self.clear_processing().await;
-                return result;
+            } else {
+                tracing::info!(
+                    video_id,
+                    youtube_id = %youtube_id,
+                    "asr_path: no text candidates — running blind (empty keyterms)"
+                );
             }
-
-            // No candidates at all — preserved old behavior: mark unsupported.
-            tracing::warn!(
-                video_id,
-                youtube_id = %youtube_id,
-                candidate_sources = ?names,
-                "lyrics: no text candidate at all — marking unsupported_source"
-            );
-            if let Err(e) = crate::db::models::mark_unsupported_source(
-                &self.pool,
-                video_id,
-                LYRICS_PIPELINE_VERSION,
-            )
-            .await
-            {
-                warn!("worker: mark_unsupported_source error for {youtube_id}: {e}");
-            }
+            let result = self
+                .run_asr_path_branch(
+                    &ctx.candidate_texts,
+                    row.audio_file_path.as_deref(),
+                    row.duration_ms,
+                    video_id,
+                    &youtube_id,
+                    &song,
+                    &artist,
+                    started_at_unix_ms,
+                    start_instant,
+                )
+                .await;
             self.clear_processing().await;
-            return Ok(());
+            return result;
         }
 
         self.broadcast_stage(
@@ -559,9 +573,8 @@ impl LyricsWorker {
         )
         .await;
 
-        // Preprocess vocals — UNCHANGED path (Mel-Roformer + anvuew dereverb).
-        // Per feedback_winresolume_is_shared_event_machine.md this uses
-        // BELOW_NORMAL priority subprocesses; not modified here.
+        // Preprocess vocals (Mel-Roformer + anvuew); #154 passes the VRAM cap.
+        let gpu_mem = self.gpu_mem_setting().await;
         let venv_python = self.venv_python.read().await.clone();
         let clean_vocal: Option<PathBuf> = if let (Some(python), Some(audio_path)) = (
             venv_python.as_ref(),
@@ -575,6 +588,8 @@ impl LyricsWorker {
                     &self.models_dir,
                     &audio_path,
                     &wav_path,
+                    aligner::isolation_timeout(row.duration_ms),
+                    gpu_mem.as_deref(),
                 )
                 .await
                 {
@@ -611,73 +626,107 @@ impl LyricsWorker {
             .map(crate::lyrics::tier1::CandidateText::from)
             .collect();
 
-        // Build the WhisperX backend using the Replicate API token from settings.
-        // Read per-song so operators can add the token without restarting.
-        let replicate_token = crate::db::models::get_setting(&self.pool, "replicate_api_token")
+        // Lever 2 (#143): forced-alignment reference stage. Runs BEFORE the
+        // WhisperX/asr_path route below decides anything, using the SAME
+        // best candidate `claude_merge::best_authoritative_candidate` would
+        // pick for that route (any source, timed or not). On gate PASS this
+        // ships the mtl line timings directly and the WhisperX/replicate
+        // route below never runs for this song.
+        let best_candidate =
+            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
+        let gemini_csv = crate::db::models::get_setting(&self.pool, "gemini_api_key")
             .await
             .ok()
             .flatten()
             .unwrap_or_default();
-        if replicate_token.trim().is_empty() {
-            warn!(
-                youtube_id = %youtube_id,
-                "worker: replicate_api_token not set — skipping song; \
-                 configure via PATCH /api/v1/settings"
-            );
-            self.clear_processing().await;
-            return Err(anyhow::anyhow!("replicate_api_token not configured"));
-        }
-        let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> = Arc::new(
-            WhisperXReplicateBackend::new(replicate_token, self.tools_dir.clone()),
-        );
+        let reference_backend = crate::lyrics::orchestrator::RealReferenceStageBackend {
+            mtl_cfg: crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir),
+            work_dir: self.cache_dir.clone(),
+            http_client: self.client.clone(),
+            gemini_keys: crate::lyrics::g35t_client::gemini_keys_from_setting(&gemini_csv),
+            gpu_mem_setting: gpu_mem.clone(),
+        };
+        let mtl_track = self
+            .run_mtl_reference_stage(
+                video_id,
+                &youtube_id,
+                best_candidate.as_ref(),
+                clean_vocal.as_deref(),
+                &reference_backend,
+            )
+            .await;
 
-        // Require an AI client for orchestrator construction — claude-merge needs it.
-        // If None at runtime, log warning and bail processing for this song.
-        let ai_client = match &self.ai_client {
-            Some(c) => c.clone(),
-            None => {
+        let mut track = if let Some(t) = mtl_track {
+            t
+        } else {
+            // Build the WhisperX backend using the Replicate API token from settings.
+            // Read per-song so operators can add the token without restarting.
+            let replicate_token = crate::db::models::get_setting(&self.pool, "replicate_api_token")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if replicate_token.trim().is_empty() {
                 warn!(
-                    "worker: ai_client is None — CLIProxyAPI not configured; \
-                     cannot run claude-merge for {youtube_id}"
+                    youtube_id = %youtube_id,
+                    "worker: replicate_api_token not set — skipping song; \
+                     configure via PATCH /api/v1/settings"
                 );
                 self.clear_processing().await;
-                return Err(anyhow::anyhow!(
-                    "ai_client required for orchestrator (claude-merge) but is None"
-                ));
+                return Err(anyhow::anyhow!("replicate_api_token not configured"));
             }
-        };
+            let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> = Arc::new(
+                WhisperXReplicateBackend::new(replicate_token, self.tools_dir.clone()),
+            );
 
-        let orch = Orchestrator::new(
-            backend,
-            ai_client,
-            crate::lyrics::line_splitter::SplitConfig::default(),
-        );
-        let aligned = match orch
-            .process(OrchestratorInput {
-                candidates,
-                language: "en",
-                vocal_wav: clean_vocal.as_deref(),
-                audit: Some(crate::lyrics::audit_ctx::AuditContext {
-                    cache_dir: &self.cache_dir,
-                    youtube_id: &youtube_id,
-                }),
-            })
-            .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                warn!("worker: orchestrator failed for {youtube_id}: {e}");
-                // Vocals WAV intentionally preserved on disk — aligner's
-                // cache-hit path (aligner.rs:87-96) reuses it on next run,
-                // saving Demucs minutes per song. Self-heal removes orphans
-                // when the parent video is removed (cache.rs).
-                self.clear_processing().await;
-                return Err(anyhow::anyhow!("orchestrator: {e}"));
-            }
-        };
+            // Require an AI client for orchestrator construction — claude-merge needs it.
+            // If None at runtime, log warning and bail processing for this song.
+            let ai_client = match &self.ai_client {
+                Some(c) => c.clone(),
+                None => {
+                    warn!(
+                        "worker: ai_client is None — CLIProxyAPI not configured; \
+                         cannot run claude-merge for {youtube_id}"
+                    );
+                    self.clear_processing().await;
+                    return Err(anyhow::anyhow!(
+                        "ai_client required for orchestrator (claude-merge) but is None"
+                    ));
+                }
+            };
 
-        // Convert AlignedTrack → LyricsTrack at the worker boundary.
-        let mut track = align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION);
+            let orch = Orchestrator::new(
+                backend,
+                ai_client,
+                crate::lyrics::line_splitter::SplitConfig::default(),
+            );
+            let aligned = match orch
+                .process(OrchestratorInput {
+                    candidates,
+                    language: "en",
+                    vocal_wav: clean_vocal.as_deref(),
+                    audit: Some(crate::lyrics::audit_ctx::AuditContext {
+                        cache_dir: &self.cache_dir,
+                        youtube_id: &youtube_id,
+                    }),
+                })
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!("worker: orchestrator failed for {youtube_id}: {e}");
+                    // Vocals WAV intentionally preserved on disk — aligner's
+                    // cache-hit path (aligner.rs:87-96) reuses it on next run,
+                    // saving Demucs minutes per song. Self-heal removes orphans
+                    // when the parent video is removed (cache.rs).
+                    self.clear_processing().await;
+                    return Err(anyhow::anyhow!("orchestrator: {e}"));
+                }
+            };
+
+            // Convert AlignedTrack → LyricsTrack at the worker boundary.
+            align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION)
+        };
 
         // Vocals WAV intentionally preserved on disk — aligner's cache-hit
         // path (aligner.rs:87-96) reuses it on next run, saving Demucs
@@ -696,7 +745,9 @@ impl LyricsWorker {
         .await;
 
         // EN→SK translation — Claude-only (per feedback_claude_only_translation.md).
-        self.translate_track(&mut track, &youtube_id).await;
+        // #152: gender picks masculine (default) / feminine Slovak first-person forms.
+        let gender = self.resolve_gender(video_id).await;
+        self.translate_track(&mut track, &youtube_id, gender).await;
 
         self.broadcast_stage(
             video_id,
@@ -717,31 +768,10 @@ impl LyricsWorker {
         let json_bytes = serde_json::to_vec(&track)?;
         tokio::fs::write(&json_path, &json_bytes).await?;
 
-        // Pick the alignment-model literal for this success path. Logic
-        // mirrors the table in the spec ("Per-song processing metadata"):
-        //   - source label contains `whisperx` → WHISPERX_V3_REV1
-        //   - source label contains `timed-merge` → TIMED_MERGE
-        //   - source label is exactly `yt_subs` / `lrclib` / `spotify` (raw
-        //     ship-through, no alignment ran) → NONE
-        //   - anything else → None (NULL — unknown model, e.g. legacy
-        //     ensemble:gemini paths that may still appear in `track.source`)
-        //
-        // Precedence note: `whisperx` is checked FIRST so that a compound
-        // label like `lrclib+timed-merge+whisperx-large-v3@rev1` (theoretical;
-        // not observed in the current catalog) reports the dominant alignment
-        // step (whisperx, the expensive one) rather than `timed-merge`. If a
-        // future pipeline emits such a compound label, audit queries see
-        // whisperx as the alignment model — which is correct.
-        let alignment_model: Option<&'static str> = if track.source.contains("whisperx") {
-            Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
-        } else if track.source.contains("timed-merge") {
-            Some(crate::lyrics::ALIGNMENT_MODEL_TIMED_MERGE)
-        } else if track.source == "yt_subs" || track.source == "lrclib" || track.source == "spotify"
-        {
-            Some(crate::lyrics::ALIGNMENT_MODEL_NONE)
-        } else {
-            None
-        };
+        // Pick the alignment-model literal for this success path — see
+        // `alignment_model_for_source`'s doc comment for the precedence.
+        let alignment_model =
+            crate::lyrics::worker_reference::alignment_model_for_source(&track.source);
 
         crate::db::models::mark_video_lyrics_complete(
             &self.pool,
@@ -752,6 +782,16 @@ impl LyricsWorker {
             alignment_model,
         )
         .await?;
+
+        // #152: mark this song translated under the current translation version
+        // so the stale-translation retranslate pass skips it (independent of
+        // lyrics_pipeline_version — no re-alignment).
+        let _ = crate::db::models::stamp_translation_version(
+            &self.pool,
+            video_id,
+            crate::lyrics::LYRICS_TRANSLATION_VERSION,
+        )
+        .await;
 
         tracing::info!(
             "worker: persisted {} (source={}, version={})",
@@ -772,7 +812,7 @@ impl LyricsWorker {
         });
         self.clear_processing().await;
 
-        Ok(())
+        Ok(SongOutcome::Done)
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -789,7 +829,7 @@ impl LyricsWorker {
             }
         }
         let result = get_next_video_missing_translation(&self.pool, &self.cache_dir).await;
-        let (_video_id, youtube_id) = match result {
+        let (video_id, youtube_id) = match result {
             Ok(Some(pair)) => pair,
             _ => return,
         };
@@ -813,19 +853,30 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        // Claude-only by design (see `translate_track` doc comment).
-        let result: Result<()> = match translator::translate_via_claude(ai_client, &track).await {
-            Ok(t) => {
-                Self::apply_translations(&mut track, t);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        };
+        // Claude-only by design (see `translate_track` doc comment). #152: the
+        // song's gender picks masculine (default) / feminine Slovak forms.
+        let gender = self.resolve_gender(video_id).await;
+        let result: Result<()> =
+            match translator::translate_via_claude(ai_client, &track, gender).await {
+                Ok(t) => {
+                    Self::apply_translations(&mut track, t);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            };
 
         match result {
             Ok(()) => {
                 let json = serde_json::to_vec(&track).unwrap_or_default();
                 let _ = tokio::fs::write(&lyrics_path, &json).await;
+                // #152: stamp the translation version so the stale-translation
+                // pass does not re-pick a song we just filled in.
+                let _ = crate::db::models::stamp_translation_version(
+                    &self.pool,
+                    video_id,
+                    crate::lyrics::LYRICS_TRANSLATION_VERSION,
+                )
+                .await;
                 info!("lyrics_worker: translation retry succeeded for {youtube_id}");
                 let mut backoff = self.retry_backoff.lock().await;
                 backoff.consecutive_failures = 0;
@@ -930,3 +981,19 @@ pub async fn queue_update_loop(
 #[path = "worker_tests.rs"]
 #[cfg(test)]
 mod tests;
+
+#[path = "worker_tests_asr_blind.rs"]
+#[cfg(test)]
+mod tests_asr_blind;
+
+#[path = "worker_tests_asr_routing.rs"]
+#[cfg(test)]
+mod tests_asr_routing;
+
+#[path = "worker_tests_reference.rs"]
+#[cfg(test)]
+mod tests_reference;
+
+#[path = "worker_tests_deferral.rs"]
+#[cfg(test)]
+mod tests_deferral;

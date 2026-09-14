@@ -339,34 +339,52 @@ pub fn probe_sample_rate_symphonia(audio_path: &Path) -> Option<u32> {
     }
 }
 
-/// Trigger a one-time playlist sync for every active playlist at startup.
-/// Legacy Python parity with `tools.py::trigger_startup_sync`.
-pub async fn startup_sync_active_playlists(
+/// Enqueue one [`SyncRequest`] for every currently active `kind = 'youtube'`
+/// playlist. Returns how many were enqueued.
+///
+/// This is the reusable core shared by [`startup_sync_active_playlists`]
+/// (fired once, after tools become ready) and the periodic re-sync loop
+/// spawned in `lib.rs` (#139) — both need the exact same "active youtube
+/// playlists only" selection, just on a different cadence.
+pub async fn enqueue_sync_all_active(
     pool: &SqlitePool,
     sync_tx: &tokio::sync::mpsc::Sender<SyncRequest>,
-) -> Result<(), sqlx::Error> {
+) -> anyhow::Result<usize> {
     let rows = sqlx::query(
         "SELECT id, youtube_url FROM playlists WHERE is_active = 1 AND kind = 'youtube'",
     )
     .fetch_all(pool)
     .await?;
-    tracing::info!(
-        count = rows.len(),
-        "startup sync: enqueueing one SyncRequest per active playlist"
-    );
+
+    let mut enqueued = 0usize;
     for row in rows {
         let playlist_id: i64 = row.get("id");
         let youtube_url: String = row.get("youtube_url");
-        if let Err(e) = sync_tx
+        match sync_tx
             .send(SyncRequest {
                 playlist_id,
                 youtube_url,
             })
             .await
         {
-            tracing::warn!(playlist_id, "startup sync enqueue failed: {e}");
+            Ok(()) => enqueued += 1,
+            Err(e) => tracing::warn!(playlist_id, "sync enqueue failed: {e}"),
         }
     }
+    Ok(enqueued)
+}
+
+/// Trigger a one-time playlist sync for every active playlist at startup.
+/// Legacy Python parity with `tools.py::trigger_startup_sync`.
+pub async fn startup_sync_active_playlists(
+    pool: &SqlitePool,
+    sync_tx: &tokio::sync::mpsc::Sender<SyncRequest>,
+) -> anyhow::Result<()> {
+    let count = enqueue_sync_all_active(pool, sync_tx).await?;
+    tracing::info!(
+        count,
+        "startup sync: enqueueing one SyncRequest per active playlist"
+    );
     Ok(())
 }
 
@@ -741,6 +759,56 @@ mod sync_filter_tests {
             "only youtube playlists should be synced"
         );
         assert_eq!(received_urls[0], "https://yt.com/fast");
+    }
+
+    /// RED (#139): `enqueue_sync_all_active` is the reusable extraction
+    /// that both `startup_sync_active_playlists` and the new periodic
+    /// re-sync loop in `lib.rs` call. It must enqueue exactly the active
+    /// `kind = 'youtube'` playlists — never an inactive one, never an
+    /// active `kind = 'custom'` one (e.g. the pre-seeded `ytlive` row) —
+    /// and return how many it enqueued.
+    #[tokio::test]
+    async fn enqueue_sync_all_active_enqueues_every_active_youtube_playlist() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+
+        let active1 = db::models::insert_playlist(&pool, "ytfast", "https://yt.com/fast")
+            .await
+            .unwrap();
+        let active2 = db::models::insert_playlist(&pool, "ytslow", "https://yt.com/slow")
+            .await
+            .unwrap();
+
+        let inactive = db::models::insert_playlist(&pool, "ytpaused", "https://yt.com/paused")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = ?")
+            .bind(inactive.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // An active *custom* playlist (the pre-seeded `ytlive` row) must
+        // never be enqueued — same filter as `startup_sync_active_playlists`.
+        ensure_live_playlist_exists(&pool).await.unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<SyncRequest>(8);
+        let enqueued = enqueue_sync_all_active(&pool, &tx).await.unwrap();
+        drop(tx);
+
+        assert_eq!(
+            enqueued, 2,
+            "only the 2 active youtube playlists should be enqueued"
+        );
+
+        let mut received_ids = Vec::new();
+        while let Some(req) = rx.recv().await {
+            received_ids.push(req.playlist_id);
+        }
+        received_ids.sort();
+        let mut expected_ids = vec![active1.id, active2.id];
+        expected_ids.sort();
+        assert_eq!(received_ids, expected_ids);
     }
 
     #[tokio::test]

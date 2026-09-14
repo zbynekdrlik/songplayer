@@ -18,7 +18,7 @@
 //! autosub_provider, description_provider, text_merge).
 //! Those are deleted in Phase G.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -399,9 +399,11 @@ fn aligned_lines_to_candidate(
 ///   (curated text; whisperx performs full alignment against it)
 ///
 /// Anything else (`genius`, `lrclib` without timing, raw whisperx with no
-/// text reference, empty candidate list) is rejected. The worker stamps the
-/// row with `lyrics_source = 'unsupported_source'` and bails — see
-/// `db::models::mark_unsupported_source`.
+/// text reference, empty candidate list) is rejected. The worker routes a
+/// rejected song to asr_path — with the candidate text as AAI keyterms bias
+/// when one exists, or BLIND with empty keyterms when the candidate list is
+/// empty (#120) — see `has_any_text_candidate` and
+/// `LyricsWorker::run_asr_path_branch`.
 ///
 /// See `docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md`.
 pub(crate) fn is_allowed_text_source(
@@ -415,14 +417,179 @@ pub(crate) fn is_allowed_text_source(
 }
 
 /// Returns true if `gather_sources` returned ANY text candidate, regardless
-/// of whether the gate accepts it. The asr_path branch uses this to decide
-/// whether to try ASR-based alignment on a song whose only candidates are
-/// untimed (genius, lrclib-untimed, etc.). Songs with zero candidates skip
-/// asr_path and remain marked `no_text_source`.
+/// of whether the gate accepts it. The worker uses this only to choose the
+/// asr_path log line / AAI keyterms: `true` passes the gathered candidate
+/// text as keyterms bias (untimed genius, lrclib-untimed, etc.); `false`
+/// runs asr_path BLIND with empty keyterms (#120) — both cases still reach
+/// asr_path, never a separate "no candidates" terminal state.
 pub(crate) fn has_any_text_candidate(
     candidates: &[crate::lyrics::provider::CandidateText],
 ) -> bool {
     candidates.iter().any(|c| !c.lines.is_empty())
+}
+
+// ---------------------------------------------------------------------------
+// Lever 2 (#143) — forced-alignment reference stage.
+//
+// Runs BEFORE the tier chain above decides anything: aligns the chosen text
+// candidate's lines to the isolated vocal stem with `lyrics-alignment-mtl`
+// (`mtl_aligner::align`), verifies the result against an independent Gemini
+// 3.5 Transcribe word transcript (`g35t_client::transcribe_words` +
+// `reference_gate::evaluate`), and on PASS ships the mtl line timings
+// directly — the caller (`LyricsWorker::run_mtl_reference_stage`) then skips
+// the WhisperX/asr_path tier chain above entirely for that song. On
+// FAIL/ERROR the caller falls through to the tier chain unchanged.
+//
+// `ReferenceStageBackend` is the injection seam: production wires
+// `RealReferenceStageBackend` (real subprocess + real HTTP); tests inject a
+// fake so the gate-decision logic in `run_reference_stage` is exercised
+// without spawning a process or making a network call.
+// ---------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+pub trait ReferenceStageBackend: Send + Sync {
+    async fn mtl_align(
+        &self,
+        vocals_wav: &Path,
+        video_id: &str,
+        lines: &[String],
+    ) -> anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput>;
+
+    async fn asr_transcribe(
+        &self,
+        vocals_wav: &Path,
+    ) -> anyhow::Result<Vec<crate::lyrics::g35t_client::AsrWord>>;
+}
+
+/// Production `ReferenceStageBackend`: real `mtl_aligner::align` subprocess
+/// call + real `g35t_client::transcribe_words` HTTP call.
+pub struct RealReferenceStageBackend {
+    pub mtl_cfg: crate::lyrics::mtl_aligner::MtlConfig,
+    pub work_dir: PathBuf,
+    pub http_client: reqwest::Client,
+    pub gemini_keys: Vec<String>,
+    /// Raw `lyrics_gpu_mem_fraction` DB setting (#154), passed to the mtl
+    /// subprocess as the VRAM cap. `None` → the child applies the default.
+    pub gpu_mem_setting: Option<String>,
+}
+
+#[async_trait::async_trait]
+impl ReferenceStageBackend for RealReferenceStageBackend {
+    async fn mtl_align(
+        &self,
+        vocals_wav: &Path,
+        video_id: &str,
+        lines: &[String],
+    ) -> anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput> {
+        crate::lyrics::mtl_aligner::align(
+            &self.mtl_cfg,
+            vocals_wav,
+            video_id,
+            lines,
+            &self.work_dir,
+            self.gpu_mem_setting.as_deref(),
+        )
+        .await
+    }
+
+    async fn asr_transcribe(
+        &self,
+        vocals_wav: &Path,
+    ) -> anyhow::Result<Vec<crate::lyrics::g35t_client::AsrWord>> {
+        crate::lyrics::g35t_client::transcribe_words(
+            &self.http_client,
+            &self.gemini_keys,
+            vocals_wav,
+            &["en-US".to_string()],
+        )
+        .await
+    }
+}
+
+/// Outcome of `run_reference_stage`. `Error` covers both an `mtl_align` and
+/// an `asr_transcribe` transport failure — the caller treats both
+/// identically (log + write the audit sidecar + fall through to the
+/// existing route); only the message differs.
+pub enum ReferenceStageResult {
+    Pass {
+        lines: Vec<crate::lyrics::backend::AlignedLine>,
+        stats: crate::lyrics::reference_gate::GateStats,
+    },
+    Fail {
+        reason: crate::lyrics::reference_gate::GateFailReason,
+        stats: crate::lyrics::reference_gate::GateStats,
+        mtl_device: String,
+        mtl_elapsed_s: f64,
+        asr_word_count: usize,
+    },
+    Error {
+        stage: &'static str,
+        message: String,
+    },
+}
+
+/// Runs the mtl-align → Gemini-ASR → gate chain for one song's chosen
+/// candidate text. All I/O is behind the injected `backend`; everything
+/// else here is pure decision logic.
+pub async fn run_reference_stage(
+    backend: &dyn ReferenceStageBackend,
+    vocals_wav: &Path,
+    video_id: &str,
+    lines: &[String],
+) -> ReferenceStageResult {
+    let mtl = match backend.mtl_align(vocals_wav, video_id, lines).await {
+        Ok(m) => m,
+        Err(e) => {
+            return ReferenceStageResult::Error {
+                stage: "mtl_align",
+                message: e.to_string(),
+            };
+        }
+    };
+    let words = match backend.asr_transcribe(vocals_wav).await {
+        Ok(w) => w,
+        Err(e) => {
+            return ReferenceStageResult::Error {
+                stage: "asr_transcribe",
+                message: e.to_string(),
+            };
+        }
+    };
+    let asr_word_count = words.len();
+    let gate_lines: Vec<crate::lyrics::reference_gate::AlignedLine> = mtl
+        .lines
+        .iter()
+        .map(|l| crate::lyrics::reference_gate::AlignedLine {
+            text: l.text.clone(),
+            start_ms: l.start_ms,
+        })
+        .collect();
+    match crate::lyrics::reference_gate::evaluate(&gate_lines, &words) {
+        crate::lyrics::reference_gate::GateVerdict::Pass(stats) => ReferenceStageResult::Pass {
+            lines: mtl
+                .lines
+                .into_iter()
+                .map(|l| crate::lyrics::backend::AlignedLine {
+                    text: l.text,
+                    start_ms: l.start_ms as u32,
+                    end_ms: l.end_ms as u32,
+                    // Per feedback_line_timing_only.md: never synthesize
+                    // word timings; mtl ships line-level timing only.
+                    words: None,
+                })
+                .collect(),
+            stats,
+        },
+        crate::lyrics::reference_gate::GateVerdict::Fail { reason, stats } => {
+            ReferenceStageResult::Fail {
+                reason,
+                stats,
+                mtl_device: mtl.device,
+                mtl_elapsed_s: mtl.elapsed_s,
+                asr_word_count,
+            }
+        }
+    }
 }
 
 #[cfg(test)]

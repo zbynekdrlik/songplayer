@@ -62,13 +62,26 @@ pub fn ResolumeHealthCard() -> impl IntoView {
     let _poll = Effect::new(move |_| {
         leptos::task::spawn_local(async move {
             loop {
-                if cancelled.get_untracked() {
+                // `cancelled` and `snapshot` are owned by the Dashboard page.
+                // Navigating away disposes them while this task is parked in
+                // the 5 s timer below, so the old `cancelled.get_untracked()`
+                // panicked ("access a reactive value that has already been
+                // disposed") on the next wake. `try_get_untracked` returns
+                // None on a disposed signal (and Some(true) once on_cleanup
+                // flips the flag) — either way, stop without touching a dead
+                // signal.
+                if cancelled.try_get_untracked() != Some(false) {
                     break;
                 }
                 if let Ok(data) =
                     crate::api::get::<Vec<HostHealth>>("/api/v1/resolume/health").await
                 {
-                    snapshot.set(data);
+                    // The fetch can finish after disposal; `try_set` no-ops
+                    // (returns the value back) on a disposed signal — stop
+                    // rather than panic on a later access.
+                    if snapshot.try_set(data).is_some() {
+                        break;
+                    }
                 }
                 gloo_timers::future::TimeoutFuture::new(5_000).await;
             }

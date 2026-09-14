@@ -48,6 +48,8 @@ async fn fetch_bucket_manual(
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
                     OR v.lyrics_pipeline_version < ?) \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY v.id ASC LIMIT 1",
     )
     .bind(current_version as i64)
@@ -99,6 +101,8 @@ async fn fetch_bucket_null(
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)
@@ -114,19 +118,15 @@ async fn fetch_bucket_stale(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // v18 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 18)`.
-    // Pre-v18 Gemini output is degraded in one or more ways:
-    //   - v11-v14: sanitize_track dropped wordless lines → empty JSONs.
-    //   - v15: sanitize fixed, but AutoSubProvider still registered →
-    //     autosub contamination.
-    //   - v16: AutoSub removed, but no end_ms clip / no merge break.
-    //   - v17: end_ms clip + merge break added, but also synthesized
-    //     per-word timings by even-distribution. The fake timings
-    //     animated wrong on the karaoke wall; user asked for
-    //     line-level focus only.
-    //   - v18+: `words: None` for wordless providers; end_ms clip
-    //     and merge break retained. Line timing is clean; no fake
-    //     per-word data.
+    // The v18 smart-skip clause (`NOT (source LIKE '%gemini%' AND version >=
+    // 18)`) that used to live here is DELETED (#143). It protected the
+    // Gemini chunked-alignment regime's v18+ output from unnecessary
+    // reprocessing — but that whole regime (`gemini_provider.rs` +
+    // qwen3/autosub aligners) no longer exists as of v20 (see
+    // `mod.rs::LYRICS_PIPELINE_VERSION` history); every `ensemble:gemini`
+    // row on the catalog is stale legacy output now, and must re-queue
+    // under v21's Lever-2 reference regime like everything else instead of
+    // being permanently protected from ever being touched again.
     let row = sqlx::query_as::<_, VideoLyricsRow>(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
@@ -136,8 +136,9 @@ async fn fetch_bucket_stale(
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 \
-               AND NOT (v.lyrics_source LIKE '%gemini%' AND v.lyrics_pipeline_version >= 18) \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)
@@ -428,10 +429,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_bucket_skips_songs_already_produced_by_gemini() {
-        // v18 smart-skip clause: `NOT (source LIKE '%gemini%' AND version >= 18)`.
-        // Pre-v18 Gemini output is degraded (empty lines, autosub contamination,
-        // missing end_ms clip, or synthesized fake words). Only v18+ rows trusted.
+    async fn stale_bucket_no_longer_protects_legacy_gemini_rows() {
+        // #143: the v18 Gemini smart-skip clause (`NOT (source LIKE
+        // '%gemini%' AND version >= 18)`) is deleted — that regime no
+        // longer exists (see mod.rs::LYRICS_PIPELINE_VERSION history), so
+        // EVERY `ensemble:gemini` row, including the once-protected v18+
+        // ones, must re-queue for reprocessing under v21 like any other
+        // stale row.
         let pool = setup().await;
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
@@ -445,26 +449,26 @@ mod tests {
         .await
         .unwrap();
 
-        // Running under v19 — only the v18 pure-Gemini row is protected; all
-        // pre-v18 rows must come back, including v17 (which had fake words).
-        let mut remaining = vec!["gemini_v17", "autosub_only", "old_gemini"];
+        // Running under v21 — every row (including the former v18
+        // "protected" one) must come back exactly once.
+        let mut remaining = vec!["gemini_v18", "gemini_v17", "autosub_only", "old_gemini"];
         while !remaining.is_empty() {
-            let row = fetch_bucket_stale(&pool, 19).await.unwrap().unwrap();
+            let row = fetch_bucket_stale(&pool, 21).await.unwrap().unwrap();
             assert!(
                 remaining.contains(&row.youtube_id.as_str()),
                 "unexpected row picked: {}",
                 row.youtube_id
             );
             remaining.retain(|&id| id != row.youtube_id.as_str());
-            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 19 WHERE youtube_id = ?")
+            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 21 WHERE youtube_id = ?")
                 .bind(&row.youtube_id)
                 .execute(&pool)
                 .await
                 .unwrap();
         }
         assert!(
-            fetch_bucket_stale(&pool, 19).await.unwrap().is_none(),
-            "v18+ pure-Gemini rows must not appear in stale bucket"
+            fetch_bucket_stale(&pool, 21).await.unwrap().is_none(),
+            "every row must be re-queued exactly once, none left behind"
         );
     }
 

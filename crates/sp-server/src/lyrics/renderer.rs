@@ -24,6 +24,18 @@ fn strip_display_punctuation(s: &str) -> String {
         .to_string()
 }
 
+/// Append ` ★` (U+2605) to `s` when `is_reference` and `s` is non-empty
+/// (#142). Called AFTER `strip_display_punctuation` so the star itself is
+/// never stripped as trailing punctuation. An empty string stays empty —
+/// a lone star on a blank display slot would be worse than no marker.
+fn append_reference_star(s: String, is_reference: bool) -> String {
+    if is_reference && !s.is_empty() {
+        format!("{s} \u{2605}")
+    } else {
+        s
+    }
+}
+
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
@@ -145,21 +157,36 @@ impl LyricsState {
     /// is last or when the next line has no SK translation.
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
+    ///
+    /// `is_reference` (#142) — when true, every non-empty returned line gets
+    /// ` ★` appended so the LED wall shows which songs carry Claude's
+    /// verified reference lyrics. Applied AFTER `strip_display_punctuation`
+    /// so the star is never stripped as trailing punctuation. An empty
+    /// string (or `None`) stays empty/`None` — no lone star on a blank slot.
     pub fn resolume_lines_with_next(
         &self,
         position_ms: u64,
+        is_reference: bool,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.track.line_at(lookahead)?;
         let next_line = self.track.lines.get(idx + 1);
-        let cur_en = strip_display_punctuation(&line.en);
-        let next_en = next_line
-            .map(|l| strip_display_punctuation(&l.en))
-            .unwrap_or_default();
-        let cur_sk = line.sk.as_deref().map(strip_display_punctuation);
+        let cur_en = append_reference_star(strip_display_punctuation(&line.en), is_reference);
+        let next_en = append_reference_star(
+            next_line
+                .map(|l| strip_display_punctuation(&l.en))
+                .unwrap_or_default(),
+            is_reference,
+        );
+        let cur_sk = line
+            .sk
+            .as_deref()
+            .map(strip_display_punctuation)
+            .map(|s| append_reference_star(s, is_reference));
         let next_sk = next_line
             .and_then(|l| l.sk.as_deref())
-            .map(strip_display_punctuation);
+            .map(strip_display_punctuation)
+            .map(|s| append_reference_star(s, is_reference));
         Some((cur_en, next_en, cur_sk, next_sk))
     }
 
@@ -440,10 +467,58 @@ mod tests {
     fn resolume_lines_with_next_returns_all_four() {
         let st = LyricsState::new(test_track());
         let (cur_en, next_en, cur_sk, _next_sk) =
-            st.resolume_lines_with_next(1500).expect("on line 0");
+            st.resolume_lines_with_next(1500, false).expect("on line 0");
         assert_eq!(cur_en, "Hello world");
         assert!(!next_en.is_empty(), "expected a next line text");
         assert!(cur_sk.is_some(), "current line has SK in test_track()");
+    }
+
+    // ── #142 — ★ reference marker on the Resolume dual-line push ──────────
+
+    #[test]
+    fn resolume_lines_with_next_appends_star_to_all_four_when_reference() {
+        // is_reference=true: every non-empty EN/SK current+next line ends
+        // with " ★" so the LED wall shows which songs carry Claude's
+        // verified reference lyrics (#142).
+        let st = LyricsState::new(test_track());
+        let (cur_en, next_en, cur_sk, next_sk) =
+            st.resolume_lines_with_next(1500, true).expect("on line 0");
+        assert_eq!(cur_en, "Hello world \u{2605}");
+        assert_eq!(next_en, "Goodbye \u{2605}");
+        assert_eq!(cur_sk, Some("Ahoj svet \u{2605}".to_string()));
+        assert_eq!(next_sk, Some("Zbohom \u{2605}".to_string()));
+    }
+
+    #[test]
+    fn resolume_lines_with_next_no_star_when_not_reference() {
+        // is_reference=false: behavior is byte-identical to before #142.
+        let st = LyricsState::new(test_track());
+        let (cur_en, next_en, cur_sk, next_sk) =
+            st.resolume_lines_with_next(1500, false).expect("on line 0");
+        assert_eq!(cur_en, "Hello world");
+        assert_eq!(next_en, "Goodbye");
+        assert_eq!(cur_sk, Some("Ahoj svet".to_string()));
+        assert_eq!(next_sk, Some("Zbohom".to_string()));
+    }
+
+    #[test]
+    fn resolume_lines_with_next_no_star_on_empty_lines_when_reference() {
+        // Empty strings/None stay empty/None even when is_reference=true —
+        // a lone " ★" on an empty next-line slot would be worse than no
+        // marker at all.
+        let st = LyricsState::new(test_track());
+        // With 0 lead, position 3200 looks up at exactly 3200 ms, which is
+        // inside the last line (3000..5000) — no next line exists.
+        let (cur_en, next_en, cur_sk, next_sk) = st
+            .resolume_lines_with_next(3200, true)
+            .expect("on last line");
+        assert_eq!(
+            cur_en, "Goodbye \u{2605}",
+            "non-empty current line gets the star"
+        );
+        assert_eq!(next_en, "", "empty next_en must stay empty, no star");
+        assert_eq!(cur_sk, Some("Zbohom \u{2605}".to_string()));
+        assert_eq!(next_sk, None, "next_sk stays None, no star");
     }
 
     #[test]
@@ -451,8 +526,9 @@ mod tests {
         let st = LyricsState::new(test_track());
         // With 0 lead, position 3200 looks up at exactly 3200 ms, which is
         // inside the last line (3000..5000).
-        let (_cur, next_en, _cur_sk, next_sk) =
-            st.resolume_lines_with_next(3200).expect("on last line");
+        let (_cur, next_en, _cur_sk, next_sk) = st
+            .resolume_lines_with_next(3200, false)
+            .expect("on last line");
         assert!(next_en.is_empty(), "last-line next_en must be empty");
         assert!(next_sk.is_none(), "last-line next_sk must be None");
     }
@@ -531,8 +607,8 @@ mod tests {
                 "resolume_lines must match at position {pos}"
             );
             assert_eq!(
-                st_new.resolume_lines_with_next(pos),
-                st_off.resolume_lines_with_next(pos),
+                st_new.resolume_lines_with_next(pos, false),
+                st_off.resolume_lines_with_next(pos, false),
                 "resolume_lines_with_next must match at position {pos}"
             );
         }

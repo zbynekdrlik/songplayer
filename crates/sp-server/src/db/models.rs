@@ -3,6 +3,25 @@
 use sp_core::models::{Playlist, Video};
 use sqlx::{Row, SqlitePool};
 
+// ★ reference-marker functions (#142) split into a sibling module
+// (models_reference.rs) so this file stays under the 1000-line airuleset
+// cap. Re-exported so every existing call site
+// (`crate::db::models::get_video_lyrics_reference`, etc.) keeps compiling
+// unchanged.
+#[path = "models_reference.rs"]
+mod models_reference;
+pub use models_reference::*;
+
+// Per-row lyrics retry backoff (#144) split into a sibling module so this
+// file stays under the 1000-line airuleset cap. Re-exported so call sites use
+// `crate::db::models::record_lyrics_deferral`.
+#[path = "models_lyrics_backoff.rs"]
+mod models_lyrics_backoff;
+pub use models_lyrics_backoff::*;
+#[path = "models_translation.rs"] // #152 translation gender/version queries
+mod models_translation;
+pub use models_translation::*;
+
 // ---------------------------------------------------------------------------
 // Playlists
 // ---------------------------------------------------------------------------
@@ -83,7 +102,8 @@ pub async fn get_videos_for_playlist(
     let rows = sqlx::query(
         "SELECT id, playlist_id, youtube_id, title, song, artist,
                 duration_ms, file_path, normalized, gemini_failed,
-                suppress_resolume_en, spotify_track_id
+                suppress_resolume_en, spotify_track_id,
+                download_attempts, last_download_error
          FROM videos WHERE playlist_id = ? ORDER BY id",
     )
     .bind(playlist_id)
@@ -112,7 +132,8 @@ pub async fn upsert_video(
          ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title
          RETURNING id, playlist_id, youtube_id, title, song, artist,
                    duration_ms, file_path, normalized, gemini_failed,
-                   suppress_resolume_en, spotify_track_id",
+                   suppress_resolume_en, spotify_track_id,
+                   download_attempts, last_download_error",
     )
     .bind(playlist_id)
     .bind(youtube_id)
@@ -137,6 +158,8 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         gemini_failed: r.get::<i32, _>("gemini_failed") != 0,
         suppress_resolume_en: r.get::<i32, _>("suppress_resolume_en") != 0,
         spotify_track_id: r.get("spotify_track_id"),
+        download_attempts: r.get("download_attempts"),
+        last_download_error: r.get("last_download_error"),
     }
 }
 
@@ -285,7 +308,8 @@ pub async fn mark_video_processed_pair(
     let result = sqlx::query(
         "UPDATE videos
          SET song = ?, artist = ?, metadata_source = ?,
-             gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1
+             gemini_failed = ?, file_path = ?, audio_file_path = ?, normalized = 1,
+             download_attempts = 0, last_download_error = NULL, next_attempt_at = NULL
          WHERE id = ?",
     )
     .bind(song)
@@ -448,6 +472,7 @@ pub async fn mark_video_lyrics(
     sqlx::query(
         "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ?, \
          lyrics_manual_priority = 0, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
          WHERE id = ?",
@@ -492,6 +517,7 @@ pub async fn mark_video_lyrics_complete(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
          lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
          lyrics_manual_priority = 0, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = ? \
          WHERE id = ?",
@@ -934,6 +960,7 @@ pub async fn mark_unsupported_source(
     sqlx::query(
         "UPDATE videos SET has_lyrics = 0, lyrics_source = 'unsupported_source', \
          lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
          WHERE id = ?",
@@ -967,3 +994,7 @@ mod tests_video;
 #[path = "models_tests_lyrics.rs"]
 #[cfg(test)]
 mod tests_lyrics;
+
+#[path = "models_tests_lyrics_backoff.rs"]
+#[cfg(test)]
+mod tests_lyrics_backoff;

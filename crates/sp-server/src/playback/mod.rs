@@ -4,18 +4,29 @@
 //! transitions through the pure [`PlayState`] state machine.  Title timing
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
+pub mod audio_grid;
+pub mod burn_overlay;
 mod clear_lyrics;
+pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
+pub mod lock_state;
 mod lyrics_loader;
+pub mod ndi_burn;
 pub mod ndi_health;
+pub mod pacer;
 pub mod pipeline;
+#[cfg(windows)]
+pub(crate) mod pipeline_paced;
+#[cfg(windows)]
+pub(crate) mod pipeline_paced_idle;
 mod position_update;
 mod recovery;
 pub mod state;
 pub mod submitter;
 mod test_helpers;
 mod title;
+pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -90,6 +101,9 @@ struct PlaylistPipeline {
     cached_duration_ms: u64,
     /// v0.22.0: skip EN Resolume when true (baked-in video lyrics).
     cached_suppress_en: bool,
+    /// #142: song carries Claude's verified "reference" lyrics — the
+    /// renderer appends " ★" to every displayed line on the LED wall.
+    cached_lyrics_reference: bool,
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
     last_now_playing_broadcast: Option<Instant>,
@@ -161,6 +175,26 @@ pub struct PlaybackEngine {
     /// Cloned into `AppState` so the API layer reads without going through
     /// the engine. Mirrors the `Arc<ResolumeRegistry>` pattern from PR #54.
     ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
+    /// Shared dantesync clock health (#146). Written by the clock-health
+    /// poller (spawned in `lib.rs::start`); read when building each NDI health
+    /// snapshot. Defaults to `no dantesync` until a handle is injected.
+    clock_health: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
+    /// Boundary-paced emission staging flag (#147, DB setting `genlock_pacing`,
+    /// default OFF). Read once at startup (`lib.rs::start`) and passed to each
+    /// pipeline thread at spawn. OFF = today's SDK-clocked path; ON = the
+    /// wall-clock grid `Pacer`.
+    genlock_pacing: bool,
+    /// Per-pipeline genlock lock-state event windows (#149, Lane 1). One 60 s
+    /// ring of cumulative pacing counters per playlist, pushed at each
+    /// heartbeat; the snapshot's `lock_state` / `lock_reason` are derived from
+    /// the differenced counts. Engine-thread-local, not shared.
+    lock_windows: HashMap<i64, crate::playback::lock_state::EventWindow>,
+    /// Runtime burn-id overlay toggle registry (#151). Cloned into `AppState`
+    /// so the HTTP handler reads/writes it synchronously (404/409/204); each
+    /// pipeline gets a shared `Arc<AtomicBool>` from it at spawn; read here when
+    /// building each health snapshot (`burn_on`). Defaults to an empty registry
+    /// until `set_ndi_burn_registry` shares the one `lib.rs::start` owns.
+    ndi_burn_registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -226,7 +260,43 @@ impl PlaybackEngine {
             presenter_client,
             instant_origin,
             ndi_health_registry,
+            clock_health: std::sync::Arc::new(std::sync::RwLock::new(
+                crate::playback::clock_health::ClockHealth::default(),
+            )),
+            genlock_pacing: false,
+            lock_windows: HashMap::new(),
+            ndi_burn_registry: std::sync::Arc::new(
+                crate::playback::ndi_burn::NdiBurnRegistry::new(),
+            ),
         }
+    }
+
+    /// Inject the shared burn-id toggle registry (#151) that `lib.rs::start`
+    /// also hands to `AppState`, so the HTTP `POST /api/v1/ndi/burn` handler and
+    /// the pipeline threads share one registry. Must be called before pipelines
+    /// are spawned (new pipelines register into it at spawn).
+    pub fn set_ndi_burn_registry(
+        &mut self,
+        registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
+    ) {
+        self.ndi_burn_registry = registry;
+    }
+
+    /// Set the boundary-paced emission staging flag (#147), read from the DB
+    /// setting `genlock_pacing` at startup (`lib.rs::start`). Must be called
+    /// before pipelines are spawned; new pipelines pick it up at spawn.
+    pub fn set_genlock_pacing(&mut self, enabled: bool) {
+        self.genlock_pacing = enabled;
+    }
+
+    /// Inject the shared dantesync clock-health handle written by the poller
+    /// spawned in `lib.rs::start` (#146). Until this is called, snapshots
+    /// carry the default `no dantesync` health.
+    pub fn set_clock_health(
+        &mut self,
+        handle: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
+    ) {
+        self.clock_health = handle;
     }
 
     /// Ensure a pipeline exists for the given playlist, creating one if needed.
@@ -238,10 +308,24 @@ impl PlaybackEngine {
         #[cfg(not(windows))]
         let ndi_backend: Option<()> = None;
 
+        let genlock_pacing = self.genlock_pacing;
+        let ndi_burn_registry = self.ndi_burn_registry.clone();
         self.pipelines.entry(playlist_id).or_insert_with(|| {
-            info!(playlist_id, ndi_name, "creating playback pipeline");
-            let pipeline =
-                PlaybackPipeline::spawn(ndi_name.to_string(), ndi_backend, event_tx, playlist_id);
+            info!(
+                playlist_id,
+                ndi_name, genlock_pacing, "creating playback pipeline"
+            );
+            // #151: register this output's burn flag (default OFF, never
+            // persisted) and hand the shared Arc to the pipeline's submitter.
+            let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
+            let pipeline = PlaybackPipeline::spawn(
+                ndi_name.to_string(),
+                ndi_backend,
+                event_tx,
+                playlist_id,
+                genlock_pacing,
+                burn_on,
+            );
             PlaylistPipeline {
                 pipeline,
                 state: PlayState::Idle,
@@ -254,6 +338,7 @@ impl PlaybackEngine {
                 cached_artist: String::new(),
                 cached_duration_ms: 0,
                 cached_suppress_en: false,
+                cached_lyrics_reference: false,
                 last_now_playing_broadcast: None,
                 history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
                 lyrics_state: None,
@@ -666,12 +751,16 @@ impl PlaybackEngine {
         let suppress_en = crate::db::models::get_video_suppress_resolume_en(&self.pool, video_id)
             .await
             .unwrap_or(false);
+        let lyrics_reference = crate::db::models::get_video_lyrics_reference(&self.pool, video_id)
+            .await
+            .unwrap_or(false);
 
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.cached_song = song.clone();
             pp.cached_artist = artist.clone();
             pp.cached_duration_ms = duration_ms;
             pp.cached_suppress_en = suppress_en;
+            pp.cached_lyrics_reference = lyrics_reference;
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
@@ -825,6 +914,9 @@ mod dispatch_lyrics_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "tests_engine_setters.rs"]
+mod tests_engine_setters;
 #[cfg(test)]
 #[path = "tests_history.rs"]
 mod tests_history;

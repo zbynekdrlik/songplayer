@@ -1,6 +1,7 @@
 //! V19 migration tests. Sibling file split from mod_tests.rs to honor
 //! the airuleset 1000-line cap.
 
+use super::MIGRATIONS;
 use super::test_helpers::{apply_first_n, column_names};
 use super::*;
 
@@ -71,5 +72,10 @@ async fn migration_v19_leaves_existing_rows_with_null_for_new_columns() {
 async fn migration_v19_advances_schema_version() {
     let pool = setup().await;
     let v = current_schema_version(&pool).await.unwrap();
-    assert_eq!(v, 19, "schema_version must advance to 19 after V19 applied");
+    let latest = MIGRATIONS.last().expect("at least one migration").0;
+    assert!(latest >= 19, "V19 must be part of the migration list");
+    assert_eq!(
+        v, latest,
+        "schema_version must advance to the newest migration ({latest}) after all migrations applied"
+    );
 }

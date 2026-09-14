@@ -7,6 +7,8 @@ use sp_core::models::*;
 use sp_core::playback::*;
 use sp_core::ws::ServerMsg;
 
+use crate::api::NdiOutputHealth;
+
 /// Lyrics pipeline queue state reflected from server WebSocket updates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LyricsQueueInfo {
@@ -43,6 +45,15 @@ pub struct LyricsSongEntry {
     pub has_lyrics: bool,
     pub is_stale: bool,
     pub manual_priority: bool,
+    /// `videos.lyrics_reference` (#142) — Claude's verified reference
+    /// lyrics; the row renders a ★ badge + „Nesedí" feedback button.
+    #[serde(default)]
+    pub lyrics_reference: bool,
+    /// `videos.lyrics_translation_gender` (#152) — per-song SK translation
+    /// gender override: `None` = auto (masculine default), `"m"`, or `"f"`.
+    /// The row renders a ♂/♀ toggle bound to this value.
+    #[serde(default)]
+    pub translation_gender: Option<String>,
 }
 
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).
@@ -96,6 +107,10 @@ pub struct DashboardStore {
     pub lyrics_queue: RwSignal<Option<LyricsQueueInfo>>,
     pub lyrics_songs: RwSignal<Vec<LyricsSongEntry>>,
     pub last_reprocess: RwSignal<Option<ReprocessOutcome>>,
+    /// Per-output NDI genlock health (#150), refreshed ~1 Hz by the
+    /// dashboard's `GlobalLockBadge` poll loop and read by every per-card
+    /// `LockBadge`.
+    pub ndi_health: RwSignal<Vec<NdiOutputHealth>>,
 }
 
 impl DashboardStore {
@@ -113,6 +128,7 @@ impl DashboardStore {
             lyrics_queue: RwSignal::new(None),
             lyrics_songs: RwSignal::new(vec![]),
             last_reprocess: RwSignal::new(None),
+            ndi_health: RwSignal::new(vec![]),
         }
     }
 

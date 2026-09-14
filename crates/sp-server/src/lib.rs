@@ -63,6 +63,10 @@ pub struct AppState {
     pub resolume_registry: Arc<resolume::ResolumeRegistry>,
     /// NDI health registry exposing per-pipeline health snapshots.
     pub ndi_health_registry: Arc<playback::ndi_health::NdiHealthRegistry>,
+    /// Runtime burn-id overlay toggle registry (#151). `POST /api/v1/ndi/burn`
+    /// reads/writes it synchronously; the playback engine + pipeline threads
+    /// share the same registry (default OFF, never persisted).
+    pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
 }
 
 /// Commands sent from the API layer to the playback engine.
@@ -239,6 +243,26 @@ pub async fn start(
     // 3b. NDI health registry — constructed before AppState so both the engine
     // (writer) and the AppState (reader) can hold an Arc to the same instance.
     let ndi_health_registry = Arc::new(playback::ndi_health::NdiHealthRegistry::new());
+    // #151: one burn-id toggle registry shared by AppState (API) + the engine
+    // (pipeline spawn + health). Default OFF, never persisted.
+    let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
+
+    // 3b'. dantesync clock health (#146). Shared handle: the 1 Hz poller writes
+    // it, the playback engine reads it into every NDI health snapshot. Never
+    // blocks playback — a missing endpoint just reads `no dantesync`.
+    let clock_health = Arc::new(std::sync::RwLock::new(
+        playback::clock_health::ClockHealth::default(),
+    ));
+    {
+        let url = std::env::var("DANTESYNC_STATUS_URL")
+            .unwrap_or_else(|_| playback::clock_health::DANTESYNC_STATUS_URL_DEFAULT.to_string());
+        playback::clock_health::spawn_clock_health_poller(
+            reqwest::Client::new(),
+            url,
+            clock_health.clone(),
+            shutdown_tx.subscribe(),
+        );
+    }
 
     // 3c. Resolume registry — must be created before AppState so the Arc can
     // be stored in state and shared with the health endpoint.
@@ -274,6 +298,7 @@ pub async fn start(
         presenter_client: presenter_client.clone(),
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
+        ndi_burn_registry: ndi_burn_registry.clone(),
     };
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
@@ -330,11 +355,22 @@ pub async fn start(
     let tool_paths_clone = tool_paths.clone();
     let dl_pool = pool.clone();
     let dl_cache_dir = config.cache_dir.clone();
+    // Same directory as the SQLite DB — where a production operator drops
+    // cookies.txt (Netscape format) to authenticate yt-dlp downloads (#141).
+    let dl_data_dir = config
+        .db_path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_gemini_key = gemini_key.clone();
     let dl_gemini_model = gemini_model.clone();
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
+    let periodic_sync_pool = pool.clone();
+    let periodic_sync_tx = sync_tx.clone();
+    let periodic_sync_shutdown = shutdown_tx.clone();
+    let ytdlp_update_shutdown = shutdown_tx.clone();
     let lyrics_pool = pool.clone();
     let lyrics_cache_dir = config.cache_dir.clone();
     let lyrics_shutdown = shutdown_tx.clone();
@@ -355,6 +391,44 @@ pub async fn start(
                 });
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");
+
+                // yt-dlp self-update (#140): the download worker never
+                // updates its own yt-dlp binary, so a box that has been up
+                // for a while silently falls behind YouTube's format
+                // changes (observed: `audio download failed … Requested
+                // format is not available` on a stale 2026.03 build — see
+                // `.claude/rules/youtube-cookies.md`). One-shot update
+                // right after tools are ready, then a shutdown-aware
+                // periodic re-update — never fatal, a stale yt-dlp should
+                // degrade, not crash the server.
+                let version_before = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                match tools_mgr.update_ytdlp().await {
+                    Ok(()) => {
+                        let version_after = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                        info!(
+                            version_before = ?version_before,
+                            version_after = ?version_after,
+                            "yt-dlp self-update: startup check complete"
+                        );
+                    }
+                    Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
+                }
+                // Shared with the download worker below: an update never
+                // runs while a song is downloading and vice versa.
+                let ytdlp_lock: downloader::YtdlpLock =
+                    std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                let ytdlp_interval_secs = ytdlp_update_interval_secs();
+                tokio::spawn(periodic_ytdlp_update(
+                    tools_mgr,
+                    paths.ytdlp.clone(),
+                    ytdlp_interval_secs,
+                    ytdlp_lock.clone(),
+                    ytdlp_update_shutdown.subscribe(),
+                ));
+                info!(
+                    interval_secs = ytdlp_interval_secs,
+                    "periodic yt-dlp self-update worker started"
+                );
 
                 // Defensive self-heal for #40: any normalized=1 row whose
                 // FLAC is not at 48 kHz would explode in
@@ -379,6 +453,23 @@ pub async fn start(
                     tracing::warn!("startup sync enqueue failed: {e}");
                 }
 
+                // Periodic re-sync (#139): the one-shot startup sync above
+                // only ever fires once, so a video added to a YouTube
+                // playlist later would never be picked up without an
+                // operator manually hitting the sync button. Spawned only
+                // once tools are ready, same as the startup sync itself.
+                let periodic_interval_secs = playlist_sync_interval_secs();
+                tokio::spawn(periodic_playlist_sync(
+                    periodic_sync_pool,
+                    periodic_sync_tx,
+                    periodic_interval_secs,
+                    periodic_sync_shutdown.subscribe(),
+                ));
+                info!(
+                    interval_secs = periodic_interval_secs,
+                    "periodic playlist sync worker started"
+                );
+
                 let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
                 // Claude first (via CLIProxyAPI), Gemini as fallback
                 dl_providers.push(Box::new(metadata::claude::ClaudeMetadataProvider::new(
@@ -397,8 +488,10 @@ pub async fn start(
                     dl_pool,
                     paths,
                     dl_cache_dir,
+                    dl_data_dir,
                     dl_providers,
                     dl_event_tx_for_worker,
+                    ytdlp_lock,
                 );
                 tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                 info!("download worker started");
@@ -441,7 +534,7 @@ pub async fn start(
             let Some(ref tp) = *paths else {
                 warn!(
                     playlist_id = req.playlist_id,
-                    "sync request received but tools not yet available, dropping"
+                    "sync request received but tools not yet available, dropping — the periodic sync re-enqueues"
                 );
                 continue;
             };
@@ -560,6 +653,26 @@ pub async fn start(
         presenter_client,
         ndi_health_registry,
     });
+    // Inject the shared dantesync clock-health handle so every NDI health
+    // snapshot carries the current clock state (#146).
+    engine.set_clock_health(clock_health);
+
+    // Boundary-paced emission staging flag (#147): DB setting `genlock_pacing`
+    // ("true"/"false"), default OFF. Read once before pipelines are spawned.
+    let genlock_pacing = db::models::get_setting(&pool, "genlock_pacing")
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    info!(
+        genlock_pacing,
+        "genlock boundary-paced emission staging flag"
+    );
+    engine.set_genlock_pacing(genlock_pacing);
+    // #151: share the burn-id toggle registry BEFORE pipelines spawn (each
+    // pipeline registers its output into it at spawn).
+    engine.set_ndi_burn_registry(ndi_burn_registry.clone());
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)
@@ -719,6 +832,137 @@ async fn ai_proxy_watchdog(
                 match proxy.start().await {
                     Ok(()) => info!("ai_proxy watchdog: restart succeeded"),
                     Err(e) => warn!("ai_proxy watchdog: restart failed: {e}"),
+                }
+            }
+        }
+    }
+}
+
+/// Default interval, in seconds, between periodic playlist re-syncs — used
+/// whenever `PLAYLIST_SYNC_INTERVAL_SECS` is absent, unparseable, or zero.
+const DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS: u64 = 600;
+
+/// Default interval, in seconds, between periodic yt-dlp self-updates
+/// (#140) — used whenever `YTDLP_UPDATE_INTERVAL_SECS` is absent,
+/// unparseable, or zero.
+const DEFAULT_YTDLP_UPDATE_INTERVAL_SECS: u64 = 86400;
+
+/// Pure parser shared by every periodic-interval env override in this
+/// module: falls back to `default` on `None`, on a value that doesn't
+/// parse as a `u64`, or on `0` — `tokio::time::interval` panics on a
+/// zero-duration period, so zero is treated the same as absent.
+fn interval_from(env_value: Option<&str>, default: u64) -> u64 {
+    match env_value.and_then(|v| v.parse::<u64>().ok()) {
+        Some(secs) if secs > 0 => secs,
+        _ => default,
+    }
+}
+
+/// Pure parser for the periodic playlist re-sync interval override.
+/// Falls back to [`DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS`] on `None`, on a
+/// value that doesn't parse as a `u64`, or on `0`.
+fn sync_interval_from(env_value: Option<&str>) -> u64 {
+    interval_from(env_value, DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS)
+}
+
+/// Read `PLAYLIST_SYNC_INTERVAL_SECS` from the environment, warning (but
+/// still falling back to the default) when the value is present but
+/// invalid, so a typo in an operator's env file is visible in the logs
+/// instead of silently defaulting.
+fn playlist_sync_interval_secs() -> u64 {
+    let raw = std::env::var("PLAYLIST_SYNC_INTERVAL_SECS").ok();
+    if let Some(v) = &raw {
+        let valid = v.parse::<u64>().is_ok_and(|n| n > 0);
+        if !valid {
+            warn!(
+                value = %v,
+                default_secs = DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS,
+                "PLAYLIST_SYNC_INTERVAL_SECS invalid or zero, using default"
+            );
+        }
+    }
+    sync_interval_from(raw.as_deref())
+}
+
+/// Periodically re-enqueue a [`SyncRequest`] for every active playlist
+/// (#139): the one-shot startup sync only ever fires once, so a video
+/// added to a YouTube playlist later would never be picked up otherwise.
+/// The first `interval.tick()` resolves immediately — that tick is
+/// deliberately consumed and discarded before entering the loop, since the
+/// startup sync already covered t=0. Exits on shutdown broadcast.
+async fn periodic_playlist_sync(
+    pool: SqlitePool,
+    sync_tx: mpsc::Sender<SyncRequest>,
+    interval_secs: u64,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await; // immediate first tick — startup sync already covered it
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = interval.tick() => {
+                match startup::enqueue_sync_all_active(&pool, &sync_tx).await {
+                    Ok(count) => info!(
+                        count,
+                        "periodic sync: enqueueing one SyncRequest per active playlist"
+                    ),
+                    Err(e) => warn!("periodic sync enqueue failed: {e}"),
+                }
+            }
+        }
+    }
+}
+
+/// Read `YTDLP_UPDATE_INTERVAL_SECS` from the environment (#140), warning
+/// (but still falling back to the default) when the value is present but
+/// invalid — same shape as [`playlist_sync_interval_secs`].
+fn ytdlp_update_interval_secs() -> u64 {
+    let raw = std::env::var("YTDLP_UPDATE_INTERVAL_SECS").ok();
+    if let Some(v) = &raw {
+        let valid = v.parse::<u64>().is_ok_and(|n| n > 0);
+        if !valid {
+            warn!(
+                value = %v,
+                default_secs = DEFAULT_YTDLP_UPDATE_INTERVAL_SECS,
+                "YTDLP_UPDATE_INTERVAL_SECS invalid or zero, using default"
+            );
+        }
+    }
+    interval_from(raw.as_deref(), DEFAULT_YTDLP_UPDATE_INTERVAL_SECS)
+}
+
+/// Periodically re-run `yt-dlp --update` (#140): the download worker never
+/// updates its own yt-dlp binary, so a long-running box falls behind
+/// YouTube's format changes over time (see
+/// `.claude/rules/youtube-cookies.md`). The startup one-shot update
+/// already covers t=0, so the first `interval.tick()` is deliberately
+/// consumed and discarded before entering the loop, same pattern as
+/// [`periodic_playlist_sync`]. Never fatal — a failed update just leaves
+/// the current binary in place. Exits on shutdown broadcast.
+async fn periodic_ytdlp_update(
+    tools_mgr: downloader::tools::ToolsManager,
+    ytdlp_path: PathBuf,
+    interval_secs: u64,
+    ytdlp_lock: downloader::YtdlpLock,
+    mut shutdown: broadcast::Receiver<()>,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await; // immediate first tick — startup update already covered it
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = interval.tick() => {
+                // Wait for any in-flight download before touching the binary.
+                let _ytdlp_guard = ytdlp_lock.lock().await;
+                match tools_mgr.update_ytdlp().await {
+                    Ok(()) => {
+                        let version = tools_mgr.ytdlp_version(&ytdlp_path).await.ok();
+                        info!(version = ?version, "periodic yt-dlp self-update succeeded");
+                    }
+                    Err(e) => warn!("periodic yt-dlp self-update failed: {e}"),
                 }
             }
         }

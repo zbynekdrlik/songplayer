@@ -71,6 +71,7 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
+            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
         };
 
         // Verify the router can be built.
@@ -350,6 +351,7 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
+            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
         };
 
         // Verify clone works.
@@ -358,5 +360,29 @@ mod tests {
         // Verify obs_state is readable.
         let obs = state.obs_state.read().await;
         assert!(!obs.connected);
+    }
+
+    // -----------------------------------------------------------------
+    // Periodic playlist re-sync interval (#139)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn sync_interval_from_defaults_when_env_absent() {
+        assert_eq!(sync_interval_from(None), 600);
+    }
+
+    #[test]
+    fn sync_interval_from_parses_valid_override() {
+        assert_eq!(sync_interval_from(Some("120")), 120);
+    }
+
+    #[test]
+    fn sync_interval_from_defaults_on_unparseable_value() {
+        assert_eq!(sync_interval_from(Some("abc")), 600);
+    }
+
+    #[test]
+    fn sync_interval_from_defaults_on_zero() {
+        assert_eq!(sync_interval_from(Some("0")), 600);
     }
 }

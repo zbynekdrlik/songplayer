@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tower::ServiceExt;
 
-async fn test_state() -> AppState {
+pub(crate) async fn test_state() -> AppState {
     test_state_with_cache_dir(std::path::PathBuf::from("/tmp/cache")).await
 }
 
@@ -48,10 +48,11 @@ async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
     }
 }
 
-fn app(state: AppState) -> axum::Router {
+pub(crate) fn app(state: AppState) -> axum::Router {
     crate::api::router(state, None)
 }
 
@@ -347,6 +348,7 @@ async fn post_seek_returns_204_and_forwards_to_engine() {
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
     };
 
     let body = serde_json::json!({"position_ms": 45000});
@@ -838,6 +840,7 @@ async fn ndi_health_endpoint_returns_array() {
 #[tokio::test]
 async fn ndi_health_endpoint_returns_seeded_pipeline() {
     use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
+    use sp_core::genlock::lock_state::LockState;
     let state = test_state().await;
     state.ndi_health_registry.update(PipelineHealthSnapshot {
         playlist_id: 11,
@@ -852,6 +855,13 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,
         degraded_reason: None,
+        clock: crate::playback::clock_health::ClockHealth::default(),
+        pacing: Default::default(),
+        audio: Default::default(),
+        // #149 Lane 1: flag-OFF (pacing disabled) reports UNLOCKED by contract.
+        lock_state: LockState::Unlocked,
+        lock_reason: "pacing disabled".to_string(),
+        burn_on: false,
     });
     let resp = app(state)
         .oneshot(
@@ -872,6 +882,10 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
     assert_eq!(arr[0]["playlist_id"].as_i64(), Some(11));
     assert_eq!(arr[0]["ndi_name"].as_str(), Some("SP-test"));
     assert_eq!(arr[0]["state"], serde_json::json!("Playing"));
+    // #149 Lane 1: lock_state + lock_reason are on the wire; a pacing-disabled
+    // (flag-OFF) pipeline reports the three-state UNLOCKED vocabulary.
+    assert_eq!(arr[0]["lock_state"].as_str(), Some("UNLOCKED"));
+    assert_eq!(arr[0]["lock_reason"].as_str(), Some("pacing disabled"));
 }
 
 #[tokio::test]

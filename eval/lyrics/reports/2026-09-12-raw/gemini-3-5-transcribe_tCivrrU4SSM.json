@@ -1,0 +1,1408 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\tCivrrU4SSM_vocal16k.wav",
+  "duration_ms": 208100,
+  "lines": [
+    {
+      "text": "Greater than the perfect sunrise, greater than the oceans deep.",
+      "start_ms": 2100,
+      "end_ms": 8600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 2100,
+          "end_ms": 2600,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 2600,
+          "end_ms": 2800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 2800,
+          "end_ms": 3000,
+          "confidence": null
+        },
+        {
+          "text": "perfect",
+          "start_ms": 3000,
+          "end_ms": 4000,
+          "confidence": null
+        },
+        {
+          "text": "sunrise,",
+          "start_ms": 4000,
+          "end_ms": 5600,
+          "confidence": null
+        },
+        {
+          "text": "greater",
+          "start_ms": 5800,
+          "end_ms": 6200,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 6200,
+          "end_ms": 6500,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 6500,
+          "end_ms": 6800,
+          "confidence": null
+        },
+        {
+          "text": "oceans",
+          "start_ms": 6800,
+          "end_ms": 7700,
+          "confidence": null
+        },
+        {
+          "text": "deep.",
+          "start_ms": 7700,
+          "end_ms": 8600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Greater than the highest mountain, Lord I believe. You are greater than the world I see. Yeah Jesus you're above everything.",
+      "start_ms": 9500,
+      "end_ms": 22300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 9500,
+          "end_ms": 10100,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 10100,
+          "end_ms": 10400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 10400,
+          "end_ms": 10500,
+          "confidence": null
+        },
+        {
+          "text": "highest",
+          "start_ms": 10500,
+          "end_ms": 11500,
+          "confidence": null
+        },
+        {
+          "text": "mountain,",
+          "start_ms": 11500,
+          "end_ms": 12800,
+          "confidence": null
+        },
+        {
+          "text": "Lord",
+          "start_ms": 13200,
+          "end_ms": 13700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 13700,
+          "end_ms": 13800,
+          "confidence": null
+        },
+        {
+          "text": "believe.",
+          "start_ms": 13800,
+          "end_ms": 14800,
+          "confidence": null
+        },
+        {
+          "text": "You",
+          "start_ms": 15100,
+          "end_ms": 15800,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 15800,
+          "end_ms": 16000,
+          "confidence": null
+        },
+        {
+          "text": "greater",
+          "start_ms": 16000,
+          "end_ms": 16700,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 16700,
+          "end_ms": 16900,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 16900,
+          "end_ms": 17100,
+          "confidence": null
+        },
+        {
+          "text": "world",
+          "start_ms": 17100,
+          "end_ms": 17700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 18000,
+          "end_ms": 18100,
+          "confidence": null
+        },
+        {
+          "text": "see.",
+          "start_ms": 18100,
+          "end_ms": 18800,
+          "confidence": null
+        },
+        {
+          "text": "Yeah",
+          "start_ms": 19200,
+          "end_ms": 19700,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 19700,
+          "end_ms": 20400,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 20400,
+          "end_ms": 20700,
+          "confidence": null
+        },
+        {
+          "text": "above",
+          "start_ms": 20700,
+          "end_ms": 21200,
+          "confidence": null
+        },
+        {
+          "text": "everything.",
+          "start_ms": 21200,
+          "end_ms": 22300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And your spirit is alive in me.",
+      "start_ms": 22800,
+      "end_ms": 26200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 22800,
+          "end_ms": 23200,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 23200,
+          "end_ms": 23500,
+          "confidence": null
+        },
+        {
+          "text": "spirit",
+          "start_ms": 23500,
+          "end_ms": 24200,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 24200,
+          "end_ms": 24400,
+          "confidence": null
+        },
+        {
+          "text": "alive",
+          "start_ms": 24400,
+          "end_ms": 25200,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 25200,
+          "end_ms": 25600,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 25600,
+          "end_ms": 26200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah with you I can do anything cuz you're greater.",
+      "start_ms": 26700,
+      "end_ms": 31200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 26700,
+          "end_ms": 27100,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 27100,
+          "end_ms": 27700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 27700,
+          "end_ms": 28000,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 28000,
+          "end_ms": 28100,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 28100,
+          "end_ms": 28400,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 28400,
+          "end_ms": 28700,
+          "confidence": null
+        },
+        {
+          "text": "anything",
+          "start_ms": 28700,
+          "end_ms": 29800,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 29900,
+          "end_ms": 30000,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 30000,
+          "end_ms": 30200,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 30200,
+          "end_ms": 31200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Greater than all that expectation.",
+      "start_ms": 50800,
+      "end_ms": 53900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 50800,
+          "end_ms": 51300,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 51300,
+          "end_ms": 51600,
+          "confidence": null
+        },
+        {
+          "text": "all",
+          "start_ms": 51600,
+          "end_ms": 51800,
+          "confidence": null
+        },
+        {
+          "text": "that",
+          "start_ms": 51800,
+          "end_ms": 52200,
+          "confidence": null
+        },
+        {
+          "text": "expectation.",
+          "start_ms": 52200,
+          "end_ms": 53900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Greater than my wildest dream.",
+      "start_ms": 54500,
+      "end_ms": 57200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 54500,
+          "end_ms": 55100,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 55100,
+          "end_ms": 55300,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 55300,
+          "end_ms": 55600,
+          "confidence": null
+        },
+        {
+          "text": "wildest",
+          "start_ms": 55600,
+          "end_ms": 56500,
+          "confidence": null
+        },
+        {
+          "text": "dream.",
+          "start_ms": 56500,
+          "end_ms": 57200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Far beyond my comprehension.",
+      "start_ms": 58400,
+      "end_ms": 61200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Far",
+          "start_ms": 58400,
+          "end_ms": 58600,
+          "confidence": null
+        },
+        {
+          "text": "beyond",
+          "start_ms": 58600,
+          "end_ms": 59100,
+          "confidence": null
+        },
+        {
+          "text": "my",
+          "start_ms": 59100,
+          "end_ms": 59300,
+          "confidence": null
+        },
+        {
+          "text": "comprehension.",
+          "start_ms": 59300,
+          "end_ms": 61200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Lord I believe.",
+      "start_ms": 62100,
+      "end_ms": 63500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Lord",
+          "start_ms": 62100,
+          "end_ms": 62400,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 62400,
+          "end_ms": 62600,
+          "confidence": null
+        },
+        {
+          "text": "believe.",
+          "start_ms": 62600,
+          "end_ms": 63500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You are greater than the world I Oh yeah. Jesus you're above everything.",
+      "start_ms": 64000,
+      "end_ms": 71000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 64000,
+          "end_ms": 64600,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 64600,
+          "end_ms": 64800,
+          "confidence": null
+        },
+        {
+          "text": "greater",
+          "start_ms": 64800,
+          "end_ms": 65400,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 65400,
+          "end_ms": 65700,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 65700,
+          "end_ms": 65800,
+          "confidence": null
+        },
+        {
+          "text": "world",
+          "start_ms": 65800,
+          "end_ms": 66400,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 66400,
+          "end_ms": 66600,
+          "confidence": null
+        },
+        {
+          "text": "Oh",
+          "start_ms": 67000,
+          "end_ms": 67200,
+          "confidence": null
+        },
+        {
+          "text": "yeah.",
+          "start_ms": 67200,
+          "end_ms": 68000,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 68400,
+          "end_ms": 69200,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 69200,
+          "end_ms": 69500,
+          "confidence": null
+        },
+        {
+          "text": "above",
+          "start_ms": 69500,
+          "end_ms": 69900,
+          "confidence": null
+        },
+        {
+          "text": "everything.",
+          "start_ms": 69900,
+          "end_ms": 71000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And your spirit is alive in me.",
+      "start_ms": 71600,
+      "end_ms": 74800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 71600,
+          "end_ms": 72000,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 72000,
+          "end_ms": 72300,
+          "confidence": null
+        },
+        {
+          "text": "spirit",
+          "start_ms": 72300,
+          "end_ms": 73000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 73000,
+          "end_ms": 73200,
+          "confidence": null
+        },
+        {
+          "text": "alive",
+          "start_ms": 73200,
+          "end_ms": 73800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 74000,
+          "end_ms": 74300,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 74300,
+          "end_ms": 74800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah with you I can do anything cuz you're greater.",
+      "start_ms": 75400,
+      "end_ms": 80400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 75400,
+          "end_ms": 75900,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 75900,
+          "end_ms": 76400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 76400,
+          "end_ms": 76700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 76700,
+          "end_ms": 76800,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 76800,
+          "end_ms": 77100,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 77100,
+          "end_ms": 77400,
+          "confidence": null
+        },
+        {
+          "text": "anything",
+          "start_ms": 77400,
+          "end_ms": 78500,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 78700,
+          "end_ms": 78800,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 78800,
+          "end_ms": 79000,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 79000,
+          "end_ms": 80400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There is no one like you.",
+      "start_ms": 97800,
+      "end_ms": 99800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 97800,
+          "end_ms": 98000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 98000,
+          "end_ms": 98200,
+          "confidence": null
+        },
+        {
+          "text": "no",
+          "start_ms": 98200,
+          "end_ms": 98500,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 98500,
+          "end_ms": 98600,
+          "confidence": null
+        },
+        {
+          "text": "like",
+          "start_ms": 98800,
+          "end_ms": 99200,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 99200,
+          "end_ms": 99800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "There is no one like you.",
+      "start_ms": 112700,
+      "end_ms": 114800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "There",
+          "start_ms": 112700,
+          "end_ms": 113000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 113000,
+          "end_ms": 113200,
+          "confidence": null
+        },
+        {
+          "text": "no",
+          "start_ms": 113200,
+          "end_ms": 113500,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 113500,
+          "end_ms": 113600,
+          "confidence": null
+        },
+        {
+          "text": "like",
+          "start_ms": 113900,
+          "end_ms": 114300,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 114300,
+          "end_ms": 114800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Jesus you are greater.",
+      "start_ms": 120200,
+      "end_ms": 122200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 120200,
+          "end_ms": 120700,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 120700,
+          "end_ms": 121000,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 121000,
+          "end_ms": 121200,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 121200,
+          "end_ms": 122200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Greater than the world I see. Yeah Jesus you're above everything.",
+      "start_ms": 128600,
+      "end_ms": 134700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Greater",
+          "start_ms": 128600,
+          "end_ms": 129200,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 129200,
+          "end_ms": 129400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 129400,
+          "end_ms": 129600,
+          "confidence": null
+        },
+        {
+          "text": "world",
+          "start_ms": 129600,
+          "end_ms": 130200,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 130600,
+          "end_ms": 130600,
+          "confidence": null
+        },
+        {
+          "text": "see.",
+          "start_ms": 130600,
+          "end_ms": 131300,
+          "confidence": null
+        },
+        {
+          "text": "Yeah",
+          "start_ms": 131700,
+          "end_ms": 132200,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 132200,
+          "end_ms": 132900,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 132900,
+          "end_ms": 133200,
+          "confidence": null
+        },
+        {
+          "text": "above",
+          "start_ms": 133200,
+          "end_ms": 133700,
+          "confidence": null
+        },
+        {
+          "text": "everything.",
+          "start_ms": 133700,
+          "end_ms": 134700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And your spirit is alive in me.",
+      "start_ms": 135300,
+      "end_ms": 138700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 135300,
+          "end_ms": 135800,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 135800,
+          "end_ms": 136100,
+          "confidence": null
+        },
+        {
+          "text": "spirit",
+          "start_ms": 136100,
+          "end_ms": 136800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 136800,
+          "end_ms": 137000,
+          "confidence": null
+        },
+        {
+          "text": "alive",
+          "start_ms": 137000,
+          "end_ms": 137700,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 137700,
+          "end_ms": 138100,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 138100,
+          "end_ms": 138700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah with you I can do anything cuz you're greater.",
+      "start_ms": 139200,
+      "end_ms": 143800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 139200,
+          "end_ms": 139700,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 139700,
+          "end_ms": 140200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 140200,
+          "end_ms": 140500,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 140500,
+          "end_ms": 140600,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 140600,
+          "end_ms": 140800,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 140800,
+          "end_ms": 141200,
+          "confidence": null
+        },
+        {
+          "text": "anything",
+          "start_ms": 141200,
+          "end_ms": 142200,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 142400,
+          "end_ms": 142500,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 142500,
+          "end_ms": 142700,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 142700,
+          "end_ms": 143800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Cuz there is no one like you.",
+      "start_ms": 161300,
+      "end_ms": 163600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Cuz",
+          "start_ms": 161300,
+          "end_ms": 161500,
+          "confidence": null
+        },
+        {
+          "text": "there",
+          "start_ms": 161500,
+          "end_ms": 161800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 161800,
+          "end_ms": 162000,
+          "confidence": null
+        },
+        {
+          "text": "no",
+          "start_ms": 162000,
+          "end_ms": 162300,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 162300,
+          "end_ms": 162400,
+          "confidence": null
+        },
+        {
+          "text": "like",
+          "start_ms": 162700,
+          "end_ms": 163000,
+          "confidence": null
+        },
+        {
+          "text": "you.",
+          "start_ms": 163000,
+          "end_ms": 163600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "No one can compare to.",
+      "start_ms": 165100,
+      "end_ms": 167400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 165100,
+          "end_ms": 165500,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 165500,
+          "end_ms": 165700,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 165700,
+          "end_ms": 165900,
+          "confidence": null
+        },
+        {
+          "text": "compare",
+          "start_ms": 165900,
+          "end_ms": 166600,
+          "confidence": null
+        },
+        {
+          "text": "to.",
+          "start_ms": 166800,
+          "end_ms": 167400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Jesus you are greater.",
+      "start_ms": 168900,
+      "end_ms": 171000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 168900,
+          "end_ms": 169500,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 169500,
+          "end_ms": 169800,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 169800,
+          "end_ms": 169900,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 169900,
+          "end_ms": 171000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "No one",
+      "start_ms": 178600,
+      "end_ms": 179700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "No",
+          "start_ms": 178600,
+          "end_ms": 179000,
+          "confidence": null
+        },
+        {
+          "text": "one",
+          "start_ms": 179000,
+          "end_ms": 179700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Jesus you are greater.",
+      "start_ms": 183900,
+      "end_ms": 186000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Jesus",
+          "start_ms": 183900,
+          "end_ms": 184500,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 184500,
+          "end_ms": 184800,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 184800,
+          "end_ms": 184900,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 184900,
+          "end_ms": 186000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "You are greater than the world",
+      "start_ms": 191400,
+      "end_ms": 193500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "You",
+          "start_ms": 191400,
+          "end_ms": 192100,
+          "confidence": null
+        },
+        {
+          "text": "are",
+          "start_ms": 192100,
+          "end_ms": 192300,
+          "confidence": null
+        },
+        {
+          "text": "greater",
+          "start_ms": 192300,
+          "end_ms": 192900,
+          "confidence": null
+        },
+        {
+          "text": "than",
+          "start_ms": 192900,
+          "end_ms": 193100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 193100,
+          "end_ms": 193200,
+          "confidence": null
+        },
+        {
+          "text": "world",
+          "start_ms": 193200,
+          "end_ms": 193500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I see. Yeah Jesus you're above everything.",
+      "start_ms": 194300,
+      "end_ms": 198500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 194300,
+          "end_ms": 194300,
+          "confidence": null
+        },
+        {
+          "text": "see.",
+          "start_ms": 194300,
+          "end_ms": 195100,
+          "confidence": null
+        },
+        {
+          "text": "Yeah",
+          "start_ms": 195400,
+          "end_ms": 195900,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 195900,
+          "end_ms": 196700,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 196700,
+          "end_ms": 197000,
+          "confidence": null
+        },
+        {
+          "text": "above",
+          "start_ms": 197000,
+          "end_ms": 197500,
+          "confidence": null
+        },
+        {
+          "text": "everything.",
+          "start_ms": 197500,
+          "end_ms": 198500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And your spirit is alive in me. Yeah with you I can do anything cuz you're greater.",
+      "start_ms": 199000,
+      "end_ms": 208100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 199000,
+          "end_ms": 199500,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 199500,
+          "end_ms": 199800,
+          "confidence": null
+        },
+        {
+          "text": "spirit",
+          "start_ms": 199800,
+          "end_ms": 200500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 200500,
+          "end_ms": 200700,
+          "confidence": null
+        },
+        {
+          "text": "alive",
+          "start_ms": 200700,
+          "end_ms": 201400,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 201400,
+          "end_ms": 201800,
+          "confidence": null
+        },
+        {
+          "text": "me.",
+          "start_ms": 201800,
+          "end_ms": 202500,
+          "confidence": null
+        },
+        {
+          "text": "Yeah",
+          "start_ms": 202900,
+          "end_ms": 203400,
+          "confidence": null
+        },
+        {
+          "text": "with",
+          "start_ms": 203400,
+          "end_ms": 203900,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 203900,
+          "end_ms": 204200,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 204200,
+          "end_ms": 204300,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 204300,
+          "end_ms": 204600,
+          "confidence": null
+        },
+        {
+          "text": "do",
+          "start_ms": 204600,
+          "end_ms": 204900,
+          "confidence": null
+        },
+        {
+          "text": "anything",
+          "start_ms": 204900,
+          "end_ms": 205900,
+          "confidence": null
+        },
+        {
+          "text": "cuz",
+          "start_ms": 206100,
+          "end_ms": 206300,
+          "confidence": null
+        },
+        {
+          "text": "you're",
+          "start_ms": 206300,
+          "end_ms": 206400,
+          "confidence": null
+        },
+        {
+          "text": "greater.",
+          "start_ms": 206400,
+          "end_ms": 208100,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 13.5,
+    "upload_s": 3.6,
+    "transcribe_s": 8.4,
+    "word_count": 191,
+    "line_count": 25,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 5406,
+      "total_input_tokens": 5406,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 1
+        },
+        {
+          "modality": "audio",
+          "tokens": 5405
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 6321,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 916
+            },
+            {
+              "modality": "audio",
+              "tokens": 5405
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 238
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_ChdMQktsYXJQNEtwcVQzYm9QcllpcGdBVRIXTEJLbGFyUDRLcHFUM2JvUHJZaXBnQVU"
+  }
+}

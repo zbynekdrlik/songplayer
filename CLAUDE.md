@@ -11,6 +11,8 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - lyrics-eval backends → `.claude/rules/lyrics-eval-backends.md` (auto-loads on `eval/lyrics/**`)
 - sp-ui / e2e mock gotchas → `.claude/rules/sp-ui-frontend.md` (auto-loads on `sp-ui/**`, `e2e/mock-api.mjs`)
 - pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
+- YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
+- genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter}*`, `sp-ndi/**`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|
@@ -294,6 +296,52 @@ The `start()` function wires all subsystems: DB, tools manager, playlist sync ha
   comma-separated `gemini_api_key` list, advancing on error so a 429 on
   one key does not kill translation for the song. Wired into both
   `translate_track` and `retry_missing_translations`.
+- v20: the Gemini chunked-alignment regime (`gemini_provider.rs` +
+  qwen3/autosub aligners) is deleted — `orchestrator.rs` imports none of
+  the legacy providers. Text gathering (`gather.rs`) gains Genius.com
+  scraping (`genius.rs`, fallback behind lyrics.ovh) and the operator
+  `lyrics_override_text` field (highest gather priority) alongside the
+  pre-existing yt_subs/LRCLIB/Spotify/description sources. The sole
+  `AlignmentBackend` is now **WhisperX large-v3 on Replicate**
+  (`whisperx_replicate.rs`), with **`asr_path`** (AssemblyAI Universal-3
+  Pro + Claude regroup, line-level) as the fallback when the gathered
+  text is untimed-only and fails the WhisperX gate. `ALIGNMENT_MODEL_*`
+  constants in `lyrics/mod.rs` name the alignment method actually used
+  per song (`ALIGNMENT_MODEL_WHISPERX_V3_REV1`,
+  `ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1`, etc.). See the
+  `lyrics-pipeline` skill's "Provider hierarchy" section for the full
+  route map.
+- v21 (current `LYRICS_PIPELINE_VERSION`, #143): Lever-2 forced-alignment
+  reference regime. Owner directive 2026-09-12 on #130 ("vyber podľa
+  teba najlepšie aktuálne dosiahnuteľné riešenie a začni
+  reprocessovať") — for any song with an allowed text candidate + a
+  preprocessed vocal WAV, a NEW stage runs BEFORE the v20 WhisperX/
+  asr_path route decides anything: `mtl_aligner::align`
+  (`crates/sp-server/src/lyrics/mtl_aligner.rs`, production wrapper
+  around the eval script `eval/lyrics/aligners/lyrics_alignment_mtl/
+  run.py`) force-aligns the chosen candidate's lines
+  (`claude_merge::best_authoritative_candidate` — the SAME selector the
+  v20 route uses) to the isolated vocals with `lyrics-alignment-mtl`
+  (MTL+BDR, the best-measured backend on #130: 31.6% gold-norm, 83-92%
+  on clean songs). The result is verified against an independent
+  **Gemini 3.5 Transcribe** word transcript
+  (`g35t_client::transcribe_words` + `reference_gate::evaluate` — both
+  own `pub mod` lines in `lyrics/mod.rs`): **pass** → the mtl line
+  timings ship directly (`words: None`, per the v18 line-timing-only
+  rule), stamped `lyrics_source = "<candidate.source>+mtl@rev1/g35t-ok"`
+  / `lyrics_alignment_model = ALIGNMENT_MODEL_MTL_REV1`, and
+  `videos.lyrics_reference` is set so the wall shows a ★; **fail/error**
+  → `videos.lyrics_reference` is cleared, the gate decision + stats land
+  in `{youtube_id}_alignment_audit.json`
+  (`audit_ctx::write_alignment_audit`), and the song falls through to
+  the v20 route unchanged (`orchestrator::run_reference_stage`'s
+  `ReferenceStageBackend` seam — `RealReferenceStageBackend` in
+  production). Skip conditions (info-logged per song): mtl tooling not
+  installed (`MtlConfig::is_available()`, WARNed once at worker start),
+  no preprocessed vocal WAV, no text candidate, or a candidate under 4
+  lines. `reprocess.rs::fetch_bucket_stale`'s v18 Gemini smart-skip
+  clause is DELETED — that regime no longer exists (see the v20 entry
+  above), so every `ensemble:gemini` row re-queues under v21 too.
 
 ## Disabled subsystems (do not re-enable without redesign)
 

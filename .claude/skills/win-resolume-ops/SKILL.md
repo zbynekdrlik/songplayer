@@ -28,6 +28,42 @@ triggers:
 - **SongPlayer data:** `C:\ProgramData\SongPlayer\`
 - **SongPlayer install:** `C:\Program Files\SongPlayer\`
 
+## Public URL `sp.newlevel.media` — Cloudflare Tunnel, TCP-only on this network
+
+The dashboard is published through a token-run Cloudflare Tunnel (`Cloudflared`
+Windows service, tunnel `0242c8d3-…`, token file
+`C:\ProgramData\cloudflared_tunnel_token.txt`). Ingress is managed remotely in
+the Cloudflare dashboard, so there is no local ingress config to inspect.
+
+**Symptom → cause map when the domain is down:**
+
+| What you see | What it means |
+|---|---|
+| HTTP **530 / `error code: 1033`** | No connector registered — the tunnel is down. The origin is irrelevant; check the service, not SongPlayer. |
+| `Cloudflared` service `Running` but the Application event log shows *"Cloudflared service starting"* every ~40 s | Crash loop. `sc.exe qfailure Cloudflared` shows `RESTART -- Delay = 20000 ms`, so a dead connector looks alive in `Get-Service`. |
+| stderr `failed to dial to edge with quic: timeout: handshake did not complete in time` | **UDP 7844 is blocked on the current network** — the 2026-08-07 outage, which began at a reboot after the LAN was switched. |
+
+**The fix (already applied, persists across reboots):** force the TCP transport.
+The service `binPath` now carries `--protocol http2`:
+
+```powershell
+$tok = (Get-Content C:\ProgramData\cloudflared_tunnel_token.txt -Raw).Trim()
+$bp  = '"C:\Program Files\cloudflared\cloudflared.exe" tunnel --no-autoupdate --protocol http2 run --token ' + $tok
+(Get-WmiObject Win32_Service -Filter "Name='Cloudflared'").Change($null,$bp)   # 0 = OK
+Restart-Service Cloudflared -Force
+```
+
+Read the token from that file — never type or echo it. Confirm with
+`Test-NetConnection region1.v2.argotunnel.com -Port 7844` (TCP reachable while
+QUIC is not) and expect four `Registered tunnel connection … protocol=http2`
+lines within seconds. Verify from the dev side, not the box:
+`curl -s -o /dev/null -w '%{http_code}' https://sp.newlevel.media/` → `200`.
+
+Diagnose the service's own stderr by launching a SECOND short-lived copy with
+`Start-Process -RedirectStandardError` (extra connectors are harmless) — the
+Windows service itself writes only "starting"/"stopped" to the event log and
+discards cloudflared's real output.
+
 ## MCP tool traps (cost two agents hours on 2026-08-05)
 
 - **`mcp__win-resolume__FileWrite` SILENTLY TRUNCATES `content` over ~20,000
@@ -43,6 +79,14 @@ triggers:
   undocumented) and per-file MCP round trips are slow. To pull a BATCH of files
   back, start a temporary `python -m http.server` on the box, `curl` them from
   the dev side, then stop it.
+- **`Shell` + `Start-Process -RedirectStandardOutput` BLOCKS until the child
+  exits, and after the tool's timeout the server RE-RUNS the command with the
+  system `C:\Program Files\Python312\python.exe`** — a long eval batch was
+  running twice (double API calls, 429s) on 2026-09-12. Launch background work
+  with `Invoke-CimMethod -ClassName Win32_Process -MethodName Create
+  -Arguments @{CommandLine='cmd.exe /c ""<python>" -u "<script>" > "<log>" 2>&1"'}`,
+  which returns at once, then poll the log. Kill strays via
+  `Get-CimInstance Win32_Process | Where CommandLine -match '<script>'`.
 - MCP is the ONLY sanctioned channel here — never ssh/scp to this box. If an MCP
   call fails with a connection/timeout error, STOP and tell the user.
 
@@ -142,9 +186,81 @@ irm https://raw.githubusercontent.com/owner/repo/branch/scripts/install.ps1 | ie
 Create an `install.ps1` in the repo that handles download, config, scheduled
 task, firewall, and verification. Not manual multi-step commands.
 
+## Dialogs hidden behind Arena's output windows — drive them with UI Automation
+
+Arena's fullscreen "Display" windows cover monitors 2-4, so a Qt dialog that
+opens there (OBS "Crash Detected" / Safe Mode prompt, 2026-09-12) is
+invisible to `Snapshot` and `FocusWindow` fails. Do not click blind — from
+the MCP `Shell`, read and press its buttons by name (never pick OBS Safe
+Mode: it disables NDI and obs-websocket):
+
+```powershell
+Add-Type -AssemblyName UIAutomationClient; Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]<hwnd from the Snapshot window list>)
+$c = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Run in Normal Mode')
+$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $c).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+```
+
+List buttons/text first (`ControlType.Button` / `.Text` with `FindAll`) when the
+labels are unknown. Launch GUI apps that need a working directory via
+`Invoke-CimMethod Win32_Process Create -Arguments @{CommandLine=…; CurrentDirectory=…}`
+(OBS needs `bin\64bit`); the MCP `Shell` sometimes returns "(no output)" for
+longer commands — redirect to a log file and read that instead.
+
 ## win-resolume is always free when user prompts
 
 When the user gives a new prompt, win-resolume is ALWAYS free. Never defer
 interactive work citing "wall idle window" or "event might be in progress".
 If the user wanted to stop, they would stop Claude. CI uses the machine without
 an idle check; Claude during active prompts can too.
+
+## Genlock soak workflow (`.github/workflows/genlock-soak.yml`, #149)
+
+Receiver-side ground-truth soak for the genlock chain (Genlock 4/6 lane 2).
+`workflow_dispatch`-only for now (the daily `schedule` line is committed
+commented-out; enable it when camera-box#1295 puts cg OBS on the genlock
+build). It is NOT wired to push/PR — it deliberately waits `minutes`, which is
+allowed only outside the PR pipeline (CLAUDE.md "CI architecture").
+
+**Run it:**
+```bash
+gh workflow run genlock-soak.yml --ref dev -f minutes=5
+# inputs: minutes (default 20), skew_bound_ms (default 20), hops (default cg-obs)
+```
+One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
+1. checks out camera-box at a PINNED commit (`fdd68e47c…`) for the verifier;
+2. preflights SongPlayer `/api/v1/status` + OBS WebSocket 4455, notes the
+   `genlock_pacing` setting + per-output `lock_state` into the job summary;
+3. plays the first playlist with videos (no OBS scene switch — SongPlayer just
+   emits NDI on that SP-* stream, which cg OBS ingests; the live wall is
+   untouched) and, during the `minutes` window, samples `/api/v1/ndi/health`
+   once per minute into `sp-health.csv`;
+4. dumps the newest RESOLUME-SNV OBS log tail (last 4000 lines, byte-safe) to
+   `cg-obs.log`;
+5. runs `camera-box/scripts/cg-chain-verify.sh --hops cg-obs` against that log
+   with `CG_CHAIN_CG_OBS_LOG=…`. **The job PASS/FAIL IS the verifier's exit
+   code (exit 3 = FAIL), never SongPlayer's own counters.**
+
+**Artifacts** (`genlock-soak-<run_id>`, uploaded `if: always()`):
+- `sp-health.csv` — send-side evidence only (NOT the gate): per output per
+  minute `seq, late_frames, lag_slots, repeats, resyncs, audio.residual_ppm,
+  lock_state, lock_reason`.
+- `cg-chain.csv` — the verifier's per-hop/per-source verdict rows.
+- `cg-obs.log` — the receiver log tail the verdict was computed from.
+- `cg-verdict.txt` — the verifier's printed per-hop table + OVERALL PASS/FAIL.
+
+**Expected result TODAY = FAIL (count-gate BEFORE picture).** Until
+camera-box#1295 lands, cg OBS is not on the genlock build, so its log carries
+NO `genlock-fifo audit 'sp-*_video'` lines. The verifier reports the `cg-obs`
+hop as `NO SOURCES` / `UNREADABLE` and exits 3 → the job is RED. Equivalently:
+`locked=0` on every `sp-*` input is the honest count-gate signal that there is
+no genlock picture yet — that is the correct, expected state, not a regression.
+The workflow flips to a real PASS/FAIL verdict only once the receiver is on the
+genlock build (add the `schedule` line then and add the `strih`/`stream` hops
+once the runner has the ssh/bundle-state reader, camera-box#1294 Q10).
+
+**Bumping the pinned camera-box ref:** replace the full 40-char SHA in the
+`Checkout camera-box` step with a newer camera-box commit that still ships
+`scripts/cg-chain-verify.sh` + `scripts/lib/cg-chain-verify.sh` with the
+`CG_CHAIN_<HOP>_LOG` reader seam (a full SHA is required for checkout's
+fetch-by-commit).

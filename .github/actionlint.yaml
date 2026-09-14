@@ -1,0 +1,7 @@
+# actionlint configuration.
+# Declare the custom self-hosted runner label used by the win-resolume box so
+# actionlint's runner-label check does not flag `[self-hosted, windows, resolume]`
+# in ci.yml (deploy-resolume / e2e-resolume) and genlock-soak.yml.
+self-hosted-runner:
+  labels:
+    - resolume

@@ -59,12 +59,43 @@ struct ChunkResultFile {
 }
 
 // ---------------------------------------------------------------------------
+// isolation_timeout
+// ---------------------------------------------------------------------------
+
+/// Duration-scaled ceiling for the vocal-isolation subprocess (#144).
+///
+/// Vocal isolation (Mel-Roformer + anvuew dereverb + resample) runs at ≈1×
+/// realtime on win-resolume (RTX 3070 Ti, BELOW_NORMAL priority; measured
+/// 2026-09-12: a 240-s song took 233 s, and the Mel-Roformer pass alone is
+/// 0.75× realtime and linear on both a 240-s and an 827-s song). The old
+/// hard-coded 600 s ceiling could only ever pass a song under ~9 min from a
+/// cached WAV, so the 10–15-min band (29 catalog songs) timed out on every
+/// cold run.
+///
+/// `clamp(2 × duration, 600 s, 3600 s)` gives every song ~2× its realtime
+/// length of headroom while still capping a hung separator at one hour. An
+/// unknown or non-positive duration falls back to the 3600 s ceiling.
+pub fn isolation_timeout(duration_ms: Option<i64>) -> std::time::Duration {
+    match duration_ms {
+        Some(ms) if ms > 0 => {
+            let secs = (ms / 1000).saturating_mul(2).clamp(600, 3600);
+            std::time::Duration::from_secs(secs as u64)
+        }
+        _ => std::time::Duration::from_secs(3600),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // preprocess_vocals
 // ---------------------------------------------------------------------------
 
 /// Run Mel-Roformer vocal isolation + anvuew de-reverb + 16 kHz mono float32
 /// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
 /// the same path on success.
+///
+/// `timeout` bounds the isolation subprocess; callers pass
+/// [`isolation_timeout`]`(duration_ms)` so a long song gets a proportionally
+/// longer ceiling instead of the old fixed 600 s (#144).
 ///
 /// **Cache (v18):** if `wav_out` already exists and is larger than 1 MB,
 /// skip Demucs entirely and return the existing path. Demucs on a 10-min
@@ -79,6 +110,8 @@ pub async fn preprocess_vocals(
     models_dir: &Path,
     audio_in: &Path,
     wav_out: &Path,
+    timeout: std::time::Duration,
+    gpu_mem_setting: Option<&str>,
 ) -> Result<PathBuf> {
     // Cache check: reuse an existing vocals WAV if it looks complete.
     // 1 MB minimum avoids reusing truncated/aborted files from a previous
@@ -114,6 +147,11 @@ pub async fn preprocess_vocals(
             crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
     }
+    // #154: carry the operator-tunable VRAM cap to the GPU child so vocal
+    // isolation leaves headroom for the live MF decoder on the shared PC.
+    for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
+        cmd.env(k, v);
+    }
 
     #[cfg(windows)]
     {
@@ -139,13 +177,12 @@ pub async fn preprocess_vocals(
     );
 
     let mut child = cmd.spawn().context("failed to spawn preprocess-vocals")?;
-    let status = match tokio::time::timeout(std::time::Duration::from_secs(600), child.wait()).await
-    {
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => anyhow::bail!("preprocess-vocals wait failed: {e}"),
         Err(_) => {
             let _ = child.kill().await;
-            anyhow::bail!("preprocess-vocals timed out after 600 s");
+            anyhow::bail!("preprocess-vocals timed out after {} s", timeout.as_secs());
         }
     };
     if !status.success() {
@@ -383,3 +420,7 @@ mod tests {
         assert_eq!(parsed.chunks[1].words.len(), 0);
     }
 }
+
+#[path = "aligner_tests_timeout.rs"]
+#[cfg(test)]
+mod tests_timeout;

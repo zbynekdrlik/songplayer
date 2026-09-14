@@ -18,7 +18,7 @@ impl Default for AiSettings {
         Self {
             api_url: "http://localhost:18787/v1".into(),
             api_key: None,
-            model: "claude-opus-4-20250514".into(),
+            model: sp_core::config::DEFAULT_AI_MODEL.into(),
             system_prompt_extra: None,
         }
     }

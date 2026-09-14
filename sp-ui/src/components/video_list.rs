@@ -52,6 +52,9 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                             let video_id = video.id;
                             let normalized = video.normalized;
                             let title = video.song.clone().unwrap_or_else(|| video.title.clone());
+                            let last_error = (!normalized)
+                                .then(|| video.last_download_error.clone())
+                                .flatten();
                             view! {
                                 <tr>
                                     <td class="video-list-col-play">
@@ -81,7 +84,20 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                                             "▶"
                                         </button>
                                     </td>
-                                    <td>{title}</td>
+                                    <td>
+                                        {title}
+                                        {last_error
+                                            .map(|err| {
+                                                view! {
+                                                    <span
+                                                        class="video-list-error-icon"
+                                                        title=err
+                                                    >
+                                                        " ⚠"
+                                                    </span>
+                                                }
+                                            })}
+                                    </td>
                                     <td>{video.artist.clone().unwrap_or_default()}</td>
                                     <td>{if video.cached { "Yes" } else { "No" }}</td>
                                     <td>{if video.normalized { "Yes" } else { "No" }}</td>

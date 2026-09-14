@@ -84,6 +84,8 @@ fn install_pipeline(
         None,
         mpsc::unbounded_channel().0,
         playlist_id,
+        false,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     let pp = PlaylistPipeline {
         pipeline,
@@ -97,6 +99,7 @@ fn install_pipeline(
         cached_artist: "Artist".into(),
         cached_duration_ms: 10_000,
         cached_suppress_en: false,
+        cached_lyrics_reference: false,
         last_now_playing_broadcast: None,
         history: VecDeque::new(),
         lyrics_state: lyrics,

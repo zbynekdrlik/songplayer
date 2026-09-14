@@ -255,6 +255,49 @@ fn paused_heartbeat_respects_5s_cadence() {
 }
 
 #[test]
+fn heartbeat_forwards_the_pacing_flag() {
+    // #147 change 7: an idle/paused heartbeat carries pacing.enabled = the flag
+    // (and any accumulated counters), NOT PacingStats::default() (enabled=false).
+    use crate::playback::ndi_health::PacingStats;
+    use crate::playback::submitter::FrameSubmitter;
+    use sp_ndi::test_util::MockNdiBackend;
+    use std::sync::Arc;
+
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = sp_ndi::NdiSender::new_with_clocking(backend, "HB-pacing", true, false).unwrap();
+    let mut submitter = FrameSubmitter::new(sender, 30, 1);
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut last_heartbeat = Instant::now() - Duration::from_secs(6);
+    let mut consecutive_bad_polls: u32 = 0;
+
+    let pacing = PacingStats {
+        enabled: true,
+        seq: 3,
+        ..Default::default()
+    };
+    emit_heartbeat(
+        &mut submitter,
+        &event_tx,
+        99,
+        PlaybackStateLabel::Paused,
+        &mut last_heartbeat,
+        &mut consecutive_bad_polls,
+        pacing.clone(),
+        crate::playback::ndi_health::AudioStats::default(),
+    );
+
+    let (_pid, event) = event_rx.try_recv().expect("heartbeat must emit");
+    match event {
+        PipelineEvent::HealthSnapshot { pacing: got, .. } => {
+            assert_eq!(got, pacing, "the pacing flag + counters must be forwarded");
+            assert!(got.enabled, "idle/paused snapshot must report enabled=flag");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn classify_bad_poll_stale_excludes_exact_10s() {
     // Kills the `now.duration_since(ts) > Duration::from_secs(10)`
     // -> `>=` mutant. last_submit_ts exactly 10s ago must NOT be

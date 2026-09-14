@@ -2,7 +2,9 @@
 //!
 //! This crate is WASM-safe — no OS-specific dependencies.
 
+pub mod clock_health;
 pub mod config;
+pub mod genlock;
 pub mod lyrics;
 pub mod metadata;
 pub mod models;
@@ -170,6 +172,8 @@ mod tests {
             gemini_failed: false,
             suppress_resolume_en: false,
             spotify_track_id: None,
+            download_attempts: 0,
+            last_download_error: None,
         };
         let json = serde_json::to_string(&v).unwrap();
         let back: models::Video = serde_json::from_str(&json).unwrap();

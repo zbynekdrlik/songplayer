@@ -14,6 +14,14 @@ pub fn LyricsSongRow(
 ) -> impl IntoView {
     let store = expect_context::<DashboardStore>();
     let last_reprocess = store.last_reprocess;
+    // #142: local reactive copy of the ★ reference flag. Seeded from the
+    // fetched entry; cleared optimistically the moment "Nesedí" feedback
+    // is recorded server-side, so the star disappears without needing a
+    // full re-fetch of the (non-reactive) parent song list.
+    let is_reference = RwSignal::new(entry.lyrics_reference);
+    // #152: per-song SK translation gender override. Cycles auto → ♂ → ♀ →
+    // auto; each click PATCHes and optimistically flips the glyph.
+    let gender = RwSignal::new(entry.translation_gender.clone());
     let status_class = if !entry.has_lyrics {
         "status-none"
     } else if entry.is_stale {
@@ -59,14 +67,80 @@ pub fn LyricsSongRow(
     };
     let on_details_click = move |_| on_details.run(video_id);
 
+    // #152: ♂♀ = auto (masculine default), ♂ = forced masculine, ♀ = feminine.
+    let gender_glyph = move || match gender.get().as_deref() {
+        Some("m") => "\u{2642}",
+        Some("f") => "\u{2640}",
+        _ => "\u{2642}\u{2640}",
+    };
+    let on_gender = move |_| {
+        let next: Option<&'static str> = match gender.get_untracked().as_deref() {
+            None => Some("m"),
+            Some("m") => Some("f"),
+            _ => None,
+        };
+        spawn_local(async move {
+            if api::patch_translation_gender(video_id, next).await.is_ok() {
+                gender.set(next.map(|s| s.to_string()));
+            }
+        });
+    };
+
     view! {
         <div class={format!("lyrics-song-row {status_class}")}>
             <span class="status-icon">{status_icon}</span>
             <span class="song-display">{display}</span>
+            {move || {
+                is_reference
+                    .get()
+                    .then(|| view! { <span class="reference-badge">"\u{2605}"</span> })
+            }}
             <span class="source-chip">{source_text}</span>
             <span class="quality-text">{quality_text}</span>
             <button on:click=on_details_click>"Details"</button>
             <button on:click=on_reprocess>"Reprocess"</button>
+            <button
+                class="translation-gender-btn"
+                title="Rod prekladu (prvá osoba)"
+                on:click=on_gender
+            >
+                {gender_glyph}
+            </button>
+            {move || {
+                is_reference
+                    .get()
+                    .then(|| {
+                        // #142: owner flags a starred song as wrong. Prompt
+                        // for a short note, POST it to the feedback
+                        // endpoint, and clear the star on success.
+                        view! {
+                            <button
+                                class="reference-reject-btn"
+                                on:click=move |_| {
+                                    let note = web_sys::window()
+                                        .and_then(|w| {
+                                            w.prompt_with_message("Prečo referenčný text nesedí?")
+                                                .ok()
+                                        })
+                                        .flatten();
+                                    let Some(note) = note.filter(|n| !n.trim().is_empty()) else {
+                                        return;
+                                    };
+                                    spawn_local(async move {
+                                        if api::post_reference_feedback(video_id, &note)
+                                            .await
+                                            .is_ok()
+                                        {
+                                            is_reference.set(false);
+                                        }
+                                    });
+                                }
+                            >
+                                "Nesedí"
+                            </button>
+                        }
+                    })
+            }}
         </div>
     }
 }

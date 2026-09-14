@@ -20,15 +20,20 @@ pub(crate) fn prepend_path_with(dir: &Path) -> std::ffi::OsString {
     joined
 }
 
-/// The `-c` script passed to the venv Python by `is_ready` to verify the
-/// three Python packages the aligner pipeline depends on are importable
-/// AND CUDA is available. Exit code 0 iff all four conditions hold:
+/// The `-c` script passed to the venv Python by `is_ready` to verify every
+/// Python package the aligner pipeline depends on is importable AND CUDA is
+/// available. Exit code 0 iff all conditions hold:
 ///   1. `qwen_asr` importable (the Qwen3-ForcedAligner package)
 ///   2. `torch` importable
 ///   3. `audio_separator` importable (the Mel-Roformer vocal isolator)
-///   4. `torch.cuda.is_available()` returns True
-const IS_READY_PROBE: &str =
-    "import qwen_asr, torch, audio_separator, sys; sys.exit(0 if torch.cuda.is_available() else 1)";
+///   4. `numba` + `librosa` + `soundfile` importable — the numeric stack
+///      `preprocess-vocals` runs on. A too-new numpy (>= 2.5) breaks numba's
+///      import ("Numba needs NumPy 2.4 or less"), so importing them here is
+///      what makes a broken pin report "not ready" and trigger the repair;
+///      without it the venv reported ready while every song failed isolation
+///      (win-resolume, 2026-09-11, #144).
+///   5. `torch.cuda.is_available()` returns True
+const IS_READY_PROBE: &str = "import qwen_asr, torch, audio_separator, numba, librosa, soundfile, sys; sys.exit(0 if torch.cuda.is_available() else 1)";
 
 /// `audio-separator[gpu]` pip package spec — Mel-Roformer vocal isolation
 /// plus ONNX Runtime GPU support. Quoted exactly because pip's shell
@@ -42,6 +47,16 @@ const AUDIO_SEPARATOR_PACKAGE: &str = "audio-separator[gpu]";
 /// first run.
 #[allow(dead_code)] // only referenced inside #[cfg(target_os = "windows")] bootstrap
 const AUDIO_SEPARATOR_PIP_TIMEOUT_SECS: u64 = 900;
+
+/// numpy pin repaired AFTER the cu124 torch force-reinstall. numba 0.65/0.66
+/// (April) cap numpy at 2.4 ("Numba needs NumPy 2.4 or less. Got NumPy 2.5.");
+/// the torch `--upgrade --force-reinstall` in step 2b re-resolves torch's
+/// dependency tree ignoring the constraints of already-installed packages, so
+/// on win-resolume (2026-09-11, #144) it pulled numpy 2.5.2 next to numba
+/// 0.65 and every `preprocess-vocals` run (librosa → numba) failed. Re-pin
+/// numpy below 2.5 LAST so the numeric stack imports again.
+#[allow(dead_code)] // only referenced inside #[cfg(target_os = "windows")] bootstrap
+const NUMPY_PIN: &str = "numpy<2.5";
 
 /// Returns the absolute path to the venv Python interpreter, or `None`
 /// if the bootstrap is skipped (non-Windows).
@@ -278,6 +293,39 @@ pub async fn ensure_ready(
             );
         }
 
+        // 2c. Repair the numpy pin (#144). The cu124 torch force-reinstall in
+        // step 2b re-resolves torch's dependency tree with `--force-reinstall`,
+        // ignoring the constraints of already-installed packages — on
+        // win-resolume (2026-09-11) it pulled numpy 2.5.2 next to numba 0.65,
+        // and numba 0.65/0.66 cap numpy at 2.4, so every `preprocess-vocals`
+        // run (librosa → numba) died with "Numba needs NumPy 2.4 or less. Got
+        // NumPy 2.5." Re-pin numpy below 2.5 LAST so the numeric stack imports
+        // again. WARN-and-tolerate like the other pip steps; the final
+        // is_ready probe (now importing numba/librosa/soundfile) is the gate.
+        tracing::info!("lyrics bootstrap: repairing numpy pin ({NUMPY_PIN})");
+        let mut numpy_pip = Command::new(&venv_python);
+        numpy_pip.args(["-m", "pip", "install", NUMPY_PIN]);
+        numpy_pip.creation_flags(0x08000000);
+        let mut numpy_child = numpy_pip
+            .spawn()
+            .context("failed to spawn numpy pin pip install")?;
+        let numpy_status =
+            match tokio::time::timeout(std::time::Duration::from_secs(600), numpy_child.wait())
+                .await
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => anyhow::bail!("numpy pin install spawn failed: {e}"),
+                Err(_) => {
+                    let _ = numpy_child.kill().await;
+                    anyhow::bail!("numpy pin install timed out after 10 minutes");
+                }
+            };
+        if !numpy_status.success() {
+            tracing::warn!(
+                "lyrics bootstrap: numpy pin install exited {numpy_status} (tolerated, final is_ready check decides)"
+            );
+        }
+
         // Verify the install actually worked regardless of pip's exit codes.
         // Retry up to 5× with backoff: immediately after `pip install
         // --force-reinstall torch`, Windows sometimes fails to import the
@@ -336,6 +384,10 @@ pub async fn ensure_ready(
         Ok(Some(venv_python))
     }
 }
+
+#[path = "bootstrap_tests_numpy_pin.rs"]
+#[cfg(test)]
+mod bootstrap_tests_numpy_pin;
 
 #[cfg(test)]
 mod tests {

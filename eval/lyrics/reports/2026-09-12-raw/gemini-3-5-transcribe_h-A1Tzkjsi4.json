@@ -1,0 +1,2558 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\h-A1Tzkjsi4_vocal16k.wav",
+  "duration_ms": 341900,
+  "lines": [
+    {
+      "text": "Slowing",
+      "start_ms": 16600,
+      "end_ms": 16800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Slowing",
+          "start_ms": 16600,
+          "end_ms": 16800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "on the side",
+      "start_ms": 17900,
+      "end_ms": 19500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "on",
+          "start_ms": 17900,
+          "end_ms": 18100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 18100,
+          "end_ms": 18200,
+          "confidence": null
+        },
+        {
+          "text": "side",
+          "start_ms": 18600,
+          "end_ms": 19500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Our",
+      "start_ms": 27500,
+      "end_ms": 27600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 27500,
+          "end_ms": 27600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Father",
+      "start_ms": 28200,
+      "end_ms": 29900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Father",
+          "start_ms": 28200,
+          "end_ms": 29900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "in heaven",
+      "start_ms": 30800,
+      "end_ms": 33600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 30800,
+          "end_ms": 31400,
+          "confidence": null
+        },
+        {
+          "text": "heaven",
+          "start_ms": 31400,
+          "end_ms": 33600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Holy",
+      "start_ms": 35000,
+      "end_ms": 36800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Holy",
+          "start_ms": 35000,
+          "end_ms": 36800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "is your name",
+      "start_ms": 37700,
+      "end_ms": 38900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 37700,
+          "end_ms": 37800,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 37800,
+          "end_ms": 38100,
+          "confidence": null
+        },
+        {
+          "text": "name",
+          "start_ms": 38100,
+          "end_ms": 38900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Your kingdom",
+      "start_ms": 41000,
+      "end_ms": 43700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 41000,
+          "end_ms": 41800,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 41800,
+          "end_ms": 43700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "is coming",
+      "start_ms": 44500,
+      "end_ms": 47100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 44500,
+          "end_ms": 45300,
+          "confidence": null
+        },
+        {
+          "text": "coming",
+          "start_ms": 45300,
+          "end_ms": 47100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Let your will be done today",
+      "start_ms": 47900,
+      "end_ms": 52800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 47900,
+          "end_ms": 48400,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 48400,
+          "end_ms": 48700,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 48700,
+          "end_ms": 49600,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 49600,
+          "end_ms": 50100,
+          "confidence": null
+        },
+        {
+          "text": "done",
+          "start_ms": 50100,
+          "end_ms": 51000,
+          "confidence": null
+        },
+        {
+          "text": "today",
+          "start_ms": 51300,
+          "end_ms": 52800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Providing",
+      "start_ms": 54800,
+      "end_ms": 57500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Providing",
+          "start_ms": 54800,
+          "end_ms": 57500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Protecting",
+      "start_ms": 58300,
+      "end_ms": 50900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Protecting",
+          "start_ms": 58300,
+          "end_ms": 50900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And forgiving",
+      "start_ms": 61700,
+      "end_ms": 63900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 61700,
+          "end_ms": 62000,
+          "confidence": null
+        },
+        {
+          "text": "forgiving",
+          "start_ms": 62000,
+          "end_ms": 63900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "us our",
+      "start_ms": 64600,
+      "end_ms": 64800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "us",
+          "start_ms": 64600,
+          "end_ms": 64700,
+          "confidence": null
+        },
+        {
+          "text": "our",
+          "start_ms": 64700,
+          "end_ms": 64800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "sins",
+      "start_ms": 65500,
+      "end_ms": 66700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "sins",
+          "start_ms": 65500,
+          "end_ms": 66700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "As we humbly",
+      "start_ms": 68600,
+      "end_ms": 71200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 68600,
+          "end_ms": 69000,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 69000,
+          "end_ms": 69300,
+          "confidence": null
+        },
+        {
+          "text": "humbly",
+          "start_ms": 69300,
+          "end_ms": 71200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "come before you",
+      "start_ms": 72000,
+      "end_ms": 74500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "come",
+          "start_ms": 72000,
+          "end_ms": 72400,
+          "confidence": null
+        },
+        {
+          "text": "before",
+          "start_ms": 72400,
+          "end_ms": 73600,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 73600,
+          "end_ms": 74500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "As we worship you and sing",
+      "start_ms": 75400,
+      "end_ms": 80400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 75400,
+          "end_ms": 75800,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 75800,
+          "end_ms": 76100,
+          "confidence": null
+        },
+        {
+          "text": "worship",
+          "start_ms": 76100,
+          "end_ms": 77500,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 77500,
+          "end_ms": 78400,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 78400,
+          "end_ms": 79100,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 79100,
+          "end_ms": 80400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom",
+      "start_ms": 81200,
+      "end_ms": 83800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 81200,
+          "end_ms": 81800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 81800,
+          "end_ms": 82200,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 82200,
+          "end_ms": 82600,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 82600,
+          "end_ms": 83800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power",
+      "start_ms": 84700,
+      "end_ms": 87600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 84700,
+          "end_ms": 85400,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 85400,
+          "end_ms": 85700,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 85700,
+          "end_ms": 86000,
+          "confidence": null
+        },
+        {
+          "text": "power",
+          "start_ms": 86000,
+          "end_ms": 87600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory",
+      "start_ms": 88100,
+      "end_ms": 90800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 88100,
+          "end_ms": 88800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 88800,
+          "end_ms": 89100,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 89100,
+          "end_ms": 89400,
+          "confidence": null
+        },
+        {
+          "text": "glory",
+          "start_ms": 89400,
+          "end_ms": 90800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Forever Come Holy Spirit",
+      "start_ms": 92500,
+      "end_ms": 97600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Forever",
+          "start_ms": 92500,
+          "end_ms": 94600,
+          "confidence": null
+        },
+        {
+          "text": "Come",
+          "start_ms": 95000,
+          "end_ms": 95600,
+          "confidence": null
+        },
+        {
+          "text": "Holy",
+          "start_ms": 95600,
+          "end_ms": 96300,
+          "confidence": null
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 96300,
+          "end_ms": 97600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Pour out your fire",
+      "start_ms": 98600,
+      "end_ms": 101400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Pour",
+          "start_ms": 98600,
+          "end_ms": 99100,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 99100,
+          "end_ms": 99200,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 99200,
+          "end_ms": 99600,
+          "confidence": null
+        },
+        {
+          "text": "fire",
+          "start_ms": 99600,
+          "end_ms": 101400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is revival",
+      "start_ms": 101900,
+      "end_ms": 104500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 101900,
+          "end_ms": 102400,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 102400,
+          "end_ms": 102800,
+          "confidence": null
+        },
+        {
+          "text": "revival",
+          "start_ms": 102800,
+          "end_ms": 104500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is revival",
+      "start_ms": 105400,
+      "end_ms": 107900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 105400,
+          "end_ms": 105800,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 105800,
+          "end_ms": 106200,
+          "confidence": null
+        },
+        {
+          "text": "revival",
+          "start_ms": 106200,
+          "end_ms": 107900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come and pour out your Spirit",
+      "start_ms": 112900,
+      "end_ms": 114600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 112900,
+          "end_ms": 113100,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 113100,
+          "end_ms": 113200,
+          "confidence": null
+        },
+        {
+          "text": "pour",
+          "start_ms": 113200,
+          "end_ms": 113500,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 113500,
+          "end_ms": 113800,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 113800,
+          "end_ms": 114000,
+          "confidence": null
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 114000,
+          "end_ms": 114600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Oh we worship we worship",
+      "start_ms": 116800,
+      "end_ms": 119200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Oh",
+          "start_ms": 116800,
+          "end_ms": 116900,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 116900,
+          "end_ms": 117100,
+          "confidence": null
+        },
+        {
+          "text": "worship",
+          "start_ms": 117100,
+          "end_ms": 117900,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 117900,
+          "end_ms": 118000,
+          "confidence": null
+        },
+        {
+          "text": "worship",
+          "start_ms": 118000,
+          "end_ms": 119200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come on reach out for him tonight",
+      "start_ms": 124200,
+      "end_ms": 126000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 124200,
+          "end_ms": 124400,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 124400,
+          "end_ms": 124600,
+          "confidence": null
+        },
+        {
+          "text": "reach",
+          "start_ms": 124600,
+          "end_ms": 124900,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 124900,
+          "end_ms": 125100,
+          "confidence": null
+        },
+        {
+          "text": "for",
+          "start_ms": 125100,
+          "end_ms": 125200,
+          "confidence": null
+        },
+        {
+          "text": "him",
+          "start_ms": 125200,
+          "end_ms": 125400,
+          "confidence": null
+        },
+        {
+          "text": "tonight",
+          "start_ms": 125400,
+          "end_ms": 126000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Our hearts cry out to you Jesus",
+      "start_ms": 127300,
+      "end_ms": 129700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 127300,
+          "end_ms": 127500,
+          "confidence": null
+        },
+        {
+          "text": "hearts",
+          "start_ms": 127500,
+          "end_ms": 127800,
+          "confidence": null
+        },
+        {
+          "text": "cry",
+          "start_ms": 127800,
+          "end_ms": 128200,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 128200,
+          "end_ms": 128400,
+          "confidence": null
+        },
+        {
+          "text": "to",
+          "start_ms": 128400,
+          "end_ms": 128400,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 128400,
+          "end_ms": 128700,
+          "confidence": null
+        },
+        {
+          "text": "Jesus",
+          "start_ms": 128700,
+          "end_ms": 129700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yeah yeah yeah",
+      "start_ms": 130700,
+      "end_ms": 130900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yeah",
+          "start_ms": 130700,
+          "end_ms": 130800,
+          "confidence": null
+        },
+        {
+          "text": "yeah",
+          "start_ms": 130800,
+          "end_ms": 130800,
+          "confidence": null
+        },
+        {
+          "text": "yeah",
+          "start_ms": 130800,
+          "end_ms": 130900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Our",
+      "start_ms": 137100,
+      "end_ms": 137200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Our",
+          "start_ms": 137100,
+          "end_ms": 137200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Father",
+      "start_ms": 137900,
+      "end_ms": 139600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Father",
+          "start_ms": 137900,
+          "end_ms": 139600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "in heaven",
+      "start_ms": 140600,
+      "end_ms": 143200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "in",
+          "start_ms": 140600,
+          "end_ms": 141200,
+          "confidence": null
+        },
+        {
+          "text": "heaven",
+          "start_ms": 141200,
+          "end_ms": 143200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Holy",
+      "start_ms": 144800,
+      "end_ms": 146800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Holy",
+          "start_ms": 144800,
+          "end_ms": 146800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "is your name",
+      "start_ms": 147300,
+      "end_ms": 148800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 147300,
+          "end_ms": 147200,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 147400,
+          "end_ms": 147800,
+          "confidence": null
+        },
+        {
+          "text": "name",
+          "start_ms": 147800,
+          "end_ms": 148800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Your kingdom",
+      "start_ms": 150700,
+      "end_ms": 153500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Your",
+          "start_ms": 150700,
+          "end_ms": 151500,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 151500,
+          "end_ms": 153500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "is coming",
+      "start_ms": 154400,
+      "end_ms": 156800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "is",
+          "start_ms": 154400,
+          "end_ms": 155000,
+          "confidence": null
+        },
+        {
+          "text": "coming",
+          "start_ms": 155000,
+          "end_ms": 156800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Let your will be done today",
+      "start_ms": 157600,
+      "end_ms": 162600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Let",
+          "start_ms": 157600,
+          "end_ms": 158100,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 158100,
+          "end_ms": 158500,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 158500,
+          "end_ms": 159400,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 159400,
+          "end_ms": 159800,
+          "confidence": null
+        },
+        {
+          "text": "done",
+          "start_ms": 159800,
+          "end_ms": 160700,
+          "confidence": null
+        },
+        {
+          "text": "today",
+          "start_ms": 161100,
+          "end_ms": 162600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Providing",
+      "start_ms": 164500,
+      "end_ms": 167300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Providing",
+          "start_ms": 164500,
+          "end_ms": 167300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Protecting",
+      "start_ms": 167900,
+      "end_ms": 168500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Protecting",
+          "start_ms": 167900,
+          "end_ms": 168500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "And forgiving",
+      "start_ms": 171400,
+      "end_ms": 173600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "And",
+          "start_ms": 171400,
+          "end_ms": 171800,
+          "confidence": null
+        },
+        {
+          "text": "forgiving",
+          "start_ms": 171800,
+          "end_ms": 173600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "us our sins As we humbly As we humbly",
+      "start_ms": 175200,
+      "end_ms": 181000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "us",
+          "start_ms": 175200,
+          "end_ms": 175200,
+          "confidence": null
+        },
+        {
+          "text": "our",
+          "start_ms": 175200,
+          "end_ms": 175300,
+          "confidence": null
+        },
+        {
+          "text": "sins",
+          "start_ms": 175300,
+          "end_ms": 176600,
+          "confidence": null
+        },
+        {
+          "text": "As",
+          "start_ms": 176700,
+          "end_ms": 177000,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 177000,
+          "end_ms": 177200,
+          "confidence": null
+        },
+        {
+          "text": "humbly",
+          "start_ms": 177200,
+          "end_ms": 178200,
+          "confidence": null
+        },
+        {
+          "text": "As",
+          "start_ms": 178300,
+          "end_ms": 178700,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 178700,
+          "end_ms": 179000,
+          "confidence": null
+        },
+        {
+          "text": "humbly",
+          "start_ms": 179000,
+          "end_ms": 181000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "come before you",
+      "start_ms": 181600,
+      "end_ms": 184500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "come",
+          "start_ms": 181600,
+          "end_ms": 182100,
+          "confidence": null
+        },
+        {
+          "text": "before",
+          "start_ms": 182100,
+          "end_ms": 183200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 183200,
+          "end_ms": 184500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "As we worship you and sing",
+      "start_ms": 185100,
+      "end_ms": 180800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "As",
+          "start_ms": 185100,
+          "end_ms": 185500,
+          "confidence": null
+        },
+        {
+          "text": "we",
+          "start_ms": 185500,
+          "end_ms": 185900,
+          "confidence": null
+        },
+        {
+          "text": "worship",
+          "start_ms": 185900,
+          "end_ms": 187100,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 187100,
+          "end_ms": 188100,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 188100,
+          "end_ms": 188800,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 188800,
+          "end_ms": 180800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the kingdom",
+      "start_ms": 191000,
+      "end_ms": 193600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 191000,
+          "end_ms": 191600,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 191600,
+          "end_ms": 191900,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 191900,
+          "end_ms": 192300,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 192300,
+          "end_ms": 193600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power Yours is the glory Forever",
+      "start_ms": 194400,
+      "end_ms": 201100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 194400,
+          "end_ms": 195000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 195000,
+          "end_ms": 195400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 195400,
+          "end_ms": 195700,
+          "confidence": null
+        },
+        {
+          "text": "power",
+          "start_ms": 195700,
+          "end_ms": 197500,
+          "confidence": null
+        },
+        {
+          "text": "Yours",
+          "start_ms": 197900,
+          "end_ms": 198500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 198500,
+          "end_ms": 198800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 198800,
+          "end_ms": 199100,
+          "confidence": null
+        },
+        {
+          "text": "glory",
+          "start_ms": 199100,
+          "end_ms": 200500,
+          "confidence": null
+        },
+        {
+          "text": "Forever",
+          "start_ms": 200800,
+          "end_ms": 201100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Forever",
+      "start_ms": 202400,
+      "end_ms": 202600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Forever",
+          "start_ms": 202400,
+          "end_ms": 202600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come Holy Spirit",
+      "start_ms": 204800,
+      "end_ms": 207300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 204800,
+          "end_ms": 205200,
+          "confidence": null
+        },
+        {
+          "text": "Holy",
+          "start_ms": 205200,
+          "end_ms": 206000,
+          "confidence": null
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 206000,
+          "end_ms": 207300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Pour out your fire",
+      "start_ms": 208300,
+      "end_ms": 211000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Pour",
+          "start_ms": 208300,
+          "end_ms": 208800,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 208800,
+          "end_ms": 209000,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 209000,
+          "end_ms": 209400,
+          "confidence": null
+        },
+        {
+          "text": "fire",
+          "start_ms": 209400,
+          "end_ms": 211000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is revival",
+      "start_ms": 211600,
+      "end_ms": 214200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 211600,
+          "end_ms": 212100,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 212100,
+          "end_ms": 212500,
+          "confidence": null
+        },
+        {
+          "text": "revival",
+          "start_ms": 212500,
+          "end_ms": 214200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is revival Yours is the kingdom",
+      "start_ms": 215000,
+      "end_ms": 221000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 215000,
+          "end_ms": 215500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 215500,
+          "end_ms": 215900,
+          "confidence": null
+        },
+        {
+          "text": "revival",
+          "start_ms": 215900,
+          "end_ms": 218000,
+          "confidence": null
+        },
+        {
+          "text": "Yours",
+          "start_ms": 218400,
+          "end_ms": 219000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 219000,
+          "end_ms": 219400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 219400,
+          "end_ms": 219700,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 219700,
+          "end_ms": 221000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the power",
+      "start_ms": 221800,
+      "end_ms": 224600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 221800,
+          "end_ms": 222500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 222500,
+          "end_ms": 222800,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 222800,
+          "end_ms": 223100,
+          "confidence": null
+        },
+        {
+          "text": "power",
+          "start_ms": 223100,
+          "end_ms": 224600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yours is the glory",
+      "start_ms": 225200,
+      "end_ms": 227900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yours",
+          "start_ms": 225200,
+          "end_ms": 225900,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 225900,
+          "end_ms": 226200,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 226200,
+          "end_ms": 226600,
+          "confidence": null
+        },
+        {
+          "text": "glory",
+          "start_ms": 226600,
+          "end_ms": 227900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Forever Come Holy Spirit",
+      "start_ms": 229700,
+      "end_ms": 234700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Forever",
+          "start_ms": 229700,
+          "end_ms": 231800,
+          "confidence": null
+        },
+        {
+          "text": "Come",
+          "start_ms": 232200,
+          "end_ms": 232700,
+          "confidence": null
+        },
+        {
+          "text": "Holy",
+          "start_ms": 232700,
+          "end_ms": 233500,
+          "confidence": null
+        },
+        {
+          "text": "Spirit",
+          "start_ms": 233500,
+          "end_ms": 234700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Pour out your fire",
+      "start_ms": 235700,
+      "end_ms": 238000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Pour",
+          "start_ms": 235700,
+          "end_ms": 236300,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 236300,
+          "end_ms": 236500,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 236500,
+          "end_ms": 236900,
+          "confidence": null
+        },
+        {
+          "text": "fire",
+          "start_ms": 236900,
+          "end_ms": 238000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is revival",
+      "start_ms": 239100,
+      "end_ms": 241600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 239100,
+          "end_ms": 239500,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 239500,
+          "end_ms": 239900,
+          "confidence": null
+        },
+        {
+          "text": "revival",
+          "start_ms": 239900,
+          "end_ms": 241600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "This is revival Yeah yeah yeah yeah",
+      "start_ms": 242500,
+      "end_ms": 247000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "This",
+          "start_ms": 242500,
+          "end_ms": 243000,
+          "confidence": null
+        },
+        {
+          "text": "is",
+          "start_ms": 243000,
+          "end_ms": 243300,
+          "confidence": null
+        },
+        {
+          "text": "revival",
+          "start_ms": 243300,
+          "end_ms": 246000,
+          "confidence": null
+        },
+        {
+          "text": "Yeah",
+          "start_ms": 246400,
+          "end_ms": 246800,
+          "confidence": null
+        },
+        {
+          "text": "yeah",
+          "start_ms": 246800,
+          "end_ms": 246800,
+          "confidence": null
+        },
+        {
+          "text": "yeah",
+          "start_ms": 246800,
+          "end_ms": 246900,
+          "confidence": null
+        },
+        {
+          "text": "yeah",
+          "start_ms": 246900,
+          "end_ms": 247000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come and pour",
+      "start_ms": 253200,
+      "end_ms": 253700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 253200,
+          "end_ms": 253500,
+          "confidence": null
+        },
+        {
+          "text": "and",
+          "start_ms": 253500,
+          "end_ms": 253600,
+          "confidence": null
+        },
+        {
+          "text": "pour",
+          "start_ms": 253600,
+          "end_ms": 253700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can hear the wind blowing",
+      "start_ms": 260100,
+      "end_ms": 262400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 260100,
+          "end_ms": 260200,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 260200,
+          "end_ms": 260500,
+          "confidence": null
+        },
+        {
+          "text": "hear",
+          "start_ms": 260500,
+          "end_ms": 260700,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 260700,
+          "end_ms": 260900,
+          "confidence": null
+        },
+        {
+          "text": "wind",
+          "start_ms": 260900,
+          "end_ms": 261300,
+          "confidence": null
+        },
+        {
+          "text": "blowing",
+          "start_ms": 261300,
+          "end_ms": 262400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "blowing",
+      "start_ms": 262900,
+      "end_ms": 263800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "blowing",
+          "start_ms": 262900,
+          "end_ms": 263800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "blowing",
+      "start_ms": 264600,
+      "end_ms": 266000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "blowing",
+          "start_ms": 264600,
+          "end_ms": 266000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking shaking",
+      "start_ms": 266900,
+      "end_ms": 270700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 266900,
+          "end_ms": 267000,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 267000,
+          "end_ms": 267300,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 267300,
+          "end_ms": 267600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 267600,
+          "end_ms": 267800,
+          "confidence": null
+        },
+        {
+          "text": "ground",
+          "start_ms": 267800,
+          "end_ms": 268200,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 268200,
+          "end_ms": 269400,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 269800,
+          "end_ms": 270700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "shaking",
+      "start_ms": 271500,
+      "end_ms": 272800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "shaking",
+          "start_ms": 271500,
+          "end_ms": 272800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can see if I fall in",
+      "start_ms": 273800,
+      "end_ms": 276200,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 273800,
+          "end_ms": 274000,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 274000,
+          "end_ms": 274200,
+          "confidence": null
+        },
+        {
+          "text": "see",
+          "start_ms": 274200,
+          "end_ms": 274500,
+          "confidence": null
+        },
+        {
+          "text": "if",
+          "start_ms": 274500,
+          "end_ms": 274700,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 274700,
+          "end_ms": 275000,
+          "confidence": null
+        },
+        {
+          "text": "fall",
+          "start_ms": 275000,
+          "end_ms": 275400,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 275400,
+          "end_ms": 276200,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "fall in",
+      "start_ms": 276800,
+      "end_ms": 278000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "fall",
+          "start_ms": 276800,
+          "end_ms": 277100,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 277100,
+          "end_ms": 278000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "fall in",
+      "start_ms": 278500,
+      "end_ms": 279800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "fall",
+          "start_ms": 278500,
+          "end_ms": 278800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 278800,
+          "end_ms": 279800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "So let your kingdom come let your will be done I can hear the wind blowing",
+      "start_ms": 280600,
+      "end_ms": 289800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 280600,
+          "end_ms": 281000,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 281000,
+          "end_ms": 281500,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 281500,
+          "end_ms": 281800,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 281800,
+          "end_ms": 283600,
+          "confidence": null
+        },
+        {
+          "text": "come",
+          "start_ms": 283600,
+          "end_ms": 284200,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 284400,
+          "end_ms": 284900,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 284900,
+          "end_ms": 285300,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 285300,
+          "end_ms": 286200,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 286200,
+          "end_ms": 287000,
+          "confidence": null
+        },
+        {
+          "text": "done",
+          "start_ms": 287000,
+          "end_ms": 287600,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 287600,
+          "end_ms": 287700,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 287700,
+          "end_ms": 287900,
+          "confidence": null
+        },
+        {
+          "text": "hear",
+          "start_ms": 287900,
+          "end_ms": 288200,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 288200,
+          "end_ms": 288300,
+          "confidence": null
+        },
+        {
+          "text": "wind",
+          "start_ms": 288300,
+          "end_ms": 288800,
+          "confidence": null
+        },
+        {
+          "text": "blowing",
+          "start_ms": 288800,
+          "end_ms": 289800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "blowing",
+      "start_ms": 290300,
+      "end_ms": 291500,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "blowing",
+          "start_ms": 290300,
+          "end_ms": 291500,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "blowing Come on sing it out I can feel the ground shaking",
+      "start_ms": 292000,
+      "end_ms": 296800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "blowing",
+          "start_ms": 292000,
+          "end_ms": 293300,
+          "confidence": null
+        },
+        {
+          "text": "Come",
+          "start_ms": 293400,
+          "end_ms": 293500,
+          "confidence": null
+        },
+        {
+          "text": "on",
+          "start_ms": 293500,
+          "end_ms": 293700,
+          "confidence": null
+        },
+        {
+          "text": "sing",
+          "start_ms": 293700,
+          "end_ms": 293900,
+          "confidence": null
+        },
+        {
+          "text": "it",
+          "start_ms": 293900,
+          "end_ms": 294000,
+          "confidence": null
+        },
+        {
+          "text": "out",
+          "start_ms": 294000,
+          "end_ms": 294100,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 294400,
+          "end_ms": 294500,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 294500,
+          "end_ms": 294700,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 294700,
+          "end_ms": 295000,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 295000,
+          "end_ms": 295200,
+          "confidence": null
+        },
+        {
+          "text": "ground",
+          "start_ms": 295200,
+          "end_ms": 295600,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 295600,
+          "end_ms": 296800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "shaking shaking",
+      "start_ms": 297300,
+      "end_ms": 299900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "shaking",
+          "start_ms": 297300,
+          "end_ms": 298500,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 298900,
+          "end_ms": 299900,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can see if I fall in",
+      "start_ms": 301200,
+      "end_ms": 303600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 301200,
+          "end_ms": 301400,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 301400,
+          "end_ms": 301600,
+          "confidence": null
+        },
+        {
+          "text": "see",
+          "start_ms": 301600,
+          "end_ms": 301900,
+          "confidence": null
+        },
+        {
+          "text": "if",
+          "start_ms": 301900,
+          "end_ms": 302100,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 302100,
+          "end_ms": 302500,
+          "confidence": null
+        },
+        {
+          "text": "fall",
+          "start_ms": 302500,
+          "end_ms": 302800,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 302800,
+          "end_ms": 303600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "fall in",
+      "start_ms": 304200,
+      "end_ms": 305300,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "fall",
+          "start_ms": 304200,
+          "end_ms": 304500,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 304500,
+          "end_ms": 305300,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "fall in",
+      "start_ms": 305900,
+      "end_ms": 307400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "fall",
+          "start_ms": 305900,
+          "end_ms": 306200,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 306200,
+          "end_ms": 307400,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "So let your kingdom come let your will be done I can hear the wind blowing blowing blowing",
+      "start_ms": 308000,
+      "end_ms": 320000,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 308000,
+          "end_ms": 308500,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 308500,
+          "end_ms": 309000,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 309000,
+          "end_ms": 309300,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 309300,
+          "end_ms": 311000,
+          "confidence": null
+        },
+        {
+          "text": "come",
+          "start_ms": 311000,
+          "end_ms": 311600,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 311800,
+          "end_ms": 312400,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 312400,
+          "end_ms": 312800,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 312800,
+          "end_ms": 313600,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 313600,
+          "end_ms": 314500,
+          "confidence": null
+        },
+        {
+          "text": "done",
+          "start_ms": 314500,
+          "end_ms": 315000,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 315000,
+          "end_ms": 315200,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 315200,
+          "end_ms": 315400,
+          "confidence": null
+        },
+        {
+          "text": "hear",
+          "start_ms": 315400,
+          "end_ms": 315600,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 315600,
+          "end_ms": 315800,
+          "confidence": null
+        },
+        {
+          "text": "wind",
+          "start_ms": 315800,
+          "end_ms": 316200,
+          "confidence": null
+        },
+        {
+          "text": "blowing",
+          "start_ms": 316200,
+          "end_ms": 317500,
+          "confidence": null
+        },
+        {
+          "text": "blowing",
+          "start_ms": 317800,
+          "end_ms": 319200,
+          "confidence": null
+        },
+        {
+          "text": "blowing",
+          "start_ms": 319500,
+          "end_ms": 320000,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Yes Lord",
+      "start_ms": 320800,
+      "end_ms": 321100,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Yes",
+          "start_ms": 320800,
+          "end_ms": 321000,
+          "confidence": null
+        },
+        {
+          "text": "Lord",
+          "start_ms": 321000,
+          "end_ms": 321100,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can feel the ground shaking shaking shaking",
+      "start_ms": 321800,
+      "end_ms": 327800,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 321800,
+          "end_ms": 322000,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 322000,
+          "end_ms": 322200,
+          "confidence": null
+        },
+        {
+          "text": "feel",
+          "start_ms": 322200,
+          "end_ms": 322400,
+          "confidence": null
+        },
+        {
+          "text": "the",
+          "start_ms": 322400,
+          "end_ms": 322600,
+          "confidence": null
+        },
+        {
+          "text": "ground",
+          "start_ms": 322600,
+          "end_ms": 323000,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 323000,
+          "end_ms": 324400,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 324700,
+          "end_ms": 326100,
+          "confidence": null
+        },
+        {
+          "text": "shaking",
+          "start_ms": 326400,
+          "end_ms": 327800,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "I can see if I fall in fall in fall in",
+      "start_ms": 328600,
+      "end_ms": 334700,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "I",
+          "start_ms": 328600,
+          "end_ms": 328800,
+          "confidence": null
+        },
+        {
+          "text": "can",
+          "start_ms": 328800,
+          "end_ms": 329000,
+          "confidence": null
+        },
+        {
+          "text": "see",
+          "start_ms": 329000,
+          "end_ms": 329400,
+          "confidence": null
+        },
+        {
+          "text": "if",
+          "start_ms": 329400,
+          "end_ms": 329600,
+          "confidence": null
+        },
+        {
+          "text": "I",
+          "start_ms": 329600,
+          "end_ms": 329900,
+          "confidence": null
+        },
+        {
+          "text": "fall",
+          "start_ms": 329900,
+          "end_ms": 330200,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 330200,
+          "end_ms": 331200,
+          "confidence": null
+        },
+        {
+          "text": "fall",
+          "start_ms": 331600,
+          "end_ms": 332000,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 332000,
+          "end_ms": 332900,
+          "confidence": null
+        },
+        {
+          "text": "fall",
+          "start_ms": 333300,
+          "end_ms": 333700,
+          "confidence": null
+        },
+        {
+          "text": "in",
+          "start_ms": 333700,
+          "end_ms": 334700,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "So let your kingdom come let your will be",
+      "start_ms": 335400,
+      "end_ms": 341900,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "So",
+          "start_ms": 335400,
+          "end_ms": 335900,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 335900,
+          "end_ms": 336400,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 336400,
+          "end_ms": 336700,
+          "confidence": null
+        },
+        {
+          "text": "kingdom",
+          "start_ms": 336700,
+          "end_ms": 338400,
+          "confidence": null
+        },
+        {
+          "text": "come",
+          "start_ms": 338400,
+          "end_ms": 339100,
+          "confidence": null
+        },
+        {
+          "text": "let",
+          "start_ms": 339300,
+          "end_ms": 339800,
+          "confidence": null
+        },
+        {
+          "text": "your",
+          "start_ms": 339800,
+          "end_ms": 340200,
+          "confidence": null
+        },
+        {
+          "text": "will",
+          "start_ms": 340200,
+          "end_ms": 341000,
+          "confidence": null
+        },
+        {
+          "text": "be",
+          "start_ms": 341000,
+          "end_ms": 341900,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 15.7,
+    "upload_s": 4.0,
+    "transcribe_s": 9.9,
+    "word_count": 312,
+    "line_count": 78,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 9664,
+      "total_input_tokens": 9664,
+      "input_tokens_by_modality": [
+        {
+          "modality": "audio",
+          "tokens": 9663
+        },
+        {
+          "modality": "text",
+          "tokens": 1
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 11259,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 1596
+            },
+            {
+              "modality": "audio",
+              "tokens": 9663
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 313
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_Chd5eFdsYXN2Nk42U0gyOG9QLXFmaXFRcxIXeXhXbGFzdjZONlNIMjhvUC1xZmlxUXM"
+  }
+}

@@ -5,6 +5,7 @@ use sp_core::models::Playlist;
 use sp_core::playback::PlaybackState;
 
 use crate::components::karaoke_panel;
+use crate::components::ndi_health;
 use crate::components::playback_controls;
 use crate::components::video_list;
 use crate::store::DashboardStore;
@@ -13,6 +14,9 @@ use crate::store::DashboardStore;
 pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
     let pid = playlist.id;
+    // #150: this card's NDI output name, matched against the 1 Hz
+    // `store.ndi_health` snapshot to render its genlock LockBadge.
+    let ndi_name = playlist.ndi_output_name.clone();
     // #134: song list is collapsed by default — a busy playlist can have
     // dozens of cached videos, and most dashboard glances only care about
     // now-playing + transport controls. Toggled open on demand.
@@ -23,6 +27,17 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
             <div class="card-header">
                 <h3>{playlist.name.clone()}</h3>
                 <span class="playlist-id">{playlist.ndi_output_name.clone()}</span>
+                {
+                    let ndi_name = ndi_name.clone();
+                    move || {
+                        store
+                            .ndi_health
+                            .get()
+                            .into_iter()
+                            .find(|o| o.ndi_name == ndi_name)
+                            .map(|o| view! { <ndi_health::LockBadge output=o /> })
+                    }
+                }
             </div>
 
             <div class="now-playing">

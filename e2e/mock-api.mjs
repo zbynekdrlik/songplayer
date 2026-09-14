@@ -74,6 +74,8 @@ const videos = [
     cached: true,
     normalized: true,
     gemini_failed: false,
+    download_attempts: 0,
+    last_download_error: null,
   },
   {
     id: 2,
@@ -85,6 +87,10 @@ const videos = [
     cached: false,
     normalized: false,
     gemini_failed: false,
+    // #140: exercises the VideoList "⚠" hint on an un-normalized row that
+    // has failed and is backing off.
+    download_attempts: 2,
+    last_download_error: "yt-dlp exited with 1: Requested format is not available",
   },
 ];
 
@@ -301,6 +307,101 @@ app.delete("/api/v1/resolume/hosts/:id", (_req, res) => {
   res.status(204).end();
 });
 
+// Resolume push-chain health — polled every 5 s by the dashboard's
+// ResolumeHealthCard on a spawn_local loop. An empty array means no
+// configured hosts / no alerts, which keeps the quiet-by-default card
+// hidden. The endpoint must exist so the frontend's async completion
+// (snapshot.set) actually runs in the E2E instead of failing to
+// deserialize the SPA-fallback index.html.
+app.get("/api/v1/resolume/health", (_req, res) => {
+  res.json([]);
+});
+
+// NDI genlock health (#150) — polled every 1 s by the dashboard's
+// GlobalLockBadge (which fills store.ndi_health for the per-card LockBadges).
+// Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
+// per output `lock_state` (#149) / `lock_reason`, `clock` (#146),
+// `pacing` (#147), `audio` (#148). Mutable so a test can drive all three
+// states via `POST /__mock/ndi-health`.
+//
+// Default fixture exercises the three badges at once:
+//   - SP-worship   → LOCKED   (live, receiver present, clock ok)
+//   - SP-background → DEGRADED (live, "no receiver")
+//   - SP-live       → UNLOCKED (Idle → non-live, "pacing disabled")
+// The global summary counts only LIVE outputs, so it resolves to
+// `DEGRADED — SP-background` (the non-live UNLOCKED SP-live is ignored).
+let ndiHealth = [
+  {
+    ndi_name: "SP-worship",
+    playlist_id: 1,
+    state: "Playing",
+    connections: 2,
+    lock_state: "LOCKED",
+    lock_reason: "locked",
+    clock: { is_locked: true, mode: "LOCK", offset_ns: 1200, clock_ok: true },
+    pacing: {
+      enabled: true,
+      late_frames: 0,
+      jitter_p99_us: 40,
+      repeats: 0,
+      resyncs: 0,
+      lag_slots: 0,
+    },
+    audio: { residual_ppm: 1.2, underruns: 0 },
+  },
+  {
+    ndi_name: "SP-background",
+    playlist_id: 2,
+    state: "Playing",
+    connections: 0,
+    lock_state: "DEGRADED",
+    lock_reason: "no receiver",
+    clock: { is_locked: true, mode: "LOCK", offset_ns: 950, clock_ok: true },
+    pacing: {
+      enabled: true,
+      late_frames: 0,
+      jitter_p99_us: 55,
+      repeats: 0,
+      resyncs: 0,
+      lag_slots: 0,
+    },
+    audio: { residual_ppm: -0.4, underruns: 0 },
+  },
+  {
+    ndi_name: "SP-live",
+    playlist_id: 184,
+    state: "Idle",
+    connections: 0,
+    lock_state: "UNLOCKED",
+    lock_reason: "pacing disabled",
+    clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+    pacing: {
+      enabled: false,
+      late_frames: 0,
+      jitter_p99_us: 0,
+      repeats: 0,
+      resyncs: 0,
+      lag_slots: 0,
+    },
+    audio: { residual_ppm: 0, underruns: 0 },
+  },
+];
+
+app.get("/api/v1/ndi/health", (_req, res) => {
+  res.json(ndiHealth);
+});
+
+// Admin: replace the NDI health fixture with the posted JSON array.
+// Test-only — used by the frontend spec to flip the global badge to LOCKED.
+app.post("/__mock/ndi-health", (req, res) => {
+  if (!Array.isArray(req.body)) {
+    res.status(400).json({ error: "expected a JSON array" });
+    return;
+  }
+  ndiHealth = req.body;
+  res.json({ status: "set", count: ndiHealth.length });
+});
+
 // Lyrics pipeline queue
 app.get('/api/v1/lyrics/queue', (_req, res) => {
   res.json({
@@ -311,6 +412,10 @@ app.get('/api/v1/lyrics/queue', (_req, res) => {
     processing: null,
   });
 });
+
+// #152: per-song SK translation gender override, kept mutable so the PATCH
+// handler below echoes the value back in the songs list.
+const translationGenders = {};
 
 // Lyrics songs list (supports ?playlist_id=N filter)
 app.get('/api/v1/lyrics/songs', (req, res) => {
@@ -327,6 +432,8 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       has_lyrics: true,
       is_stale: false,
       manual_priority: false,
+      lyrics_reference: true,
+      translation_gender: translationGenders[1] ?? null,
     },
     {
       video_id: 2,
@@ -340,8 +447,31 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       has_lyrics: false,
       is_stale: false,
       manual_priority: false,
+      lyrics_reference: false,
+      translation_gender: translationGenders[2] ?? null,
     },
   ]);
+});
+
+// #142: ★ reference marker feedback + admin toggle (test-only mocks —
+// just acknowledge the write, the dashboard's own optimistic state update
+// is what the e2e spec asserts).
+app.post('/api/v1/lyrics/songs/:id/reference-feedback', (_req, res) => {
+  res.status(204).end();
+});
+app.post('/api/v1/lyrics/songs/:id/reference', (_req, res) => {
+  res.status(204).end();
+});
+// #152: per-song translation gender toggle. Validates m/f/null, stores it so
+// the songs list echoes it, and replies 204 (mirrors the real handler).
+app.patch('/api/v1/lyrics/songs/:id/translation-gender', (req, res) => {
+  const gender = req.body?.gender ?? null;
+  if (gender !== null && gender !== 'm' && gender !== 'f') {
+    res.status(400).end();
+    return;
+  }
+  translationGenders[Number(req.params.id)] = gender;
+  res.status(204).end();
 });
 
 // Lyrics song detail
@@ -358,6 +488,7 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
       has_lyrics: true,
       is_stale: false,
       manual_priority: false,
+      lyrics_reference: false,
     },
     lyrics_json: { version: 2, source: 'ensemble:qwen3+autosub', lines: [] },
     audit_json: {

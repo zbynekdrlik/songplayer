@@ -1,0 +1,114 @@
+{
+  "backend_id": "gemini-3-5-transcribe",
+  "backend_revision": 1,
+  "wav_path": "C:\\ProgramData\\SongPlayer\\eval-cache\\JjgkhHlTROQ_vocal16k.wav",
+  "duration_ms": 215400,
+  "lines": [
+    {
+      "text": "Let's go.",
+      "start_ms": 13400,
+      "end_ms": 13600,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Let's",
+          "start_ms": 13400,
+          "end_ms": 13500,
+          "confidence": null
+        },
+        {
+          "text": "go.",
+          "start_ms": 13500,
+          "end_ms": 13600,
+          "confidence": null
+        }
+      ]
+    },
+    {
+      "text": "Come on, you say.",
+      "start_ms": 215000,
+      "end_ms": 215400,
+      "text_sk": null,
+      "words": [
+        {
+          "text": "Come",
+          "start_ms": 215000,
+          "end_ms": 215100,
+          "confidence": null
+        },
+        {
+          "text": "on,",
+          "start_ms": 215100,
+          "end_ms": 215200,
+          "confidence": null
+        },
+        {
+          "text": "you",
+          "start_ms": 215200,
+          "end_ms": 215300,
+          "confidence": null
+        },
+        {
+          "text": "say.",
+          "start_ms": 215300,
+          "end_ms": 215400,
+          "confidence": null
+        }
+      ]
+    }
+  ],
+  "raw_confidence": null,
+  "metadata": {
+    "model": "gemini-3.5-transcribe",
+    "elapsed_s": 24.0,
+    "upload_s": 3.3,
+    "transcribe_s": 19.4,
+    "word_count": 6,
+    "line_count": 2,
+    "line_gap_ms": 400,
+    "language_codes": [
+      "en-US"
+    ],
+    "usage": {
+      "total_tokens": 6012,
+      "total_input_tokens": 6012,
+      "input_tokens_by_modality": [
+        {
+          "modality": "audio",
+          "tokens": 6011
+        },
+        {
+          "modality": "text",
+          "tokens": 1
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0,
+      "raw_prompt_token": 7023,
+      "model_invocation_token_counts": [
+        {
+          "prompt_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 1012
+            },
+            {
+              "modality": "audio",
+              "tokens": 6011
+            }
+          ],
+          "candidates_tokens_details": [
+            {
+              "modality": "text",
+              "tokens": 11
+            }
+          ]
+        }
+      ]
+    },
+    "device": "api",
+    "interaction_id": "v1_Chc1aFdsYW96SkM3NmF2ZElQNE5IYjZRdxIXNWhXbGFvekpDNzZhdmRJUDROSGI2UXc"
+  }
+}

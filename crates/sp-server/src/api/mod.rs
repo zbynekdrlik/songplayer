@@ -92,6 +92,10 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/ndi/health",
             axum::routing::get(routes::get_ndi_health),
         )
+        .route(
+            "/api/v1/ndi/burn",
+            axum::routing::post(routes::set_ndi_burn),
+        )
         // Lyrics
         .route(
             "/api/v1/videos/{id}/lyrics",
@@ -116,6 +120,18 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/lyrics/songs/{video_id}",
             axum::routing::get(lyrics::get_song_detail),
+        )
+        .route(
+            "/api/v1/lyrics/songs/{video_id}/reference-feedback",
+            axum::routing::post(lyrics::post_reference_feedback),
+        )
+        .route(
+            "/api/v1/lyrics/songs/{video_id}/reference",
+            axum::routing::post(lyrics::post_set_reference),
+        )
+        .route(
+            "/api/v1/lyrics/songs/{video_id}/translation-gender",
+            axum::routing::patch(lyrics::patch_translation_gender),
         )
         .route(
             "/api/v1/lyrics/reprocess",
