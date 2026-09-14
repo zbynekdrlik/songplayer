@@ -149,7 +149,7 @@ fn paint_nv12_returns_early_on_too_few_modules() {
         x: 4,
         y: 4,
     };
-    paint_nv12(&mut buf, 16, 16, 16, geom, 5, &vec![false; 12]);
+    paint_nv12(&mut buf, 16, 16, 16, geom, 5, &[false; 12]);
     assert_eq!(buf, before, "too few modules must be a no-op");
 }
 
@@ -169,7 +169,7 @@ fn paint_nv12_returns_early_on_zero_module_side() {
         x: 4,
         y: 4,
     };
-    paint_nv12(&mut buf, 16, 16, 16, geom, 0, &vec![false; 25]);
+    paint_nv12(&mut buf, 16, 16, 16, geom, 0, &[false; 25]);
     assert_eq!(buf, before, "zero module_side must be a no-op");
 }
 

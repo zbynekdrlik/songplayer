@@ -108,7 +108,7 @@ fn seek_variant_carries_position_ms() {
 #[test]
 fn seek_does_not_collide_with_other_variants() {
     // Compile-time check that every variant is still distinct.
-    let variants = vec![
+    let variants = [
         PipelineCommand::Play {
             video: PathBuf::new(),
             audio: PathBuf::new(),
