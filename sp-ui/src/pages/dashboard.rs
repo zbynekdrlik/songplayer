@@ -5,7 +5,8 @@ use sp_core::models::Playlist;
 
 use crate::api;
 use crate::components::{
-    download_queue, lan_address, ndi_health, obs_status, playlist_card, resolume_health,
+    download_queue, karaoke_control, lan_address, ndi_health, obs_status, playlist_card,
+    resolume_health,
 };
 use crate::store::DashboardStore;
 
@@ -53,6 +54,8 @@ pub fn DashboardPage() -> impl IntoView {
                     }
                 />
             </div>
+
+            <karaoke_control::KaraokeControl />
 
             <download_queue::DownloadQueue />
         </div>

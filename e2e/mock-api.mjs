@@ -320,6 +320,24 @@ app.patch("/api/v1/settings", (req, res) => {
   res.json(settings);
 });
 
+// Karaoke (#14): live mode + vocal gain + stem progress. `/__mock/karaoke-last`
+// exposes the last POSTed body so specs can assert what the UI sent.
+let karaoke = { mode: "full_mix", vocal_gain: 0.3, stems_pending: 2, stems_done: 5 };
+let lastKaraokePost = null;
+app.get("/api/v1/karaoke", (_req, res) => {
+  res.json(karaoke);
+});
+app.post("/api/v1/karaoke", (req, res) => {
+  lastKaraokePost = req.body || {};
+  if (typeof lastKaraokePost.mode === "string") karaoke.mode = lastKaraokePost.mode;
+  if (typeof lastKaraokePost.vocal_gain === "number")
+    karaoke.vocal_gain = lastKaraokePost.vocal_gain;
+  res.status(204).end();
+});
+app.get("/__mock/karaoke-last", (_req, res) => {
+  res.json(lastKaraokePost || {});
+});
+
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({

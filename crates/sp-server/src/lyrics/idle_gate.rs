@@ -112,6 +112,34 @@ impl GateLog {
     }
 }
 
+/// Read a wall-activity snapshot from the in-process handles, for a worker that
+/// is NOT the `LyricsWorker` (the #14 stem worker reuses this gate). Same data
+/// source as `LyricsWorker::wall_activity`; `None` handles read as idle. Kept a
+/// free function so both workers share ONE implementation without the stem
+/// worker touching `worker.rs`.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn wall_activity_from(
+    ndi_health_registry: Option<&std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
+    obs_state: Option<&std::sync::Arc<tokio::sync::RwLock<crate::obs::ObsState>>>,
+) -> WallActivity {
+    let any_playing = match ndi_health_registry {
+        Some(reg) => any_playing(reg.snapshots().iter().map(|s| &s.state)),
+        None => false,
+    };
+    let (obs_streaming, obs_recording) = match obs_state {
+        Some(obs) => {
+            let s = obs.read().await;
+            (s.streaming, s.recording)
+        }
+        None => (false, false),
+    };
+    WallActivity {
+        any_playing,
+        obs_streaming,
+        obs_recording,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Live-handle seam — reads the in-process engine health registry + OBS state.
 // I/O only (RwLock reads + one DB setting read); the decision it feeds is the
