@@ -198,28 +198,15 @@ impl crate::lyrics::worker::LyricsWorker {
     /// the second heavy stage or degrading to the g35t base tier. Only call when
     /// mtl would actually run heavy work (a candidate + an isolated vocal WAV).
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn defer_before_mtl(
-        &self,
-        video_id: i64,
-        youtube_id: &str,
-        song: &str,
-        artist: &str,
-        started_at_unix_ms: i64,
-    ) -> bool {
+    pub(crate) async fn defer_before_mtl(&self) -> bool {
         let (defer, activity) = self.wall_gate_should_defer().await;
         if defer {
             let detail = self.wall_busy_detail(activity).await;
             self.note_wall_gate(true, &detail);
-            self.broadcast_stage(
-                video_id,
-                youtube_id,
-                song,
-                artist,
-                &format!("waiting — wall in use ({detail})"),
-                None,
-                started_at_unix_ms,
-            )
-            .await;
+            // Same song-less "waiting — wall in use" badge as the loop-level
+            // gate (`enter_wall_wait`), so a mid-song defer does not flicker the
+            // dashboard between a song-named waiting stage and the generic badge.
+            self.enter_wall_wait(&detail).await;
         }
         defer
     }

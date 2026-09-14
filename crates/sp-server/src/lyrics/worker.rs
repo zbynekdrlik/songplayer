@@ -665,12 +665,7 @@ impl LyricsWorker {
         // through to the g35t base tier — that would degrade the ★ mtl tier
         // (owner's quality-first rule). Only when mtl would run heavy work
         // (a text candidate AND an isolated vocal WAV present).
-        if best_candidate.is_some()
-            && clean_vocal.is_some()
-            && self
-                .defer_before_mtl(video_id, &youtube_id, &song, &artist, started_at_unix_ms)
-                .await
-        {
+        if best_candidate.is_some() && clean_vocal.is_some() && self.defer_before_mtl().await {
             return Ok(SongOutcome::WaitingForWall);
         }
 
