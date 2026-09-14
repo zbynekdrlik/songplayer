@@ -468,7 +468,7 @@ mod tests {
     use super::*;
 
     /// Build a solid-grey NV12 frame (`width`×`height`, `stride`≥`width`).
-    fn grey_nv12(width: usize, height: usize, stride: usize) -> Vec<u8> {
+    fn grey_nv12(_width: usize, height: usize, stride: usize) -> Vec<u8> {
         let y_size = stride * height;
         let uv_size = stride * (height / 2);
         let mut v = vec![0u8; y_size + uv_size];

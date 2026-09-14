@@ -888,6 +888,7 @@ fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
 // decode_and_send, both of which stay `#[cfg(windows)]`-only.
 #[cfg(any(windows, test))]
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)] // heartbeat carries the pacing + audio gauges (#147/#150); a struct would just move the same 8 fields
 pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     submitter: &mut FrameSubmitter<B>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,

@@ -28,8 +28,10 @@ async fn obs_client_reconnects_after_server_initiated_clean_close() {
     // event loop falls out of `read.next()`, and `connect_and_run`
     // returns `Ok(())`. Under the bug the reconnect supervisor breaks
     // out of its loop on that path → no reconnect.
-    let mut fake_state = FakeObsState::default();
-    fake_state.close_after_identify = true;
+    let fake_state = FakeObsState {
+        close_after_identify: true,
+        ..Default::default()
+    };
     let fake_obs = FakeObsServer::spawn_with_state(fake_state).await;
 
     let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));

@@ -306,10 +306,10 @@ mod tests {
         assert_eq!(words.len(), 12);
         assert_eq!(words[0].text, "w0");
         assert_eq!(words[0].start_ms, 100);
-        for i in 4..8 {
-            assert_eq!(words[i].start_ms, 0);
-            assert_eq!(words[i].end_ms, 0);
-            assert_eq!(words[i].text, format!("w{i}"));
+        for (i, w) in words.iter().enumerate().take(8).skip(4) {
+            assert_eq!(w.start_ms, 0);
+            assert_eq!(w.end_ms, 0);
+            assert_eq!(w.text, format!("w{i}"));
         }
         assert_eq!(words[8].text, "w8");
         assert_eq!(words[8].start_ms, 9_000);

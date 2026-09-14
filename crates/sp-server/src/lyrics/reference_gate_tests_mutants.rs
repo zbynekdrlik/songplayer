@@ -69,7 +69,7 @@ fn find_ngram_empty_ngram_is_none_not_some() {
 ///   - `87:25 + -> *`: `3 * 2 = 6 > 5` → early `None`.
 ///   - `87:29 > -> ==`: `3 + 2 == 5` → early `None`.
 ///   - `87:29 > -> >=`: `3 + 2 >= 5` → early `None`.
-/// The unmutated guard is `5 > 5` = false, so it finds the match → `Some(3)`.
+///     The unmutated guard is `5 > 5` = false, so it finds the match → `Some(3)`.
 #[test]
 fn find_ngram_exact_fit_at_end_matches_some() {
     let w = norms(&["a", "b", "c", "d", "e"]);

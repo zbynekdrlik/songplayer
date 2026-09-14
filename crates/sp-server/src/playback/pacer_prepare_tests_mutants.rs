@@ -10,8 +10,8 @@
 //!
 //!   * → +   collapses `len * 99` to `len + 99`  (tiny index near the front)
 //!   * → /   collapses `len * 99` to `len / 99`  (index 0)
-//!   / → %   turns `… / 100` into `… % 100`       (a small remainder index)
-//!   / → *   turns `… / 100` into `… * 100`       (huge, clamped to `len - 1`)
+//!     / → %   turns `… / 100` into `… % 100`       (a small remainder index)
+//!     / → *   turns `… / 100` into `… * 100`       (huge, clamped to `len - 1`)
 //!
 //! Wired as a child of `pacer_prepare`, so it reaches the private `push_prep`
 //! and the `Pacer`'s private prep-ring fields (all under the `pacer` tree).

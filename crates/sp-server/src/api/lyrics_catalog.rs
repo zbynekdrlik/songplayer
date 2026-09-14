@@ -391,14 +391,14 @@ mod tests {
 
     /// Router-driven test — invokes the real handler through `crate::api::router`
     /// + `tower::ServiceExt::oneshot`. Locks the URL route, the bind order in
-    /// the production SQL (not the `run_endpoint_sql` mirror), and the JSON
-    /// response shape. If the handler's SQL ever drifts from the mirror, this
-    /// test catches it while the unit tests would silently pass.
-    /// Build an `AppState` for tests that need to invoke handlers through the
-    /// real `crate::api::router`. Inline mirror of the helper in
-    /// `crate::api::lyrics::tests` — duplicated here because that helper isn't
-    /// pub. Trade-off: a few lines of boilerplate vs. promoting a private test
-    /// helper to crate-scope (which would expand the public test-only surface).
+    ///   the production SQL (not the `run_endpoint_sql` mirror), and the JSON
+    ///   response shape. If the handler's SQL ever drifts from the mirror, this
+    ///   test catches it while the unit tests would silently pass.
+    ///   Build an `AppState` for tests that need to invoke handlers through the
+    ///   real `crate::api::router`. Inline mirror of the helper in
+    ///   `crate::api::lyrics::tests` — duplicated here because that helper isn't
+    ///   pub. Trade-off: a few lines of boilerplate vs. promoting a private test
+    ///   helper to crate-scope (which would expand the public test-only surface).
     async fn router_test_state() -> (crate::AppState, tempfile::TempDir) {
         use std::sync::Arc;
         use tokio::sync::{RwLock, broadcast, mpsc};

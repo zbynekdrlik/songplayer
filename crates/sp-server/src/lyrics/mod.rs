@@ -257,10 +257,12 @@ mod tests {
             LYRICS_TRANSLATION_VERSION, 2,
             "v2 = neutral technical translation prompt replaces the #152 grandparent/plaque story (#145)"
         );
-        assert!(
-            LYRICS_TRANSLATION_VERSION != LYRICS_PIPELINE_VERSION,
-            "translation version is independent of the pipeline version"
-        );
+        const {
+            assert!(
+                LYRICS_TRANSLATION_VERSION != LYRICS_PIPELINE_VERSION,
+                "translation version is independent of the pipeline version"
+            );
+        }
     }
 }
 
