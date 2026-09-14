@@ -114,6 +114,26 @@ body {
 .card-header .playlist-id { font-size: 0.8rem; color: var(--text-dim); }
 
 .now-playing { margin-bottom: 12px; }
+/* #15 part 2: live video preview inside the playlist card. 16:9, capped so it
+   never widens the ~340px card; black backdrop for letterboxed/loading state. */
+.preview-img,
+.preview-placeholder {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    aspect-ratio: 16 / 9;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    background: #000;
+    object-fit: contain;
+}
+.preview-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+}
 .np-song { font-weight: 600; display: block; }
 .np-artist { color: var(--text-dim); display: block; margin-bottom: 6px; }
 .np-time { font-size: 0.8rem; color: var(--text-dim); }

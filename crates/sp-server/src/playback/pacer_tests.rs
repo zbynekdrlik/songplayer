@@ -659,6 +659,9 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
     // 2. The WHOLE legacy `decode_and_send` call site is byte-unchanged — a
     //    stronger guard than a two-string grep: any edit to how the legacy path
     //    is invoked (args, order) breaks this.
+    // #15 part 2: the legacy call site now also passes the preview tap as its
+    // final arg (an opportunistic sampler that never touches the NDI submit
+    // path); the guard is updated to the new byte-exact call site.
     let legacy_call_site = "\
                     } else {
                         decode_and_send(
@@ -672,6 +675,7 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
+                            &preview_tap,
                         )
                     };";
     assert!(

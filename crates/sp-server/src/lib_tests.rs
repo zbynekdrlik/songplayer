@@ -72,6 +72,7 @@ mod tests {
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
             ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
+            preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             lan_status: mdns::new_status_handle(),
         };
 
@@ -353,6 +354,7 @@ mod tests {
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
             ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
+            preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             lan_status: mdns::new_status_handle(),
         };
 

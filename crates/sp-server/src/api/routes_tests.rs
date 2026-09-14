@@ -49,6 +49,7 @@ async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
         ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
+        preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
         lan_status: crate::mdns::new_status_handle(),
     }
 }
@@ -362,6 +363,7 @@ async fn post_seek_returns_204_and_forwards_to_engine() {
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
         ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
+        preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
         lan_status: crate::mdns::new_status_handle(),
     };
 
