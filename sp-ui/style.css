@@ -191,6 +191,20 @@ body {
 
 .status-dot.connected { background: var(--success); }
 
+/* ---- LAN sp.local address (#51) ---- */
+
+.lan-address {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85rem;
+}
+
+.lan-address .lan-label { color: var(--text-dim); }
+.lan-address .lan-link { color: var(--accent); text-decoration: none; }
+.lan-address .lan-link:hover { text-decoration: underline; }
+.lan-address .lan-fallback { color: var(--text-dim); font-size: 0.8rem; }
+
 /* ---- Download queue ---- */
 
 .download-queue { margin-top: 24px; }

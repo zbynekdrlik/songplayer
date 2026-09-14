@@ -44,6 +44,13 @@ tempfile = "3.27.0"
 # advisories) — the core `QrCode`/`into_colors` API is not feature-gated and is
 # all we need for the module matrix.
 qrcode = { version = "0.14.1", default-features = false }
+# #51 LAN sp.local advertisement. `mdns-sd` is a maintained pure-Rust mDNS-SD
+# responder (no system Avahi/Bonjour daemon needed); `if-addrs` (the same crate
+# mdns-sd uses internally) enumerates the host's interface IPs so we advertise
+# the box's routable LAN IPv4 (never APIPA). Version-matched to mdns-sd's own
+# if-addrs requirement so cargo unifies them into one build.
+mdns-sd = "0.21"
+if-addrs = "0.15"
 
 [dev-dependencies]
 tower = "0.5"

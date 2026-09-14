@@ -68,6 +68,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
         ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
+        lan_status: crate::mdns::new_status_handle(),
     }
 }
 

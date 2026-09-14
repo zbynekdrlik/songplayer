@@ -74,6 +74,12 @@ pub struct StatusResponse {
     pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,
     pub playlist_count: i64,
+    /// LAN `sp.local` URL the dashboard is reachable at without internet (#51):
+    /// `Some("http://sp.local:8920")` while advertised, else `None` (a missing
+    /// `Option` deserializes to `None`, so the mock / older clients stay ok).
+    pub lan_url: Option<String>,
+    /// The box's routable LAN IPv4 as a raw fallback for the dashboard (#51).
+    pub lan_ip: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -721,6 +727,8 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let mut active_playlist_ids: Vec<i64> = obs.active_playlist_ids.iter().copied().collect();
     active_playlist_ids.sort_unstable();
 
+    let lan = state.lan_status.read().await;
+
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected: obs.connected,
@@ -732,6 +740,8 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             ytdlp_version: tools.ytdlp_version.clone(),
         },
         playlist_count,
+        lan_url: lan.lan_url.clone(),
+        lan_ip: lan.lan_ip.clone(),
     })
 }
 
