@@ -194,13 +194,13 @@ jobs:
             try {
               $health = Invoke-RestMethod -Uri "$api/api/v1/ndi/health" -TimeoutSec 5
             } catch {
-              Write-Host "minute $m: /api/v1/ndi/health error: $_"
+              Write-Host "minute ${m}: /api/v1/ndi/health error: $_"
               Append-Row "$ts,$m,(health-error),,,,,,,,$(Csv-Field $_)"
               $health = @()
             }
             if ($health.Count -eq 0) {
               Append-Row "$ts,$m,(no outputs),,,,,,,,"
-              Write-Host "minute $m: no outputs in /api/v1/ndi/health"
+              Write-Host "minute ${m}: no outputs in /api/v1/ndi/health"
             } else {
               foreach ($o in $health) {
                 $row = @(
@@ -217,7 +217,7 @@ jobs:
                 ) -join ","
                 Append-Row $row
               }
-              Write-Host "minute $m: sampled $($health.Count) output(s)"
+              Write-Host "minute ${m}: sampled $($health.Count) output(s)"
             }
             $remain = ($deadline - (Get-Date)).TotalSeconds
             if ($remain -le 0) { break }
