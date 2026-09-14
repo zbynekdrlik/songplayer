@@ -120,8 +120,13 @@ impl PreviewShared {
         }
     }
 
+    /// Milliseconds since the tap was created, offset by 1 so it is never 0:
+    /// `last_request_ms` / `last_offer_ms` use 0 as their "never" sentinel,
+    /// and a viewer request in the first millisecond after creation (the unit
+    /// tests, or a dashboard already polling when a pipeline spawns) must
+    /// still count as subscribed.
     fn now_ms(&self) -> u64 {
-        self.origin.elapsed().as_millis() as u64
+        self.origin.elapsed().as_millis() as u64 + 1
     }
 
     /// Record a viewer request (a `GET .../preview.jpg`). Logs the
