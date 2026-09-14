@@ -57,7 +57,12 @@ Read the token from that file — never type or echo it. Confirm with
 `Test-NetConnection region1.v2.argotunnel.com -Port 7844` (TCP reachable while
 QUIC is not) and expect four `Registered tunnel connection … protocol=http2`
 lines within seconds. Verify from the dev side, not the box:
-`curl -s -o /dev/null -w '%{http_code}' https://sp.newlevel.media/` → `200`.
+`curl -s -o /dev/null -w '%{http_code}' https://sp.newlevel.media/` → **`302`**
+(since #155 the public hostname is behind Cloudflare Access — a 302 to
+`newlevelchurch.cloudflareaccess.com` is the healthy "tunnel up" signal, NOT a
+`200`; see the Cloudflare Access subsection below). To confirm the ORIGIN behind
+the tunnel is serving, check the on-box LAN path instead:
+`Invoke-WebRequest http://127.0.0.1:8920/api/v1/status` → `200`.
 
 Diagnose the service's own stderr by launching a SECOND short-lived copy with
 `Start-Process -RedirectStandardError` (extra connectors are harmless) — the
