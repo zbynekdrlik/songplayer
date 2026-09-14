@@ -248,10 +248,10 @@ async fn mark_video_lyrics_complete_writes_processed_at_and_explicit_model() {
     mark_video_lyrics_complete(
         &pool,
         video_id,
-        "description+whisperx-large-v3@rev1",
-        20,
+        "description+mtl@rev1/g35t-ok",
+        22,
         Some(0.85),
-        Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1),
+        Some(crate::lyrics::ALIGNMENT_MODEL_MTL_REV1),
     )
     .await
     .unwrap();
@@ -269,7 +269,7 @@ async fn mark_video_lyrics_complete_writes_processed_at_and_explicit_model() {
     );
     assert_eq!(
         model.as_deref(),
-        Some("whisperx-large-v3@rev1"),
+        Some("lyrics-alignment-mtl@rev1"),
         "alignment_model must round-trip the literal"
     );
 }

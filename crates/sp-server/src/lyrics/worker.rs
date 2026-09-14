@@ -1,10 +1,12 @@
-//! Lyrics worker — tier-chain pipeline.
+//! Lyrics worker — two-tier pipeline (v22, #159).
 //!
 //! Every song goes through:
 //!   1. gather_sources: YT manual subs + LRCLIB + Genius + description in parallel.
 //!   2. Vocal isolation (Mel-Roformer + anvuew; best-effort via `preprocess_vocals`).
-//!   3. Build tier1 fetchers from candidate_texts → Orchestrator::process → AlignedTrack.
-//!   4. Convert AlignedTrack → LyricsTrack via `align_track_to_lyrics_track`.
+//!   3. Tier 1 (★): v21 mtl forced-alignment reference stage
+//!      (`run_mtl_reference_stage`) — gate PASS ships mtl line timings.
+//!   4. Tier 2 (base): g35t transcript (`run_g35t_transcript_branch`) for every
+//!      song the reference stage did not ship.
 //!   5. SK translation — Claude (CLIProxyAPI) only per `feedback_claude_only_translation.md`.
 //!   6. Persist JSON + DB row with pipeline_version.
 
@@ -27,7 +29,7 @@ use crate::{
 
 pub struct LyricsWorker {
     pub(crate) pool: SqlitePool,
-    client: Client,
+    pub(crate) client: Client,
     pub(crate) cache_dir: PathBuf,
     ytdlp_path: PathBuf,
     python_path: Option<PathBuf>,
@@ -397,11 +399,7 @@ impl LyricsWorker {
         &self,
         mut row: crate::db::models::VideoLyricsRow,
     ) -> Result<SongOutcome> {
-        use crate::lyrics::{
-            LYRICS_PIPELINE_VERSION,
-            orchestrator::{Orchestrator, OrchestratorInput},
-            whisperx_replicate::WhisperXReplicateBackend,
-        };
+        use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
@@ -506,62 +504,11 @@ impl LyricsWorker {
             }
         };
 
-        // GATE: per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md,
-        // refuse to run expensive alignment (Demucs + whisperx, ~3 min/song) on
-        // text sources we know produce poor wall output. Allowed set is
-        // yt_subs/lrclib/spotify (line-timed) and description (curated).
-        // Anything else (genius, lrclib-plain-without-timing, no candidates at
-        // all) gets routed to asr_path (AAI U3-Pro transcribe + silence-gap
-        // split). A song WITH a rejected candidate passes it as AAI keyterms
-        // bias; a song with ZERO candidates runs asr_path BLIND with empty
-        // keyterms instead of being marked unsupported_source (#120) — AAI
-        // transcribes unbiased, and the existing empty-transcript quarantine
-        // (`asr_gap`, see asr_path::run) is the safety net for instrumentals.
-        if !crate::lyrics::orchestrator::is_allowed_text_source(&ctx.candidate_texts) {
-            let names: Vec<&str> = ctx
-                .candidate_texts
-                .iter()
-                .map(|c| c.source.as_str())
-                .collect();
-
-            // Whisperx gate rejected this song; asr_path uses AAI ASR +
-            // silence-gap split + a drop-safe index-level Claude regroup. Any
-            // gathered candidate text is passed in as AAI keyterms (helper
-            // bias) and as the regroup phrasing reference — it never adds or
-            // drops lines. Zero candidates means empty keyterms, i.e. a blind
-            // run (#120) — `build_transcript_body` already omits
-            // `keyterms_prompt` when the slice is empty.
-            if crate::lyrics::orchestrator::has_any_text_candidate(&ctx.candidate_texts) {
-                tracing::info!(
-                    video_id,
-                    youtube_id = %youtube_id,
-                    candidate_sources = ?names,
-                    "lyrics: no allowed text source — routing to asr_path"
-                );
-            } else {
-                tracing::info!(
-                    video_id,
-                    youtube_id = %youtube_id,
-                    "asr_path: no text candidates — running blind (empty keyterms)"
-                );
-            }
-            let result = self
-                .run_asr_path_branch(
-                    &ctx.candidate_texts,
-                    row.audio_file_path.as_deref(),
-                    row.duration_ms,
-                    video_id,
-                    &youtube_id,
-                    &song,
-                    &artist,
-                    started_at_unix_ms,
-                    start_instant,
-                )
-                .await;
-            self.clear_processing().await;
-            return result;
-        }
-
+        // v22 (#159): one regime. Every song with vocals + a text candidate
+        // (≥4 lines) tries the v21 mtl reference stage below; songs it does
+        // not ship (no usable text, gate fail, mtl skip/error) take the g35t
+        // base tier. The old `is_allowed_text_source` gate that routed to the
+        // now-deleted asr_path / WhisperX routes is gone.
         self.broadcast_stage(
             video_id,
             &youtube_id,
@@ -617,33 +564,36 @@ impl LyricsWorker {
         )
         .await;
 
-        // Convert provider::CandidateText → tier1::CandidateText for the
-        // orchestrator. All I/O already happened in `gather_sources`; the
-        // orchestrator runs `tier1::pick_best` on these directly.
+        // Convert provider::CandidateText → tier1::CandidateText so the v21
+        // reference stage can pick the best candidate. All I/O already happened
+        // in `gather_sources`.
         let candidates: Vec<crate::lyrics::tier1::CandidateText> = ctx
             .candidate_texts
             .into_iter()
             .map(crate::lyrics::tier1::CandidateText::from)
             .collect();
 
-        // Lever 2 (#143): forced-alignment reference stage. Runs BEFORE the
-        // WhisperX/asr_path route below decides anything, using the SAME
-        // best candidate `claude_merge::best_authoritative_candidate` would
-        // pick for that route (any source, timed or not). On gate PASS this
-        // ships the mtl line timings directly and the WhisperX/replicate
-        // route below never runs for this song.
-        let best_candidate =
-            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
+        // Parse the Gemini key list once — used by BOTH the v21 reference gate
+        // and the v22 g35t base tier.
         let gemini_csv = crate::db::models::get_setting(&self.pool, "gemini_api_key")
             .await
             .ok()
             .flatten()
             .unwrap_or_default();
+        let gemini_keys = crate::lyrics::g35t_client::gemini_keys_from_setting(&gemini_csv);
+
+        // Tier 1 — v21 (#143) forced-alignment reference stage (★). Aligns the
+        // best text candidate via mtl and verifies it against a g35t word
+        // transcript. On gate PASS this ships the mtl line timings directly;
+        // otherwise (skip / gate fail / mtl error) it returns None and the song
+        // takes the g35t base tier below. UNCHANGED byte-for-byte from v21.
+        let best_candidate =
+            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
         let reference_backend = crate::lyrics::orchestrator::RealReferenceStageBackend {
             mtl_cfg: crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir),
             work_dir: self.cache_dir.clone(),
             http_client: self.client.clone(),
-            gemini_keys: crate::lyrics::g35t_client::gemini_keys_from_setting(&gemini_csv),
+            gemini_keys: gemini_keys.clone(),
             gpu_mem_setting: gpu_mem.clone(),
         };
         let mtl_track = self
@@ -656,76 +606,37 @@ impl LyricsWorker {
             )
             .await;
 
+        // Tier 2 — v22 (#159) g35t base tier. The single fallback for every
+        // song the reference stage did not ship: a Gemini 3.5 Transcribe
+        // transcript grouped into lines. Replaces the deleted WhisperX + asr_path
+        // routes. Reuses the already-isolated `clean_vocal` (no second Demucs).
         let mut track = if let Some(t) = mtl_track {
             t
         } else {
-            // Build the WhisperX backend using the Replicate API token from settings.
-            // Read per-song so operators can add the token without restarting.
-            let replicate_token = crate::db::models::get_setting(&self.pool, "replicate_api_token")
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            if replicate_token.trim().is_empty() {
-                warn!(
-                    youtube_id = %youtube_id,
-                    "worker: replicate_api_token not set — skipping song; \
-                     configure via PATCH /api/v1/settings"
-                );
-                self.clear_processing().await;
-                return Err(anyhow::anyhow!("replicate_api_token not configured"));
-            }
-            let backend: Arc<dyn crate::lyrics::backend::AlignmentBackend> = Arc::new(
-                WhisperXReplicateBackend::new(replicate_token, self.tools_dir.clone()),
-            );
-
-            // Require an AI client for orchestrator construction — claude-merge needs it.
-            // If None at runtime, log warning and bail processing for this song.
-            let ai_client = match &self.ai_client {
-                Some(c) => c.clone(),
-                None => {
-                    warn!(
-                        "worker: ai_client is None — CLIProxyAPI not configured; \
-                         cannot run claude-merge for {youtube_id}"
-                    );
-                    self.clear_processing().await;
-                    return Err(anyhow::anyhow!(
-                        "ai_client required for orchestrator (claude-merge) but is None"
-                    ));
-                }
-            };
-
-            let orch = Orchestrator::new(
-                backend,
-                ai_client,
-                crate::lyrics::line_splitter::SplitConfig::default(),
-            );
-            let aligned = match orch
-                .process(OrchestratorInput {
-                    candidates,
-                    language: "en",
-                    vocal_wav: clean_vocal.as_deref(),
-                    audit: Some(crate::lyrics::audit_ctx::AuditContext {
-                        cache_dir: &self.cache_dir,
-                        youtube_id: &youtube_id,
-                    }),
-                })
-                .await
+            match self
+                .run_g35t_transcript_branch(
+                    clean_vocal.as_deref(),
+                    &gemini_keys,
+                    video_id,
+                    &youtube_id,
+                    &song,
+                    &artist,
+                    started_at_unix_ms,
+                )
+                .await?
             {
-                Ok(t) => t,
-                Err(e) => {
-                    warn!("worker: orchestrator failed for {youtube_id}: {e}");
+                crate::lyrics::worker_g35t::G35tOutcome::Track(t) => t,
+                crate::lyrics::worker_g35t::G35tOutcome::Deferred(reason) => {
                     // Vocals WAV intentionally preserved on disk — aligner's
-                    // cache-hit path (aligner.rs:87-96) reuses it on next run,
-                    // saving Demucs minutes per song. Self-heal removes orphans
-                    // when the parent video is removed (cache.rs).
+                    // cache-hit path reuses it on the next run.
                     self.clear_processing().await;
-                    return Err(anyhow::anyhow!("orchestrator: {e}"));
+                    return Ok(SongOutcome::Deferred(reason));
                 }
-            };
-
-            // Convert AlignedTrack → LyricsTrack at the worker boundary.
-            align_track_to_lyrics_track(aligned, LYRICS_PIPELINE_VERSION)
+                crate::lyrics::worker_g35t::G35tOutcome::Quarantined => {
+                    self.clear_processing().await;
+                    return Ok(SongOutcome::Done);
+                }
+            }
         };
 
         // Vocals WAV intentionally preserved on disk — aligner's cache-hit
@@ -982,18 +893,6 @@ pub async fn queue_update_loop(
 #[cfg(test)]
 mod tests;
 
-#[path = "worker_tests_asr_blind.rs"]
-#[cfg(test)]
-mod tests_asr_blind;
-
-#[path = "worker_tests_asr_routing.rs"]
-#[cfg(test)]
-mod tests_asr_routing;
-
 #[path = "worker_tests_reference.rs"]
 #[cfg(test)]
 mod tests_reference;
-
-#[path = "worker_tests_deferral.rs"]
-#[cfg(test)]
-mod tests_deferral;

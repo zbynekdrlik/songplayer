@@ -52,7 +52,8 @@ impl LyricsWorker {
 // -----------------------------------------------------------------------
 
 #[test]
-fn alignment_model_for_source_prioritizes_mtl_over_whisperx() {
+fn alignment_model_for_source_mtl_checked_first() {
+    // The stamped label is "<candidate.source>+mtl@rev1/g35t-ok" — mtl must win.
     assert_eq!(
         alignment_model_for_source("description+mtl@rev1/g35t-ok"),
         Some(crate::lyrics::ALIGNMENT_MODEL_MTL_REV1)
@@ -60,18 +61,10 @@ fn alignment_model_for_source_prioritizes_mtl_over_whisperx() {
 }
 
 #[test]
-fn alignment_model_for_source_whisperx() {
+fn alignment_model_for_source_g35t_base_tier() {
     assert_eq!(
-        alignment_model_for_source("description+whisperx-large-v3@rev1"),
-        Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
-    );
-}
-
-#[test]
-fn alignment_model_for_source_timed_merge() {
-    assert_eq!(
-        alignment_model_for_source("lrclib+timed-merge"),
-        Some(crate::lyrics::ALIGNMENT_MODEL_TIMED_MERGE)
+        alignment_model_for_source("gemini-3-5-transcribe"),
+        Some(crate::lyrics::ALIGNMENT_MODEL_G35T_REV1)
     );
 }
 
@@ -94,6 +87,13 @@ fn alignment_model_for_source_raw_ship_through() {
 #[test]
 fn alignment_model_for_source_unknown_is_none() {
     assert_eq!(alignment_model_for_source("ensemble:gemini"), None);
+    // #159: the whisperx / timed-merge routes are deleted, so their legacy
+    // labels (only ever seen on un-reprocessed DB rows) map to None now.
+    assert_eq!(
+        alignment_model_for_source("description+whisperx-large-v3@rev1"),
+        None
+    );
+    assert_eq!(alignment_model_for_source("lrclib+timed-merge"), None);
 }
 
 // -----------------------------------------------------------------------
