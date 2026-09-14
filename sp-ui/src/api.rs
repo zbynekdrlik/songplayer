@@ -291,6 +291,22 @@ pub async fn patch_translation_gender(video_id: i64, gender: Option<&str>) -> Re
     .await
 }
 
+// ── Karaoke live control (#14) ────────────────────────────────────────────────
+
+/// GET the live karaoke state: `{mode, vocal_gain, stems_pending, stems_done}`.
+pub async fn get_karaoke() -> Result<serde_json::Value, String> {
+    get("/api/v1/karaoke").await
+}
+
+/// POST a new karaoke mode + vocal gain (`0.0..=1.0`). Replies 204 No Content.
+pub async fn post_karaoke(mode: &str, vocal_gain: f32) -> Result<(), String> {
+    post_json_empty(
+        "/api/v1/karaoke",
+        &serde_json::json!({ "mode": mode, "vocal_gain": vocal_gain }),
+    )
+    .await
+}
+
 // ── Live playlist API helpers ─────────────────────────────────────────────────
 
 /// GET all set-list items for a custom playlist.

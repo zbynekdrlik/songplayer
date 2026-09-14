@@ -39,6 +39,13 @@ fn worker_has_no_retired_symbols() {
         ["Qwen3", "Provider"].concat(),
         // Legacy orchestrator::Orchestrator::new(..., providers, ai_client, cache_dir) shape.
         ["process_", "song(&ctx"].concat(),
+        // #159 one-regime cleanup — the deleted WhisperX + asr_path routes.
+        ["WhisperX", "ReplicateBackend"].concat(),
+        ["whisperx_", "replicate"].concat(),
+        ["run_asr_", "path_branch"].concat(),
+        ["is_allowed_", "text_source"].concat(),
+        ["replicate_", "api_token"].concat(),
+        ["Orchestrator", "::new"].concat(),
     ];
     for sym in &banned {
         assert!(
@@ -164,12 +171,14 @@ fn align_track_to_lyrics_track_maps_fields_correctly() {
 /// test breaks, forcing a deliberate update.
 #[test]
 fn new_provenance_source_literals_are_recognizable() {
-    // These are the sources the tier chain can produce. Asserted as
-    // non-empty string comparisons to make the test read as a spec.
+    // The v22 (#159) pipeline produces exactly two output-source shapes:
+    // the ★ mtl tier and the g35t base tier. Asserted as a spec so a format
+    // change forces a deliberate update.
     let tier1_sources = ["tier1:spotify", "tier1:lrclib", "tier1:yt_subs", "genius"];
-    let backend_source = "whisperx-large-v3@rev1";
-    // asr_path source — lean path, no claude-merge suffix.
-    let asr_source = "asr:aai-u3-pro";
+    // ★ tier: "<candidate.source>+mtl@rev1/g35t-ok".
+    let mtl_source = "description+mtl@rev1/g35t-ok";
+    // base tier: the Gemini 3.5 Transcribe transcript.
+    let g35t_source = crate::lyrics::g35t_transcript::SOURCE_G35T;
 
     for s in &tier1_sources {
         assert!(
@@ -178,12 +187,12 @@ fn new_provenance_source_literals_are_recognizable() {
         );
     }
     assert!(
-        backend_source.contains("whisperx"),
-        "backend source must mention whisperx"
+        mtl_source.contains("mtl@rev1"),
+        "★ tier source must carry the mtl@rev1 tag"
     );
-    assert!(
-        asr_source.starts_with("asr:"),
-        "asr_path source must start with 'asr:'"
+    assert_eq!(
+        g35t_source, "gemini-3-5-transcribe",
+        "base tier source is the g35t transcript label"
     );
 }
 
@@ -365,28 +374,6 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         ctx.candidate_texts.is_empty(),
         "expected an empty candidate list for the blind asr_path route, got: {:?}",
         ctx.candidate_texts
-    );
-}
-
-/// Verify the replicate_api_token early-exit guard is present in process_song.
-///
-/// The guard prevents the worker from feeding an empty string to
-/// WhisperXReplicateBackend (which would then fail with HTTP 401 after the
-/// 12-second rate-limit pre-sleep, chewing through every queued song before
-/// anyone notices). A structural check catches if the guard is accidentally
-/// removed during future edits.
-#[test]
-fn process_song_has_replicate_token_early_exit() {
-    let src = include_str!("worker.rs");
-    // The guard must check trim().is_empty() on the token ...
-    assert!(
-        src.contains("replicate_token.trim().is_empty()"),
-        "process_song must have a replicate_token early-exit guard"
-    );
-    // ... and produce the expected error message.
-    assert!(
-        src.contains("replicate_api_token not configured"),
-        "early-exit error message must mention replicate_api_token not configured"
     );
 }
 

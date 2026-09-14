@@ -7,6 +7,7 @@ pub mod downloader;
 mod engine_command;
 pub use engine_command::EngineCommand;
 pub mod lyrics;
+pub mod mdns;
 pub mod metadata;
 pub mod obs;
 mod obs_bridge;
@@ -18,6 +19,7 @@ pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
 pub mod startup;
+pub mod stems;
 
 pub use panic_hook::install_panic_hook;
 
@@ -71,6 +73,9 @@ pub struct AppState {
     /// reads/writes it synchronously; the playback engine + pipeline threads
     /// share the same registry (default OFF, never persisted).
     pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
+    /// LAN `sp.local` advertisement status (#51) — written by the mDNS task,
+    /// read by `/api/v1/status` so the dashboard shows the offline-LAN URL.
+    pub lan_status: mdns::LanStatusHandle,
 }
 
 /// Status of external tool availability.
@@ -208,6 +213,11 @@ pub async fn start(
     // (pipeline spawn + health). Default OFF, never persisted.
     let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
 
+    // #51: shared LAN sp.local status — the mDNS task (spawned after AppState)
+    // writes it, `/api/v1/status` reads it. Starts empty until the task
+    // detects the LAN IP and registers the record.
+    let lan_status = mdns::new_status_handle();
+
     // 3b'. dantesync clock health (#146). Shared handle: the 1 Hz poller writes
     // it, the playback engine reads it into every NDI health snapshot. Never
     // blocks playback — a missing endpoint just reads `no dantesync`.
@@ -260,7 +270,19 @@ pub async fn start(
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
         ndi_burn_registry: ndi_burn_registry.clone(),
+        lan_status: lan_status.clone(),
     };
+
+    // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
+    // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a
+    // failure only degrades to no advertisement, it never blocks startup.
+    mdns::spawn_lan_mdns(
+        pool.clone(),
+        config.port,
+        lan_status.clone(),
+        shutdown_tx.subscribe(),
+    )
+    .await;
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
     // periodically re-launches it if it dies. Without this, every
@@ -337,6 +359,16 @@ pub async fn start(
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
     let ai_client_for_dl = ai_client.clone();
+    // #154 idle gate: the lyrics worker reads these to defer heavy GPU/CPU work
+    // while the wall is in use (any pipeline Playing, or OBS streaming/recording).
+    let lyrics_ndi_health = ndi_health_registry.clone();
+    let lyrics_obs_state = obs_state.clone();
+    // #14 karaoke stem worker shares the same tools dir + idle-gate handles.
+    let stem_pool = pool.clone();
+    let stem_tools_dir = lyrics_tools_dir.clone();
+    let stem_ndi_health = ndi_health_registry.clone();
+    let stem_obs_state = obs_state.clone();
+    let stem_shutdown = shutdown_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -467,6 +499,8 @@ pub async fn start(
                     lyrics_tools_dir,
                     Some(ai_client_for_dl),
                     tools_event_tx.clone(),
+                    lyrics_ndi_health,
+                    lyrics_obs_state,
                 );
                 let current_processing_handle = lyrics_worker.current_processing();
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
@@ -479,6 +513,19 @@ pub async fn start(
                     current_processing_handle,
                     lyrics_shutdown.subscribe(),
                 ));
+
+                // Karaoke stem worker (#14) — separates the catalog into
+                // vocals + instrumental sidecars under the SAME #154 idle gate,
+                // lowest priority (after lyrics).
+                let stem_worker = crate::stems::StemWorker::new(
+                    stem_pool,
+                    paths.python.clone(),
+                    stem_tools_dir,
+                    stem_ndi_health,
+                    stem_obs_state,
+                );
+                tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
+                info!("stem worker started");
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -602,6 +649,9 @@ pub async fn start(
             }
         }
     });
+
+    // #14 karaoke: seed the process-global live control before pipelines spawn.
+    crate::stems::control::init_from_settings(&pool).await;
 
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {
@@ -727,6 +777,9 @@ pub async fn start(
                             // #132: a playlist deleted/deactivated at runtime
                             // tears its pipeline down symmetrically.
                             engine.remove_pipeline(playlist_id);
+                        }
+                        EngineCommand::SetKaraoke { mode, vocal_gain } => {
+                            engine.set_karaoke(mode, vocal_gain).await; // #14
                         }
                     }
                 }

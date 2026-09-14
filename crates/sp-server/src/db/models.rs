@@ -933,10 +933,11 @@ pub async fn quarantine_video_lyrics(
 // Unsupported-source sentinel
 // ---------------------------------------------------------------------------
 
-/// Mark a video as having no allowed text source. Parallel to `quarantine_video_lyrics`
-/// (asr_gap) but for the case where the gather pass found candidates but none of
-/// them passed `is_allowed_text_source` — typically genius-only, lrclib-plain
-/// without timing, or no_source-then-just-whisperx.
+/// Mark a video `unsupported_source`. Parallel to `quarantine_video_lyrics`
+/// (asr_gap). Since the v22 one-regime cut (#159) the only caller is the #144
+/// duration-cap path (`worker_outcome::mark_over_cap`) — a > 30-min row is a
+/// live set / mix, not a song. (The old text-source-eligibility gate that also
+/// wrote this sentinel was deleted with the WhisperX/asr_path routes.)
 ///
 /// Sets `lyrics_source = 'unsupported_source'`, clears `has_lyrics` and
 /// `lyrics_manual_priority`, stamps the current pipeline version and timestamp,
@@ -982,19 +983,15 @@ pub async fn mark_unsupported_source(
 #[path = "models_tests_helpers.rs"]
 #[cfg(test)]
 mod tests_helpers;
-
-#[path = "models_tests_playlist.rs"]
-#[cfg(test)]
-mod tests_playlist;
-
-#[path = "models_tests_video.rs"]
-#[cfg(test)]
-mod tests_video;
-
 #[path = "models_tests_lyrics.rs"]
 #[cfg(test)]
 mod tests_lyrics;
-
 #[path = "models_tests_lyrics_backoff.rs"]
 #[cfg(test)]
 mod tests_lyrics_backoff;
+#[path = "models_tests_playlist.rs"]
+#[cfg(test)]
+mod tests_playlist;
+#[path = "models_tests_video.rs"]
+#[cfg(test)]
+mod tests_video;

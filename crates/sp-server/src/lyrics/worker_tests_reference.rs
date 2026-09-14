@@ -43,6 +43,9 @@ impl LyricsWorker {
             events_tx,
             spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver::new(),
             current_processing: Arc::new(RwLock::new(None)),
+            ndi_health_registry: None,
+            obs_state: None,
+            wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
         }
     }
 }
@@ -52,7 +55,8 @@ impl LyricsWorker {
 // -----------------------------------------------------------------------
 
 #[test]
-fn alignment_model_for_source_prioritizes_mtl_over_whisperx() {
+fn alignment_model_for_source_mtl_checked_first() {
+    // The stamped label is "<candidate.source>+mtl@rev1/g35t-ok" — mtl must win.
     assert_eq!(
         alignment_model_for_source("description+mtl@rev1/g35t-ok"),
         Some(crate::lyrics::ALIGNMENT_MODEL_MTL_REV1)
@@ -60,18 +64,10 @@ fn alignment_model_for_source_prioritizes_mtl_over_whisperx() {
 }
 
 #[test]
-fn alignment_model_for_source_whisperx() {
+fn alignment_model_for_source_g35t_base_tier() {
     assert_eq!(
-        alignment_model_for_source("description+whisperx-large-v3@rev1"),
-        Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
-    );
-}
-
-#[test]
-fn alignment_model_for_source_timed_merge() {
-    assert_eq!(
-        alignment_model_for_source("lrclib+timed-merge"),
-        Some(crate::lyrics::ALIGNMENT_MODEL_TIMED_MERGE)
+        alignment_model_for_source("gemini-3-5-transcribe"),
+        Some(crate::lyrics::ALIGNMENT_MODEL_G35T_REV1)
     );
 }
 
@@ -94,6 +90,13 @@ fn alignment_model_for_source_raw_ship_through() {
 #[test]
 fn alignment_model_for_source_unknown_is_none() {
     assert_eq!(alignment_model_for_source("ensemble:gemini"), None);
+    // #159: the whisperx / timed-merge routes are deleted, so their legacy
+    // labels (only ever seen on un-reprocessed DB rows) map to None now.
+    assert_eq!(
+        alignment_model_for_source("description+whisperx-large-v3@rev1"),
+        None
+    );
+    assert_eq!(alignment_model_for_source("lrclib+timed-merge"), None);
 }
 
 // -----------------------------------------------------------------------
@@ -151,6 +154,65 @@ impl crate::lyrics::orchestrator::ReferenceStageBackend for FakeReferenceStageBa
             .unwrap()
             .take()
             .expect("asr_transcribe called twice")
+    }
+}
+
+// Direct `run_reference_stage` transport-error coverage (re-homed from the
+// deleted orchestrator_tests.rs — this is SURVIVING code): an `mtl_align` or
+// `asr_transcribe` failure returns `ReferenceStageResult::Error` naming the
+// failing stage, so the worker falls through to the g35t base tier.
+#[tokio::test]
+async fn run_reference_stage_mtl_align_error_returns_error_stage() {
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("mtl boom")))),
+        asr: std::sync::Mutex::new(None), // asr_transcribe must NOT be reached
+    };
+    let lines = vec!["a".to_string(), "b".to_string()];
+    let result = crate::lyrics::orchestrator::run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "yt1",
+        &lines,
+    )
+    .await;
+    match result {
+        crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
+            assert_eq!(stage, "mtl_align");
+            assert!(message.contains("mtl boom"), "message: {message}");
+        }
+        _ => panic!("expected Error stage=mtl_align"),
+    }
+}
+
+#[tokio::test]
+async fn run_reference_stage_asr_transcribe_error_returns_error_stage() {
+    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(MtlOutput {
+            lines: vec![MtlLine {
+                text: "a".into(),
+                start_ms: 0,
+                end_ms: 1000,
+            }],
+            device: "cpu".into(),
+            elapsed_s: 1.0,
+        }))),
+        asr: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("asr boom")))),
+    };
+    let lines = vec!["a".to_string()];
+    let result = crate::lyrics::orchestrator::run_reference_stage(
+        &backend,
+        Path::new("/x.wav"),
+        "yt1",
+        &lines,
+    )
+    .await;
+    match result {
+        crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
+            assert_eq!(stage, "asr_transcribe");
+            assert!(message.contains("asr boom"), "message: {message}");
+        }
+        _ => panic!("expected Error stage=asr_transcribe"),
     }
 }
 

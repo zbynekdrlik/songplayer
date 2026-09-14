@@ -578,7 +578,7 @@ fn decode_and_send(
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
 ) -> DecodeResult {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder, SymphoniaAudioReader};
+    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
         Ok(v) => v,
@@ -589,17 +589,20 @@ fn decode_and_send(
             ));
         }
     };
-    let audio_reader = match SymphoniaAudioReader::open(audio_path) {
-        Ok(a) => a,
-        Err(e) => {
-            return DecodeResult::Error(format!(
-                "failed to open audio {}: {e}",
-                audio_path.display()
-            ));
-        }
-    };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), Box::new(audio_reader))
-    {
+    // #14: honour the live karaoke control — a plain mix reader, or a stem-mixing
+    // KaraokeAudioReader (with FullMix fallback when stems are missing).
+    let audio_stream =
+        match crate::stems::reader::open_audio_stream(audio_path, &crate::stems::control::global())
+        {
+            Ok(a) => a,
+            Err(e) => {
+                return DecodeResult::Error(format!(
+                    "failed to open audio {}: {e}",
+                    audio_path.display()
+                ));
+            }
+        };
+    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
         Ok(d) => d,
         Err(e) => {
             return DecodeResult::Error(format!("SplitSyncedDecoder::new failed: {e}"));

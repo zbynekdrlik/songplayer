@@ -19,7 +19,7 @@ pub mod stream;
 #[cfg(windows)]
 pub mod video;
 
-pub use audio::SymphoniaAudioReader;
+pub use audio::{KaraokeAudioReader, SymphoniaAudioReader, gain_to_bits, shared_gain};
 pub use error::DecoderError;
 pub use split_sync::SplitSyncedDecoder;
 pub use stream::{AudioStream, MediaStream, VideoStream};

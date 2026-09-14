@@ -10,6 +10,7 @@ mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
+mod karaoke; // #14 set_karaoke (impl PlaybackEngine, 1000-line cap split)
 pub mod lock_state;
 mod lyrics_loader;
 pub mod ndi_burn;

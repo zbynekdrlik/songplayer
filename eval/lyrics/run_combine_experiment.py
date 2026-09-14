@@ -70,17 +70,12 @@ CONSERVATIVE_RATIO_THRESHOLD = 0.75
 # module both `score_aligner.py` and this module already import — see
 # POISONED_FIXTURE_VIDEO_ID's definition there) rather than duplicated here.
 
-BASELINE_BACKENDS = [
-    "gemini36-flash",
-    "aai-u35-translate",
-    "soniox-v5",
-    "qwen35-omni",
-]
-COMBOS: list[tuple[str, str]] = [
-    ("qwen35-omni", "soniox-v5"),
-    ("qwen35-omni", "aai-u35-translate"),
-    ("gemini36-flash", "soniox-v5"),
-]
+# The multi-backend zoo these defaults named (gemini36-flash, aai-u35-translate,
+# soniox-v5, qwen35-omni) was retired in #159 — the production pipeline is now a
+# single regime (mtl force-align + gemini-3-5-transcribe). The scoring helpers
+# below stay usable for any future backend; pass backends explicitly via the CLI.
+BASELINE_BACKENDS: list[str] = []
+COMBOS: list[tuple[str, str]] = []
 
 
 def combo_id(line_backend: str, time_backend: str) -> str:

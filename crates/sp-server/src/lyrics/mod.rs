@@ -1,7 +1,5 @@
 pub mod aligner;
-pub mod asr_path;
 pub mod assembly;
-pub mod audio_chunking;
 pub mod audit_ctx;
 pub mod backend;
 pub mod bootstrap;
@@ -9,9 +7,11 @@ pub mod chunking;
 pub mod claude_merge;
 pub mod description_provider;
 pub mod g35t_client;
+pub mod g35t_transcript;
 pub mod gather;
 pub mod genius;
 pub mod gpu_policy;
+pub mod idle_gate;
 pub mod line_splitter;
 pub mod lrclib;
 pub mod lyrics_ovh;
@@ -21,178 +21,59 @@ pub mod probe;
 pub mod provider;
 pub mod reference_gate;
 pub mod renderer;
-pub mod replicate_client;
 pub mod reprocess;
 pub mod spotify_proxy;
 pub mod spotify_resolver;
-pub mod text_reference_merge;
 pub mod tier1;
-pub mod timed_reference_merge;
 pub mod translator;
-pub mod whisperx_replicate;
 pub mod worker;
-pub mod worker_asr;
+pub mod worker_g35t;
 pub mod worker_outcome;
 pub mod worker_reference;
 pub mod worker_translation;
 pub mod youtube_subs;
-pub mod yt_subs_split;
 pub use worker::LyricsWorker;
 pub use worker::queue_update_loop;
 
 use sp_core::lyrics::LyricsTrack;
 
-/// Monotonic version of the lyrics pipeline output. Bump when prompts, provider
-/// list, merge algorithm, or reference-text selection changes. Every bump
-/// triggers auto-reprocess of existing songs via the stale-version bucket.
+/// Monotonic version of the lyrics pipeline output. Bump when prompts, the
+/// provider/route registration, the alignment algorithm, or reference-text
+/// selection changes. Every bump auto-reprocesses existing songs via the
+/// stale-version bucket (`reprocess.rs`).
 ///
-/// Version history:
-/// - v1 (implicit, pre-this-PR): single-path yt_subs→Qwen3 or lrclib-line-level
-/// - v2 (this PR): ensemble orchestrator with AutoSubProvider + Claude text-merge
-/// - v3 (this PR): merge prompt reworked — weight by base_confidence^2,
-///   prefer higher-confidence provider on >1000ms disagreement. Fixes
-///   regression seen on h-A1Tzkjsi4 (v2 got 0.48 vs baseline 0.63).
-/// - v4: description provider added as 4th text candidate (YouTube video
-///   description parsed via Claude). Targets recovering from v3 regression
-///   (0.524 -> >= 0.65) by giving text_merge reliable reference text on
-///   songs lacking yt_subs/lrclib coverage.
-/// - v5: description provider prompt reframed to software-engineering task
-///   (empty system, karaoke-app framing in user) — Claude on CLIProxyAPI OAuth
-///   was returning conversational preamble instead of JSON under the previous
-///   direct-instruction prompt, yielding 0% extraction success on production.
-/// - v6: merge-layer fallback — when Claude miscounts per-word timings (1-6
-///   off vs reference split_whitespace), fall back to the highest-
-///   base-confidence provider's timings instead of dropping the song. Root
-///   cause: tokenization of contractions/possessives is inherently fuzzy for
-///   LLM output; strict count matching blocked ~40% of real production songs.
-/// - v7: merge layer rewritten as pure Rust. Dropped the Claude call
-///   entirely — its rules (base_confidence^2 weighting, >1000ms
-///   disagreement handling, outlier rejection) are all deterministic math.
-///   New algorithm: highest-base-confidence provider is primary, other
-///   providers' timestamps (within 500ms) boost confidence to min(1.0,
-///   base * 1.2); otherwise pass-through at base * 0.7. Zero stochastic
-///   failure, zero API latency, identical output for non-failing songs.
-/// - v8: sanitize word timings on the merge layer — enforce monotonic
-///   start_ms, minimum per-word duration (80ms), and no overlap with
-///   the next word's start. Fixes the 2026-04-19 event's blinking /
-///   stuck karaoke display, which came from qwen3 emitting
-///   zero-duration words, words that went backward in time, and
-///   duplicate start_ms clusters.
-/// - v9: sanitize runs on BOTH the single-provider pass-through and
-///   the multi-provider merge. v8 had a gap: the single-provider
-///   fast-path in `orchestrator.rs` copied qwen3's raw word timings
-///   into the output without calling `sanitize_word_timings`, so
-///   songs whose autosub failed (→ `ensemble:qwen3` bare) still
-///   shipped with zero-duration / duplicate-start words. Measured
-///   post-v8 on win-resolume: `ensemble:qwen3` songs had
-///   duplicate_start_pct 20%+ while `ensemble:autosub+qwen3` songs
-///   were 0%. v9 applies the same sanitizer everywhere.
-/// - v10: sanitize threads `floor_start_ms` across line boundaries.
-///   v9 sanitized WITHIN each line but reset the floor to 0 per
-///   line, so two consecutive lines could have identical word
-///   start_ms at their boundary. `compute_duplicate_start_pct`
-///   sorts all starts globally and counts ties, so v9 audit logs
-///   reported 91% duplicates even though per-line output was clean.
-///   v10 makes cross-line boundaries strictly increasing too.
-/// - v11: Gemini chunked lyrics provider (GeminiProvider) replaces
-///   qwen3 as the primary forced-alignment source. Provides more
-///   robust per-word timing on low-quality/noisy audio and better
-///   handling of edge cases. Existing songs with v10 or earlier
-///   output are re-queued for reprocessing under the new provider.
-/// - v12: Gemini provider gains HTTP 429/500/503 retry with exponential
-///   backoff (base 10 s, cap 60 s, max 4 attempts, honors Retry-After
-///   header) plus 1 s inter-chunk pacing. v11 silently dropped chunks
-///   on first 429 (Google's bulk-reprocess quota), causing ~18 songs
-///   to end up with `source="ensemble:autosub"` instead of
-///   `ensemble:gemini` and ~95 with `no_source`. v12 re-queues the
-///   entire catalog for a clean Gemini pass.
-/// - v13: Gemini alignment calls move from the direct API endpoint
-///   (billed against `gemini_api_key`) to the local CLIProxyAPI
-///   (`http://127.0.0.1:18787`), which is backed by an AI-Pro OAuth
-///   login. Quota is no longer the €10 API cap — it is the paid
-///   subscription tier via OAuth, which sustained the full-catalog
-///   reprocess in practice. Output format is byte-identical to v12;
-///   the stale bucket in `reprocess.rs::fetch_bucket_stale` adds a
-///   skip clause for rows where the source matches `%gemini%` and the
-///   pipeline version is already at 12 or higher, so songs whose v12
-///   Gemini result was already good stay untouched. Only autosub-
-///   fallback and no_source failures from v12 are retried under v13.
-/// - v14: (a) Reverts alignment transport from CLIProxyAPI OAuth back
-///   to the direct `generativelanguage.googleapis.com` API. The OAuth
-///   path turned out to be capped globally on Google's side
-///   (`MODEL_CAPACITY_EXHAUSTED` on `cloudcode-pa.googleapis.com` for
-///   the 3.x Pro preview models, public issue discussed in
-///   google-gemini/gemini-cli #24004/#24159 and AI Developers Forum
-///   thread 137168). (b) Introduces multi-key Gemini rotation — the
-///   `gemini_api_key` DB setting is now a comma-separated list of
-///   direct-API keys; `transcribe_rotating` in `gemini_provider.rs`
-///   starts at a sticky index, moves to the next key on HTTP 429,
-///   and fails only when every key is exhausted. (c) Moves EN→SK
-///   translation from Gemini to Claude via CLIProxyAPI using a
-///   short neutral prompt (no "lyrics"/"song"/"karaoke"/"church"
-///   wording — those tripped Claude's policy layer in v5). Gemini
-///   quota is reserved entirely for alignment.
-/// - v15: **Critical data-loss fix.** Every v11-v14 Gemini-only song
-///   shipped with `lines: []` in the persisted `_lyrics.json` file.
-///   `merge.rs::sanitize_track` had a `continue` branch that silently
-///   dropped every `LineTiming` whose `words` vector was empty — and
-///   `GeminiProvider` produces wordless lines (line-level timings
-///   only, word-level is deferred). 17 of 31 v11-v14 Gemini rows on
-///   win-resolume were empty as a result; the remaining 14 only had
-///   non-empty output because the multi-provider merge path
-///   contributed words from autosub. v15 changes the wordless
-///   branch to emit `LyricsLine { start_ms, end_ms, en, words: None }`
-///   with floor-clamped start for the cross-line strict-increasing
-///   invariant.
-/// - v16: Unregister `AutoSubProvider` from the worker's alignment
-///   provider list. Autosub has unreliable timing on sung music.
-/// - v17: Port Python prototype's `write_lyrics_json` finalize
-///   (end_ms clip, synthesized words, merge break).
-/// - v18: **Drop synthesized per-word timings.** Per explicit user
-///   direction the lyrics focus is line-level timing only. v17's
-///   even-distribution word synthesis caused the karaoke highlighter
-///   to animate at wrong moments on the wall — a 0.2 s word and a
-///   2 s word received the same duration under linear interpolation.
-///   v18 emits `words: None` for wordless provider output; the
-///   renderer falls back to line-level display (line text shown
-///   between `line.start_ms` and `line.end_ms`, no per-word
-///   highlight). The v17 end_ms clip and merge-break fixes stay in
-///   place — those are correct and don't depend on word-level data.
-///   Smart-skip tightened to `version >= 18`; every pre-v18 Gemini
-///   row is reprocessed so the persisted JSON drops the synthetic
-///   word arrays.
-/// - v19 (#TBD): YtManualSubsProvider registered as AlignmentProvider
-///   ahead of Gemini. When gather_sources produces a yt_subs candidate
-///   with `has_timing=true`, alignment short-circuits — no Gemini API
-///   call, no ffmpeg chunking — and the track ships as
-///   `source="yt_subs"` directly. Per `feedback_no_autosub.md` this is
-///   MANUAL subs only (autosub never reaches candidate_texts with
-///   has_timing=true). Pipeline-version bump re-queues pre-v19 rows in
-///   the stale bucket so existing Gemini-only songs are re-evaluated
-///   against the new fast path; the smart-skip clause in
-///   `reprocess.rs::fetch_bucket_stale` keeps pure-Gemini v19+ output
-///   protected once generated.
-/// - v20: Genius text source (`genius.rs`, fallback behind lyrics.ovh) +
-///   the operator `lyrics_override_text` gather path added.
-/// - v21 (#143): Lever-2 reference regime. Owner directive 2026-09-12 on
-///   #130 ("vyber najlepšie dosiahnuteľné riešenie a začni
-///   reprocessovať") — for any song with an allowed text candidate + a
-///   preprocessed vocal WAV, `mtl_aligner::align` force-aligns the chosen
-///   candidate's lines to the isolated vocals with `lyrics-alignment-mtl`
-///   BEFORE the WhisperX/asr_path route below decides anything. The
-///   result is verified against an independent Gemini 3.5 Transcribe word
-///   transcript (`g35t_client::transcribe_words` + `reference_gate::
-///   evaluate`): pass → the mtl line timings ship directly, stamped
-///   `lyrics_source = "<candidate.source>+mtl@rev1/g35t-ok"` /
-///   `lyrics_alignment_model = ALIGNMENT_MODEL_MTL_REV1`, and
-///   `videos.lyrics_reference` is set so the wall shows a ★; fail/error →
-///   `videos.lyrics_reference` is cleared, the gate decision + stats are
-///   written to `{youtube_id}_alignment_audit.json`, and the song falls
-///   through to the existing WhisperX/asr_path route unchanged. The
-///   `reprocess.rs::fetch_bucket_stale` v18 Gemini smart-skip clause is
-///   dropped — that regime no longer exists, so those rows re-queue
-///   under v21 like everything else.
-pub const LYRICS_PIPELINE_VERSION: u32 = 21;
+/// Condensed history (the full route archaeology lived here through v21; the
+/// regimes below are all DELETED — kept only as a one-line trail):
+/// - v1–v10: qwen3/autosub ensemble + Claude/Rust merge + word-timing
+///   sanitizers (blinking-karaoke fixes). Ensemble deleted.
+/// - v11–v18: Gemini chunked forced-alignment era — multi-key rotation,
+///   CLIProxy↔direct-API flip-flops, the `lines: []` data-loss fix (v15),
+///   AutoSub unregistered (v16), and the move to line-level-only timing
+///   (v18, `words: None`, no synthesized word timings — still enforced).
+///   Gemini chunked regime deleted.
+/// - v19: manual yt_subs short-circuit. v20: Genius text source +
+///   `lyrics_override_text`; sole aligner became WhisperX-on-Replicate with
+///   an AssemblyAI-U3-Pro `asr_path` fallback for no-text songs.
+/// - v21 (#143): Lever-2 reference regime added — `mtl_aligner` force-align
+///   verified by a Gemini-3.5-Transcribe word transcript (`reference_gate`),
+///   ship ★ on gate PASS, else fall through to the v20 WhisperX/asr_path
+///   routes.
+/// - v22 (#159): **one regime.** The v20 WhisperX-on-Replicate route
+///   (`whisperx_replicate`/`Orchestrator`) and the AssemblyAI `asr_path`
+///   route are DELETED, not kept as fallbacks (owner directive 2026-09-14).
+///   The pipeline is now two tiers, both anchored on the v21 tooling:
+///   (1) ★ tier — text candidate (≥4 lines) + vocals → `mtl_aligner` force-
+///   align + `reference_gate` g35t verify → PASS ships mtl line timings
+///   (`<src>+mtl@rev1/g35t-ok`, `videos.lyrics_reference=1`); UNCHANGED from
+///   v21. (2) base tier — everything else (no usable text, gate fail, mtl
+///   skip/error) → a Gemini-3.5-Transcribe transcript grouped into lines
+///   (`g35t_transcript`, source `gemini-3-5-transcribe`). One forced
+///   aligner (mtl), one ASR vendor (Gemini). Measured no-text quality:
+///   g35t 19.7% gold-norm ≤400ms vs the retired AssemblyAI 3.8%
+///   (`eval/lyrics/reports/2026-09-12-gemini-3-5-transcribe.md`). Every
+///   pre-v22 row re-queues (no smart-skip — that was the v18 trap); v21
+///   mtl rows re-run to identical output and re-★.
+pub const LYRICS_PIPELINE_VERSION: u32 = 22;
 
 /// Monotonic version of the SK **translation** output (#152), INDEPENDENT of
 /// `LYRICS_PIPELINE_VERSION`. Bump ONLY when the translation prompt changes in
@@ -203,7 +84,17 @@ pub const LYRICS_PIPELINE_VERSION: u32 = 21;
 /// and NEVER re-runs alignment or touches `lyrics_pipeline_version`. Every
 /// `videos` row starts at `lyrics_translation_version = 0`, so the first
 /// non-zero value re-translates the whole catalog under the current prompt.
-pub const LYRICS_TRANSLATION_VERSION: u32 = 1;
+///
+/// History:
+/// - v1 (#152): gender-aware grandparent/plaque framing.
+/// - v2 (#145): the grandparent/plaque STORY is replaced by a neutral technical
+///   prompt (`translator::build_prompt`) — the newest flagships refused the
+///   story ("…even for a family plaque…") while the neutral framing translates
+///   every measured song and preserves masculine/feminine forms. The Slovak
+///   output changes (new framing + previously-refused songs now translate), so
+///   the catalog re-translates under the working prompt. No alignment change →
+///   `LYRICS_PIPELINE_VERSION` untouched.
+pub const LYRICS_TRANSLATION_VERSION: u32 = 2;
 
 /// Upper duration bound for lyrics processing (#144, "Rollout blocker #3").
 ///
@@ -216,23 +107,10 @@ pub const LYRICS_TRANSLATION_VERSION: u32 = 1;
 /// with `lyrics_override_text` + manual priority if ever needed.
 pub const MAX_LYRICS_DURATION_MS: i64 = 30 * 60 * 1000;
 
-/// Alignment-model identifier written to `lyrics_alignment_model` for the
-/// raw-ship-through path (line-timed text source, no whisperx alignment ran).
+/// Alignment-model identifier written to `lyrics_alignment_model` when no
+/// forced alignment ran (defensive default for a raw line-timed ship-through;
+/// still referenced by `db::models`).
 pub const ALIGNMENT_MODEL_NONE: &str = "none";
-
-/// Alignment-model identifier for the line-timed merge module path (e.g.
-/// `lrclib+timed-merge` source label). No whisperx alignment ran.
-pub const ALIGNMENT_MODEL_TIMED_MERGE: &str = "timed-merge";
-
-/// Alignment-model identifier for whisperx large-v3 rev1 (current default
-/// alignment model for description + yt_subs+whisperx paths).
-pub const ALIGNMENT_MODEL_WHISPERX_V3_REV1: &str = "whisperx-large-v3@rev1";
-
-/// Alignment-model literal stamped on lyrics rows produced by the asr_path
-/// branch (AssemblyAI Universal-3 Pro ASR + Claude-merge). Revision counter
-/// bumps when the prompt or post-processing changes in a way that affects
-/// production output.
-pub const ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1: &str = "assemblyai-universal-3-pro@rev1";
 
 /// Alignment-model literal stamped on lyrics rows produced by the Lever-2
 /// (#143) forced-alignment reference stage: `lyrics-alignment-mtl`
@@ -240,6 +118,12 @@ pub const ALIGNMENT_MODEL_ASSEMBLYAI_U3_PRO_REV1: &str = "assemblyai-universal-3
 /// transcript. `rev1` bumps when the mtl subprocess wrapper or the gate
 /// thresholds change in a way that affects production output.
 pub const ALIGNMENT_MODEL_MTL_REV1: &str = "lyrics-alignment-mtl@rev1";
+
+/// Alignment-model literal stamped on lyrics rows produced by the v22 (#159)
+/// base tier: a Gemini 3.5 Transcribe transcript grouped into lines
+/// (`g35t_transcript`). `rev1` bumps when the grouping/gap thresholds change
+/// in a way that affects production output.
+pub const ALIGNMENT_MODEL_G35T_REV1: &str = "gemini-3-5-transcribe@rev1";
 
 /// Clean a lyrics track by removing noise from auto-generated subtitles.
 ///
@@ -360,10 +244,22 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_pipeline_version_is_v21() {
+    fn lyrics_pipeline_version_is_v22() {
         assert_eq!(
-            LYRICS_PIPELINE_VERSION, 21,
-            "v21 = Lever-2 forced-alignment reference regime (#143)"
+            LYRICS_PIPELINE_VERSION, 22,
+            "v22 = one regime: mtl ★ tier + g35t base tier, legacy routes deleted (#159)"
+        );
+    }
+
+    #[test]
+    fn lyrics_translation_version_is_v2() {
+        assert_eq!(
+            LYRICS_TRANSLATION_VERSION, 2,
+            "v2 = neutral technical translation prompt replaces the #152 grandparent/plaque story (#145)"
+        );
+        assert!(
+            LYRICS_TRANSLATION_VERSION != LYRICS_PIPELINE_VERSION,
+            "translation version is independent of the pipeline version"
         );
     }
 }
