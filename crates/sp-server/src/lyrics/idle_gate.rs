@@ -18,6 +18,7 @@
 //! stay as defence in depth (secondary); this gate is the primary mechanism.
 
 use crate::playback::ndi_health::PlaybackStateLabel;
+use std::time::{Duration, Instant};
 
 /// A read-only snapshot of "is the wall in use right now?" — the three signals
 /// that make heavy lyrics processing contend with live output on the shared
@@ -68,6 +69,39 @@ pub(crate) fn should_defer(gate_enabled: bool, activity: WallActivity) -> bool {
     gate_enabled && activity.in_use()
 }
 
+/// Idle-settle hysteresis (2026-09-14 incident): a single idle sample is not
+/// enough — OBS scene re-evaluation, operator scene switches and song changes
+/// flip every pipeline off `Playing` for a few seconds, and the worker resumed
+/// a 5-minute GPU job while SP-fast was playing. Heavy work resumes only after
+/// the wall has read idle for this long WITHOUT interruption.
+pub(crate) const WALL_IDLE_SETTLE: Duration = Duration::from_secs(30);
+
+/// Tracks how long the wall has read continuously idle. Pure — `now` is passed in.
+#[derive(Debug, Default)]
+pub(crate) struct IdleSettle {
+    idle_since: Option<Instant>,
+}
+
+impl IdleSettle {
+    /// Feed one gate sample. Returns `true` when heavy work must still be
+    /// DEFERRED: the wall is in use, or it went idle less than
+    /// `WALL_IDLE_SETTLE` ago. A busy sample resets the settle clock.
+    pub(crate) fn defer(&mut self, in_use: bool, now: Instant) -> bool {
+        if in_use {
+            self.idle_since = None;
+            return true;
+        }
+        let since = *self.idle_since.get_or_insert(now);
+        now.saturating_duration_since(since) < WALL_IDLE_SETTLE
+    }
+
+    /// How long the wall has been continuously idle (None while in use).
+    pub(crate) fn idle_for(&self, now: Instant) -> Option<Duration> {
+        self.idle_since
+            .map(|since| now.saturating_duration_since(since))
+    }
+}
+
 /// Parse the `lyrics_gate_when_playing` DB setting. Default ON (`true`) so a
 /// deploy/upgrade with no setting row gates by default; `false`/`0`/`off`/`no`
 /// (case- and whitespace-insensitive) disable it. Mirrors the
@@ -82,18 +116,23 @@ pub(crate) fn gate_setting_enabled(raw: Option<&str>) -> bool {
     }
 }
 
-/// Once-per-transition logger for the gate. `note` returns `Some(line)` only
-/// when the busy state flips, so the "waiting — wall in use" INFO logs on each
-/// transition rather than every 5-s worker tick.
+/// Once-per-transition logger for the gate, plus the shared idle-settle clock.
+/// `note` returns `Some(line)` only when the busy state flips, so the
+/// "waiting — wall in use" INFO logs on each transition rather than every worker
+/// tick. `settle` carries the idle-settle hysteresis (see `defer_settled`) —
+/// both workers already hold this struct in a `Mutex`, so parking the settle
+/// state here needs no worker constructor changes.
 #[derive(Debug, Default)]
 pub(crate) struct GateLog {
     last_busy: Option<bool>,
+    settle: IdleSettle,
 }
 
 impl GateLog {
     /// Record the current busy state and return a log line iff it changed.
     /// `detail` names the concrete cause (e.g. `"SP-fast Playing"`) for the
-    /// busy→ line; the idle→ line reports the worker resuming.
+    /// busy→ line; the idle→ line reports the worker resuming. Busy-flag
+    /// transitions only — the idle-settle clock lives in `defer_settled`.
     pub(crate) fn note(&mut self, busy: bool, detail: &str) -> Option<String> {
         if self.last_busy == Some(busy) {
             return None;
@@ -109,6 +148,19 @@ impl GateLog {
         } else {
             None
         }
+    }
+
+    /// The settled gate decision both workers route through: defer heavy work
+    /// while the gate is enabled AND the wall is either in use OR has read idle
+    /// for less than `WALL_IDLE_SETTLE`. A disabled gate never defers (unchanged
+    /// behaviour). Feeds one sample to the shared `IdleSettle` clock.
+    pub(crate) fn defer_settled(
+        &mut self,
+        gate_enabled: bool,
+        activity: WallActivity,
+        now: Instant,
+    ) -> bool {
+        gate_enabled && self.settle.defer(activity.in_use(), now)
     }
 }
 
@@ -188,7 +240,15 @@ impl crate::lyrics::worker::LyricsWorker {
     pub(crate) async fn wall_gate_should_defer(&self) -> (bool, WallActivity) {
         let enabled = self.gate_when_playing_enabled().await;
         let activity = self.wall_activity().await;
-        (should_defer(enabled, activity), activity)
+        // Idle-settle hysteresis lives in the shared `GateLog` (held in a Mutex
+        // by both workers). Sample it AFTER the awaits and drop the lock before
+        // returning — never hold the mutex across an `.await`.
+        let now = Instant::now();
+        let defer = match self.wall_gate_log.lock() {
+            Ok(mut g) => g.defer_settled(enabled, activity, now),
+            Err(_) => should_defer(enabled, activity),
+        };
+        (defer, activity)
     }
 
     /// Human detail for the gate log / dashboard, e.g. `"SP-fast Playing"`. For
@@ -196,6 +256,24 @@ impl crate::lyrics::worker::LyricsWorker {
     /// falls back to the generic `WallActivity::reason`.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn wall_busy_detail(&self, activity: WallActivity) -> String {
+        if !activity.in_use() {
+            // Deferring only because the idle-settle window has not elapsed yet
+            // (the wall is idle right now). Read the settle clock under the same
+            // shared lock the gate decision used.
+            let idle_secs = match self.wall_gate_log.lock() {
+                Ok(g) => g
+                    .settle
+                    .idle_for(Instant::now())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                Err(_) => 0,
+            };
+            return format!(
+                "wall just went idle — settling {}s of {}s",
+                idle_secs,
+                WALL_IDLE_SETTLE.as_secs()
+            );
+        }
         if activity.any_playing
             && let Some(reg) = &self.ndi_health_registry
             && let Some(name) = reg

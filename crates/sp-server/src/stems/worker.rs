@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast};
@@ -118,8 +118,22 @@ impl StemWorker {
         );
         let activity =
             wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()).await;
-        if should_defer(gate_enabled, activity) {
-            let detail = activity.reason().unwrap_or("wall in use");
+        // Idle-settle hysteresis (2026-09-14 incident): a single idle sample is
+        // not enough — resume only after the wall has read idle continuously for
+        // `WALL_IDLE_SETTLE`. Shared with the lyrics worker via `GateLog`.
+        let now = Instant::now();
+        let defer = match self.wall_gate_log.lock() {
+            Ok(mut g) => g.defer_settled(gate_enabled, activity, now),
+            Err(_) => should_defer(gate_enabled, activity),
+        };
+        if defer {
+            // When deferring only because the settle window has not elapsed (the
+            // wall is idle right now), say so instead of "wall in use".
+            let detail = if activity.in_use() {
+                activity.reason().unwrap_or("wall in use")
+            } else {
+                "wall just went idle — settling"
+            };
             if let Ok(mut g) = self.wall_gate_log.lock()
                 && let Some(line) = g.note(true, detail)
             {

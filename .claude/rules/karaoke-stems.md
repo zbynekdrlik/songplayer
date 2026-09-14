@@ -68,11 +68,19 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   InstrumentalOnly, with `stem_gains(vocal_gain) → (vg, ig)`.
 - **Worker (`crate::stems::StemWorker`)** mirrors the lyrics worker: a 10 s tick
   that, ONLY while the wall is idle (reuses the #154 gate via
-  `idle_gate::wall_activity_from` + `should_defer`), separates the next normalized
-  song (`get_next_video_for_stems`, oldest-first, backoff-gated). Runs
+  `idle_gate::wall_activity_from` + `GateLog::defer_settled`), separates the next
+  normalized song (`get_next_video_for_stems`, oldest-first, backoff-gated). Runs
   `stem_worker.py` at BELOW_NORMAL WDDM priority + the `LYRICS_GPU_MEM_FRACTION`
   VRAM cap + CUDA-OOM→CPU fallback (`gpu_policy`). Kill switch: `stem_worker_enabled`
   (default ON, idle-gated anyway).
+- **Idle-settle hysteresis (2026-09-14 incident, `idle_gate.rs`):** a SINGLE idle
+  sample was the bug — OBS scene re-evaluation (E2E `afterAll`), an operator
+  scene switch or a song change flips every pipeline off `Playing` for a few
+  seconds, and both workers resumed a multi-minute GPU job during that gap. Heavy
+  work now resumes only after the wall reads idle continuously for
+  `WALL_IDLE_SETTLE = 30 s`. Both workers share the clock through
+  `GateLog::defer_settled` (the `GateLog` each already holds in a `Mutex`), so no
+  worker constructor changed; the pure `should_defer` stays for its own tests.
 - **DB (V24):** `videos.{vocals_file_path, instrumental_file_path, stem_status,
   stem_attempts, stem_next_attempt_at}`. `stem_status` NULL=pending → done /
   failed (retryable) / unsupported (terminal). Paths are also derived
