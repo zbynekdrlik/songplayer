@@ -428,6 +428,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn translate_via_claude_refusal_error_names_refusal_and_model() {
+        // #145 regression: when Claude REFUSES on content-policy grounds, the
+        // failure must be surfaced AS a refusal and must carry the model id —
+        // never a generic "returned no translations" that hides the cause.
+        use crate::ai::AiSettings;
+        use crate::ai::client::AiClient;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {"content":
+                    "I'd like to help, but I can't do this one — these lines match \
+                     the lyrics of a published worship song."}
+            }]
+        });
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "claude-fable-5-1".into(),
+            system_prompt_extra: None,
+        });
+
+        let track = make_track(&["Line one", "Line two"]);
+        let err = translate_via_claude(&client, &track, SpeakerGender::Male)
+            .await
+            .expect_err("a refusal must be an error");
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("refus"),
+            "a content-policy refusal must be surfaced as a refusal, got: {msg}"
+        );
+        assert!(
+            msg.contains("claude-fable-5-1"),
+            "a refusal error must name the model id, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
     async fn translate_via_claude_empty_track_returns_empty() {
         use crate::ai::AiSettings;
         use crate::ai::client::AiClient;
