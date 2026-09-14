@@ -17,6 +17,11 @@ pub fn run() {
     // writer thread keeps draining buffered messages until shutdown.
     let _log_guard = setup_logging();
 
+    // Install the panic hook as early as possible so a startup-phase panic is
+    // captured to a durable crash file before release `panic = "abort"` aborts
+    // the process (#156). Idempotent with sp_server::start()'s own call.
+    sp_server::install_panic_hook(data_directory().join("songplayer-panic.log"));
+
     tracing::info!("SongPlayer v{} starting", env!("BUILD_VERSION"));
 
     // Create Tokio runtime for sp-server.

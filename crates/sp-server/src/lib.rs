@@ -8,6 +8,7 @@ pub mod lyrics;
 pub mod metadata;
 pub mod obs;
 mod obs_bridge;
+pub mod panic_hook;
 pub mod playback;
 pub mod playlist;
 pub mod presenter;
@@ -15,6 +16,8 @@ pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
 pub mod startup;
+
+pub use panic_hook::install_panic_hook;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -196,6 +199,17 @@ pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
+    // Install the panic hook FIRST so any panic during startup or steady-state
+    // is captured to a durable crash file before release `panic = "abort"`
+    // kills the process (#156). Idempotent: the Tauri shell installs it earlier
+    // when present, and the internal `Once` makes the double call safe.
+    let crash_log = config
+        .db_path
+        .parent()
+        .map(|d| d.join("songplayer-panic.log"))
+        .unwrap_or_else(|| PathBuf::from("songplayer-panic.log"));
+    crate::install_panic_hook(crash_log);
+
     // 1. Database
     let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
     db::run_migrations(&pool).await?;
