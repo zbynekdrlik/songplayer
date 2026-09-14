@@ -146,6 +146,67 @@ fn source_label_is_gemini_transcribe() {
     assert_eq!(SOURCE_G35T, "gemini-3-5-transcribe");
 }
 
+// --- sanitize_lines: direct invariant tests (salvaged from asr_path/sanitize.rs,
+// pinning the monotonic-floor / min-duration clamps against mutation) ---
+
+fn line(start: u64, end: u64) -> sp_core::lyrics::LyricsLine {
+    sp_core::lyrics::LyricsLine {
+        start_ms: start,
+        end_ms: end,
+        en: "x".into(),
+        sk: None,
+        words: None,
+    }
+}
+
+#[test]
+fn sanitize_clamps_start_below_floor_up_to_floor() {
+    let out = sanitize_lines(vec![line(0, 500), line(200, 800)]);
+    assert_eq!(out[0].start_ms, 0);
+    assert_eq!(out[0].end_ms, 500);
+    assert_eq!(out[1].start_ms, 500, "start below floor clamps up to floor");
+    assert_eq!(out[1].end_ms, 800);
+}
+
+#[test]
+fn sanitize_does_not_clamp_start_above_floor() {
+    let out = sanitize_lines(vec![line(0, 500), line(600, 900)]);
+    assert_eq!(out[1].start_ms, 600, "start above floor is left alone");
+}
+
+#[test]
+fn sanitize_clamps_end_below_minimum_duration() {
+    let out = sanitize_lines(vec![line(1000, 1050)]);
+    assert_eq!(out[0].start_ms, 1000);
+    assert_eq!(out[0].end_ms, 1200, "50ms line clamped up to start+200");
+}
+
+#[test]
+fn sanitize_end_far_above_minimum_is_unchanged() {
+    let out = sanitize_lines(vec![line(10, 500)]);
+    assert_eq!(
+        out[0].end_ms, 500,
+        "end far above minimum must not be clamped"
+    );
+}
+
+#[test]
+fn sanitize_start_exactly_at_floor_not_clamped() {
+    let out = sanitize_lines(vec![line(0, 500), line(500, 900)]);
+    assert_eq!(out[1].start_ms, 500);
+}
+
+#[test]
+fn sanitize_end_exactly_at_min_duration_not_clamped() {
+    let out = sanitize_lines(vec![line(100, 300)]); // 300 == 100 + MIN(200)
+    assert_eq!(out[0].end_ms, 300);
+}
+
+#[test]
+fn sanitize_empty_input_empty_output() {
+    assert!(sanitize_lines(vec![]).is_empty());
+}
+
 // --- build_track: the base-tier decision the worker routes on ---
 
 #[test]
