@@ -84,7 +84,17 @@ pub const LYRICS_PIPELINE_VERSION: u32 = 22;
 /// and NEVER re-runs alignment or touches `lyrics_pipeline_version`. Every
 /// `videos` row starts at `lyrics_translation_version = 0`, so the first
 /// non-zero value re-translates the whole catalog under the current prompt.
-pub const LYRICS_TRANSLATION_VERSION: u32 = 1;
+///
+/// History:
+/// - v1 (#152): gender-aware grandparent/plaque framing.
+/// - v2 (#145): the grandparent/plaque STORY is replaced by a neutral technical
+///   prompt (`translator::build_prompt`) — the newest flagships refused the
+///   story ("…even for a family plaque…") while the neutral framing translates
+///   every measured song and preserves masculine/feminine forms. The Slovak
+///   output changes (new framing + previously-refused songs now translate), so
+///   the catalog re-translates under the working prompt. No alignment change →
+///   `LYRICS_PIPELINE_VERSION` untouched.
+pub const LYRICS_TRANSLATION_VERSION: u32 = 2;
 
 /// Upper duration bound for lyrics processing (#144, "Rollout blocker #3").
 ///
@@ -238,6 +248,18 @@ mod tests {
         assert_eq!(
             LYRICS_PIPELINE_VERSION, 22,
             "v22 = one regime: mtl ★ tier + g35t base tier, legacy routes deleted (#159)"
+        );
+    }
+
+    #[test]
+    fn lyrics_translation_version_is_v2() {
+        assert_eq!(
+            LYRICS_TRANSLATION_VERSION, 2,
+            "v2 = neutral technical translation prompt replaces the #152 grandparent/plaque story (#145)"
+        );
+        assert!(
+            LYRICS_TRANSLATION_VERSION != LYRICS_PIPELINE_VERSION,
+            "translation version is independent of the pipeline version"
         );
     }
 }
