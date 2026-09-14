@@ -332,7 +332,7 @@ pub(crate) fn decode_and_send_paced(
                     // #15 part 2: offer to the preview tap during `prepare`
                     // (decode-ahead, BEFORE the boundary emit) so the sampling
                     // is OFF the time-critical paced submit path. No viewer =>
-                    // one atomic load; the pacer/genlock cadence is untouched.
+                    // a couple of relaxed atomic loads; pacer/genlock untouched.
                     preview_tap.try_offer(
                         video_frame.width,
                         video_frame.height,

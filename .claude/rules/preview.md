@@ -29,8 +29,9 @@ submitted to NDI:
 
 ## Iron rules
 
-1. **`try_offer` must never block the decode thread.** With no viewer it is one
-   atomic load + return. It uses `try_lock` (never `lock`) on the inbox and
+1. **`try_offer` must never block the decode thread.** With no viewer it is a
+   couple of relaxed atomic loads + return (no lock, no allocation). It uses
+   `try_lock` (never `lock`) on the inbox and
    drops the frame if the encoder is busy. Do NOT add a blocking call, a
    `lock()`, or any per-frame allocation on the no-viewer path.
 2. **No DCT on the decode thread.** The decode thread only does a cheap

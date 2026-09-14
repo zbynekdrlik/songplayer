@@ -688,8 +688,8 @@ fn decode_and_send(
                 let timestamp_ms = video_frame.timestamp_ms;
                 // #15 part 2: opportunistically offer this decoded frame to the
                 // preview tap BEFORE the NDI submit consumes `video_frame.data`.
-                // No viewer => one atomic load; never blocks, never adds latency
-                // to the NDI submit path.
+                // No viewer => a couple of relaxed atomic loads; never blocks,
+                // never adds latency to the NDI submit path.
                 preview_tap.try_offer(
                     video_frame.width,
                     video_frame.height,

@@ -7,8 +7,9 @@
 //! The offer is engineered to NEVER touch the NDI submit / genlock / pacing
 //! path and NEVER block the decode thread:
 //!
-//! * With no viewer, `try_offer` is a single atomic load + return (a recent
-//!   `GET .../preview.jpg` marks a viewer with a TTL).
+//! * With no viewer, `try_offer` is a couple of relaxed atomic loads + return
+//!   — no lock, no allocation, never blocks (a recent `GET .../preview.jpg`
+//!   marks a viewer with a TTL).
 //! * With a viewer, at most one frame per `min_ingest_interval` is accepted:
 //!   the NV12 frame is nearest-neighbour downscaled to a small packed-RGB
 //!   frame ON the decode thread (cheap, no DCT) and stored latest-wins in a
@@ -80,8 +81,6 @@ struct Inbox {
     pending: Option<RawPreviewFrame>,
     /// The worker is currently encoding — new offers are dropped.
     busy: bool,
-    /// The tap is shutting down — the worker should exit.
-    shutdown: bool,
 }
 
 /// Shared state behind a [`PreviewTap`]. All the logic lives here so tests can
@@ -115,7 +114,6 @@ impl PreviewShared {
             inbox: Mutex::new(Inbox {
                 pending: None,
                 busy: false,
-                shutdown: false,
             }),
             cv: Condvar::new(),
             latest_jpeg: Mutex::new(None),
@@ -144,9 +142,14 @@ impl PreviewShared {
         self.now_ms().saturating_sub(last) < self.cfg.viewer_ttl_ms
     }
 
-    /// Log the unsubscribe edge once the viewer has gone stale.
+    /// Log the unsubscribe edge once the viewer has gone stale. Load-first so
+    /// the steady no-viewer path is a single relaxed load with no write — the
+    /// `swap` (and log) fire only on the actual active→stale edge.
     fn note_unsubscribe_if_stale(&self) {
-        if !self.is_subscribed() && self.was_subscribed.swap(false, Ordering::Relaxed) {
+        if self.was_subscribed.load(Ordering::Relaxed)
+            && !self.is_subscribed()
+            && self.was_subscribed.swap(false, Ordering::Relaxed)
+        {
             info!(label = %self.label, "preview unsubscribed (viewer gone)");
         }
     }
@@ -169,7 +172,7 @@ impl PreviewShared {
         // NEVER blocks the decode thread.
         {
             match self.inbox.try_lock() {
-                Ok(g) if !g.busy && !g.shutdown => {}
+                Ok(g) if !g.busy => {}
                 _ => {
                     debug!(label = %self.label, "preview: dropped frame (encoder busy)");
                     return;
@@ -185,7 +188,7 @@ impl PreviewShared {
             Ok(g) => g,
             Err(_) => return,
         };
-        if ib.busy || ib.shutdown {
+        if ib.busy {
             return;
         }
         ib.pending = Some(frame); // latest-wins
@@ -292,14 +295,11 @@ fn spawn_worker(shared: Arc<PreviewShared>) {
                         Ok(g) => g,
                         Err(p) => p.into_inner(),
                     };
-                    while ib.pending.is_none() && !ib.shutdown {
+                    while ib.pending.is_none() {
                         ib = match shared.cv.wait(ib) {
                             Ok(g) => g,
                             Err(p) => p.into_inner(),
                         };
-                    }
-                    if ib.shutdown {
-                        break;
                     }
                 }
                 shared.encode_pending_once();

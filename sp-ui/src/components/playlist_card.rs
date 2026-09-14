@@ -27,6 +27,10 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
     // from `GET /api/v1/playback/{id}/preview.jpg`. The image element only
     // exists while Playing (see below), so an idle card makes no requests.
     let preview_tick = RwSignal::new(0u64);
+    // The <img> stays hidden (placeholder shown) until the first frame actually
+    // loads, so a body-less 204 during warmup never flashes a broken image or
+    // trips the zero-console-errors gate.
+    let preview_loaded = RwSignal::new(false);
     let preview_cancelled = RwSignal::new(false);
     on_cleanup(move || preview_cancelled.set(true));
     Effect::new(move |_| {
@@ -97,6 +101,11 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
                                                 class="preview-img"
                                                 data-testid="preview-img"
                                                 alt="Živý náhľad"
+                                                style:display=move || {
+                                                    if preview_loaded.get() { "block" } else { "none" }
+                                                }
+                                                on:load=move |_| preview_loaded.set(true)
+                                                on:error=move |_| preview_loaded.set(false)
                                                 src=move || {
                                                     format!(
                                                         "/api/v1/playback/{pid}/preview.jpg?t={}",
@@ -104,6 +113,19 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
                                                     )
                                                 }
                                             />
+                                            {move || {
+                                                (!preview_loaded.get())
+                                                    .then(|| {
+                                                        view! {
+                                                            <div
+                                                                class="preview-placeholder"
+                                                                data-testid="preview-placeholder"
+                                                            >
+                                                                "Načítavam náhľad…"
+                                                            </div>
+                                                        }
+                                                    })
+                                            }}
                                         }
                                             .into_any()
                                     } else {
