@@ -22,6 +22,13 @@ pub use models_lyrics_backoff::*;
 mod models_translation;
 pub use models_translation::*;
 
+// Karaoke stem-separation queries (#14) split into a sibling module so this
+// file stays under the 1000-line airuleset cap. Re-exported so call sites use
+// `crate::db::models::get_next_video_for_stems`, etc.
+#[path = "models_stems.rs"]
+mod models_stems;
+pub use models_stems::*;
+
 // ---------------------------------------------------------------------------
 // Playlists
 // ---------------------------------------------------------------------------

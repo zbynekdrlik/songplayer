@@ -32,6 +32,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (21, MIGRATION_V21),
     (22, MIGRATION_V22),
     (23, MIGRATION_V23),
+    (24, MIGRATION_V24),
 ];
 
 const MIGRATION_V1: &str = "
@@ -320,6 +321,23 @@ ALTER TABLE videos ADD COLUMN lyrics_translation_gender TEXT;
 ALTER TABLE videos ADD COLUMN lyrics_translation_version INTEGER NOT NULL DEFAULT 0;
 ";
 
+// V24 (#14) — karaoke stem separation bookkeeping. Additive, no data loss.
+// The stem worker separates each normalized `{id}_audio.flac` into a vocals +
+// instrumental sidecar (48 kHz stereo, no dereverb) under the #154 idle gate,
+// then records the two paths + a status here. `stem_status` NULL = pending
+// (never attempted); 'done' = both sidecars written; 'failed' = separation
+// errored (retried with backoff); 'unsupported' = terminal (e.g. audio too
+// long). `stem_attempts` + `stem_next_attempt_at` mirror the V22 lyrics retry
+// backoff so a broken row does not hot-loop the worker. Existing rows default
+// to (NULL, NULL, NULL, 0, NULL) → every cached song is queued for separation.
+const MIGRATION_V24: &str = "
+ALTER TABLE videos ADD COLUMN vocals_file_path TEXT;
+ALTER TABLE videos ADD COLUMN instrumental_file_path TEXT;
+ALTER TABLE videos ADD COLUMN stem_status TEXT;
+ALTER TABLE videos ADD COLUMN stem_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN stem_next_attempt_at TEXT;
+";
+
 /// Create a connection pool backed by a file.
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(path)?
@@ -420,3 +438,7 @@ mod tests_v22;
 #[path = "mod_tests_v23.rs"]
 #[cfg(test)]
 mod tests_v23;
+
+#[path = "mod_tests_v24.rs"]
+#[cfg(test)]
+mod tests_v24;
