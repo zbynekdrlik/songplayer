@@ -23,82 +23,65 @@ triggers:
 
 # Songplayer Lyrics Pipeline Rules
 
-## Provider hierarchy (current production state, v20)
+## Provider hierarchy (current production state, v22 — ONE regime, #159)
 
-The Gemini chunked-transcription regime (`gemini_provider.rs`) and the
-qwen3/autosub aligners are DELETED (`orchestrator.rs`'s own doc comment:
-"imports NONE of the legacy providers ... deleted in Phase G"). The real
-route is two independent stages:
+Owner directive 2026-09-14: keep the best route (v21 mtl★), delete the rest —
+NOT "keep as fallback". The v20 WhisperX-on-Replicate route
+(`whisperx_replicate`/`Orchestrator`/`text_reference_merge`/`timed_reference_merge`/
+`yt_subs_split`) and the AssemblyAI `asr_path` route are DELETED. The Gemini
+chunked-transcription / qwen3 / autosub regimes were already gone. The pipeline
+is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
+(Gemini g35t):
 
-1. **Text gathering** (`gather.rs::gather_sources_impl`) — fetched in this
-   order, all best-effort: manual **yt_subs** captions → **LRCLIB** →
-   **lyrics.ovh** (community lyrics API; **Genius** is the fallback ONLY
-   when lyrics.ovh misses, both labelled source `"genius"`) → **Spotify**
-   (operator-pasted `spotify_track_id`, LINE_SYNCED) → operator
-   **`lyrics_override_text`** → **YouTube description** LLM-extracted via
-   Claude (`description_provider.rs`). The authoritative candidate among
-   whatever gathering found is picked by `claude_merge::priority_with_timing`
-   (override=6 highest; timed spotify/lrclib=5, timed yt_subs=4; text
-   description=3, text lrclib=2, text genius=1; everything else=0).
-2. **Timing** (`orchestrator.rs`) — **WhisperX large-v3 on Replicate**
-   (`whisperx_replicate.rs::WhisperXReplicateBackend`) is the sole
-   `AlignmentBackend`. Tier-1 `LineSynced` (yt_subs/lrclib/spotify already
-   timed) runs a per-caption-window Claude split with WhisperX anchors
-   (`timed_reference_merge`); Tier-1 `TextOnly` runs WhisperX against the
-   best text candidate (`timed_reference_merge` when coverage is good,
-   else `text_reference_merge`); Tier-1 `None` ships raw WhisperX + line
-   split.
-3. **`asr_path`** (`asr_path/mod.rs` — AssemblyAI Universal-3 Pro + Claude
-   regroup, line-level only) — the fallback when
-   `orchestrator::is_allowed_text_source` rejects every gathered candidate
-   (untimed-only, WhisperX gate would reject it) but at least one text
-   candidate exists.
-4. **Zero candidates at all** → `db::models::mark_unsupported_source`
-   (`lyrics_source = 'unsupported_source'`); an `asr_path` transcription
-   failure quarantines as `asr_gap` instead.
-5. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again, no
-   exceptions. YouTube autosub produces wrong timing and contaminates
-   ensemble output.
+0. **Text gathering** (`gather.rs::gather_sources_impl`) — unchanged, all
+   best-effort: manual **yt_subs** captions → **LRCLIB** → **lyrics.ovh**
+   (Genius is the fallback when lyrics.ovh misses, both labelled `"genius"`)
+   → **Spotify** (`spotify_track_id`, LINE_SYNCED) → operator
+   **`lyrics_override_text`** → **YouTube description** (Claude-extracted,
+   `description_provider.rs`). The best candidate is picked by
+   `claude_merge::best_authoritative_candidate` /
+   `priority_with_timing` (override=6; timed spotify/lrclib=5, timed
+   yt_subs=4; text description=3, text lrclib=2, text genius=1; else=0).
 
-## Reference regime (v21, #143)
-
-A NEW stage runs BEFORE step 2 (WhisperX/asr_path) decides anything, for
-any song with an allowed text candidate + a preprocessed vocal WAV. Owner
-directive 2026-09-12 on #130: "vyber najlepšie dosiahnuteľné riešenie a
-začni reprocessovať" — the forced aligner `lyrics-alignment-mtl` (MTL+BDR)
-leads every measurement (31.6% gold-norm, 83–92% on clean songs) but has a
-known catastrophic failure mode (locking onto the wrong repetition of a
-repetitive worship arrangement, shifting a whole song 22–42s), so it ships
-gated by an independent second opinion rather than on its own:
-
-1. **Align** — `mtl_aligner::align` (production wrapper around the eval
-   script `eval/lyrics/aligners/lyrics_alignment_mtl/run.py`) force-aligns
-   `claude_merge::best_authoritative_candidate`'s lines (the SAME selector
-   step 1 above uses — any source, timed or not) to the isolated vocals.
-   BELOW_NORMAL priority + no console window on Windows, `PYTHONUTF8=1`
-   (#137), 15-min timeout, one `--no-cuda` retry on a CUDA-OOM stderr tail.
-2. **Verify** — `g35t_client::transcribe_words` (Gemini 3.5 Transcribe
-   word timings, keys from `gemini_api_key`) + `reference_gate::evaluate`
-   gate BOTH conditions: whole-song sanity (`|median signed Δstart| <=
-   400ms` — this is what catches the wrong-repetition failure mode) AND
-   agreement (`>=70%` of matched lines within 400ms, `>=60%` of lines
-   matched).
-3. **Pass** → mtl line timings ship directly (`words: None`, no word
-   synthesis — same v18 rule as everywhere else), `lyrics_source =
+1. **★ tier — v21 reference stage** (`worker_reference::run_mtl_reference_stage`
+   → `orchestrator::run_reference_stage`). For any song with vocals + a text
+   candidate (≥4 lines): `mtl_aligner::align` (production wrapper around
+   `eval/lyrics/aligners/lyrics_alignment_mtl/run.py`, MTL+BDR — 31.6%
+   gold-norm, best measured) force-aligns the best candidate's lines to the
+   isolated vocals, verified against an independent `g35t_client::
+   transcribe_words` (Gemini 3.5 Transcribe) transcript through
+   `reference_gate::evaluate` (whole-song sanity `|median signed Δstart| ≤
+   400ms` — catches mtl's wrong-repetition failure mode — AND agreement ≥70%
+   of matched lines within 400ms, ≥60% matched). **PASS** → mtl line timings
+   ship directly (`words: None`), `lyrics_source =
    "<candidate.source>+mtl@rev1/g35t-ok"`, `lyrics_alignment_model =
-   ALIGNMENT_MODEL_MTL_REV1`, `videos.lyrics_reference = 1` (the wall ★).
-   **Fail/error** → `videos.lyrics_reference = 0`, the gate decision +
-   stats land in `{youtube_id}_alignment_audit.json`, and the song falls
-   through to step 2 (WhisperX/asr_path) unchanged — never a regression
-   versus what production shipped before this stage existed.
-4. Skip conditions (info-logged per song, never fatal): mtl tooling not
-   installed (`MtlConfig::is_available()` — WARNed ONCE at worker start,
-   not per song), no preprocessed vocal WAV, no text candidate, or a
-   candidate under 4 lines.
-5. The injection seam is `orchestrator::ReferenceStageBackend`
-   (`mtl_align` + `asr_transcribe`); production wires
-   `RealReferenceStageBackend`, tests inject a fake — never make a real
-   subprocess/HTTP call from a unit test.
+   ALIGNMENT_MODEL_MTL_REV1`, `videos.lyrics_reference = 1` (wall ★).
+   **FAIL/ERROR** → `videos.lyrics_reference = 0`, the gate decision lands in
+   `{youtube_id}_alignment_audit.json`, and the song falls through to tier 2.
+   Byte-for-byte UNCHANGED from v21 — do NOT degrade this path.
+   - Skip conditions (info-logged, fall to tier 2): mtl tooling absent
+     (`MtlConfig::is_available()`, WARNed once at worker start), no vocal WAV,
+     no text candidate, or candidate < 4 lines.
+   - Injection seam: `orchestrator::ReferenceStageBackend` (`mtl_align` +
+     `asr_transcribe`); production wires `RealReferenceStageBackend`, tests
+     inject a fake — never a real subprocess/HTTP call in a unit test.
+
+2. **base tier — g35t transcript** (`worker_g35t::run_g35t_transcript_branch`
+   → `g35t_transcript::words_to_lines`). The SOLE fallback for every song the
+   ★ tier does not ship (no usable text, gate FAIL, mtl skip/error):
+   `g35t_client::transcribe_words` transcribes the isolated vocals, and the
+   words are grouped into LED-wall lines by a deterministic silence-gap split
+   (salvaged from the old asr_path, re-typed) + `line_splitter::
+   split_lyrics_lines` + the monotonic/min-duration sanitizer. Ships
+   `words: None`, `lyrics_source = "gemini-3-5-transcribe"`,
+   `lyrics_alignment_model = ALIGNMENT_MODEL_G35T_REV1`. Measured no-text
+   quality: g35t 19.7% gold-norm ≤400ms vs the retired AssemblyAI 3.8%.
+   Reuses the vocal WAV already isolated for the ★ tier (no 2nd Demucs).
+   - Empty/blank transcript → quarantine as `asr_gap`. No vocals / no gemini
+     keys / g35t transport error → `Deferred` (row backs off, retries later).
+
+3. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again.
+   YouTube autosub produces wrong timing.
 
 ## Gemini API discipline
 
@@ -216,11 +199,11 @@ Also: never suggest, ask about, or include "bump pipeline version" as an option
 in AskUserQuestion. Wait for the user to initiate.
 
 Bump the constant ONLY when:
-- Adding/removing an AlignmentProvider from the worker registration
-- Changing a provider's algorithm (chunking, matcher, density gate thresholds)
-- Changing either Claude merge prompt (text reconciliation or timing merge)
-- Changing the reference-text-selection algorithm
-- Toggling `LYRICS_GEMINI_ENABLED` or `LYRICS_QWEN3_ENABLED`
+- Adding/removing a route or alignment stage from the worker (e.g. the #159
+  one-regime cut that dropped WhisperX + asr_path was a 21→22 bump)
+- Changing the mtl align invocation, the `reference_gate` thresholds, or the
+  g35t base-tier grouping (gap/coalesce/sanitize) in a way that alters output
+- Changing the reference-text-selection algorithm (`best_authoritative_candidate`)
 
 Do NOT bump for: bug fixes with identical output, refactoring, logging
 changes, UI-only changes, performance optimizations with identical output.
@@ -254,10 +237,10 @@ A Claude call handles arbitrary human-authored text uniformly.
 
 ## ASR-data-only fixes
 
-Only fix timing issues that whisperx ASR data actually supports. When a wall
-issue traces to missing/wrong ASR words, state it explicitly as an ASR limit.
-Do NOT propose code fixes that fabricate timing past whisperx's coverage.
-Do NOT push another fix round when ASR data does not support one.
+Only fix timing issues the underlying ASR data (mtl alignment / g35t transcript)
+actually supports. When a wall issue traces to missing/wrong ASR words, state it
+explicitly as an ASR limit. Do NOT propose code fixes that fabricate timing past
+the ASR's coverage. Do NOT push another fix round when the data does not support one.
 
 ## Dead code — delete, never stub
 
