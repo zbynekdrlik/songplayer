@@ -14,6 +14,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
 - genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter}*`, `sp-ndi/**`)
 - OBS↔NDI health / dark-wall receiver recovery → `.claude/rules/obs-ndi-health.md` (auto-loads on `obs/**`, `playback/ndi_health.rs`, `e2e/post-deploy*`)
+- obs-mcp gateway watchdog → `.claude/rules/obs-mcp-gateway.md` (auto-loads on `scripts/obs-mcp/**`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|
