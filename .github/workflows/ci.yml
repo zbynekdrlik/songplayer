@@ -587,17 +587,30 @@ jobs:
           # semantics.
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           echo "Cross-checking the push-run Gate for $HEAD_SHA"
-          # Two `Gate` check-runs exist for this SHA: this PR-side one (still
-          # in_progress) and the push-side one. Filter to completed runs and take
-          # the most recent — the push-side Gate — and require conclusion=success.
-          conclusion=$(gh api \
-            "repos/${{ github.repository }}/commits/$HEAD_SHA/check-runs?check_name=Gate&per_page=100" \
-            --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // "pending"')
-          echo "push-run Gate conclusion: $conclusion"
+          # Two `Gate` check-runs exist for this SHA: this PR-side one (in_progress
+          # while this step runs) and the push-side one. POLL until the push-side
+          # Gate reaches a terminal state, then require conclusion=success. A fast
+          # PR's mutation gate can finish before the push run's Build Tauri (~10 min),
+          # so a one-shot read would spuriously see "pending" and force a needless
+          # Gate re-run — the poll waits for the real result instead. Bounded to
+          # ~15 min (the push Gate completes well within that); the PR cannot merge
+          # before that build finishes anyway, so this adds no real latency.
+          conclusion=""
+          for i in $(seq 1 30); do
+            conclusion=$(gh api \
+              "repos/${{ github.repository }}/commits/$HEAD_SHA/check-runs?check_name=Gate&per_page=100" \
+              --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // ""' \
+              2>/dev/null || echo "")
+            if [ -n "$conclusion" ]; then
+              break
+            fi
+            echo "attempt $i: push-run Gate not completed yet — waiting 30s"
+            sleep 30
+          done
+          echo "push-run Gate conclusion: ${conclusion:-<none: timed out>}"
           if [ "$conclusion" != "success" ]; then
-            echo "FAILED: the push-event Gate for $HEAD_SHA is '$conclusion' (not success)."
-            echo "A shared build/test job failed on the push run, or the push run has"
-            echo "not completed yet — fix it (or re-run this once the push run is green)."
+            echo "FAILED: the push-event Gate for $HEAD_SHA is '${conclusion:-not-completed}' (need success)."
+            echo "A shared build/test job failed on the push run (or it never ran) — fix it."
             exit 1
           fi
           echo "push-run Gate is green for this SHA — all shared jobs passed."
