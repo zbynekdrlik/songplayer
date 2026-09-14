@@ -983,15 +983,15 @@ pub async fn mark_unsupported_source(
 #[path = "models_tests_helpers.rs"]
 #[cfg(test)]
 mod tests_helpers;
-#[path = "models_tests_playlist.rs"]
-#[cfg(test)]
-mod tests_playlist;
-#[path = "models_tests_video.rs"]
-#[cfg(test)]
-mod tests_video;
 #[path = "models_tests_lyrics.rs"]
 #[cfg(test)]
 mod tests_lyrics;
 #[path = "models_tests_lyrics_backoff.rs"]
 #[cfg(test)]
 mod tests_lyrics_backoff;
+#[path = "models_tests_playlist.rs"]
+#[cfg(test)]
+mod tests_playlist;
+#[path = "models_tests_video.rs"]
+#[cfg(test)]
+mod tests_video;
