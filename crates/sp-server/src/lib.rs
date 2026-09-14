@@ -488,7 +488,6 @@ pub async fn start(
 
                 let lyrics_ytdlp = paths.ytdlp.clone();
                 let lyrics_python = paths.python.clone();
-                let stem_python = paths.python.clone();
                 let dl_worker = downloader::DownloadWorker::new(
                     dl_pool,
                     paths,
@@ -531,7 +530,6 @@ pub async fn start(
                 // lowest priority (after lyrics).
                 let stem_worker = crate::stems::StemWorker::new(
                     stem_pool,
-                    stem_python,
                     stem_tools_dir,
                     stem_ndi_health,
                     stem_obs_state,

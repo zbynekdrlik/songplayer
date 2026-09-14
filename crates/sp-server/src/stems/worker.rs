@@ -24,7 +24,7 @@ const TICK: Duration = Duration::from_secs(10);
 
 pub struct StemWorker {
     pool: SqlitePool,
-    python_path: Option<PathBuf>,
+    tools_dir: PathBuf,
     script_path: PathBuf,
     models_dir: PathBuf,
     ndi_health_registry: Option<Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
@@ -51,7 +51,6 @@ pub(crate) fn worker_enabled(raw: Option<&str>) -> bool {
 impl StemWorker {
     pub fn new(
         pool: SqlitePool,
-        python_path: Option<PathBuf>,
         tools_dir: PathBuf,
         ndi_health_registry: Arc<crate::playback::ndi_health::NdiHealthRegistry>,
         obs_state: Arc<RwLock<crate::obs::ObsState>>,
@@ -60,7 +59,7 @@ impl StemWorker {
         let models_dir = tools_dir.join("hf_models");
         Self {
             pool,
-            python_path,
+            tools_dir,
             script_path,
             models_dir,
             ndi_health_registry: Some(ndi_health_registry),
@@ -95,15 +94,18 @@ impl StemWorker {
             return;
         }
 
-        let Some(python) = self.python_path.clone() else {
+        let python = crate::lyrics::bootstrap::venv_python_path(&self.tools_dir);
+        if !python.exists() {
             if !self
                 .warned_no_python
                 .swap(true, std::sync::atomic::Ordering::Relaxed)
             {
-                warn!("stem worker: no python configured — karaoke stems will not be generated");
+                warn!(
+                    "stem worker: lyrics venv python not found at {python:?} — karaoke stems wait for the lyrics bootstrap"
+                );
             }
             return;
-        };
+        }
 
         // #154 idle gate (reused): no heavy GPU separation while the wall is in
         // use. Same `lyrics_gate_when_playing` setting as the lyrics worker.
@@ -168,9 +170,17 @@ impl StemWorker {
             "stem worker: separating"
         );
 
+        let script_path = match self.ensure_script().await {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(%e, "stem worker: could not materialise stem_worker.py — deferring");
+                return;
+            }
+        };
+
         match crate::stems::separator::separate_stems(
             &python,
-            &self.script_path,
+            &script_path,
             &self.models_dir,
             &audio_path,
             &vocals_out,
@@ -223,6 +233,26 @@ impl StemWorker {
             }
         }
     }
+
+    /// Materialise `stem_worker.py` into `tools_dir`, mirroring the lyrics
+    /// worker's `ensure_script`. The script is embedded at compile time via
+    /// `include_str!`, so it always ships alongside the binary; it is (re)written
+    /// only when the on-disk content differs, and the resolved path is returned.
+    async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
+        const EMBEDDED: &str = include_str!("../../../../scripts/stem_worker.py");
+        if let Some(parent) = self.script_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let stale = match tokio::fs::read_to_string(&self.script_path).await {
+            Ok(existing) => existing != EMBEDDED,
+            Err(_) => true,
+        };
+        if stale {
+            tokio::fs::write(&self.script_path, EMBEDDED).await?;
+            info!("stem_worker: wrote {}", self.script_path.display());
+        }
+        Ok(self.script_path.clone())
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +268,44 @@ mod tests {
         assert!(!worker_enabled(Some("0")));
         assert!(!worker_enabled(Some(" OFF ")));
         assert!(!worker_enabled(Some("no")));
+    }
+
+    fn test_worker(pool: SqlitePool, tools_dir: PathBuf) -> StemWorker {
+        StemWorker::new(
+            pool,
+            tools_dir,
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        )
+    }
+
+    #[tokio::test]
+    async fn ensure_script_materialises_stem_worker_py() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let worker = test_worker(pool, dir.path().to_path_buf());
+
+        let path = worker.ensure_script().await.unwrap();
+
+        assert!(path.exists(), "stem_worker.py was not written");
+        let written = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(written, include_str!("../../../../scripts/stem_worker.py"));
+    }
+
+    #[tokio::test]
+    async fn missing_venv_python_warns_and_skips_without_touching_db() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        // No lyrics_venv under the tempdir → venv_python_path does not exist.
+        let worker = test_worker(pool, dir.path().to_path_buf());
+
+        worker.process_next().await;
+
+        assert!(
+            worker
+                .warned_no_python
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "tick should warn once when the venv python is missing"
+        );
     }
 }
