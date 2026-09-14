@@ -22,6 +22,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - CLIProxyAPI / DEFAULT_AI_MODEL → `.claude/rules/ai-proxy.md` (auto-loads on `crates/sp-server/src/ai/**`, `config.rs`)
 - crash diagnostics / panic hook → `.claude/rules/crash-diagnostics.md` (auto-loads on `panic_hook.rs`, `src-tauri/src/lib.rs`, `build.rs`)
 - LAN sp.local mDNS advertisement → `.claude/rules/lan-mdns.md` (auto-loads on `crates/sp-server/src/mdns.rs`)
+- CI workflows: runner shell traps / mutation gate / push+PR de-dup → `.claude/rules/ci-workflows.md` (auto-loads on `.github/workflows/**`, `.cargo/mutants.toml`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|
