@@ -52,6 +52,16 @@ async fn gate_worker(
 ) -> (LyricsWorker, sqlx::SqlitePool) {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
+    // The eligible-song fixtures reference playlist 1 — seed it, the memory
+    // pool enforces the videos.playlist_id foreign key (CI: "FOREIGN KEY
+    // constraint failed" on the first insert).
+    sqlx::query(
+        "INSERT OR IGNORE INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (1, 'gate_pl', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let cache_dir = std::env::temp_dir().join(format!("sp_idle_gate_{}", uuid::Uuid::new_v4()));
     let _ = std::fs::create_dir_all(&cache_dir);
     let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
