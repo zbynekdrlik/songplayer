@@ -1040,6 +1040,16 @@ jobs:
       - name: Restart SongPlayer (pick up OBS connection after OBS start)
         shell: powershell
         run: |
+          # Continue (NOT Stop) — matches the "Deploy SongPlayer" twin. Under
+          # Stop, a native `taskkill ... 2>&1 | Out-Null` of an ABSENT process
+          # writes "ERROR: process not found" to stderr, which the 2>&1 merge
+          # turns into a terminating NativeCommandError. That would abort this
+          # step AFTER SongPlayer is killed but BEFORE the relaunch/verify/
+          # fallback runs — leaving the box dark, the exact failure this step
+          # exists to prevent. The relaunch-verify logic below does not need
+          # Stop: it uses explicit exit codes + try/catch.
+          $ErrorActionPreference = "Continue"
+
           # SongPlayer may have been started before OBS and be in backoff.
           # Restart it now that OBS is confirmed running so it connects immediately.
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
@@ -1048,9 +1058,59 @@ jobs:
           # orphan holding port 18787.
           taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 3
+
+          # #127: VERIFY the relaunch actually comes up (process + /api/v1/status),
+          # early-exiting the moment it does. A bare `schtasks /run` that silently
+          # fails to launch left the box dark on 2026-09-13 (15:48-15:56): the
+          # relaunch never came up, the next step failed after 24 attempts, and
+          # the box ran without SongPlayer until a manual Start-ScheduledTask.
+          function Wait-SongPlayerUp {
+            param([int]$TimeoutSec = 60)
+            $deadline = (Get-Date).AddSeconds($TimeoutSec)
+            while ((Get-Date) -lt $deadline) {
+              $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+              if ($proc) {
+                try {
+                  $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
+                  if ($resp.version) {
+                    Write-Host "SongPlayer up: pid=$($proc.Id) version=$($resp.version)"
+                    return $true
+                  }
+                } catch {
+                  # process exists but API not answering yet — keep polling
+                }
+              }
+              Start-Sleep -Seconds 3
+            }
+            return $false
+          }
+
+          Write-Host "Relaunching SongPlayer via schtasks /run..."
           schtasks.exe /run /tn SongPlayer
-          Start-Sleep -Seconds 10
-          Write-Host "SongPlayer restarted"
+          if (Wait-SongPlayerUp -TimeoutSec 90) {
+            Write-Host "OK: SongPlayer relaunched and API is responding"
+            exit 0
+          }
+
+          # Primary relaunch did not come up. Fall back to the operator's proven
+          # recovery (Start-ScheduledTask) so the box is NOT left dark, then FAIL
+          # loudly with the reason — never exit green on a failed relaunch.
+          Write-Warning "SongPlayer did not come up after 'schtasks /run'; running Start-ScheduledTask fallback..."
+          taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          Start-Sleep -Seconds 2
+          try {
+            Start-ScheduledTask -TaskName SongPlayer
+          } catch {
+            Write-Warning "Start-ScheduledTask threw: $($_.Exception.Message)"
+          }
+
+          if (Wait-SongPlayerUp -TimeoutSec 90) {
+            Write-Error "FAIL: 'schtasks /run' did not relaunch SongPlayer; the Start-ScheduledTask fallback recovered it (box is back up), but the primary relaunch failed — investigate the SongPlayer scheduled task."
+            exit 1
+          } else {
+            Write-Error "FAIL: SongPlayer did not come up after 'schtasks /run' AND the Start-ScheduledTask fallback — no process / no listener on 8920. The box may be dark; manual intervention required."
+            exit 1
+          }
 
       - name: Wait for SongPlayer API (read + write)
         shell: powershell

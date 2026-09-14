@@ -6,6 +6,7 @@
 //! Mirrors `playback/recovery.rs` precedent and `resolume::ResolumeRegistry`
 //! shape from PR #54.
 
+use crate::obs::ndi_recovery::NdiRecoveryTracker;
 use crate::playback::clock_health::ClockHealth;
 use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use chrono::{DateTime, Utc};
@@ -14,6 +15,11 @@ use std::collections::HashMap;
 use std::sync::{RwLock, atomic::Ordering};
 use std::time::Instant;
 use tracing::warn;
+
+/// The `degraded_reason` string a Playing-on-program pipeline gets when it has
+/// zero NDI receivers — the "dark wall" state (#127). Single source of truth so
+/// the receiver-recovery trigger and the dashboard read the same string.
+pub(crate) const DARK_WALL_REASON: &str = "no NDI receiver — wall is dark";
 
 /// Per-pipeline NDI health. Serialized to the dashboard via
 /// `GET /api/v1/ndi/health`. Built by the engine from
@@ -177,6 +183,10 @@ pub struct WindowStats {
 /// returned Vec is owned data, no lifetimes leak out.
 pub struct NdiHealthRegistry {
     snapshots: RwLock<HashMap<i64, PipelineHealthSnapshot>>,
+    /// #127 receiver-recovery state. Composed here (rather than as a new
+    /// `PlaybackEngine` field) so the engine reaches it through the `Arc` it
+    /// already holds; the single writer is `handle_health_snapshot`.
+    recovery: NdiRecoveryTracker,
 }
 
 impl NdiHealthRegistry {
@@ -186,7 +196,23 @@ impl NdiHealthRegistry {
     pub fn new() -> Self {
         Self {
             snapshots: RwLock::new(HashMap::new()),
+            recovery: NdiRecoveryTracker::new(),
         }
+    }
+
+    /// #127: evaluate the receiver-recovery trigger for one pipeline and apply
+    /// the state mutation. Returns `true` iff the engine should nudge OBS now.
+    /// `is_dark` is true iff the pipeline is Playing on program with the
+    /// dark-wall `degraded_reason` set (`connections == 0`).
+    pub fn evaluate_recovery(
+        &self,
+        playlist_id: i64,
+        is_dark: bool,
+        consecutive_bad_polls: u32,
+        now_100ns: i64,
+    ) -> bool {
+        self.recovery
+            .evaluate(playlist_id, is_dark, consecutive_bad_polls, now_100ns)
     }
 
     /// Replace (or insert) the snapshot for `playlist_id`.
@@ -441,6 +467,42 @@ impl crate::playback::PlaybackEngine {
         }
 
         self.ndi_health_registry.update(snapshot);
+
+        // #127 receiver-side recovery: when this pipeline is Playing on program
+        // with a dead NDI receiver (the dark-wall state SongPlayer already
+        // names), nudge OBS over its healthy WebSocket to re-subscribe the
+        // input. The tracker enforces a consecutive-poll threshold, a cooldown,
+        // and a per-outage attempt cap; a recovered pipeline resets it.
+        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON);
+        if self.ndi_health_registry.evaluate_recovery(
+            playlist_id,
+            is_dark,
+            consecutive_bad_polls,
+            heartbeat_100ns,
+        ) {
+            match self.obs_cmd_tx.as_ref() {
+                Some(tx) => match tx.try_send(crate::obs::ObsCommand::NudgeNdiReceiver {
+                    ndi_name: ndi_name.clone(),
+                }) {
+                    Ok(()) => warn!(
+                        playlist_id,
+                        ndi_name = %ndi_name,
+                        "ndi-recovery: dark wall — nudging OBS to re-subscribe the receiver"
+                    ),
+                    Err(e) => warn!(
+                        playlist_id,
+                        ndi_name = %ndi_name,
+                        error = %e,
+                        "ndi-recovery: failed to queue OBS nudge"
+                    ),
+                },
+                None => warn!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    "ndi-recovery: dark wall but no OBS command channel wired"
+                ),
+            }
+        }
     }
 }
 
@@ -508,7 +570,7 @@ fn compute_degraded_reason(
         return None;
     }
     if connections == 0 {
-        return Some("no NDI receiver — wall is dark".to_string());
+        return Some(DARK_WALL_REASON.to_string());
     }
     if nominal_fps > 0.0 && observed_fps < nominal_fps / 2.0 {
         return Some(format!(
@@ -558,6 +620,102 @@ mod tests {
             ndi_health_registry: registry.clone(),
         });
         (engine, registry)
+    }
+
+    /// Like `fresh_engine`, but wires a real `obs_cmd_tx` so tests can assert
+    /// the #127 receiver-recovery nudge command is dispatched.
+    async fn fresh_engine_with_obs_cmd() -> (
+        PlaybackEngine,
+        Arc<NdiHealthRegistry>,
+        mpsc::Receiver<crate::obs::ObsCommand>,
+    ) {
+        let pool = SqlitePool::connect(":memory:").await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let (obs_tx, _) = broadcast::channel(16);
+        let (resolume_tx, _) = mpsc::channel(16);
+        let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+        let (obs_cmd_tx, obs_cmd_rx) = mpsc::channel::<crate::obs::ObsCommand>(16);
+        let registry = Arc::new(NdiHealthRegistry::new());
+        let engine = PlaybackEngine::new(PlaybackEngineConfig {
+            pool,
+            cache_dir: PathBuf::from("/tmp"),
+            obs_event_tx: obs_tx,
+            obs_cmd_tx: Some(obs_cmd_tx),
+            resolume_tx,
+            ws_event_tx: ws_tx,
+            presenter_client: None,
+            ndi_health_registry: registry.clone(),
+        });
+        (engine, registry, obs_cmd_rx)
+    }
+
+    /// Build a dark-wall HealthSnapshot event (Playing, connections=0) with the
+    /// given consecutive-bad-poll count.
+    fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> PipelineEvent {
+        PipelineEvent::HealthSnapshot {
+            connections: 0,
+            frames_submitted_total: 12_000,
+            frames_submitted_last_5s: 120,
+            observed_fps: 30.0,
+            nominal_fps: 30.0,
+            last_submit_ts: Some(now),
+            last_heartbeat_ts: now,
+            consecutive_bad_polls,
+            reported_state: PlaybackStateLabel::Playing,
+            pacing: Default::default(),
+            audio: Default::default(),
+        }
+    }
+
+    /// #127: a Playing-on-program pipeline dark past the nudge threshold must
+    /// dispatch an OBS `NudgeNdiReceiver` for its stream. This is the RED test
+    /// for the receiver-recovery trigger — before the fix, nothing acted on the
+    /// dark-wall state SongPlayer already named.
+    #[tokio::test]
+    async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
+        let (mut engine, _registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
+        engine.ensure_pipeline(4, "SP-slow");
+        engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(4, true);
+
+        let now = Instant::now();
+        engine.handle_health_snapshot(
+            4,
+            dark_wall_event(now, crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS),
+        );
+
+        match obs_rx.try_recv() {
+            Ok(crate::obs::ObsCommand::NudgeNdiReceiver { ndi_name }) => {
+                assert_eq!(ndi_name, "SP-slow");
+            }
+            Ok(other) => panic!("expected NudgeNdiReceiver, got a different ObsCommand: {other:?}"),
+            Err(e) => panic!("expected a NudgeNdiReceiver command, got none: {e:?}"),
+        }
+    }
+
+    /// A dark wall below the nudge threshold (degraded, but only a couple of
+    /// bad polls) must NOT nudge OBS yet — a receiver that simply needs a moment
+    /// to connect is left alone.
+    #[tokio::test]
+    async fn handle_health_snapshot_does_not_nudge_below_threshold() {
+        let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
+        engine.ensure_pipeline(4, "SP-slow");
+        engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
+        engine.set_scene_active_for_test(4, true);
+
+        let now = Instant::now();
+        // 2 bad polls: degraded_reason IS set, but below the nudge threshold.
+        engine.handle_health_snapshot(4, dark_wall_event(now, 2));
+
+        assert_eq!(
+            registry.snapshots()[0].degraded_reason.as_deref(),
+            Some(DARK_WALL_REASON),
+            "the dashboard degraded_reason must still fire below the nudge threshold",
+        );
+        assert!(
+            obs_rx.try_recv().is_err(),
+            "no nudge should be queued below the consecutive-poll threshold",
+        );
     }
 
     #[tokio::test]

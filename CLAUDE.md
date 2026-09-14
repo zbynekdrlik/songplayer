@@ -13,6 +13,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
 - genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter}*`, `sp-ndi/**`)
+- OBS↔NDI health / dark-wall receiver recovery → `.claude/rules/obs-ndi-health.md` (auto-loads on `obs/**`, `playback/ndi_health.rs`, `e2e/post-deploy*`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|

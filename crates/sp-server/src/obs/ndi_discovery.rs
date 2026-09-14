@@ -14,7 +14,9 @@ use tracing::{debug, info, warn};
 
 use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
-use crate::obs::text::{get_input_list_request, get_input_settings_request};
+use crate::obs::text::{
+    get_input_list_request, get_input_settings_request, set_ndi_source_name_request,
+};
 
 /// Query OBS for its NDI inputs and return a map of
 /// `OBS input name → playlist_id` for the playlists whose `ndi_output_name`
@@ -233,6 +235,118 @@ async fn fetch_input_ndi_sender_name(
     response["d"]["responseData"]["inputSettings"]["ndi_source_name"]
         .as_str()
         .map(|s| s.to_string())
+}
+
+/// Outcome of a receiver-recovery nudge (#127), for logging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReapplyOutcome {
+    /// Found the matching input and applied clear + restore.
+    Applied,
+    /// No OBS NDI input advertises the target stream name.
+    NoMatch,
+    /// An OBS query/set failed; the nudge could not be completed.
+    Failed,
+}
+
+/// #127: nudge OBS to re-subscribe a stranded NDI receiver for `target_stream`
+/// (the bare stream name, e.g. `"SP-slow"`).
+///
+/// Enumerates OBS's NDI inputs, finds the one whose `ndi_source_name`
+/// advertises `target_stream` (via [`extract_ndi_stream_name`]), then clears
+/// (`""`) and restores that field so DistroAV re-runs discovery. Re-applying
+/// the *identical* value is a no-op for DistroAV — proven on issue #127 — so
+/// the clear-then-restore is required. Receiver-side only; never a per-sender
+/// `RecreateSender` (CLAUDE.md "Disabled subsystems", #60).
+pub(crate) async fn reapply_ndi_input(
+    write: &SharedWrite,
+    dispatcher: &Dispatcher,
+    target_stream: &str,
+) -> ReapplyOutcome {
+    let input_names = match fetch_ndi_input_names(write, dispatcher).await {
+        Some(names) => names,
+        None => {
+            warn!(
+                target = target_stream,
+                "ndi-recovery: GetInputList returned nothing; cannot nudge"
+            );
+            return ReapplyOutcome::Failed;
+        }
+    };
+
+    for input_name in input_names {
+        let sender_name = match fetch_input_ndi_sender_name(write, dispatcher, &input_name).await {
+            Some(s) => s,
+            None => continue,
+        };
+        if extract_ndi_stream_name(&sender_name) != target_stream {
+            continue;
+        }
+
+        info!(
+            input_name = %input_name,
+            sender_name = %sender_name,
+            target = target_stream,
+            "ndi-recovery: nudging stranded receiver (clear + restore ndi_source_name)"
+        );
+
+        // Clear the field — an empty ndi_source_name makes DistroAV drop the
+        // dead subscription.
+        let cleared = set_input_ndi_source_name(write, dispatcher, &input_name, "").await;
+        // Restore the original network-visible name so the receiver
+        // re-subscribes to the live sender.
+        let restored =
+            set_input_ndi_source_name(write, dispatcher, &input_name, &sender_name).await;
+
+        if cleared && restored {
+            info!(
+                input_name = %input_name,
+                "ndi-recovery: clear + restore applied; DistroAV will re-run discovery"
+            );
+            return ReapplyOutcome::Applied;
+        }
+        warn!(
+            input_name = %input_name,
+            cleared,
+            restored,
+            "ndi-recovery: nudge did not fully apply (OBS query/set failed)"
+        );
+        return ReapplyOutcome::Failed;
+    }
+
+    warn!(
+        target = target_stream,
+        "ndi-recovery: no OBS NDI input advertises this stream; cannot nudge"
+    );
+    ReapplyOutcome::NoMatch
+}
+
+/// Send a `SetInputSettings` that writes `ndi_source_name` on `input_name`.
+/// Returns `true` iff OBS acknowledged success.
+async fn set_input_ndi_source_name(
+    write: &SharedWrite,
+    dispatcher: &Dispatcher,
+    input_name: &str,
+    value: &str,
+) -> bool {
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let req = set_ndi_source_name_request(&req_id, input_name, value);
+    match dispatcher
+        .send_and_await(
+            write,
+            req_id,
+            Message::Text(req.to_string().into()),
+            DEFAULT_RESPONSE_TIMEOUT,
+        )
+        .await
+    {
+        Ok(response) => response["d"]["requestStatus"]["result"]
+            .as_bool()
+            .unwrap_or(false),
+        Err(e) => {
+            warn!(input_name, error = %e, "ndi-recovery: SetInputSettings failed");
+            false
+        }
+    }
 }
 
 #[cfg(test)]
