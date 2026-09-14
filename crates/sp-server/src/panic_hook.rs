@@ -227,4 +227,28 @@ mod tests {
             "panic thread name captured: {content}"
         );
     }
+
+    #[test]
+    fn install_panic_hook_writes_the_crash_file_for_a_thread_panic() {
+        let _guard = HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let crash_path = tmp.path().join("songplayer-panic.log");
+        install_panic_hook(crash_path.clone());
+        let joined = std::thread::Builder::new()
+            .name("install-hook-thread".to_string())
+            .spawn(|| panic!("install-hook-marker-2026"))
+            .expect("spawn")
+            .join();
+        assert!(joined.is_err(), "the spawned thread must have panicked");
+        let content = std::fs::read_to_string(&crash_path)
+            .expect("install_panic_hook must have written the crash file");
+        assert!(
+            content.contains("install-hook-marker-2026"),
+            "message captured: {content}"
+        );
+        assert!(
+            content.contains("install-hook-thread"),
+            "thread captured: {content}"
+        );
+    }
 }
