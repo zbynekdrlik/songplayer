@@ -6,9 +6,11 @@
 //! while an idle wall / a disabled gate proceed.
 
 use super::*;
+use crate::lyrics::idle_gate::{GateLog, IdleSettle, WALL_IDLE_SETTLE, WallActivity};
 use crate::obs::ObsState;
 use crate::playback::ndi_health::{NdiHealthRegistry, PipelineHealthSnapshot, PlaybackStateLabel};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// Minimal `Playing` health snapshot for a given NDI output. Mirrors the
@@ -150,12 +152,128 @@ async fn gate_defers_when_obs_streaming() {
     assert!(!activity.any_playing);
 }
 
-/// An idle wall (no output playing, OBS not streaming/recording) lets the
-/// worker proceed.
+/// After the idle-settle fix (2026-09-14 incident) a FRESHLY idle wall no longer
+/// resumes on the first sample: it must first read idle continuously for
+/// `WALL_IDLE_SETTLE`. The elapsed-settle → proceed path is proven by the pure
+/// `idle_settle_*` tests (they inject time); the worker seam reads the real
+/// clock, so here we only assert the freshly-idle sample still defers.
 #[tokio::test]
-async fn gate_proceeds_when_wall_idle() {
+async fn gate_freshly_idle_wall_defers_until_settled() {
     let (worker, _pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
     let (defer, activity) = worker.wall_gate_should_defer().await;
-    assert!(!defer, "idle wall must proceed");
+    assert!(
+        defer,
+        "a freshly-idle wall must defer during the settle window"
+    );
     assert!(!activity.in_use());
+    let detail = worker.wall_busy_detail(activity).await;
+    assert!(
+        detail.contains("settling"),
+        "idle-but-settling detail should mention settling; was: {detail}"
+    );
+}
+
+// ---- IdleSettle pure hysteresis ------------------------------------------
+
+/// The core guarantee: a single idle sample is not enough — heavy work resumes
+/// only after `WALL_IDLE_SETTLE` of CONTINUOUS idle.
+#[test]
+fn idle_settle_defers_until_thirty_seconds_of_continuous_idle() {
+    let mut s = IdleSettle::default();
+    let t0 = Instant::now();
+    assert!(s.defer(true, t0), "in use → defer");
+    assert!(s.defer(false, t0), "just went idle → still defer");
+    assert!(
+        s.defer(false, t0 + Duration::from_secs(29)),
+        "29s idle → still defer"
+    );
+    assert!(
+        !s.defer(false, t0 + Duration::from_secs(30)),
+        "30s continuous idle → resume"
+    );
+    assert_eq!(
+        s.idle_for(t0 + Duration::from_secs(30)),
+        Some(Duration::from_secs(30))
+    );
+    assert_eq!(WALL_IDLE_SETTLE, Duration::from_secs(30));
+}
+
+/// A busy sample mid-settle resets the clock — the wall must read idle for a
+/// FRESH full window after any interruption.
+#[test]
+fn idle_settle_busy_sample_resets_the_clock() {
+    let mut s = IdleSettle::default();
+    let t0 = Instant::now();
+    assert!(s.defer(false, t0), "idle t0 → defer (settling)");
+    assert!(
+        s.defer(false, t0 + Duration::from_secs(20)),
+        "20s idle → defer"
+    );
+    assert!(s.defer(true, t0 + Duration::from_secs(25)), "busy → defer");
+    assert_eq!(
+        s.idle_for(t0 + Duration::from_secs(25)),
+        None,
+        "busy → idle_for None"
+    );
+    assert!(
+        s.defer(false, t0 + Duration::from_secs(26)),
+        "idle again → settle restarts"
+    );
+    assert!(
+        s.defer(false, t0 + Duration::from_secs(55)),
+        "29s since restart → still defer"
+    );
+    assert!(
+        !s.defer(false, t0 + Duration::from_secs(56)),
+        "30s since restart → resume"
+    );
+}
+
+/// The gate seam both workers share: a disabled gate never defers, regardless of
+/// the settle clock (unchanged behaviour).
+#[test]
+fn gate_log_defer_settled_never_defers_when_gate_disabled() {
+    let mut log = GateLog::default();
+    let in_use = WallActivity {
+        any_playing: true,
+        obs_streaming: false,
+        obs_recording: false,
+    };
+    assert!(
+        !log.defer_settled(false, in_use, Instant::now()),
+        "gate OFF must never defer even while busy"
+    );
+}
+
+/// Regression (2026-09-14, LyricsWorker level): the wall goes idle for ONE
+/// sample right after Playing — the pre-fix code resumed a heavy job in exactly
+/// this gap. The settle window must keep deferring. This assertion returns
+/// `false` (proceeds) on the pre-fix code and `true` after the fix.
+#[tokio::test]
+async fn single_idle_sample_after_busy_still_defers() {
+    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
+    let (worker, _pool) = gate_worker(Arc::clone(&registry), ObsState::default()).await;
+
+    // Busy wall defers, and primes the settle clock as "in use".
+    let (defer, activity) = worker.wall_gate_should_defer().await;
+    assert!(defer, "playing wall must defer");
+    assert!(activity.any_playing);
+
+    // Flip the same output to Idle — a single idle sample.
+    let mut idle = playing_snapshot(7, "SP-fast");
+    idle.state = PlaybackStateLabel::Idle;
+    registry.update(idle);
+
+    let (defer, activity) = worker.wall_gate_should_defer().await;
+    assert!(
+        defer,
+        "a single idle sample right after busy must STILL defer (settle not elapsed)"
+    );
+    assert!(!activity.in_use(), "the wall reads idle now");
+
+    let detail = worker.wall_busy_detail(activity).await;
+    assert!(
+        detail.contains("settling"),
+        "idle-but-settling detail should mention settling; was: {detail}"
+    );
 }
