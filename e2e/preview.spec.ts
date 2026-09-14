@@ -52,9 +52,18 @@ test("playing card renders a live preview image with non-zero size", async ({
     .toBeGreaterThan(0);
 });
 
-test("idle card shows the preview placeholder, not an image", async ({
+test("idle card shows the preview placeholder, hides the image, and issues no preview request", async ({
   page,
 }) => {
+  // The single stable <img> exists in the DOM for every card now, but an idle
+  // card must keep it hidden AND never hit the network endpoint (its src is an
+  // inline data-URI while idle).
+  const idlePreviewRequests: string[] = [];
+  page.on("request", (req) => {
+    if (/\/api\/v1\/playback\/2\/preview\.jpg/.test(req.url())) {
+      idlePreviewRequests.push(req.url());
+    }
+  });
   await page.goto("/");
   const bgCard = page.locator(".playlist-card", {
     has: page.getByRole("heading", { name: "Background" }),
@@ -62,7 +71,10 @@ test("idle card shows the preview placeholder, not an image", async ({
   await expect(bgCard.getByTestId("preview-placeholder")).toBeVisible({
     timeout: 10000,
   });
-  await expect(bgCard.getByTestId("preview-img")).toHaveCount(0);
+  await expect(bgCard.getByTestId("preview-img")).toBeHidden();
+  // Idle card issues no preview request across several tick intervals.
+  await page.waitForTimeout(1500);
+  expect(idlePreviewRequests).toEqual([]);
 });
 
 test("preview endpoint returns a JPEG for a playing playlist", async ({

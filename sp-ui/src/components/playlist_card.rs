@@ -53,6 +53,29 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
         });
     });
 
+    // #15 part 2 (recursive-closure fix): the preview <img> is created ONCE,
+    // outside the now-playing rebuild block, so a position update (~2 Hz) never
+    // drops the element together with its on:load/on:error closures while a
+    // fetch is in flight (the "closure invoked recursively or after being
+    // dropped" console error). A stable memo drives whether this card is Playing.
+    let is_playing = Memo::new(move |_| {
+        store.now_playing.with(|m| {
+            m.get(&pid)
+                .map(|i| matches!(i.state, PlaybackState::Playing))
+                .unwrap_or(false)
+        })
+    });
+    // While idle the <img> points at a 1×1 transparent GIF data-URI — no network
+    // request, no error event, and the tick is not tracked.
+    const PREVIEW_IDLE_SRC: &str =
+        "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    // Reset the loaded flag when playback stops so the placeholder returns.
+    Effect::new(move |_| {
+        if !is_playing.get() {
+            preview_loaded.set(false);
+        }
+    });
+
     view! {
         <div class="playlist-card">
             <div class="card-header">
@@ -72,6 +95,38 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
             </div>
 
             <div class="now-playing">
+                // #15 part 2: ONE stable preview <img> per card, created once and
+                // never rebuilt. While idle its src is an inline data-URI (no
+                // network request); while Playing the tick-driven cache-buster
+                // re-fetches the sampled JPEG. Kept outside the now-playing
+                // rebuild block so a position update never drops it mid-fetch.
+                <img
+                    class="preview-img"
+                    data-testid="preview-img"
+                    alt="Živý náhľad"
+                    style:display=move || {
+                        if is_playing.get() && preview_loaded.get() { "block" } else { "none" }
+                    }
+                    on:load=move |_| preview_loaded.set(true)
+                    on:error=move |_| preview_loaded.set(false)
+                    src=move || {
+                        if is_playing.get() {
+                            format!("/api/v1/playback/{pid}/preview.jpg?t={}", preview_tick.get())
+                        } else {
+                            PREVIEW_IDLE_SRC.to_string()
+                        }
+                    }
+                />
+                {move || {
+                    (!(is_playing.get() && preview_loaded.get()))
+                        .then(|| {
+                            view! {
+                                <div class="preview-placeholder" data-testid="preview-placeholder">
+                                    {if is_playing.get() { "Načítavam náhľad…" } else { "Bez náhľadu" }}
+                                </div>
+                            }
+                        })
+                }}
                 {move || {
                     let np = store.now_playing.get();
                     if let Some(info) = np.get(&pid) {
@@ -87,59 +142,8 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
                         };
                         let pos_s = info.position_ms / 1000;
                         let dur_s = info.duration_ms / 1000;
-                        let is_playing = matches!(info.state, PlaybackState::Playing);
                         view! {
                             <div>
-                                // #15 part 2: live video preview of the current
-                                // song. The <img> only exists while Playing, so
-                                // an idle card issues no preview requests; a
-                                // placeholder shows otherwise.
-                                {move || {
-                                    if is_playing {
-                                        view! {
-                                            <img
-                                                class="preview-img"
-                                                data-testid="preview-img"
-                                                alt="Živý náhľad"
-                                                style:display=move || {
-                                                    if preview_loaded.get() { "block" } else { "none" }
-                                                }
-                                                on:load=move |_| preview_loaded.set(true)
-                                                on:error=move |_| preview_loaded.set(false)
-                                                src=move || {
-                                                    format!(
-                                                        "/api/v1/playback/{pid}/preview.jpg?t={}",
-                                                        preview_tick.get(),
-                                                    )
-                                                }
-                                            />
-                                            {move || {
-                                                (!preview_loaded.get())
-                                                    .then(|| {
-                                                        view! {
-                                                            <div
-                                                                class="preview-placeholder"
-                                                                data-testid="preview-placeholder"
-                                                            >
-                                                                "Načítavam náhľad…"
-                                                            </div>
-                                                        }
-                                                    })
-                                            }}
-                                        }
-                                            .into_any()
-                                    } else {
-                                        view! {
-                                            <div
-                                                class="preview-placeholder"
-                                                data-testid="preview-placeholder"
-                                            >
-                                                "Bez náhľadu"
-                                            </div>
-                                        }
-                                            .into_any()
-                                    }
-                                }}
                                 <div class="np-info">
                                     <span class="np-song">{info.song.clone()}</span>
                                     <span class="np-artist">{info.artist.clone()}</span>
