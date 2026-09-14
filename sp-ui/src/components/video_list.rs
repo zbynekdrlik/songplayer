@@ -60,7 +60,15 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                 <tbody>
                     <For
                         each=move || videos.get()
-                        key=|v| v.id
+                        // Key on the fields this row RENDERS statically (id +
+                        // the editable song/artist), not on id alone. `For`
+                        // never re-runs `children` for an existing key, so an
+                        // id-only key left the row showing the pre-edit
+                        // song/artist after the save-triggered `load()`
+                        // refresh (the child captured them by value). Folding
+                        // song+artist into the key recreates just the corrected
+                        // row when its stored metadata changes (#136 T1).
+                        key=|v| (v.id, v.song.clone(), v.artist.clone())
                         children=move |video| {
                             let video_id = video.id;
                             let normalized = video.normalized;
