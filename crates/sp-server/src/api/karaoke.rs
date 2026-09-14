@@ -27,7 +27,7 @@ pub struct SetKaraokeRequest {
 /// GET the live karaoke state + stem progress for the dashboard.
 pub async fn get_karaoke(State(state): State<AppState>) -> impl IntoResponse {
     let control = crate::stems::control::global();
-    let (pending, done) = crate::db::models::count_stems_progress(&state.pool)
+    let (pending, done) = crate::db::models_stems::count_stems_progress(&state.pool)
         .await
         .unwrap_or((0, 0));
     Json(serde_json::json!({

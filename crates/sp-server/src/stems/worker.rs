@@ -131,7 +131,7 @@ impl StemWorker {
             info!("stem_worker: {line}");
         }
 
-        let job = match crate::db::models::get_next_video_for_stems(&self.pool).await {
+        let job = match crate::db::models_stems::get_next_video_for_stems(&self.pool).await {
             Ok(Some(j)) => j,
             Ok(None) => return, // nothing to separate
             Err(e) => {
@@ -149,7 +149,7 @@ impl StemWorker {
                 duration_ms = ms,
                 "stem worker: song exceeds stem duration cap — marking unsupported"
             );
-            let _ = crate::db::models::mark_stems_unsupported(&self.pool, job.video_id).await;
+            let _ = crate::db::models_stems::mark_stems_unsupported(&self.pool, job.video_id).await;
             return;
         }
 
@@ -181,7 +181,7 @@ impl StemWorker {
         .await
         {
             Ok(()) => {
-                match crate::db::models::mark_stems_done(
+                match crate::db::models_stems::mark_stems_done(
                     &self.pool,
                     job.video_id,
                     &vocals_out.to_string_lossy(),
@@ -214,8 +214,12 @@ impl StemWorker {
                     backoff_secs = backoff.as_secs(),
                     "stem worker: separation failed — deferring"
                 );
-                let _ = crate::db::models::record_stem_deferral(&self.pool, job.video_id, backoff)
-                    .await;
+                let _ = crate::db::models_stems::record_stem_deferral(
+                    &self.pool,
+                    job.video_id,
+                    backoff,
+                )
+                .await;
             }
         }
     }

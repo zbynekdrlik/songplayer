@@ -1,6 +1,7 @@
 //! Database layer — SQLite pool creation and manual migration system.
 
 pub mod models;
+pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};

@@ -650,8 +650,7 @@ pub async fn start(
         }
     });
 
-    // #14 karaoke: seed the process-global live control from settings before any
-    // pipeline spawns (pipelines read it at song open + per audio chunk).
+    // #14 karaoke: seed the process-global live control before pipelines spawn.
     crate::stems::control::init_from_settings(&pool).await;
 
     // 10. Playback engine (bridges API commands to the engine state machine)
@@ -780,9 +779,7 @@ pub async fn start(
                             engine.remove_pipeline(playlist_id);
                         }
                         EngineCommand::SetKaraoke { mode, vocal_gain } => {
-                            // #14: update the live control, persist, broadcast,
-                            // and reload playing pipelines when the mode changed.
-                            engine.set_karaoke(mode, vocal_gain).await;
+                            engine.set_karaoke(mode, vocal_gain).await; // #14
                         }
                     }
                 }
