@@ -162,3 +162,13 @@ fn gate_log_busy_line_carries_detail() {
     assert!(line.contains("waiting"), "line was: {line}");
     assert!(line.contains("SP-fast Playing"), "line was: {line}");
 }
+
+#[test]
+fn gate_log_first_idle_observation_is_silent() {
+    let mut log = GateLog::default();
+    // Never was busy → the first idle tick must NOT emit a spurious "resuming".
+    assert!(log.note(false, "").is_none());
+    // The first busy still emits, and the following idle then reports the resume.
+    assert!(log.note(true, "SP-fast Playing").is_some());
+    assert!(log.note(false, "").is_some());
+}

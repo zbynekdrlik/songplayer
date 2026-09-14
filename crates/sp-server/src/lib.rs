@@ -358,6 +358,10 @@ pub async fn start(
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
     let ai_client_for_dl = ai_client.clone();
+    // #154 idle gate: the lyrics worker reads these to defer heavy GPU/CPU work
+    // while the wall is in use (any pipeline Playing, or OBS streaming/recording).
+    let lyrics_ndi_health = ndi_health_registry.clone();
+    let lyrics_obs_state = obs_state.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -488,6 +492,8 @@ pub async fn start(
                     lyrics_tools_dir,
                     Some(ai_client_for_dl),
                     tools_event_tx.clone(),
+                    lyrics_ndi_health,
+                    lyrics_obs_state,
                 );
                 let current_processing_handle = lyrics_worker.current_processing();
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
