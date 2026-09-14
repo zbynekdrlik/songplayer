@@ -101,3 +101,18 @@ The post-deploy Playwright suite shares win-resolume's OBS with the LED wall.
 The baseline-scene picker must prefer `sp-slow` and fall back to non-disruptive
 sp-* scenes. The suite must restore the original program scene at test end.
 Never leave the wall on whatever scene the last test happened to switch to.
+
+## CI event model — shared jobs run once on push (do not re-add double-fire)
+
+Since #124 the pipeline runs the shared build/test jobs ONCE, on the `push`
+event (`if: github.event_name == 'push'`). Only the PR-specific gates
+(`version-check`, `mutation-testing`, `red-green-order`) run on `pull_request`.
+The required checks (`Gate`, `Deploy to win-resolume`, `E2E Tests
+(win-resolume)`) are produced by the push run and satisfy the dev→main PR by
+commit-SHA match, so the merge stays gated with no branch-protection change.
+When editing triggers: never drop `if: github.event_name == 'push'` from a
+shared job (that re-introduces the 2×-per-commit double-fire), keep
+`version-check` on `pull_request` only (a dev push legitimately has a `-dev`
+VERSION), and keep the `gate` job's PR-side push-Gate cross-check (it needs
+`checks: read`). Details + the self-hosted-runner shell traps + the mutation
+gate config live in `.claude/rules/ci-workflows.md`.
