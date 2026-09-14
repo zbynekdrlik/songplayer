@@ -26,8 +26,8 @@ Application settings: `type: self_hosted`, `domain: sp.newlevel.media`,
 `allowed_idps` = the OTP IdP, **no path exclusions** (the whole hostname is
 protected, so the `/api/v1/ws` WebSocket rides the same `CF_Authorization`
 cookie). Policy: `decision: allow`, `precedence: 1`, `include` = the three owner
-e-mails (`drlik.zbynek@gmail.com`, `drlik.marek@gmail.com`,
-`drlik.alex@gmail.com`).
+Gmail addresses (not listed here — this repo is public; read the live list with
+the GET call in "Add or remove an allowed e-mail" below).
 
 ## Credentials — never printed, never committed
 
@@ -69,14 +69,19 @@ curl -s -X PUT -H "Authorization: Bearer $CF" -H "Content-Type: application/json
     "decision": "allow",
     "precedence": 1,
     "include": [
-      { "email": { "email": "drlik.zbynek@gmail.com" } },
-      { "email": { "email": "drlik.marek@gmail.com" } },
-      { "email": { "email": "drlik.alex@gmail.com" } }
+      { "email": { "email": "owner-1@example.com" } },
+      { "email": { "email": "owner-2@example.com" } },
+      { "email": { "email": "owner-3@example.com" } }
     ]
   }' \
   "https://api.cloudflare.com/client/v4/accounts/$ACC/access/apps/$APP/policies/131644e6-20a5-4917-a465-8f5774491692" \
   | jq '{success, errors}'
 ```
+
+The `owner-N@example.com` entries are placeholders — the PUT REPLACES the whole
+`include` list, so first read the live list with the GET above and paste the
+real allowlist plus/minus the one address you are changing (the actual owner
+Gmail addresses are not committed to this public repo).
 
 To grant a whole domain instead of individual e-mails, use an `email_domain`
 rule (`{ "email_domain": { "domain": "example.com" } }`). Prefer explicit
