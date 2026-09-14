@@ -69,8 +69,11 @@ pub fn new_status_handle() -> LanStatusHandle {
 }
 
 /// `true` for a regular routable LAN IPv4 — not loopback, not link-local
-/// (APIPA `169.254/16`), not unspecified (`0.0.0.0`). Mirrors the non-APIPA
-/// predicate `sp_ndi::network_ready::is_real_ipv4` uses.
+/// (APIPA `169.254/16`), not unspecified (`0.0.0.0`). Applies the same
+/// non-APIPA / non-loopback intent as `sp_ndi::network_ready::is_real_ipv4`
+/// (plus an extra `!is_unspecified()` guard); reimplemented rather than reused
+/// because that helper is `pub(crate)` and Windows-only in sp-ndi, so it can't
+/// be called from sp-server (least of all on Linux CI).
 pub(crate) fn is_real_lan_ipv4(addr: Ipv4Addr) -> bool {
     !addr.is_loopback() && !addr.is_link_local() && !addr.is_unspecified()
 }
@@ -151,6 +154,31 @@ pub(crate) fn build_service_info(
 /// The user-facing LAN URL for the given port.
 fn lan_url(port: u16) -> String {
     format!("http://{LAN_HOSTNAME}:{port}")
+}
+
+/// Minimal seam over the mDNS daemon so [`reconcile`] — the register /
+/// re-register / clear state machine — is unit-testable with a call-recording
+/// fake (the real `ServiceDaemon` opens a socket and can't run in CI). This is
+/// the one piece of logic that mirrors the same-name-conflict trap the
+/// `CLAUDE.md` NDI note warns about, so it must be tested. Errors are reduced
+/// to a `String` (all `reconcile` does with them is log) so the fake needn't
+/// construct an `mdns_sd::Error`.
+pub(crate) trait MdnsRegistrar {
+    fn register_service(&self, info: mdns_sd::ServiceInfo) -> Result<(), String>;
+    fn unregister_service(&self, fullname: &str) -> Result<(), String>;
+}
+
+impl MdnsRegistrar for mdns_sd::ServiceDaemon {
+    fn register_service(&self, info: mdns_sd::ServiceInfo) -> Result<(), String> {
+        // Inherent `ServiceDaemon::register` — the differently-named trait
+        // method above means no recursion / no name collision.
+        self.register(info).map_err(|e| e.to_string())
+    }
+    fn unregister_service(&self, fullname: &str) -> Result<(), String> {
+        self.unregister(fullname)
+            .map(|_rx| ())
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Spawn the LAN `sp.local` mDNS advertiser. Reads [`SETTING_LAN_MDNS_ENABLED`]
@@ -255,8 +283,8 @@ async fn run_lan_mdns(
 /// any stale record first (a same-name re-register would otherwise conflict —
 /// the exact trap the `CLAUDE.md` NDI note warns about). Keeps
 /// `advertised_ip` / `advertised_fullname` and the shared status in sync.
-async fn reconcile(
-    daemon: &mdns_sd::ServiceDaemon,
+async fn reconcile<D: MdnsRegistrar>(
+    daemon: &D,
     port: u16,
     ip: Option<Ipv4Addr>,
     advertised_ip: &mut Option<Ipv4Addr>,
@@ -264,7 +292,7 @@ async fn reconcile(
     status: &LanStatusHandle,
 ) {
     if let Some(old) = advertised_fullname.take() {
-        if let Err(e) = daemon.unregister(&old) {
+        if let Err(e) = daemon.unregister_service(&old) {
             warn!("mdns: unregister of stale record failed: {e}");
         }
     }
@@ -279,7 +307,7 @@ async fn reconcile(
     match build_service_info(new_ip, port) {
         Ok(info) => {
             let fullname = info.get_fullname().to_string();
-            match daemon.register(info) {
+            match daemon.register_service(info) {
                 Ok(()) => {
                     let url = lan_url(port);
                     info!("mdns: advertising {MDNS_HOSTNAME} A={new_ip} -> {url}");
@@ -403,5 +431,167 @@ mod tests {
         assert!(!setting_enabled("  off "));
         assert!(!setting_enabled("0"));
         assert!(!setting_enabled("no"));
+    }
+
+    // --- reconcile state-machine tests -----------------------------------
+    // The register / re-register / clear logic is the one piece that mirrors
+    // the same-name-conflict trap the CLAUDE.md NDI note warns about, so it is
+    // covered here via a call-recording fake (the real ServiceDaemon opens a
+    // socket and can't run in CI).
+
+    #[derive(Default)]
+    struct FakeDaemon {
+        registered: std::sync::Mutex<Vec<String>>,
+        unregistered: std::sync::Mutex<Vec<String>>,
+        fail_register: bool,
+    }
+
+    impl MdnsRegistrar for FakeDaemon {
+        fn register_service(&self, info: mdns_sd::ServiceInfo) -> Result<(), String> {
+            if self.fail_register {
+                return Err("simulated register failure".into());
+            }
+            self.registered
+                .lock()
+                .unwrap()
+                .push(info.get_fullname().to_string());
+            Ok(())
+        }
+        fn unregister_service(&self, fullname: &str) -> Result<(), String> {
+            self.unregistered.lock().unwrap().push(fullname.to_string());
+            Ok(())
+        }
+    }
+
+    fn some_ip(a: u8, b: u8, c: u8, d: u8) -> Option<Ipv4Addr> {
+        Some(Ipv4Addr::new(a, b, c, d))
+    }
+
+    #[tokio::test]
+    async fn reconcile_first_registers_and_publishes_status() {
+        let daemon = FakeDaemon::default();
+        let status = new_status_handle();
+        let mut advertised_ip = None;
+        let mut advertised_fullname = None;
+
+        reconcile(
+            &daemon,
+            8920,
+            some_ip(10, 77, 9, 201),
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+
+        assert_eq!(advertised_ip, some_ip(10, 77, 9, 201));
+        assert!(advertised_fullname.is_some());
+        assert_eq!(daemon.registered.lock().unwrap().len(), 1);
+        assert!(daemon.unregistered.lock().unwrap().is_empty());
+        let s = status.read().await.clone();
+        assert_eq!(s.lan_url.as_deref(), Some("http://sp.local:8920"));
+        assert_eq!(s.lan_ip.as_deref(), Some("10.77.9.201"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_ip_change_unregisters_old_then_registers_new() {
+        let daemon = FakeDaemon::default();
+        let status = new_status_handle();
+        let mut advertised_ip = None;
+        let mut advertised_fullname = None;
+
+        reconcile(
+            &daemon,
+            8920,
+            some_ip(10, 0, 0, 1),
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+        let first_fullname = advertised_fullname.clone().expect("registered");
+
+        // DHCP hands out a new lease.
+        reconcile(
+            &daemon,
+            8920,
+            some_ip(10, 0, 0, 2),
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+
+        assert_eq!(advertised_ip, some_ip(10, 0, 0, 2));
+        // The old record is torn down before the new one registers (the
+        // same-name trap the CLAUDE.md NDI note warns about).
+        assert_eq!(
+            daemon.unregistered.lock().unwrap().as_slice(),
+            &[first_fullname]
+        );
+        assert_eq!(daemon.registered.lock().unwrap().len(), 2);
+        assert_eq!(status.read().await.lan_ip.as_deref(), Some("10.0.0.2"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_register_failure_falls_back_to_ip_only() {
+        let daemon = FakeDaemon {
+            fail_register: true,
+            ..Default::default()
+        };
+        let status = new_status_handle();
+        let mut advertised_ip = None;
+        let mut advertised_fullname = None;
+
+        reconcile(
+            &daemon,
+            8920,
+            some_ip(10, 0, 0, 1),
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+
+        // Not advertised (so the next tick retries), but the raw IP is surfaced.
+        assert_eq!(advertised_ip, None);
+        assert!(advertised_fullname.is_none());
+        let s = status.read().await.clone();
+        assert_eq!(s.lan_url, None);
+        assert_eq!(s.lan_ip.as_deref(), Some("10.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_no_ip_clears_advertisement() {
+        let daemon = FakeDaemon::default();
+        let status = new_status_handle();
+        let mut advertised_ip = None;
+        let mut advertised_fullname = None;
+        reconcile(
+            &daemon,
+            8920,
+            some_ip(10, 0, 0, 1),
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+        assert!(advertised_fullname.is_some());
+
+        // Network drops — no routable IP.
+        reconcile(
+            &daemon,
+            8920,
+            None,
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+
+        assert_eq!(advertised_ip, None);
+        assert!(advertised_fullname.is_none());
+        assert_eq!(daemon.unregistered.lock().unwrap().len(), 1);
+        assert_eq!(*status.read().await, LanStatus::default());
     }
 }

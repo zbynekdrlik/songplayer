@@ -23,6 +23,16 @@ struct LanInfo {
     lan_ip: Option<String>,
 }
 
+/// The port the dashboard is currently served on. The dashboard is same-origin
+/// as the server, so this is the operator's actual `api_port` — used to build
+/// the raw-IP fallback URL instead of assuming the default 8920.
+fn current_port() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().port().ok())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| "8920".to_string())
+}
+
 #[component]
 pub fn LanAddress() -> impl IntoView {
     let lan_url = RwSignal::new(None::<String>);
@@ -59,9 +69,10 @@ pub fn LanAddress() -> impl IntoView {
                         }
                         .into_any()
                     }
-                    // mDNS not up but the LAN IP is known — show the raw fallback.
+                    // mDNS not up but the LAN IP is known — show the raw fallback
+                    // on the port the dashboard is actually served on.
                     (None, Some(ip)) => {
-                        let fallback = format!("http://{ip}:8920");
+                        let fallback = format!("http://{ip}:{}", current_port());
                         let href = fallback.clone();
                         view! {
                             <span class="lan-label">"LAN: "</span>
