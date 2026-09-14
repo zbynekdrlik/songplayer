@@ -12,7 +12,12 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - sp-ui / e2e mock gotchas → `.claude/rules/sp-ui-frontend.md` (auto-loads on `sp-ui/**`, `e2e/mock-api.mjs`)
 - pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
+- yt-dlp spawn env (UTF-8 titles + hide console) → `.claude/rules/yt-dlp-spawn-env.md` (auto-loads on `downloader/**`, `playlist/**`)
 - genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter}*`, `sp-ndi/**`)
+- OBS↔NDI health / dark-wall receiver recovery → `.claude/rules/obs-ndi-health.md` (auto-loads on `obs/**`, `playback/ndi_health.rs`, `e2e/post-deploy*`)
+- obs-mcp gateway watchdog → `.claude/rules/obs-mcp-gateway.md` (auto-loads on `scripts/obs-mcp/**`)
+- CLIProxyAPI / DEFAULT_AI_MODEL → `.claude/rules/ai-proxy.md` (auto-loads on `crates/sp-server/src/ai/**`, `config.rs`)
+- crash diagnostics / panic hook → `.claude/rules/crash-diagnostics.md` (auto-loads on `panic_hook.rs`, `src-tauri/src/lib.rs`, `build.rs`)
 
 | Area | Skill | Load when |
 |------|-------|-----------|

@@ -377,6 +377,10 @@ pub async fn fetch_video_metadata(
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
+    // The `title` we read below comes straight from yt-dlp's `--dump-json`;
+    // force UTF-8 stdio so a non-ANSI-codepage title (e.g. "Vámonos") is not
+    // mangled before we parse it (#136 T4).
+    super::apply_utf8_env(&mut cmd);
     let output = cmd.output().await?;
     if !output.status.success() {
         anyhow::bail!(

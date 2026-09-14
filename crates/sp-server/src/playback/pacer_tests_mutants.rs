@@ -649,3 +649,39 @@ fn audio_overflow_warn_needed_reflects_the_buffer() {
         "the overflow warning is one-shot"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Empty-ring percentile guards (#156): jitter_p99_us / iter_percentile_us each
+// open with `if <len> == 0 { return 0 }`. Without the guard, `len - 1` on an
+// empty ring panics either way — in debug (this test profile) on subtraction
+// overflow, in release by wrapping to usize::MAX so `.min` never clamps and
+// `v[huge]` indexes past an empty vec (the 0xc0000409 abort mechanism #156 was
+// filed for). The index-math tests above all use full rings (len=100/200);
+// these lock the untested empty case so a future refactor can't drop the guard.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn jitter_p99_us_on_empty_ring_returns_zero_without_panicking() {
+    let (pacer, _clk) = anchored_pacer();
+    assert_eq!(pacer.jitter_len, 0);
+    assert_eq!(
+        pacer.jitter_p99_us(),
+        0,
+        "an empty jitter ring must return 0, never index-panic"
+    );
+}
+
+#[test]
+fn iter_percentile_us_on_empty_ring_returns_zero_without_panicking() {
+    let (pacer, _clk) = anchored_pacer();
+    assert_eq!(pacer.iter_len, 0);
+    for p in [0usize, 50, 99, 100] {
+        assert_eq!(
+            pacer.iter_percentile_us(p),
+            0,
+            "an empty iter ring must return 0 for p={p}, never index-panic"
+        );
+    }
+    assert_eq!(pacer.iter_p50_us(), 0);
+    assert_eq!(pacer.iter_p99_us(), 0);
+}

@@ -4,10 +4,13 @@ pub mod ai;
 pub mod api;
 pub mod db;
 pub mod downloader;
+mod engine_command;
+pub use engine_command::EngineCommand;
 pub mod lyrics;
 pub mod metadata;
 pub mod obs;
 mod obs_bridge;
+pub mod panic_hook;
 pub mod playback;
 pub mod playlist;
 pub mod presenter;
@@ -16,11 +19,12 @@ pub mod resolume;
 pub mod shutdown;
 pub mod startup;
 
+pub use panic_hook::install_panic_hook;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
 use sqlx::{Row, SqlitePool};
 use tokio::sync::{RwLock, broadcast, mpsc};
@@ -67,60 +71,6 @@ pub struct AppState {
     /// reads/writes it synchronously; the playback engine + pipeline threads
     /// share the same registry (default OFF, never persisted).
     pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
-}
-
-/// Commands sent from the API layer to the playback engine.
-#[derive(Debug, Clone)]
-pub enum EngineCommand {
-    SceneChanged {
-        playlist_id: i64,
-        on_program: bool,
-    },
-    Play {
-        playlist_id: i64,
-    },
-    Pause {
-        playlist_id: i64,
-    },
-    Skip {
-        playlist_id: i64,
-    },
-    /// Go back to the previous track. Pops the most recent entry off
-    /// the per-playlist history stack maintained by `PlaybackEngine`
-    /// and plays it. No-op if the history is empty.
-    Previous {
-        playlist_id: i64,
-    },
-    SetMode {
-        playlist_id: i64,
-        mode: PlaybackMode,
-    },
-    /// Jump to a specific video within a playlist and start playing it
-    /// immediately. For custom playlists, also updates
-    /// `playlists.current_position` so subsequent Skip advances from the
-    /// new position. For youtube playlists it behaves like Previous
-    /// (plays the given video but does not affect the random-unplayed
-    /// selector; the next Skip will pick a fresh random video).
-    ///
-    /// When `position_ms` is `Some(ms)`, the pipeline seeks to that
-    /// offset before starting frame submission — atomic play-from-position
-    /// that eliminates the race in the old play-video + delayed seek dance
-    /// (see issue #88).
-    PlayVideo {
-        playlist_id: i64,
-        video_id: i64,
-        position_ms: Option<u64>,
-    },
-    /// Seek the currently-playing song on the given playlist to `position_ms`.
-    /// No-op when no pipeline exists or no song is loaded.
-    Seek {
-        playlist_id: i64,
-        position_ms: u64,
-    },
-    /// Re-emit current title + subtitle state after a Resolume host recovered.
-    ResolumeRecovered {
-        host: String,
-    },
 }
 
 /// Status of external tool availability.
@@ -183,6 +133,17 @@ pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
+    // Install the panic hook FIRST so any panic during startup or steady-state
+    // is captured to a durable crash file before release `panic = "abort"`
+    // kills the process (#156). Idempotent: the Tauri shell installs it earlier
+    // when present, and the internal `Once` makes the double call safe.
+    let crash_log = config
+        .db_path
+        .parent()
+        .map(|d| d.join("songplayer-panic.log"))
+        .unwrap_or_else(|| PathBuf::from("songplayer-panic.log"));
+    crate::install_panic_hook(crash_log);
+
     // 1. Database
     let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
     db::run_migrations(&pool).await?;
@@ -756,6 +717,16 @@ pub async fn start(
                         }
                         EngineCommand::ResolumeRecovered { host } => {
                             engine.handle_resolume_recovery(&host).await;
+                        }
+                        EngineCommand::EnsurePipeline { playlist_id } => {
+                            // #132: a playlist created/activated at runtime
+                            // registers its pipeline the same way startup does.
+                            engine.ensure_pipeline_for_playlist(playlist_id).await;
+                        }
+                        EngineCommand::RemovePipeline { playlist_id } => {
+                            // #132: a playlist deleted/deactivated at runtime
+                            // tears its pipeline down symmetrically.
+                            engine.remove_pipeline(playlist_id);
                         }
                     }
                 }

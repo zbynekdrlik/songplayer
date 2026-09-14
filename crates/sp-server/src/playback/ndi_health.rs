@@ -6,6 +6,7 @@
 //! Mirrors `playback/recovery.rs` precedent and `resolume::ResolumeRegistry`
 //! shape from PR #54.
 
+use crate::obs::ndi_recovery::NdiRecoveryTracker;
 use crate::playback::clock_health::ClockHealth;
 use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use chrono::{DateTime, Utc};
@@ -14,6 +15,11 @@ use std::collections::HashMap;
 use std::sync::{RwLock, atomic::Ordering};
 use std::time::Instant;
 use tracing::warn;
+
+/// The `degraded_reason` string a Playing-on-program pipeline gets when it has
+/// zero NDI receivers — the "dark wall" state (#127). Single source of truth so
+/// the receiver-recovery trigger and the dashboard read the same string.
+pub(crate) const DARK_WALL_REASON: &str = "no NDI receiver — wall is dark";
 
 /// Per-pipeline NDI health. Serialized to the dashboard via
 /// `GET /api/v1/ndi/health`. Built by the engine from
@@ -177,6 +183,10 @@ pub struct WindowStats {
 /// returned Vec is owned data, no lifetimes leak out.
 pub struct NdiHealthRegistry {
     snapshots: RwLock<HashMap<i64, PipelineHealthSnapshot>>,
+    /// #127 receiver-recovery state. Composed here (rather than as a new
+    /// `PlaybackEngine` field) so the engine reaches it through the `Arc` it
+    /// already holds; the single writer is `handle_health_snapshot`.
+    recovery: NdiRecoveryTracker,
 }
 
 impl NdiHealthRegistry {
@@ -186,7 +196,23 @@ impl NdiHealthRegistry {
     pub fn new() -> Self {
         Self {
             snapshots: RwLock::new(HashMap::new()),
+            recovery: NdiRecoveryTracker::new(),
         }
+    }
+
+    /// #127: evaluate the receiver-recovery trigger for one pipeline and apply
+    /// the state mutation. Returns `true` iff the engine should nudge OBS now.
+    /// `is_dark` is true iff the pipeline is Playing on program with the
+    /// dark-wall `degraded_reason` set (`connections == 0`).
+    pub fn evaluate_recovery(
+        &self,
+        playlist_id: i64,
+        is_dark: bool,
+        consecutive_bad_polls: u32,
+        now_100ns: i64,
+    ) -> bool {
+        self.recovery
+            .evaluate(playlist_id, is_dark, consecutive_bad_polls, now_100ns)
     }
 
     /// Replace (or insert) the snapshot for `playlist_id`.
@@ -441,6 +467,42 @@ impl crate::playback::PlaybackEngine {
         }
 
         self.ndi_health_registry.update(snapshot);
+
+        // #127 receiver-side recovery: when this pipeline is Playing on program
+        // with a dead NDI receiver (the dark-wall state SongPlayer already
+        // names), nudge OBS over its healthy WebSocket to re-subscribe the
+        // input. The tracker enforces a consecutive-poll threshold, a cooldown,
+        // and a per-outage attempt cap; a recovered pipeline resets it.
+        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON);
+        if self.ndi_health_registry.evaluate_recovery(
+            playlist_id,
+            is_dark,
+            consecutive_bad_polls,
+            heartbeat_100ns,
+        ) {
+            match self.obs_cmd_tx.as_ref() {
+                Some(tx) => match tx.try_send(crate::obs::ObsCommand::NudgeNdiReceiver {
+                    ndi_name: ndi_name.clone(),
+                }) {
+                    Ok(()) => warn!(
+                        playlist_id,
+                        ndi_name = %ndi_name,
+                        "ndi-recovery: dark wall — nudging OBS to re-subscribe the receiver"
+                    ),
+                    Err(e) => warn!(
+                        playlist_id,
+                        ndi_name = %ndi_name,
+                        error = %e,
+                        "ndi-recovery: failed to queue OBS nudge"
+                    ),
+                },
+                None => warn!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    "ndi-recovery: dark wall but no OBS command channel wired"
+                ),
+            }
+        }
     }
 }
 
@@ -508,7 +570,7 @@ fn compute_degraded_reason(
         return None;
     }
     if connections == 0 {
-        return Some("no NDI receiver — wall is dark".to_string());
+        return Some(DARK_WALL_REASON.to_string());
     }
     if nominal_fps > 0.0 && observed_fps < nominal_fps / 2.0 {
         return Some(format!(
@@ -529,386 +591,5 @@ fn compute_degraded_reason(
 mod lock_state_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::playback::state::PlayState;
-    use crate::playback::{PlaybackEngine, PlaybackEngineConfig};
-    use sp_core::ws::ServerMsg;
-    use sqlx::SqlitePool;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::time::Instant;
-    use tokio::sync::{broadcast, mpsc};
-
-    async fn fresh_engine() -> (PlaybackEngine, Arc<NdiHealthRegistry>) {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        let (obs_tx, _) = broadcast::channel(16);
-        let (resolume_tx, _) = mpsc::channel(16);
-        let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-        let registry = Arc::new(NdiHealthRegistry::new());
-        let engine = PlaybackEngine::new(PlaybackEngineConfig {
-            pool,
-            cache_dir: PathBuf::from("/tmp"),
-            obs_event_tx: obs_tx,
-            obs_cmd_tx: None,
-            resolume_tx,
-            ws_event_tx: ws_tx,
-            presenter_client: None,
-            ndi_health_registry: registry.clone(),
-        });
-        (engine, registry)
-    }
-
-    #[tokio::test]
-    async fn handle_health_snapshot_populates_registry_for_known_pipeline() {
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(7, "SP-test");
-
-        let now = Instant::now();
-        engine.handle_health_snapshot(
-            7,
-            PipelineEvent::HealthSnapshot {
-                connections: 2,
-                frames_submitted_total: 150,
-                frames_submitted_last_5s: 30,
-                observed_fps: 29.97,
-                nominal_fps: 29.97,
-                last_submit_ts: Some(now),
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 0,
-                reported_state: PlaybackStateLabel::Playing,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-
-        let snapshots = registry.snapshots();
-        assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].playlist_id, 7);
-        assert_eq!(snapshots[0].connections, 2);
-        assert_eq!(snapshots[0].frames_submitted_total, 150);
-        assert!(snapshots[0].last_submit_ts.is_some());
-    }
-
-    #[tokio::test]
-    async fn handle_health_snapshot_drops_event_for_unknown_pipeline() {
-        let (mut engine, registry) = fresh_engine().await;
-        let now = Instant::now();
-        engine.handle_health_snapshot(
-            999,
-            PipelineEvent::HealthSnapshot {
-                connections: 0,
-                frames_submitted_total: 0,
-                frames_submitted_last_5s: 0,
-                observed_fps: 0.0,
-                nominal_fps: 30.0,
-                last_submit_ts: None,
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 0,
-                reported_state: PlaybackStateLabel::Idle,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-        assert_eq!(registry.snapshots().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn registry_holds_one_entry_per_pipeline_with_health() {
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(1, "SP-a");
-        engine.ensure_pipeline(2, "SP-b");
-        let now = Instant::now();
-        let mk_event = |state| PipelineEvent::HealthSnapshot {
-            connections: 1,
-            frames_submitted_total: 0,
-            frames_submitted_last_5s: 0,
-            observed_fps: 0.0,
-            nominal_fps: 30.0,
-            last_submit_ts: None,
-            last_heartbeat_ts: now,
-            consecutive_bad_polls: 0,
-            reported_state: state,
-            pacing: Default::default(),
-            audio: Default::default(),
-        };
-        engine.handle_health_snapshot(1, mk_event(PlaybackStateLabel::Playing));
-        engine.handle_health_snapshot(2, mk_event(PlaybackStateLabel::Idle));
-        let snapshots = registry.snapshots();
-        assert_eq!(snapshots.len(), 2);
-        let ids: Vec<_> = snapshots.iter().map(|s| s.playlist_id).collect();
-        assert!(ids.contains(&1));
-        assert!(ids.contains(&2));
-    }
-
-    #[tokio::test]
-    async fn engine_overrides_idle_to_waiting_for_scene_when_canonical_state_says_so() {
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(5, "SP-w");
-        engine.set_state_for_test(5, PlayState::WaitingForScene);
-
-        let now = Instant::now();
-        engine.handle_health_snapshot(
-            5,
-            PipelineEvent::HealthSnapshot {
-                connections: 0,
-                frames_submitted_total: 0,
-                frames_submitted_last_5s: 0,
-                observed_fps: 0.0,
-                nominal_fps: 30.0,
-                last_submit_ts: None,
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 0,
-                reported_state: PlaybackStateLabel::Idle,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-
-        let snapshots = registry.snapshots();
-        assert_eq!(snapshots.len(), 1);
-        assert_eq!(
-            snapshots[0].state,
-            PlaybackStateLabel::WaitingForScene,
-            "engine must override pipeline's Idle -> WaitingForScene when canonical state matches"
-        );
-    }
-
-    #[tokio::test]
-    async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls() {
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(8, "SP-fail");
-        engine.set_state_for_test(8, PlayState::Playing { video_id: 1 });
-        engine.set_scene_active_for_test(8, true);
-        let now = Instant::now();
-        engine.handle_health_snapshot(
-            8,
-            PipelineEvent::HealthSnapshot {
-                connections: 0,
-                frames_submitted_total: 100,
-                frames_submitted_last_5s: 30,
-                observed_fps: 30.0,
-                nominal_fps: 30.0,
-                last_submit_ts: Some(now),
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 2,
-                reported_state: PlaybackStateLabel::Playing,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-        let snapshots = registry.snapshots();
-        assert_eq!(snapshots[0].consecutive_bad_polls, 2);
-        assert_eq!(
-            snapshots[0].degraded_reason.as_deref(),
-            Some("no NDI receiver — wall is dark"),
-        );
-    }
-
-    #[test]
-    fn degraded_reason_returns_none_at_one_bad_poll() {
-        let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 0, 0.0, 30.0, 1);
-        assert!(r.is_none(), "single bad poll must not trigger degradation");
-    }
-
-    #[test]
-    fn degraded_reason_returns_none_when_not_playing() {
-        let r = compute_degraded_reason(&PlaybackStateLabel::Idle, 0, 0.0, 30.0, 5);
-        assert!(r.is_none());
-        let r = compute_degraded_reason(&PlaybackStateLabel::Paused, 0, 0.0, 30.0, 5);
-        assert!(r.is_none());
-        let r = compute_degraded_reason(&PlaybackStateLabel::WaitingForScene, 0, 0.0, 30.0, 5);
-        assert!(r.is_none());
-    }
-
-    #[test]
-    fn degraded_reason_emits_underrun_when_fps_below_half_nominal() {
-        let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 1, 10.0, 30.0, 2);
-        assert_eq!(r.as_deref(), Some("underrunning (10/30 fps)"));
-    }
-
-    #[test]
-    fn degraded_reason_emits_stale_when_fps_ok_and_connections_ok() {
-        let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 1, 30.0, 30.0, 2);
-        assert_eq!(r.as_deref(), Some("no frames in 10s"));
-    }
-
-    /// Regression test for the 2026-04-27 production failure.
-    ///
-    /// v0.25.0 deployed PR #58's Tier-2 RecreateSender as the auto-recovery
-    /// for prolonged `connections=0`. In production NDI's mDNS socket bound
-    /// to a stale APIPA address (`169.254.144.214`); per-sender recreate
-    /// could not fix that runtime-level binding, and `send_create` with the
-    /// existing name failed on the same-name conflict. The wall stayed dark
-    /// while the log spammed `RecreateSender mid-decode: failed; keeping existing`
-    /// every 30 s for ~50 minutes until the process was restarted.
-    ///
-    /// v0.26.0 ripped the entire trigger out (no `RecreateSender` variant,
-    /// no `should_fire_recreate` predicate, no `recreate_attempts` snapshot
-    /// field) and reverted to Tier-1 visibility only. This test asserts the
-    /// remaining behaviour: prolonged `connections=0` while Playing fills
-    /// `degraded_reason` for the dashboard/log without any other side effects.
-    /// Re-introducing per-sender recreate machinery would have to redefine
-    /// the snapshot shape and is structurally caught by `cargo check` — but
-    /// this test is the documented contract.
-    #[tokio::test]
-    async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(7, "SP-fast");
-        engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-        engine.set_scene_active_for_test(7, true);
-
-        let now = Instant::now();
-        // Simulate 100 consecutive bad polls (8+ minutes of dark wall) —
-        // past every threshold the v0.25.0 PR #58 schedule fired at.
-        engine.handle_health_snapshot(
-            7,
-            PipelineEvent::HealthSnapshot {
-                connections: 0,
-                frames_submitted_total: 12_000,
-                frames_submitted_last_5s: 120,
-                observed_fps: 24.0,
-                nominal_fps: 24.0,
-                last_submit_ts: Some(now),
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 100,
-                reported_state: PlaybackStateLabel::Playing,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-
-        let snap = &registry.snapshots()[0];
-        assert_eq!(snap.consecutive_bad_polls, 100);
-        assert_eq!(snap.connections, 0);
-        // Tier-1 visibility fires.
-        assert_eq!(
-            snap.degraded_reason.as_deref(),
-            Some("no NDI receiver — wall is dark"),
-        );
-    }
-
-    /// Tier-1 visibility must clear when the wall recovers (e.g. operator
-    /// restarts SongPlayer after NDI APIPA binding made connections=0). A
-    /// clean poll after a degraded run drops `degraded_reason` back to None
-    /// so the dashboard / log "ndi: pipeline recovered" path fires.
-    #[tokio::test]
-    async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(7, "SP-fast");
-        engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-        engine.set_scene_active_for_test(7, true);
-
-        let now = Instant::now();
-        // First: degraded.
-        engine.handle_health_snapshot(
-            7,
-            PipelineEvent::HealthSnapshot {
-                connections: 0,
-                frames_submitted_total: 240,
-                frames_submitted_last_5s: 120,
-                observed_fps: 24.0,
-                nominal_fps: 24.0,
-                last_submit_ts: Some(now),
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 5,
-                reported_state: PlaybackStateLabel::Playing,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-        assert_eq!(
-            registry.snapshots()[0].degraded_reason.as_deref(),
-            Some("no NDI receiver — wall is dark")
-        );
-
-        // Then: clean poll. Connections returned, no consecutive_bad_polls.
-        engine.handle_health_snapshot(
-            7,
-            PipelineEvent::HealthSnapshot {
-                connections: 2,
-                frames_submitted_total: 480,
-                frames_submitted_last_5s: 120,
-                observed_fps: 24.0,
-                nominal_fps: 24.0,
-                last_submit_ts: Some(now),
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 0,
-                reported_state: PlaybackStateLabel::Playing,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-        let snap = &registry.snapshots()[0];
-        assert_eq!(snap.connections, 2);
-        assert_eq!(snap.consecutive_bad_polls, 0);
-        assert!(
-            snap.degraded_reason.is_none(),
-            "clean poll must clear degraded_reason so 'ndi: pipeline recovered' log fires",
-        );
-    }
-
-    #[test]
-    fn should_log_periodic_heartbeat_on_first_heartbeat() {
-        let cur: DateTime<Utc> = "2026-04-28T05:21:00Z".parse().unwrap();
-        assert!(
-            should_log_periodic_heartbeat(None, cur),
-            "first heartbeat for a pipeline must always log"
-        );
-    }
-
-    #[test]
-    fn should_log_periodic_heartbeat_on_new_minute_bucket() {
-        let prev: DateTime<Utc> = "2026-04-28T05:21:55Z".parse().unwrap();
-        let cur: DateTime<Utc> = "2026-04-28T05:22:00Z".parse().unwrap();
-        assert!(
-            should_log_periodic_heartbeat(Some(prev), cur),
-            "crossing into a new UTC-minute bucket must log"
-        );
-    }
-
-    #[test]
-    fn should_log_periodic_heartbeat_suppresses_within_same_minute() {
-        let prev: DateTime<Utc> = "2026-04-28T05:21:00Z".parse().unwrap();
-        let cur: DateTime<Utc> = "2026-04-28T05:21:55Z".parse().unwrap();
-        assert!(
-            !should_log_periodic_heartbeat(Some(prev), cur),
-            "heartbeats inside the same UTC minute must NOT spam the log"
-        );
-    }
-
-    #[tokio::test]
-    async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
-        // Pipeline is decoding (state=Playing) but OBS is on a different
-        // scene → scene_active=false. Even with connections=0, no alert.
-        let (mut engine, registry) = fresh_engine().await;
-        engine.ensure_pipeline(9, "SP-off");
-        engine.set_state_for_test(9, PlayState::Playing { video_id: 1 });
-        // scene_active defaults to false on a fresh pipeline; do not flip it.
-
-        let now = Instant::now();
-        engine.handle_health_snapshot(
-            9,
-            PipelineEvent::HealthSnapshot {
-                connections: 0,
-                frames_submitted_total: 100,
-                frames_submitted_last_5s: 30,
-                observed_fps: 30.0,
-                nominal_fps: 30.0,
-                last_submit_ts: Some(now),
-                last_heartbeat_ts: now,
-                consecutive_bad_polls: 5,
-                reported_state: PlaybackStateLabel::Playing,
-                pacing: Default::default(),
-                audio: Default::default(),
-            },
-        );
-        let snapshots = registry.snapshots();
-        assert_eq!(snapshots[0].state, PlaybackStateLabel::Paused);
-        assert!(
-            snapshots[0].degraded_reason.is_none(),
-            "scene_active=false must not produce a degraded_reason even with connections=0"
-        );
-    }
-}
+#[path = "ndi_health_tests.rs"]
+mod tests;

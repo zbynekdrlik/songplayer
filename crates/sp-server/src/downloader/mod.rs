@@ -31,6 +31,20 @@ pub fn hide_console_window(cmd: &mut tokio::process::Command) {
     let _ = cmd; // suppress unused warning on non-Windows
 }
 
+/// Force UTF-8 stdio on a yt-dlp (frozen-Python) child (#136 T4).
+///
+/// yt-dlp is a frozen-Python program; on Windows its `--dump-json` stdout is
+/// encoded with the process ANSI codepage (cp1252 on win-resolume), not
+/// UTF-8, so a title outside cp1252's range (e.g. "Vámonos") is mangled
+/// before `String::from_utf8_lossy` ever sees it. Both variables are needed:
+/// `PYTHONUTF8=1` enables Python's UTF-8 mode process-wide, and a redirected
+/// pipe additionally honors `PYTHONIOENCODING=utf-8` for the stream
+/// encoding. Same mechanism `lyrics::mtl_aligner` already uses (#137).
+pub fn apply_utf8_env(cmd: &mut tokio::process::Command) {
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONIOENCODING", "utf-8");
+}
+
 /// Maximum video resolution height for downloads.
 const MAX_RESOLUTION: u32 = 1440;
 
@@ -369,6 +383,7 @@ impl DownloadWorker {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut cmd);
+        apply_utf8_env(&mut cmd);
         let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
@@ -413,6 +428,7 @@ impl DownloadWorker {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut cmd);
+        apply_utf8_env(&mut cmd);
         let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
@@ -559,6 +575,36 @@ pub(crate) struct VideoRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #136 T4: yt-dlp's `--dump-json` title text must arrive as UTF-8, so
+    /// every yt-dlp spawn gets `PYTHONUTF8=1` + `PYTHONIOENCODING=utf-8`.
+    /// Introspect the built Command's explicit env to pin both.
+    #[test]
+    fn apply_utf8_env_sets_pythonutf8_and_ioencoding() {
+        use std::ffi::OsStr;
+        let mut cmd = tokio::process::Command::new("yt-dlp");
+        apply_utf8_env(&mut cmd);
+        let mut utf8 = None;
+        let mut ioenc = None;
+        for (k, v) in cmd.as_std().get_envs() {
+            if k == OsStr::new("PYTHONUTF8") {
+                utf8 = v.map(|s| s.to_owned());
+            }
+            if k == OsStr::new("PYTHONIOENCODING") {
+                ioenc = v.map(|s| s.to_owned());
+            }
+        }
+        assert_eq!(
+            utf8.as_deref(),
+            Some(OsStr::new("1")),
+            "PYTHONUTF8=1 must be set so frozen-Python yt-dlp emits UTF-8 stdout"
+        );
+        assert_eq!(
+            ioenc.as_deref(),
+            Some(OsStr::new("utf-8")),
+            "PYTHONIOENCODING=utf-8 must be set for the redirected stdout pipe"
+        );
+    }
 
     #[test]
     fn format_spec_orders_av1_then_hls_then_dash() {

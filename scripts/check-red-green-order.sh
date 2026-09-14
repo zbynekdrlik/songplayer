@@ -22,6 +22,11 @@
 #   * Multiple `fix(#N)` commits referencing the same N are all covered by
 #     a single preceding `test(#N)` commit (the test is the regression
 #     guard, the fix can land in multiple commits if needed).
+#   * A `[no-test: <reason>]` marker anywhere in a fix commit's full body is
+#     a LOGGED bypass (per regression-test-first.md) — not a violation.
+#   * Any `test(<scope>)` commit whose subject mentions `(#N)` anywhere (e.g.
+#     `test(config): RED — … (#145)`) counts as the RED commit for N, not
+#     only the strict `test(#N)` leading form.
 
 set -euo pipefail
 
@@ -45,12 +50,17 @@ check_range() {
     local violations=()
 
     while IFS=$'\t' read -r sha subject; do
-        # Record any test(#N) commit so a following fix(#N) can pair against
-        # it. We match #N strictly inside the parens — `test(#94):` records
-        # 94. `test: …` plain doesn't trigger; `test(refactor):` doesn't
-        # either (no issue reference, nothing to pair).
-        if [[ "$subject" =~ ^test\(#([0-9]+)\) ]]; then
-            test_seen[${BASH_REMATCH[1]}]="$sha"
+        # Record any test commit that references an issue so a following
+        # fix(#N) can pair against it. A `test(<scope>)` subject counts for
+        # EVERY `#N` it mentions anywhere (e.g. `test(config): RED — … (#145)`
+        # records 145), which subsumes the strict `test(#N)` leading form.
+        # `test: …` plain / `test(refactor):` with no `#N` don't trigger.
+        if [[ "$subject" =~ ^test\( ]]; then
+            local rest="$subject"
+            while [[ "$rest" =~ \#([0-9]+) ]]; do
+                test_seen[${BASH_REMATCH[1]}]="$sha"
+                rest="${rest#*"${BASH_REMATCH[0]}"}"
+            done
         fi
         # Flag every bug-prefix subject that explicitly tags an issue —
         # `fix(#N):`, `bug(#N):`, `bugfix(#N):`, `hotfix(#N):`,
@@ -62,6 +72,14 @@ check_range() {
         # not bug-fix claims.
         if [[ "$subject" =~ ^(fix|bug|bugfix|hotfix|regression|repair|patch)\(#([0-9]+)\) ]]; then
             issue="${BASH_REMATCH[2]}"
+            # A `[no-test: <reason>]` marker anywhere in the full commit body
+            # is a LOGGED bypass (regression-test-first.md), not a violation.
+            local body
+            body="$(git log -1 --format=%B "$sha")"
+            if [[ "$body" =~ \[no-test:[^]]*\] ]]; then
+                echo "bypass: $sha #$issue ${BASH_REMATCH[0]}"
+                continue
+            fi
             if [ -z "${test_seen[$issue]:-}" ]; then
                 violations+=("$sha #$issue $subject")
             fi
@@ -69,7 +87,7 @@ check_range() {
     done <<< "$log"
 
     if [ ${#violations[@]} -gt 0 ]; then
-        echo "RED-GREEN order violation: each fix(#N) commit needs a preceding test(#N) commit in the same range."
+        echo "RED-GREEN order violation: each fix(#N) commit needs a preceding test(#N) commit in the same range (or a [no-test: <reason>] body marker)."
         echo "See regression-test-first.md."
         echo ""
         echo "Offending commits:"
@@ -78,7 +96,7 @@ check_range() {
         done
         return 1
     fi
-    echo "ok: all fix(#N) commits in $range have a preceding test(#N) commit"
+    echo "ok: all fix(#N) commits in $range have a preceding test(#N) commit or a [no-test: …] bypass"
     return 0
 }
 
@@ -127,21 +145,36 @@ self_test() {
         # Fixture 6: regression(#N) without preceding test(#N) — must fail.
         git commit --allow-empty -q -m "regression(#303): rushed regression without test"
         git tag fixture-regression-bad
+
+        # Fixture 7: fix(#N) with a [no-test: …] body marker and NO test
+        # commit — a LOGGED bypass, must pass.
+        git commit --allow-empty -q -m "fix(#401): ops-only change" -m "[no-test: operational script, verified live]"
+        git tag fixture-no-test-bypass
+
+        # Fixture 8: test(<scope>) subject that mentions (#N) anywhere pairs a
+        # following fix(#N) — must pass.
+        git commit --allow-empty -q -m "test(config): RED — guard for foo (#402)"
+        git commit --allow-empty -q -m "fix(#402): the fix"
+        git tag fixture-scoped-test-good
     )
 
-    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc
+    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc no_test_rc scoped_test_rc
     good_rc=0
     bad_rc=0
     prefixes_good_rc=0
     bug_bad_rc=0
     hotfix_bad_rc=0
     regression_bad_rc=0
+    no_test_rc=0
+    scoped_test_rc=0
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-good >/dev/null 2>&1 ) || good_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-bad >/dev/null 2>&1 ) || bad_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-bad..fixture-prefixes-good >/dev/null 2>&1 ) || prefixes_good_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-prefixes-good..fixture-bug-bad >/dev/null 2>&1 ) || bug_bad_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-bug-bad..fixture-hotfix-bad >/dev/null 2>&1 ) || hotfix_bad_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-hotfix-bad..fixture-regression-bad >/dev/null 2>&1 ) || regression_bad_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-regression-bad..fixture-no-test-bypass >/dev/null 2>&1 ) || no_test_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-no-test-bypass..fixture-scoped-test-good >/dev/null 2>&1 ) || scoped_test_rc=$?
 
     if [ "$good_rc" -ne 0 ]; then
         echo "self-test FAIL: well-formed range expected rc=0, got $good_rc"
@@ -165,6 +198,14 @@ self_test() {
     fi
     if [ "$regression_bad_rc" -ne 1 ]; then
         echo "self-test FAIL: regression(#N) without test expected rc=1, got $regression_bad_rc"
+        return 1
+    fi
+    if [ "$no_test_rc" -ne 0 ]; then
+        echo "self-test FAIL: fix(#N) with [no-test: …] marker expected rc=0, got $no_test_rc"
+        return 1
+    fi
+    if [ "$scoped_test_rc" -ne 0 ]; then
+        echo "self-test FAIL: test(<scope>) mentioning (#N) expected rc=0, got $scoped_test_rc"
         return 1
     fi
     echo "ok: self-test passed (all bug-prefix subjects gate correctly)"

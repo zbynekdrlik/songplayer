@@ -22,6 +22,7 @@ pub(crate) mod pipeline_paced;
 pub(crate) mod pipeline_paced_idle;
 mod position_update;
 mod recovery;
+mod runtime_pipeline;
 pub mod state;
 pub mod submitter;
 mod test_helpers;
@@ -923,6 +924,9 @@ mod tests_history;
 #[cfg(test)]
 #[path = "tests_play_video.rs"]
 mod tests_play_video;
+#[cfg(test)]
+#[path = "tests_runtime_pipeline.rs"]
+mod tests_runtime_pipeline;
 #[cfg(test)]
 #[path = "tests_scene_change.rs"]
 mod tests_scene_change;

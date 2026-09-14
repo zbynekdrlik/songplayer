@@ -41,6 +41,43 @@ loop that outlives a mount: `if sig.try_get_untracked() != Some(false) { break }
 and `if sig.try_set(v).is_some() { break }`. The frontend spec's nav round-trip
 test (7 s wait — the timer fires at 5 s) guards this.
 
+## `<For>` keyed on `id` alone goes STALE after an in-place refresh
+
+`<For each key=|v| v.id children=|v| {...}>` never re-runs `children` for a key
+it has already seen — it only adds/removes/moves rows by key. So if the row's
+cells capture the item's fields BY VALUE (e.g. `let title = v.song.clone()...`)
+and the list is later REPLACED with the same ids but changed data (an in-place
+`load()` re-fetch after an edit/PATCH), the row keeps showing the OLD values —
+the data persisted, the DOM did not update (`video_list.rs`, #136 T1: the
+save→`load()` round-trip left the corrected song/artist invisible until a full
+page reload). Fixes, cheapest first: fold the mutable rendered fields into the
+key (`key=|v| (v.id, v.song.clone(), v.artist.clone())`) so only the changed
+row is recreated; or make the cells reactive (look the item up in the signal by
+id inside a `move ||`). `download_queue.rs` dodged this only by accident — its
+`<For>` lives inside a `{move || { store.get(); view!{...} }}` block that
+rebuilds the whole subtree on every change. **Caveat for the key-on-content
+fix:** it is safe only while the list is never mutated DURING an active edit — a
+key change mid-typing recreates the `<tr>` and drops input focus. If you add
+live/WebSocket refresh to a list with an inline editor, key on identity and make
+cells reactive instead.
+
+## A wide `<table>` inside a fixed-width card paints over the NEXT card and steals its clicks
+
+`.video-list table { width: 100% }` is only a MAX preference — a table cannot
+shrink below its columns' min-content width. The songs table (6 columns) is
+~445px min, wider than the ~340px `.playlist-card`, and the container had no
+scroll boundary, so the table overflowed the card's right edge. Because the
+dashboard `.playlist-grid` packs cards side-by-side (3×376px at 1280px), the
+overflowing rightmost column landed physically OVER the neighbouring
+`.playlist-card` — a later DOM sibling that paints on top — and captured the
+pointer, so Playwright reported `<div class="playlist-card">…</div> intercepts
+pointer events` and the edit (✎) button was unclickable on any card with a
+right-hand neighbour (#136 T1, dev CI run 34812659893). Fix: give the container
+a scroll boundary — `.video-list { overflow-x: auto }` — so the wide table is
+clipped/scrolled INSIDE its own card instead of overflowing onto siblings.
+General rule: any content that can exceed a grid card's width needs its own
+`overflow` boundary, or it will steal clicks from the card next to it.
+
 ## Root `cargo fmt` / `cargo clippy` do NOT check `sp-ui` or `src-tauri`
 
 Both are excluded from the root `Cargo.toml` workspace (different toolchain

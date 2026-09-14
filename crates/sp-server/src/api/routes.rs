@@ -142,18 +142,40 @@ pub async fn create_playlist(
 
     match result {
         Ok(row) => {
+            // Extract every field into owned values so the `SqliteRow` is not
+            // held across the `engine_tx.send().await` below.
+            let id = row.get::<i64, _>("id");
+            let name = row.get::<String, _>("name");
+            let youtube_url = row.get::<String, _>("youtube_url");
+            let ndi_output_name = row.get::<String, _>("ndi_output_name");
+            let playback_mode = row.get::<String, _>("playback_mode");
+            let is_active = row.get::<i32, _>("is_active") != 0;
+            drop(row);
+
             // Trigger a scene-detection rebuild so the new playlist can be
             // matched against OBS NDI inputs immediately.
             let _ = state.obs_rebuild_tx.send(());
+            // #132: register a playback pipeline for the new playlist so scene
+            // detection can start it without a process restart. The engine
+            // reconciles from the DB (creates only when active + non-empty NDI).
+            // GUARANTEED delivery (`.send().await`, not `try_send`): a dropped
+            // command would leave the playlist unplayable until a restart — the
+            // exact bug this fixes — since no other path calls `ensure_pipeline`
+            // at runtime (`apply_event` only warns "no pipeline"). The engine
+            // drains `engine_rx` on an independent task, so this never deadlocks.
+            let _ = state
+                .engine_tx
+                .send(EngineCommand::EnsurePipeline { playlist_id: id })
+                .await;
             (
                 StatusCode::CREATED,
                 Json(serde_json::json!({
-                    "id": row.get::<i64, _>("id"),
-                    "name": row.get::<String, _>("name"),
-                    "youtube_url": row.get::<String, _>("youtube_url"),
-                    "ndi_output_name": row.get::<String, _>("ndi_output_name"),
-                    "playback_mode": row.get::<String, _>("playback_mode"),
-                    "is_active": row.get::<i32, _>("is_active") != 0,
+                    "id": id,
+                    "name": name,
+                    "youtube_url": youtube_url,
+                    "ndi_output_name": ndi_output_name,
+                    "playback_mode": playback_mode,
+                    "is_active": is_active,
                 })),
             )
                 .into_response()
@@ -247,6 +269,18 @@ pub async fn update_playlist(
                 StatusCode::NOT_FOUND.into_response()
             } else {
                 let _ = state.obs_rebuild_tx.send(());
+                // #132: reconcile the playback pipeline with the update.
+                // Deactivation tears the pipeline down; every other update
+                // (activation, NDI-name set, rename) ensures it — the ensure
+                // handler is idempotent and a no-op when the playlist is
+                // inactive / has no NDI name / already has a pipeline. Guaranteed
+                // delivery (`.send().await`), as in `create_playlist`.
+                let cmd = if body.is_active == Some(false) {
+                    EngineCommand::RemovePipeline { playlist_id: id }
+                } else {
+                    EngineCommand::EnsurePipeline { playlist_id: id }
+                };
+                let _ = state.engine_tx.send(cmd).await;
                 StatusCode::NO_CONTENT.into_response()
             }
         }
@@ -271,6 +305,12 @@ pub async fn delete_playlist(
                 StatusCode::NOT_FOUND.into_response()
             } else {
                 let _ = state.obs_rebuild_tx.send(());
+                // #132: tear down the deleted playlist's pipeline symmetrically.
+                // Guaranteed delivery (`.send().await`), as in `create_playlist`.
+                let _ = state
+                    .engine_tx
+                    .send(EngineCommand::RemovePipeline { playlist_id: id })
+                    .await;
                 StatusCode::NO_CONTENT.into_response()
             }
         }
@@ -338,18 +378,58 @@ pub struct PatchVideoReq {
     /// `Some("")` to clear the override.
     #[serde(default)]
     pub lyrics_override_text: Option<String>,
+    /// Operator correction of the wall song title (#136 T1). Sanitized
+    /// through the same central choke point as an ingested title; a
+    /// whitespace-only value is rejected 400 (a blank song has no
+    /// meaningful wall display).
+    #[serde(default)]
+    pub song: Option<String>,
+    /// Operator correction of the wall artist (#136 T1). Sanitized like
+    /// `song`; an empty value clears the column to NULL (some songs have no
+    /// artist), mirroring the `lyrics_override_text` empty->NULL convention.
+    #[serde(default)]
+    pub artist: Option<String>,
 }
 
-/// Update mutable per-video flags. Currently supports `suppress_resolume_en`
-/// and `lyrics_override_text`. Returns 204 on success, 404 if the video
-/// id doesn't exist, 400 if the request body has no actionable fields.
+/// Update mutable per-video flags. Supports `suppress_resolume_en`,
+/// `lyrics_override_text`, and the `song` / `artist` metadata correction
+/// levers (#136 T1). Returns 204 on success, 404 if the video id doesn't
+/// exist, 400 if the request body has no actionable fields or carries a
+/// whitespace-only `song`.
 pub async fn patch_video(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
     Json(req): Json<PatchVideoReq>,
 ) -> impl IntoResponse {
+    // Sanitize operator-provided metadata through the SAME central choke
+    // point (`metadata::sanitize::strip_emoji`) that `metadata::get_metadata`
+    // applies to every ingested provider/fallback title, so a manual
+    // correction is cleaned identically (emoji / high-plane junk stripped,
+    // whitespace collapsed and trimmed). `strip_emoji` already returns a
+    // trimmed, whitespace-collapsed string, so `is_empty()` == whitespace-only.
+    let song = req
+        .song
+        .as_ref()
+        .map(|s| crate::metadata::sanitize::strip_emoji(s));
+    let artist = req
+        .artist
+        .as_ref()
+        .map(|a| crate::metadata::sanitize::strip_emoji(a));
+
+    // A whitespace-only (empty-after-sanitize) song is a clear operator
+    // error — a blank title has nothing to show on the wall.
+    if let Some(s) = &song {
+        if s.is_empty() {
+            return (StatusCode::BAD_REQUEST, "song must not be whitespace-only").into_response();
+        }
+    }
+
     // Require at least one field so empty-body PATCHes are a clear error.
-    if req.suppress_resolume_en.is_none() && req.lyrics_override_text.is_none() {
+    if req.suppress_resolume_en.is_none()
+        && req.lyrics_override_text.is_none()
+        && song.is_none()
+        && artist.is_none()
+    {
         return (
             StatusCode::BAD_REQUEST,
             "request body must include at least one patchable field",
@@ -366,6 +446,12 @@ pub async fn patch_video(
     if req.lyrics_override_text.is_some() {
         sets.push("lyrics_override_text = ?");
     }
+    if song.is_some() {
+        sets.push("song = ?");
+    }
+    if artist.is_some() {
+        sets.push("artist = ?");
+    }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
 
     let mut q = sqlx::query(&sql);
@@ -379,6 +465,18 @@ pub async fn patch_video(
             q = q.bind::<Option<String>>(None);
         } else {
             q = q.bind::<Option<String>>(Some(text.clone()));
+        }
+    }
+    if let Some(s) = song.as_ref() {
+        // Validated non-empty above.
+        q = q.bind::<Option<String>>(Some(s.clone()));
+    }
+    if let Some(a) = artist.as_ref() {
+        // Empty artist clears the column (some songs legitimately have none).
+        if a.is_empty() {
+            q = q.bind::<Option<String>>(None);
+        } else {
+            q = q.bind::<Option<String>>(Some(a.clone()));
         }
     }
     q = q.bind(video_id);
@@ -881,3 +979,11 @@ mod tests_pacing;
 #[cfg(test)]
 #[path = "routes_tests_burn.rs"]
 mod tests_burn;
+
+#[cfg(test)]
+#[path = "routes_tests_runtime_pipeline.rs"]
+mod tests_runtime_pipeline;
+
+#[cfg(test)]
+#[path = "routes_tests_patch_metadata.rs"]
+mod tests_patch_metadata;
