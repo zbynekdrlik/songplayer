@@ -332,6 +332,14 @@ body {
 
 /* ---- Video list ---- */
 
+/* The songs table has 6 columns and cannot shrink below its min-content
+   width, so `width: 100%` alone leaves it wider than the ~340px dashboard
+   card. Without a scroll boundary the overflow paints OUTSIDE the card,
+   over the next `.playlist-card` in the grid — which (a later DOM sibling)
+   then captures pointer events on the rightmost (edit) column, making the
+   ✎ button unclickable on any card that has a right-hand neighbour (#136). */
+.video-list { overflow-x: auto; }
+
 .video-list table {
     width: 100%;
     border-collapse: collapse;

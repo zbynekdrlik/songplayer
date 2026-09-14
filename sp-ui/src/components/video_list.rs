@@ -60,7 +60,20 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                 <tbody>
                     <For
                         each=move || videos.get()
-                        key=|v| v.id
+                        // Key on the fields this row RENDERS statically (id +
+                        // the editable song/artist), not on id alone. `For`
+                        // never re-runs `children` for an existing key, so an
+                        // id-only key left the row showing the pre-edit
+                        // song/artist after the save-triggered `load()`
+                        // refresh (the child captured them by value). Folding
+                        // song+artist into the key recreates just the corrected
+                        // row when its stored metadata changes (#136 T1).
+                        // Safe because `videos` is only ever REPLACED by
+                        // `load()` (mount + post-save, after `editing_id` is
+                        // cleared), never mutated mid-edit: if live/WebSocket
+                        // refresh is ever added here, revisit — a key change
+                        // while a row is being typed into would drop focus.
+                        key=|v| (v.id, v.song.clone(), v.artist.clone())
                         children=move |video| {
                             let video_id = video.id;
                             let normalized = video.normalized;
