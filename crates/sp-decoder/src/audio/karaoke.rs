@@ -66,6 +66,23 @@ pub struct KaraokeAudioReader {
     emitted_frames: u64,
 }
 
+impl std::fmt::Debug for KaraokeAudioReader {
+    // The boxed `dyn AudioStream` fields are not `Debug`, so skip them and print
+    // the mixer's own observable state (enough for test assertions on the reader).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KaraokeAudioReader")
+            .field("sample_rate", &self.sample_rate)
+            .field("channels", &self.channels)
+            .field("duration_ms", &self.duration_ms)
+            .field("vbuf_len", &self.vbuf.len())
+            .field("ibuf_len", &self.ibuf.len())
+            .field("veos", &self.veos)
+            .field("ieos", &self.ieos)
+            .field("emitted_frames", &self.emitted_frames)
+            .finish()
+    }
+}
+
 impl KaraokeAudioReader {
     /// Build from two owned stem readers plus the shared gain atomics.
     ///
