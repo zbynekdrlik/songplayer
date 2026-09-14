@@ -99,7 +99,9 @@ _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 _SK_DIACRITIC_RE = re.compile(r"[áäčďéíĺľňóôŕšťúýž]", re.IGNORECASE)
 
-DEFAULT_BACKENDS = ["gemini36-flash", "aai-u35-translate"]
+# The gemini36-flash / aai-u35-translate zoo was retired in #159; the surviving
+# ASR backend is gemini-3-5-transcribe. Override with --backends as needed.
+DEFAULT_BACKENDS = ["gemini-3-5-transcribe"]
 
 
 def normalize_text(s: str) -> str:

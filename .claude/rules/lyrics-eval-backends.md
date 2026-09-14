@@ -165,3 +165,23 @@ the gold text — which weakens text-similarity matching while the timing is fin
 Say so when quoting any figure. Measuring the gold's own accuracy on a few
 hand-verified fixtures is the highest-value next step before any further model
 hunting — until it exists, every number here is a floor, not a verdict.
+
+## CI eval-checks — verify locally with the PINNED ruff, not your system ruff
+
+The `eval-checks` CI job (`.github/workflows/ci.yml`) runs `ruff check eval/` +
+`ruff format --check eval/` + `pytest eval/lyrics/tests` under **`ruff==0.5.7`**
+(pinned in the pip install step). A newer local ruff (0.16.x) enables rules the
+0.5.7 default set does not (RUF059, I001, E501…) and will report failures CI
+never sees — do NOT trust it. Verify eval changes against CI's exact toolchain:
+
+```bash
+python3 -m venv /tmp/evalvenv
+/tmp/evalvenv/bin/pip install -q ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3
+/tmp/evalvenv/bin/ruff check eval/ && /tmp/evalvenv/bin/ruff format --check eval/
+/tmp/evalvenv/bin/python -m pytest eval/lyrics/tests -q
+```
+
+Deleting a backend means deleting its `tests/test_<backend>.py` too (pytest
+imports it), but the run-script name-string registries (`BASELINE_BACKENDS` /
+`COMBOS` / `DEFAULT_BACKENDS`) are dynamic — a stale name there is a `ruff`/
+`pytest` no-op, not a failure, so prune them for cleanliness, not correctness.

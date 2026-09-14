@@ -429,6 +429,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn v22_requeues_every_pre_v22_row_including_mtl_and_deleted_routes() {
+        // #159: bumping to v22 must re-queue EVERY row at version < 22 — the
+        // deleted-route rows (whisperx / asr / ensemble) AND the v21 mtl★ rows.
+        // NO smart-skip protects the mtl rows (a `source LIKE '%mtl%' AND
+        // version>=21` clause would be the v18-gemini trap: it leaves them
+        // permanently stale). The mtl rows re-run to identical output and
+        // re-★; that one-time idempotent re-run is the correct behaviour.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_quality_score) VALUES \
+                 (1, 1, 'mtl_star',   1, 1, 'description+mtl@rev1/g35t-ok', 21, 1.0), \
+                 (2, 1, 'whisperx',   1, 1, 'description+whisperx-large-v3@rev1', 21, 0.5), \
+                 (3, 1, 'asr',        1, 1, 'asr:aai-u3-pro', 20, 0.4), \
+                 (4, 1, 'ensemble',   1, 1, 'ensemble:gemini', 18, 0.3)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut remaining = vec!["mtl_star", "whisperx", "asr", "ensemble"];
+        while !remaining.is_empty() {
+            let row = fetch_bucket_stale(&pool, 22).await.unwrap().unwrap();
+            assert!(
+                remaining.contains(&row.youtube_id.as_str()),
+                "unexpected row picked: {}",
+                row.youtube_id
+            );
+            remaining.retain(|&id| id != row.youtube_id.as_str());
+            sqlx::query("UPDATE videos SET lyrics_pipeline_version = 22 WHERE youtube_id = ?")
+                .bind(&row.youtube_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert!(
+            fetch_bucket_stale(&pool, 22).await.unwrap().is_none(),
+            "every pre-v22 row (mtl★ included) must re-queue exactly once, none protected"
+        );
+    }
+
+    #[tokio::test]
     async fn stale_bucket_no_longer_protects_legacy_gemini_rows() {
         // #143: the v18 Gemini smart-skip clause (`NOT (source LIKE
         // '%gemini%' AND version >= 18)`) is deleted — that regime no
