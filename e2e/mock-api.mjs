@@ -329,6 +329,10 @@ app.get("/api/v1/status", (_req, res) => {
     ytdlp_available: true,
     ffmpeg_available: true,
     playlists_count: playlists.length,
+    // #51: LAN sp.local advertisement — the dashboard's LanAddress component
+    // reads these to show the offline-LAN URL + raw-IP fallback.
+    lan_url: "http://sp.local:8920",
+    lan_ip: "10.77.9.201",
   });
 });
 

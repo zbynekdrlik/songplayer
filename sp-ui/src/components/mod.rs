@@ -3,6 +3,7 @@ pub mod import_url_box;
 pub mod live_catalog;
 pub mod live_setlist;
 pub mod karaoke_panel;
+pub mod lan_address;
 pub mod lyrics_playlist_section;
 pub mod lyrics_queue_card;
 pub mod lyrics_scroller;
