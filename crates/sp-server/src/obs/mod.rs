@@ -62,6 +62,15 @@ pub struct ObsState {
     pub current_scene: Option<String>,
     /// Playlist IDs whose NDI source is currently on program.
     pub active_playlist_ids: HashSet<i64>,
+    /// OBS is actively streaming an output (#154). Seeded from
+    /// `GetStreamStatus` on connect and updated by `StreamStateChanged`
+    /// events; reset to `false` on disconnect. Read by the lyrics idle gate
+    /// so heavy GPU work never contends with a live stream.
+    pub streaming: bool,
+    /// OBS is actively recording an output (#154). Seeded from
+    /// `GetRecordStatus` on connect and updated by `RecordStateChanged`
+    /// events; reset to `false` on disconnect.
+    pub recording: bool,
 }
 
 /// Configuration for connecting to OBS WebSocket.
