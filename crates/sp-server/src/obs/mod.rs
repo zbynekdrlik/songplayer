@@ -3,6 +3,7 @@
 pub mod dispatcher;
 pub mod ndi_discovery;
 pub mod ndi_recovery;
+pub(crate) mod output_state;
 pub mod scene;
 pub mod text;
 
@@ -507,50 +508,10 @@ async fn connect_and_run(
         }
     }
 
-    // Step 6b (#154): seed OBS stream/record state. An output already active
-    // when SongPlayer connects emits no StreamStateChanged/RecordStateChanged,
-    // so query it once — otherwise the idle gate would miss an in-progress
-    // recording. Best-effort: a failure leaves the state at its default (not
-    // busy); the next state-change event corrects it.
-    for (req_type, recording) in [("GetStreamStatus", false), ("GetRecordStatus", true)] {
-        let req_id = uuid::Uuid::new_v4().to_string();
-        let req = serde_json::json!({
-            "op": 6,
-            "d": { "requestType": req_type, "requestId": req_id.clone() }
-        });
-        match dispatcher
-            .send_and_await(
-                &write,
-                req_id,
-                Message::Text(req.to_string().into()),
-                DEFAULT_RESPONSE_TIMEOUT,
-            )
-            .await
-        {
-            Ok(response) => {
-                if let Some(active) = response["d"]["responseData"]["outputActive"].as_bool() {
-                    let mut s = state.write().await;
-                    if recording {
-                        s.recording = active;
-                    } else {
-                        s.streaming = active;
-                    }
-                    debug!(
-                        req_type,
-                        active, "seeded OBS output state (idle-gate signal)"
-                    );
-                }
-            }
-            Err(DispatcherError::Closed) => {
-                debug!("reader closed during initial {req_type}; main loop will reconnect");
-            }
-            Err(DispatcherError::Timeout) => {
-                warn!(
-                    "initial {req_type} timed out — idle gate relies on events until next change"
-                );
-            }
-        }
-    }
+    // Step 6b (#154): seed OBS stream/record state so the idle gate knows about
+    // an output already active at connect time (no StreamStateChanged/
+    // RecordStateChanged fires for it). Best-effort; see `output_state`.
+    output_state::seed_output_state(&write, &dispatcher, state).await;
 
     // Step 7: main loop — thin router: each arm spawns a task to do
     // the work. The write half is shared via Arc<Mutex<>> so helper
@@ -798,57 +759,6 @@ mod tests {
         // #154: idle-gate signals default to "not busy".
         assert!(!state.streaming);
         assert!(!state.recording);
-    }
-
-    #[test]
-    fn test_parse_stream_state_changed_output_active() {
-        // #154: the reader extracts `outputActive` from StreamStateChanged /
-        // RecordStateChanged to drive the idle gate.
-        let ev = serde_json::json!({
-            "op": 5,
-            "d": {
-                "eventType": "StreamStateChanged",
-                "eventData": { "outputActive": true, "outputState": "OBS_WEBSOCKET_OUTPUT_STARTED" }
-            }
-        });
-        assert_eq!(ev["d"]["eventType"].as_str(), Some("StreamStateChanged"));
-        assert_eq!(ev["d"]["eventData"]["outputActive"].as_bool(), Some(true));
-
-        let rec_stopped = serde_json::json!({
-            "op": 5,
-            "d": {
-                "eventType": "RecordStateChanged",
-                "eventData": { "outputActive": false, "outputState": "OBS_WEBSOCKET_OUTPUT_STOPPED" }
-            }
-        });
-        assert_eq!(
-            rec_stopped["d"]["eventData"]["outputActive"].as_bool(),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn test_output_status_response_seed() {
-        // #154 initial seed: GetStreamStatus / GetRecordStatus responses carry
-        // `outputActive` under responseData.
-        let resp = serde_json::json!({
-            "op": 7,
-            "d": { "responseData": { "outputActive": true, "outputDuration": 123 } }
-        });
-        assert_eq!(
-            resp["d"]["responseData"]["outputActive"].as_bool(),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn test_obs_state_output_flags_settable() {
-        let mut state = ObsState::default();
-        state.streaming = true;
-        assert!(state.streaming && !state.recording);
-        state.recording = true;
-        state.streaming = false;
-        assert!(state.recording && !state.streaming);
     }
 
     #[test]
