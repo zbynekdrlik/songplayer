@@ -78,12 +78,7 @@ fn approx(a: &[f32], b: &[f32]) {
     }
 }
 
-fn reader(
-    v: Vec<Vec<f32>>,
-    i: Vec<Vec<f32>>,
-    vg: f32,
-    ig: f32,
-) -> KaraokeAudioReader {
+fn reader(v: Vec<Vec<f32>>, i: Vec<Vec<f32>>, vg: f32, ig: f32) -> KaraokeAudioReader {
     let voc = Box::new(MockAudio::new(v, 48_000, 2, 1000));
     let inst = Box::new(MockAudio::new(i, 48_000, 2, 1000));
     KaraokeAudioReader::new(voc, inst, shared_gain(vg), shared_gain(ig)).unwrap()
@@ -138,12 +133,7 @@ fn karaoke_low_attenuates_vocals_keeps_instrumental() {
 
 #[test]
 fn clamps_positive_and_negative_overshoot() {
-    let mut r = reader(
-        vec![vec![0.9, -0.9]],
-        vec![vec![0.9, -0.9]],
-        1.0,
-        1.0,
-    );
+    let mut r = reader(vec![vec![0.9, -0.9]], vec![vec![0.9, -0.9]], 1.0, 1.0);
     // 1.8 → 1.0 ; -1.8 → -1.0
     approx(&drain(&mut r), &[1.0, -1.0]);
 }
@@ -163,8 +153,18 @@ fn mixes_across_mismatched_packet_boundaries() {
 #[test]
 fn live_gain_change_between_chunks_takes_effect() {
     let vg = shared_gain(1.0);
-    let voc = Box::new(MockAudio::new(vec![vec![0.2, 0.2], vec![0.2, 0.2]], 48_000, 2, 1000));
-    let inst = Box::new(MockAudio::new(vec![vec![0.0, 0.0], vec![0.0, 0.0]], 48_000, 2, 1000));
+    let voc = Box::new(MockAudio::new(
+        vec![vec![0.2, 0.2], vec![0.2, 0.2]],
+        48_000,
+        2,
+        1000,
+    ));
+    let inst = Box::new(MockAudio::new(
+        vec![vec![0.0, 0.0], vec![0.0, 0.0]],
+        48_000,
+        2,
+        1000,
+    ));
     let mut r = KaraokeAudioReader::new(voc, inst, Arc::clone(&vg), shared_gain(1.0)).unwrap();
 
     let first = r.next_samples().unwrap().unwrap();
@@ -178,8 +178,18 @@ fn live_gain_change_between_chunks_takes_effect() {
 #[test]
 fn timestamps_are_monotonic_from_cumulative_frames() {
     // sr=1000, stereo ⇒ 1 frame = 1 ms. Two 2-frame packets.
-    let voc = Box::new(MockAudio::new(vec![vec![0.0; 4], vec![0.0; 4]], 1000, 2, 100));
-    let inst = Box::new(MockAudio::new(vec![vec![0.0; 4], vec![0.0; 4]], 1000, 2, 100));
+    let voc = Box::new(MockAudio::new(
+        vec![vec![0.0; 4], vec![0.0; 4]],
+        1000,
+        2,
+        100,
+    ));
+    let inst = Box::new(MockAudio::new(
+        vec![vec![0.0; 4], vec![0.0; 4]],
+        1000,
+        2,
+        100,
+    ));
     let mut r = KaraokeAudioReader::new(voc, inst, shared_gain(1.0), shared_gain(1.0)).unwrap();
     let a = r.next_samples().unwrap().unwrap();
     let b = r.next_samples().unwrap().unwrap();

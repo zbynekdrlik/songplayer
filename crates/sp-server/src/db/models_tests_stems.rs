@@ -51,10 +51,12 @@ async fn selects_normalized_song_with_audio_and_no_stems() {
 async fn skips_un_normalized_and_missing_audio_rows() {
     let pool = setup_pool().await;
     // Un-normalized row (no audio sidecar).
-    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, title, normalized) VALUES (1, 'nn', 't', 0)")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, title, normalized) VALUES (1, 'nn', 't', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     // Normalized but no audio_file_path.
     sqlx::query(
         "INSERT INTO videos (playlist_id, youtube_id, title, normalized, file_path) \
@@ -71,9 +73,14 @@ async fn done_and_unsupported_are_excluded() {
     let pool = setup_pool().await;
     let a = insert_normalized(&pool, "done1").await;
     let b = insert_normalized(&pool, "unsup1").await;
-    mark_stems_done(&pool, a, "/c/done1_audio_vocals.flac", "/c/done1_audio_instrumental.flac")
-        .await
-        .unwrap();
+    mark_stems_done(
+        &pool,
+        a,
+        "/c/done1_audio_vocals.flac",
+        "/c/done1_audio_instrumental.flac",
+    )
+    .await
+    .unwrap();
     mark_stems_unsupported(&pool, b).await.unwrap();
     assert!(
         get_next_video_for_stems(&pool).await.unwrap().is_none(),
@@ -97,7 +104,10 @@ async fn deferral_hides_row_until_backoff_elapses() {
 
     backdate(&pool, id).await;
     assert_eq!(
-        get_next_video_for_stems(&pool).await.unwrap().map(|j| j.video_id),
+        get_next_video_for_stems(&pool)
+            .await
+            .unwrap()
+            .map(|j| j.video_id),
         Some(id),
         "failed row past its backoff is re-selected"
     );
@@ -107,8 +117,12 @@ async fn deferral_hides_row_until_backoff_elapses() {
 async fn deferral_increments_attempts() {
     let pool = setup_pool().await;
     let id = insert_normalized(&pool, "fail2").await;
-    let a1 = record_stem_deferral(&pool, id, Duration::from_secs(300)).await.unwrap();
-    let a2 = record_stem_deferral(&pool, id, Duration::from_secs(600)).await.unwrap();
+    let a1 = record_stem_deferral(&pool, id, Duration::from_secs(300))
+        .await
+        .unwrap();
+    let a2 = record_stem_deferral(&pool, id, Duration::from_secs(600))
+        .await
+        .unwrap();
     assert_eq!((a1, a2), (1, 2));
 }
 
@@ -116,10 +130,17 @@ async fn deferral_increments_attempts() {
 async fn mark_done_stores_paths_and_resets_backoff() {
     let pool = setup_pool().await;
     let id = insert_normalized(&pool, "ok1").await;
-    record_stem_deferral(&pool, id, Duration::from_secs(300)).await.unwrap();
-    mark_stems_done(&pool, id, "/c/ok1_audio_vocals.flac", "/c/ok1_audio_instrumental.flac")
+    record_stem_deferral(&pool, id, Duration::from_secs(300))
         .await
         .unwrap();
+    mark_stems_done(
+        &pool,
+        id,
+        "/c/ok1_audio_vocals.flac",
+        "/c/ok1_audio_instrumental.flac",
+    )
+    .await
+    .unwrap();
 
     let (v, i, status, attempts): (Option<String>, Option<String>, Option<String>, i64) =
         sqlx::query_as(
@@ -142,7 +163,10 @@ async fn oldest_first_selection() {
     let first = insert_normalized(&pool, "first").await;
     let _second = insert_normalized(&pool, "second").await;
     assert_eq!(
-        get_next_video_for_stems(&pool).await.unwrap().map(|j| j.video_id),
+        get_next_video_for_stems(&pool)
+            .await
+            .unwrap()
+            .map(|j| j.video_id),
         Some(first),
         "selector is oldest-first by id"
     );
@@ -153,9 +177,14 @@ async fn count_stems_progress_counts_pending_and_done() {
     let pool = setup_pool().await;
     let a = insert_normalized(&pool, "p1").await;
     let _b = insert_normalized(&pool, "p2").await;
-    mark_stems_done(&pool, a, "/c/p1_audio_vocals.flac", "/c/p1_audio_instrumental.flac")
-        .await
-        .unwrap();
+    mark_stems_done(
+        &pool,
+        a,
+        "/c/p1_audio_vocals.flac",
+        "/c/p1_audio_instrumental.flac",
+    )
+    .await
+    .unwrap();
     let (pending, done) = count_stems_progress(&pool).await.unwrap();
     assert_eq!(pending, 1, "one song still needs stems");
     assert_eq!(done, 1, "one song has stems");

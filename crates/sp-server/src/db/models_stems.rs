@@ -26,9 +26,7 @@ pub struct StemJob {
 /// normalized, have an `audio_file_path`, are not already `done`/`unsupported`,
 /// and (if previously `failed`) have passed their backoff window. Returns `None`
 /// when nothing is due.
-pub async fn get_next_video_for_stems(
-    pool: &SqlitePool,
-) -> Result<Option<StemJob>, sqlx::Error> {
+pub async fn get_next_video_for_stems(pool: &SqlitePool) -> Result<Option<StemJob>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT id, youtube_id, audio_file_path, duration_ms, song, artist \
          FROM videos \
@@ -106,10 +104,7 @@ pub async fn record_stem_deferral(
 }
 
 /// Mark a song as terminally unsupported for stem separation (no retry).
-pub async fn mark_stems_unsupported(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> Result<(), sqlx::Error> {
+pub async fn mark_stems_unsupported(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE videos \
          SET stem_status = 'unsupported', stem_next_attempt_at = NULL \
@@ -132,11 +127,9 @@ pub async fn count_stems_progress(pool: &SqlitePool) -> Result<(i64, i64), sqlx:
     )
     .fetch_one(pool)
     .await?;
-    let done: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM videos WHERE stem_status = 'done'",
-    )
-    .fetch_one(pool)
-    .await?;
+    let done: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM videos WHERE stem_status = 'done'")
+        .fetch_one(pool)
+        .await?;
     Ok((pending, done))
 }
 

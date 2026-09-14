@@ -1,6 +1,6 @@
 //! Commands the API/OBS/Resolume layers send to the playback engine — moved out of lib.rs for the 1000-line cap.
 
-use sp_core::playback::PlaybackMode;
+use sp_core::playback::{KaraokeMode, PlaybackMode};
 
 /// Commands sent from the API layer to the playback engine.
 #[derive(Debug, Clone)]
@@ -66,5 +66,14 @@ pub enum EngineCommand {
     /// deactivate. No-op if the engine has no pipeline for it.
     RemovePipeline {
         playlist_id: i64,
+    },
+    /// #14: Set the process-global karaoke mode + vocal gain. The engine updates
+    /// the live control, persists both to settings, broadcasts the new state,
+    /// and — when the MODE changed — reloads every playing pipeline at its
+    /// current position so the change is heard on the wall immediately (the
+    /// vocal-gain slider is already live per audio chunk, no reload needed).
+    SetKaraoke {
+        mode: KaraokeMode,
+        vocal_gain: f32,
     },
 }

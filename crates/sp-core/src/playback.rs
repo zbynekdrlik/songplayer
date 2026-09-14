@@ -162,10 +162,22 @@ mod tests {
 
     #[test]
     fn karaoke_mode_from_str_lossy_aliases_and_fallback() {
-        assert_eq!(KaraokeMode::from_str_lossy("KARAOKE-LOW"), KaraokeMode::KaraokeLow);
-        assert_eq!(KaraokeMode::from_str_lossy("vocals"), KaraokeMode::VocalsOnly);
-        assert_eq!(KaraokeMode::from_str_lossy("instr"), KaraokeMode::InstrumentalOnly);
-        assert_eq!(KaraokeMode::from_str_lossy("  full  "), KaraokeMode::FullMix);
+        assert_eq!(
+            KaraokeMode::from_str_lossy("KARAOKE-LOW"),
+            KaraokeMode::KaraokeLow
+        );
+        assert_eq!(
+            KaraokeMode::from_str_lossy("vocals"),
+            KaraokeMode::VocalsOnly
+        );
+        assert_eq!(
+            KaraokeMode::from_str_lossy("instr"),
+            KaraokeMode::InstrumentalOnly
+        );
+        assert_eq!(
+            KaraokeMode::from_str_lossy("  full  "),
+            KaraokeMode::FullMix
+        );
         assert_eq!(KaraokeMode::from_str_lossy("garbage"), KaraokeMode::FullMix);
         assert_eq!(KaraokeMode::from_str_lossy(""), KaraokeMode::FullMix);
     }

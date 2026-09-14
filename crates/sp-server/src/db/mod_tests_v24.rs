@@ -48,12 +48,11 @@ async fn migration_v24_defaults_existing_rows_to_pending() {
 
     run_migrations(&pool).await.unwrap();
 
-    let status: Option<String> =
-        sqlx::query_scalar("SELECT stem_status FROM videos WHERE id = ?")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let status: Option<String> = sqlx::query_scalar("SELECT stem_status FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let attempts: i64 = sqlx::query_scalar("SELECT stem_attempts FROM videos WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
@@ -65,9 +64,15 @@ async fn migration_v24_defaults_existing_rows_to_pending() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(status.is_none(), "existing rows default to NULL stem_status (pending)");
+    assert!(
+        status.is_none(),
+        "existing rows default to NULL stem_status (pending)"
+    );
     assert_eq!(attempts, 0, "existing rows default to 0 stem_attempts");
-    assert!(vpath.is_none(), "existing rows have no vocals_file_path yet");
+    assert!(
+        vpath.is_none(),
+        "existing rows have no vocals_file_path yet"
+    );
 }
 
 #[tokio::test]

@@ -19,6 +19,7 @@ pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
 pub mod startup;
+pub mod stems;
 
 pub use panic_hook::install_panic_hook;
 
@@ -362,6 +363,12 @@ pub async fn start(
     // while the wall is in use (any pipeline Playing, or OBS streaming/recording).
     let lyrics_ndi_health = ndi_health_registry.clone();
     let lyrics_obs_state = obs_state.clone();
+    // #14 karaoke stem worker shares the same tools dir + idle-gate handles.
+    let stem_pool = pool.clone();
+    let stem_tools_dir = lyrics_tools_dir.clone();
+    let stem_ndi_health = ndi_health_registry.clone();
+    let stem_obs_state = obs_state.clone();
+    let stem_shutdown = shutdown_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -506,6 +513,19 @@ pub async fn start(
                     current_processing_handle,
                     lyrics_shutdown.subscribe(),
                 ));
+
+                // Karaoke stem worker (#14) — separates the catalog into
+                // vocals + instrumental sidecars under the SAME #154 idle gate,
+                // lowest priority (after lyrics).
+                let stem_worker = crate::stems::StemWorker::new(
+                    stem_pool,
+                    paths.python.clone(),
+                    stem_tools_dir,
+                    stem_ndi_health,
+                    stem_obs_state,
+                );
+                tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
+                info!("stem worker started");
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -629,6 +649,10 @@ pub async fn start(
             }
         }
     });
+
+    // #14 karaoke: seed the process-global live control from settings before any
+    // pipeline spawns (pipelines read it at song open + per audio chunk).
+    crate::stems::control::init_from_settings(&pool).await;
 
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {
@@ -754,6 +778,11 @@ pub async fn start(
                             // #132: a playlist deleted/deactivated at runtime
                             // tears its pipeline down symmetrically.
                             engine.remove_pipeline(playlist_id);
+                        }
+                        EngineCommand::SetKaraoke { mode, vocal_gain } => {
+                            // #14: update the live control, persist, broadcast,
+                            // and reload playing pipelines when the mode changed.
+                            engine.set_karaoke(mode, vocal_gain).await;
                         }
                     }
                 }
