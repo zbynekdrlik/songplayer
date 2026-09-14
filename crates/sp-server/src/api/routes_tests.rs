@@ -49,6 +49,7 @@ async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
         ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
+        lan_status: crate::mdns::new_status_handle(),
     }
 }
 
@@ -361,6 +362,7 @@ async fn post_seek_returns_204_and_forwards_to_engine() {
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
         ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
+        lan_status: crate::mdns::new_status_handle(),
     };
 
     let body = serde_json::json!({"position_ms": 45000});
@@ -447,6 +449,39 @@ async fn status_json_shape() {
     assert!(!json.tools.ffmpeg_available);
     // Fresh state → no playlists active on program yet.
     assert!(json.active_playlist_ids.is_empty());
+    // #51: fresh state has no LAN advertisement yet (mDNS task not run).
+    assert!(json.lan_url.is_none());
+    assert!(json.lan_ip.is_none());
+}
+
+/// #51: `/api/v1/status` must surface the LAN `sp.local` URL + raw-IP
+/// fallback the mDNS task writes into the shared `lan_status` handle, so the
+/// dashboard can show the offline-LAN address without guessing.
+#[tokio::test]
+async fn status_reflects_lan_advertisement() {
+    let state = test_state().await;
+    *state.lan_status.write().await = crate::mdns::LanStatus {
+        lan_url: Some("http://sp.local:8920".to_string()),
+        lan_ip: Some("10.77.9.201".to_string()),
+    };
+    let app = app(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: StatusResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.lan_url.as_deref(), Some("http://sp.local:8920"));
+    assert_eq!(json.lan_ip.as_deref(), Some("10.77.9.201"));
 }
 
 /// Playlist CRUD must signal the OBS client to rebuild its NDI source
