@@ -13,6 +13,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  checks: read   # gate's PR-side cross-check reads the push-run Gate conclusion (#124)
 
 jobs:
   version-check:
@@ -63,6 +64,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +82,7 @@ jobs:
 
   test:
     name: Test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +93,7 @@ jobs:
 
   test-wasm:
     name: Test WASM (sp-core)
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +106,7 @@ jobs:
 
   security:
     name: Security Audit
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +119,7 @@ jobs:
 
   eval-checks:
     name: Eval Checks (ruff + pytest)
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,6 +137,7 @@ jobs:
 
   build-wasm:
     name: Build WASM (trunk)
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [lint, test-wasm]
     steps:
@@ -156,6 +163,7 @@ jobs:
 
   build-tauri:
     name: Build Tauri (Windows)
+    if: github.event_name == 'push'
     runs-on: windows-latest
     needs: [build-wasm]
     steps:
@@ -180,6 +188,7 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E Tests
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-wasm]
     steps:
@@ -221,6 +230,7 @@ jobs:
 
   build-windows:
     name: Build (Windows)
+    if: github.event_name == 'push'
     runs-on: windows-latest
     needs: [lint, test]
     steps:
@@ -241,6 +251,7 @@ jobs:
 
   test-integrity:
     name: Test Integrity Check
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -419,6 +430,7 @@ jobs:
 
   file-size:
     name: File Size Check
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -454,6 +466,7 @@ jobs:
 
   coverage:
     name: Coverage
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [test]
     steps:
@@ -540,29 +553,54 @@ jobs:
       - coverage
       - mutation-testing
     steps:
-      - name: Check all jobs passed
+      - name: Check no needed job failed
         run: |
           results='${{ toJSON(needs) }}'
           echo "Job results: $results"
-          # version-check, dev-version-check, mutation-testing, red-green-order are conditional — skipped is acceptable
-          for job in lint test test-wasm security eval-checks build-windows build-wasm build-tauri frontend-e2e test-integrity file-size coverage; do
-            result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
-            echo "$job: $result"
-            if [ "$result" != "success" ]; then
-              echo "FAILED: job '$job' did not succeed (result: $result)"
-              exit 1
-            fi
-          done
-          # conditional jobs: skipped is acceptable, failure is NOT
-          for job in version-check dev-version-check red-green-order mutation-testing; do
-            result=$(echo "$results" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['$job']['result'])")
+          # De-dup (#124): the shared build/test jobs run on the `push` event, the
+          # PR-specific gates (version-check, mutation-testing, red-green-order) on
+          # `pull_request`. So on EITHER event some needed jobs are SKIPPED here —
+          # they ran (and gated) on the sibling event for the same commit SHA. The
+          # invariant that holds on both events: no needed job may FAIL/cancel;
+          # `skipped` and `success` are both acceptable, anything else is not.
+          for job in $(echo "$results" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin).keys()))"); do
+            result=$(echo "$results" | python3 -c "import sys,json; print(json.load(sys.stdin)['$job']['result'])")
             echo "$job: $result"
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-              echo "FAILED: conditional job '$job' did not succeed (result: $result)"
+              echo "FAILED: needed job '$job' did not succeed (result: $result)"
               exit 1
             fi
           done
-          echo "All required jobs passed."
+          echo "No needed job failed."
+      - name: PR-side cross-check — the push-run Gate for this SHA is green
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # On the pull_request event the shared build/test jobs are SKIPPED here
+          # (they run on the push event of the same commit SHA). To guarantee a
+          # shared build/test failure on that push run can never slip through the
+          # PR-side Gate, require the push-event Gate check for this head SHA to
+          # have concluded success. GitHub already uses this same SHA to satisfy
+          # the required Gate/Deploy/E2E checks on the PR, so this closes the only
+          # hole the de-dup could introduce, under any multiple-same-name-check
+          # semantics.
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Cross-checking the push-run Gate for $HEAD_SHA"
+          # Two `Gate` check-runs exist for this SHA: this PR-side one (still
+          # in_progress) and the push-side one. Filter to completed runs and take
+          # the most recent — the push-side Gate — and require conclusion=success.
+          conclusion=$(gh api \
+            "repos/${{ github.repository }}/commits/$HEAD_SHA/check-runs?check_name=Gate&per_page=100" \
+            --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // "pending"')
+          echo "push-run Gate conclusion: $conclusion"
+          if [ "$conclusion" != "success" ]; then
+            echo "FAILED: the push-event Gate for $HEAD_SHA is '$conclusion' (not success)."
+            echo "A shared build/test job failed on the push run, or the push run has"
+            echo "not completed yet — fix it (or re-run this once the push run is green)."
+            exit 1
+          fi
+          echo "push-run Gate is green for this SHA — all shared jobs passed."
 
   deploy-resolume:
     name: Deploy to win-resolume
