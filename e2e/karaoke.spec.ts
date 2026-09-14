@@ -89,11 +89,16 @@ test("KaraokeLow enables the vocal-gain slider and POSTs the gain (#14)", async 
   await expect(slider).toBeEnabled();
 
   // Drag the slider to 20% and release; the UI POSTs the gain as 0.2.
+  // The gain is an f32 in the Rust UI, so `serde_json` serializes 20/100 as the
+  // f32-widened f64 0.20000000298023224 — never bit-exactly 0.2. Match with the
+  // same tolerance the backend-effect assertion below uses (toBeCloseTo(0.2, 5));
+  // a strict `=== 0.2` here silently never matches and the wait times out.
   const postPromise = page.waitForRequest(
     (req) =>
       req.url().includes("/api/v1/karaoke") &&
       req.method() === "POST" &&
-      JSON.parse(req.postData() ?? "{}").vocal_gain === 0.2,
+      Math.abs((JSON.parse(req.postData() ?? "{}").vocal_gain ?? NaN) - 0.2) <
+        1e-6,
   );
   await slider.fill("20");
   await slider.dispatchEvent("change");
