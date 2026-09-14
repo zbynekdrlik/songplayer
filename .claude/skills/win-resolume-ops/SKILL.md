@@ -64,6 +64,27 @@ Diagnose the service's own stderr by launching a SECOND short-lived copy with
 Windows service itself writes only "starting"/"stopped" to the event log and
 discards cloudflared's real output.
 
+### Public dashboard is behind Cloudflare Access (email OTP) — since 2026-09-14 (#155)
+
+`sp.newlevel.media` is protected by a **Cloudflare Access** (Zero Trust) app with
+a One-time PIN identity provider and an e-mail allowlist (the 3 owners). Only the
+**public hostname** is gated — the LAN path (`http://10.77.9.201:8920`,
+`sp.local`) is untouched. So the healthy signals differ by path:
+
+- **Public** `curl -sI https://sp.newlevel.media/` → **302** to
+  `newlevelchurch.cloudflareaccess.com/cdn-cgi/access/login/...` is now the
+  CORRECT "up" signal, **not** a fault. A `200` from the public hostname without a
+  logged-in `CF_Authorization` cookie would mean Access is OFF (the #155 bug).
+- **LAN / on-box** `Invoke-WebRequest http://127.0.0.1:8920/api/v1/status` → **200**
+  is the origin-health check (Access does not sit on the local port).
+- Access covers the whole hostname with **no path exclusions**, so the dashboard
+  WebSocket `/api/v1/ws` also rides the `CF_Authorization` cookie once logged in.
+
+Full config (app/policy ids, add/remove an email, rollback, the service-token
+option for automated public-hostname checks) is in `scripts/cloudflare/README.md`.
+The Cloudflare API token lives at `~/.secrets/cloudflare-newlevel-access` on the
+dev box — never echo or commit it.
+
 ## MCP tool traps (cost two agents hours on 2026-08-05)
 
 - **`mcp__win-resolume__FileWrite` SILENTLY TRUNCATES `content` over ~20,000
