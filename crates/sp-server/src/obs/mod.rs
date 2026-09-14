@@ -3,6 +3,7 @@
 pub mod dispatcher;
 pub mod ndi_discovery;
 pub mod ndi_recovery;
+pub(crate) mod output_state;
 pub mod scene;
 pub mod text;
 
@@ -62,6 +63,15 @@ pub struct ObsState {
     pub current_scene: Option<String>,
     /// Playlist IDs whose NDI source is currently on program.
     pub active_playlist_ids: HashSet<i64>,
+    /// OBS is actively streaming an output (#154). Seeded from
+    /// `GetStreamStatus` on connect and updated by `StreamStateChanged`
+    /// events; reset to `false` on disconnect. Read by the lyrics idle gate
+    /// so heavy GPU work never contends with a live stream.
+    pub streaming: bool,
+    /// OBS is actively recording an output (#154). Seeded from
+    /// `GetRecordStatus` on connect and updated by `RecordStateChanged`
+    /// events; reset to `false` on disconnect.
+    pub recording: bool,
 }
 
 /// Configuration for connecting to OBS WebSocket.
@@ -127,6 +137,11 @@ enum ReaderMessage {
     /// follow-up GetSceneItemList queries (via dispatcher) and emit
     /// the upstream `ObsEvent::SceneChanged`.
     SceneChange { scene_name: String },
+    /// #154: `StreamStateChanged` / `RecordStateChanged` arrived. `outputActive`
+    /// is the new state; the main loop writes it into `ObsState` so the lyrics
+    /// idle gate defers heavy work while OBS is live. `recording` distinguishes
+    /// the two output kinds.
+    OutputState { recording: bool, active: bool },
     /// Stream closed cleanly OR errored. Main loop must exit so the
     /// outer reconnect loop fires.
     Closed,
@@ -206,6 +221,11 @@ impl ObsClient {
                     s.connected = false;
                     s.current_scene = None;
                     s.active_playlist_ids.clear();
+                    // #154: OBS is gone — its stream/record state is unknown, so
+                    // clear it. The Playing gate still covers SP outputs; a
+                    // stale `true` here would gate heavy work forever.
+                    s.streaming = false;
+                    s.recording = false;
                 }
                 let _ = loop_event_tx.send(ObsEvent::Disconnected);
 
@@ -288,6 +308,26 @@ async fn run_reader_task(
                                     scene_name: scene_name.to_string(),
                                 })
                                 .await;
+                        } else if event_type == "StreamStateChanged"
+                            && let Some(active) = json["d"]["eventData"]["outputActive"].as_bool()
+                        {
+                            // #154: OBS started/stopped streaming.
+                            let _ = reader_tx
+                                .send(ReaderMessage::OutputState {
+                                    recording: false,
+                                    active,
+                                })
+                                .await;
+                        } else if event_type == "RecordStateChanged"
+                            && let Some(active) = json["d"]["eventData"]["outputActive"].as_bool()
+                        {
+                            // #154: OBS started/stopped recording.
+                            let _ = reader_tx
+                                .send(ReaderMessage::OutputState {
+                                    recording: true,
+                                    active,
+                                })
+                                .await;
                         }
                     }
                     7 => {
@@ -341,9 +381,13 @@ async fn connect_and_run(
     debug!("received OBS Hello");
 
     // Step 2: Identify (op 1).
+    // eventSubscriptions bitmask: Scenes (4) | Outputs (64). Outputs delivers
+    // StreamStateChanged / RecordStateChanged so the #154 idle gate can defer
+    // heavy lyrics work while OBS is live.
+    // 68 = Scenes (4) | Outputs (64).
     let mut identify_data = serde_json::json!({
         "rpcVersion": 1,
-        "eventSubscriptions": 4  // Scenes events
+        "eventSubscriptions": 68
     });
     if let Some(password) = &config.password
         && let Some(auth) = hello["d"]["authentication"].as_object()
@@ -464,6 +508,11 @@ async fn connect_and_run(
         }
     }
 
+    // Step 6b (#154): seed OBS stream/record state so the idle gate knows about
+    // an output already active at connect time (no StreamStateChanged/
+    // RecordStateChanged fires for it). Best-effort; see `output_state`.
+    output_state::seed_output_state(&write, &dispatcher, state).await;
+
     // Step 7: main loop — thin router: each arm spawns a task to do
     // the work. The write half is shared via Arc<Mutex<>> so helper
     // tasks lock it briefly for the send and release before awaiting
@@ -497,6 +546,19 @@ async fn connect_and_run(
                                 active_playlist_ids: active_ids,
                             });
                         });
+                    }
+                    Some(ReaderMessage::OutputState { recording, active }) => {
+                        // #154: record OBS stream/record state for the idle gate.
+                        let mut s = state.write().await;
+                        if recording {
+                            s.recording = active;
+                        } else {
+                            s.streaming = active;
+                        }
+                        debug!(
+                            recording,
+                            active, "OBS output state changed (idle-gate signal)"
+                        );
                     }
                     Some(ReaderMessage::Closed) | None => {
                         break Ok(());
@@ -694,6 +756,9 @@ mod tests {
         assert!(!state.connected);
         assert!(state.current_scene.is_none());
         assert!(state.active_playlist_ids.is_empty());
+        // #154: idle-gate signals default to "not busy".
+        assert!(!state.streaming);
+        assert!(!state.recording);
     }
 
     #[test]

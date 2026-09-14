@@ -127,17 +127,39 @@ failure — calm instrumental passages are legitimate.
   the reprocess endpoint) — never re-picked on the next 5-s tick. Monitors
   on the box: `lyrics_progress.py` (buckets, ★, gate tally) and
   `lyrics_recent.py <min>` (per-song lines/sk/source + Claude failures).
-- **GPU discipline (#154).** `gpu_polite()` in `lyrics_worker.py` (and the mtl
-  `run.py`) sets a **BELOW_NORMAL WDDM GPU scheduling priority** (ctypes
-  `D3DKMTSetProcessSchedulingPriorityClass`) and a **per-process VRAM cap** via
-  `torch.cuda.set_per_process_memory_fraction` — default **0.7**, tunable by the
-  `lyrics_gpu_mem_fraction` DB setting (clamp 0.2–0.95, plumbed to the child as
-  `LYRICS_GPU_MEM_FRACTION`). Model parameters are UNCHANGED, so separation
-  quality is identical; only priority + VRAM headroom move. On a CUDA OOM under
-  the cap the isolation re-runs on CPU (same model → identical output, slower).
-  Expected effect: playback keeps nominal fps during isolation at some
-  isolation-time cost — exact slowdown is **measurement-pending on the box**
-  (owner: "rýchlosť je nepodstatná").
+- **GPU discipline (#154) — the idle GATE is PRIMARY; priority + VRAM cap are
+  SECONDARY (defence in depth).** The 2026-09-14 box crash (`LiveKernelEvent`
+  141 ×5, hard reset) proved priority/cap alone are insufficient: at cap 0.4 the
+  OOM fallback moves isolation to the CPU, which stutters the NDI/decoder path
+  just as badly. So the real fix is:
+  - **The gate (`crates/sp-server/src/lyrics/idle_gate.rs`).** Heavy stages
+    (vocal isolation, dereverb, mtl forced-alignment) run ONLY while the wall is
+    idle — NO playback pipeline `Playing` on program (engine `NdiHealthRegistry`
+    snapshots, the same state `/api/v1/ndi/health` reports, read in-process) AND
+    OBS not streaming/recording (`ObsState.streaming/recording`, tracked via the
+    Outputs event group + a GetStreamStatus/GetRecordStatus seed on connect).
+    Two points: `process_next` (loop level — don't START heavy work while busy;
+    cheap HTTP work like g35t/Claude/translation is NOT gated and keeps running)
+    and `process_song` before the mtl spawn (`SongOutcome::WaitingForWall` —
+    bounds max exposure to ONE stage; a running subprocess is never killed).
+    Deferral carries NO backoff penalty; the isolated vocal WAV is preserved so
+    the next idle pick is a cache-hit isolation + mtl (byte-identical output).
+    Operator override `lyrics_gate_when_playing` (DB setting, default ON; OFF =
+    pre-gate behaviour), read live each tick like `lyrics_worker_enabled`. The
+    worker state (`idle` / `processing <id>` / `waiting — wall in use`) is
+    surfaced via the WS `LyricsQueueUpdate.processing` field (dashboard badge).
+  - **Secondary: `gpu_polite()`** in `lyrics_worker.py` (and the mtl `run.py`)
+    sets a **BELOW_NORMAL WDDM GPU scheduling priority** (ctypes
+    `D3DKMTSetProcessSchedulingPriorityClass`) and a **per-process VRAM cap**
+    via `torch.cuda.set_per_process_memory_fraction` — default **0.7**, tunable
+    by the `lyrics_gpu_mem_fraction` DB setting (clamp 0.2–0.95, plumbed to the
+    child as `LYRICS_GPU_MEM_FRACTION`). Model parameters are UNCHANGED, so
+    separation quality is identical; only priority + VRAM headroom move. On a
+    CUDA OOM under the cap the isolation re-runs on CPU (same model → identical
+    output, slower). Kept as defence in depth for the bounded one-stage window
+    the gate cannot avoid (wall goes busy DURING an isolation that started idle).
+  - The gate only changes WHEN work runs, never the output → NOT a
+    `LYRICS_PIPELINE_VERSION` bump.
 
 ## Translation — Claude only, never Gemini fallback
 

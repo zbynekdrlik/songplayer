@@ -51,8 +51,21 @@ pub struct LyricsWorker {
     /// spotify_resolved_at IS NULL) before invoking it.
     spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver,
     /// Shared state read by `queue_update_loop` so the broadcast `processing`
-    /// field reflects the current song being aligned.
-    current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
+    /// field reflects the current song being aligned. pub(crate) so the #154
+    /// idle-gate seam (`idle_gate.rs`) can surface the "waiting — wall in use"
+    /// state through the same field.
+    pub(crate) current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
+    /// #154 idle gate: engine health registry, read for the per-pipeline
+    /// `Playing` state (the same snapshots `/api/v1/ndi/health` serves) so heavy
+    /// GPU/CPU work is deferred while an output is on the wall. `None` in unit
+    /// tests that don't exercise the gate.
+    pub(crate) ndi_health_registry: Option<Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
+    /// #154 idle gate: shared OBS state, read for `streaming`/`recording` so
+    /// heavy work is also deferred while OBS is live. `None` in unit tests.
+    pub(crate) obs_state: Option<Arc<RwLock<crate::obs::ObsState>>>,
+    /// #154 idle gate: once-per-transition log tracker so the "waiting — wall
+    /// in use" INFO logs on each state change, not every 5-s tick.
+    pub(crate) wall_gate_log: std::sync::Mutex<crate::lyrics::idle_gate::GateLog>,
 }
 
 #[derive(Default)]
@@ -90,6 +103,7 @@ pub(crate) fn should_resolve_spotify(
 }
 
 impl LyricsWorker {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: SqlitePool,
         cache_dir: PathBuf,
@@ -98,6 +112,8 @@ impl LyricsWorker {
         tools_dir: PathBuf,
         ai_client: Option<Arc<AiClient>>,
         events_tx: broadcast::Sender<ServerMsg>,
+        ndi_health_registry: Arc<crate::playback::ndi_health::NdiHealthRegistry>,
+        obs_state: Arc<RwLock<crate::obs::ObsState>>,
     ) -> Self {
         let script_path = tools_dir.join("lyrics_worker.py");
         let models_dir = tools_dir.join("hf_models");
@@ -116,6 +132,9 @@ impl LyricsWorker {
             events_tx,
             spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver::new(),
             current_processing: Arc::new(RwLock::new(None)),
+            ndi_health_registry: Some(ndi_health_registry),
+            obs_state: Some(obs_state),
+            wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
         }
     }
 
@@ -144,6 +163,9 @@ impl LyricsWorker {
             events_tx,
             spotify_resolver: crate::lyrics::spotify_resolver::SpotifyResolver::new(),
             current_processing: Arc::new(RwLock::new(None)),
+            ndi_health_registry: None,
+            obs_state: None,
+            wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
         }
     }
 
@@ -152,6 +174,19 @@ impl LyricsWorker {
     #[cfg_attr(test, mutants::skip)]
     pub fn current_processing(&self) -> Arc<RwLock<Option<LyricsProcessingState>>> {
         self.current_processing.clone()
+    }
+
+    /// Attach the #154 idle-gate handles to a test worker so the gate can be
+    /// exercised at the loop level with an injected `Playing` snapshot.
+    #[cfg(test)]
+    pub(crate) fn with_wall_handles(
+        mut self,
+        ndi_health_registry: Arc<crate::playback::ndi_health::NdiHealthRegistry>,
+        obs_state: Arc<RwLock<crate::obs::ObsState>>,
+    ) -> Self {
+        self.ndi_health_registry = Some(ndi_health_registry);
+        self.obs_state = Some(obs_state);
+        self
     }
 
     // I/O-only: updates shared RwLock + sends on broadcast channel. Fire-and-forget; no return value to assert.
@@ -318,6 +353,27 @@ impl LyricsWorker {
             return;
         }
 
+        // #154 idle gate (loop level): heavy GPU/CPU stages (vocal isolation,
+        // dereverb, mtl alignment) run ONLY while the wall is idle — no
+        // playback pipeline Playing on program AND OBS not streaming/recording.
+        // While busy, skip the heavy pick, surface "waiting — wall in use" to
+        // the dashboard, and log once per state change. Cheap non-gated HTTP
+        // work (translation) STILL runs. No DB deferral/backoff — the row stays
+        // at the head of the queue and is picked the instant the wall goes idle.
+        let (defer, activity) = self.wall_gate_should_defer().await;
+        if defer {
+            let detail = self.wall_busy_detail(activity).await;
+            self.note_wall_gate(true, &detail);
+            self.enter_wall_wait(&detail).await;
+            // Translation is a cheap Claude HTTP call, explicitly NOT gated —
+            // it keeps the SK backfill moving while the wall is in use.
+            self.retry_missing_translations().await;
+            self.retranslate_next_stale().await;
+            return;
+        }
+        // Wall is idle — log the resume transition (once) before picking work.
+        self.note_wall_gate(false, "");
+
         let row = match get_next_video_for_lyrics(&self.pool, LYRICS_PIPELINE_VERSION).await {
             Ok(Some(r)) => r,
             Ok(None) => {
@@ -347,6 +403,15 @@ impl LyricsWorker {
             // re-picking it every 5 s tick (37-min hot-loop on 3_ccqgwVZYM).
             Ok(SongOutcome::Deferred(reason)) => {
                 self.defer_song(video_id, &youtube_id, reason).await
+            }
+            // #154: the wall went busy mid-song (after isolation, before mtl).
+            // No backoff penalty — the isolated vocal WAV is preserved on disk,
+            // so the next idle pick is a cache-hit isolation + mtl with
+            // identical output. The waiting stage is already broadcast; leave
+            // current_processing as-is so the dashboard keeps showing it until
+            // the next tick re-evaluates.
+            Ok(SongOutcome::WaitingForWall) => {
+                debug!("worker: {youtube_id} deferred — wall in use (no backoff)");
             }
             Err(e) => {
                 debug!("worker: processing failed for {youtube_id}: {e}");
@@ -589,6 +654,21 @@ impl LyricsWorker {
         // takes the g35t base tier below. UNCHANGED byte-for-byte from v21.
         let best_candidate =
             crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
+
+        // #154 gate #2 (bound exposure to ONE stage). Isolation above may have
+        // started while the wall was idle and finished after it went busy — a
+        // running subprocess is never killed (that would waste ~4 min of GPU
+        // work), so the check goes here, BEFORE the next heavy spawn (mtl). If
+        // the wall is busy now, defer the WHOLE song (WaitingForWall): the
+        // isolated vocal WAV is preserved on disk, so the next idle pick is a
+        // cache-hit isolation + mtl with byte-identical output. We do NOT fall
+        // through to the g35t base tier — that would degrade the ★ mtl tier
+        // (owner's quality-first rule). Only when mtl would run heavy work
+        // (a text candidate AND an isolated vocal WAV present).
+        if best_candidate.is_some() && clean_vocal.is_some() && self.defer_before_mtl().await {
+            return Ok(SongOutcome::WaitingForWall);
+        }
+
         let reference_backend = crate::lyrics::orchestrator::RealReferenceStageBackend {
             mtl_cfg: crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir),
             work_dir: self.cache_dir.clone(),
@@ -896,3 +976,7 @@ mod tests;
 #[path = "worker_tests_reference.rs"]
 #[cfg(test)]
 mod tests_reference;
+
+#[path = "worker_tests_idle_gate.rs"]
+#[cfg(test)]
+mod tests_idle_gate;
