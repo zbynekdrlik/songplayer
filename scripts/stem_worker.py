@@ -38,7 +38,6 @@ import shutil
 import sys
 import tempfile
 
-
 # The chosen karaoke separator (MIT-licensed, best-measured 8 GB two-stem).
 KARAOKE_STEM_MODEL = "vocals_mel_band_roformer.ckpt"
 
@@ -180,8 +179,8 @@ def _write_stem_48k_stereo(src_path, out_path):
     """Load a separated stem, resample to 48 kHz STEREO, peak-clamp to [-1, 1],
     and write a FLAC. Keeps stereo (mono=False); mono sources are duplicated to
     two channels so every stem matches the mix's channel layout."""
-    import numpy as np
     import librosa
+    import numpy as np
     import soundfile as sf
 
     # mono=False keeps the channel dimension; librosa returns shape (ch, n) for
