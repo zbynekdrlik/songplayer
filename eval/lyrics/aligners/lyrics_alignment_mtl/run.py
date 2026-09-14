@@ -241,6 +241,31 @@ def install_compat_shims(repo_dir: str):
     # ("./checkpoints/checkpoint_...") — see wrapper.py::align().
     os.chdir(repo_dir)
 
+    # #137: upstream wrapper.preprocess_lyrics() opens the reference text with
+    # a bare `open(lyrics_file)` (no encoding=). On Windows that defaults to
+    # the process ANSI codepage (cp1252), so a smart quote / em-dash / other
+    # non-cp1252 character raises UnicodeDecodeError before any output. The
+    # production spawn sets PYTHONUTF8=1 (mtl_aligner.rs), but a direct
+    # `python run.py` invocation has no such env. Default TEXT-mode open() to
+    # UTF-8, caller-independent (fixes the bare upstream open() no matter which
+    # function opens the file), respecting any caller-supplied encoding and
+    # never touching binary mode. Mirrors what PYTHONUTF8=1 does process-wide.
+    import builtins
+
+    _orig_open = builtins.open
+
+    def _utf8_default_open(
+        file, mode="r", buffering=-1, encoding=None, *args, **kwargs
+    ):
+        if "b" not in mode and encoding is None:
+            encoding = "utf-8"
+        return _orig_open(file, mode, buffering, encoding, *args, **kwargs)
+
+    builtins.open = _utf8_default_open  # type: ignore[assignment]
+    logger.info(
+        "compat shim installed: open() defaults to encoding='utf-8' for text mode (#137)"
+    )
+
     import numpy as np
 
     if not hasattr(np, "Inf"):
