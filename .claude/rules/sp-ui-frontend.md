@@ -98,3 +98,26 @@ touched: `rustfmt --edition 2024 --check src/components/foo.rs
 src/components/bar.rs`. Same idea for clippy — scope to what you changed
 (`cargo clippy --target wasm32-unknown-unknown` and grep the output for your
 files) rather than treating pre-existing warnings elsewhere as yours to fix.
+
+## Layout-stable cards: reserve space, never conditionally render a container above other content
+
+A dashboard card is a vertical stack; conditionally rendering (or early-returning
+an empty view for) any block that sits ABOVE other content makes everything below
+it jump when the block appears/disappears. `karaoke_panel.rs` did exactly this —
+it returned `view! {}` when there was no lyric line, so the subtitles block
+vanished on every pause and the card jerked up and down (#163). Fix: keep the
+container ALWAYS in the DOM with a reserved `min-height` (CSS) sized for its
+slots, always render each inner line slot (empty = `\u{00A0}`), and swap only the
+text. The #15 preview is the good pattern to copy: `.preview-img` and
+`.preview-placeholder` share one `aspect-ratio: 16/9` box so a load/unload never
+shifts layout.
+
+## Status badges only where actionable
+
+A per-card status badge that renders the same non-actionable value on every card
+(e.g. the genlock `LockBadge` showing '● UNLOCKED — pacing disabled' on all 9
+cards while `genlock_pacing` is OFF) reads as N errors, not one disabled feature.
+Gate it: render nothing when the state is a global no-op (`pacing.enabled ==
+false`), show a per-card badge only where it is actionable (Playing/Paused
+outputs), and fold the whole-box status into ONE header summary (#164,
+`ndi_health.rs::should_show_lock_badge` / `global_summary`).
