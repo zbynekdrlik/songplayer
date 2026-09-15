@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use leptos::prelude::Set;
 use sp_core::models::Playlist;
 use sp_core::playback::PlaybackState;
 use wasm_bindgen::JsValue;
