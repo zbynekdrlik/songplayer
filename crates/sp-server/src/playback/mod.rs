@@ -16,6 +16,7 @@ mod lyrics_loader;
 pub mod ndi_burn;
 pub mod ndi_health;
 pub mod pacer;
+pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;
