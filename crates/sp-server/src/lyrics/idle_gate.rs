@@ -88,6 +88,16 @@ pub(crate) const STARTUP_GRACE: Duration = Duration::from_secs(30);
 /// The hard startup floor (#167): NO heavy step of any kind runs for this long
 /// after engine start, so the wall pipelines come up on a fully quiet box (the
 /// post-deploy E2E samples the engine in exactly this window).
+///
+/// Both this floor and [`STARTUP_GRACE`] are measured from `NdiHealthRegistry`
+/// creation (≈ engine start, `since_created`), NOT from per-pipeline readiness.
+/// The assumption is that active pipelines are CREATED and report within this
+/// window of engine start (true on every normal restart — they come up in
+/// seconds, and the created/reported count path then reads them as known). A
+/// pathologically slow cold boot that first creates a pipeline > 60 s after
+/// engine start would lift the floor before that output plays; the reported-count
+/// path still forces UNKNOWN once the pipeline is created-but-unreported, so the
+/// residual risk is only the narrow gap before creation on such a boot.
 pub(crate) const HEAVY_STEP_STARTUP_FLOOR: Duration = Duration::from_secs(60);
 
 /// Is the wall-activity reading trustworthy yet (#167)? `expected` pipelines were

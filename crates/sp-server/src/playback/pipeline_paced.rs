@@ -580,11 +580,26 @@ pub(crate) fn decode_and_send_paced(
                     last_position_report = Instant::now();
                 }
 
-                // End when the producer has drained (EOS + empty queue) and the
-                // pacer holds nothing parked — the last frame has been shown; do
-                // not repeat past end of stream.
-                if shared.is_drained() && !pacer.has_pending() {
-                    info!(playlist_id, "paced: video decode complete");
+                // End the song when EITHER the producer drained normally (EOS +
+                // empty queue) with nothing parked in the pacer — the last frame
+                // has been shown — OR the producer thread has EXITED without
+                // signalling EOS (a panic after the open phase). The latter is
+                // symmetric with the open-phase liveness check (`open_rx` →
+                // Disconnected): `SharedQueue` is an Arc<Mutex>, not a channel, so a
+                // dead producer would otherwise leave `is_drained()` false forever
+                // and freeze the wall on a repeat with no auto-advance. Ending
+                // (not erroring) lets the playlist move to the next song — the
+                // resilient choice on a box with a driver-timeout history.
+                let producer_dead = producer.is_finished() && !shared.is_drained();
+                if (shared.is_drained() && !pacer.has_pending()) || producer_dead {
+                    if producer_dead {
+                        error!(
+                            playlist_id,
+                            "paced: decode producer exited without EOS — ending song"
+                        );
+                    } else {
+                        info!(playlist_id, "paced: video decode complete");
+                    }
                     // Flush the remaining buffered audio as one final chunk
                     // (zero-filled to a full boundary) with the raw wall timecode
                     // before returning, so the last <1 boundary of audio is not
@@ -593,7 +608,12 @@ pub(crate) fn decode_and_send_paced(
                     if !tail.is_empty() {
                         submitter.submit_audio_tail(&tail, pacer.now_100ns());
                     }
-                    log_song_summary(pacer, &summary_base, song_start, playlist_id, "ended");
+                    let reason = if producer_dead {
+                        "producer-died"
+                    } else {
+                        "ended"
+                    };
+                    log_song_summary(pacer, &summary_base, song_start, playlist_id, reason);
                     submitter.flush();
                     break 'emit DecodeResult::Ended;
                 }
