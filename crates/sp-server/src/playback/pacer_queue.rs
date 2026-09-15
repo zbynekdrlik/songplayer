@@ -56,26 +56,14 @@ impl<T> PacedQueue<T> {
         }
     }
 
-    /// The look-ahead bound (max frames buffered).
-    pub fn bound(&self) -> usize {
-        self.bound
-    }
-
     /// Current queue depth (frames buffered).
     pub fn depth(&self) -> usize {
         self.buf.len()
     }
 
-    /// The queue holds no frames.
-    pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
-    }
-
     /// The queue is at its bound — the producer must wait.
     pub fn is_full(&self) -> bool {
-        // RED (#147): off-by-one — allows one frame past the bound. GREEN uses
-        // `>=`.
-        self.buf.len() > self.bound
+        self.buf.len() >= self.bound
     }
 
     /// The current seek generation.
@@ -92,9 +80,12 @@ impl<T> PacedQueue<T> {
     /// if its epoch is stale (a seek raced ahead of it) or the queue is at its
     /// bound; otherwise appended and NEVER exceeds `bound`.
     pub fn push(&mut self, frame: T, frame_epoch: u64) -> PushOutcome<T> {
-        // RED (#147): no epoch guard, no bound guard — always accepts. GREEN adds
-        // the stale-epoch reject and the bound backpressure.
-        let _ = frame_epoch;
+        if frame_epoch != self.epoch {
+            return PushOutcome::Stale(frame);
+        }
+        if self.is_full() {
+            return PushOutcome::Full(frame);
+        }
         self.buf.push_back(frame);
         PushOutcome::Accepted {
             depth: self.buf.len(),
@@ -115,9 +106,7 @@ impl<T> PacedQueue<T> {
     /// Consumer: the producer finished AND every queued frame has been popped —
     /// the song is done (EOS DRAINS the queue, it never truncates it).
     pub fn is_drained(&self) -> bool {
-        // RED (#147): ignores the buffered frames — reports "drained" the instant
-        // EOS is marked, truncating the tail. GREEN ANDs `self.buf.is_empty()`.
-        self.eos
+        self.eos && self.buf.is_empty()
     }
 
     /// Consumer: a seek happened — drop every buffered (now-stale) frame, clear
@@ -125,15 +114,183 @@ impl<T> PacedQueue<T> {
     /// under the old epoch is rejected as [`PushOutcome::Stale`]. Returns the new
     /// epoch for the producer to adopt after it seeks.
     pub fn begin_seek(&mut self) -> u64 {
-        // RED (#147): does not flush, does not bump the epoch. GREEN clears the
-        // buffer + eos and increments the epoch.
+        self.buf.clear();
+        self.eos = false;
+        self.epoch += 1;
         self.epoch
     }
 }
 
-// The threading wrapper (`SharedQueue`) that drives this pure queue from the
-// Windows decode producer + emit consumer is added alongside the GREEN pipeline
-// wiring.
+use std::sync::{Condvar, Mutex};
+
+/// What a blocking [`SharedQueue::producer_push`] / [`SharedQueue::wait_after_eos`]
+/// tells the decode producer to do next.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ProducerAction {
+    /// The frame was enqueued (or dropped as stale) — keep decoding.
+    Continue,
+    /// A seek is pending: seek the decoder to `position_ms`, adopt `epoch`, and
+    /// DISCARD the frame that was being pushed (it was decoded pre-seek).
+    Seek { position_ms: u64, epoch: u64 },
+    /// The consumer asked the producer to stop (song end / shutdown) — exit the
+    /// thread so the decoder drops on its own STA thread.
+    Stop,
+}
+
+struct QueueState<T> {
+    queue: PacedQueue<T>,
+    stop: bool,
+    /// Set by the consumer on a Seek; consumed by the producer. Carries the seek
+    /// target; the epoch is already bumped in `queue` by `begin_seek`.
+    pending_seek: Option<u64>,
+}
+
+/// Thread-safe wrapper around [`PacedQueue`] driving the #147 decode producer and
+/// the emit consumer: a `Mutex` guarding the pure queue + a `not_full` `Condvar`
+/// for producer backpressure. The DECISIONS (bound, drain, epoch) all live in the
+/// pure `PacedQueue`; this is the (Windows-consumed, box-verified) `Mutex`/
+/// `Condvar` plumbing, so its methods are `mutants::skip` glue.
+pub struct SharedQueue<T> {
+    inner: Mutex<QueueState<T>>,
+    not_full: Condvar,
+}
+
+impl<T> SharedQueue<T> {
+    /// Build a shared queue bounded to `bound` frames of look-ahead.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn new(bound: usize) -> Self {
+        Self {
+            inner: Mutex::new(QueueState {
+                queue: PacedQueue::new(bound),
+                stop: false,
+                pending_seek: None,
+            }),
+            not_full: Condvar::new(),
+        }
+    }
+
+    /// Producer: push `frame` (decoded under `frame_epoch`), BLOCKING while the
+    /// queue is full until the consumer pops, a seek arrives, or stop is set.
+    /// Returns the [`ProducerAction`] to take next. A poisoned mutex maps to
+    /// `Stop` (the consumer is gone).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn producer_push(&self, frame: T, frame_epoch: u64) -> ProducerAction {
+        let mut frame = Some(frame);
+        let mut st = match self.inner.lock() {
+            Ok(g) => g,
+            Err(_) => return ProducerAction::Stop,
+        };
+        loop {
+            if st.stop {
+                return ProducerAction::Stop;
+            }
+            if let Some(position_ms) = st.pending_seek.take() {
+                // The frame in hand was decoded before this seek — discard it.
+                return ProducerAction::Seek {
+                    position_ms,
+                    epoch: st.queue.epoch(),
+                };
+            }
+            match st
+                .queue
+                .push(frame.take().expect("frame present"), frame_epoch)
+            {
+                PushOutcome::Accepted { .. } | PushOutcome::Stale(_) => {
+                    // Stale = a seek raced ahead: the next loop / call surfaces it;
+                    // either way this frame is done.
+                    return ProducerAction::Continue;
+                }
+                PushOutcome::Full(f) => {
+                    // Backpressure: put the frame back and wait for room / seek /
+                    // stop, then retry.
+                    frame = Some(f);
+                    st = match self.not_full.wait(st) {
+                        Ok(g) => g,
+                        Err(_) => return ProducerAction::Stop,
+                    };
+                }
+            }
+        }
+    }
+
+    /// Consumer: pop the oldest frame without blocking, or `None` when empty
+    /// (starvation → the pacer repeats its last frame). Signals `not_full` so a
+    /// backpressured producer can push. Poisoned mutex → `None`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn consumer_pop(&self) -> Option<T> {
+        let mut st = self.inner.lock().ok()?;
+        let f = st.queue.pop();
+        if f.is_some() {
+            self.not_full.notify_one();
+        }
+        f
+    }
+
+    /// Producer: mark end-of-stream (no more frames until a seek). Poison → no-op.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn producer_eos(&self) {
+        if let Ok(mut st) = self.inner.lock() {
+            st.queue.mark_eos();
+        }
+    }
+
+    /// Producer: after EOS, BLOCK until the consumer requests a seek (scrub after
+    /// end) or stop. Returns `Seek{..}` or `Stop`; never `Continue`. Poison → Stop.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn wait_after_eos(&self) -> ProducerAction {
+        let mut st = match self.inner.lock() {
+            Ok(g) => g,
+            Err(_) => return ProducerAction::Stop,
+        };
+        loop {
+            if st.stop {
+                return ProducerAction::Stop;
+            }
+            if let Some(position_ms) = st.pending_seek.take() {
+                return ProducerAction::Seek {
+                    position_ms,
+                    epoch: st.queue.epoch(),
+                };
+            }
+            st = match self.not_full.wait(st) {
+                Ok(g) => g,
+                Err(_) => return ProducerAction::Stop,
+            };
+        }
+    }
+
+    /// Consumer: a Seek command arrived — flush the buffered (stale) frames, bump
+    /// the epoch, and hand the producer the new target. Wakes a backpressured /
+    /// post-EOS producer. Poison → no-op.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn request_seek(&self, position_ms: u64) {
+        if let Ok(mut st) = self.inner.lock() {
+            st.queue.begin_seek();
+            st.pending_seek = Some(position_ms);
+            self.not_full.notify_all();
+        }
+    }
+
+    /// Consumer: tell the producer to stop (song end / shutdown) and wake it.
+    /// Poison → no-op (the producer already saw the disconnect).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn stop(&self) {
+        if let Ok(mut st) = self.inner.lock() {
+            st.stop = true;
+            self.not_full.notify_all();
+        }
+    }
+
+    /// Consumer: the producer finished AND the buffer is empty — the song is done.
+    /// Poison → true (nothing more will arrive; end cleanly).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn is_drained(&self) -> bool {
+        match self.inner.lock() {
+            Ok(st) => st.queue.is_drained(),
+            Err(_) => true,
+        }
+    }
+}
 
 #[cfg(test)]
 #[path = "pacer_queue_tests.rs"]
