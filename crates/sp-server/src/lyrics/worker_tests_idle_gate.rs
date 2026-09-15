@@ -234,8 +234,10 @@ fn idle_settle_busy_sample_resets_the_clock() {
 /// The core #161 guarantee at the worker level: with a Playing snapshot, a heavy
 /// step run under `wall_abort` is KILLED (its future dropped, never run to
 /// completion) within the ~2 s debounce, and the caller gets `Err(WallAbort)`.
-/// `start_paused` advances the 1 s poll + the mock 30 s step deterministically.
-#[tokio::test(start_paused = true)]
+/// Real clock on purpose: the fixture opens the sqlite pool inside the test, and
+/// under `start_paused` sqlx's acquire timeout auto-advances (PoolTimedOut,
+/// CI run 34926435178). The 1 s poll aborts the mock 30 s step after ~2 s.
+#[tokio::test]
 async fn wall_abort_kills_running_step_when_wall_playing() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
