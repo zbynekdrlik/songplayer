@@ -155,8 +155,10 @@ async fn slot_serializes_two_heavy_steps() {
 fn child_job_limit_is_six_gib() {
     assert_eq!(CHILD_JOB_MEMORY_LIMIT_BYTES, 6 * (1u64 << 30));
     assert_eq!(HEAVY_STEP_MIN_FREE_BYTES, 4 * (1u64 << 30));
-    assert!(
-        CHILD_JOB_MEMORY_LIMIT_BYTES > HEAVY_STEP_MIN_FREE_BYTES,
-        "a child may use more than the admission floor, never less"
-    );
+    const {
+        assert!(
+            CHILD_JOB_MEMORY_LIMIT_BYTES > HEAVY_STEP_MIN_FREE_BYTES,
+            "a child may use more than the admission floor, never less"
+        );
+    }
 }
