@@ -181,4 +181,11 @@ test("at 400px the selector becomes a <select> above the work area (#165)", asyn
   await select.selectOption("6");
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 06");
   await expect(page).toHaveURL(/[?&]playlist=6\b/);
+
+  // The page body must never scroll horizontally on a phone: the top navbar
+  // (page buttons + ws dot + version) overflowed to 588 px on the live box.
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(overflow, "horizontal overflow in px at 400px width").toBeLessThanOrEqual(0);
 });
