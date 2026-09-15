@@ -32,9 +32,29 @@ export interface WaitForProgramSceneOptions {
 export async function waitForProgramScene(
   getProgramScene: () => Promise<string>,
   target: string,
-  _opts: WaitForProgramSceneOptions = {},
+  opts: WaitForProgramSceneOptions = {},
 ): Promise<void> {
-  // RED stub (#170): reads the program scene once and returns without waiting
-  // for the transition to apply. GREEN replaces this with a bounded poll.
-  await getProgramScene();
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const pollMs = opts.pollMs ?? 150;
+  const deadline = Date.now() + timeoutMs;
+
+  // Poll the program scene until it equals the target. On the first pass we
+  // return immediately for a no-op switch (already on target); otherwise we
+  // wait out the transition, re-reading every `pollMs`, and throw once the
+  // deadline passes.
+  for (;;) {
+    const current = await getProgramScene();
+    if (current === target) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `OBS program scene did not become "${target}" within ${timeoutMs}ms ` +
+          `(last saw "${current}"). On win-resolume OBS runs Studio Mode with ` +
+          `a 2000ms Fade, so the program scene only reports the target once ` +
+          `the transition completes — a stuck/too-short wait or a missing ` +
+          `scene surfaces here instead of as a mysterious downstream failure. ` +
+          `(#170)`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
 }

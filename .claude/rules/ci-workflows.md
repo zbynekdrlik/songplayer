@@ -86,3 +86,36 @@ in-flight run finish (or cancel it deliberately), THEN re-run the old one, THEN
 finished leaves that push range without a mutation verdict — re-run its failed
 jobs before trusting the diff, and expect the old commit's already-known
 survivors to fail again there (read only the shard you need).
+
+## Post-deploy E2E: OBS is in Studio Mode with a 2000ms Fade — never blind-sleep after a scene switch (#170)
+
+The `E2E Tests (win-resolume)` job restarts SongPlayer (`taskkill` + `schtasks
+/run /tn SongPlayer` + `Wait-SongPlayerUp`), then the Playwright post-deploy
+suite drives OBS scene switches via `e2e/obs-driver.ts`. **OBS on win-resolume
+runs Studio Mode with a `Fade` transition of `2000ms`** (verify:
+`obs-get-studio-mode`, `obs-get-current-transition`). In studio mode
+`SetCurrentProgramScene` only *starts* the fade; obs-websocket updates
+`GetCurrentProgramScene` and emits `CurrentProgramSceneChanged` — the event
+SongPlayer's OBS client reacts to (in <1 ms) — **only when the fade completes,
+~2 s later** (both come from OBS's `OBS_FRONTEND_EVENT_SCENE_CHANGED`, which
+fires at transition end).
+
+So a blind `sleep(300)` after `SetCurrentProgramScene` **races the 2 s fade**:
+`/api/v1/status.active_playlist_ids` still shows the old scene's playlist for
+~2 s, which fails a single-read assertion (test 15's baseline "ytfast NOT
+active" read) and, with back-to-back scene tests, re-triggers `SelectAndPlay`
+from position 0 so the position never advances (test 17's 0→0). This was the
+"post-restart window flake" in #170 — NOT an engine/scene-detection bug (the
+box log showed SongPlayer receiving and reacting to every switch, each ~2 s
+after the OBS switch).
+
+**Contract:** any E2E that switches OBS scenes must wait for the switch to
+actually apply, never a fixed sleep. `ObsDriver.switchScene` polls
+`GetCurrentProgramScene` until it equals the target (`e2e/obs-scene-wait.ts`
+`waitForProgramScene`, unit-tested in the mock suite `obs-scene-wait.spec.ts`),
+then a short settle, and **throws loudly** if the program scene never applies
+(a stuck transition / missing scene surfaces here, not as a mysterious
+downstream failure). This is transition-duration-agnostic — a 0 ms cut or a
+2 s fade both work. Do NOT "fix" scene-switch flake by bumping test timeouts
+(`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config
+(transition duration / studio mode).

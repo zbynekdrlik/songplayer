@@ -6,6 +6,7 @@
  */
 
 import OBSWebSocket from "obs-websocket-js";
+import { waitForProgramScene } from "./obs-scene-wait";
 
 export class ObsDriver {
   private constructor(private obs: OBSWebSocket) {}
@@ -28,8 +29,19 @@ export class ObsDriver {
 
   async switchScene(sceneName: string): Promise<void> {
     await this.obs.call("SetCurrentProgramScene", { sceneName });
-    // Give OBS + SongPlayer a moment to propagate the change.
-    await new Promise((r) => setTimeout(r, 300));
+    // Wait for the switch to ACTUALLY take effect before returning. OBS on
+    // win-resolume runs Studio Mode with a 2000ms Fade, so the program scene
+    // — and the CurrentProgramSceneChanged event SongPlayer reacts to — only
+    // reports `sceneName` after the fade completes ~2s later. A blind sleep
+    // races that fade and made tests 15/17 flaky (#170). Poll
+    // GetCurrentProgramScene until it applies (throws loudly if it never
+    // does), then a short settle so SongPlayer processes the post-transition
+    // event (its reaction is <1ms, so 400ms is ample margin).
+    await waitForProgramScene(
+      () => this.currentProgramScene(),
+      sceneName,
+    );
+    await new Promise((r) => setTimeout(r, 400));
   }
 
   async disconnect(): Promise<void> {
