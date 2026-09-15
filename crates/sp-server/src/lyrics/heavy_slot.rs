@@ -44,6 +44,7 @@ pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 4_294_967_296; // 4 GiB
 /// Job Object path.
 // Platform-independent literal (no arithmetic: the cfg(windows) product was
 // invisible to the Linux mutation runner) — pinned by `child_job_limit_is_six_gib`.
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows Job Object path reads it
 pub(crate) const CHILD_JOB_MEMORY_LIMIT_BYTES: u64 = 6_442_450_944; // 6 GiB
 
 // ---------------------------------------------------------------------------
