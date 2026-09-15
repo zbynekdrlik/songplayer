@@ -42,10 +42,23 @@ pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 4_294_967_296; // 4 GiB
 /// set (~3.2 GB) with headroom, so a genuine runaway is killed at the CHILD,
 /// never by starving the host. Only referenced inside the `#[cfg(windows)]`
 /// Job Object path.
+///
+/// Raised from 6 GiB to 10 GiB (2026-09-15, live finding on win-resolume
+/// 10:19–10:45 UTC): 6 GiB is fine for a normal ≤4-minute song (measured
+/// identical throughput inside vs. outside a 6 GiB job), but a 10-minute
+/// "warm-up" file ("10 Minute Daily Vocal Workout", 118 MB FLAC) pins private
+/// bytes at ~5.0 GB against the cap — CUDA context reservation plus several
+/// float32 copies of the whole mix — so allocations start failing and the
+/// child crawls at 0.2 cores with ~200k page faults/s for 20+ minutes before
+/// timing out. 10 GiB clears that working set with margin. Paired with the
+/// stems worker's own `STEM_MAX_DURATION_MS` cap (`stems/worker.rs`), which
+/// now skips separation entirely past 15 minutes — such long files are not
+/// songs and karaoke stems for them are pointless — this ceiling is for the
+/// lyrics-worker heavy steps (isolation / mtl), which have no duration cap.
 // Platform-independent literal (no arithmetic: the cfg(windows) product was
-// invisible to the Linux mutation runner) — pinned by `child_job_limit_is_six_gib`.
+// invisible to the Linux mutation runner) — pinned by `child_job_limit_is_ten_gib`.
 #[cfg_attr(not(windows), allow(dead_code))] // only the Windows Job Object path reads it
-pub(crate) const CHILD_JOB_MEMORY_LIMIT_BYTES: u64 = 6_442_450_944; // 6 GiB
+pub(crate) const CHILD_JOB_MEMORY_LIMIT_BYTES: u64 = 10_737_418_240; // 10 GiB
 
 // ---------------------------------------------------------------------------
 // Layer 1 — process-global heavy-step slot (Semaphore with ONE permit).

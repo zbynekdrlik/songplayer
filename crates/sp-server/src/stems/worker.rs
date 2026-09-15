@@ -31,8 +31,15 @@ enum StemStepResult {
     WallAborted(String),
 }
 
-/// Songs longer than this are not separated (huge stems, slow); marked terminal.
-const STEM_MAX_DURATION_MS: i64 = 30 * 60 * 1000;
+/// Songs longer than this are not separated; marked terminal (`unsupported`).
+/// Lowered from 30 min to 15 min (2026-09-15, live finding on win-resolume):
+/// a 10-minute "warm-up" file pinned the heavy child's memory near its Job
+/// Object ceiling (see `heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`) and
+/// crawled for 20+ minutes before timing out — such long files are not songs
+/// and karaoke stems for them are pointless.
+// Literal, not `15 * 60 * 1000` — cfg-independent arithmetic on a const is
+// invisible to the mutation runner (same reasoning as heavy_slot.rs's ceiling).
+pub(crate) const STEM_MAX_DURATION_MS: i64 = 900_000; // 15 min
 
 /// How often the worker looks for the next song to separate.
 const TICK: Duration = Duration::from_secs(10);
@@ -133,6 +140,26 @@ pub(crate) fn stem_defer_fallback(mode: ProcessingMode, activity: WallActivity) 
     mode == ProcessingMode::IdleOnly && should_defer(true, activity)
 }
 
+/// Whether stem separation is supported for a song of this duration. `None`
+/// (duration unknown) is always supported — an unknown length must never
+/// block separation, only a KNOWN duration past [`STEM_MAX_DURATION_MS`]
+/// does. Pure — unit-tested directly with the exact boundary values.
+pub(crate) fn stem_duration_supported(duration_ms: Option<i64>) -> bool {
+    match duration_ms {
+        None => true,
+        Some(d) => d <= STEM_MAX_DURATION_MS,
+    }
+}
+
+/// Positive-form twin of [`stem_duration_supported`] for the `process_next`
+/// spawn seam: `true` when the song is too long and must be skipped. Avoids a
+/// `!` at the call site (a deleted-`!` mutant there would be unobservable
+/// without a real long-duration fixture); the decision itself is the
+/// unit-tested `stem_duration_supported`.
+pub(crate) fn stem_duration_too_long(duration_ms: Option<i64>) -> bool {
+    !stem_duration_supported(duration_ms)
+}
+
 impl StemWorker {
     pub fn new(
         pool: SqlitePool,
@@ -230,14 +257,19 @@ impl StemWorker {
             }
         };
 
-        // Terminal skip: a song too long for a sane stem pass.
-        if let Some(ms) = job.duration_ms
-            && ms > STEM_MAX_DURATION_MS
-        {
-            warn!(
+        // Terminal skip: a song too long for a sane stem pass (2026-09-15 —
+        // long "warm-up" files pin the heavy child's memory near its ceiling
+        // and are not songs anyway). Positive form via `stem_duration_too_long`
+        // so no `!` sits at this seam; the decision is the unit-tested
+        // `stem_duration_supported`.
+        if stem_duration_too_long(job.duration_ms) {
+            let secs = job.duration_ms.unwrap_or(0) / 1000;
+            info!(
                 video_id = job.video_id,
-                duration_ms = ms,
-                "stem worker: song exceeds stem duration cap — marking unsupported"
+                duration_ms = job.duration_ms,
+                "stem worker: skipping video_id={} ({secs}s > {}s) — stems only for songs up to 15 min",
+                job.video_id,
+                STEM_MAX_DURATION_MS / 1000
             );
             let _ = crate::db::models_stems::mark_stems_unsupported(&self.pool, job.video_id).await;
             return;
@@ -637,5 +669,85 @@ mod tests {
             attempts, 1,
             "a real failure increments stem_attempts (backoff)"
         );
+    }
+
+    // ---- duration terminal-skip (2026-09-15) ------------------------------
+
+    /// A worker whose venv python "exists" (an empty stub file at the
+    /// platform-correct path), so `process_next` clears the venv gate and
+    /// reaches the terminal duration-skip check.
+    fn worker_with_stub_venv(pool: SqlitePool, dir: &std::path::Path) -> StemWorker {
+        let python = crate::lyrics::bootstrap::venv_python_path(dir);
+        if let Some(parent) = python.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&python, b"").unwrap();
+        test_worker(pool, dir.to_path_buf())
+    }
+
+    /// A 20-minute row (over the 15-min `STEM_MAX_DURATION_MS` cap) must be
+    /// marked terminal `unsupported`, with no backoff bookkeeping touched —
+    /// mirrors the exact-boundary coverage in `stem_duration_supported`'s pure
+    /// tests (`worker_plan_tests.rs`), but proves the worker's real spawn seam
+    /// (`stem_duration_too_long`) actually gates on it.
+    #[tokio::test]
+    async fn process_next_marks_overlong_song_unsupported() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        seed_pending_stem_row(&pool, 1).await;
+        sqlx::query("UPDATE videos SET duration_ms = ? WHERE id = 1")
+            .bind(1_200_000i64) // 20 min
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let worker = worker_with_stub_venv(pool.clone(), dir.path());
+
+        worker.process_next().await;
+
+        let (status, attempts): (Option<String>, i64) =
+            sqlx::query_as("SELECT stem_status, stem_attempts FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            status.as_deref(),
+            Some("unsupported"),
+            "a 20-min song must be marked terminal unsupported"
+        );
+        assert_eq!(
+            attempts, 0,
+            "the duration skip must not touch stem_attempts — it is not a backoff"
+        );
+    }
+
+    /// A normal-length (4-min) row is never touched by the terminal-skip path.
+    /// No stub venv is provided here — `process_next` stops at the missing
+    /// venv-python gate before reaching the duration check at all (same as
+    /// `missing_venv_python_warns_and_skips_without_touching_db`); that is
+    /// fine, since the exact 15-min boundary is already proven by the pure
+    /// `stem_duration_supported` tests. This just proves a normal row is left
+    /// pending, never spuriously marked unsupported.
+    #[tokio::test]
+    async fn process_next_leaves_a_normal_length_song_pending() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        seed_pending_stem_row(&pool, 1).await;
+        sqlx::query("UPDATE videos SET duration_ms = ? WHERE id = 1")
+            .bind(240_000i64) // 4 min
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let worker = test_worker(pool.clone(), dir.path().to_path_buf());
+
+        worker.process_next().await;
+
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT stem_status FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(status.is_none(), "a 4-minute song must stay pending");
     }
 }

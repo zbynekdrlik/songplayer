@@ -144,6 +144,19 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   pending: `stem_status` NULL, `stem_attempts` unchanged, re-picked when idle). A
   genuine separation failure still records the backoff deferral. The lyrics worker
   wraps its isolation + mtl steps the same way.
+- **Duration cap (2026-09-15) — stems only up to 15 min
+  (`STEM_MAX_DURATION_MS`, `stems/worker.rs`).** A 10-minute "warm-up" file
+  pinned the heavy child's private bytes at ~5.0 GB against the (then) 6 GiB
+  Job Object ceiling (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES` — CUDA
+  context + several float32 copies of the whole mix), so allocations failed
+  and the child crawled at 0.2 cores / ~200k page faults/s for 20+ minutes
+  before timing out. Fix was two-part: the ceiling went 6→10 GiB (clears a
+  normal long-song working set with margin), AND the stem worker now skips
+  separation entirely for anything over 15 min — `process_next` checks
+  `stem_duration_too_long(job.duration_ms)` right after picking the job,
+  before the heavy-slot/memory-guard/spawn, and marks the row terminal
+  `stem_status = 'unsupported'` (no retry, no backoff). Such long files are
+  not songs; karaoke stems for them are pointless regardless of ceiling size.
 - **DB (V24):** `videos.{vocals_file_path, instrumental_file_path, stem_status,
   stem_attempts, stem_next_attempt_at}`. `stem_status` NULL=pending → done /
   failed (retryable) / unsupported (terminal). Paths are also derived
