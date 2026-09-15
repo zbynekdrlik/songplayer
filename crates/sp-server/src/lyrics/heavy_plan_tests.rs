@@ -1,9 +1,11 @@
 //! #162 pure tests for the CPU/GPU priority-regime decision core.
 //!
-//! RED (TIER-0 pattern): `HeavyStepPlan::for_activity`'s low-priority busy
-//! branch ships the WRONG plan (gpu), so `low_priority_playing_is_cpu_idle` and
-//! `cpu_plan_hides_cuda_and_caps_threads` FAIL until the GREEN fix returns
-//! `Self::cpu_idle()`. The other tests pin the surrounding invariants.
+//! `for_activity` picks the plan (cpu-idle on a busy wall in low-priority, gpu
+//! otherwise). `apply` stamps thread caps + Windows priority-class flags but
+//! NEVER a CUDA env: hiding the GPU via `CUDA_VISIBLE_DEVICES="-1"` crashed the
+//! NVIDIA driver on the box (`nvdxgdmal64.dll_unloaded`, 0xc0000005 —
+//! win-resolume 2026-09-15), so CPU is forced via the `--force-cpu` script arg
+//! (`script_cpu_args`) instead. The tests pin both invariants.
 
 use super::*;
 use crate::lyrics::idle_gate::WallActivity;
@@ -158,22 +160,51 @@ fn env_of(cmd: &tokio::process::Command, key: &str) -> Option<Option<std::ffi::O
 }
 
 #[tokio::test]
-async fn cpu_plan_hides_cuda_and_caps_threads() {
-    // Derived through the full decision path so a wrong `for_activity` (RED)
-    // fails here too, not only in the pure device assert above.
-    let plan = HeavyStepPlan::for_activity(ProcessingMode::LowPriority, playing());
+async fn cpu_plan_never_touches_cuda_env_and_caps_threads() {
+    // #162: apply() must NEVER set CUDA_VISIBLE_DEVICES. Hiding the GPU that way
+    // crashed the NVIDIA driver on the box; CPU is forced via --force-cpu argv
+    // (see script_cpu_args), not env. Assert NO CUDA env on BOTH plans.
+    let cpu = HeavyStepPlan::for_activity(ProcessingMode::LowPriority, playing());
+    let gpu = HeavyStepPlan::for_activity(ProcessingMode::LowPriority, idle());
+    for plan in [cpu, gpu] {
+        let mut cmd = tokio::process::Command::new("true");
+        plan.apply(&mut cmd);
+        assert!(
+            env_of(&cmd, "CUDA_VISIBLE_DEVICES").is_none(),
+            "apply() must never set CUDA_VISIBLE_DEVICES (it crashed the driver, #162)"
+        );
+    }
+    // The cpu-idle plan still caps threads.
     let mut cmd = tokio::process::Command::new("true");
-    plan.apply(&mut cmd);
-
-    assert_eq!(
-        env_of(&cmd, "CUDA_VISIBLE_DEVICES"),
-        Some(Some(std::ffi::OsString::from("-1"))),
-        "cpu-idle plan must hide the GPU with CUDA_VISIBLE_DEVICES=\"-1\" \
-         (Windows drops an empty value, leaving the GPU visible)"
-    );
+    cpu.apply(&mut cmd);
     for k in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "TORCH_NUM_THREADS"] {
         assert!(env_of(&cmd, k).is_some(), "cpu-idle plan must cap {k}");
     }
+}
+
+#[test]
+fn script_cpu_args_only_for_cpu_plan() {
+    assert_eq!(
+        HeavyStepPlan::cpu_idle().script_cpu_args(),
+        &["--force-cpu"],
+        "a CPU plan forces the script onto CPU via --force-cpu"
+    );
+    assert!(
+        HeavyStepPlan::gpu_below_normal()
+            .script_cpu_args()
+            .is_empty(),
+        "a GPU plan passes no CPU-force arg"
+    );
+    // Through the full decision path too.
+    assert_eq!(
+        HeavyStepPlan::for_activity(ProcessingMode::LowPriority, playing()).script_cpu_args(),
+        &["--force-cpu"]
+    );
+    assert!(
+        HeavyStepPlan::for_activity(ProcessingMode::LowPriority, idle())
+            .script_cpu_args()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
