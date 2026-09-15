@@ -140,7 +140,6 @@ fn is_cuda_oom(text: &str) -> bool {
 // not unit-tested here — skip mutation so the added env plumbing does not leave
 // a survivor cargo-mutants can never kill without a live GPU.
 #[cfg_attr(test, mutants::skip)]
-#[allow(clippy::too_many_arguments)]
 async fn run_once(
     cfg: &MtlConfig,
     wav: &Path,
@@ -249,7 +248,6 @@ async fn parse_output(path: &Path) -> Result<MtlOutput> {
 // control flow needs a live subprocess). Skip mutation so the #154 arg
 // threading does not introduce an unkillable survivor.
 #[cfg_attr(test, mutants::skip)]
-#[allow(clippy::too_many_arguments)]
 pub async fn align(
     cfg: &MtlConfig,
     vocals_wav: &Path,
