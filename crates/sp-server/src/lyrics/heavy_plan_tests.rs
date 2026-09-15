@@ -64,8 +64,8 @@ fn low_priority_playing_is_cpu_idle() {
     assert_eq!(p.device, Device::Cpu, "low-priority + wall in use → CPU");
     assert_eq!(
         p.priority,
-        Priority::Idle,
-        "low-priority + wall in use → IDLE class"
+        Priority::BelowNormal,
+        "low-priority + wall in use → BELOW_NORMAL class (IDLE at creation starves the child: working set trimmed, 0.02 cores)"
     );
     assert!(p.threads.is_some(), "cpu-idle plan caps threads");
     assert!(!p.is_gpu());
@@ -138,9 +138,10 @@ fn cpu_plan_timeout_saturates() {
 // ---- creation_flags (pure, Windows constants) ----------------------------
 
 #[test]
-fn creation_flags_cpu_idle_is_create_no_window_plus_idle_class() {
-    // CREATE_NO_WINDOW 0x08000000 | IDLE_PRIORITY_CLASS 0x40
-    assert_eq!(HeavyStepPlan::cpu_idle().creation_flags(), 0x0800_0040);
+fn creation_flags_cpu_idle_is_create_no_window_plus_below_normal_class() {
+    // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x4000 — never
+    // IDLE: a child created in IDLE class is starved by working-set trimming.
+    assert_eq!(HeavyStepPlan::cpu_idle().creation_flags(), 0x0800_4000);
 }
 
 #[test]
