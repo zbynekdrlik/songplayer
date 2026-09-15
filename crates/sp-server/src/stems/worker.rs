@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::lyrics::aligner::isolation_timeout;
 use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
-use crate::lyrics::idle_gate::{GateLog, should_defer, wall_activity_from};
+use crate::lyrics::idle_gate::{GateLog, WallActivity, should_defer, wall_activity_from};
 use crate::lyrics::idle_gate_abort::run_with_wall_abort;
 
 /// #161: outcome of one stem-separation attempt run under the wall-abort
@@ -61,6 +61,58 @@ pub(crate) fn worker_enabled(raw: Option<&str>) -> bool {
             !(v == "false" || v == "0" || v == "off" || v == "no")
         }
     }
+}
+
+/// #162 stem-worker per-tick defer decision. Pure w.r.t. `now`, so it is
+/// unit-tested on BOTH mode arms (replacing the inline `mode == IdleOnly` branch,
+/// whose `==` was a surviving mutant).
+///
+/// - [`LowPriority`](ProcessingMode::LowPriority) NEVER defers — it runs every
+///   heavy separation at reduced priority instead.
+/// - [`IdleOnly`](ProcessingMode::IdleOnly) defers on a busy wall using the
+///   shared idle-settle hysteresis ([`GateLog::defer_settled`]) and emits the
+///   once-per-transition INFO log via [`GateLog::note`].
+///
+/// Returns `Some(detail)` when this tick must defer (the caller returns early),
+/// `None` to proceed to a job.
+pub(crate) fn stem_defer_decision(
+    mode: ProcessingMode,
+    gate_enabled: bool,
+    activity: WallActivity,
+    gate_log: &mut GateLog,
+    now: Instant,
+) -> Option<&'static str> {
+    match mode {
+        ProcessingMode::LowPriority => None,
+        ProcessingMode::IdleOnly => {
+            if gate_log.defer_settled(gate_enabled, activity, now) {
+                // When deferring only because the settle window has not elapsed
+                // (the wall is idle right now), say so instead of "wall in use".
+                let detail = if activity.in_use() {
+                    activity.reason().unwrap_or("wall in use")
+                } else {
+                    "wall just went idle — settling"
+                };
+                if let Some(line) = gate_log.note(true, detail) {
+                    info!("stem_worker: {line}");
+                }
+                Some(detail)
+            } else {
+                if let Some(line) = gate_log.note(false, "") {
+                    info!("stem_worker: {line}");
+                }
+                None
+            }
+        }
+    }
+}
+
+/// #162: whether the mid-job wall-abort watcher is armed for `plan`. Only a GPU
+/// plan is aborted mid-run — a CPU/IDLE separation cannot disturb the live wall,
+/// so it always runs to completion. Positive form (no `!` at the call site,
+/// whose deletion was a surviving mutant) so the decision is directly tested.
+pub(crate) fn separation_abort_armed(plan: &HeavyStepPlan) -> bool {
+    plan.is_gpu()
 }
 
 impl StemWorker {
@@ -136,36 +188,19 @@ impl StemWorker {
         );
         let activity =
             wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()).await;
-        if mode == ProcessingMode::IdleOnly {
-            // Idle-settle hysteresis (2026-09-14 incident): a single idle sample
-            // is not enough — resume only after the wall has read idle
-            // continuously for `WALL_IDLE_SETTLE`. Shared with the lyrics worker
-            // via `GateLog`. Gate is definitionally ON in idle-only mode.
-            let now = Instant::now();
-            let defer = match self.wall_gate_log.lock() {
-                Ok(mut g) => g.defer_settled(true, activity, now),
-                Err(_) => should_defer(true, activity),
-            };
-            if defer {
-                // When deferring only because the settle window has not elapsed
-                // (the wall is idle right now), say so instead of "wall in use".
-                let detail = if activity.in_use() {
-                    activity.reason().unwrap_or("wall in use")
-                } else {
-                    "wall just went idle — settling"
-                };
-                if let Ok(mut g) = self.wall_gate_log.lock()
-                    && let Some(line) = g.note(true, detail)
-                {
-                    info!("stem_worker: {line}");
-                }
-                return;
-            }
-            if let Ok(mut g) = self.wall_gate_log.lock()
-                && let Some(line) = g.note(false, "")
-            {
-                info!("stem_worker: {line}");
-            }
+        // #162: only `idle-only` mode can defer (idle-settle hysteresis +
+        // once-per-transition log); `low-priority` NEVER defers. The mode branch
+        // and the settle/log logic live in the pure `stem_defer_decision` so BOTH
+        // arms are unit-tested. Held under one lock — no `.await` inside.
+        let now = Instant::now();
+        let defer = match self.wall_gate_log.lock() {
+            Ok(mut g) => stem_defer_decision(mode, true, activity, &mut g, now).is_some(),
+            // Poisoned lock: fall back to the settle-free decision (idle-only
+            // only), no transition logging — unchanged from the pre-#162 path.
+            Err(_) => mode == ProcessingMode::IdleOnly && should_defer(true, activity),
+        };
+        if defer {
+            return;
         }
 
         let job = match crate::db::models_stems::get_next_video_for_stems(&self.pool).await {
@@ -231,24 +266,9 @@ impl StemWorker {
                 "idle"
             }
         );
-        let step = if !plan.is_gpu() {
-            match crate::stems::separator::separate_stems(
-                &python,
-                &script_path,
-                &self.models_dir,
-                &audio_path,
-                &vocals_out,
-                &instrumental_out,
-                timeout,
-                gpu_mem.as_deref(),
-                &plan,
-            )
-            .await
-            {
-                Ok(()) => StemStepResult::Done,
-                Err(e) => StemStepResult::Failed(e),
-            }
-        } else {
+        let step = if separation_abort_armed(&plan) {
+            // GPU plan: run under the mid-job wall-abort watcher (positive form —
+            // the arming decision is the unit-tested `separation_abort_armed`).
             match run_with_wall_abort(
                 crate::stems::separator::separate_stems(
                     &python,
@@ -295,6 +315,25 @@ impl StemWorker {
                     }
                     ProcessingMode::IdleOnly => StemStepResult::WallAborted(abort.detail),
                 },
+            }
+        } else {
+            // CPU-idle plan: never aborted (a CPU/IDLE job cannot disturb the
+            // wall), so run the separator directly to completion.
+            match crate::stems::separator::separate_stems(
+                &python,
+                &script_path,
+                &self.models_dir,
+                &audio_path,
+                &vocals_out,
+                &instrumental_out,
+                timeout,
+                gpu_mem.as_deref(),
+                &plan,
+            )
+            .await
+            {
+                Ok(()) => StemStepResult::Done,
+                Err(e) => StemStepResult::Failed(e),
             }
         };
         self.record_stem_result(&job, &vocals_out, &instrumental_out, step)
@@ -391,6 +430,10 @@ impl StemWorker {
         Ok(self.script_path.clone())
     }
 }
+
+#[cfg(test)]
+#[path = "worker_plan_tests.rs"]
+mod plan_tests;
 
 #[cfg(test)]
 mod tests {

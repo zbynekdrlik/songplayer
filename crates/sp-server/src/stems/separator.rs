@@ -75,7 +75,7 @@ pub async fn separate_stems(
         cmd.env(k, v);
     }
     // #162: stamp the priority-regime plan — CPU path hides the GPU
-    // (`CUDA_VISIBLE_DEVICES=""` → the script's torch builds every model on CPU,
+    // (`CUDA_VISIBLE_DEVICES="-1"` → the script's torch builds every model on CPU,
     // byte-identical to the OOM→CPU fallback) + caps CPU threads; Windows
     // priority-class creation flags (IDLE for cpu-idle, BELOW_NORMAL for gpu).
     // Replaces the old inline BELOW_NORMAL.

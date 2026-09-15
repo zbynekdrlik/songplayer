@@ -155,7 +155,7 @@ pub async fn preprocess_vocals(
         cmd.env(k, v);
     }
     // #162: stamp the priority-regime plan — CPU path hides the GPU
-    // (`CUDA_VISIBLE_DEVICES=""`, so the script's torch builds every model on
+    // (`CUDA_VISIBLE_DEVICES="-1"`, so the script's torch builds every model on
     // CPU, byte-identical to the OOM→CPU fallback) + caps CPU threads; and on
     // Windows sets the priority-class creation flags (IDLE for cpu-idle,
     // BELOW_NORMAL for gpu) OR'd with CREATE_NO_WINDOW. This replaces the old

@@ -139,7 +139,7 @@ failure — calm instrumental passages are legitimate.
     - **`low-priority` (DEFAULT)** — every heavy stage (vocal isolation, dereverb,
       mtl, stem separation) ALWAYS RUNS. While the wall is in use (`Playing` on
       program via `NdiHealthRegistry`, or OBS streaming/recording via `ObsState`)
-      it runs **CPU-only** (`HeavyStepPlan::apply` sets `CUDA_VISIBLE_DEVICES=""`
+      it runs **CPU-only** (`HeavyStepPlan::apply` sets `CUDA_VISIBLE_DEVICES="-1"`
       → the script's torch builds every model on CPU, byte-identical to the
       OOM→CPU fallback) **+ IDLE_PRIORITY_CLASS + thread cap
       `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** — the GPU is never touched,

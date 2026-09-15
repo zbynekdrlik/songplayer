@@ -75,7 +75,7 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   *stopping is not the solution* (the idle-only gate starved the queue because
   SongPlayer/CG-OBS always play something). `HeavyStepPlan::for_activity(mode,
   activity)` decides per step: **low-priority + wall in use → CPU-only** (`apply`
-  sets `CUDA_VISIBLE_DEVICES=""` so the script's torch builds every model on CPU,
+  sets `CUDA_VISIBLE_DEVICES="-1"` so the script's torch builds every model on CPU,
   byte-identical to the OOM→CPU fallback) **+ IDLE_PRIORITY_CLASS + thread cap
   `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** → the GPU is never touched, so
   no fps drop / TDR; **low-priority + wall idle → GPU + BELOW_NORMAL** (fast);

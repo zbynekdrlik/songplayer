@@ -175,7 +175,9 @@ def _force_cpu():
     orig_env = os.environ.get("CUDA_VISIBLE_DEVICES")
     torch.cuda.is_available = lambda: False
     torch.cuda.device_count = lambda: 0
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # "-1" (not ""): an invalid ordinal disables CUDA on every platform, and
+    # Windows drops an empty-valued variable so "" would leave the GPU visible.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     try:
         yield
     finally:

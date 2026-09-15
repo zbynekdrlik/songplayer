@@ -69,7 +69,7 @@ pub struct HeavyStepPlan {
 }
 
 impl HeavyStepPlan {
-    /// cpu-idle: GPU untouched (`CUDA_VISIBLE_DEVICES=""`), `IDLE_PRIORITY_CLASS`,
+    /// cpu-idle: GPU untouched (`CUDA_VISIBLE_DEVICES="-1"`), `IDLE_PRIORITY_CLASS`,
     /// thread cap = half the logical cores. Cannot disturb the live wall.
     pub(crate) fn cpu_idle() -> Self {
         Self {
@@ -120,6 +120,7 @@ impl HeavyStepPlan {
     /// off-Windows. Only CALLED inside the `#[cfg(windows)]` branch of `apply`
     /// (and by the pure tests), so it is dead code in the non-Windows lib build.
     #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(test, mutants::skip)] // `|` and `^` are equivalent for disjoint bit masks; the exact flag values are asserted by creation_flags_* tests
     pub(crate) fn creation_flags(&self) -> u32 {
         // winbase.h values.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -129,15 +130,32 @@ impl HeavyStepPlan {
             Priority::Idle => IDLE_PRIORITY_CLASS,
             Priority::BelowNormal => BELOW_NORMAL_PRIORITY_CLASS,
         };
+        // The priority-class bits are disjoint from CREATE_NO_WINDOW, so `|` and
+        // `^` yield identical values here — the assumption behind the skipped
+        // equivalent mutant, stated in code.
+        debug_assert!(
+            CREATE_NO_WINDOW & prio == 0,
+            "priority-class bits must be disjoint from CREATE_NO_WINDOW"
+        );
         CREATE_NO_WINDOW | prio
     }
 
     /// Stamp this plan onto a subprocess `Command`:
-    /// - CPU path → `CUDA_VISIBLE_DEVICES=""` so the child's torch reports no
+    /// - CPU path → `CUDA_VISIBLE_DEVICES="-1"` so the child's torch reports no
     ///   CUDA device and builds every model on CPU — byte-identical to the
     ///   existing in-process OOM→CPU fallback (`_force_cpu` in the scripts),
     ///   only slower. (mtl's `run.py` additionally takes `--no-cuda`, which the
     ///   caller passes for a CPU plan.)
+    ///
+    ///   The value is `"-1"`, NOT `""`. Windows DROPS an empty-valued variable
+    ///   when building a child's environment block, so `""` reached the child as
+    ///   `<unset>` and torch fell back to the GPU — probed on win-resolume with
+    ///   the lyrics venv (torch 2.6.0+cu124): `""` → child sees `<unset>`,
+    ///   `torch.cuda.is_available()=True, device_count=1` (BUG — cpu-idle still
+    ///   ran on the GPU, and audio-separator's RoFormer load then died with
+    ///   "Invalid device id"); `"-1"` → `is_available()=False, device_count=0`;
+    ///   unset → `True/1`. CUDA treats any invalid ordinal (`-1`) as "no
+    ///   devices" on Linux too, so `"-1"` is correct cross-platform.
     /// - cap CPU threads via `OMP|MKL|TORCH_NUM_THREADS` when `threads` is set.
     /// - on Windows, set the priority-class creation flags (replacing the old
     ///   inline `BELOW_NORMAL` at every heavy spawn).
@@ -146,7 +164,9 @@ impl HeavyStepPlan {
     /// branch is unit-tested via `cmd.as_std().get_envs()`.
     pub(crate) fn apply(&self, cmd: &mut Command) {
         if matches!(self.device, Device::Cpu) {
-            cmd.env("CUDA_VISIBLE_DEVICES", "");
+            // "-1", not "" — Windows drops empty-valued env from the child block
+            // (see the doc comment above); "-1" reaches the child and disables CUDA.
+            cmd.env("CUDA_VISIBLE_DEVICES", "-1");
         }
         if let Some(n) = self.threads {
             let n = n.to_string();
