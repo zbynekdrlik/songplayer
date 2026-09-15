@@ -81,9 +81,29 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode DLL
   unloads and a later stray call kills the process, `nvdxgdmal64.dll_unloaded`
   0xc0000005, every isolation/separation, win-resolume 2026-09-15) **+ IDLE_PRIORITY_CLASS + thread cap
-  `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** → the GPU is never touched, so
+  `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/4)`** (#162 07:40 ruling — MINIMAL
+  load, not speed; 3 threads on the 12-core box) → the GPU is never touched, so
   no fps drop / TDR; **low-priority + wall idle → GPU + BELOW_NORMAL** (fast);
   **idle-only → GPU** (it defers instead of running on a busy wall).
+- **Sequential heavy-step guard (#162 07:40 crash, `lyrics/heavy_slot.rs`) — the
+  box must NEVER be overloaded.** The lyrics worker (isolation + mtl) and the
+  stem worker (separation) are two independent loops; once #162 removed the
+  idle-only gate they each spawned a ~3.2 GB CPU RoFormer child in the same
+  second → Windows low-virtual-memory → SongPlayer abort `0xc0000409` + OBS died
+  (dump `SongPlayer.exe.4892.dmp`). Owner ruling (verbatim): *"spracovanie na
+  pozadí je VŽDY sekvenčné … nikdy paralelne, a nikdy nesmie preťažiť PC"*.
+  Three layers funnel EVERY heavy child spawn: (1) a **process-global
+  `tokio::sync::Semaphore(1)`** (`acquire_slot`) — at most ONE heavy child
+  (isolation / mtl / separation) runs process-wide; fair FIFO, so the two workers
+  alternate; (2) a **`GlobalMemoryStatusEx` headroom check BEFORE the slot**
+  (`heavy_step_memory_ok`) — both free physical RAM and free commit must be
+  ≥ 4 GiB (`HEAVY_STEP_MIN_FREE_BYTES`), else the tick defers with NO backoff
+  (lyrics `SongOutcome::WaitingForMemory`; stems leave the row pending, no
+  `record_stem_deferral`) and re-checks next tick; (3) a **per-child Windows Job
+  Object** (`assign_child_job`, `JOB_OBJECT_LIMIT_PROCESS_MEMORY` 6 GiB +
+  `KILL_ON_JOB_CLOSE`) so an OOM kills the child, never the host. g35t /
+  translation HTTP steps take NONE of these (not heavy). windows-sys is a
+  cfg(windows) sp-server dep for the OS calls.
 - **Worker (`crate::stems::StemWorker`)** mirrors the lyrics worker: a 10 s tick
   that separates the next normalized song (`get_next_video_for_stems`,
   oldest-first, backoff-gated) under the priority regime. In `low-priority` it

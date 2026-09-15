@@ -159,6 +159,15 @@ failure — calm instrumental passages are legitimate.
       `waiting — wall in use` badge.
     - The removed `lyrics_gate_when_playing` boolean folds to `low-priority`
       (`MIGRATION_V25`). Cheap HTTP work (g35t/Claude/translation) is never gated.
+  - **Box-overload guard (#162 07:40 crash, `lyrics/heavy_slot.rs`).** Background
+    processing is ALWAYS sequential: a process-global `Semaphore(1)`
+    (`acquire_slot`) means at most ONE heavy child (isolation / mtl / separation)
+    runs process-wide — the lyrics and stem workers can never OOM the box
+    together (they did, 07:40 → SongPlayer abort 0xc0000409 + OBS died).
+  - Before each heavy step a `GlobalMemoryStatusEx` check (`heavy_step_memory_ok`)
+    requires ≥ 4 GiB free physical AND commit, else it defers with no backoff
+    (`WaitingForMemory` / stem row stays pending); each child also runs in a
+    Windows Job Object capped at 6 GiB so an OOM kills the child, not the host.
   - **Secondary: `gpu_polite()`** in `lyrics_worker.py` (and the mtl `run.py`)
     sets a **BELOW_NORMAL WDDM GPU scheduling priority** (ctypes
     `D3DKMTSetProcessSchedulingPriorityClass`) and a **per-process VRAM cap**
