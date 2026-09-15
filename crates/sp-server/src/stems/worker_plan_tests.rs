@@ -104,3 +104,22 @@ fn abort_armed_only_for_gpu_plan() {
         "a GPU plan runs under the mid-job wall-abort watcher"
     );
 }
+
+// ---- stem_defer_fallback — the poisoned-lock path, all four cases ---------
+
+#[test]
+fn defer_fallback_defers_only_idle_only_while_in_use() {
+    assert!(
+        stem_defer_fallback(ProcessingMode::IdleOnly, playing()),
+        "idle-only + wall in use defers even without the settle clock"
+    );
+    assert!(
+        !stem_defer_fallback(ProcessingMode::IdleOnly, idle()),
+        "idle-only + idle wall proceeds"
+    );
+    assert!(
+        !stem_defer_fallback(ProcessingMode::LowPriority, playing()),
+        "low-priority never defers, in use or not"
+    );
+    assert!(!stem_defer_fallback(ProcessingMode::LowPriority, idle()));
+}
