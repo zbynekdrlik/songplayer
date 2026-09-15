@@ -43,6 +43,12 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
 fn registry_with(snapshots: Vec<PipelineHealthSnapshot>) -> Arc<NdiHealthRegistry> {
     let reg = Arc::new(NdiHealthRegistry::new());
     for s in snapshots {
+        // Mirror production: `ensure_pipeline` registers a created pipeline (#167),
+        // then heartbeats report it. Registering here so `created == reported`
+        // makes the wall reading KNOWN (activity_known), the state these gate
+        // tests assume — an empty registry stays UNKNOWN (created 0), which is the
+        // #167 startup default.
+        reg.register_pipeline();
         reg.update(s);
     }
     reg
@@ -201,7 +207,12 @@ async fn gate_defers_when_obs_streaming() {
 /// clock, so here we only assert the freshly-idle sample still defers.
 #[tokio::test]
 async fn gate_freshly_idle_wall_defers_until_settled() {
-    let (worker, _pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
+    // A KNOWN-idle wall: a created + reported pipeline in the Idle state (not an
+    // empty registry, which is #167-UNKNOWN and would read as in-use). The point
+    // of this test is the idle-settle hysteresis on a genuinely-idle wall.
+    let mut idle = playing_snapshot(7, "SP-fast");
+    idle.state = PlaybackStateLabel::Idle;
+    let (worker, _pool) = gate_worker(registry_with(vec![idle]), ObsState::default()).await;
     let (defer, activity) = worker.wall_gate_should_defer().await;
     assert!(
         defer,
