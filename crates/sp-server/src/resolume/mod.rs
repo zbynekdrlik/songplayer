@@ -68,6 +68,12 @@ pub struct HostHealthSnapshot {
     pub last_refresh_ok: bool,
     pub consecutive_failures: u32,
     pub circuit_breaker_open: bool,
+    /// Round-trip of the last successful `/product` liveness probe, in ms.
+    /// `None` after a failed probe or before the first one (#157).
+    pub product_latency_ms: Option<u64>,
+    /// Wall-clock timestamp of the last SUCCESSFUL full `/composition` refresh,
+    /// so the box can measure the light-poll rework before/after (#157).
+    pub last_full_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
     /// Number of clips mapped per token (e.g. `"#sp-title"` → 2).
     pub clips_by_token: std::collections::BTreeMap<String, usize>,
 }
@@ -118,6 +124,8 @@ impl ResolumeRegistry {
             last_refresh_ok: false,
             consecutive_failures: 0,
             circuit_breaker_open: false,
+            product_latency_ms: None,
+            last_full_refresh_ts: None,
             clips_by_token: std::collections::BTreeMap::new(),
         };
         let (health_tx, health_rx) = watch::channel(initial);

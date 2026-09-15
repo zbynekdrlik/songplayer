@@ -13,6 +13,92 @@ use crate::resolume::handlers;
 
 const RESOLUTION_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
+/// How long a full `/composition` clip-mapping refresh stays fresh before a
+/// steady tick pulls it again. Distinct from `RESOLUTION_TTL` (DNS/endpoint
+/// caching) even though both are 5 minutes — this one bounds how stale the
+/// clip map may get between the light `/product` liveness probes (#157).
+const FULL_REFRESH_TTL: Duration = Duration::from_secs(300); // 5 minutes
+
+/// Why a full `/composition` refresh is being performed. Drives the INFO
+/// transition log and is the return type of the pure [`FullRefreshReason::decide`]
+/// poll policy (#157). The steady state runs ONLY the light `/product` probe,
+/// so a full refresh always has a specific, logged reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FullRefreshReason {
+    /// The driver's first refresh at startup — or the first success after a
+    /// startup where Arena's REST was still dead (`last_full_ok` still `None`).
+    Startup,
+    /// An operator/engine `ResolumeCommand::RefreshMapping` forced it.
+    Command,
+    /// The 5-minute TTL since the last successful full refresh expired.
+    Ttl,
+    /// The circuit breaker just closed (Arena recovered) — resync the map once.
+    BreakerClosed,
+}
+
+impl FullRefreshReason {
+    /// Stable, log-friendly identifier for the INFO mode-transition line.
+    #[cfg_attr(test, mutants::skip)] // log-only string mapping; no behavior is asserted on it
+    fn as_str(self) -> &'static str {
+        match self {
+            FullRefreshReason::Startup => "startup",
+            FullRefreshReason::Command => "command",
+            FullRefreshReason::Ttl => "ttl",
+            FullRefreshReason::BreakerClosed => "breaker-closed",
+        }
+    }
+
+    /// Pure poll policy: decide whether — and why — a full `/composition`
+    /// refresh should run on this tick. `now` and `last_full_ok` are
+    /// monotonic `Instant`s so tests can construct synthetic forward-only
+    /// clocks (the `is_expired_at` Windows-underflow-safe pattern).
+    ///
+    /// Precedence: a forced command wins, then a just-closed breaker, then
+    /// the never-refreshed startup case, then TTL expiry. Returns `None` in
+    /// the steady state (fresh cache, live REST) — only the light `/product`
+    /// probe runs then.
+    fn decide(
+        now: Instant,
+        last_full_ok: Option<Instant>,
+        ttl: Duration,
+        forced: bool,
+        breaker_just_closed: bool,
+    ) -> Option<FullRefreshReason> {
+        if forced {
+            return Some(FullRefreshReason::Command);
+        }
+        if breaker_just_closed {
+            return Some(FullRefreshReason::BreakerClosed);
+        }
+        match last_full_ok {
+            None => Some(FullRefreshReason::Startup),
+            Some(last) => {
+                if now.duration_since(last) >= ttl {
+                    Some(FullRefreshReason::Ttl)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// Poll interval for the light `/product` liveness probe: 10 s ± up to 2 s
+/// of jitter, so multiple SongPlayer probers and the post-deploy E2E probe do
+/// not hammer Arena's single-threaded REST in lockstep (#157). Derived from
+/// the wall-clock sub-second nanos — no rng dependency; a ±2 s spread has no
+/// deterministic unit oracle, so this helper is smoke-exercised only by the
+/// live `run` loop.
+#[cfg_attr(test, mutants::skip)] // non-deterministic jitter; no behavioral oracle, only the live loop uses it
+fn jittered_poll_period() -> Duration {
+    let subsec = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let jitter_ms = (subsec % 4001) as u64; // 0..=4000 ms
+    Duration::from_millis(8000 + jitter_ms) // 8.0 s .. 12.0 s, centered ~10 s
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedEndpoint {
     pub base_url: String,
@@ -91,6 +177,16 @@ pub struct HostDriver {
     consecutive_failures: u32,
     /// Whether the circuit breaker has tripped (≥30s of failures).
     circuit_breaker_open: bool,
+    /// Round-trip of the last successful `/product` liveness probe, in ms.
+    /// `None` after a failed probe or before the first one (#157).
+    product_latency_ms: Option<u64>,
+    /// Wall-clock timestamp of the last SUCCESSFUL full `/composition`
+    /// refresh — surfaced in the health snapshot for before/after measuring.
+    last_full_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
+    /// Monotonic instant of the last successful full `/composition` refresh,
+    /// used for the TTL decision. Separate from `last_full_refresh_ts` (which
+    /// is a display timestamp) so TTL math stays on a monotonic clock (#157).
+    last_full_refresh_ok_at: Option<Instant>,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -112,6 +208,9 @@ impl HostDriver {
             last_refresh_ts: None,
             consecutive_failures: 0,
             circuit_breaker_open: false,
+            product_latency_ms: None,
+            last_full_refresh_ts: None,
+            last_full_refresh_ok_at: None,
             recovery_tx: None,
             health_tx: None,
         }
@@ -144,27 +243,177 @@ impl HostDriver {
         mut rx: mpsc::Receiver<ResolumeCommand>,
         mut shutdown: broadcast::Receiver<()>,
     ) {
-        if let Err(e) = self.refresh_mapping().await {
-            warn!(host = %self.host, %e, "initial clip mapping refresh failed");
-        }
+        // Startup: one full clip-mapping refresh (like the legacy behavior).
+        self.run_full_refresh(FullRefreshReason::Startup).await;
 
-        let mut refresh_interval = tokio::time::interval(Duration::from_secs(10));
+        // Jittered liveness cadence. `sleep_until` a stable per-cycle deadline
+        // (recomputed only when the probe actually fires) so command traffic
+        // never resets or delays the next liveness probe.
+        let mut next_probe = tokio::time::Instant::now() + jittered_poll_period();
 
         loop {
             tokio::select! {
                 Some(cmd) = rx.recv() => {
                     self.handle_command(cmd).await;
                 }
-                _ = refresh_interval.tick() => {
-                    if let Err(e) = self.refresh_mapping().await {
-                        debug!(host = %self.host, %e, "clip mapping refresh failed");
-                    }
+                _ = tokio::time::sleep_until(next_probe) => {
+                    self.on_tick_at(Instant::now()).await;
+                    next_probe = tokio::time::Instant::now() + jittered_poll_period();
                 }
                 _ = shutdown.recv() => {
                     info!(host = %self.host, "Resolume driver shutting down");
                     break;
                 }
             }
+        }
+    }
+
+    /// One liveness tick: a light `/product` probe, then a full `/composition`
+    /// refresh ONLY when the poll policy calls for one AND the REST is alive
+    /// (never pile the ~14 MB fetch onto a dead/saturated single-thread REST).
+    /// `now` is an explicit parameter so the TTL branch is testable with a
+    /// synthetic forward-only clock (the `is_expired_at` pattern).
+    async fn on_tick_at(&mut self, now: Instant) {
+        let breaker_just_closed = self.probe_liveness().await;
+        if !self.last_refresh_ok {
+            return;
+        }
+        if let Some(reason) = FullRefreshReason::decide(
+            now,
+            self.last_full_refresh_ok_at,
+            FULL_REFRESH_TTL,
+            false,
+            breaker_just_closed,
+        ) {
+            self.run_full_refresh(reason).await;
+        }
+    }
+
+    /// Log the mode transition and run a full `/composition` refresh.
+    #[cfg_attr(test, mutants::skip)] // thin wrapper: the refresh call is covered by wiremock request-count tests; the info!/warn! lines are log-only
+    async fn run_full_refresh(&mut self, reason: FullRefreshReason) {
+        info!(
+            host = %self.host,
+            reason = reason.as_str(),
+            "Resolume full /composition refresh"
+        );
+        if let Err(e) = self.refresh_mapping().await {
+            warn!(host = %self.host, %e, "Resolume full refresh failed");
+        }
+    }
+
+    /// Light liveness probe: `GET /api/v1/product`. Records the round-trip
+    /// latency and feeds the shared failure/breaker machinery. Returns whether
+    /// the circuit breaker transitioned open→closed on this probe (reason d).
+    async fn probe_liveness(&mut self) -> bool {
+        let started = Instant::now();
+        match self.fetch_product().await {
+            Ok(()) => {
+                let latency_ms = started.elapsed().as_millis() as u64;
+                self.product_latency_ms = Some(latency_ms);
+                debug!(host = %self.host, latency_ms, "Resolume /product liveness ok");
+                self.apply_outcome(true)
+            }
+            Err(e) => {
+                self.product_latency_ms = None;
+                debug!(host = %self.host, %e, "Resolume /product liveness failed");
+                self.apply_outcome(false)
+            }
+        }
+    }
+
+    /// `GET /api/v1/product` — a small JSON payload used only to confirm the
+    /// Arena REST server is alive, without pulling the ~14 MB composition.
+    async fn fetch_product(&mut self) -> Result<(), anyhow::Error> {
+        let ep = self.endpoint().await?;
+        let url = format!("{}/api/v1/product", ep.base_url);
+        let req = self.client.get(&url);
+        Self::apply_host_header(req, &ep)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    /// Shared per-attempt bookkeeping for BOTH the liveness probe and the full
+    /// refresh: updates the failure counter, circuit breaker, recovery event,
+    /// and the health snapshot. Returns whether the breaker transitioned
+    /// open→closed on this call (so the caller can trigger a resync refresh).
+    /// The WARN / circuit-breaker log lines are kept byte-identical to the
+    /// pre-#157 inline machinery.
+    fn apply_outcome(&mut self, ok: bool) -> bool {
+        let mut breaker_just_closed = false;
+        self.last_refresh_ts = Some(chrono::Utc::now());
+        if ok {
+            self.last_refresh_ok = true;
+            let was_failing = self.consecutive_failures > 0;
+            self.consecutive_failures = 0;
+            if self.circuit_breaker_open {
+                self.circuit_breaker_open = false;
+                breaker_just_closed = true;
+                info!(host = %self.host, "circuit breaker closed — Resolume recovered");
+            }
+            if was_failing {
+                if let Some(tx) = &self.recovery_tx {
+                    let _ = tx.send(crate::resolume::RecoveryEvent {
+                        host: self.host.clone(),
+                    });
+                }
+                info!(host = %self.host, "Resolume recovery — RecoveryEvent fired");
+            }
+        } else {
+            self.last_refresh_ok = false;
+            self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+            if Self::should_emit_repeated_failure_warn(self.consecutive_failures) {
+                warn!(
+                    host = %self.host,
+                    consecutive_failures = self.consecutive_failures,
+                    "Resolume refresh failing repeatedly"
+                );
+            }
+            if self.consecutive_failures >= Self::CIRCUIT_OPEN_THRESHOLD
+                && !self.circuit_breaker_open
+            {
+                self.circuit_breaker_open = true;
+                self.clip_mapping = HashMap::new();
+                warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
+            }
+        }
+        self.publish_health();
+        breaker_just_closed
+    }
+
+    /// Publish the current health snapshot on the watch channel (if wired).
+    fn publish_health(&self) {
+        if let Some(tx) = &self.health_tx {
+            let snapshot = crate::resolume::HostHealthSnapshot {
+                host: self.host.clone(),
+                last_refresh_ts: self.last_refresh_ts,
+                last_refresh_ok: self.last_refresh_ok,
+                consecutive_failures: self.consecutive_failures,
+                circuit_breaker_open: self.circuit_breaker_open,
+                product_latency_ms: self.product_latency_ms,
+                last_full_refresh_ts: self.last_full_refresh_ts,
+                // Only SongPlayer-relevant tokens. The driver scans the
+                // entire composition for `#`-prefixed names, but operators
+                // have many of their own tokens (#bible-*, #timer,
+                // #translate-*-u-re, etc.) that are noise to this dashboard.
+                clips_by_token: [
+                    crate::resolume::TITLE_TOKEN,
+                    crate::resolume::SUBS_TOKEN,
+                    crate::resolume::SUBS_NEXT_TOKEN,
+                    crate::resolume::SUBS_SK_TOKEN,
+                ]
+                .iter()
+                .map(|t| {
+                    (
+                        (*t).to_string(),
+                        self.clip_mapping.get(*t).map(|v| v.len()).unwrap_or(0),
+                    )
+                })
+                .collect(),
+            };
+            let _ = tx.send(snapshot);
         }
     }
 
@@ -209,8 +458,15 @@ impl HostDriver {
                 }
             }
             ResolumeCommand::RefreshMapping => {
-                if let Err(e) = self.refresh_mapping().await {
-                    warn!(host = %self.host, %e, "refresh_mapping failed");
+                // A command forces a full refresh regardless of TTL/liveness.
+                if let Some(reason) = FullRefreshReason::decide(
+                    Instant::now(),
+                    self.last_full_refresh_ok_at,
+                    FULL_REFRESH_TTL,
+                    true,
+                    false,
+                ) {
+                    self.run_full_refresh(reason).await;
                 }
             }
             ResolumeCommand::Shutdown => {
@@ -232,25 +488,10 @@ impl HostDriver {
     ///
     /// `GET /api/v1/composition`
     pub(crate) async fn refresh_mapping(&mut self) -> Result<(), anyhow::Error> {
-        let result = self.fetch_mapping_inner().await;
-        let outcome = match result {
+        match self.fetch_mapping_inner().await {
             Ok(new_mapping) => {
-                self.last_refresh_ok = true;
-                self.last_refresh_ts = Some(chrono::Utc::now());
-                let was_failing = self.consecutive_failures > 0;
-                self.consecutive_failures = 0;
-                if self.circuit_breaker_open {
-                    self.circuit_breaker_open = false;
-                    info!(host = %self.host, "circuit breaker closed — Resolume recovered");
-                }
-                if was_failing {
-                    if let Some(tx) = &self.recovery_tx {
-                        let _ = tx.send(crate::resolume::RecoveryEvent {
-                            host: self.host.clone(),
-                        });
-                    }
-                    info!(host = %self.host, "Resolume recovery — RecoveryEvent fired");
-                }
+                self.last_full_refresh_ok_at = Some(Instant::now());
+                self.last_full_refresh_ts = Some(chrono::Utc::now());
                 if new_mapping != self.clip_mapping {
                     let total: usize = new_mapping.values().map(|v| v.len()).sum();
                     info!(
@@ -261,58 +502,14 @@ impl HostDriver {
                     );
                     self.clip_mapping = new_mapping;
                 }
+                self.apply_outcome(true);
                 Ok(())
             }
             Err(e) => {
-                self.last_refresh_ok = false;
-                self.last_refresh_ts = Some(chrono::Utc::now());
-                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-                if Self::should_emit_repeated_failure_warn(self.consecutive_failures) {
-                    warn!(
-                        host = %self.host,
-                        consecutive_failures = self.consecutive_failures,
-                        "Resolume refresh failing repeatedly"
-                    );
-                }
-                if self.consecutive_failures >= Self::CIRCUIT_OPEN_THRESHOLD
-                    && !self.circuit_breaker_open
-                {
-                    self.circuit_breaker_open = true;
-                    self.clip_mapping = HashMap::new();
-                    warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
-                }
+                self.apply_outcome(false);
                 Err(e)
             }
-        };
-        if let Some(tx) = &self.health_tx {
-            let snapshot = crate::resolume::HostHealthSnapshot {
-                host: self.host.clone(),
-                last_refresh_ts: self.last_refresh_ts,
-                last_refresh_ok: self.last_refresh_ok,
-                consecutive_failures: self.consecutive_failures,
-                circuit_breaker_open: self.circuit_breaker_open,
-                // Only SongPlayer-relevant tokens. The driver scans the
-                // entire composition for `#`-prefixed names, but operators
-                // have many of their own tokens (#bible-*, #timer,
-                // #translate-*-u-re, etc.) that are noise to this dashboard.
-                clips_by_token: [
-                    crate::resolume::TITLE_TOKEN,
-                    crate::resolume::SUBS_TOKEN,
-                    crate::resolume::SUBS_NEXT_TOKEN,
-                    crate::resolume::SUBS_SK_TOKEN,
-                ]
-                .iter()
-                .map(|t| {
-                    (
-                        (*t).to_string(),
-                        self.clip_mapping.get(*t).map(|v| v.len()).unwrap_or(0),
-                    )
-                })
-                .collect(),
-            };
-            let _ = tx.send(snapshot);
         }
-        outcome
     }
 
     async fn fetch_mapping_inner(

@@ -597,8 +597,14 @@ fn apply_outcome_returns_breaker_just_closed() {
         closed,
         "a success while the breaker is open must report breaker_just_closed"
     );
-    assert!(!driver.circuit_breaker_open, "the breaker must be closed now");
-    assert_eq!(driver.consecutive_failures, 0, "failures must reset on success");
+    assert!(
+        !driver.circuit_breaker_open,
+        "the breaker must be closed now"
+    );
+    assert_eq!(
+        driver.consecutive_failures, 0,
+        "failures must reset on success"
+    );
 
     // A subsequent success does not re-close an already-closed breaker.
     let closed_again = driver.apply_outcome(true);
@@ -618,15 +624,23 @@ async fn liveness_success_records_latency() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})),
+        )
         .mount(&server)
         .await;
     let port = server.address().port();
     let mut driver = HostDriver::new("127.0.0.1".into(), port);
 
     let closed = driver.probe_liveness().await;
-    assert!(!closed, "a clean first probe must not report a breaker close");
-    assert!(driver.last_refresh_ok, "a successful probe marks the host live");
+    assert!(
+        !closed,
+        "a clean first probe must not report a breaker close"
+    );
+    assert!(
+        driver.last_refresh_ok,
+        "a successful probe marks the host live"
+    );
     assert_eq!(driver.consecutive_failures, 0);
     assert!(
         driver.product_latency_ms.is_some(),
@@ -642,7 +656,9 @@ async fn probe_liveness_reports_breaker_close() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})),
+        )
         .mount(&server)
         .await;
     let port = server.address().port();
@@ -703,7 +719,9 @@ async fn steady_state_polls_product_not_composition() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -744,7 +762,9 @@ async fn ttl_expiry_triggers_one_composition_refresh() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -825,7 +845,9 @@ async fn refresh_mapping_command_forces_composition() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -861,7 +883,9 @@ async fn health_snapshot_carries_new_fields() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "Arena"})),
+        )
         .mount(&server)
         .await;
     let composition = serde_json::json!({
@@ -907,12 +931,16 @@ async fn health_snapshot_carries_new_fields() {
         "snapshot must carry the last successful full-refresh timestamp"
     );
     assert_eq!(
-        snap.clips_by_token.get(crate::resolume::TITLE_TOKEN).copied(),
+        snap.clips_by_token
+            .get(crate::resolume::TITLE_TOKEN)
+            .copied(),
         Some(1),
         "the mapped #sp-title clip must be counted"
     );
     assert_eq!(
-        snap.clips_by_token.get(crate::resolume::SUBS_TOKEN).copied(),
+        snap.clips_by_token
+            .get(crate::resolume::SUBS_TOKEN)
+            .copied(),
         Some(0),
         "an unmapped token must report zero clips"
     );
