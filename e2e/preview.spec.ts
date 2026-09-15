@@ -34,13 +34,13 @@ test.afterEach(async () => {
 test("playing card renders a live preview image with non-zero size", async ({
   page,
 }) => {
+  // #165: the mock marks Worship (playlist 1) Playing, so it is preselected in
+  // the single work area — no need to pick it.
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
+  await expect(page.getByTestId("workspace-title")).toHaveText("Worship", {
     timeout: 10000,
   });
-  const worshipCard = page.locator(".playlist-card", {
-    has: page.getByRole("heading", { name: "Worship" }),
-  });
+  const worshipCard = page.locator(".playlist-card");
   const img = worshipCard.getByTestId("preview-img");
   await expect(img).toBeVisible({ timeout: 10000 });
   // The <img> must actually decode a frame (proves a real JPEG was served and
@@ -65,9 +65,17 @@ test("idle card shows the preview placeholder, hides the image, and issues no pr
     }
   });
   await page.goto("/");
-  const bgCard = page.locator(".playlist-card", {
-    has: page.getByRole("heading", { name: "Background" }),
+  // #165: bring the idle Background playlist into the single work area by
+  // selecting its row (Worship is playing and preselected by default).
+  await expect(page.getByTestId("playlist-workspace")).toBeVisible({
+    timeout: 10000,
   });
+  await page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Background" })
+    .click();
+  await expect(page.getByTestId("workspace-title")).toHaveText("Background");
+  const bgCard = page.locator(".playlist-card");
   await expect(bgCard.getByTestId("preview-placeholder")).toBeVisible({
     timeout: 10000,
   });

@@ -11,7 +11,13 @@ use crate::components::video_list;
 use crate::store::DashboardStore;
 
 #[component]
-pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
+pub fn PlaylistCard(
+    playlist: Playlist,
+    // #165: the genlock badge (#164) belongs in the selector rows + header
+    // summary, NOT on the single work area. The workspace renders the card
+    // with `show_badge=false`; the default keeps the badge for any other use.
+    #[prop(default = true)] show_badge: bool,
+) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
     let pid = playlist.id;
     // #150: this card's NDI output name, matched against the 1 Hz
@@ -79,21 +85,27 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
     view! {
         <div class="playlist-card">
             <div class="card-header">
-                <h3>{playlist.name.clone()}</h3>
+                <h3 data-testid="workspace-title">{playlist.name.clone()}</h3>
                 <span class="playlist-id">{playlist.ndi_output_name.clone()}</span>
                 {
                     let ndi_name = ndi_name.clone();
                     move || {
                         // #164: show the badge only on live pacing-enabled
                         // outputs — no '● UNLOCKED — pacing disabled' noise on
-                        // every card while pacing is off.
-                        store
-                            .ndi_health
-                            .get()
-                            .into_iter()
-                            .find(|o| o.ndi_name == ndi_name)
-                            .filter(ndi_health::should_show_lock_badge)
-                            .map(|o| view! { <ndi_health::LockBadge output=o /> })
+                        // every card while pacing is off. #165: and only when
+                        // `show_badge` (off on the work area — the badge lives
+                        // in the selector rows + header summary instead).
+                        show_badge
+                            .then(|| {
+                                store
+                                    .ndi_health
+                                    .get()
+                                    .into_iter()
+                                    .find(|o| o.ndi_name == ndi_name)
+                                    .filter(ndi_health::should_show_lock_badge)
+                                    .map(|o| view! { <ndi_health::LockBadge output=o /> })
+                            })
+                            .flatten()
                     }
                 }
             </div>

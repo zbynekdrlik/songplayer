@@ -109,11 +109,9 @@ test("clicking another row switches the work area and the URL (#165)", async ({
   // Work area switches to that playlist; URL mirrors the selection.
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 05");
   await expect(page).toHaveURL(/[?&]playlist=5\b/);
-  // The playing playlist's now-playing song is no longer in the work area's
-  // card (Playlist 05 is not playing).
-  await expect(page.locator(".playlist-card .np-song")).not.toContainText(
-    PLAYING_SONG,
-  );
+  // Playlist 05 is not playing, so its work-area card shows the idle state
+  // (not the playing playlist's song).
+  await expect(page.locator(".playlist-card")).toContainText("Nothing playing");
 });
 
 test("the Práve hrá strip leads back to the playing playlist (#165)", async ({

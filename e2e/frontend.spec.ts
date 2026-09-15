@@ -77,10 +77,31 @@ test("dashboard loads and shows title", async ({ page }) => {
   await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
 });
 
-test("dashboard shows playlist cards", async ({ page }) => {
+test("dashboard shows a selector row per playlist and one work area (#165)", async ({
+  page,
+}) => {
+  // #165: the dashboard is a selector (one row per playlist) + ONE work area
+  // showing the selected playlist — not a grid of every card. The mock marks
+  // playlist 1 (Worship) Playing, so it is preselected in the work area.
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole("heading", { name: "Background" })).toBeVisible();
+  await expect(page.getByTestId("playlist-workspace")).toBeVisible({
+    timeout: 10000,
+  });
+  // A selector row exists for each of the 3 mock playlists.
+  await expect(
+    page.getByTestId("playlist-selector-row").filter({ hasText: "Worship" }),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("playlist-selector-row").filter({ hasText: "Background" }),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("playlist-selector-row").filter({ hasText: "ytlive" }),
+  ).toBeVisible();
+  // Exactly one work area, and it shows the playing playlist (Worship).
+  await expect(page.getByTestId("playlist-workspace")).toHaveCount(1);
+  await expect(page.getByTestId("workspace-title")).toHaveText("Worship", {
+    timeout: 10000,
+  });
 });
 
 test("settings tab navigates", async ({ page }) => {
@@ -194,28 +215,33 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
   expect(set.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
+  await expect(page.getByTestId("playlist-workspace")).toBeVisible({
     timeout: 10000,
   });
 
+  // #165: the per-playlist badge now lives in the SELECTOR rows (not the single
+  // work area). Same #164 gating rule applies.
   const worshipBadge = page
-    .locator(".playlist-card", { hasText: "Worship" })
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Worship" })
     .locator(".lock-badge");
   await expect(worshipBadge).toBeVisible({ timeout: 5000 });
   await expect(worshipBadge).toHaveText("● LOCKED");
   await expect(worshipBadge).toHaveClass(/lock-locked/);
 
   const bgBadge = page
-    .locator(".playlist-card", { hasText: "Background" })
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Background" })
     .locator(".lock-badge");
   await expect(bgBadge).toBeVisible();
   await expect(bgBadge).toContainText("DEGRADED");
   await expect(bgBadge).toContainText("no receiver");
   await expect(bgBadge).toHaveClass(/lock-degraded/);
 
-  // The pacing-disabled SP-live (ytlive) card carries NO badge at all.
+  // The pacing-disabled SP-live (ytlive) row carries NO badge at all.
   const liveBadge = page
-    .locator(".playlist-card", { hasText: "ytlive" })
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "ytlive" })
     .locator(".lock-badge");
   await expect(liveBadge).toHaveCount(0);
 });
@@ -286,9 +312,12 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   await expect(global).toContainText("2/2");
   await expect(global).toHaveClass(/lock-locked/);
 
-  // Both live locked outputs also carry a per-card badge.
+  // Both live locked outputs also carry a per-row badge in the selector.
   await expect(
-    page.locator(".playlist-card", { hasText: "Worship" }).locator(".lock-badge"),
+    page
+      .getByTestId("playlist-selector-row")
+      .filter({ hasText: "Worship" })
+      .locator(".lock-badge"),
   ).toBeVisible();
 });
 

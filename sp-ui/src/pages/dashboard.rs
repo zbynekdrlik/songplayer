@@ -1,12 +1,13 @@
-//! Main dashboard page showing playlists, now-playing, and download queue.
+//! Main dashboard page. #165: a playlist SELECTOR + ONE work area (the playing
+//! playlist preselected) instead of a grid of every playlist card.
 
 use leptos::prelude::*;
 use sp_core::models::Playlist;
 
 use crate::api;
 use crate::components::{
-    download_queue, karaoke_control, lan_address, ndi_health, obs_status, playlist_card,
-    resolume_health,
+    download_queue, karaoke_control, lan_address, ndi_health, obs_status, playlist_selector,
+    playlist_workspace, resolume_health, selection,
 };
 use crate::store::DashboardStore;
 
@@ -21,6 +22,33 @@ pub fn DashboardPage() -> impl IntoView {
                 store.playlists.set(playlists);
             }
         });
+    });
+
+    // #165: auto-follow the playing playlist for the INITIAL selection. Runs
+    // until the selection is pinned (a user click / `<select>` / "Prejsť", or a
+    // value restored from the URL/localStorage in `App`) AND still valid.
+    // `App` seeds a persisted selection with `selection_pinned = true`, so a
+    // reload keeps the operator's choice; a fresh load (no persisted value) has
+    // `pinned = false`, so it defaults to the currently-playing playlist, then
+    // the first by name. Reads of `selected_playlist` are UNTRACKED so the
+    // Effect never re-triggers on its own write.
+    let _auto = Effect::new(move |_| {
+        let pls = store.playlists.get();
+        let np = store.now_playing.get();
+        let pinned = store.selection_pinned.get();
+        if pls.is_empty() {
+            return;
+        }
+        let sel = store.selected_playlist.get_untracked();
+        let valid = sel.is_some_and(|id| pls.iter().any(|p| p.id == id));
+        if pinned && valid {
+            return;
+        }
+        if let Some(target) = selection::choose_default(&pls, &np)
+            && sel != Some(target)
+        {
+            store.selected_playlist.set(Some(target));
+        }
     });
 
     view! {
@@ -45,14 +73,9 @@ pub fn DashboardPage() -> impl IntoView {
                 }}
             </div>
 
-            <div class="playlist-grid">
-                <For
-                    each=move || store.playlists.get()
-                    key=|p| p.id
-                    children=|playlist| {
-                        view! { <playlist_card::PlaylistCard playlist=playlist /> }
-                    }
-                />
+            <div class="dashboard-body">
+                <playlist_selector::PlaylistSelector />
+                <playlist_workspace::PlaylistWorkspace />
             </div>
 
             <karaoke_control::KaraokeControl />
