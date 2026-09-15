@@ -75,3 +75,14 @@ carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 scope-only subjects (`fix(stems): … (#14)`) are not. Run
 `bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
 release PR — it is bash-only, allowed under Tier-0.
+
+## `gh run rerun <old-run>` CANCELS the newer in-flight run on the same branch
+`ci.yml` has a per-branch concurrency group with `cancel-in-progress`; a re-run
+of an OLDER run is a NEW run in that group, so GitHub cancels whatever is
+currently in flight (2026-09-15: the mutant-fix run 34948303347 died because I
+re-ran 34947398815 for its cancelled shard 1/4). Sequence instead: let the
+in-flight run finish (or cancel it deliberately), THEN re-run the old one, THEN
+`gh run rerun <new-run>`. Also: cancelling a run whose mutation shards had not
+finished leaves that push range without a mutation verdict — re-run its failed
+jobs before trusting the diff, and expect the old commit's already-known
+survivors to fail again there (read only the shard you need).
