@@ -80,7 +80,7 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   initialized. NOT hidden via `CUDA_VISIBLE_DEVICES="-1"`: that CRASHED the box —
   torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode DLL
   unloads and a later stray call kills the process, `nvdxgdmal64.dll_unloaded`
-  0xc0000005, every isolation/separation, win-resolume 2026-09-15) **+ IDLE_PRIORITY_CLASS + thread cap
+  0xc0000005, every isolation/separation, win-resolume 2026-09-15) **+ BELOW_NORMAL_PRIORITY_CLASS (NOT IDLE: a child created in IDLE class is starved by working-set trimming — 0.02 cores, measured 2026-09-15) + thread cap
   `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/4)`** (#162 07:40 ruling — MINIMAL
   load, not speed; 3 threads on the 12-core box) → the GPU is never touched, so
   no fps drop / TDR; **low-priority + wall idle → GPU + BELOW_NORMAL** (fast);

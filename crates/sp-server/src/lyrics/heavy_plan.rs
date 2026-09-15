@@ -63,7 +63,6 @@ pub enum Device {
 /// Windows scheduling priority class for a heavy step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Priority {
-    Idle,
     BelowNormal,
 }
 
@@ -82,13 +81,19 @@ pub struct HeavyStepPlan {
 impl HeavyStepPlan {
     /// cpu-idle: GPU untouched (the script runs `--force-cpu`, forcing CPU
     /// in-process — see [`apply`](Self::apply) for why we no longer hide the GPU
-    /// via `CUDA_VISIBLE_DEVICES`), `IDLE_PRIORITY_CLASS`, thread cap = a QUARTER
+    /// via `CUDA_VISIBLE_DEVICES`), `BELOW_NORMAL_PRIORITY_CLASS` (never IDLE — see `cpu_idle`), thread cap = a QUARTER
     /// of the logical cores (#162 — minimal load, not speed). Cannot disturb the
     /// live wall.
     pub(crate) fn cpu_idle() -> Self {
         Self {
             device: Device::Cpu,
-            priority: Priority::Idle,
+            // BELOW_NORMAL, not IDLE: a child CREATED in IDLE_PRIORITY_CLASS gets
+            // the lowest page priority and the memory manager trims its working
+            // set continuously while OBS/Arena churn — measured 0.02–0.23 cores
+            // with ~200k page faults/s (win-resolume 2026-09-15). The same job
+            // created BELOW_NORMAL runs at full speed; the 3-thread cap keeps the
+            // load minimal, and OBS (High) always wins the CPU anyway.
+            priority: Priority::BelowNormal,
             threads: Some(cpu_idle_threads()),
         }
     }
@@ -153,9 +158,7 @@ impl HeavyStepPlan {
         // winbase.h values.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
-        const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
         let prio = match self.priority {
-            Priority::Idle => IDLE_PRIORITY_CLASS,
             Priority::BelowNormal => BELOW_NORMAL_PRIORITY_CLASS,
         };
         // The priority-class bits are disjoint from CREATE_NO_WINDOW, so `|` and
