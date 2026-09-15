@@ -64,6 +64,36 @@ const playlists = [
   },
 ];
 
+// #165: opt-in 12-playlist fixture for the dashboard-redesign spec (playlist
+// selector + single workspace). Playlist id 1 ("Playlist 01") is the
+// currently-playing one — the WS connection handler below marks playlist 1
+// Playing regardless of the fixture mode, so the selector's "playing
+// preselected + ▶" behaviour is exercised with no extra WS wiring. Only
+// playlist 1 carries videos (it reuses the base `videos` fixture).
+const twelvePlaylists = Array.from({ length: 12 }, (_, i) => {
+  const id = i + 1;
+  const nn = String(id).padStart(2, "0");
+  return {
+    id,
+    name: `Playlist ${nn}`,
+    youtube_url: `https://youtube.com/playlist?list=PLmock${nn}`,
+    ndi_output_name: `SP-${nn}`,
+    playback_mode: "continuous",
+    is_active: true,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  };
+});
+
+// "default" → the 3-playlist fixture above (every other spec relies on it);
+// "twelve" → the 12-playlist fixture. The #165 spec POSTs "twelve" in
+// beforeEach and resets to "default" in afterEach so no state leaks into the
+// serially-run sibling spec files (playwright.config.ts pins workers: 1).
+let fixtureMode = "default";
+function activePlaylists() {
+  return fixtureMode === "twelve" ? twelvePlaylists : playlists;
+}
+
 // `normalized` and `gemini_failed` are required (non-`#[serde(default)]`)
 // fields on sp_core::models::Video — every fixture must include them or
 // the dashboard's VideoList (#134) fails to deserialize GET
@@ -132,7 +162,13 @@ let nextResolumeId = 1;
 
 // Playlists
 app.get("/api/v1/playlists", (_req, res) => {
-  res.json(playlists);
+  res.json(activePlaylists());
+});
+
+// #165: switch the playlists fixture between "default" (3) and "twelve" (12).
+app.post("/__mock/fixture", (req, res) => {
+  fixtureMode = req.body?.mode === "twelve" ? "twelve" : "default";
+  res.json({ mode: fixtureMode, count: activePlaylists().length });
 });
 
 app.post("/api/v1/playlists", (req, res) => {
@@ -142,7 +178,7 @@ app.post("/api/v1/playlists", (req, res) => {
 });
 
 app.get("/api/v1/playlists/:id", (req, res) => {
-  const pl = playlists.find((p) => p.id === Number(req.params.id));
+  const pl = activePlaylists().find((p) => p.id === Number(req.params.id));
   if (pl) res.json(pl);
   else res.status(404).json({ error: "not found" });
 });
@@ -372,7 +408,7 @@ app.get("/api/v1/status", (_req, res) => {
     active_scene: null,
     ytdlp_available: true,
     ffmpeg_available: true,
-    playlists_count: playlists.length,
+    playlists_count: activePlaylists().length,
     // #51: LAN sp.local advertisement — the dashboard's LanAddress component
     // reads these to show the offline-LAN URL + raw-IP fallback.
     lan_url: "http://sp.local:8920",
