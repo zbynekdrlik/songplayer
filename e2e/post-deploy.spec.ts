@@ -92,6 +92,26 @@ async function findPlaylistWithVideos(
   throw new Error("no playlist on deployed server has any videos");
 }
 
+// #165: the dashboard is now a selector + ONE work area. To assert on a
+// specific playlist's card, SELECT it in the selector first, then read the
+// single work-area card. Replaces the old per-card grid locators without
+// reducing what each test verifies.
+async function selectWorkspaceCard(
+  page: import("@playwright/test").Page,
+  name: string,
+) {
+  await expect(page.getByTestId("playlist-workspace")).toBeVisible({
+    timeout: 30_000,
+  });
+  await page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: name })
+    .click();
+  const card = page.locator(".playlist-card", { hasText: name });
+  await expect(card).toBeVisible();
+  return card;
+}
+
 test.describe("SongPlayer post-deploy feature verification", () => {
   let obs: ObsDriver | null = null;
   // Captured at suite start, restored at suite end so the wall returns
@@ -269,15 +289,14 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     }
 
     await page.goto("/");
-    // Wait for the WASM bundle to mount and the card to appear.
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+    // Wait for the WASM bundle to mount, then select the playlist's card in the
+    // work area (#165 selector + single work area).
 
     // (The NDI dark-wall gate — `connections > 0` for the on-program output —
     // lives in its own dedicated test above, "on-program NDI output has a live
     // receiver (#127)", so this Play-button test stays focused on the button.)
 
-    const card = page.locator(".playlist-card", { hasText: pl.name });
-    await expect(card).toBeVisible();
+    const card = await selectWorkspaceCard(page, pl.name);
 
     const expectedUrl = new RegExp(`/api/v1/playback/${pl.id}/play$`);
     const respPromise = page.waitForResponse((r) => expectedUrl.test(r.url()), { timeout: 10_000 });
@@ -319,9 +338,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // up the NowPlaying broadcast from the replay / current position
     // stream that the engine emits for active playback.
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
-
-    const card = page.locator(".playlist-card", { hasText: pl.name });
+    const card = await selectWorkspaceCard(page, pl.name);
 
     // Within 10 s the card must show the `.np-info` block with a
     // non-empty position counter (proves NowPlaying actually arrived).
@@ -455,14 +472,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await new Promise((r) => setTimeout(r, 500));
 
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({
-      timeout: 30_000,
-    });
-
-    const fastCard = page
-      .locator(".playlist-card")
-      .filter({ hasText: FAST_PLAYLIST_NAME });
-    await expect(fastCard).toBeVisible();
+    // #165: select ytfast in the work area BEFORE the scene switch, and pin it
+    // (a click pins the selection) so the work area stays on ytfast when it
+    // starts playing.
+    const fastCard = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
 
     // Switch OBS to sp-fast — this must kick off the full chain.
     await obs!.switchScene(FAST_SCENE_NAME);
@@ -521,10 +534,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await obs!.switchScene(FAST_SCENE_NAME);
 
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
-
-    const card = page.locator(".playlist-card").filter({ hasText: FAST_PLAYLIST_NAME });
-    await expect(card).toBeVisible();
+    // #165: select ytfast in the work area (it is the on-program playlist).
+    const card = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
 
     // 1. The `.np-info` block must appear within 30 s. If the engine
     //    is stuck in WaitingForScene (the original bug), the card
@@ -582,7 +593,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     request,
   }) => {
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({
+    await expect(page.getByTestId("playlist-workspace")).toBeVisible({
       timeout: 30_000,
     });
 
@@ -657,8 +668,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         (h.state === "Playing" || h.state === "Paused"),
     );
     if (matched) {
+      // #165: the per-playlist badge lives in the SELECTOR row now, not the
+      // single work area.
       const cardBadge = page
-        .locator(".playlist-card", { hasText: nameByNdi.get(matched.ndi_name)! })
+        .getByTestId("playlist-selector-row")
+        .filter({ hasText: nameByNdi.get(matched.ndi_name)! })
         .locator(".lock-badge");
       await expect(cardBadge).toBeVisible({ timeout: 10_000 });
       const ccls = (await cardBadge.getAttribute("class")) ?? "";
@@ -693,7 +707,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     });
 
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("playlist-workspace")).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(3_000);
 
     const real = messages.filter((m) => !allowed.some((r) => r.test(m)));

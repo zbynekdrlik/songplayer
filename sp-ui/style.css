@@ -94,10 +94,102 @@ body {
     margin-bottom: 12px;
 }
 
-.playlist-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+/* #165: dashboard = selector (left) + ONE work area (right), instead of a grid
+   of every playlist card. On ≤700 px the selector collapses to a <select>
+   above the work area (see the media query below). */
+.dashboard-body {
+    display: flex;
+    align-items: flex-start;
     gap: 16px;
+}
+.playlist-selector-panel { flex: 0 0 260px; }
+.playlist-workspace { flex: 1 1 auto; min-width: 0; }
+
+/* The native dropdown is the mobile control — hidden on desktop, where the
+   clickable row list is shown instead. */
+.playlist-select-mobile { display: none; }
+
+.playlist-selector-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.playlist-selector-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.playlist-selector-row:hover { border-color: var(--text-dim); }
+.playlist-selector-row.selected {
+    border-color: var(--accent);
+    background: var(--bg-input);
+}
+.playlist-selector-row .sel-glyph { width: 1.2em; flex-shrink: 0; text-align: center; }
+.playlist-selector-row .sel-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.playlist-selector-row .sel-ndi { color: var(--text-dim); font-size: 0.75rem; flex-shrink: 0; }
+
+/* #165: "Práve hrá" strip above the work area — ALWAYS present with a reserved
+   height so nothing below it jumps (#163 layout-stable pattern); only the text
+   swaps. */
+.now-playing-strip {
+    min-height: 2.2rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    font-size: 0.85rem;
+}
+.now-playing-strip .strip-quiet { color: var(--text-dim); }
+.now-playing-strip .strip-live { color: var(--text); }
+.now-playing-strip .strip-goto {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    cursor: pointer;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+.now-playing-strip .strip-goto:hover { border-color: var(--text-dim); }
+
+.workspace-empty { color: var(--text-dim); font-style: italic; padding: 24px 0; }
+
+/* The work area's card fills the width (not a fixed-width grid tile). */
+.playlist-workspace .playlist-card { width: 100%; max-width: none; }
+
+@media (max-width: 700px) {
+    .dashboard-body { flex-direction: column; }
+    .playlist-selector-panel { flex: 0 0 auto; width: 100%; }
+    .playlist-selector-list { display: none; }
+    .playlist-select-mobile {
+        display: block;
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 12px;
+        background: var(--bg-card);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        font-size: 0.9rem;
+    }
 }
 
 /* ---- Playlist card ---- */

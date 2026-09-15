@@ -61,7 +61,8 @@ test.describe("FLAC pipeline post-deploy verification", () => {
 
   test("dashboard loads without console errors", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({
+    // #165: the dashboard shows a selector + ONE work area.
+    await expect(page.getByTestId("playlist-workspace")).toBeVisible({
       timeout: 30_000,
     });
   });
@@ -252,7 +253,10 @@ test.describe("FLAC pipeline post-deploy verification", () => {
 
   test("dashboard shows karaoke panel when playing with lyrics", async ({ page }) => {
     await page.goto("/");
-    await page.waitForSelector(".playlist-card", { timeout: 10_000 });
+    // #165: the playing playlist is preselected in the single work area.
+    await page.waitForSelector('[data-testid="playlist-workspace"]', {
+      timeout: 10_000,
+    });
 
     const karaokePanel = page.locator(".karaoke-panel");
     const panelCount = await karaokePanel.count();
@@ -290,14 +294,23 @@ test.describe("FLAC pipeline post-deploy verification", () => {
   });
 
   test("karaoke panel hidden for idle playlists", async ({ page }) => {
+    // #165: only ONE work area is shown at a time, so walk the selector rows and
+    // bring each playlist into the work area to check the invariant for every
+    // playlist (an idle playlist — one with no now-playing, i.e. a `.np-idle`
+    // card — must not render a karaoke panel). Same coverage as the old
+    // per-card grid scan, now driven through the selector.
     await page.goto("/");
-    await page.waitForSelector(".playlist-card", { timeout: 10_000 });
+    await page.waitForSelector('[data-testid="playlist-workspace"]', {
+      timeout: 10_000,
+    });
 
-    const cards = page.locator(".playlist-card");
-    const cardCount = await cards.count();
+    const rows = page.getByTestId("playlist-selector-row");
+    const rowCount = await rows.count();
 
-    for (let i = 0; i < cardCount; i++) {
-      const card = cards.nth(i);
+    for (let i = 0; i < rowCount; i++) {
+      await rows.nth(i).click();
+      const card = page.locator(".playlist-card").first();
+      await expect(card).toBeVisible();
       const idleText = card.locator(".np-idle");
       if ((await idleText.count()) > 0) {
         // Idle playlist should not show karaoke panel

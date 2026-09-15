@@ -68,6 +68,17 @@ pub fn App() -> impl IntoView {
     let store = DashboardStore::new();
     provide_context(store);
 
+    // #165: seed the work-area selection from a persisted value (URL
+    // `?playlist=<id>` first, else localStorage) exactly once at startup. A
+    // persisted value is PINNED so the dashboard's auto-follow Effect keeps the
+    // operator's choice on reload instead of snapping to the playing playlist.
+    // No persisted value → selection stays None + unpinned, so the auto-follow
+    // Effect defaults to the currently-playing playlist on first load.
+    if let Some(id) = crate::components::selection::persisted_selection() {
+        store.selected_playlist.set(Some(id));
+        store.selection_pinned.set(true);
+    }
+
     // Restore the active tab from the current URL so reloads keep the user
     // on the page they were on (previously everything snapped back to
     // Dashboard because page state was an ephemeral RwSignal).
