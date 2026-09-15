@@ -787,7 +787,10 @@ jobs:
           $action = New-ScheduledTaskAction -Execute $ExePath -WorkingDirectory $InstallDir
           $trigger = New-ScheduledTaskTrigger -AtLogon -User "Resolume"
           $principal = New-ScheduledTaskPrincipal -UserId "Resolume" -LogonType Interactive -RunLevel Limited
-          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit 0
+          # -Priority 4 (normal): the default 7 runs SongPlayer AND every child it
+          # spawns at low I/O + memory priority (2026-09-15 measurement) — wrong for
+          # the process that feeds the wall.
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit 0 -Priority 4
           Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
           Write-Host "Created scheduled task: $TaskName"
 
