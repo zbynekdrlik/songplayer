@@ -46,6 +46,32 @@ paths:
   `pacing.iter_p99_us` (decode+submit cost; `>= interval` = decoder can't keep
   up) are the honest signals; `jitter_p99_us` only mirrored the lag.
   `late_frames` counts an emit > 2 ms past its boundary.
+- Producer/consumer decode split (#147, 0.51.0-dev.2, box test 4→5): a
+  ONE-frame synchronous look-ahead inside `Pacer::prepare` on the emit thread
+  could NOT hold the grid while the #162 stems child was resident (1440p decode
+  p99 93–111 ms > the 41.7 ms slot → 85 % late, re-anchor storm). The paced path
+  is now producer/consumer: a dedicated DECODE thread (`pipeline_paced.rs::run_decode_producer`)
+  owns the whole MF decoder and fills a BOUNDED look-ahead queue (`playback/pacer_queue.rs`
+  — pure `PacedQueue` + a `Mutex`/`Condvar` `SharedQueue`, bound 12 ≈ 500 ms);
+  the emit thread only POPS at the boundary (`prepare(target, || queue.consumer_pop())`),
+  so `Pacer::prepare`/`service` are unchanged. **COM STA is free**: `MediaFoundationVideoReader::open`
+  calls `CoInitializeEx(APARTMENTTHREADED)+MFStartup` on WHATEVER thread calls it,
+  so the producer thread self-inits its apartment — just keep open/decode/seek/drop
+  ALL on the producer thread (never split the decoder across threads). Seek is
+  routed to the producer via `request_seek` (flushes the queue + bumps a seek
+  EPOCH so in-flight pre-seek frames are dropped). `pacer_queue.rs` is
+  cross-platform + Linux-tested + mutation-scored; `pipeline_paced.rs` is
+  Windows-only + mutation-excluded (box-verified).
+- Box test 5 (0.51.0-dev.2, stems child RESIDENT 3.96 GB): the split SOLVED the
+  decode contention — `resyncs 0`, `lag 0`, `prep_p99 0.4 ms`, seq at the full
+  30/s grid, NO re-anchors (box test 4 had `resyncs +8`/30 s, `lag 12…23`). But
+  `late_frames` stayed 27.6 % with `iter_p99 81 ms` while `prep_p99` is 0.4 ms —
+  the bottleneck MOVED from the decode to the **NDI SUBMIT** (`send_video_async` +
+  audio still on the emit thread, stalling under the child's memory-bandwidth /
+  page-fault pressure). So `genlock_pacing` STAYS OFF in production until the
+  submit is also moved off the boundary-critical path (a dedicated NDI-submit
+  thread) or the stems child's D3D/NDI-path impact is bounded. `iter_p99` ≫
+  `prep_p99` is the signature of submit-side (not decode-side) lateness.
 - Burn-id QR overlay (#151, run_id **911014**): the paced emit paints a QR of
   `P{run_id}.{frame_id}.{gen_ts_ns}.{crc32}` bottom-right (side `0.28·h`, margin
   `40/1080·h` — camera-box `payload.rs` + `burn-geom.hpp`, ported into
