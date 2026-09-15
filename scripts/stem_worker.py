@@ -216,7 +216,10 @@ def _write_stem_48k_stereo(src_path, out_path):
     out = np.clip(y.T, -1.0, 1.0)
     tmp_path = f"{out_path}.tmp"
     try:
-        sf.write(tmp_path, out, OUTPUT_SAMPLE_RATE, subtype="PCM_24")
+        # format= is REQUIRED: soundfile infers it from the extension and the
+        # atomic temp path ends in ".tmp" (first live separation failed here,
+        # win-resolume 2026-09-15 07:16 UTC).
+        sf.write(tmp_path, out, OUTPUT_SAMPLE_RATE, format="FLAC", subtype="PCM_24")
         os.replace(tmp_path, out_path)  # atomic on the same filesystem
     finally:
         # If os.replace never ran (write failed), don't leave the temp behind.
