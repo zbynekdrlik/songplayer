@@ -263,13 +263,15 @@ impl StemWorker {
         // so no `!` sits at this seam; the decision is the unit-tested
         // `stem_duration_supported`.
         if stem_duration_too_long(job.duration_ms) {
-            let secs = job.duration_ms.unwrap_or(0) / 1000;
+            // Raw milliseconds on purpose: a `/ 1000` here is log-only
+            // arithmetic that no test can pin (surviving mutants).
             info!(
                 video_id = job.video_id,
                 duration_ms = job.duration_ms,
-                "stem worker: skipping video_id={} ({secs}s > {}s) — stems only for songs up to 15 min",
+                "stem worker: skipping video_id={} ({} ms > {} ms) — stems only for songs up to 15 min",
                 job.video_id,
-                STEM_MAX_DURATION_MS / 1000
+                job.duration_ms.unwrap_or(0),
+                STEM_MAX_DURATION_MS
             );
             let _ = crate::db::models_stems::mark_stems_unsupported(&self.pool, job.video_id).await;
             return;
