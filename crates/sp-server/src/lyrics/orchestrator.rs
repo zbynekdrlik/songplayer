@@ -85,8 +85,9 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
         .await;
         let plan = HeavyStepPlan::for_activity(self.mode, activity);
         tracing::info!(
-            "lyrics_worker: heavy step mtl mode={} (wall {})",
+            "lyrics_worker: heavy step mtl mode={} timeout={}s (wall {})",
             plan.label(),
+            crate::lyrics::mtl_aligner::mtl_timeout(&plan).as_secs(),
             activity.reason().unwrap_or("idle")
         );
 
@@ -142,7 +143,9 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
                         // wait. Byte-identical ★ output (same aligner, CPU vs GPU).
                         tracing::info!(
                             "lyrics_worker: heavy step mtl re-run mode=cpu-idle \
-                             after GPU abort ({})",
+                             timeout={}s after GPU abort ({})",
+                            crate::lyrics::mtl_aligner::mtl_timeout(&HeavyStepPlan::cpu_idle())
+                                .as_secs(),
                             abort.detail
                         );
                         crate::lyrics::mtl_aligner::align(

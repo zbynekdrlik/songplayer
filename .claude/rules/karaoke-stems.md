@@ -85,6 +85,21 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   load, not speed; 3 threads on the 12-core box) → the GPU is never touched, so
   no fps drop / TDR; **low-priority + wall idle → GPU + BELOW_NORMAL** (fast);
   **idle-only → GPU** (it defers instead of running on a busy wall).
+- **CPU-plan timeouts are ×4 the GPU-sized base (#162, `heavy_step_timeout` in
+  `heavy_plan.rs`).** Every heavy timeout (`aligner::isolation_timeout` for
+  isolation + stem separation, mtl's fixed `TIMEOUT_SECS` 15 min) was sized for
+  GPU speed (~8× realtime). On the win-resolume CPU a step measures ~3× realtime
+  with 6 threads and ~5–6× realtime under the cpu-idle 3-thread cap (measured
+  2026-09-15). A GPU-sized ceiling therefore KILLS a CPU job mid-run — it is
+  deferred with backoff, retried, killed again forever (the live 10.5-min stem
+  case: `separate-stems timed out after 1280 s`). So `heavy_step_timeout(plan,
+  base)` keeps `base` for a GPU plan and returns `base * CPU_TIMEOUT_MULTIPLIER`
+  (=4, saturating) for a cpu-idle plan (1280 s → 5120 s ≈ 85 min). Applied at
+  every heavy spawn (isolation via `idle_gate_abort::isolation_step_timeout`,
+  stems via `stems::worker::separation_timeout`, mtl via `mtl_aligner::mtl_timeout`
+  threaded into `run_once`); the per-step INFO line logs the chosen `timeout=…s`.
+  The abort→CPU re-run recomputes its OWN cpu-idle (×4) timeout, never the
+  GPU-sized one it aborted under.
 - **Sequential heavy-step guard (#162 07:40 crash, `lyrics/heavy_slot.rs`) — the
   box must NEVER be overloaded.** The lyrics worker (isolation + mtl) and the
   stem worker (separation) are two independent loops; once #162 removed the

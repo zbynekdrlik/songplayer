@@ -115,6 +115,16 @@ pub(crate) fn separation_abort_armed(plan: &HeavyStepPlan) -> bool {
     plan.is_gpu()
 }
 
+/// #162: the stem-separation subprocess timeout for `plan`. The base ceiling
+/// (`isolation_timeout`) is sized for GPU speed; a CPU plan (cpu-idle, forced
+/// onto CPU while the wall plays) is scaled by `CPU_TIMEOUT_MULTIPLIER` via
+/// `heavy_step_timeout` so a CPU separation is not killed mid-run and retried
+/// forever. Pure — unit-tested; each `separate_stems` spawn chooses its timeout
+/// through this, from the plan it actually runs under.
+pub(crate) fn separation_timeout(plan: &HeavyStepPlan, duration_ms: Option<i64>) -> Duration {
+    crate::lyrics::heavy_plan::heavy_step_timeout(plan, isolation_timeout(duration_ms))
+}
+
 /// #162: the settle-free defer decision used when the gate-log mutex is
 /// poisoned — only `idle-only` can defer, and only while the wall is in use.
 /// Pure so both arms are unit-tested (`worker_plan_tests.rs`); the inline
@@ -239,8 +249,6 @@ impl StemWorker {
             .await
             .ok()
             .flatten();
-        let timeout = isolation_timeout(job.duration_ms);
-
         info!(
             video_id = job.video_id,
             youtube_id = %job.youtube_id,
@@ -273,10 +281,16 @@ impl StemWorker {
         // `idle-only` we re-queue with NO penalty (`StemStepResult::WallAborted`
         // → `stem_status` stays NULL). `separate_stems` is remote-free.
         let plan = HeavyStepPlan::for_activity(mode, activity);
+        // #162: the timeout for THIS plan — a cpu-idle plan gets the ×4 base so a
+        // slow CPU separation is not killed mid-run and retried forever. The GPU
+        // branch and the cpu-idle-direct branch both run under `plan`; the
+        // abort→CPU re-run below recomputes its own cpu-idle timeout.
+        let timeout = separation_timeout(&plan, job.duration_ms);
         info!(
             video_id = job.video_id,
-            "stem worker: heavy step separation mode={} (wall {})",
+            "stem worker: heavy step separation mode={} timeout={}s (wall {})",
             plan.label(),
+            timeout.as_secs(),
             if activity.in_use() {
                 activity.reason().unwrap_or("wall in use")
             } else {
@@ -307,10 +321,16 @@ impl StemWorker {
                 Ok(Err(e)) => StemStepResult::Failed(e),
                 Err(abort) => match mode {
                     ProcessingMode::LowPriority => {
+                        // The GPU spawn aborted; re-run on CPU. The cpu-idle plan
+                        // is several times slower, so it needs the ×4 timeout, NOT
+                        // the GPU-sized `timeout` bound above (#162).
+                        let cpu_plan = HeavyStepPlan::cpu_idle();
+                        let cpu_timeout = separation_timeout(&cpu_plan, job.duration_ms);
                         info!(
                             video_id = job.video_id,
                             "stem worker: heavy step separation re-run mode=cpu-idle \
-                             after GPU abort ({})",
+                             timeout={}s after GPU abort ({})",
+                            cpu_timeout.as_secs(),
                             abort.detail
                         );
                         match crate::stems::separator::separate_stems(
@@ -320,9 +340,9 @@ impl StemWorker {
                             &audio_path,
                             &vocals_out,
                             &instrumental_out,
-                            timeout,
+                            cpu_timeout,
                             gpu_mem.as_deref(),
-                            &HeavyStepPlan::cpu_idle(),
+                            &cpu_plan,
                         )
                         .await
                         {

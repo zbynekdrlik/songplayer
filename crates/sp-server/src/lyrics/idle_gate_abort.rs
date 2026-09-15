@@ -114,6 +114,21 @@ where
     }
 }
 
+/// #162: the vocal-isolation subprocess timeout for `plan`. The base ceiling
+/// [`aligner::isolation_timeout`] is sized for GPU speed; a CPU plan (cpu-idle,
+/// forced onto CPU while the wall plays) is scaled by `CPU_TIMEOUT_MULTIPLIER`
+/// via [`heavy_step_timeout`] so a CPU isolation is not killed mid-run. Pure —
+/// unit-tested; `isolate_vocals` chooses its timeout through this.
+pub(crate) fn isolation_step_timeout(
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
+    duration_ms: Option<i64>,
+) -> Duration {
+    crate::lyrics::heavy_plan::heavy_step_timeout(
+        plan,
+        crate::lyrics::aligner::isolation_timeout(duration_ms),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Live-handle seam for the lyrics worker — reads its in-process wall handles to
 // drive the abort watcher, and surfaces the abort to the dashboard. I/O only;
@@ -179,7 +194,7 @@ impl crate::lyrics::worker::LyricsWorker {
             &self.models_dir,
             &audio_path,
             &wav_path,
-            crate::lyrics::aligner::isolation_timeout(row.duration_ms),
+            isolation_step_timeout(plan, row.duration_ms),
             gpu_mem,
             plan,
         );

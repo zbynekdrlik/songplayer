@@ -13,7 +13,18 @@
 //! regime orchestration (`impl LyricsWorker`) is added alongside the wiring.
 
 use crate::lyrics::idle_gate::WallActivity;
+use std::time::Duration;
 use tokio::process::Command;
+
+/// #162: how much longer a CPU heavy step is allowed to run than the GPU-sized
+/// base timeout. Vocal isolation / stem separation / mtl were all timed for GPU
+/// speed (~8× realtime); on the win-resolume CPU they measure ~3× realtime with
+/// 6 threads and ~5–6× realtime under the cpu-idle 3-thread cap (2026-09-15).
+/// A GPU-sized ceiling therefore kills a CPU job mid-run — it is deferred with
+/// backoff, retried, killed again forever. ×4 gives a 10-min file 1280 s → 5120 s
+/// (≈85 min), enough for ~6× realtime plus model load. Applied by
+/// [`heavy_step_timeout`].
+pub(crate) const CPU_TIMEOUT_MULTIPLIER: u32 = 4;
 
 /// The single operator switch — replaces the removed `lyrics_gate_when_playing`
 /// boolean (#162, `MIGRATION_V25`). DEFAULT [`LowPriority`](ProcessingMode::LowPriority):
@@ -193,6 +204,20 @@ impl HeavyStepPlan {
     }
 }
 
+/// #162: the subprocess timeout for one heavy step under `plan`, from the
+/// GPU-sized `base` ceiling. A GPU plan keeps `base`; a CPU plan (cpu-idle,
+/// forced onto CPU while the wall plays) gets `base * CPU_TIMEOUT_MULTIPLIER`,
+/// saturating at [`Duration::MAX`], because the CPU runs the step several times
+/// slower than the GPU the base was sized for. Pure — unit-tested; every heavy
+/// spawn site chooses its timeout through this.
+pub(crate) fn heavy_step_timeout(plan: &HeavyStepPlan, base: Duration) -> Duration {
+    if plan.is_gpu() {
+        base
+    } else {
+        base.saturating_mul(CPU_TIMEOUT_MULTIPLIER)
+    }
+}
+
 /// CPU-idle thread cap: a quarter of the logical cores, at least 1. Reads the
 /// environment (`available_parallelism`) so it is integration-only; the pure
 /// rule it delegates to (`cpu_idle_threads_for`) is unit-tested.
@@ -327,9 +352,12 @@ impl crate::lyrics::worker::LyricsWorker {
         let activity = self.wall_activity().await;
         let plan = HeavyStepPlan::for_activity(mode, activity);
         let detail = self.wall_regime_detail(activity).await;
+        let timeout =
+            crate::lyrics::idle_gate_abort::isolation_step_timeout(&plan, row.duration_ms);
         tracing::info!(
-            "lyrics_worker: heavy step isolation mode={} (wall {detail})",
-            plan.label()
+            "lyrics_worker: heavy step isolation mode={} timeout={}s (wall {detail})",
+            plan.label(),
+            timeout.as_secs()
         );
         let result = match (mode, plan.is_gpu()) {
             (ProcessingMode::LowPriority, true) => {
@@ -337,9 +365,14 @@ impl crate::lyrics::worker::LyricsWorker {
                     Ok(v) => Ok(v),
                     Err(abort) => {
                         let cpu = HeavyStepPlan::cpu_idle();
+                        let cpu_timeout = crate::lyrics::idle_gate_abort::isolation_step_timeout(
+                            &cpu,
+                            row.duration_ms,
+                        );
                         tracing::info!(
                             "lyrics_worker: heavy step isolation re-run mode=cpu-idle \
-                             after GPU abort ({})",
+                             timeout={}s after GPU abort ({})",
+                            cpu_timeout.as_secs(),
                             abort.detail
                         );
                         // abort_enabled=false → runs to completion, never Err.
