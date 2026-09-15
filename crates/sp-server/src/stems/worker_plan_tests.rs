@@ -127,6 +127,31 @@ fn separation_timeout_scales_only_the_cpu_plan() {
 
 // ---- stem_defer_fallback — the poisoned-lock path, all four cases ---------
 
+// ---- stem_duration_supported / stem_duration_too_long — the 15-min cap ---
+
+#[test]
+fn duration_unknown_is_always_supported() {
+    assert!(
+        stem_duration_supported(None),
+        "an unknown duration must never block separation"
+    );
+    assert!(!stem_duration_too_long(None));
+}
+
+#[test]
+fn duration_at_and_under_the_cap_is_supported() {
+    assert!(stem_duration_supported(Some(899_999)));
+    assert!(stem_duration_supported(Some(STEM_MAX_DURATION_MS)));
+    assert!(!stem_duration_too_long(Some(899_999)));
+    assert!(!stem_duration_too_long(Some(STEM_MAX_DURATION_MS)));
+}
+
+#[test]
+fn duration_one_ms_over_the_cap_is_unsupported() {
+    assert!(!stem_duration_supported(Some(900_001)));
+    assert!(stem_duration_too_long(Some(900_001)));
+}
+
 #[test]
 fn defer_fallback_defers_only_idle_only_while_in_use() {
     assert!(

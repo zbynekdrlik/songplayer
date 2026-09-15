@@ -152,8 +152,8 @@ async fn slot_serializes_two_heavy_steps() {
 // ---- pinned constants (literals; the cfg(windows) product was un-mutatable) ----
 
 #[test]
-fn child_job_limit_is_six_gib() {
-    assert_eq!(CHILD_JOB_MEMORY_LIMIT_BYTES, 6 * (1u64 << 30));
+fn child_job_limit_is_ten_gib() {
+    assert_eq!(CHILD_JOB_MEMORY_LIMIT_BYTES, 10 * (1u64 << 30));
     assert_eq!(HEAVY_STEP_MIN_FREE_BYTES, 4 * (1u64 << 30));
     const {
         assert!(
