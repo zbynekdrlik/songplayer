@@ -27,6 +27,8 @@ body {
 
 .navbar {
     display: flex;
+    flex-wrap: wrap; /* phone width: buttons + ws dot + version wrap, never overflow (#165) */
+    row-gap: 6px;
     align-items: center;
     gap: 12px;
     padding: 10px 20px;
