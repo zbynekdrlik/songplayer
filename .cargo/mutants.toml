@@ -1,0 +1,130 @@
+# cargo-mutants configuration (songplayer). See ~/devel/airuleset/modules/ci/mutation-testing.md.
+#
+# The PR gate (.github/workflows/ci.yml `mutation-testing`) is diff-scoped
+# (`--in-diff pr.diff`) and hard-bounded to 20 min; the on-demand full sweep
+# (.github/workflows/mutation-full.yml) is sharded over the whole tree. Both
+# read this file, so the profile / test tool / exclusions live here once
+# instead of being duplicated on two command lines (#123).
+
+# Mutant builds use the dedicated `mutants` cargo profile (Cargo.toml
+# `[profile.mutants]`, inherits = "test", debug = "none"): dropping debuginfo
+# cuts each mutant's compile time and — crucially — its peak memory, so the
+# gate no longer needs `--jobs 1` + a 24 G swap file to survive the 16 G runner.
+profile = "mutants"
+
+# Run the per-mutant test suite under cargo-nextest (faster harness startup and
+# parallelism than `cargo test`; nextest never runs doctests, which is wanted
+# here — a doctest would compile a separate binary per mutant).
+test_tool = "nextest"
+
+# === STRUCTURAL exclusions ==================================================
+# Files whose functions are integration-only glue (live OBS / yt-dlp / Gemini /
+# HTTP / a Python subprocess), external-library wrappers validated only against
+# real files on the target platform, or cfg(windows)-only code that is dead on
+# the Linux mutation runner. A mutant here can never be killed by a Linux unit
+# test — it is not a suppressed survivor, it is code the mutation gate is
+# structurally unable to exercise. (Substring regexes match the workspace-
+# relative path inside the mutant description, identical to the previous
+# `--exclude-re` CLI form.)
+exclude_re = [
+  # -- integration-only orchestration / external shell-outs / HTTP --
+  'sp-server/src/lib.rs',                 # orchestration glue, integration-tested only
+  'sp-server/src/obs/',                   # requires live OBS WebSocket
+  'sp-server/src/downloader/',            # shells out to yt-dlp
+  'sp-server/src/reprocess/',             # requires live Gemini API
+  'sp-server/src/api/websocket',          # WS upgrade flow, integration-tested
+  'sp-server/src/playlist/',              # shells out to yt-dlp
+  # sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
+  # sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
+  # sp-ndi/, sp-decoder/reader.rs, sp-server/src/playback/pipeline.rs are NOT
+  # excluded — MockNdiBackend unit tests + FrameSubmitter cross-platform tests
+  # cover them; the Windows-gated decoder in sp-decoder/reader.rs is skipped by
+  # cargo-mutants on Linux automatically (cfg(windows) not compiled in).
+  'sp-decoder/src/audio/',                # Symphonia wrapper — external-lib glue, fixture-tested
+  'sp-decoder/src/video/',                # Windows-only MF wrapper — fixture-tested
+  # -- genlock #146–#151: Windows-only paced pipeline + Python MTL shell-out --
+  # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
+  #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux mutation
+  #   runner; every mutant lands in dead code, builds, and no test runs it ->
+  #   MISSED. Same class as the sp-decoder/{audio,video} exclusions (target-only).
+  'sp-server/src/playback/pipeline_paced',
+  # pipeline.rs:239:5 run_loop -> (): the #[cfg(windows)] run_loop twin (the
+  #   #[cfg(not(windows))] run_loop is compiled + covered). Windows dead code.
+  'pipeline\.rs:239:5: replace run_loop with \(\)',
+  # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the Python
+  #   LyricsAlignment-MTL tool (tokio::process::Command) not installed on the
+  #   runner; run_once/align/write_text_json are subprocess/file glue and
+  #   is_available/TIMEOUT_SECS are std::fs/const trivia around it — integration-
+  #   tested against the real tool, like reprocess/ + downloader/.
+  'sp-server/src/lyrics/mtl_aligner',
+  # orchestrator.rs asr_transcribe (line-agnostic — the line shifted 495->499 and
+  #   the old pin missed on run 34784800346 shard 3/8): the RealReferenceStageBackend
+  #   ASR call hits the live AssemblyAI HTTP API; network-bound, no local unit
+  #   test (same class as g35t_client's #[mutants::skip] HTTP helpers).
+  'orchestrator\.rs:[0-9]+:[0-9]+: replace <impl ReferenceStageBackend for RealReferenceStageBackend>::asr_transcribe',
+
+  # === documented EQUIVALENT mutations (audit 2026-05-06, PR #82;
+  #     re-anchored after PR #84 refactor) — provably no observable change ====
+  # split_line / split_one_lyrics_line: the empty-side guard never fires
+  #   (find_split_index returns a word boundary, both halves non-empty) and the
+  #   recursion `>` boundary is a no-op (a half exactly == max_chars yields
+  #   find_split_index None, no further split).
+  'replace match guard !w\.is_empty\(\) with true in build_phrases',
+  'replace match guard in_string with true in try_parse_balanced',
+  'replace [+\-*] with [+\-*] in try_all_lines_positions',
+  'replace \|\| with && in split_one_lyrics_line',
+  'replace > with (<|==|>=) in split_one_lyrics_line',
+  # === genlock #146–#151 provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
+  # genlock_audio.rs:129:31 `> -> <` in LevelAverager::record: the ring drain
+  #   `while ring.len() > 2*window { pop_front }` becomes `< 2*window`, popping
+  #   until empty then spinning on an empty deque forever -> non-terminating on
+  #   the FIRST record() call, not catchable by a terminating test.
+  'genlock_audio\.rs:129:31: replace > with <',
+  # genlock_audio.rs:254:32 `* -> +` and `* -> /` in AudioPll::update: the rate
+  #   step `(-residual * 0.5).clamp(±5)` only runs when |residual| > 50, so
+  #   |−residual·0.5| > 25 and the clamp always saturates to ±5 with sign =
+  #   sign(−residual). `-residual + 0.5` and `-residual / 0.5` keep that sign and
+  #   saturate to the SAME ±5 for every reachable residual -> equivalent.
+  'genlock_audio\.rs:254:32: replace \* with \+',
+  'genlock_audio\.rs:254:32: replace \* with /',
+  # genlock_audio.rs:296:32 `* -> /` in AudioPll::update_level: bias_target
+  #   `BIAS_PPM * signum(level − target)` is only evaluated when engaged, and
+  #   level == target is `near` (clears far_since before engaged is read), so
+  #   engaged => signum ∈ {−1,+1}; `20 * s == 20 / s` for s ∈ {−1,+1} -> equivalent.
+  'genlock_audio\.rs:296:32: replace \* with /',
+  # pacer_prepare.rs:85:66 and pacer.rs:788:70 (- -> + / /) in the p99 index
+  #   `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for every len>=1,
+  #   so the `.min(len-1)` clamp never binds; replacing `len-1` cannot change the
+  #   index. (iter_percentile_us IS killable — there p=100 makes the clamp load-bearing.)
+  'pacer_prepare\.rs:85:66: replace - with \+ in Pacer::prep_p99_us',
+  'pacer_prepare\.rs:85:66: replace - with / in Pacer::prep_p99_us',
+  'pacer\.rs:788:70: replace - with \+ in Pacer::jitter_p99_us',
+  'pacer\.rs:788:70: replace - with / in Pacer::jitter_p99_us',
+  # pacer.rs:731:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
+  #   operators differ solely at `late_us == max_late_us`, where the assignment
+  #   writes the value it just compared — a no-op. Output identical for all inputs.
+  'pacer\.rs:731:20: replace > with >= in Pacer::on_emit',
+  # pacer.rs:682:28 += -> *= / -= in service_standby: the mutated `relatches += 1`
+  #   sits in the `if emit_now < boundary` backward-step net, but service_standby
+  #   takes both now_100ns() reads with no decode pull between them and only
+  #   reaches this point after `sched_now >= boundary`, so on a monotonic clock
+  #   emit_now == sched_now >= boundary and the branch is unreachable by any
+  #   terminating deterministic test. (The `service` mutant at 532:28 IS killable.)
+  'pacer\.rs:682:28: replace \+= with \*= in Pacer::service_standby',
+  'pacer\.rs:682:28: replace \+= with -= in Pacer::service_standby',
+
+  # === TIMEOUTs (non-terminating under mutation; not catchable by a terminating
+  #     test, like the apply_greedy loop-counter pins) ==========================
+  # pacer.rs:94 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
+  #   decode-advance loop; a constant/zero pts never advances it -> 300 s TIMEOUT.
+  'pacer\.rs:94:',
+  # audio_grid.rs:74 push -> (), 77:26 ==->!= in push, 158 level_samples ->0/1:
+  #   the buffer-fill test loops `while level_samples() < N { push }`; a no-op
+  #   push or a constant level never reaches N -> TIMEOUT.
+  'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)',
+  'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push',
+  'audio_grid\.rs:158:9: replace AudioGridBuffer::level_samples',
+  # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain guard
+  #   so eviction never makes progress under the window-fill test -> TIMEOUT.
+  'lock_state\.rs:96:31: replace > with < in EventWindow::evict',
+]

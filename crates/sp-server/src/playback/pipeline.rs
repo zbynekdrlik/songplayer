@@ -9,10 +9,9 @@
 //! sends frames over NDI.  On other platforms the thread logs a warning and
 //! immediately reports an error (video decode requires Media Foundation).
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use std::path::PathBuf;
 use std::thread;
-use tracing::{info, warn};
 
 // Used in cfg(windows) blocks:
 // FrameSubmitter is also needed under `test` cfg — emit_heartbeat /
@@ -23,11 +22,11 @@ use tracing::{info, warn};
 #[cfg(any(windows, test))]
 use crate::playback::submitter::FrameSubmitter;
 #[cfg(windows)]
-use crossbeam_channel::TryRecvError;
+use crossbeam_channel::{Receiver, TryRecvError};
 #[cfg(windows)]
 use std::time::Instant;
 #[cfg(windows)]
-use tracing::{debug, error};
+use tracing::{debug, error, info, warn};
 
 /// Commands sent from the async engine to the pipeline thread.
 #[derive(Debug)]
@@ -127,6 +126,7 @@ impl PlaybackPipeline {
         playlist_id: i64,
         genlock_pacing: bool,
         burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        preview_tap: crate::playback::preview::PreviewTap,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -142,6 +142,7 @@ impl PlaybackPipeline {
                     playlist_id,
                     genlock_pacing,
                     burn_on,
+                    preview_tap,
                 );
             })
             .expect("failed to spawn pipeline thread");
@@ -165,6 +166,9 @@ impl PlaybackPipeline {
         playlist_id: i64,
         _genlock_pacing: bool,
         _burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        // #15 part 2: the decode loop is a stub on non-Windows (no frames are
+        // decoded), so the preview tap is never offered to here.
+        _preview_tap: crate::playback::preview::PreviewTap,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -172,7 +176,7 @@ impl PlaybackPipeline {
         let handle = thread::Builder::new()
             .name(format!("pipeline-{playlist_id}"))
             .spawn(move || {
-                run_loop(cmd_rx, &ndi_name, event_tx, playlist_id);
+                crate::playback::pipeline_stub::run_loop(cmd_rx, &ndi_name, event_tx, playlist_id);
             })
             .expect("failed to spawn pipeline thread");
 
@@ -212,21 +216,9 @@ impl Drop for PlaybackPipeline {
     }
 }
 
-/// Main loop for the pipeline thread (non-Windows).
-#[cfg(not(windows))]
-fn run_loop(
-    cmd_rx: Receiver<PipelineCommand>,
-    ndi_name: &str,
-    event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
-    playlist_id: i64,
-) {
-    info!(ndi_name, playlist_id, "pipeline thread started");
-    run_loop_stub(cmd_rx, ndi_name, event_tx, playlist_id);
-    info!(playlist_id, "pipeline thread exited");
-}
-
 /// Main loop for the pipeline thread (Windows).
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 fn run_loop(
     cmd_rx: Receiver<PipelineCommand>,
     ndi_name: &str,
@@ -235,6 +227,7 @@ fn run_loop(
     playlist_id: i64,
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    preview_tap: crate::playback::preview::PreviewTap,
 ) {
     info!(
         ndi_name,
@@ -248,56 +241,9 @@ fn run_loop(
         playlist_id,
         genlock_pacing,
         burn_on,
+        preview_tap,
     );
     info!(playlist_id, "pipeline thread exited");
-}
-
-/// Non-Windows stub: waits for commands and reports errors for Play.
-#[cfg(not(windows))]
-fn run_loop_stub(
-    cmd_rx: Receiver<PipelineCommand>,
-    _ndi_name: &str,
-    event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
-    playlist_id: i64,
-) {
-    loop {
-        match cmd_rx.recv() {
-            Ok(PipelineCommand::Shutdown) | Err(_) => {
-                info!(playlist_id, "pipeline thread shutting down");
-                break;
-            }
-            Ok(PipelineCommand::Play {
-                video,
-                audio,
-                start_position_ms: _,
-            }) => {
-                warn!(
-                    ?video,
-                    ?audio,
-                    "video decode not available on this platform"
-                );
-                let _ = event_tx.send((
-                    playlist_id,
-                    PipelineEvent::Error("Video decode requires Windows (Media Foundation)".into()),
-                ));
-            }
-            Ok(PipelineCommand::Pause) => {
-                info!(playlist_id, "pipeline: paused (stub)");
-            }
-            Ok(PipelineCommand::Resume) => {
-                info!(playlist_id, "pipeline: resumed (stub)");
-            }
-            Ok(PipelineCommand::Seek { position_ms }) => {
-                // Seek is a no-op when no song is loaded. When loaded, forward
-                // to the decoder and log on error — seek failures shouldn't kill
-                // the pipeline (decoder recovers on the next Play).
-                tracing::debug!(position_ms, "pipeline: seek ignored (no song loaded)");
-            }
-            Ok(PipelineCommand::Stop) => {
-                info!(playlist_id, "pipeline: stopped (stub)");
-            }
-        }
-    }
 }
 
 /// Windows decode-to-NDI loop.
@@ -310,6 +256,7 @@ fn run_loop_stub(
 /// tests in submitter.rs which the mutation runner does exercise.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)]
 fn run_loop_windows(
     cmd_rx: Receiver<PipelineCommand>,
     ndi_name: &str,
@@ -318,6 +265,7 @@ fn run_loop_windows(
     playlist_id: i64,
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    preview_tap: crate::playback::preview::PreviewTap,
 ) {
     // 1 ms system timer for the boundary-paced sleep granularity (#147).
     if genlock_pacing {
@@ -452,6 +400,7 @@ fn run_loop_windows(
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
+                            &preview_tap,
                         )
                     } else {
                         decode_and_send(
@@ -465,6 +414,7 @@ fn run_loop_windows(
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
+                            &preview_tap,
                         )
                     };
                     match decode_result {
@@ -566,6 +516,7 @@ pub(crate) enum DecodeResult {
 /// Returns when the video ends or a Stop/Shutdown/Play command is received.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)]
 fn decode_and_send(
     cmd_rx: &Receiver<PipelineCommand>,
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
@@ -577,8 +528,9 @@ fn decode_and_send(
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
+    preview_tap: &crate::playback::preview::PreviewTap,
 ) -> DecodeResult {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder, SymphoniaAudioReader};
+    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
         Ok(v) => v,
@@ -589,17 +541,20 @@ fn decode_and_send(
             ));
         }
     };
-    let audio_reader = match SymphoniaAudioReader::open(audio_path) {
-        Ok(a) => a,
-        Err(e) => {
-            return DecodeResult::Error(format!(
-                "failed to open audio {}: {e}",
-                audio_path.display()
-            ));
-        }
-    };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), Box::new(audio_reader))
-    {
+    // #14: honour the live karaoke control — a plain mix reader, or a stem-mixing
+    // KaraokeAudioReader (with FullMix fallback when stems are missing).
+    let audio_stream =
+        match crate::stems::reader::open_audio_stream(audio_path, &crate::stems::control::global())
+        {
+            Ok(a) => a,
+            Err(e) => {
+                return DecodeResult::Error(format!(
+                    "failed to open audio {}: {e}",
+                    audio_path.display()
+                ));
+            }
+        };
+    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
         Ok(d) => d,
         Err(e) => {
             return DecodeResult::Error(format!("SplitSyncedDecoder::new failed: {e}"));
@@ -731,6 +686,16 @@ fn decode_and_send(
                     .collect();
 
                 let timestamp_ms = video_frame.timestamp_ms;
+                // #15 part 2: opportunistically offer this decoded frame to the
+                // preview tap BEFORE the NDI submit consumes `video_frame.data`.
+                // No viewer => a couple of relaxed atomic loads; never blocks,
+                // never adds latency to the NDI submit path.
+                preview_tap.try_offer(
+                    video_frame.width,
+                    video_frame.height,
+                    video_frame.stride,
+                    &video_frame.data,
+                );
                 submitter.submit_nv12(
                     video_frame.width,
                     video_frame.height,
@@ -923,6 +888,7 @@ fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
 // decode_and_send, both of which stay `#[cfg(windows)]`-only.
 #[cfg(any(windows, test))]
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)] // heartbeat carries the pacing + audio gauges (#147/#150); a struct would just move the same 8 fields
 pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     submitter: &mut FrameSubmitter<B>,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,

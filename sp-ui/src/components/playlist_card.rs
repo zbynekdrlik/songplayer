@@ -22,6 +22,60 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
     // now-playing + transport controls. Toggled open on demand.
     let songs_open = RwSignal::new(false);
 
+    // #15 part 2: live preview cache-buster. A ~3 fps tick drives the
+    // `<img>` src's `?t=` so the browser re-fetches the latest sampled JPEG
+    // from `GET /api/v1/playback/{id}/preview.jpg`. The image element only
+    // exists while Playing (see below), so an idle card makes no requests.
+    let preview_tick = RwSignal::new(0u64);
+    // The <img> stays hidden (placeholder shown) until the first frame actually
+    // loads, so a body-less 204 during warmup never flashes a broken image or
+    // trips the zero-console-errors gate.
+    let preview_loaded = RwSignal::new(false);
+    let preview_cancelled = RwSignal::new(false);
+    on_cleanup(move || preview_cancelled.set(true));
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            loop {
+                // Page-owned signals: navigating away disposes them while the
+                // task is parked in the timer — `try_*` (None on a disposed
+                // signal) and stop, never panic (see sp-ui-frontend.md).
+                if preview_cancelled.try_get_untracked() != Some(false) {
+                    break;
+                }
+                gloo_timers::future::TimeoutFuture::new(300).await;
+                if preview_tick
+                    .try_update(|t| *t = t.wrapping_add(1))
+                    .is_none()
+                {
+                    break;
+                }
+            }
+        });
+    });
+
+    // #15 part 2 (recursive-closure fix): the preview <img> is created ONCE,
+    // outside the now-playing rebuild block, so a position update (~2 Hz) never
+    // drops the element together with its on:load/on:error closures while a
+    // fetch is in flight (the "closure invoked recursively or after being
+    // dropped" console error). A stable memo drives whether this card is Playing.
+    let is_playing = Memo::new(move |_| {
+        store.now_playing.with(|m| {
+            m.get(&pid)
+                .map(|i| matches!(i.state, PlaybackState::Playing))
+                .unwrap_or(false)
+        })
+    });
+    // While idle the <img> points at a 1×1 transparent GIF data-URI — no network
+    // request, no error event, and the tick is not tracked.
+    const PREVIEW_IDLE_SRC: &str =
+        "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    // Reset the loaded flag when playback stops so the placeholder returns.
+    Effect::new(move |_| {
+        if !is_playing.get() {
+            preview_loaded.set(false);
+        }
+    });
+
     view! {
         <div class="playlist-card">
             <div class="card-header">
@@ -41,6 +95,38 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
             </div>
 
             <div class="now-playing">
+                // #15 part 2: ONE stable preview <img> per card, created once and
+                // never rebuilt. While idle its src is an inline data-URI (no
+                // network request); while Playing the tick-driven cache-buster
+                // re-fetches the sampled JPEG. Kept outside the now-playing
+                // rebuild block so a position update never drops it mid-fetch.
+                <img
+                    class="preview-img"
+                    data-testid="preview-img"
+                    alt="Živý náhľad"
+                    style:display=move || {
+                        if is_playing.get() && preview_loaded.get() { "block" } else { "none" }
+                    }
+                    on:load=move |_| preview_loaded.set(true)
+                    on:error=move |_| preview_loaded.set(false)
+                    src=move || {
+                        if is_playing.get() {
+                            format!("/api/v1/playback/{pid}/preview.jpg?t={}", preview_tick.get())
+                        } else {
+                            PREVIEW_IDLE_SRC.to_string()
+                        }
+                    }
+                />
+                {move || {
+                    (!(is_playing.get() && preview_loaded.get()))
+                        .then(|| {
+                            view! {
+                                <div class="preview-placeholder" data-testid="preview-placeholder">
+                                    {if is_playing.get() { "Načítavam náhľad…" } else { "Bez náhľadu" }}
+                                </div>
+                            }
+                        })
+                }}
                 {move || {
                     let np = store.now_playing.get();
                     if let Some(info) = np.get(&pid) {

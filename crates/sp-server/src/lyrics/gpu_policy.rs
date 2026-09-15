@@ -17,6 +17,13 @@
 //! priority change — the separator's / aligner's model parameters are left
 //! untouched. On a CUDA OOM under the cap the Python side re-runs the SAME model
 //! on CPU (identical output, only slower).
+//!
+//! **Secondary to the idle gate (`idle_gate.rs`, #154).** The 2026-09-14 box
+//! crash proved priority + cap alone are insufficient (cap 0.4 → CPU fallback →
+//! still stutters). The PRIMARY mechanism is now the idle gate: heavy stages run
+//! only while the wall is idle. This module stays as defence in depth for the
+//! bounded one-stage window the gate cannot avoid (the wall going busy DURING an
+//! isolation that started while idle — the running subprocess is not killed).
 
 /// Default per-process CUDA memory fraction when `lyrics_gpu_mem_fraction` is
 /// unset. 0.7 ≈ 5.6 GB on the box's 8 GB card — enough for the roformer while

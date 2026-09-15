@@ -150,8 +150,9 @@ pub(crate) fn decode_and_send_paced(
     last_heartbeat: &mut Instant,
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
+    preview_tap: &crate::playback::preview::PreviewTap,
 ) -> DecodeResult {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder, SymphoniaAudioReader};
+    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
         Ok(v) => v,
@@ -162,17 +163,19 @@ pub(crate) fn decode_and_send_paced(
             ));
         }
     };
-    let audio_reader = match SymphoniaAudioReader::open(audio_path) {
-        Ok(a) => a,
-        Err(e) => {
-            return DecodeResult::Error(format!(
-                "failed to open audio {}: {e}",
-                audio_path.display()
-            ));
-        }
-    };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), Box::new(audio_reader))
-    {
+    // #14: karaoke-aware audio source (plain mix or stem mix with FullMix fallback).
+    let audio_stream =
+        match crate::stems::reader::open_audio_stream(audio_path, &crate::stems::control::global())
+        {
+            Ok(a) => a,
+            Err(e) => {
+                return DecodeResult::Error(format!(
+                    "failed to open audio {}: {e}",
+                    audio_path.display()
+                ));
+            }
+        };
+    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
         Ok(d) => d,
         Err(e) => {
             return DecodeResult::Error(format!("SplitSyncedDecoder::new failed: {e}"));
@@ -326,6 +329,16 @@ pub(crate) fn decode_and_send_paced(
             match decoder.next_synced() {
                 Ok(Some((video_frame, audio_frames))) => {
                     last_decoded_ms = video_frame.timestamp_ms;
+                    // #15 part 2: offer to the preview tap during `prepare`
+                    // (decode-ahead, BEFORE the boundary emit) so the sampling
+                    // is OFF the time-critical paced submit path. No viewer =>
+                    // a couple of relaxed atomic loads; pacer/genlock untouched.
+                    preview_tap.try_offer(
+                        video_frame.width,
+                        video_frame.height,
+                        video_frame.stride,
+                        &video_frame.data,
+                    );
                     Some(to_paced_frame(video_frame, audio_frames, pts_offset_ms))
                 }
                 Ok(None) => {

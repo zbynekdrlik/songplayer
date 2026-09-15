@@ -1,9 +1,11 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
 pub mod ai;
+pub mod karaoke;
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
+pub mod preview;
 pub mod routes;
 pub mod websocket;
 
@@ -68,10 +70,20 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/playback/{playlist_id}/mode",
             axum::routing::put(routes::set_mode),
         )
+        // #15 part 2: live low-res video preview of the currently-playing song.
+        .route(
+            "/api/v1/playback/{playlist_id}/preview.jpg",
+            axum::routing::get(preview::get_playback_preview),
+        )
         // Settings
         .route(
             "/api/v1/settings",
             axum::routing::get(routes::get_settings).patch(routes::update_settings),
+        )
+        // Karaoke (#14) — live mode + vocal gain
+        .route(
+            "/api/v1/karaoke",
+            axum::routing::get(karaoke::get_karaoke).post(karaoke::set_karaoke),
         )
         // Status
         .route("/api/v1/status", axum::routing::get(routes::status))

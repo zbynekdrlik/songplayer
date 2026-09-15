@@ -319,8 +319,10 @@ impl DashboardStore {
             ServerMsg::Pong
             | ServerMsg::QueueUpdate { .. }
             | ServerMsg::ResolumeStatus { .. }
-            | ServerMsg::ToolsStatus { .. } => {
-                // These are informational; no store update needed yet.
+            | ServerMsg::ToolsStatus { .. }
+            | ServerMsg::KaraokeStateChanged { .. } => {
+                // Informational; the karaoke control component owns its own
+                // mode/gain state via GET/POST, so no store update needed.
             }
         }
     }

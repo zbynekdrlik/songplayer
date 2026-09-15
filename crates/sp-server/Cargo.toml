@@ -44,6 +44,17 @@ tempfile = "3.27.0"
 # advisories) — the core `QrCode`/`into_colors` API is not feature-gated and is
 # all we need for the module matrix.
 qrcode = { version = "0.14.1", default-features = false }
+# #15 part 2 live video preview. Pure-Rust JPEG encoder for the low-res
+# preview frames (no C/system deps, mirrors the `qrcode` pure-Rust precedent);
+# used only by `playback/preview.rs` off the NDI submit path.
+jpeg-encoder = "0.6"
+# #51 LAN sp.local advertisement. `mdns-sd` is a maintained pure-Rust mDNS-SD
+# responder (no system Avahi/Bonjour daemon needed); `if-addrs` (the same crate
+# mdns-sd uses internally) enumerates the host's interface IPs so we advertise
+# the box's routable LAN IPv4 (never APIPA). Version-matched to mdns-sd's own
+# if-addrs requirement so cargo unifies them into one build.
+mdns-sd = "0.21"
+if-addrs = "0.15"
 
 [dev-dependencies]
 tower = "0.5"

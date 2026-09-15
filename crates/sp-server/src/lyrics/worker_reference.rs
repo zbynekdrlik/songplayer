@@ -1,13 +1,14 @@
-//! `LyricsWorker` extension — Lever-2 (#143) forced-alignment reference stage.
+//! `LyricsWorker` extension — Lever-2 (#143) forced-alignment reference stage
+//! (the v22 ★ tier).
 //!
 //! Extracted from `worker.rs::process_song` to keep that file under the
-//! 1000-line CI limit. `run_mtl_reference_stage` runs BEFORE the
-//! WhisperX/asr_path route decides anything: it aligns the best text
-//! candidate via mtl, verifies it against Gemini ASR through the reference
-//! gate (`orchestrator::run_reference_stage`), and on gate PASS ships the mtl
-//! line timings directly while stamping `videos.lyrics_reference`. Gate
+//! 1000-line CI limit. `run_mtl_reference_stage` is the FIRST tier: it aligns
+//! the best text candidate via mtl, verifies it against Gemini ASR through the
+//! reference gate (`orchestrator::run_reference_stage`), and on gate PASS ships
+//! the mtl line timings directly while stamping `videos.lyrics_reference`. Gate
 //! FAIL/ERROR writes the `{youtube_id}_alignment_audit.json` sidecar and
-//! falls through to the existing route unchanged.
+//! returns `None` so the caller falls through to the v22 g35t base tier
+//! (`worker_g35t`).
 
 use std::path::Path;
 
@@ -27,9 +28,8 @@ impl LyricsWorker {
     /// production passes `RealReferenceStageBackend`, tests pass a fake.
     ///
     /// Returns `Some(LyricsTrack)` on gate PASS — the caller ships it
-    /// directly, skipping the WhisperX/replicate route entirely for this
-    /// song. Returns `None` on skip/FAIL/ERROR — the caller falls through
-    /// to the existing route unchanged.
+    /// directly (★). Returns `None` on skip/FAIL/ERROR — the caller falls
+    /// through to the v22 g35t base tier (`worker_g35t`).
     pub(crate) async fn run_mtl_reference_stage(
         &self,
         video_id: i64,
@@ -162,23 +162,20 @@ impl LyricsWorker {
 
 /// Chooses the `lyrics_alignment_model` literal from a persisted
 /// `LyricsTrack.source` label. Precedence:
-///   - source label contains `mtl@rev1` (Lever-2 reference stage, #143) →
+///   - source label contains `mtl@rev1` (v21 reference stage, #143) →
 ///     ALIGNMENT_MODEL_MTL_REV1 — checked FIRST since the stamped label is
-///     `"<candidate.source>+mtl@rev1/g35t-ok"`, which could otherwise
-///     collide with a `timed-merge`-labelled candidate source.
-///   - source label contains `whisperx` → WHISPERX_V3_REV1
-///   - source label contains `timed-merge` → TIMED_MERGE
+///     `"<candidate.source>+mtl@rev1/g35t-ok"`.
+///   - source label is exactly the g35t base tier (#159) → G35T_REV1.
 ///   - source label is exactly `yt_subs` / `lrclib` / `spotify` (raw
-///     ship-through, no alignment ran) → NONE
-///   - anything else → None (NULL — unknown model, e.g. legacy
-///     ensemble:gemini paths that may still appear in `track.source`)
+///     ship-through, no alignment ran) → NONE (defensive; the v22 pipeline
+///     force-aligns these via mtl rather than shipping raw).
+///   - anything else → None (NULL — unknown model, e.g. legacy `ensemble:*`
+///     / `whisperx` paths that may still appear on un-reprocessed DB rows).
 pub(crate) fn alignment_model_for_source(source: &str) -> Option<&'static str> {
     if source.contains("mtl@rev1") {
         Some(crate::lyrics::ALIGNMENT_MODEL_MTL_REV1)
-    } else if source.contains("whisperx") {
-        Some(crate::lyrics::ALIGNMENT_MODEL_WHISPERX_V3_REV1)
-    } else if source.contains("timed-merge") {
-        Some(crate::lyrics::ALIGNMENT_MODEL_TIMED_MERGE)
+    } else if source == crate::lyrics::g35t_transcript::SOURCE_G35T {
+        Some(crate::lyrics::ALIGNMENT_MODEL_G35T_REV1)
     } else if source == "yt_subs" || source == "lrclib" || source == "spotify" {
         Some(crate::lyrics::ALIGNMENT_MODEL_NONE)
     } else {

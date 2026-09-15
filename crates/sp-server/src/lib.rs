@@ -1,12 +1,14 @@
 //! SongPlayer server — all business logic.
 
 pub mod ai;
+mod ai_proxy_watchdog;
 pub mod api;
 pub mod db;
 pub mod downloader;
 mod engine_command;
 pub use engine_command::EngineCommand;
 pub mod lyrics;
+pub mod mdns;
 pub mod metadata;
 pub mod obs;
 mod obs_bridge;
@@ -18,6 +20,7 @@ pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
 pub mod startup;
+pub mod stems;
 
 pub use panic_hook::install_panic_hook;
 
@@ -71,6 +74,14 @@ pub struct AppState {
     /// reads/writes it synchronously; the playback engine + pipeline threads
     /// share the same registry (default OFF, never persisted).
     pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
+    /// Per-playlist live preview tap registry (#15 part 2).
+    /// `GET /api/v1/playback/{id}/preview.jpg` reads it; the playback engine +
+    /// pipeline decode loops share the same registry (an idle tap costs one
+    /// atomic load per decoded frame, and never touches the NDI submit path).
+    pub preview_registry: Arc<playback::preview::PreviewRegistry>,
+    /// LAN `sp.local` advertisement status (#51) — written by the mDNS task,
+    /// read by `/api/v1/status` so the dashboard shows the offline-LAN URL.
+    pub lan_status: mdns::LanStatusHandle,
 }
 
 /// Status of external tool availability.
@@ -207,6 +218,15 @@ pub async fn start(
     // #151: one burn-id toggle registry shared by AppState (API) + the engine
     // (pipeline spawn + health). Default OFF, never persisted.
     let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
+    // #15 part 2: one live-preview tap registry shared by AppState (route) +
+    // the engine (registers a tap per pipeline at spawn; the decode loops feed
+    // it). Idle taps cost one atomic load per decoded frame.
+    let preview_registry = Arc::new(playback::preview::PreviewRegistry::new());
+
+    // #51: shared LAN sp.local status — the mDNS task (spawned after AppState)
+    // writes it, `/api/v1/status` reads it. Starts empty until the task
+    // detects the LAN IP and registers the record.
+    let lan_status = mdns::new_status_handle();
 
     // 3b'. dantesync clock health (#146). Shared handle: the 1 Hz poller writes
     // it, the playback engine reads it into every NDI health snapshot. Never
@@ -260,7 +280,20 @@ pub async fn start(
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
         ndi_burn_registry: ndi_burn_registry.clone(),
+        preview_registry: preview_registry.clone(),
+        lan_status: lan_status.clone(),
     };
+
+    // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
+    // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a
+    // failure only degrades to no advertisement, it never blocks startup.
+    mdns::spawn_lan_mdns(
+        pool.clone(),
+        config.port,
+        lan_status.clone(),
+        shutdown_tx.subscribe(),
+    )
+    .await;
 
     // Auto-start the CLIProxyAPI child process + start a watchdog that
     // periodically re-launches it if it dies. Without this, every
@@ -276,7 +309,7 @@ pub async fn start(
         }
         let watchdog_proxy = state.ai_proxy.clone();
         let watchdog_shutdown = shutdown_tx.subscribe();
-        tokio::spawn(ai_proxy_watchdog(watchdog_proxy, watchdog_shutdown));
+        tokio::spawn(ai_proxy_watchdog::run(watchdog_proxy, watchdog_shutdown));
     } else {
         info!("ai_proxy: not authenticated, skipping auto-start + watchdog");
     }
@@ -337,6 +370,16 @@ pub async fn start(
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
     let ai_client_for_dl = ai_client.clone();
+    // #154 idle gate: the lyrics worker reads these to defer heavy GPU/CPU work
+    // while the wall is in use (any pipeline Playing, or OBS streaming/recording).
+    let lyrics_ndi_health = ndi_health_registry.clone();
+    let lyrics_obs_state = obs_state.clone();
+    // #14 karaoke stem worker shares the same tools dir + idle-gate handles.
+    let stem_pool = pool.clone();
+    let stem_tools_dir = lyrics_tools_dir.clone();
+    let stem_ndi_health = ndi_health_registry.clone();
+    let stem_obs_state = obs_state.clone();
+    let stem_shutdown = shutdown_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -467,6 +510,8 @@ pub async fn start(
                     lyrics_tools_dir,
                     Some(ai_client_for_dl),
                     tools_event_tx.clone(),
+                    lyrics_ndi_health,
+                    lyrics_obs_state,
                 );
                 let current_processing_handle = lyrics_worker.current_processing();
                 tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
@@ -479,6 +524,18 @@ pub async fn start(
                     current_processing_handle,
                     lyrics_shutdown.subscribe(),
                 ));
+
+                // Karaoke stem worker (#14) — separates the catalog into
+                // vocals + instrumental sidecars under the SAME #154 idle gate,
+                // lowest priority (after lyrics).
+                let stem_worker = crate::stems::StemWorker::new(
+                    stem_pool,
+                    stem_tools_dir,
+                    stem_ndi_health,
+                    stem_obs_state,
+                );
+                tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
+                // (StemWorker::run logs "stem worker started" once it is live.)
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -603,6 +660,9 @@ pub async fn start(
         }
     });
 
+    // #14 karaoke: seed the process-global live control before pipelines spawn.
+    crate::stems::control::init_from_settings(&pool).await;
+
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {
         pool: pool.clone(),
@@ -634,6 +694,9 @@ pub async fn start(
     // #151: share the burn-id toggle registry BEFORE pipelines spawn (each
     // pipeline registers its output into it at spawn).
     engine.set_ndi_burn_registry(ndi_burn_registry.clone());
+    // #15 part 2: share the preview registry BEFORE pipelines spawn (each
+    // pipeline registers a preview tap into it at spawn).
+    engine.set_preview_registry(preview_registry.clone());
 
     // Pre-create pipelines for all active playlists so NDI sources appear immediately.
     let active_playlists = db::models::get_active_playlists(&pool)
@@ -728,6 +791,9 @@ pub async fn start(
                             // tears its pipeline down symmetrically.
                             engine.remove_pipeline(playlist_id);
                         }
+                        EngineCommand::SetKaraoke { mode, vocal_gain } => {
+                            engine.set_karaoke(mode, vocal_gain).await; // #14
+                        }
                     }
                 }
                 // Handle pipeline events (started, position, ended, error)
@@ -776,37 +842,6 @@ pub async fn start(
     info!("server stopped");
 
     Ok(())
-}
-
-/// Interval between ai_proxy health checks.
-const AI_PROXY_WATCHDOG_INTERVAL_SECS: u64 = 30;
-
-/// Poll the CLIProxyAPI child every `AI_PROXY_WATCHDOG_INTERVAL_SECS` and
-/// restart it if it died. Without this, a proxy crash mid-processing
-/// leaves the worker silently falling through to "no text sources
-/// available" for every subsequent song (2026-04-19 event). Exits on
-/// shutdown broadcast.
-async fn ai_proxy_watchdog(
-    proxy: Arc<ai::proxy::ProxyManager>,
-    mut shutdown: tokio::sync::broadcast::Receiver<()>,
-) {
-    let interval = std::time::Duration::from_secs(AI_PROXY_WATCHDOG_INTERVAL_SECS);
-    loop {
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(interval) => {
-                let status = proxy.status().await;
-                if status.running {
-                    continue;
-                }
-                warn!("ai_proxy watchdog: proxy is down, attempting restart");
-                match proxy.start().await {
-                    Ok(()) => info!("ai_proxy watchdog: restart succeeded"),
-                    Err(e) => warn!("ai_proxy watchdog: restart failed: {e}"),
-                }
-            }
-        }
-    }
 }
 
 /// Default interval, in seconds, between periodic playlist re-syncs — used

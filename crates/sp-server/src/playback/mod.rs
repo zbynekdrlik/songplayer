@@ -10,6 +10,7 @@ mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
 mod handle_pipeline_event;
+mod karaoke; // #14 set_karaoke (impl PlaybackEngine, 1000-line cap split)
 pub mod lock_state;
 mod lyrics_loader;
 pub mod ndi_burn;
@@ -20,7 +21,10 @@ pub mod pipeline;
 pub(crate) mod pipeline_paced;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced_idle;
+#[cfg(not(windows))]
+pub(crate) mod pipeline_stub;
 mod position_update;
+pub mod preview; // #15 part 2: live low-res video preview tap
 mod recovery;
 mod runtime_pipeline;
 pub mod state;
@@ -196,6 +200,12 @@ pub struct PlaybackEngine {
     /// building each health snapshot (`burn_on`). Defaults to an empty registry
     /// until `set_ndi_burn_registry` shares the one `lib.rs::start` owns.
     ndi_burn_registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
+    /// Per-playlist live preview tap registry (#15 part 2). Cloned into
+    /// `AppState` so `GET /api/v1/playback/{id}/preview.jpg` reads the same
+    /// taps the pipeline decode loops write. Each pipeline gets a `PreviewTap`
+    /// from it at spawn. Defaults to an empty registry until
+    /// `set_preview_registry` shares the one `lib.rs::start` owns.
+    preview_registry: std::sync::Arc<crate::playback::preview::PreviewRegistry>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -269,6 +279,7 @@ impl PlaybackEngine {
             ndi_burn_registry: std::sync::Arc::new(
                 crate::playback::ndi_burn::NdiBurnRegistry::new(),
             ),
+            preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
         }
     }
 
@@ -281,6 +292,18 @@ impl PlaybackEngine {
         registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
     ) {
         self.ndi_burn_registry = registry;
+    }
+
+    /// Inject the shared live-preview registry (#15 part 2) that
+    /// `lib.rs::start` also hands to `AppState`, so the HTTP
+    /// `GET /api/v1/playback/{id}/preview.jpg` handler and the pipeline decode
+    /// loops share one registry. Must be called before pipelines are spawned
+    /// (new pipelines register a tap into it at spawn).
+    pub fn set_preview_registry(
+        &mut self,
+        registry: std::sync::Arc<crate::playback::preview::PreviewRegistry>,
+    ) {
+        self.preview_registry = registry;
     }
 
     /// Set the boundary-paced emission staging flag (#147), read from the DB
@@ -311,6 +334,7 @@ impl PlaybackEngine {
 
         let genlock_pacing = self.genlock_pacing;
         let ndi_burn_registry = self.ndi_burn_registry.clone();
+        let preview_registry = self.preview_registry.clone();
         self.pipelines.entry(playlist_id).or_insert_with(|| {
             info!(
                 playlist_id,
@@ -319,6 +343,9 @@ impl PlaybackEngine {
             // #151: register this output's burn flag (default OFF, never
             // persisted) and hand the shared Arc to the pipeline's submitter.
             let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
+            // #15 part 2: register this playlist's preview tap and hand the
+            // handle to the decode loops (they offer decoded frames to it).
+            let preview_tap = preview_registry.register(playlist_id);
             let pipeline = PlaybackPipeline::spawn(
                 ndi_name.to_string(),
                 ndi_backend,
@@ -326,6 +353,7 @@ impl PlaybackEngine {
                 playlist_id,
                 genlock_pacing,
                 burn_on,
+                preview_tap,
             );
             PlaylistPipeline {
                 pipeline,

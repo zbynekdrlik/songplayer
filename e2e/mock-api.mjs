@@ -256,6 +256,7 @@ const failModes = {
   skip: false,
   previous: false,
   mode: false,
+  preview: false,
 };
 
 function maybeFail(kind, res) {
@@ -291,6 +292,26 @@ app.put("/api/v1/playback/:id/mode", (_req, res) => {
   res.json({ status: "mode_changed" });
 });
 
+// #15 part 2: live video preview. A minimal 1x1 JPEG so the dashboard <img>
+// gets a decodable image (non-zero naturalWidth) for playlist 1 (which the WS
+// stream marks Playing below); other playlists have no frame → 204 (idle).
+const PREVIEW_JPEG = Buffer.from(
+  "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof" +
+    "Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAAB" +
+    "AAAAAAAAAAAAAAAAAAAAAv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AfwD/2Q==",
+  "base64",
+);
+app.get("/api/v1/playback/:id/preview.jpg", (req, res) => {
+  if (maybeFail("preview", res)) return;
+  if (String(req.params.id) === "1") {
+    res.set("Content-Type", "image/jpeg");
+    res.set("Cache-Control", "no-store");
+    res.send(PREVIEW_JPEG);
+  } else {
+    res.status(204).end();
+  }
+});
+
 // Admin: flip a playback endpoint into 500-failure mode.
 // Test-only — used by Playwright specs to assert the UI's error path.
 app.post("/__mock/fail-mode", (req, res) => {
@@ -320,6 +341,24 @@ app.patch("/api/v1/settings", (req, res) => {
   res.json(settings);
 });
 
+// Karaoke (#14): live mode + vocal gain + stem progress. `/__mock/karaoke-last`
+// exposes the last POSTed body so specs can assert what the UI sent.
+let karaoke = { mode: "full_mix", vocal_gain: 0.3, stems_pending: 2, stems_done: 5 };
+let lastKaraokePost = null;
+app.get("/api/v1/karaoke", (_req, res) => {
+  res.json(karaoke);
+});
+app.post("/api/v1/karaoke", (req, res) => {
+  lastKaraokePost = req.body || {};
+  if (typeof lastKaraokePost.mode === "string") karaoke.mode = lastKaraokePost.mode;
+  if (typeof lastKaraokePost.vocal_gain === "number")
+    karaoke.vocal_gain = lastKaraokePost.vocal_gain;
+  res.status(204).end();
+});
+app.get("/__mock/karaoke-last", (_req, res) => {
+  res.json(lastKaraokePost || {});
+});
+
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({
@@ -329,6 +368,10 @@ app.get("/api/v1/status", (_req, res) => {
     ytdlp_available: true,
     ffmpeg_available: true,
     playlists_count: playlists.length,
+    // #51: LAN sp.local advertisement — the dashboard's LanAddress component
+    // reads these to show the offline-LAN URL + raw-IP fallback.
+    lan_url: "http://sp.local:8920",
+    lan_ip: "10.77.9.201",
   });
 });
 
@@ -583,6 +626,65 @@ const wss = new WebSocketServer({ server, path: "/api/v1/ws" });
 wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");
 
+  // #15 part 2: mark playlist 1 as Playing so its card renders the live
+  // video preview <img> (playlist 1's preview.jpg serves a real JPEG above).
+  // `state`/`mode` are the serde-derived variant names (`ServerMsg` uses the
+  // derive, not the lowercase REST strings).
+  const playingTimer = setTimeout(() => {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "PlaybackStateChanged",
+          data: { playlist_id: 1, state: "Playing", mode: "Continuous" },
+        }),
+      );
+      // Playlist 2 gets now-playing info but stays Idle (no PlaybackStateChanged)
+      // so its card renders the idle preview placeholder, not the <img>.
+      ws.send(
+        JSON.stringify({
+          type: "NowPlaying",
+          data: {
+            playlist_id: 2,
+            video_id: 2,
+            song: "Idle Song",
+            artist: "Idle Artist",
+            position_ms: 0,
+            duration_ms: 100000,
+          },
+        }),
+      );
+    }
+  }, 100);
+
+  // #154: one-shot LyricsQueueUpdate carrying the "waiting — wall in use"
+  // worker state (a song-less processing entry). Delayed so it lands after the
+  // card's initial HTTP fetch; buckets match /api/v1/lyrics/queue so the
+  // bucket-count test is unaffected. Drives the idle-gate badge render.
+  const badgeTimer = setTimeout(() => {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "LyricsQueueUpdate",
+          data: {
+            bucket0_count: 2,
+            bucket1_count: 12,
+            bucket2_count: 187,
+            pipeline_version: 2,
+            processing: {
+              video_id: 0,
+              youtube_id: "",
+              song: "",
+              artist: "",
+              stage: "waiting — wall in use (SP-fast Playing)",
+              provider: null,
+              started_at_unix_ms: 0,
+            },
+          },
+        }),
+      );
+    }
+  }, 500);
+
   // Send a NowPlaying event periodically
   const interval = setInterval(() => {
     const msg = {
@@ -615,6 +717,8 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     clearInterval(interval);
+    clearTimeout(badgeTimer);
+    clearTimeout(playingTimer);
     console.log("[mock-api] WebSocket client disconnected");
   });
 });

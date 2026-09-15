@@ -134,7 +134,7 @@ pub async fn fetch_lyrics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Helper: build a `Client` and override the base URL via wiremock's URI.

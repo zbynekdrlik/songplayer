@@ -4,7 +4,7 @@
 //! split-tests convention used elsewhere in the lyrics module — keeps probe.rs
 //! under the file-size cap and lets each test file stay narrowly focused.
 
-use super::probe::{ProbeReport, ProbeResult, probe_sources_impl};
+use super::probe::probe_sources_impl;
 use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 use crate::db::models::VideoLyricsRow;

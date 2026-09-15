@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_reply_returns_none_for_literal_uppercase_NONE() {
+    fn parse_reply_returns_none_for_literal_uppercase_none() {
         assert_eq!(SpotifyResolver::parse_reply("NONE"), None);
     }
 
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_reply_returns_none_for_mixed_case_None() {
+    fn parse_reply_returns_none_for_mixed_case_none() {
         assert_eq!(SpotifyResolver::parse_reply("None"), None);
     }
 

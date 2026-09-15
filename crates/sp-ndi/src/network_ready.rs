@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn wait_returns_false_when_probe_returns_empty() {
         let found = wait_for_network_ready_with_probe(
-            || vec![],
+            Vec::new,
             Duration::from_millis(60),
             Duration::from_millis(20),
         );

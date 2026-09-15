@@ -57,12 +57,38 @@ Read the token from that file — never type or echo it. Confirm with
 `Test-NetConnection region1.v2.argotunnel.com -Port 7844` (TCP reachable while
 QUIC is not) and expect four `Registered tunnel connection … protocol=http2`
 lines within seconds. Verify from the dev side, not the box:
-`curl -s -o /dev/null -w '%{http_code}' https://sp.newlevel.media/` → `200`.
+`curl -s -o /dev/null -w '%{http_code}' https://sp.newlevel.media/` → **`302`**
+(since #155 the public hostname is behind Cloudflare Access — a 302 to
+`newlevelchurch.cloudflareaccess.com` is the healthy "tunnel up" signal, NOT a
+`200`; see the Cloudflare Access subsection below). To confirm the ORIGIN behind
+the tunnel is serving, check the on-box LAN path instead:
+`Invoke-WebRequest http://127.0.0.1:8920/api/v1/status` → `200`.
 
 Diagnose the service's own stderr by launching a SECOND short-lived copy with
 `Start-Process -RedirectStandardError` (extra connectors are harmless) — the
 Windows service itself writes only "starting"/"stopped" to the event log and
 discards cloudflared's real output.
+
+### Public dashboard is behind Cloudflare Access (email OTP) — since 2026-09-14 (#155)
+
+`sp.newlevel.media` is protected by a **Cloudflare Access** (Zero Trust) app with
+a One-time PIN identity provider and an e-mail allowlist (the 3 owners). Only the
+**public hostname** is gated — the LAN path (`http://10.77.9.201:8920`,
+`sp.local`) is untouched. So the healthy signals differ by path:
+
+- **Public** `curl -sI https://sp.newlevel.media/` → **302** to
+  `newlevelchurch.cloudflareaccess.com/cdn-cgi/access/login/...` is now the
+  CORRECT "up" signal, **not** a fault. A `200` from the public hostname without a
+  logged-in `CF_Authorization` cookie would mean Access is OFF (the #155 bug).
+- **LAN / on-box** `Invoke-WebRequest http://127.0.0.1:8920/api/v1/status` → **200**
+  is the origin-health check (Access does not sit on the local port).
+- Access covers the whole hostname with **no path exclusions**, so the dashboard
+  WebSocket `/api/v1/ws` also rides the `CF_Authorization` cookie once logged in.
+
+Full config (app/policy ids, add/remove an email, rollback, the service-token
+option for automated public-hostname checks) is in `scripts/cloudflare/README.md`.
+The Cloudflare API token lives at `~/.secrets/cloudflare-newlevel-access` on the
+dev box — never echo or commit it.
 
 ## MCP tool traps (cost two agents hours on 2026-08-05)
 

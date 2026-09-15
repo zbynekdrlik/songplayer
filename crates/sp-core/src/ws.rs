@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::playback::{PlaybackMode, PlaybackState};
+use crate::playback::{KaraokeMode, PlaybackMode, PlaybackState};
 
 /// State of a song currently being processed by the lyrics pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -124,6 +124,11 @@ pub enum ServerMsg {
         provider_count: u8,
         duration_ms: u64,
     },
+    /// #14: the live karaoke mode + vocal gain changed (dashboard broadcast).
+    KaraokeStateChanged {
+        mode: KaraokeMode,
+        vocal_gain: f32,
+    },
 }
 
 #[cfg(test)]
@@ -191,6 +196,17 @@ mod tests {
             youtube_id: "abc".into(),
             stage: "text_merge".into(),
             provider: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMsg = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn karaoke_state_changed_roundtrip() {
+        let msg = ServerMsg::KaraokeStateChanged {
+            mode: KaraokeMode::KaraokeLow,
+            vocal_gain: 0.3,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: ServerMsg = serde_json::from_str(&json).unwrap();

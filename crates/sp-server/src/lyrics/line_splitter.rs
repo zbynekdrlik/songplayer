@@ -6,8 +6,6 @@
 //! NEVER produces uniform/evenly-distributed output (per
 //! `feedback_no_even_distribution.md`).
 
-use crate::lyrics::backend::{AlignedLine, AlignedTrack, AlignedWord};
-
 pub const DEFAULT_MAX_CHARS: usize = 32;
 
 #[derive(Debug, Clone, Copy)]
@@ -21,90 +19,6 @@ impl Default for SplitConfig {
             max_chars: DEFAULT_MAX_CHARS,
         }
     }
-}
-
-/// Apply line splitting to every line in the track. Lines under `max_chars`
-/// pass through untouched. Lines over are split using the priority order:
-/// 1. Sentence-end punctuation (`.!?…`)
-/// 2. Comma / pause (`,`, `;`, `:`)
-/// 3. Word-boundary balance — find split nearest center
-/// 4. Hard fallback — rightmost word boundary ≤ max_chars
-pub fn split_track(track: &AlignedTrack, cfg: SplitConfig) -> AlignedTrack {
-    let mut out_lines = Vec::with_capacity(track.lines.len());
-    for line in &track.lines {
-        if line.text.chars().count() <= cfg.max_chars {
-            out_lines.push(line.clone());
-            continue;
-        }
-        out_lines.extend(split_line(line, cfg));
-    }
-    AlignedTrack {
-        lines: out_lines,
-        provenance: track.provenance.clone(),
-        raw_confidence: track.raw_confidence,
-    }
-}
-
-fn split_line(line: &AlignedLine, cfg: SplitConfig) -> Vec<AlignedLine> {
-    let split_idx = find_split_index(&line.text, cfg.max_chars);
-    let split_idx = match split_idx {
-        Some(i) => i,
-        // No safe split found — leave the line alone (better than mid-word break)
-        None => return vec![line.clone()],
-    };
-
-    let (left_text, right_text) = (
-        &line.text[..split_idx].trim_end(),
-        &line.text[split_idx..].trim_start(),
-    );
-    if left_text.is_empty() || right_text.is_empty() {
-        return vec![line.clone()];
-    }
-
-    // Distribute timing proportional to non-whitespace char counts (NOT uniform).
-    // A longer left half gets proportionally more time — content-aware, not
-    // evenly distributed (per `feedback_no_even_distribution.md`).
-    let total = line
-        .text
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .count()
-        .max(1);
-    let left_chars = left_text.chars().filter(|c| !c.is_whitespace()).count();
-    let duration = line.end_ms.saturating_sub(line.start_ms);
-    let mid_ms = (line.start_ms + (duration as u64 * left_chars as u64 / total as u64) as u32)
-        .min(line.end_ms)
-        .max(line.start_ms);
-
-    // Distribute words by their proportional position in the byte string.
-    let (left_words, right_words) = split_words_by_index(line, split_idx);
-
-    let left_line = AlignedLine {
-        text: left_text.to_string(),
-        start_ms: line.start_ms,
-        end_ms: mid_ms,
-        words: left_words,
-    };
-    let right_line = AlignedLine {
-        text: right_text.to_string(),
-        start_ms: mid_ms,
-        end_ms: line.end_ms,
-        words: right_words,
-    };
-
-    // Recursively split halves if still too long
-    let mut out = Vec::new();
-    if left_line.text.chars().count() > cfg.max_chars {
-        out.extend(split_line(&left_line, cfg));
-    } else {
-        out.push(left_line);
-    }
-    if right_line.text.chars().count() > cfg.max_chars {
-        out.extend(split_line(&right_line, cfg));
-    } else {
-        out.push(right_line);
-    }
-    out
 }
 
 /// Find the byte-index for the split. Priority order:
@@ -164,14 +78,13 @@ fn find_split_index(text: &str, max_chars: usize) -> Option<usize> {
     text[..limit_idx].rfind(' ').map(|i| i + 1)
 }
 
-/// Same char-width splitting as `split_track`, but for `sp_core::lyrics::
-/// LyricsLine` (line-level, `words: None`). Used by the asr_path flow so its
-/// output gets the same ≤`max_chars` LED-wall line breaks the whisperx flow
-/// has (per the user: long lines like "His name will bring complete
-/// breakthrough" must wrap at ~32 chars). Reuses `find_split_index`; timing is
-/// distributed proportional to non-whitespace char count (never uniform, per
-/// `feedback_no_even_distribution.md`). The whisperx `AlignedTrack` path is
-/// untouched.
+/// Char-width splitting for `sp_core::lyrics::LyricsLine` (line-level,
+/// `words: None`). Used by the v22 g35t base tier (`g35t_transcript`) so its
+/// output gets ≤`max_chars` LED-wall line breaks (per the user: long lines
+/// like "His name will bring complete breakthrough" must wrap at ~32 chars).
+/// Reuses `find_split_index`; timing is distributed proportional to
+/// non-whitespace char count (never uniform, per
+/// `feedback_no_even_distribution.md`).
 pub fn split_lyrics_lines(
     lines: Vec<sp_core::lyrics::LyricsLine>,
     cfg: SplitConfig,
@@ -239,42 +152,6 @@ fn split_one_lyrics_line(
         out.push(right);
     }
     out
-}
-
-fn split_words_by_index(
-    line: &AlignedLine,
-    byte_idx: usize,
-) -> (Option<Vec<AlignedWord>>, Option<Vec<AlignedWord>>) {
-    let words = match &line.words {
-        Some(w) => w,
-        None => return (None, None),
-    };
-    if words.is_empty() {
-        return (None, None);
-    }
-
-    // Approximate — words.len() may not equal text.split_whitespace().count() if
-    // words came from ASR with different tokenization. Byte-proportional gives a
-    // reasonable boundary even on mismatched arrays. `line.text.len()` is the byte
-    // length and `byte_idx` is a byte offset, so this is byte-proportional, not
-    // char-proportional. For ASCII/Latin text (English/Spanish/Portuguese — mostly
-    // 1-2 byte chars) the difference is negligible; it skews toward multibyte
-    // regions on CJK text, which is an acceptable approximation for the karaoke
-    // use case.
-    let split_word = (words.len() * byte_idx / line.text.len().max(1)).min(words.len());
-    let (left, right) = words.split_at(split_word);
-    (
-        if left.is_empty() {
-            None
-        } else {
-            Some(left.to_vec())
-        },
-        if right.is_empty() {
-            None
-        } else {
-            Some(right.to_vec())
-        },
-    )
 }
 
 #[cfg(test)]

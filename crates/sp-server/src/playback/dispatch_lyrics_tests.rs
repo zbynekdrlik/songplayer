@@ -86,6 +86,7 @@ fn install_pipeline(
         playlist_id,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
     );
     let pp = PlaylistPipeline {
         pipeline,

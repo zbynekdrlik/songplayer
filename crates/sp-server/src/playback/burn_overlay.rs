@@ -259,7 +259,7 @@ mod tests {
             x: 4,
             y: 4,
         };
-        paint_nv12(&mut buf, 16, 16, 16, geom, 5, &vec![true; 25]);
+        paint_nv12(&mut buf, 16, 16, 16, geom, 5, &[true; 25]);
         assert_eq!(buf, before, "too-small rectangle must not paint");
     }
 

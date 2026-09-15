@@ -87,12 +87,26 @@ pub fn LyricsQueueCard() -> impl IntoView {
                             Some(prov) => format!("{} ({prov})", p.stage),
                             None => p.stage.clone(),
                         };
-                        view! {
-                            <div class="lyrics-processing">
-                                <strong>"Currently processing: "</strong>
-                                {format!("{} \u{2014} {}", p.song, p.artist)}
-                                <div>"Stage: "{stage_label}</div>
-                            </div>
+                        // #154: a song-less processing state is a worker status
+                        // badge (e.g. "waiting — wall in use (SP-fast Playing)")
+                        // rather than an actual song — render just the stage so
+                        // the owner sees WHY nothing is happening.
+                        if p.song.is_empty() && p.artist.is_empty() {
+                            view! {
+                                <div class="lyrics-processing">
+                                    <strong>{stage_label}</strong>
+                                </div>
+                            }
+                            .into_any()
+                        } else {
+                            view! {
+                                <div class="lyrics-processing">
+                                    <strong>"Currently processing: "</strong>
+                                    {format!("{} \u{2014} {}", p.song, p.artist)}
+                                    <div>"Stage: "{stage_label}</div>
+                                </div>
+                            }
+                            .into_any()
                         }
                     });
                     view! {
