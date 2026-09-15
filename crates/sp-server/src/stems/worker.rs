@@ -5,7 +5,7 @@
 //! vocals + instrumental sidecars via `scripts/stem_worker.py`. Runs at lowest
 //! priority (after lyrics), backoff-gated so a broken row never hot-loops.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,20 @@ use tracing::{error, info, warn};
 
 use crate::lyrics::aligner::isolation_timeout;
 use crate::lyrics::idle_gate::{GateLog, gate_setting_enabled, should_defer, wall_activity_from};
+use crate::lyrics::idle_gate_abort::run_with_wall_abort;
+
+/// #161: outcome of one stem-separation attempt run under the wall-abort
+/// watcher. Distinguishes a genuine failure (backoff-deferred) from a wall
+/// abort (re-queued with no penalty) at the `separate_stems` return boundary.
+enum StemStepResult {
+    /// Separation completed — record the two stems.
+    Done,
+    /// A genuine separation failure — record the backoff deferral.
+    Failed(anyhow::Error),
+    /// The wall became busy mid-run and the separator was killed — delete any
+    /// partial stems and leave the DB row pending (no penalty).
+    WallAborted(String),
+}
 
 /// Songs longer than this are not separated (huge stems, slow); marked terminal.
 const STEM_MAX_DURATION_MS: i64 = 30 * 60 * 1000;
@@ -192,19 +206,49 @@ impl StemWorker {
             }
         };
 
-        match crate::stems::separator::separate_stems(
-            &python,
-            &script_path,
-            &self.models_dir,
-            &audio_path,
-            &vocals_out,
-            &instrumental_out,
-            timeout,
-            gpu_mem.as_deref(),
+        // #161: separate under the mid-job abort watcher. If the wall goes busy
+        // while the GPU separator runs, kill the child (kill_on_drop) and
+        // re-queue with NO penalty. `separate_stems` is remote-free GPU work, so
+        // the whole call is watched (unlike the lyrics mtl case, which must
+        // exclude its trailing g35t HTTP verification).
+        let step = match run_with_wall_abort(
+            crate::stems::separator::separate_stems(
+                &python,
+                &script_path,
+                &self.models_dir,
+                &audio_path,
+                &vocals_out,
+                &instrumental_out,
+                timeout,
+                gpu_mem.as_deref(),
+            ),
+            gate_enabled,
+            || wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()),
         )
         .await
         {
-            Ok(()) => {
+            Ok(Ok(())) => StemStepResult::Done,
+            Ok(Err(e)) => StemStepResult::Failed(e),
+            Err(abort) => StemStepResult::WallAborted(abort.detail),
+        };
+        self.record_stem_result(&job, &vocals_out, &instrumental_out, step)
+            .await;
+    }
+
+    /// #161: apply the outcome of one separation attempt. `Done` records the
+    /// stems; `Failed` records the backoff deferral (the unchanged pre-#161
+    /// behaviour); `WallAborted` deletes any partial stems and writes NOTHING to
+    /// the DB, so `stem_status` stays NULL and `stem_attempts` is unchanged —
+    /// `get_next_video_for_stems` re-picks the row the instant the wall idles.
+    async fn record_stem_result(
+        &self,
+        job: &crate::db::models_stems::StemJob,
+        vocals_out: &Path,
+        instrumental_out: &Path,
+        result: StemStepResult,
+    ) {
+        match result {
+            StemStepResult::Done => {
                 match crate::db::models_stems::mark_stems_done(
                     &self.pool,
                     job.video_id,
@@ -224,7 +268,7 @@ impl StemWorker {
                     }
                 }
             }
-            Err(e) => {
+            StemStepResult::Failed(e) => {
                 let prior: i64 =
                     sqlx::query_scalar("SELECT stem_attempts FROM videos WHERE id = ?")
                         .bind(job.video_id)
@@ -244,6 +288,19 @@ impl StemWorker {
                     backoff,
                 )
                 .await;
+            }
+            StemStepResult::WallAborted(detail) => {
+                // Delete the aborted step's partial stem outputs; do NOT touch
+                // the DB — no backoff, no 'failed' status. The row stays pending
+                // (stem_status NULL, stem_attempts unchanged) and is re-picked
+                // the moment the wall goes idle again.
+                let _ = tokio::fs::remove_file(vocals_out).await;
+                let _ = tokio::fs::remove_file(instrumental_out).await;
+                info!(
+                    video_id = job.video_id,
+                    detail = %detail,
+                    "stem worker: aborted heavy step — wall became busy — re-queued no-penalty (#161)"
+                );
             }
         }
     }
@@ -320,6 +377,119 @@ mod tests {
                 .warned_no_python
                 .load(std::sync::atomic::Ordering::Relaxed),
             "tick should warn once when the venv python is missing"
+        );
+    }
+
+    // ---- #161 mid-job wall-abort re-queue semantics -----------------------
+
+    /// Seed playlist 1 (FK target) + one pending stem row (normalized, has an
+    /// audio path, stem_status NULL). Mirrors `worker_tests_idle_gate.rs`.
+    async fn seed_pending_stem_row(pool: &SqlitePool, video_id: i64) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'stem_pl', 'u', 'SP-fast', 1)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, audio_file_path) \
+             VALUES (?, 1, 'yt_stem', 1, '/tmp/x_audio.flac')",
+        )
+        .bind(video_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn stem_job(video_id: i64) -> crate::db::models_stems::StemJob {
+        crate::db::models_stems::StemJob {
+            video_id,
+            youtube_id: "yt_stem".into(),
+            audio_file_path: "/tmp/x_audio.flac".into(),
+            duration_ms: Some(180_000),
+            song: Some("s".into()),
+            artist: Some("a".into()),
+        }
+    }
+
+    /// A wall abort re-queues with NO penalty: partial stems deleted, DB row
+    /// left pending (stem_status NULL, stem_attempts unchanged), and the
+    /// selector re-picks it immediately.
+    #[tokio::test]
+    async fn wall_abort_re_queues_with_no_penalty() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        seed_pending_stem_row(&pool, 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        // Partial stem outputs the abort must delete.
+        let vocals = dir.path().join("v.flac");
+        let instr = dir.path().join("i.flac");
+        std::fs::write(&vocals, b"partial").unwrap();
+        std::fs::write(&instr, b"partial").unwrap();
+        let worker = test_worker(pool.clone(), dir.path().to_path_buf());
+
+        worker
+            .record_stem_result(
+                &stem_job(1),
+                &vocals,
+                &instr,
+                StemStepResult::WallAborted("output playing".into()),
+            )
+            .await;
+
+        let (status, attempts): (Option<String>, i64) =
+            sqlx::query_as("SELECT stem_status, stem_attempts FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(status.is_none(), "wall-abort must leave stem_status NULL");
+        assert_eq!(attempts, 0, "wall-abort must not increment stem_attempts");
+        assert!(!vocals.exists(), "partial vocals stem must be deleted");
+        assert!(!instr.exists(), "partial instrumental stem must be deleted");
+
+        let next = crate::db::models_stems::get_next_video_for_stems(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            next.map(|j| j.video_id),
+            Some(1),
+            "the aborted row must be re-picked immediately"
+        );
+    }
+
+    /// A GENUINE separation failure still records the backoff deferral —
+    /// distinct from a wall abort.
+    #[tokio::test]
+    async fn genuine_failure_still_records_the_deferral() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        seed_pending_stem_row(&pool, 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        let worker = test_worker(pool.clone(), dir.path().to_path_buf());
+
+        worker
+            .record_stem_result(
+                &stem_job(1),
+                &dir.path().join("v.flac"),
+                &dir.path().join("i.flac"),
+                StemStepResult::Failed(anyhow::anyhow!("separator boom")),
+            )
+            .await;
+
+        let (status, attempts): (Option<String>, i64) =
+            sqlx::query_as("SELECT stem_status, stem_attempts FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            status.as_deref(),
+            Some("failed"),
+            "a real failure records 'failed'"
+        );
+        assert_eq!(
+            attempts, 1,
+            "a real failure increments stem_attempts (backoff)"
         );
     }
 }

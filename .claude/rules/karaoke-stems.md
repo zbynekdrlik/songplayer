@@ -81,6 +81,16 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   `WALL_IDLE_SETTLE = 30 s`. Both workers share the clock through
   `GateLog::defer_settled` (the `GateLog` each already holds in a `Mutex`), so no
   worker constructor changed; the pure `should_defer` stays for its own tests.
+- **Mid-job abort watcher (#161, `idle_gate_abort.rs`):** the settle gate only
+  decides BEFORE a heavy step; once separation is running (2–5 min GPU child)
+  it does nothing. `run_with_wall_abort` races the separation future against a
+  1 s wall poll and kills the child (`kill_on_drop`) after 2 consecutive busy
+  samples (~2 s debounce — NOT the 30 s settle, which guards resume, not run).
+  A wall abort re-queues with NO penalty (`StemStepResult::WallAborted`): the
+  partial stems are deleted and the DB row is left pending (`stem_status` NULL,
+  `stem_attempts` unchanged), so `get_next_video_for_stems` re-picks it the
+  moment the wall idles. A genuine separation failure still records the backoff
+  deferral. The lyrics worker wraps its isolation + mtl steps the same way.
 - **DB (V24):** `videos.{vocals_file_path, instrumental_file_path, stem_status,
   stem_attempts, stem_next_attempt_at}`. `stem_status` NULL=pending → done /
   failed (retryable) / unsupported (terminal). Paths are also derived

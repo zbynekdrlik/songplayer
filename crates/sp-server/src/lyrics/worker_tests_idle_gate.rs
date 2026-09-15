@@ -229,6 +229,66 @@ fn idle_settle_busy_sample_resets_the_clock() {
     );
 }
 
+// ---- #161 mid-job wall-abort (worker seam) --------------------------------
+
+/// The core #161 guarantee at the worker level: with a Playing snapshot, a heavy
+/// step run under `wall_abort` is KILLED (its future dropped, never run to
+/// completion) within the ~2 s debounce, and the caller gets `Err(WallAbort)`.
+/// `start_paused` advances the 1 s poll + the mock 30 s step deterministically.
+#[tokio::test(start_paused = true)]
+async fn wall_abort_kills_running_step_when_wall_playing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
+    let (worker, _pool) = gate_worker(registry, ObsState::default()).await;
+
+    let completed = Arc::new(AtomicBool::new(false));
+    let c = completed.clone();
+    let heavy = async move {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        c.store(true, Ordering::SeqCst);
+        7u32
+    };
+
+    // Gate ON, wall Playing → the running step is killed within ~2 s.
+    let result = worker.wall_abort(heavy, true).await;
+    assert!(
+        result.is_err(),
+        "a playing wall must abort the running heavy step"
+    );
+    assert!(
+        !completed.load(Ordering::SeqCst),
+        "aborted step must be dropped, never run to completion"
+    );
+    if let Err(e) = &result {
+        assert!(
+            e.detail.contains("playing"),
+            "abort detail names the cause: {}",
+            e.detail
+        );
+    }
+}
+
+/// A mid-job abort surfaces the same song-less "waiting — wall in use" badge the
+/// pre-flight gate uses, carrying the cause detail — so the dashboard keeps a
+/// stable waiting state through the abort.
+#[tokio::test]
+async fn enter_wall_abort_sets_waiting_badge() {
+    let (worker, _pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
+    worker.enter_wall_abort("output playing").await;
+    let proc = worker.current_processing().read().await.clone();
+    let proc = proc.expect("waiting badge should be set");
+    assert!(
+        proc.stage.contains("waiting — wall in use"),
+        "stage was: {}",
+        proc.stage
+    );
+    assert!(
+        proc.stage.contains("output playing"),
+        "waiting detail should name the cause; stage was: {}",
+        proc.stage
+    );
+}
+
 /// The gate seam both workers share: a disabled gate never defers, regardless of
 /// the settle clock (unchanged behaviour).
 #[test]

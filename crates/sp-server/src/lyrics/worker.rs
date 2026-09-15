@@ -24,7 +24,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     ai::client::AiClient,
     db::models::get_next_video_missing_translation,
-    lyrics::{aligner, translator, worker_outcome::SongOutcome},
+    lyrics::{translator, worker_outcome::SongOutcome},
 };
 
 pub struct LyricsWorker {
@@ -586,36 +586,23 @@ impl LyricsWorker {
         .await;
 
         // Preprocess vocals (Mel-Roformer + anvuew); #154 passes the VRAM cap.
+        // #154/#161: read the wall gate ONCE per song — shared by the pre-mtl
+        // gate (`defer_before_mtl`) and the two mid-job abort watchers below.
         let gpu_mem = self.gpu_mem_setting().await;
-        let venv_python = self.venv_python.read().await.clone();
-        let clean_vocal: Option<PathBuf> = if let (Some(python), Some(audio_path)) = (
-            venv_python.as_ref(),
-            row.audio_file_path.as_ref().map(PathBuf::from),
-        ) {
-            if audio_path.exists() {
-                let wav_path = self.cache_dir.join(format!("{youtube_id}_vocals16k.wav"));
-                match aligner::preprocess_vocals(
-                    python,
-                    &self.script_path,
-                    &self.models_dir,
-                    &audio_path,
-                    &wav_path,
-                    aligner::isolation_timeout(row.duration_ms),
-                    gpu_mem.as_deref(),
-                )
-                .await
-                {
-                    Ok(p) => Some(p),
-                    Err(e) => {
-                        warn!("worker: vocal isolation failed for {youtube_id}: {e}");
-                        None
-                    }
-                }
-            } else {
-                None
+        let gate_enabled = self.gate_when_playing_enabled().await;
+        // #161: vocal isolation runs under the mid-job abort watcher — if the
+        // wall goes busy while Demucs is running, the child is killed and the
+        // whole song defers with NO backoff penalty (the partial WAV is
+        // discarded; a cache-hit re-isolate on the next idle pick is identical).
+        let clean_vocal: Option<PathBuf> = match self
+            .isolate_vocals(&row, gpu_mem.as_deref(), gate_enabled)
+            .await
+        {
+            Ok(v) => v,
+            Err(abort) => {
+                self.enter_wall_abort(&abort.detail).await;
+                return Ok(SongOutcome::WaitingForWall);
             }
-        } else {
-            None
         };
 
         self.broadcast_stage(
@@ -675,8 +662,14 @@ impl LyricsWorker {
             http_client: self.client.clone(),
             gemini_keys: gemini_keys.clone(),
             gpu_mem_setting: gpu_mem.clone(),
+            // #161: the backend wraps ONLY the mtl subprocess in the abort
+            // watcher (never the g35t HTTP verification), using these handles +
+            // the once-read gate flag.
+            ndi_health_registry: self.ndi_health_registry.clone(),
+            obs_state: self.obs_state.clone(),
+            gate_enabled,
         };
-        let mtl_track = self
+        let mtl_track = match self
             .run_mtl_reference_stage(
                 video_id,
                 &youtube_id,
@@ -684,7 +677,19 @@ impl LyricsWorker {
                 clean_vocal.as_deref(),
                 &reference_backend,
             )
-            .await;
+            .await
+        {
+            Ok(t) => t,
+            Err(abort) => {
+                // #161: the wall went busy DURING mtl force-align — defer the
+                // whole song with no penalty. Never fall through to the g35t
+                // base tier (that would degrade the ★ mtl tier, owner's
+                // quality-first rule); the next idle pick re-runs mtl to
+                // byte-identical output.
+                self.enter_wall_abort(&abort.detail).await;
+                return Ok(SongOutcome::WaitingForWall);
+            }
+        };
 
         // Tier 2 — v22 (#159) g35t base tier. The single fallback for every
         // song the reference stage did not ship: a Gemini 3.5 Transcribe
