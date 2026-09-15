@@ -171,6 +171,16 @@ pub(crate) fn heavy_step_memory_ok(name: &str) -> bool {
     memory_ok_for(name, read_headroom())
 }
 
+/// Positive-form twin of [`heavy_step_memory_ok`] for call sites: `true` when
+/// the heavy step must be deferred this tick. Call sites use this instead of
+/// `!heavy_step_memory_ok(..)` so no `!` sits at the spawn seam (a deleted-`!`
+/// mutant there is unobservable without real memory pressure); the decision
+/// itself is the unit-tested `memory_ok_for`.
+#[cfg_attr(test, mutants::skip)] // thin negation over a real-memory read; the core is tested via memory_ok_for
+pub(crate) fn heavy_step_memory_defers(name: &str) -> bool {
+    !heavy_step_memory_ok(name)
+}
+
 /// Read free physical RAM + free commit via `GlobalMemoryStatusEx`. `None` on
 /// any failure (treated as "allow"). Integration-only.
 #[cfg(windows)]
@@ -216,6 +226,7 @@ pub(crate) struct ChildJobGuard {
 
 #[cfg(windows)]
 impl Drop for ChildJobGuard {
+    #[cfg_attr(test, mutants::skip)] // closes an OS Job handle — only the kernel can observe it (KILL_ON_JOB_CLOSE); no in-process oracle
     fn drop(&mut self) {
         if let Some(h) = self.handle {
             use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};

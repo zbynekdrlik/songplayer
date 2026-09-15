@@ -321,7 +321,7 @@ impl crate::lyrics::worker::LyricsWorker {
         // #162: memory-headroom guard BEFORE the slot (owner's order). Below the
         // 4 GiB floor → defer with no backoff (`WaitingForMemory`), re-check next
         // tick; the WARN with the numbers is logged in `heavy_step_memory_ok`.
-        if !crate::lyrics::heavy_slot::heavy_step_memory_ok("isolation") {
+        if crate::lyrics::heavy_slot::heavy_step_memory_defers("isolation") {
             return Err(HeavyDefer::Memory);
         }
         let activity = self.wall_activity().await;

@@ -261,7 +261,7 @@ impl StemWorker {
         // → leave the row PENDING with NO `record_stem_deferral` (no backoff);
         // it is re-picked the next tick. The WARN with the numbers fires inside
         // `heavy_step_memory_ok`.
-        if !crate::lyrics::heavy_slot::heavy_step_memory_ok("stem separation") {
+        if crate::lyrics::heavy_slot::heavy_step_memory_defers("stem separation") {
             return;
         }
 

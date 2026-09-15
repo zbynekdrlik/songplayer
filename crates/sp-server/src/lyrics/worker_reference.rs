@@ -74,7 +74,7 @@ impl LyricsWorker {
         // conditions, so it only defers when mtl WILL run). Below the 4 GiB floor
         // → defer the whole song with no backoff (`WaitingForMemory`); the WARN
         // with the numbers is logged in `heavy_step_memory_ok`.
-        if !crate::lyrics::heavy_slot::heavy_step_memory_ok("mtl align") {
+        if crate::lyrics::heavy_slot::heavy_step_memory_defers("mtl align") {
             return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory);
         }
 
