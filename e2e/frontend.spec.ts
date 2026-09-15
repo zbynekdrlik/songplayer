@@ -274,3 +274,73 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
   expect(JSON.parse(femaleReq.postData() || "{}").gender).toBe("f");
   await expect(toggle).toHaveText("♀");
 });
+
+// ── #163: subtitles block must not resize the card ────────────────────────────
+
+test("karaoke panel keeps the card height stable across lyrics on/off (#163)", async ({
+  page,
+  request,
+}) => {
+  // The owner's report: "okno stále skáče hore dole" — the subtitles block under
+  // the player/preview appears only when there is a lyric line, so the card (and
+  // everything below it) jumps whenever lyrics pause. The panel must ALWAYS be in
+  // the DOM with reserved height; only the text inside it swaps.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
+    timeout: 10000,
+  });
+
+  const card = page.locator(".playlist-card", {
+    has: page.getByRole("heading", { name: "Worship" }),
+  });
+  // Wait for the WS-driven now-playing block to arrive (playlist 1 is marked
+  // Playing by the mock). This also proves the WebSocket is connected, so the
+  // /__mock/lyrics-update broadcast below actually reaches a client.
+  await expect(card.locator(".np-song")).toBeVisible({ timeout: 10000 });
+
+  const panel = card.locator(".karaoke-panel");
+
+  // 1) A lyric line WITH text.
+  const withText = await request.post("/__mock/lyrics-update", {
+    data: {
+      playlist_id: 1,
+      line_en: "Amazing grace how sweet",
+      line_sk: "Úžasná milosť aká sladká",
+      prev_line_en: "was blind but now I see",
+      next_line_en: "that saved a wretch like me",
+      active_word_index: 2,
+      word_count: 4,
+    },
+  });
+  expect(withText.ok()).toBeTruthy();
+
+  await expect(panel).toBeVisible({ timeout: 5000 });
+  await expect(panel.locator(".karaoke-current")).toContainText("Amazing");
+
+  const cardBox1 = await card.boundingBox();
+  const panelBox1 = await panel.boundingBox();
+  expect(cardBox1?.height ?? 0).toBeGreaterThan(0);
+  expect(panelBox1?.height ?? 0).toBeGreaterThan(0);
+
+  // 2) A pause between lines — nothing to show. The panel must stay in the DOM
+  // at the SAME height; only its text clears.
+  const noText = await request.post("/__mock/lyrics-update", {
+    data: { playlist_id: 1 },
+  });
+  expect(noText.ok()).toBeTruthy();
+
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".karaoke-current")).not.toContainText("Amazing");
+
+  const cardBox2 = await card.boundingBox();
+  const panelBox2 = await panel.boundingBox();
+
+  // Equal within 1px: the block reserves its space whether or not there is a
+  // lyric line, so nothing below it jumps.
+  expect(
+    Math.abs((panelBox1?.height ?? 0) - (panelBox2?.height ?? 0)),
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs((cardBox1?.height ?? 0) - (cardBox2?.height ?? 0)),
+  ).toBeLessThanOrEqual(1);
+});
