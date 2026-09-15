@@ -342,6 +342,7 @@ fn gate_log_defer_settled_never_defers_when_gate_disabled() {
         any_playing: true,
         obs_streaming: false,
         obs_recording: false,
+        known: true,
     };
     assert!(
         !log.defer_settled(false, in_use, Instant::now()),
