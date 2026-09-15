@@ -81,10 +81,13 @@ body {
 
 .dashboard-header {
     display: flex;
+    flex-wrap: wrap; /* phone width: title + LAN + OBS + genlock + Resolume wrap, never overflow (#165) */
     align-items: center;
     justify-content: space-between;
+    gap: 6px 16px;
     margin-bottom: 16px;
 }
+.dashboard-header > * { min-width: 0; max-width: 100%; }
 
 .dashboard-header h1 { font-size: 1.4rem; }
 
@@ -150,8 +153,11 @@ body {
 .now-playing-strip {
     min-height: 2.2rem;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+    min-width: 0;
+    overflow-wrap: anywhere;
     margin-bottom: 12px;
     padding: 6px 10px;
     border-radius: var(--radius);
@@ -184,6 +190,7 @@ body {
     .playlist-select-mobile {
         display: block;
         width: 100%;
+        max-width: 100%;
         padding: 8px;
         margin-bottom: 12px;
         background: var(--bg-card);
