@@ -36,14 +36,15 @@ use tracing::{info, warn};
 /// heavy child spawns. 4 GiB clears one ~3.2 GB CPU-RoFormer working set with
 /// margin on the 16 GB box, so a heavy step never starts the box into a
 /// low-virtual-memory condition (the 07:40 crash).
-pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 4_294_967_296; // 4 GiB
 
 /// Per-child Windows Job Object memory ceiling. Above the single-child working
 /// set (~3.2 GB) with headroom, so a genuine runaway is killed at the CHILD,
 /// never by starving the host. Only referenced inside the `#[cfg(windows)]`
 /// Job Object path.
-#[cfg(windows)]
-const CHILD_JOB_MEMORY_LIMIT_BYTES: usize = 6 * 1024 * 1024 * 1024;
+// Platform-independent literal (no arithmetic: the cfg(windows) product was
+// invisible to the Linux mutation runner) — pinned by `child_job_limit_is_six_gib`.
+pub(crate) const CHILD_JOB_MEMORY_LIMIT_BYTES: u64 = 6_442_450_944; // 6 GiB
 
 // ---------------------------------------------------------------------------
 // Layer 1 — process-global heavy-step slot (Semaphore with ONE permit).
@@ -248,7 +249,7 @@ impl Drop for ChildJobGuard {
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
     let handle = match child.id() {
-        Some(pid) => assign_win_job(pid, CHILD_JOB_MEMORY_LIMIT_BYTES),
+        Some(pid) => assign_win_job(pid, CHILD_JOB_MEMORY_LIMIT_BYTES as usize),
         None => None,
     };
     ChildJobGuard { handle }
