@@ -21,7 +21,7 @@ use tokio::process::Command;
 /// is the pre-#162 behaviour, kept ONLY as an operator option — never the
 /// default (the owner never approved idle-only as the default).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ProcessingMode {
+pub enum ProcessingMode {
     #[default]
     LowPriority,
     IdleOnly,
@@ -44,14 +44,14 @@ impl ProcessingMode {
 
 /// Which processor a heavy step runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Device {
+pub enum Device {
     Cpu,
     Gpu,
 }
 
 /// Windows scheduling priority class for a heavy step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Priority {
+pub enum Priority {
     Idle,
     BelowNormal,
 }
@@ -59,13 +59,13 @@ pub(crate) enum Priority {
 /// How ONE heavy subprocess (vocal isolation / mtl align / stem separation)
 /// should run right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct HeavyStepPlan {
-    pub(crate) device: Device,
-    pub(crate) priority: Priority,
+pub struct HeavyStepPlan {
+    pub device: Device,
+    pub priority: Priority,
     /// CPU thread cap applied via `OMP|MKL|TORCH_NUM_THREADS`. `Some(n)` in
     /// cpu-idle mode; `None` leaves the env unset (GPU path — today's
     /// behaviour, full parallelism).
-    pub(crate) threads: Option<usize>,
+    pub threads: Option<usize>,
 }
 
 impl HeavyStepPlan {
