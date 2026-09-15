@@ -475,3 +475,60 @@ async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
         "scene_active=false must not produce a degraded_reason even with connections=0"
     );
 }
+
+// ---- #167 registry readiness signals -------------------------------------
+
+#[test]
+fn register_pipeline_increments_created_count() {
+    let reg = NdiHealthRegistry::new();
+    assert_eq!(
+        reg.created_pipelines(),
+        0,
+        "fresh registry has no pipelines"
+    );
+    reg.register_pipeline();
+    assert_eq!(reg.created_pipelines(), 1);
+    reg.register_pipeline();
+    reg.register_pipeline();
+    assert_eq!(reg.created_pipelines(), 3);
+}
+
+#[test]
+fn reported_pipelines_counts_distinct_seeded_snapshots() {
+    let reg = NdiHealthRegistry::new();
+    assert_eq!(reg.reported_pipelines(), 0, "no heartbeats yet");
+    reg.update(mk_reported_snapshot(7));
+    assert_eq!(reg.reported_pipelines(), 1);
+    // A second distinct pipeline reporting bumps the count.
+    reg.update(mk_reported_snapshot(9));
+    assert_eq!(reg.reported_pipelines(), 2);
+    // A re-report of an existing pipeline does NOT double-count.
+    reg.update(mk_reported_snapshot(7));
+    assert_eq!(reg.reported_pipelines(), 2);
+}
+
+/// Minimal seeded snapshot for the readiness-count tests — every field zeroed
+/// except the identity, so `reported_pipelines()` (a map-len read) can be
+/// exercised without the full engine heartbeat path.
+fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
+    PipelineHealthSnapshot {
+        playlist_id,
+        ndi_name: format!("SP-{playlist_id}"),
+        state: PlaybackStateLabel::Idle,
+        connections: 0,
+        frames_submitted_total: 0,
+        frames_submitted_last_5s: 0,
+        observed_fps: 0.0,
+        nominal_fps: 0.0,
+        last_submit_ts: None,
+        last_heartbeat_ts: None,
+        consecutive_bad_polls: 0,
+        degraded_reason: None,
+        clock: crate::playback::clock_health::ClockHealth::default(),
+        pacing: Default::default(),
+        audio: Default::default(),
+        lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
+        lock_reason: String::new(),
+        burn_on: false,
+    }
+}

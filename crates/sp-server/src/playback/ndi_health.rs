@@ -12,8 +12,11 @@ use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{RwLock, atomic::Ordering};
-use std::time::Instant;
+use std::sync::{
+    RwLock,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::time::{Duration, Instant};
 use tracing::warn;
 
 /// The `degraded_reason` string a Playing-on-program pipeline gets when it has
@@ -187,6 +190,15 @@ pub struct NdiHealthRegistry {
     /// `PlaybackEngine` field) so the engine reaches it through the `Arc` it
     /// already holds; the single writer is `handle_health_snapshot`.
     recovery: NdiRecoveryTracker,
+    /// #167 readiness: the wall-clock instant this registry (≈ the process /
+    /// engine) started, so the heavy-work startup grace + floor are measured
+    /// off the same `Arc` both heavy workers already hold.
+    created_at: Instant,
+    /// #167 readiness: how many playback pipelines the engine has CREATED
+    /// (`register_pipeline`), as distinct from how many have REPORTED a
+    /// heartbeat (`snapshots` len). The gap is the "not proven idle yet" window
+    /// that must read as wall-in-use.
+    expected_pipelines: AtomicUsize,
 }
 
 impl NdiHealthRegistry {
@@ -197,7 +209,51 @@ impl NdiHealthRegistry {
         Self {
             snapshots: RwLock::new(HashMap::new()),
             recovery: NdiRecoveryTracker::new(),
+            created_at: Instant::now(),
+            expected_pipelines: AtomicUsize::new(0),
         }
+    }
+
+    /// #167: record that the engine created one more playback pipeline. Called
+    /// from `PlaybackEngine::ensure_pipeline` at creation (once per new
+    /// pipeline). Feeds `created_pipelines()` — the "how many outputs must
+    /// report before the wall reading is trustworthy" count.
+    pub fn register_pipeline(&self) {
+        self.expected_pipelines.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// #167: how many pipelines the engine has created so far.
+    pub fn created_pipelines(&self) -> usize {
+        self.expected_pipelines.load(Ordering::Relaxed)
+    }
+
+    /// #167: how many pipelines have reported at least one heartbeat (the
+    /// `snapshots` map holds exactly those). A poisoned lock reads as 0 (treat
+    /// the reading as not-yet-ready, the safe direction).
+    ///
+    /// mutants::skip — the RwLock-poison fallback arm is unreachable by any
+    /// terminating test (nothing poisons the lock), so its `0` literal is a
+    /// MISSED mutant by construction; the map-len read IS exercised by
+    /// `reported_pipelines_counts_distinct_seeded_snapshots`, and the readiness
+    /// DECISION (`activity_known`) is exhaustively scored in `idle_gate.rs`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn reported_pipelines(&self) -> usize {
+        match self.snapshots.read() {
+            Ok(map) => map.len(),
+            Err(_) => 0,
+        }
+    }
+
+    /// #167: how long since this registry (≈ engine start) was created — the
+    /// input to the startup grace + the 60 s heavy-step floor.
+    ///
+    /// mutants::skip — a wall-clock elapsed read; a mutant would only be caught
+    /// by a wall-time assertion (non-deterministic on the runner). The pure
+    /// grace/floor DECISIONS it feeds (`activity_known`, `startup_floor_defers`)
+    /// are exhaustively mutation-scored in `lyrics/idle_gate.rs`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn since_created(&self) -> Duration {
+        self.created_at.elapsed()
     }
 
     /// #127: evaluate the receiver-recovery trigger for one pipeline and apply

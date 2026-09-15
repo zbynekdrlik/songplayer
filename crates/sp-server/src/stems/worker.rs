@@ -15,7 +15,9 @@ use tracing::{error, info, warn};
 
 use crate::lyrics::aligner::isolation_timeout;
 use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
-use crate::lyrics::idle_gate::{GateLog, WallActivity, should_defer, wall_activity_from};
+use crate::lyrics::idle_gate::{
+    GateLog, WallActivity, should_defer, startup_floor_defers, wall_activity_from,
+};
 use crate::lyrics::idle_gate_abort::run_with_wall_abort;
 
 /// #161: outcome of one stem-separation attempt run under the wall-abort
@@ -256,6 +258,21 @@ impl StemWorker {
                 return;
             }
         };
+
+        // #167: no heavy step for the first 60 s after engine start — the wall
+        // pipelines must come up on a fully quiet box (the post-deploy E2E samples
+        // the engine in exactly this window). Checked AFTER a job is selected so it
+        // only logs when there is real work; the row stays pending (no backoff),
+        // re-picked next tick.
+        if let Some(reg) = self.ndi_health_registry.as_ref()
+            && startup_floor_defers(reg.since_created())
+        {
+            info!(
+                video_id = job.video_id,
+                "stem worker: heavy step separation deferred (wall unknown — startup grace)"
+            );
+            return;
+        }
 
         // Terminal skip: a song too long for a sane stem pass (2026-09-15 —
         // long "warm-up" files pin the heavy child's memory near its ceiling

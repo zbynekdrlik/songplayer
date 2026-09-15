@@ -59,9 +59,7 @@ impl WallActivity {
     /// The wall is in use iff the reading is not yet trustworthy (`!known`, #167)
     /// or any of the three live signals is active.
     pub(crate) fn in_use(&self) -> bool {
-        // RED (#167): ignores `known` — the production bug this ticket fixes. The
-        // GREEN commit prepends `!self.known ||`.
-        self.any_playing || self.obs_streaming || self.obs_recording
+        !self.known || self.any_playing || self.obs_streaming || self.obs_recording
     }
 
     /// Short, generic reason for the gate log / dashboard, or `None` when idle.
@@ -99,20 +97,14 @@ pub(crate) const HEAVY_STEP_STARTUP_FLOOR: Duration = Duration::from_secs(60);
 /// until the grace elapses, so a box that has not yet created its outputs still
 /// defers heavy work.
 pub(crate) fn activity_known(expected: usize, reported: usize, since_start: Duration) -> bool {
-    // RED (#167): always known — fails the startup-unknown tests. The GREEN commit
-    // returns `(expected > 0 && reported >= expected) || since_start >= STARTUP_GRACE`.
-    let _ = (expected, reported, since_start);
-    true
+    (expected > 0 && reported >= expected) || since_start >= STARTUP_GRACE
 }
 
 /// Should EVERY heavy step be deferred right now purely because the engine only
 /// just started (#167)? True for the first [`HEAVY_STEP_STARTUP_FLOOR`] after
 /// engine start, regardless of wall activity. Pure.
 pub(crate) fn startup_floor_defers(since_start: Duration) -> bool {
-    // RED (#167): never defers — fails `startup_grace_defers_heavy_step`. The GREEN
-    // commit returns `since_start < HEAVY_STEP_STARTUP_FLOOR`.
-    let _ = since_start;
-    false
+    since_start < HEAVY_STEP_STARTUP_FLOOR
 }
 
 /// True iff any pipeline health snapshot reports `Playing`. `Playing` is
@@ -223,9 +215,19 @@ pub(crate) async fn wall_activity_from(
     ndi_health_registry: Option<&std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
     obs_state: Option<&std::sync::Arc<tokio::sync::RwLock<crate::obs::ObsState>>>,
 ) -> WallActivity {
-    let any_playing = match ndi_health_registry {
-        Some(reg) => any_playing(reg.snapshots().iter().map(|s| &s.state)),
-        None => false,
+    let (any_playing, known) = match ndi_health_registry {
+        Some(reg) => (
+            any_playing(reg.snapshots().iter().map(|s| &s.state)),
+            // #167: the reading is trustworthy only once every created pipeline
+            // has reported (or the startup grace elapsed). No registry (unit
+            // tests) → a known-idle wall.
+            activity_known(
+                reg.created_pipelines(),
+                reg.reported_pipelines(),
+                reg.since_created(),
+            ),
+        ),
+        None => (false, true),
     };
     let (obs_streaming, obs_recording) = match obs_state {
         Some(obs) => {
@@ -238,8 +240,7 @@ pub(crate) async fn wall_activity_from(
         any_playing,
         obs_streaming,
         obs_recording,
-        // RED (#167): placeholder — GREEN computes readiness from the registry.
-        known: true,
+        known,
     }
 }
 
@@ -256,9 +257,18 @@ impl crate::lyrics::worker::LyricsWorker {
     /// tests) read as idle.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn wall_activity(&self) -> WallActivity {
-        let any_playing = match &self.ndi_health_registry {
-            Some(reg) => any_playing(reg.snapshots().iter().map(|s| &s.state)),
-            None => false,
+        let (any_playing, known) = match &self.ndi_health_registry {
+            Some(reg) => (
+                any_playing(reg.snapshots().iter().map(|s| &s.state)),
+                // #167: trustworthy only once every created pipeline reported
+                // (or the grace elapsed); no registry (tests) → known-idle.
+                activity_known(
+                    reg.created_pipelines(),
+                    reg.reported_pipelines(),
+                    reg.since_created(),
+                ),
+            ),
+            None => (false, true),
         };
         let (obs_streaming, obs_recording) = match &self.obs_state {
             Some(obs) => {
@@ -271,8 +281,7 @@ impl crate::lyrics::worker::LyricsWorker {
             any_playing,
             obs_streaming,
             obs_recording,
-            // RED (#167): placeholder — GREEN computes readiness from the registry.
-            known: true,
+            known,
         }
     }
 
