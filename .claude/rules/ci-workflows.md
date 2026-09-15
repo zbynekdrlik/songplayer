@@ -63,3 +63,15 @@ it polls the push-run `Gate` check (needs `checks: read`) to confirm it was gree
 closing the hole where a shared failure reds the push Gate but is skipped-ok on the
 PR Gate. `version-check` must stay `pull_request`-only (a dev push legitimately has a
 `-dev` VERSION).
+
+## RED-GREEN gate: retroactive `[no-test: <sha> <reason>]` (release PR #160)
+`scripts/check-red-green-order.sh` runs on the PR event over the whole
+`main..dev` range, so a `fix(#N):` commit that landed on dev without a
+`[no-test:]` marker (a merge-integration compile fix, a clippy allow) fails the
+release PR weeks later. History rewrite is banned — declare the LOGGED bypass
+from a LATER commit instead: an empty `chore(red-green): …` commit whose body
+carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
+`bypass: … (declared by <sha7>)`. Only the leading `fix(#N):` form is gated;
+scope-only subjects (`fix(stems): … (#14)`) are not. Run
+`bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
+release PR — it is bash-only, allowed under Tier-0.
