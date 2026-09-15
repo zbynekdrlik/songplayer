@@ -115,6 +115,14 @@ pub(crate) fn separation_abort_armed(plan: &HeavyStepPlan) -> bool {
     plan.is_gpu()
 }
 
+/// #162: the settle-free defer decision used when the gate-log mutex is
+/// poisoned — only `idle-only` can defer, and only while the wall is in use.
+/// Pure so both arms are unit-tested (`worker_plan_tests.rs`); the inline
+/// expression let two mutants survive.
+pub(crate) fn stem_defer_fallback(mode: ProcessingMode, activity: WallActivity) -> bool {
+    mode == ProcessingMode::IdleOnly && should_defer(true, activity)
+}
+
 impl StemWorker {
     pub fn new(
         pool: SqlitePool,
@@ -197,7 +205,7 @@ impl StemWorker {
             Ok(mut g) => stem_defer_decision(mode, true, activity, &mut g, now).is_some(),
             // Poisoned lock: fall back to the settle-free decision (idle-only
             // only), no transition logging — unchanged from the pre-#162 path.
-            Err(_) => mode == ProcessingMode::IdleOnly && should_defer(true, activity),
+            Err(_) => stem_defer_fallback(mode, activity),
         };
         if defer {
             return;
