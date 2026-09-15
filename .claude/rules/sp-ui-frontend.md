@@ -121,3 +121,23 @@ Gate it: render nothing when the state is a global no-op (`pacing.enabled ==
 false`), show a per-card badge only where it is actionable (Playing/Paused
 outputs), and fold the whole-box status into ONE header summary (#164,
 `ndi_health.rs::should_show_lock_badge` / `global_summary`).
+
+## Dashboard = one playlist SELECTOR + ONE work area (#165), not a grid of cards
+
+`dashboard.rs` no longer renders `<For each=store.playlists>` of `PlaylistCard`s.
+It renders a `PlaylistSelector` (left `.playlist-selector-list` rows on desktop,
+a `.playlist-select-mobile` `<select>` on ≤700px — both always in the DOM, CSS
+toggles) + a `PlaylistWorkspace` that reuses ONE `PlaylistCard`
+(`show_badge=false`) for the selected playlist. Selection state lives in
+`store.selected_playlist: RwSignal<Option<i64>>` (+ `selection_pinned`), mirrored
+to the URL `?playlist=<id>` and `localStorage` via `components/selection.rs`.
+Seeded once in `App()` (persisted → pinned); the dashboard's auto-follow `Effect`
+defaults an UNPINNED selection to the playing playlist (first by name), so a
+fresh load preselects what's playing while a reload keeps the operator's pick.
+The #164 genlock badge belongs ONLY in the selector rows + the header
+`GlobalLockBadge` summary — never the work area (`show_badge=false`). The
+"Práve hrá" strip (`.now-playing-strip`) is always rendered with a reserved
+`min-height` (layout-stable, same discipline as the karaoke panel). Any e2e that
+asserts on a specific playlist's card must SELECT it first (click its
+`playlist-selector-row`, or a mobile `playlist-select` option), then read the one
+`playlist-workspace` card — the old per-card grid locators no longer resolve.
