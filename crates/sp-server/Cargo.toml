@@ -56,6 +56,20 @@ jpeg-encoder = "0.6"
 mdns-sd = "0.21"
 if-addrs = "0.15"
 
+# #162: the box-overload guard's Windows OS calls — GlobalMemoryStatusEx for the
+# pre-spawn memory-headroom read + a per-child Job Object (JOB_OBJECT_LIMIT_
+# PROCESS_MEMORY + KILL_ON_JOB_CLOSE) so an OOMing heavy child dies, never the
+# host. Thin FFI (windows-sys), mirroring sp-decoder's `windows` precedent;
+# cfg(windows) only, so the Linux workspace build is untouched.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_SystemInformation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tower = "0.5"
 wiremock = "0.6"

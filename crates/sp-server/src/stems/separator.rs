@@ -80,6 +80,9 @@ pub async fn separate_stems(
         return Ok(());
     }
 
+    // #162: hold the process-global heavy-step slot for this child's lifetime
+    // (after the cache check) — one heavy child at a time process-wide.
+    let _slot = crate::lyrics::heavy_slot::acquire_slot("stem separation").await;
     let mut cmd = Command::new(python_path);
     cmd.args(separate_stems_args(
         script_path,
@@ -124,6 +127,9 @@ pub async fn separate_stems(
     );
 
     let child = cmd.spawn().context("failed to spawn separate-stems")?;
+    // #162: cap the child's memory (Windows Job Object) so an OOM kills the
+    // child, not the host. Held (with the slot) until the child exits below.
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     // `wait_with_output` takes the child BY VALUE and drains both pipes while it
     // waits, so no timeout branch can `child.kill()` any more. That is fine:
     // `kill_on_drop(true)` is set above, so when the timeout fires and we drop the

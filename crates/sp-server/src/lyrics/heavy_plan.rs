@@ -71,8 +71,9 @@ pub struct HeavyStepPlan {
 impl HeavyStepPlan {
     /// cpu-idle: GPU untouched (the script runs `--force-cpu`, forcing CPU
     /// in-process — see [`apply`](Self::apply) for why we no longer hide the GPU
-    /// via `CUDA_VISIBLE_DEVICES`), `IDLE_PRIORITY_CLASS`, thread cap = half the
-    /// logical cores. Cannot disturb the live wall.
+    /// via `CUDA_VISIBLE_DEVICES`), `IDLE_PRIORITY_CLASS`, thread cap = a QUARTER
+    /// of the logical cores (#162 — minimal load, not speed). Cannot disturb the
+    /// live wall.
     pub(crate) fn cpu_idle() -> Self {
         Self {
             device: Device::Cpu,
@@ -192,7 +193,7 @@ impl HeavyStepPlan {
     }
 }
 
-/// CPU-idle thread cap: half the logical cores, at least 1. Reads the
+/// CPU-idle thread cap: a quarter of the logical cores, at least 1. Reads the
 /// environment (`available_parallelism`) so it is integration-only; the pure
 /// rule it delegates to (`cpu_idle_threads_for`) is unit-tested.
 #[cfg_attr(test, mutants::skip)]
@@ -204,9 +205,11 @@ fn cpu_idle_threads() -> usize {
     )
 }
 
-/// Pure half-cores rule (extracted so it is deterministic in tests).
+/// Pure quarter-cores rule (#162 — minimal load, not speed): `max(1, cores/4)`,
+/// so the 12-core box runs a heavy CPU step on 3 threads. Extracted so it is
+/// deterministic in tests.
 fn cpu_idle_threads_for(cores: usize) -> usize {
-    (cores / 2).max(1)
+    (cores / 2).max(1) // RED (#162): GREEN sets cores/4
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +219,19 @@ fn cpu_idle_threads_for(cores: usize) -> usize {
 // ---------------------------------------------------------------------------
 
 use crate::lyrics::idle_gate_abort::WallAbort;
+use crate::lyrics::worker_outcome::SongOutcome;
 use std::path::PathBuf;
+
+/// Why a heavy lyrics step (isolation / mtl) deferred WITHOUT touching the
+/// per-row backoff — both map to a no-penalty `SongOutcome` in `defer_heavy`.
+#[derive(Debug)]
+pub(crate) enum HeavyDefer {
+    /// #161: the wall went busy mid-GPU-step (idle-only mode) → `WaitingForWall`.
+    WallAbort(WallAbort),
+    /// #162: free RAM/commit below `HEAVY_STEP_MIN_FREE_BYTES` before the step
+    /// (the WARN is already logged where the headroom was read) → `WaitingForMemory`.
+    Memory,
+}
 
 impl crate::lyrics::worker::LyricsWorker {
     /// The live `lyrics_processing_mode` operator setting (default low-priority),
@@ -291,14 +306,24 @@ impl crate::lyrics::worker::LyricsWorker {
     /// - `LowPriority` + wall in use → CPU-idle, abort watcher OFF (a CPU/IDLE
     ///   job cannot disturb the wall, so it is never aborted).
     /// - `IdleOnly` → GPU with the abort watcher armed; an abort surfaces as
-    ///   `WallAbort` so the caller defers the whole song (today's semantics).
+    ///   `Err(HeavyDefer::WallAbort)` so the caller defers the whole song.
+    ///
+    /// A pre-step low-memory reading (either mode) returns
+    /// `Err(HeavyDefer::Memory)` BEFORE the slot — the song defers with no
+    /// backoff and re-runs when memory frees (#162).
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn isolate_with_regime(
         &self,
         row: &crate::db::models::VideoLyricsRow,
         gpu_mem: Option<&str>,
         mode: ProcessingMode,
-    ) -> Result<Option<PathBuf>, WallAbort> {
+    ) -> Result<Option<PathBuf>, HeavyDefer> {
+        // #162: memory-headroom guard BEFORE the slot (owner's order). Below the
+        // 4 GiB floor → defer with no backoff (`WaitingForMemory`), re-check next
+        // tick; the WARN with the numbers is logged in `heavy_step_memory_ok`.
+        if !crate::lyrics::heavy_slot::heavy_step_memory_ok("isolation") {
+            return Err(HeavyDefer::Memory);
+        }
         let activity = self.wall_activity().await;
         let plan = HeavyStepPlan::for_activity(mode, activity);
         let detail = self.wall_regime_detail(activity).await;
@@ -306,7 +331,7 @@ impl crate::lyrics::worker::LyricsWorker {
             "lyrics_worker: heavy step isolation mode={} (wall {detail})",
             plan.label()
         );
-        match (mode, plan.is_gpu()) {
+        let result = match (mode, plan.is_gpu()) {
             (ProcessingMode::LowPriority, true) => {
                 match self.isolate_vocals(row, gpu_mem, &plan, true).await {
                     Ok(v) => Ok(v),
@@ -326,6 +351,25 @@ impl crate::lyrics::worker::LyricsWorker {
                 self.isolate_vocals(row, gpu_mem, &plan, false).await
             }
             (ProcessingMode::IdleOnly, _) => self.isolate_vocals(row, gpu_mem, &plan, true).await,
+        };
+        result.map_err(HeavyDefer::WallAbort)
+    }
+
+    /// Map a [`HeavyDefer`] to its no-penalty `SongOutcome`: a `WallAbort`
+    /// surfaces the "waiting — wall in use" badge (`WaitingForWall`); a `Memory`
+    /// defer clears the in-flight marker so the selector re-picks next tick
+    /// (`WaitingForMemory`). Neither touches the per-row backoff.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn defer_heavy(&self, d: HeavyDefer) -> SongOutcome {
+        match d {
+            HeavyDefer::WallAbort(abort) => {
+                self.enter_wall_abort(&abort.detail).await;
+                SongOutcome::WaitingForWall
+            }
+            HeavyDefer::Memory => {
+                self.clear_processing().await;
+                SongOutcome::WaitingForMemory
+            }
         }
     }
 }

@@ -30,9 +30,11 @@ impl LyricsWorker {
     /// Returns `Ok(Some(LyricsTrack))` on gate PASS — the caller ships it
     /// directly (★). Returns `Ok(None)` on skip/FAIL/ERROR — the caller falls
     /// through to the v22 g35t base tier (`worker_g35t`). Returns
-    /// `Err(WallAbort)` (#161) when the mtl subprocess was killed mid-align
-    /// because the wall became busy — the caller defers the whole song
-    /// (WaitingForWall) and NEVER degrades to the base tier.
+    /// `Err(HeavyDefer)` (#161/#162) when the whole song must defer with NO
+    /// backoff: `WallAbort` (the mtl subprocess was killed mid-align because the
+    /// wall became busy → WaitingForWall) or `Memory` (free RAM/commit below the
+    /// floor before the mtl spawn → WaitingForMemory). Either way the caller
+    /// NEVER degrades to the base tier — the next pick re-runs mtl to identical ★.
     pub(crate) async fn run_mtl_reference_stage(
         &self,
         video_id: i64,
@@ -40,7 +42,7 @@ impl LyricsWorker {
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,
         backend: &dyn crate::lyrics::orchestrator::ReferenceStageBackend,
-    ) -> Result<Option<LyricsTrack>, crate::lyrics::idle_gate_abort::WallAbort> {
+    ) -> Result<Option<LyricsTrack>, crate::lyrics::heavy_plan::HeavyDefer> {
         const MIN_LINES: usize = 4;
 
         let mtl_cfg = crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir);
@@ -66,6 +68,14 @@ impl LyricsWorker {
                 "reference_stage: candidate below the {MIN_LINES}-line floor — skipping"
             );
             return Ok(None);
+        }
+
+        // #162: memory-headroom guard BEFORE the mtl heavy step (after the skip
+        // conditions, so it only defers when mtl WILL run). Below the 4 GiB floor
+        // → defer the whole song with no backoff (`WaitingForMemory`); the WARN
+        // with the numbers is logged in `heavy_step_memory_ok`.
+        if !crate::lyrics::heavy_slot::heavy_step_memory_ok("mtl align") {
+            return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory);
         }
 
         let outcome =
@@ -158,7 +168,9 @@ impl LyricsWorker {
                     detail = %detail,
                     "reference_stage: mtl aborted — wall became busy (#161)"
                 );
-                Err(crate::lyrics::idle_gate_abort::WallAbort { detail })
+                Err(crate::lyrics::heavy_plan::HeavyDefer::WallAbort(
+                    crate::lyrics::idle_gate_abort::WallAbort { detail },
+                ))
             }
         }
     }

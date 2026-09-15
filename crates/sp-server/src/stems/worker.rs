@@ -256,6 +256,15 @@ impl StemWorker {
             }
         };
 
+        // #162: memory-headroom guard BEFORE the heavy separation (owner's
+        // order: check memory before acquiring the slot). Below the 4 GiB floor
+        // → leave the row PENDING with NO `record_stem_deferral` (no backoff);
+        // it is re-picked the next tick. The WARN with the numbers fires inside
+        // `heavy_step_memory_ok`.
+        if !crate::lyrics::heavy_slot::heavy_step_memory_ok("stem separation") {
+            return;
+        }
+
         // #162: separate under the priority regime. In `low-priority` while the
         // wall is in use the plan is CPU-idle — it is NEVER aborted (a CPU/IDLE
         // job cannot disturb the wall). A GPU plan (wall idle, or idle-only) runs
