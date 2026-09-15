@@ -111,6 +111,14 @@ pub struct DashboardStore {
     /// dashboard's `GlobalLockBadge` poll loop and read by every per-card
     /// `LockBadge`.
     pub ndi_health: RwSignal<Vec<NdiOutputHealth>>,
+    /// #165: which playlist the single dashboard work area shows. `None` until
+    /// the first playlist load resolves it (persisted → playing → first).
+    pub selected_playlist: RwSignal<Option<i64>>,
+    /// #165: `true` once the selection is user-driven (a click / `<select>` /
+    /// "Prejsť") or restored from the URL/localStorage — the auto-follow Effect
+    /// then stops tracking the playing playlist so a reload keeps the operator's
+    /// choice instead of snapping back to whatever is playing.
+    pub selection_pinned: RwSignal<bool>,
 }
 
 impl DashboardStore {
@@ -129,6 +137,8 @@ impl DashboardStore {
             lyrics_songs: RwSignal::new(vec![]),
             last_reprocess: RwSignal::new(None),
             ndi_health: RwSignal::new(vec![]),
+            selected_playlist: RwSignal::new(None),
+            selection_pinned: RwSignal::new(false),
         }
     }
 

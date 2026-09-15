@@ -136,10 +136,21 @@ fn is_cuda_oom(text: &str) -> bool {
     text.contains("CUDA out of memory") || text.contains("OutOfMemoryError")
 }
 
+/// #162: the mtl-align subprocess timeout for `plan`. The GPU-sized base
+/// `TIMEOUT_SECS` (15 min) is kept for a GPU plan; a CPU plan (`--no-cuda`,
+/// several times slower) is scaled by `CPU_TIMEOUT_MULTIPLIER` via
+/// `heavy_step_timeout`, so a CPU alignment is not killed mid-run. Pure —
+/// unit-tested; `align` chooses its timeout through this and threads it into
+/// `run_once`.
+pub(crate) fn mtl_timeout(plan: &crate::lyrics::heavy_plan::HeavyStepPlan) -> Duration {
+    crate::lyrics::heavy_plan::heavy_step_timeout(plan, Duration::from_secs(TIMEOUT_SECS))
+}
+
 // Spawn wrapper: integration-tested against the real subprocess on the box,
 // not unit-tested here — skip mutation so the added env plumbing does not leave
 // a survivor cargo-mutants can never kill without a live GPU.
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)] // spawn helper: cfg + 3 paths + flags + cap + plan + timeout
 async fn run_once(
     cfg: &MtlConfig,
     wav: &Path,
@@ -147,7 +158,13 @@ async fn run_once(
     out_json: &Path,
     no_cuda: bool,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
+    timeout: Duration,
 ) -> Result<()> {
+    // #162: hold the process-global heavy-step slot for this mtl child's
+    // lifetime — one heavy child at a time process-wide (a CUDA-OOM `--no-cuda`
+    // retry re-acquires fresh, still ≤1 concurrent child).
+    let _slot = crate::lyrics::heavy_slot::acquire_slot("mtl align").await;
     let mut cmd = Command::new(&cfg.python);
     cmd.args(build_args(cfg, wav, text_json, out_json, no_cuda));
     // Python on Windows defaults stdio to the console codepage; #137 hit
@@ -161,15 +178,13 @@ async fn run_once(
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000
-        // — same rationale as aligner.rs::preprocess_vocals: this is a
-        // shared event PC, leave CPU/GPU headroom for live playback and
-        // OBS/Resolume on the same box.
-        cmd.creation_flags(0x08000000 | 0x00004000);
-    }
+    // #162: stamp the priority-regime plan (caps CPU threads; Windows
+    // priority-class creation flags). The caller forces `--no-cuda` for a CPU
+    // plan via `build_args` — mtl's OWN CPU switch. `apply` no longer sets any
+    // CUDA env (`CUDA_VISIBLE_DEVICES="-1"` crashed the NVIDIA driver — see
+    // `HeavyStepPlan::apply`), and mtl does NOT take `--force-cpu` (that flag is
+    // for the audio-separator scripts). Replaces the old inline BELOW_NORMAL.
+    plan.apply(&mut cmd);
     cmd.kill_on_drop(true);
 
     debug!(
@@ -181,17 +196,23 @@ async fn run_once(
     let mut child = cmd
         .spawn()
         .context("failed to spawn lyrics-alignment-mtl run.py")?;
+    // #162: cap the child's memory (Windows Job Object) so an OOM kills the
+    // child, not the host. Held (with the slot) until the child exits below.
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     let mut stderr_buf = Vec::new();
     if let Some(mut stderr) = child.stderr.take() {
         // Best-effort capture; a read failure just leaves an empty tail.
         let _ = stderr.read_to_end(&mut stderr_buf).await;
     }
-    let status = match tokio::time::timeout(Duration::from_secs(TIMEOUT_SECS), child.wait()).await {
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => bail!("lyrics-alignment-mtl wait failed: {e}"),
         Err(_) => {
             let _ = child.kill().await;
-            bail!("lyrics-alignment-mtl timed out after {TIMEOUT_SECS}s");
+            bail!(
+                "lyrics-alignment-mtl timed out after {}s",
+                timeout.as_secs()
+            );
         }
     };
     let stderr_text = String::from_utf8_lossy(&stderr_buf);
@@ -258,6 +279,7 @@ pub async fn align(
     lines: &[String],
     work_dir: &Path,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<MtlOutput> {
     tokio::fs::create_dir_all(work_dir)
         .await
@@ -266,18 +288,31 @@ pub async fn align(
     let out_json = work_dir.join(format!("{video_id}_mtl_out.json"));
     write_text_json(&text_json, video_id, lines).await?;
 
+    // #162: a CPU plan runs `run.py --no-cuda` from the start (its `cuda=True`
+    // path would hard-error without a device — that raise is not a
+    // `CUDA out of memory`, so the OOM retry below would not catch it). A GPU
+    // plan keeps the existing behaviour: attempt CUDA, retry `--no-cuda` on OOM.
+    let force_no_cuda = !plan.is_gpu();
+    // #162: a CPU plan gets the ×4 timeout so a slow CPU alignment is not killed
+    // mid-run and retried forever. The CUDA-OOM `--no-cuda` retry below re-runs
+    // on CPU but the mtl in-process fallback keeps the same wall-clock budget, so
+    // it reuses `timeout` (sized from the ORIGINAL plan).
+    let timeout = mtl_timeout(plan);
+
     match run_once(
         cfg,
         vocals_wav,
         &text_json,
         &out_json,
-        false,
+        force_no_cuda,
         gpu_mem_setting,
+        plan,
+        timeout,
     )
     .await
     {
         Ok(()) => {}
-        Err(e) if is_cuda_oom(&e.to_string()) => {
+        Err(e) if !force_no_cuda && is_cuda_oom(&e.to_string()) => {
             warn!(
                 video_id,
                 error = %e,
@@ -290,6 +325,8 @@ pub async fn align(
                 &out_json,
                 true,
                 gpu_mem_setting,
+                plan,
+                timeout,
             )
             .await?;
         }
@@ -388,6 +425,22 @@ mod tests {
         ));
         assert!(is_cuda_oom("torch.cuda.OutOfMemoryError: ..."));
         assert!(!is_cuda_oom("RuntimeError: something else entirely"));
+    }
+
+    #[test]
+    fn mtl_timeout_scales_only_the_cpu_plan() {
+        use crate::lyrics::heavy_plan::HeavyStepPlan;
+        let base = Duration::from_secs(TIMEOUT_SECS);
+        assert_eq!(
+            mtl_timeout(&HeavyStepPlan::gpu_below_normal()),
+            base,
+            "a GPU mtl align keeps the 15-min base ceiling"
+        );
+        assert_eq!(
+            mtl_timeout(&HeavyStepPlan::cpu_idle()),
+            base * 4,
+            "a CPU mtl align gets ×4 the base so it is not killed mid-run"
+        );
     }
 
     #[test]

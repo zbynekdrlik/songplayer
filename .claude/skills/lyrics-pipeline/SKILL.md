@@ -127,27 +127,47 @@ failure — calm instrumental passages are legitimate.
   the reprocess endpoint) — never re-picked on the next 5-s tick. Monitors
   on the box: `lyrics_progress.py` (buckets, ★, gate tally) and
   `lyrics_recent.py <min>` (per-song lines/sk/source + Claude failures).
-- **GPU discipline (#154) — the idle GATE is PRIMARY; priority + VRAM cap are
-  SECONDARY (defence in depth).** The 2026-09-14 box crash (`LiveKernelEvent`
-  141 ×5, hard reset) proved priority/cap alone are insufficient: at cap 0.4 the
-  OOM fallback moves isolation to the CPU, which stutters the NDI/decoder path
-  just as badly. So the real fix is:
-  - **The gate (`crates/sp-server/src/lyrics/idle_gate.rs`).** Heavy stages
-    (vocal isolation, dereverb, mtl forced-alignment) run ONLY while the wall is
-    idle — NO playback pipeline `Playing` on program (engine `NdiHealthRegistry`
-    snapshots, the same state `/api/v1/ndi/health` reports, read in-process) AND
-    OBS not streaming/recording (`ObsState.streaming/recording`, tracked via the
-    Outputs event group + a GetStreamStatus/GetRecordStatus seed on connect).
-    Two points: `process_next` (loop level — don't START heavy work while busy;
-    cheap HTTP work like g35t/Claude/translation is NOT gated and keeps running)
-    and `process_song` before the mtl spawn (`SongOutcome::WaitingForWall` —
-    bounds max exposure to ONE stage; a running subprocess is never killed).
-    Deferral carries NO backoff penalty; the isolated vocal WAV is preserved so
-    the next idle pick is a cache-hit isolation + mtl (byte-identical output).
-    Operator override `lyrics_gate_when_playing` (DB setting, default ON; OFF =
-    pre-gate behaviour), read live each tick like `lyrics_worker_enabled`. The
-    worker state (`idle` / `processing <id>` / `waiting — wall in use`) is
-    surfaced via the WS `LyricsQueueUpdate.processing` field (dashboard badge).
+- **GPU discipline — the PRIORITY REGIME is PRIMARY (#162, replaces the #154
+  idle-only gate); VRAM cap is SECONDARY (defence in depth).** The 2026-09-14 box
+  crash (`LiveKernelEvent` 141 ×5, hard reset) proved priority/cap alone are
+  insufficient, and the idle-only gate that followed STARVED the queue (3/341
+  v22, 0/341 stems/day) because SongPlayer/CG-OBS always play something. Owner
+  ruling (2026-09-15): processing must KEEP running during playback at a priority
+  that cannot disturb the wall — stopping is not the solution. So:
+  - **The priority regime (`crates/sp-server/src/lyrics/heavy_plan.rs`).** ONE
+    operator switch **`lyrics_processing_mode`** (DB setting, read live each tick):
+    - **`low-priority` (DEFAULT)** — every heavy stage (vocal isolation, dereverb,
+      mtl, stem separation) ALWAYS RUNS. While the wall is in use (`Playing` on
+      program via `NdiHealthRegistry`, or OBS streaming/recording via `ObsState`)
+      it runs **CPU-only** (the script gets `--force-cpu` from
+      `HeavyStepPlan::script_cpu_args`, which forces in-process CPU inference via
+      `_force_cpu()` — the GPU is left untouched but CUDA stays initialized. It is
+      NOT hidden via `CUDA_VISIBLE_DEVICES="-1"`: that crashed the box —
+      torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode
+      DLL unloads, and a later stray call kills the process
+      `nvdxgdmal64.dll_unloaded` 0xc0000005, win-resolume 2026-09-15) **+ IDLE_PRIORITY_CLASS + thread cap
+      `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** — the GPU is never touched,
+      so no fps drop / TDR. When the wall is idle it runs **GPU + BELOW_NORMAL**
+      (fast). The mid-job abort watcher (#161) is armed ONLY for a GPU job; a GPU
+      job aborted by playback re-runs IMMEDIATELY on CPU (no defer); a CPU-idle
+      job is never aborted. Dashboard shows the stage suffixed ` (cpu, wall in
+      use)`.
+    - **`idle-only`** — the pre-#162 behaviour (operator option only): defer heavy
+      work while the wall is in use (loop-level + a pre-mtl gate,
+      `SongOutcome::WaitingForWall`, no backoff, isolated WAV preserved) with the
+      30 s idle-settle hysteresis + the #161 abort watcher. Surfaces the song-less
+      `waiting — wall in use` badge.
+    - The removed `lyrics_gate_when_playing` boolean folds to `low-priority`
+      (`MIGRATION_V25`). Cheap HTTP work (g35t/Claude/translation) is never gated.
+  - **Box-overload guard (#162 07:40 crash, `lyrics/heavy_slot.rs`).** Background
+    processing is ALWAYS sequential: a process-global `Semaphore(1)`
+    (`acquire_slot`) means at most ONE heavy child (isolation / mtl / separation)
+    runs process-wide — the lyrics and stem workers can never OOM the box
+    together (they did, 07:40 → SongPlayer abort 0xc0000409 + OBS died).
+  - Before each heavy step a `GlobalMemoryStatusEx` check (`heavy_step_memory_ok`)
+    requires ≥ 4 GiB free physical AND commit, else it defers with no backoff
+    (`WaitingForMemory` / stem row stays pending); each child also runs in a
+    Windows Job Object capped at 6 GiB so an OOM kills the child, not the host.
   - **Secondary: `gpu_polite()`** in `lyrics_worker.py` (and the mtl `run.py`)
     sets a **BELOW_NORMAL WDDM GPU scheduling priority** (ctypes
     `D3DKMTSetProcessSchedulingPriorityClass`) and a **per-process VRAM cap**

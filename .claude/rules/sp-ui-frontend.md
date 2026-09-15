@@ -98,3 +98,46 @@ touched: `rustfmt --edition 2024 --check src/components/foo.rs
 src/components/bar.rs`. Same idea for clippy — scope to what you changed
 (`cargo clippy --target wasm32-unknown-unknown` and grep the output for your
 files) rather than treating pre-existing warnings elsewhere as yours to fix.
+
+## Layout-stable cards: reserve space, never conditionally render a container above other content
+
+A dashboard card is a vertical stack; conditionally rendering (or early-returning
+an empty view for) any block that sits ABOVE other content makes everything below
+it jump when the block appears/disappears. `karaoke_panel.rs` did exactly this —
+it returned `view! {}` when there was no lyric line, so the subtitles block
+vanished on every pause and the card jerked up and down (#163). Fix: keep the
+container ALWAYS in the DOM with a reserved `min-height` (CSS) sized for its
+slots, always render each inner line slot (empty = `\u{00A0}`), and swap only the
+text. The #15 preview is the good pattern to copy: `.preview-img` and
+`.preview-placeholder` share one `aspect-ratio: 16/9` box so a load/unload never
+shifts layout.
+
+## Status badges only where actionable
+
+A per-card status badge that renders the same non-actionable value on every card
+(e.g. the genlock `LockBadge` showing '● UNLOCKED — pacing disabled' on all 9
+cards while `genlock_pacing` is OFF) reads as N errors, not one disabled feature.
+Gate it: render nothing when the state is a global no-op (`pacing.enabled ==
+false`), show a per-card badge only where it is actionable (Playing/Paused
+outputs), and fold the whole-box status into ONE header summary (#164,
+`ndi_health.rs::should_show_lock_badge` / `global_summary`).
+
+## Dashboard = one playlist SELECTOR + ONE work area (#165), not a grid of cards
+
+`dashboard.rs` no longer renders `<For each=store.playlists>` of `PlaylistCard`s.
+It renders a `PlaylistSelector` (left `.playlist-selector-list` rows on desktop,
+a `.playlist-select-mobile` `<select>` on ≤700px — both always in the DOM, CSS
+toggles) + a `PlaylistWorkspace` that reuses ONE `PlaylistCard`
+(`show_badge=false`) for the selected playlist. Selection state lives in
+`store.selected_playlist: RwSignal<Option<i64>>` (+ `selection_pinned`), mirrored
+to the URL `?playlist=<id>` and `localStorage` via `components/selection.rs`.
+Seeded once in `App()` (persisted → pinned); the dashboard's auto-follow `Effect`
+defaults an UNPINNED selection to the playing playlist (first by name), so a
+fresh load preselects what's playing while a reload keeps the operator's pick.
+The #164 genlock badge belongs ONLY in the selector rows + the header
+`GlobalLockBadge` summary — never the work area (`show_badge=false`). The
+"Práve hrá" strip (`.now-playing-strip`) is always rendered with a reserved
+`min-height` (layout-stable, same discipline as the karaoke panel). Any e2e that
+asserts on a specific playlist's card must SELECT it first (click its
+`playlist-selector-row`, or a mobile `playlist-select` option), then read the one
+`playlist-workspace` card — the old per-card grid locators no longer resolve.

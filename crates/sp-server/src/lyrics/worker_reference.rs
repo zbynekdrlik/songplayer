@@ -27,9 +27,14 @@ impl LyricsWorker {
     /// the injection seam (`orchestrator::ReferenceStageBackend`) —
     /// production passes `RealReferenceStageBackend`, tests pass a fake.
     ///
-    /// Returns `Some(LyricsTrack)` on gate PASS — the caller ships it
-    /// directly (★). Returns `None` on skip/FAIL/ERROR — the caller falls
-    /// through to the v22 g35t base tier (`worker_g35t`).
+    /// Returns `Ok(Some(LyricsTrack))` on gate PASS — the caller ships it
+    /// directly (★). Returns `Ok(None)` on skip/FAIL/ERROR — the caller falls
+    /// through to the v22 g35t base tier (`worker_g35t`). Returns
+    /// `Err(HeavyDefer)` (#161/#162) when the whole song must defer with NO
+    /// backoff: `WallAbort` (the mtl subprocess was killed mid-align because the
+    /// wall became busy → WaitingForWall) or `Memory` (free RAM/commit below the
+    /// floor before the mtl spawn → WaitingForMemory). Either way the caller
+    /// NEVER degrades to the base tier — the next pick re-runs mtl to identical ★.
     pub(crate) async fn run_mtl_reference_stage(
         &self,
         video_id: i64,
@@ -37,7 +42,7 @@ impl LyricsWorker {
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,
         backend: &dyn crate::lyrics::orchestrator::ReferenceStageBackend,
-    ) -> Option<LyricsTrack> {
+    ) -> Result<Option<LyricsTrack>, crate::lyrics::heavy_plan::HeavyDefer> {
         const MIN_LINES: usize = 4;
 
         let mtl_cfg = crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir);
@@ -46,15 +51,15 @@ impl LyricsWorker {
                 youtube_id = %youtube_id,
                 "reference_stage: mtl tooling unavailable — skipping (#143)"
             );
-            return None;
+            return Ok(None);
         }
         let Some(wav) = clean_vocal else {
             info!(youtube_id = %youtube_id, "reference_stage: no vocals wav — skipping");
-            return None;
+            return Ok(None);
         };
         let Some(best) = best else {
             info!(youtube_id = %youtube_id, "reference_stage: no text candidate — skipping");
-            return None;
+            return Ok(None);
         };
         if best.lines.len() < MIN_LINES {
             info!(
@@ -62,7 +67,15 @@ impl LyricsWorker {
                 lines = best.lines.len(),
                 "reference_stage: candidate below the {MIN_LINES}-line floor — skipping"
             );
-            return None;
+            return Ok(None);
+        }
+
+        // #162: memory-headroom guard BEFORE the mtl heavy step (after the skip
+        // conditions, so it only defers when mtl WILL run). Below the 4 GiB floor
+        // → defer the whole song with no backoff (`WaitingForMemory`); the WARN
+        // with the numbers is logged in `heavy_step_memory_ok`.
+        if crate::lyrics::heavy_slot::heavy_step_memory_defers("mtl align") {
+            return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory);
         }
 
         let outcome =
@@ -92,10 +105,10 @@ impl LyricsWorker {
                     provenance: format!("{}+mtl@rev1/g35t-ok", best.source),
                     raw_confidence: 1.0,
                 };
-                Some(align_track_to_lyrics_track(
+                Ok(Some(align_track_to_lyrics_track(
                     aligned,
                     LYRICS_PIPELINE_VERSION,
-                ))
+                )))
             }
             crate::lyrics::orchestrator::ReferenceStageResult::Fail {
                 reason,
@@ -125,7 +138,7 @@ impl LyricsWorker {
                 .await;
                 let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
                     .await;
-                None
+                Ok(None)
             }
             crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
                 warn!(
@@ -142,7 +155,22 @@ impl LyricsWorker {
                 .await;
                 let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
                     .await;
-                None
+                Ok(None)
+            }
+            crate::lyrics::orchestrator::ReferenceStageResult::WallAborted { detail } => {
+                // #161: mtl was killed because the wall became busy — this is
+                // NOT an alignment failure, so no audit sidecar and
+                // `lyrics_reference` is left untouched. Bubble the abort up so
+                // the caller defers the whole song (WaitingForWall) and re-runs
+                // mtl to identical output on the next idle pick.
+                info!(
+                    youtube_id = %youtube_id,
+                    detail = %detail,
+                    "reference_stage: mtl aborted — wall became busy (#161)"
+                );
+                Err(crate::lyrics::heavy_plan::HeavyDefer::WallAbort(
+                    crate::lyrics::idle_gate_abort::WallAbort { detail },
+                ))
             }
         }
     }

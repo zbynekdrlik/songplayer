@@ -17,6 +17,11 @@ const SP_VERSION = readFileSync(join(__dirname, "..", "VERSION"), "utf8").trim()
 const app = express();
 app.use(express.json());
 
+// Connected WebSocket clients, so a test-only admin endpoint can broadcast a
+// server-push message (e.g. a LyricsUpdate) to the live dashboard. Populated
+// in the `wss.on("connection")` handler at the bottom of this file.
+const wsClients = new Set();
+
 // Serve the built WASM frontend from dist/
 const distPath = join(__dirname, "..", "dist");
 app.use(express.static(distPath));
@@ -58,6 +63,36 @@ const playlists = [
     updated_at: "2026-01-01 00:00:00",
   },
 ];
+
+// #165: opt-in 12-playlist fixture for the dashboard-redesign spec (playlist
+// selector + single workspace). Playlist id 1 ("Playlist 01") is the
+// currently-playing one — the WS connection handler below marks playlist 1
+// Playing regardless of the fixture mode, so the selector's "playing
+// preselected + ▶" behaviour is exercised with no extra WS wiring. Only
+// playlist 1 carries videos (it reuses the base `videos` fixture).
+const twelvePlaylists = Array.from({ length: 12 }, (_, i) => {
+  const id = i + 1;
+  const nn = String(id).padStart(2, "0");
+  return {
+    id,
+    name: `Playlist ${nn}`,
+    youtube_url: `https://youtube.com/playlist?list=PLmock${nn}`,
+    ndi_output_name: `SP-${nn}`,
+    playback_mode: "continuous",
+    is_active: true,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  };
+});
+
+// "default" → the 3-playlist fixture above (every other spec relies on it);
+// "twelve" → the 12-playlist fixture. The #165 spec POSTs "twelve" in
+// beforeEach and resets to "default" in afterEach so no state leaks into the
+// serially-run sibling spec files (playwright.config.ts pins workers: 1).
+let fixtureMode = "default";
+function activePlaylists() {
+  return fixtureMode === "twelve" ? twelvePlaylists : playlists;
+}
 
 // `normalized` and `gemini_failed` are required (non-`#[serde(default)]`)
 // fields on sp_core::models::Video — every fixture must include them or
@@ -127,7 +162,13 @@ let nextResolumeId = 1;
 
 // Playlists
 app.get("/api/v1/playlists", (_req, res) => {
-  res.json(playlists);
+  res.json(activePlaylists());
+});
+
+// #165: switch the playlists fixture between "default" (3) and "twelve" (12).
+app.post("/__mock/fixture", (req, res) => {
+  fixtureMode = req.body?.mode === "twelve" ? "twelve" : "default";
+  res.json({ mode: fixtureMode, count: activePlaylists().length });
 });
 
 app.post("/api/v1/playlists", (req, res) => {
@@ -137,7 +178,7 @@ app.post("/api/v1/playlists", (req, res) => {
 });
 
 app.get("/api/v1/playlists/:id", (req, res) => {
-  const pl = playlists.find((p) => p.id === Number(req.params.id));
+  const pl = activePlaylists().find((p) => p.id === Number(req.params.id));
   if (pl) res.json(pl);
   else res.status(404).json({ error: "not found" });
 });
@@ -367,7 +408,7 @@ app.get("/api/v1/status", (_req, res) => {
     active_scene: null,
     ytdlp_available: true,
     ffmpeg_available: true,
-    playlists_count: playlists.length,
+    playlists_count: activePlaylists().length,
     // #51: LAN sp.local advertisement — the dashboard's LanAddress component
     // reads these to show the offline-LAN URL + raw-IP fallback.
     lan_url: "http://sp.local:8920",
@@ -612,6 +653,30 @@ app.post('/__mock/reprocess-result', (req, res) => {
   res.json({ ...slot });
 });
 
+// Admin: broadcast a LyricsUpdate over the WebSocket to every connected
+// client. Test-only — the #163 fixed-height karaoke-panel spec uses it to
+// drive the current-line block with text and then with no text, without a
+// real playback engine. The body IS the `data` payload of the
+// `ServerMsg::LyricsUpdate` variant (`{ playlist_id, line_en, line_sk,
+// prev_line_en, next_line_en, active_word_index, word_count }`; every field
+// but `playlist_id` is optional — omit to send `None`).
+app.post("/__mock/lyrics-update", (req, res) => {
+  const data = req.body || {};
+  if (typeof data.playlist_id !== "number") {
+    res.status(400).json({ error: "expected a numeric playlist_id" });
+    return;
+  }
+  const msg = JSON.stringify({ type: "LyricsUpdate", data });
+  let sent = 0;
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(msg);
+      sent += 1;
+    }
+  }
+  res.json({ status: "sent", clients: sent });
+});
+
 // SPA fallback — serve index.html for unmatched routes
 app.get("*", (_req, res) => {
   res.sendFile(join(distPath, "index.html"));
@@ -625,6 +690,7 @@ const wss = new WebSocketServer({ server, path: "/api/v1/ws" });
 
 wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");
+  wsClients.add(ws);
 
   // #15 part 2: mark playlist 1 as Playing so its card renders the live
   // video preview <img> (playlist 1's preview.jpg serves a real JPEG above).
@@ -719,6 +785,7 @@ wss.on("connection", (ws) => {
     clearInterval(interval);
     clearTimeout(badgeTimer);
     clearTimeout(playingTimer);
+    wsClients.delete(ws);
     console.log("[mock-api] WebSocket client disconnected");
   });
 });

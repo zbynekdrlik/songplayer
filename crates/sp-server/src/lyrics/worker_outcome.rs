@@ -37,6 +37,12 @@ pub(crate) enum SongOutcome {
     /// vocal WAV is preserved on disk for a cache-hit re-run). Distinct from
     /// `Deferred` precisely so `process_next` skips the exponential backoff.
     WaitingForWall,
+    /// #162: free RAM / commit fell below `HEAVY_STEP_MIN_FREE_BYTES` before a
+    /// heavy step, so it was NOT spawned (owner ruling: never overload the PC).
+    /// Deferred with NO backoff penalty — like `WaitingForWall`, the row stays
+    /// at the head and re-runs the instant memory frees; distinct from
+    /// `Deferred` so `process_next` skips the exponential backoff.
+    WaitingForMemory,
 }
 
 impl LyricsWorker {

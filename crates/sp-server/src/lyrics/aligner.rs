@@ -9,6 +9,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
@@ -89,6 +90,34 @@ pub fn isolation_timeout(duration_ms: Option<i64>) -> std::time::Duration {
 // preprocess_vocals
 // ---------------------------------------------------------------------------
 
+/// Build the `preprocess-vocals` argv (script + flags), in order. `#162`: a CPU
+/// plan appends `--force-cpu` so the script forces in-process CPU inference
+/// (`_force_cpu()`), leaving the GPU untouched WITHOUT hiding it via
+/// `CUDA_VISIBLE_DEVICES` (which crashed the NVIDIA user-mode driver — see
+/// `HeavyStepPlan::apply`). A GPU plan appends nothing.
+fn preprocess_vocals_args(
+    script_path: &Path,
+    audio_in: &Path,
+    wav_out: &Path,
+    models_dir: &Path,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        script_path.as_os_str().to_owned(),
+        "preprocess-vocals".into(),
+        "--audio".into(),
+        audio_in.as_os_str().to_owned(),
+        "--output".into(),
+        wav_out.as_os_str().to_owned(),
+        "--models-dir".into(),
+        models_dir.as_os_str().to_owned(),
+    ];
+    for a in plan.script_cpu_args() {
+        args.push((*a).into());
+    }
+    args
+}
+
 /// Run Mel-Roformer vocal isolation + anvuew de-reverb + 16 kHz mono float32
 /// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
 /// the same path on success.
@@ -104,6 +133,7 @@ pub fn isolation_timeout(duration_ms: Option<i64>) -> std::time::Duration {
 /// The Python prototype's `scripts/experiments/gemini_lyrics.py` also
 /// relied on caller-side caching of the vocals WAV.
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)]
 pub async fn preprocess_vocals(
     python_path: &Path,
     script_path: &Path,
@@ -112,6 +142,7 @@ pub async fn preprocess_vocals(
     wav_out: &Path,
     timeout: std::time::Duration,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<PathBuf> {
     // Cache check: reuse an existing vocals WAV if it looks complete.
     // 1 MB minimum avoids reusing truncated/aborted files from a previous
@@ -127,17 +158,19 @@ pub async fn preprocess_vocals(
             return Ok(wav_out.to_path_buf());
         }
     }
+    // #162: acquire the process-global heavy-step slot BEFORE spawning (after
+    // the cache check, so a cache hit never waits) and hold it until the child
+    // exits — at most one heavy child (isolation / mtl / separation) runs
+    // process-wide, so two workers can never OOM the box together.
+    let _slot = crate::lyrics::heavy_slot::acquire_slot("isolation").await;
     let mut cmd = Command::new(python_path);
-    cmd.args([
-        script_path.as_os_str(),
-        "preprocess-vocals".as_ref(),
-        "--audio".as_ref(),
-        audio_in.as_os_str(),
-        "--output".as_ref(),
-        wav_out.as_os_str(),
-        "--models-dir".as_ref(),
-        models_dir.as_os_str(),
-    ]);
+    cmd.args(preprocess_vocals_args(
+        script_path,
+        audio_in,
+        wav_out,
+        models_dir,
+        plan,
+    ));
     // audio-separator calls ffmpeg.exe without an absolute path, so the
     // Python subprocess needs tools_dir (parent of lyrics_worker.py) on
     // PATH — that's where the app's bundled ffmpeg.exe lives.
@@ -147,22 +180,18 @@ pub async fn preprocess_vocals(
             crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
     }
-    // #154: carry the operator-tunable VRAM cap to the GPU child so vocal
-    // isolation leaves headroom for the live MF decoder on the shared PC.
+    // #154: carry the operator-tunable VRAM cap to the child (applied only on
+    // the GPU path by the script's `gpu_polite()`; harmless on the CPU path).
     for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
         cmd.env(k, v);
     }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000.
-        // Below-normal priority means Demucs + PyTorch leave CPU cycles for
-        // the live video/audio path and for OBS/Resolume on the same PC.
-        // Without this, processing competes with playback and the shared
-        // event PC can overload (observed reboot on 2026-04-21).
-        cmd.creation_flags(0x08000000 | 0x00004000);
-    }
+    // #162: stamp the priority-regime plan — caps CPU threads
+    // (`OMP|MKL|TORCH_NUM_THREADS`) and, on Windows, sets the priority-class
+    // creation flags (IDLE for cpu-idle, BELOW_NORMAL for gpu) OR'd with
+    // CREATE_NO_WINDOW. The CPU force is carried in argv (`--force-cpu`, added by
+    // `preprocess_vocals_args` above) — NOT via `CUDA_VISIBLE_DEVICES`, which
+    // crashed the NVIDIA driver (see `HeavyStepPlan::apply`).
+    plan.apply(&mut cmd);
     // Kill the Python child if the Command handle is dropped (worker
     // shutdown, error path, timeout). Prevents orphan Demucs processes
     // from holding ~1-2 GB of GPU model weights across SongPlayer
@@ -177,6 +206,9 @@ pub async fn preprocess_vocals(
     );
 
     let mut child = cmd.spawn().context("failed to spawn preprocess-vocals")?;
+    // #162: cap the child's memory via a Windows Job Object so an OOM kills the
+    // child, not the host. Held (with the slot) until the child exits.
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => anyhow::bail!("preprocess-vocals wait failed: {e}"),
@@ -418,6 +450,42 @@ mod tests {
         assert_eq!(parsed.chunks[0].words[0].text, "hey");
         assert_eq!(parsed.chunks[0].words[0].start_ms, 1000);
         assert_eq!(parsed.chunks[1].words.len(), 0);
+    }
+
+    // ---- #162: --force-cpu argv, NOT CUDA_VISIBLE_DEVICES ----------------
+
+    fn preprocess_argv(plan: &crate::lyrics::heavy_plan::HeavyStepPlan) -> Vec<String> {
+        preprocess_vocals_args(
+            Path::new("/tools/lyrics_worker.py"),
+            Path::new("/x/a.flac"),
+            Path::new("/x/o.wav"),
+            Path::new("/models"),
+            plan,
+        )
+        .iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect()
+    }
+
+    #[test]
+    fn preprocess_vocals_args_appends_force_cpu_for_cpu_plan() {
+        let argv = preprocess_argv(&crate::lyrics::heavy_plan::HeavyStepPlan::cpu_idle());
+        assert!(argv.contains(&"preprocess-vocals".to_string()));
+        assert_eq!(
+            argv.last().unwrap(),
+            "--force-cpu",
+            "a CPU plan must force in-process CPU inference via --force-cpu"
+        );
+    }
+
+    #[test]
+    fn preprocess_vocals_args_omits_force_cpu_for_gpu_plan() {
+        let argv = preprocess_argv(&crate::lyrics::heavy_plan::HeavyStepPlan::gpu_below_normal());
+        assert!(argv.contains(&"preprocess-vocals".to_string()));
+        assert!(
+            !argv.contains(&"--force-cpu".to_string()),
+            "a GPU plan must NOT pass --force-cpu"
+        );
     }
 }
 

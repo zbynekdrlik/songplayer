@@ -62,9 +62,11 @@ pub(crate) fn any_playing<'a>(mut states: impl Iterator<Item = &'a PlaybackState
     states.any(|s| matches!(s, PlaybackStateLabel::Playing))
 }
 
-/// The gate decision: should heavy work be deferred right now? Pure — the
-/// operator setting `lyrics_gate_when_playing` (default ON) is passed in as
-/// `gate_enabled`; when OFF the gate never defers (today's behaviour).
+/// The idle-only gate decision: should heavy work be deferred right now? Pure.
+/// `gate_enabled` is `true` in production (#162 folded the old
+/// `lyrics_gate_when_playing` boolean into `lyrics_processing_mode`; this pure
+/// core is only consulted on the idle-only path, where the gate is on), and the
+/// pure `false` case is retained for the decision-core tests.
 pub(crate) fn should_defer(gate_enabled: bool, activity: WallActivity) -> bool {
     gate_enabled && activity.in_use()
 }
@@ -99,20 +101,6 @@ impl IdleSettle {
     pub(crate) fn idle_for(&self, now: Instant) -> Option<Duration> {
         self.idle_since
             .map(|since| now.saturating_duration_since(since))
-    }
-}
-
-/// Parse the `lyrics_gate_when_playing` DB setting. Default ON (`true`) so a
-/// deploy/upgrade with no setting row gates by default; `false`/`0`/`off`/`no`
-/// (case- and whitespace-insensitive) disable it. Mirrors the
-/// `lyrics_worker_enabled` parse in `worker.rs`.
-pub(crate) fn gate_setting_enabled(raw: Option<&str>) -> bool {
-    match raw {
-        None => true,
-        Some(v) => {
-            let v = v.trim().to_ascii_lowercase();
-            !(v == "false" || v == "0" || v == "off" || v == "no")
-        }
     }
 }
 
@@ -223,30 +211,22 @@ impl crate::lyrics::worker::LyricsWorker {
         }
     }
 
-    /// The `lyrics_gate_when_playing` operator setting (default ON), read live
-    /// each tick so a dashboard flip takes effect within one worker poll.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn gate_when_playing_enabled(&self) -> bool {
-        let raw = crate::db::models::get_setting(&self.pool, "lyrics_gate_when_playing")
-            .await
-            .ok()
-            .flatten();
-        gate_setting_enabled(raw.as_deref())
-    }
-
-    /// Full gate evaluation: whether heavy work should be deferred now, plus the
-    /// activity snapshot (for the log detail / dashboard).
+    /// Full gate evaluation for `idle-only` mode: whether heavy work should be
+    /// deferred now, plus the activity snapshot (for the log detail / dashboard).
+    /// Only called from the idle-only control path (`loop_should_defer` /
+    /// `defer_before_mtl`), where the gate is definitionally ON (#162 folded the
+    /// old `lyrics_gate_when_playing` boolean into `lyrics_processing_mode`), so
+    /// `gate_enabled` is always `true` here.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn wall_gate_should_defer(&self) -> (bool, WallActivity) {
-        let enabled = self.gate_when_playing_enabled().await;
         let activity = self.wall_activity().await;
         // Idle-settle hysteresis lives in the shared `GateLog` (held in a Mutex
         // by both workers). Sample it AFTER the awaits and drop the lock before
         // returning — never hold the mutex across an `.await`.
         let now = Instant::now();
         let defer = match self.wall_gate_log.lock() {
-            Ok(mut g) => g.defer_settled(enabled, activity, now),
-            Err(_) => should_defer(enabled, activity),
+            Ok(mut g) => g.defer_settled(true, activity, now),
+            Err(_) => should_defer(true, activity),
         };
         (defer, activity)
     }

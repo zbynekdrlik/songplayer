@@ -6,10 +6,42 @@
 //! weights across a restart. The subprocess writes the two 48 kHz stereo stems.
 
 use anyhow::{Context, Result};
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{debug, warn};
+
+/// Build the `separate` argv (script + flags), in order. `#162`: a CPU plan
+/// appends `--force-cpu` so the script forces in-process CPU inference
+/// (`_force_cpu()`), leaving the GPU untouched WITHOUT hiding it via
+/// `CUDA_VISIBLE_DEVICES` (which crashed the NVIDIA user-mode driver — see
+/// `HeavyStepPlan::apply`). A GPU plan appends nothing.
+fn separate_stems_args(
+    script_path: &Path,
+    audio_in: &Path,
+    vocals_out: &Path,
+    instrumental_out: &Path,
+    models_dir: &Path,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        script_path.as_os_str().to_owned(),
+        "separate".into(),
+        "--audio".into(),
+        audio_in.as_os_str().to_owned(),
+        "--vocals-out".into(),
+        vocals_out.as_os_str().to_owned(),
+        "--instrumental-out".into(),
+        instrumental_out.as_os_str().to_owned(),
+        "--models-dir".into(),
+        models_dir.as_os_str().to_owned(),
+    ];
+    for a in plan.script_cpu_args() {
+        args.push((*a).into());
+    }
+    args
+}
 
 /// Run Kim two-stem separation on `audio_in`, writing `{vocals_out, instrumental_out}`.
 ///
@@ -19,7 +51,7 @@ use tracing::{debug, warn};
 /// re-generated). `timeout` bounds the subprocess; callers pass
 /// `aligner::isolation_timeout(duration_ms)`.
 #[cfg_attr(test, mutants::skip)]
-#[allow(clippy::too_many_arguments)] // spawn helper: paths + timeout + cap, same shape as the lyrics workers
+#[allow(clippy::too_many_arguments)] // spawn helper: paths + timeout + cap + plan, same shape as the lyrics workers
 pub async fn separate_stems(
     python_path: &Path,
     script_path: &Path,
@@ -29,6 +61,7 @@ pub async fn separate_stems(
     instrumental_out: &Path,
     timeout: std::time::Duration,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<()> {
     // Cache check: reuse an existing complete pair.
     if let (Ok(vm), Ok(im)) = (
@@ -47,19 +80,18 @@ pub async fn separate_stems(
         return Ok(());
     }
 
+    // #162: hold the process-global heavy-step slot for this child's lifetime
+    // (after the cache check) — one heavy child at a time process-wide.
+    let _slot = crate::lyrics::heavy_slot::acquire_slot("stem separation").await;
     let mut cmd = Command::new(python_path);
-    cmd.args([
-        script_path.as_os_str(),
-        "separate".as_ref(),
-        "--audio".as_ref(),
-        audio_in.as_os_str(),
-        "--vocals-out".as_ref(),
-        vocals_out.as_os_str(),
-        "--instrumental-out".as_ref(),
-        instrumental_out.as_os_str(),
-        "--models-dir".as_ref(),
-        models_dir.as_os_str(),
-    ]);
+    cmd.args(separate_stems_args(
+        script_path,
+        audio_in,
+        vocals_out,
+        instrumental_out,
+        models_dir,
+        plan,
+    ));
     // audio-separator shells out to ffmpeg by bare name, so the bundled ffmpeg
     // (next to the script in tools_dir) must be on PATH — same as preprocess_vocals.
     if let Some(tools_dir) = script_path.parent() {
@@ -68,18 +100,18 @@ pub async fn separate_stems(
             crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
     }
-    // #154: carry the operator VRAM cap so separation leaves headroom for the
-    // live MF decoder on the shared box.
+    // #154: carry the operator VRAM cap (applied only on the GPU path by the
+    // script's `gpu_polite()`; harmless on the CPU path).
     for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
         cmd.env(k, v);
     }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000.
-        cmd.creation_flags(0x08000000 | 0x00004000);
-    }
+    // #162: stamp the priority-regime plan — caps CPU threads
+    // (`OMP|MKL|TORCH_NUM_THREADS`) + Windows priority-class creation flags (IDLE
+    // for cpu-idle, BELOW_NORMAL for gpu). The CPU force is carried in argv
+    // (`--force-cpu`, added by `separate_stems_args` above) — NOT via
+    // `CUDA_VISIBLE_DEVICES`, which crashed the NVIDIA driver (see
+    // `HeavyStepPlan::apply`).
+    plan.apply(&mut cmd);
     cmd.kill_on_drop(true);
     // Capture the child's traceback: inherited stdio drops the Python stderr, so
     // a live failure could not be diagnosed from the log (#14 follow-up).
@@ -95,6 +127,9 @@ pub async fn separate_stems(
     );
 
     let child = cmd.spawn().context("failed to spawn separate-stems")?;
+    // #162: cap the child's memory (Windows Job Object) so an OOM kills the
+    // child, not the host. Held (with the slot) until the child exits below.
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     // `wait_with_output` takes the child BY VALUE and drains both pipes while it
     // waits, so no timeout branch can `child.kill()` any more. That is fine:
     // `kill_on_drop(true)` is set above, so when the timeout fires and we drop the
@@ -191,5 +226,42 @@ mod tests {
     #[test]
     fn empty_in_empty_out() {
         assert_eq!(tail_lines("", 20, 300), "");
+    }
+
+    // ---- #162: --force-cpu argv, NOT CUDA_VISIBLE_DEVICES ----------------
+
+    fn separate_argv(plan: &crate::lyrics::heavy_plan::HeavyStepPlan) -> Vec<String> {
+        super::separate_stems_args(
+            std::path::Path::new("/tools/stem_worker.py"),
+            std::path::Path::new("/x/a.flac"),
+            std::path::Path::new("/x/v.flac"),
+            std::path::Path::new("/x/i.flac"),
+            std::path::Path::new("/models"),
+            plan,
+        )
+        .iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect()
+    }
+
+    #[test]
+    fn separate_stems_args_appends_force_cpu_for_cpu_plan() {
+        let argv = separate_argv(&crate::lyrics::heavy_plan::HeavyStepPlan::cpu_idle());
+        assert!(argv.contains(&"separate".to_string()));
+        assert_eq!(
+            argv.last().unwrap(),
+            "--force-cpu",
+            "a CPU plan must force in-process CPU inference via --force-cpu"
+        );
+    }
+
+    #[test]
+    fn separate_stems_args_omits_force_cpu_for_gpu_plan() {
+        let argv = separate_argv(&crate::lyrics::heavy_plan::HeavyStepPlan::gpu_below_normal());
+        assert!(argv.contains(&"separate".to_string()));
+        assert!(
+            !argv.contains(&"--force-cpu".to_string()),
+            "a GPU plan must NOT pass --force-cpu"
+        );
     }
 }

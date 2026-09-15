@@ -36,3 +36,48 @@ CI compiles everything else.)
 Root `cargo fmt --all` / `clippy` do NOT touch `sp-ui/` or `src-tauri/`, and CI
 has no fmt/clippy step for them (only `trunk build`). Never blanket-`cargo fmt`
 sp-ui (it rewrites long-drifted files) — see `.claude/rules/sp-ui-frontend.md`.
+
+## RED commit on the TIER-0 (no local compile) box
+You can't run tests locally, so a RED test must FAIL against a version of the
+code you can only reason about, without leaving warnings CI's clippy
+(`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
+`idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
+CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`).
+The logic still reads/writes every field, so nothing is dead_code, and the
+"must-abort" tests fail cleanly; a stub function body that ignores its fields
+would instead trip `dead_code`/`unused`. For timing tests (interval + sleep),
+use `#[tokio::test(start_paused = true)]` (tokio `test-util` is a dev-dep) so the
+1 s poll and a 30 s mock future advance deterministically with no real wait.
+
+## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
+The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
+compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
+
+- **A `pub(crate)` fn called ONLY inside a `#[cfg(windows)]` block is dead_code
+  on Linux** (the cfg block is stripped, so the fn has no non-test caller in the
+  Linux lib target — tests don't count for the lib target). It fails `-D
+  warnings`. Fix: `#[cfg_attr(not(windows), allow(dead_code))]` on the fn (see
+  `HeavyStepPlan::creation_flags` in `lyrics/heavy_plan.rs`). Same idea for any
+  item live only on one platform.
+- **An RAII guard field held ONLY for its Drop is `dead_code` "never read" — a
+  `_` prefix does NOT suppress it (that only silences `unused_variables` for
+  LOCALS, never `dead_code` for a FIELD).** A guard that holds a permit / handle
+  purely so its Drop fires (`_permit: OwnedSemaphorePermit`) needs an explicit
+  `#[allow(dead_code)]` ON THE FIELD (see `HeavySlotGuard._permit` in
+  `lyrics/heavy_slot.rs`). A field that IS read in the Drop body (e.g.
+  `ChildJobGuard.handle`) is fine without it.
+- **A guard held across `.await` in a SPAWNED (Send) worker future must itself be
+  `Send`.** A raw Windows `HANDLE` (`*mut c_void`) is `!Send`, so storing it in a
+  guard held across `child.wait().await` breaks `tokio::spawn`. Store the handle
+  as `isize` (Send) and cast back (`h as HANDLE`) only inside the Drop's `unsafe`
+  block (see `heavy_slot.rs::ChildJobGuard`). windows-sys (not `windows`) is the
+  lighter FFI for such cfg(windows) OS calls — primitive types (`u32`/`i32`/
+  `*mut c_void`), no Result/Param wrappers, so `== 0` / `.is_null()` checks and
+  `std::mem::zeroed()` POD structs (set `dwLength` yourself) are what compile.
+- **`clippy::duplicated_attributes`** (warn-by-default → error under `-D
+  warnings`): adding `#[allow(clippy::too_many_arguments)]` to a fn that ALREADY
+  had one makes the attribute appear twice → build fails. GREP for a pre-existing
+  allow before adding (the #162 `separate_stems` incident).
+- **`clippy::too_many_arguments` fires at 8+ args, not 7.** A 7-arg fn needs NO
+  allow; adding one is a dead annotation (harmless, but don't add it "to be
+  safe"). Count real params (free fns have no `&self`).

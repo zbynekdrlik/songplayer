@@ -92,6 +92,26 @@ async function findPlaylistWithVideos(
   throw new Error("no playlist on deployed server has any videos");
 }
 
+// #165: the dashboard is now a selector + ONE work area. To assert on a
+// specific playlist's card, SELECT it in the selector first, then read the
+// single work-area card. Replaces the old per-card grid locators without
+// reducing what each test verifies.
+async function selectWorkspaceCard(
+  page: import("@playwright/test").Page,
+  name: string,
+) {
+  await expect(page.getByTestId("playlist-workspace")).toBeVisible({
+    timeout: 30_000,
+  });
+  await page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: name })
+    .click();
+  const card = page.locator(".playlist-card", { hasText: name });
+  await expect(card).toBeVisible();
+  return card;
+}
+
 test.describe("SongPlayer post-deploy feature verification", () => {
   let obs: ObsDriver | null = null;
   // Captured at suite start, restored at suite end so the wall returns
@@ -269,15 +289,14 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     }
 
     await page.goto("/");
-    // Wait for the WASM bundle to mount and the card to appear.
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+    // Wait for the WASM bundle to mount, then select the playlist's card in the
+    // work area (#165 selector + single work area).
 
     // (The NDI dark-wall gate — `connections > 0` for the on-program output —
     // lives in its own dedicated test above, "on-program NDI output has a live
     // receiver (#127)", so this Play-button test stays focused on the button.)
 
-    const card = page.locator(".playlist-card", { hasText: pl.name });
-    await expect(card).toBeVisible();
+    const card = await selectWorkspaceCard(page, pl.name);
 
     const expectedUrl = new RegExp(`/api/v1/playback/${pl.id}/play$`);
     const respPromise = page.waitForResponse((r) => expectedUrl.test(r.url()), { timeout: 10_000 });
@@ -319,9 +338,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // up the NowPlaying broadcast from the replay / current position
     // stream that the engine emits for active playback.
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
-
-    const card = page.locator(".playlist-card", { hasText: pl.name });
+    const card = await selectWorkspaceCard(page, pl.name);
 
     // Within 10 s the card must show the `.np-info` block with a
     // non-empty position counter (proves NowPlaying actually arrived).
@@ -455,14 +472,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await new Promise((r) => setTimeout(r, 500));
 
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({
-      timeout: 30_000,
-    });
-
-    const fastCard = page
-      .locator(".playlist-card")
-      .filter({ hasText: FAST_PLAYLIST_NAME });
-    await expect(fastCard).toBeVisible();
+    // #165: select ytfast in the work area BEFORE the scene switch, and pin it
+    // (a click pins the selection) so the work area stays on ytfast when it
+    // starts playing.
+    const fastCard = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
 
     // Switch OBS to sp-fast — this must kick off the full chain.
     await obs!.switchScene(FAST_SCENE_NAME);
@@ -521,10 +534,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await obs!.switchScene(FAST_SCENE_NAME);
 
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
-
-    const card = page.locator(".playlist-card").filter({ hasText: FAST_PLAYLIST_NAME });
-    await expect(card).toBeVisible();
+    // #165: select ytfast in the work area (it is the on-program playlist).
+    const card = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
 
     // 1. The `.np-info` block must appear within 30 s. If the engine
     //    is stuck in WaitingForScene (the original bug), the card
@@ -563,31 +574,31 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
-   * Issue #150 — LIVE-LOCKED genlock indicator consistency.
+   * Issue #150 + #164 — genlock indicator consistency with pacing gating.
    *
-   * The dashboard's global genlock badge and the per-card lock badges must
-   * AGREE with whatever `GET /api/v1/ndi/health` reports at that moment —
-   * a consistency check, NOT a hard-coded LOCKED. With `genlock_pacing` OFF
-   * the honest value is `UNLOCKED — pacing disabled` until #149 lane 2
-   * flips the default, so this test recomputes the expected summary from
-   * the live health and asserts the badge matches it. No scene switching,
-   * no sleep loops (a single settle so the 1 s poll lands, per file style).
+   * The dashboard's genlock badges must AGREE with whatever
+   * `GET /api/v1/ndi/health` reports — a consistency check, NOT a hard-coded
+   * state. #164 changed the rendering rule: while `genlock_pacing` is OFF
+   * (`pacing.enabled == false`) — the production default today — NO badge is
+   * shown at all (per-card or header summary), because '● UNLOCKED — pacing
+   * disabled' on every card reads as many errors for one disabled feature.
+   * When pacing IS enabled the per-card badge shows only on live (Playing/
+   * Paused) outputs and the header shows one summary. This test recomputes the
+   * expectation from the live health and asserts the badges match, for either
+   * regime. No scene switching, no sleep loops (a single settle so the 1 s poll
+   * lands, per file style).
    */
-  test("genlock badges agree with /api/v1/ndi/health (#150)", async ({
+  test("genlock badges agree with /api/v1/ndi/health (#150/#164)", async ({
     page,
     request,
   }) => {
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({
+    await expect(page.getByTestId("playlist-workspace")).toBeVisible({
       timeout: 30_000,
     });
 
-    // The global summary badge must exist.
-    const global = page.locator(".genlock-status .lock-badge");
-    await expect(global).toBeVisible({ timeout: 15_000 });
-
-    // Let the 1 s poll land so the badge reflects a fresh snapshot, then
-    // read the health and the badge close together.
+    // Let the 1 s poll land so the badges reflect a fresh snapshot, then read
+    // the health and the badges close together.
     await page.waitForTimeout(1_500);
 
     const resp = await request.get("/api/v1/ndi/health");
@@ -596,22 +607,39 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       ndi_name: string;
       state: string;
       lock_state: string;
+      lock_reason?: string;
       clock?: { clock_ok?: boolean };
+      pacing?: { enabled?: boolean };
     }>;
     expect(Array.isArray(health)).toBe(true);
 
-    // Recompute the summary exactly as
-    // sp_core::genlock::lock_state::summarize: a LOCKED output whose clock
-    // is not ok is demoted to UNLOCKED; LOCKED iff every LIVE
-    // (state==="Playing") output is LOCKED and clock ok; else the worst
-    // live state (UNLOCKED > DEGRADED > LOCKED); no live output → clock-only.
+    const enabled = health.filter((o) => o.pacing?.enabled === true);
+
+    if (enabled.length === 0) {
+      // Pacing disabled everywhere (prod default): the owner must see ZERO
+      // genlock badges — no header summary, no per-card badge (#164).
+      await expect(page.locator(".lock-badge")).toHaveCount(0, {
+        timeout: 10_000,
+      });
+      return;
+    }
+
+    // Pacing enabled on at least one output: the header summary is over the
+    // pacing-enabled outputs. Recompute the summarized state as
+    // sp_core::genlock::lock_state::summarize does (a LOCKED output whose clock
+    // is not ok is demoted to UNLOCKED; LOCKED iff every LIVE (state==="Playing")
+    // output is LOCKED and clock ok; else the worst live state
+    // UNLOCKED > DEGRADED > LOCKED; no live output → clock-only).
+    const global = page.locator(".genlock-status .lock-badge");
+    await expect(global).toBeVisible({ timeout: 15_000 });
+
     const sev = (s: string) => (s === "UNLOCKED" ? 2 : s === "DEGRADED" ? 1 : 0);
     const eff = (o: { lock_state: string; clock?: { clock_ok?: boolean } }) =>
       o.lock_state === "LOCKED" && !o.clock?.clock_ok ? "UNLOCKED" : o.lock_state;
-    const live = health.filter((o) => o.state === "Playing");
+    const live = enabled.filter((o) => o.state === "Playing");
     let expectedState: string;
     if (live.length === 0) {
-      const clockOk = health.every((o) => !!o.clock?.clock_ok);
+      const clockOk = enabled.every((o) => !!o.clock?.clock_ok);
       expectedState = clockOk ? "LOCKED" : "UNLOCKED";
     } else {
       expectedState = live
@@ -622,22 +650,29 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const cls = (await global.getAttribute("class")) ?? "";
     expect(
       cls,
-      `global badge class "${cls}" must match the summarized state ${expectedState} for health ${JSON.stringify(health)}`,
+      `global badge class "${cls}" must match the summarized state ${expectedState} for enabled health ${JSON.stringify(enabled)}`,
     ).toContain(`lock-${expectedState.toLowerCase()}`);
 
-    // At least one per-card badge exists and its colour class agrees with
-    // that output's raw lock_state (the per-card badge shows the output's
-    // own state, not the summary).
+    // A per-card badge is shown only on a pacing-enabled Playing/Paused output;
+    // find one that also matches a playlist card and assert its colour agrees
+    // with the output's raw lock_state.
     const playlists = (await (
       await request.get("/api/v1/playlists")
     ).json()) as Array<{ name: string; ndi_output_name: string }>;
     const nameByNdi = new Map(
       playlists.map((p) => [p.ndi_output_name, p.name]),
     );
-    const matched = health.find((h) => nameByNdi.has(h.ndi_name));
+    const matched = enabled.find(
+      (h) =>
+        nameByNdi.has(h.ndi_name) &&
+        (h.state === "Playing" || h.state === "Paused"),
+    );
     if (matched) {
+      // #165: the per-playlist badge lives in the SELECTOR row now, not the
+      // single work area.
       const cardBadge = page
-        .locator(".playlist-card", { hasText: nameByNdi.get(matched.ndi_name)! })
+        .getByTestId("playlist-selector-row")
+        .filter({ hasText: nameByNdi.get(matched.ndi_name)! })
         .locator(".lock-badge");
       await expect(cardBadge).toBeVisible({ timeout: 10_000 });
       const ccls = (await cardBadge.getAttribute("class")) ?? "";
@@ -672,7 +707,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     });
 
     await page.goto("/");
-    await expect(page.locator(".playlist-card").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("playlist-workspace")).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(3_000);
 
     const real = messages.filter((m) => !allowed.some((r) => r.test(m)));

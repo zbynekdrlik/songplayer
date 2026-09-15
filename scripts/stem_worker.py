@@ -111,15 +111,26 @@ def _gpu_mem_fraction():
     return min(0.95, max(0.2, frac))
 
 
-def gpu_polite():
+def gpu_polite(force_cpu=False):
     """GPU discipline for the shared win-resolume box (#154): BELOW_NORMAL WDDM
     priority + a per-process VRAM cap. Model parameters are UNCHANGED — quality
-    is identical; only scheduling priority + VRAM headroom move. Best-effort."""
-    _set_wddm_gpu_priority()
+    is identical; only scheduling priority + VRAM headroom move. Best-effort.
+
+    #162: with `force_cpu` the VRAM cap is SKIPPED — the GPU is left completely
+    untouched (inference is forced onto CPU in-process by `_force_cpu()`, which
+    keeps CUDA initialized so the NVIDIA driver never unloads and crashes)."""
+    # WDDM priority ONLY when CUDA is visible: on a CPU-only run (#162,
+    # CUDA_VISIBLE_DEVICES=-1) nothing keeps the NVIDIA user-mode driver
+    # loaded after D3DKMTSetProcessSchedulingPriorityClass returns, the DLL
+    # unloads and a later call into it crashes the process
+    # (nvdxgdmal64.dll_unloaded, 0xc0000005 — win-resolume 2026-09-15).
     try:
         import torch
 
         if torch.cuda.is_available():
+            _set_wddm_gpu_priority()
+            if force_cpu:
+                return  # #162: forcing CPU — leave GPU memory untouched
             frac = _gpu_mem_fraction()
             torch.cuda.set_per_process_memory_fraction(frac)
             print(
@@ -151,7 +162,9 @@ def _force_cpu():
     orig_env = os.environ.get("CUDA_VISIBLE_DEVICES")
     torch.cuda.is_available = lambda: False
     torch.cuda.device_count = lambda: 0
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # "-1" (not ""): an invalid ordinal disables CUDA on every platform, and
+    # Windows drops an empty-valued variable so "" would leave the GPU visible.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     try:
         yield
     finally:
@@ -203,7 +216,10 @@ def _write_stem_48k_stereo(src_path, out_path):
     out = np.clip(y.T, -1.0, 1.0)
     tmp_path = f"{out_path}.tmp"
     try:
-        sf.write(tmp_path, out, OUTPUT_SAMPLE_RATE, subtype="PCM_24")
+        # format= is REQUIRED: soundfile infers it from the extension and the
+        # atomic temp path ends in ".tmp" (first live separation failed here,
+        # win-resolume 2026-09-15 07:16 UTC).
+        sf.write(tmp_path, out, OUTPUT_SAMPLE_RATE, format="FLAC", subtype="PCM_24")
         os.replace(tmp_path, out_path)  # atomic on the same filesystem
     finally:
         # If os.replace never ran (write failed), don't leave the temp behind.
@@ -220,7 +236,9 @@ def cmd_separate(args):
     """
     from audio_separator.separator import Separator
 
-    gpu_polite()
+    if args.force_cpu:
+        print("stem_worker: forced CPU inference (--force-cpu)", file=sys.stderr)
+    gpu_polite(force_cpu=args.force_cpu)
 
     stem_dir = tempfile.mkdtemp(prefix="sp_karaoke_")
 
@@ -249,9 +267,11 @@ def cmd_separate(args):
         import torch
 
         try:
-            vocals, instrumental = _separate(force_cpu=False)
+            vocals, instrumental = _separate(force_cpu=args.force_cpu)
         except Exception as e:
-            if not _is_cuda_oom(e):
+            # #162: the CUDA-OOM→CPU retry is for the GPU path only. A forced-CPU
+            # run has no GPU to fall back from, so a failure there is a real error.
+            if args.force_cpu or not _is_cuda_oom(e):
                 raise
             print(
                 "gpu_polite: CUDA OOM during stem separation — retrying on CPU "
@@ -291,6 +311,9 @@ def main():
     p_sep.add_argument("--vocals-out", required=True)
     p_sep.add_argument("--instrumental-out", required=True)
     p_sep.add_argument("--models-dir", required=True)
+    # #162: force in-process CPU inference from the start (leaves the GPU
+    # untouched for the live wall) instead of only as the CUDA-OOM fallback.
+    p_sep.add_argument("--force-cpu", action="store_true")
 
     p_pre = subparsers.add_parser("preload")
     p_pre.add_argument("--models-dir", required=True)

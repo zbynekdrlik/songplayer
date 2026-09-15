@@ -63,3 +63,26 @@ it polls the push-run `Gate` check (needs `checks: read`) to confirm it was gree
 closing the hole where a shared failure reds the push Gate but is skipped-ok on the
 PR Gate. `version-check` must stay `pull_request`-only (a dev push legitimately has a
 `-dev` VERSION).
+
+## RED-GREEN gate: retroactive `[no-test: <sha> <reason>]` (release PR #160)
+`scripts/check-red-green-order.sh` runs on the PR event over the whole
+`main..dev` range, so a `fix(#N):` commit that landed on dev without a
+`[no-test:]` marker (a merge-integration compile fix, a clippy allow) fails the
+release PR weeks later. History rewrite is banned — declare the LOGGED bypass
+from a LATER commit instead: an empty `chore(red-green): …` commit whose body
+carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
+`bypass: … (declared by <sha7>)`. Only the leading `fix(#N):` form is gated;
+scope-only subjects (`fix(stems): … (#14)`) are not. Run
+`bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
+release PR — it is bash-only, allowed under Tier-0.
+
+## `gh run rerun <old-run>` CANCELS the newer in-flight run on the same branch
+`ci.yml` has a per-branch concurrency group with `cancel-in-progress`; a re-run
+of an OLDER run is a NEW run in that group, so GitHub cancels whatever is
+currently in flight (2026-09-15: the mutant-fix run 34948303347 died because I
+re-ran 34947398815 for its cancelled shard 1/4). Sequence instead: let the
+in-flight run finish (or cancel it deliberately), THEN re-run the old one, THEN
+`gh run rerun <new-run>`. Also: cancelling a run whose mutation shards had not
+finished leaves that push range without a mutation verdict — re-run its failed
+jobs before trusting the diff, and expect the old commit's already-known
+survivors to fail again there (read only the shard you need).

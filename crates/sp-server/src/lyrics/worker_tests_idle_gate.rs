@@ -72,13 +72,19 @@ async fn gate_worker(
     (worker, pool)
 }
 
-/// The core #154 guarantee: with a Playing snapshot the worker loop defers the
-/// heavy pick — the eligible song is left UNTOUCHED (not marked failed, no
-/// backoff penalty) and the dashboard shows "waiting — wall in use".
+/// The core #154 guarantee, now scoped to IDLE-ONLY mode (#162): with
+/// `lyrics_processing_mode=idle-only` and a Playing snapshot the worker loop
+/// defers the heavy pick — the eligible song is left UNTOUCHED (not marked
+/// failed, no backoff penalty) and the dashboard shows "waiting — wall in use".
+/// In the default low-priority mode the loop does NOT defer (proven by
+/// `low_priority_mode_does_not_defer_while_playing`).
 #[tokio::test]
-async fn process_next_defers_heavy_work_while_playing() {
+async fn idle_only_mode_defers_heavy_work_while_playing() {
     let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
     let (worker, pool) = gate_worker(registry, ObsState::default()).await;
+    crate::db::models::set_setting(&pool, "lyrics_processing_mode", "idle-only")
+        .await
+        .unwrap();
 
     // An eligible song sits in the queue (bucket 1: never processed).
     sqlx::query(
@@ -118,21 +124,57 @@ async fn process_next_defers_heavy_work_while_playing() {
     );
 }
 
-/// The operator override: `lyrics_gate_when_playing=false` disables the gate —
-/// heavy work proceeds even while Playing (today's behaviour).
+/// #162 core: in `low-priority` (the DEFAULT) the loop-level gate NEVER defers,
+/// even while the wall is Playing — the queue drains continuously at reduced
+/// priority instead of stopping. `idle-only` still defers (below).
 #[tokio::test]
-async fn gate_off_setting_proceeds_even_while_playing() {
+async fn low_priority_mode_does_not_defer_while_playing() {
     let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
-    let (worker, pool) = gate_worker(registry, ObsState::default()).await;
-    crate::db::models::set_setting(&pool, "lyrics_gate_when_playing", "false")
-        .await
-        .unwrap();
+    let (worker, _pool) = gate_worker(registry, ObsState::default()).await;
 
-    let (defer, activity) = worker.wall_gate_should_defer().await;
-    assert!(!defer, "gate OFF must not defer");
+    let (defer, activity) = worker
+        .loop_should_defer(crate::lyrics::heavy_plan::ProcessingMode::LowPriority)
+        .await;
+    assert!(!defer, "low-priority must not defer even while playing");
     assert!(
         activity.any_playing,
         "the wall is still detected as playing"
+    );
+}
+
+/// #162: `idle-only` mode still defers the loop-level pick while the wall plays.
+#[tokio::test]
+async fn idle_only_mode_defers_at_loop_level_while_playing() {
+    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
+    let (worker, _pool) = gate_worker(registry, ObsState::default()).await;
+
+    let (defer, activity) = worker
+        .loop_should_defer(crate::lyrics::heavy_plan::ProcessingMode::IdleOnly)
+        .await;
+    assert!(defer, "idle-only must defer while playing");
+    assert!(activity.any_playing);
+}
+
+/// #162: `processing_mode` reads the `lyrics_processing_mode` setting, defaulting
+/// to low-priority when unset and parsing idle-only when the operator sets it.
+#[tokio::test]
+async fn processing_mode_reads_setting_with_low_priority_default() {
+    use crate::lyrics::heavy_plan::ProcessingMode;
+    let (worker, pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
+
+    assert_eq!(
+        worker.processing_mode().await,
+        ProcessingMode::LowPriority,
+        "unset setting defaults to low-priority"
+    );
+
+    crate::db::models::set_setting(&pool, "lyrics_processing_mode", "idle-only")
+        .await
+        .unwrap();
+    assert_eq!(
+        worker.processing_mode().await,
+        ProcessingMode::IdleOnly,
+        "operator can select idle-only"
     );
 }
 
@@ -226,6 +268,68 @@ fn idle_settle_busy_sample_resets_the_clock() {
     assert!(
         !s.defer(false, t0 + Duration::from_secs(56)),
         "30s since restart → resume"
+    );
+}
+
+// ---- #161 mid-job wall-abort (worker seam) --------------------------------
+
+/// The core #161 guarantee at the worker level: with a Playing snapshot, a heavy
+/// step run under `wall_abort` is KILLED (its future dropped, never run to
+/// completion) within the ~2 s debounce, and the caller gets `Err(WallAbort)`.
+/// Real clock on purpose: the fixture opens the sqlite pool inside the test, and
+/// under `start_paused` sqlx's acquire timeout auto-advances (PoolTimedOut,
+/// CI run 34926435178). The 1 s poll aborts the mock 30 s step after ~2 s.
+#[tokio::test]
+async fn wall_abort_kills_running_step_when_wall_playing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
+    let (worker, _pool) = gate_worker(registry, ObsState::default()).await;
+
+    let completed = Arc::new(AtomicBool::new(false));
+    let c = completed.clone();
+    let heavy = async move {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        c.store(true, Ordering::SeqCst);
+        7u32
+    };
+
+    // Gate ON, wall Playing → the running step is killed within ~2 s.
+    let result = worker.wall_abort(heavy, true).await;
+    assert!(
+        result.is_err(),
+        "a playing wall must abort the running heavy step"
+    );
+    assert!(
+        !completed.load(Ordering::SeqCst),
+        "aborted step must be dropped, never run to completion"
+    );
+    if let Err(e) = &result {
+        assert!(
+            e.detail.contains("playing"),
+            "abort detail names the cause: {}",
+            e.detail
+        );
+    }
+}
+
+/// A mid-job abort surfaces the same song-less "waiting — wall in use" badge the
+/// pre-flight gate uses, carrying the cause detail — so the dashboard keeps a
+/// stable waiting state through the abort.
+#[tokio::test]
+async fn enter_wall_abort_sets_waiting_badge() {
+    let (worker, _pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
+    worker.enter_wall_abort("output playing").await;
+    let proc = worker.current_processing().read().await.clone();
+    let proc = proc.expect("waiting badge should be set");
+    assert!(
+        proc.stage.contains("waiting — wall in use"),
+        "stage was: {}",
+        proc.stage
+    );
+    assert!(
+        proc.stage.contains("output playing"),
+        "waiting detail should name the cause; stage was: {}",
+        proc.stage
     );
 }
 

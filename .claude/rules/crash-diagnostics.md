@@ -36,3 +36,15 @@ startup-phase panic is captured too.
 their `if len == 0 { return 0 }` guard — without it `.min(len - 1)` panics on an empty ring
 (debug: subtraction overflow; release: wrap → out-of-bounds index). Empty-ring tests lock this
 in `pacer_tests_mutants.rs` / `pacer_prepare_tests_mutants.rs`.
+
+## Aborts the panic hook cannot see — WER LocalDumps (2026-09-15, #156)
+`0xc0000409` is not only a Rust panic under `panic="abort"`: an allocation
+failure (`handle_alloc_error`), a stack overflow and any `__fastfail` abort the
+process WITHOUT running the panic hook — 2026-09-14 09:12:08 UTC SongPlayer
+0.49.0-dev aborted with the hook armed and `songplayer-panic.log` stayed absent.
+The box therefore has Windows Error Reporting LocalDumps for `SongPlayer.exe`:
+`HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\SongPlayer.exe`
+(`DumpFolder=C:\ProgramData\SongPlayer\dumps`, `DumpType=1` mini, `DumpCount=5`).
+After any abort check BOTH `songplayer-panic.log` and `dumps\*.dmp`; a dump is
+read with `cdb -z <file> -c "!analyze -v; q"` (Windows SDK debuggers) — never
+ship a "fix" for an abort without one of the two artifacts.
