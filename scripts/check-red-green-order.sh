@@ -27,6 +27,11 @@
 #   * Any `test(<scope>)` commit whose subject mentions `(#N)` anywhere (e.g.
 #     `test(config): RED — … (#145)`) counts as the RED commit for N, not
 #     only the strict `test(#N)` leading form.
+#   * A RETROACTIVE bypass: a `[no-test: <sha> <reason>]` marker (leading
+#     7-40 hex-digit sha) in ANY LATER commit's body registers a logged
+#     bypass for the fix commit identified by `<sha>`, for cases where that
+#     fix already landed without its own marker and history rewrite is
+#     banned (e.g. a `chore(red-green): …` commit amending the record).
 
 set -euo pipefail
 
@@ -47,7 +52,31 @@ check_range() {
     fi
 
     declare -A test_seen=()
+    declare -A amend_map=()
+    declare -A amend_reason=()
     local violations=()
+
+    # First pass: collect every retroactive `[no-test: <sha> <reason>]`
+    # marker in the range, keyed by the FULL sha of the fix commit it
+    # covers (resolved via `git rev-parse` so a short prefix in the marker
+    # still matches). The declaring commit is normally LATER than the fix
+    # it amends, so this must be a separate pass over the whole range
+    # before the per-fix check below runs.
+    while IFS=$'\t' read -r sha _; do
+        local body rest
+        body="$(git log -1 --format=%B "$sha")"
+        rest="$body"
+        while [[ "$rest" =~ \[no-test:[[:space:]]+([0-9a-fA-F]{7,40})[[:space:]]+([^]]*)\] ]]; do
+            local ref_prefix="${BASH_REMATCH[1]}"
+            local marker_text="${BASH_REMATCH[0]}"
+            local full_sha
+            if full_sha="$(git rev-parse --verify -q "${ref_prefix}^{commit}" 2>/dev/null)"; then
+                amend_map["$full_sha"]="$sha"
+                amend_reason["$full_sha"]="$marker_text"
+            fi
+            rest="${rest#*"$marker_text"}"
+        done
+    done <<< "$log"
 
     while IFS=$'\t' read -r sha subject; do
         # Record any test commit that references an issue so a following
@@ -78,6 +107,10 @@ check_range() {
             body="$(git log -1 --format=%B "$sha")"
             if [[ "$body" =~ \[no-test:[^]]*\] ]]; then
                 echo "bypass: $sha #$issue ${BASH_REMATCH[0]}"
+                continue
+            fi
+            if [ -n "${amend_map[$sha]:-}" ]; then
+                echo "bypass: $sha #$issue ${amend_reason[$sha]} (declared by ${amend_map[$sha]:0:7})"
                 continue
             fi
             if [ -z "${test_seen[$issue]:-}" ]; then
@@ -156,9 +189,20 @@ self_test() {
         git commit --allow-empty -q -m "test(config): RED — guard for foo (#402)"
         git commit --allow-empty -q -m "fix(#402): the fix"
         git tag fixture-scoped-test-good
+
+        # Fixture 9: retroactive bypass — a fix(#N) commit lands with no
+        # test and no marker (must fail alone, since history rewrite is
+        # banned so it can never gain its own marker). A LATER commit's
+        # body then declares `[no-test: <that fix's sha7> reason]` — the
+        # full range must pass and log the retroactive bypass.
+        git commit --allow-empty -q -m "fix(#501): merge compile fix, landed without a marker"
+        fix501_sha="$(git rev-parse HEAD)"
+        git tag fixture-retro-fix-alone
+        git commit --allow-empty -q -m "chore(red-green): retroactively bypass #501" -m "[no-test: ${fix501_sha:0:7} merge compile fix]"
+        git tag fixture-retro-declared
     )
 
-    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc no_test_rc scoped_test_rc
+    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc no_test_rc scoped_test_rc retro_alone_rc retro_declared_rc
     good_rc=0
     bad_rc=0
     prefixes_good_rc=0
@@ -167,6 +211,8 @@ self_test() {
     regression_bad_rc=0
     no_test_rc=0
     scoped_test_rc=0
+    retro_alone_rc=0
+    retro_declared_rc=0
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-good >/dev/null 2>&1 ) || good_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-bad >/dev/null 2>&1 ) || bad_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-bad..fixture-prefixes-good >/dev/null 2>&1 ) || prefixes_good_rc=$?
@@ -175,6 +221,9 @@ self_test() {
     ( cd "$tmp" && "$SCRIPT" fixture-hotfix-bad..fixture-regression-bad >/dev/null 2>&1 ) || regression_bad_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-regression-bad..fixture-no-test-bypass >/dev/null 2>&1 ) || no_test_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-no-test-bypass..fixture-scoped-test-good >/dev/null 2>&1 ) || scoped_test_rc=$?
+    ( cd "$tmp" && "$SCRIPT" fixture-scoped-test-good..fixture-retro-fix-alone >/dev/null 2>&1 ) || retro_alone_rc=$?
+    local retro_declared_out
+    retro_declared_out="$( cd "$tmp" && "$SCRIPT" fixture-scoped-test-good..fixture-retro-declared 2>&1 )" || retro_declared_rc=$?
 
     if [ "$good_rc" -ne 0 ]; then
         echo "self-test FAIL: well-formed range expected rc=0, got $good_rc"
@@ -206,6 +255,18 @@ self_test() {
     fi
     if [ "$scoped_test_rc" -ne 0 ]; then
         echo "self-test FAIL: test(<scope>) mentioning (#N) expected rc=0, got $scoped_test_rc"
+        return 1
+    fi
+    if [ "$retro_alone_rc" -ne 1 ]; then
+        echo "self-test FAIL: fix(#N) with no marker and no later declaration expected rc=1, got $retro_alone_rc"
+        return 1
+    fi
+    if [ "$retro_declared_rc" -ne 0 ]; then
+        echo "self-test FAIL: fix(#N) with a LATER [no-test: <sha> …] declaration expected rc=0, got $retro_declared_rc"
+        return 1
+    fi
+    if [[ "$retro_declared_out" != *"declared by"* ]]; then
+        echo "self-test FAIL: retroactive bypass did not log 'declared by' — got: $retro_declared_out"
         return 1
     fi
     echo "ok: self-test passed (all bug-prefix subjects gate correctly)"
