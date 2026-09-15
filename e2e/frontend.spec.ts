@@ -8,6 +8,52 @@ const ALLOWED_CONSOLE = [
   /integrity.*attribute.*ignored/, // Chrome SRI preload warning (crbug.com/981419)
 ];
 
+// #164 genlock fixtures. `pacing.enabled` decides badge visibility: a
+// pacing-disabled output shows NO badge; a pacing-enabled output shows one only
+// while its state is Playing/Paused. All three names match a playlist card
+// (SP-worship→Worship, SP-background→Background, SP-live→ytlive).
+const GENLOCK_ENABLED_FIXTURE = [
+  {
+    ndi_name: "SP-worship", playlist_id: 1, state: "Playing", connections: 2,
+    lock_state: "LOCKED", lock_reason: "locked",
+    clock: { is_locked: true, mode: "LOCK", offset_ns: 100, clock_ok: true },
+    pacing: { enabled: true }, audio: {},
+  },
+  {
+    ndi_name: "SP-background", playlist_id: 2, state: "Playing", connections: 0,
+    lock_state: "DEGRADED", lock_reason: "no receiver",
+    clock: { is_locked: true, mode: "LOCK", offset_ns: 120, clock_ok: true },
+    pacing: { enabled: true }, audio: {},
+  },
+  {
+    ndi_name: "SP-live", playlist_id: 184, state: "Idle", connections: 0,
+    lock_state: "UNLOCKED", lock_reason: "pacing disabled",
+    clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+    pacing: { enabled: false }, audio: {},
+  },
+];
+
+const GENLOCK_ALL_DISABLED_FIXTURE = [
+  {
+    ndi_name: "SP-worship", playlist_id: 1, state: "Playing", connections: 2,
+    lock_state: "UNLOCKED", lock_reason: "pacing disabled",
+    clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+    pacing: { enabled: false }, audio: {},
+  },
+  {
+    ndi_name: "SP-background", playlist_id: 2, state: "Playing", connections: 0,
+    lock_state: "UNLOCKED", lock_reason: "pacing disabled",
+    clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+    pacing: { enabled: false }, audio: {},
+  },
+  {
+    ndi_name: "SP-live", playlist_id: 184, state: "Idle", connections: 0,
+    lock_state: "UNLOCKED", lock_reason: "pacing disabled",
+    clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+    pacing: { enabled: false }, audio: {},
+  },
+];
+
 let consoleMessages: string[] = [];
 
 test.beforeEach(async ({ page }) => {
@@ -132,14 +178,21 @@ test("navigating away from the Dashboard does not panic a disposed signal", asyn
   await page.waitForTimeout(7000);
 });
 
-// ── #150: LIVE-LOCKED genlock indicator ──────────────────────────────────────
+// ── #164: genlock LockBadge hidden while pacing disabled ──────────────────────
 
-test("NDI lock badges render each output state with its reason (#150)", async ({
+test("per-card lock badge shows only on live pacing-enabled outputs (#164)", async ({
   page,
+  request,
 }) => {
-  // Default fixture (e2e/mock-api.mjs): SP-worship LOCKED, SP-background
-  // DEGRADED "no receiver", SP-live UNLOCKED "pacing disabled". Each
-  // playlist card shows a `.lock-badge` next to its NDI output name.
+  // SP-worship LOCKED + Playing + pacing enabled, SP-background DEGRADED +
+  // Playing + pacing enabled, SP-live UNLOCKED + Idle + pacing DISABLED. The
+  // badge must appear on the two live pacing-enabled cards and NOT on the
+  // pacing-disabled SP-live card (#164: no '● UNLOCKED — pacing disabled' noise).
+  const set = await request.post("/__mock/ndi-health", {
+    data: GENLOCK_ENABLED_FIXTURE,
+  });
+  expect(set.ok()).toBeTruthy();
+
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
     timeout: 10000,
@@ -155,24 +208,30 @@ test("NDI lock badges render each output state with its reason (#150)", async ({
   const bgBadge = page
     .locator(".playlist-card", { hasText: "Background" })
     .locator(".lock-badge");
+  await expect(bgBadge).toBeVisible();
   await expect(bgBadge).toContainText("DEGRADED");
   await expect(bgBadge).toContainText("no receiver");
   await expect(bgBadge).toHaveClass(/lock-degraded/);
 
+  // The pacing-disabled SP-live (ytlive) card carries NO badge at all.
   const liveBadge = page
     .locator(".playlist-card", { hasText: "ytlive" })
     .locator(".lock-badge");
-  await expect(liveBadge).toContainText("UNLOCKED");
-  await expect(liveBadge).toContainText("pacing disabled");
-  await expect(liveBadge).toHaveClass(/lock-unlocked/);
+  await expect(liveBadge).toHaveCount(0);
 });
 
-test("global genlock badge names the worst live output for the default fixture (#150)", async ({
+test("global genlock summary reports the worst live pacing-enabled output (#164)", async ({
   page,
+  request,
 }) => {
-  // Global summary counts only LIVE (state==="Playing") outputs. In the
-  // default fixture SP-live is Idle, so the worst LIVE output is the
-  // DEGRADED SP-background — the header badge must say so.
+  // Two live pacing-enabled outputs; the worst is DEGRADED SP-background. The
+  // header shows ONE summary with the state, an n/m count, and the reason — not
+  // nine identical dots.
+  const set = await request.post("/__mock/ndi-health", {
+    data: GENLOCK_ENABLED_FIXTURE,
+  });
+  expect(set.ok()).toBeTruthy();
+
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
     timeout: 10000,
@@ -181,54 +240,78 @@ test("global genlock badge names the worst live output for the default fixture (
   const global = page.locator(".genlock-status .lock-badge");
   await expect(global).toBeVisible({ timeout: 5000 });
   await expect(global).toContainText("DEGRADED");
-  await expect(global).toContainText("SP-background");
+  await expect(global).toContainText("1/2");
+  await expect(global).toContainText("no receiver");
   await expect(global).toHaveClass(/lock-degraded/);
 });
 
-test("global genlock badge flips to LOCKED after an all-locked fixture (#150)", async ({
+test("global genlock summary flips to LOCKED after an all-locked fixture (#164)", async ({
   page,
   request,
 }) => {
+  const start = await request.post("/__mock/ndi-health", {
+    data: GENLOCK_ENABLED_FIXTURE,
+  });
+  expect(start.ok()).toBeTruthy();
+
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
     timeout: 10000,
   });
 
   const global = page.locator(".genlock-status .lock-badge");
-  await expect(global).toContainText("DEGRADED", { timeout: 5000 });
+  await expect(global).toContainText("DEGRADED", { timeout: 6000 });
 
-  // Replace the fixture with every output LOCKED + live; the 1 s poll picks
-  // it up and the global badge flips within a few seconds.
+  // Replace with every live output LOCKED + pacing enabled; the 1 s poll picks
+  // it up and the summary flips to LOCKED n/m within a few seconds.
   const resp = await request.post("/__mock/ndi-health", {
     data: [
       {
-        ndi_name: "SP-worship",
-        playlist_id: 1,
-        state: "Playing",
-        connections: 2,
-        lock_state: "LOCKED",
-        lock_reason: "locked",
+        ndi_name: "SP-worship", playlist_id: 1, state: "Playing", connections: 2,
+        lock_state: "LOCKED", lock_reason: "locked",
         clock: { is_locked: true, mode: "LOCK", offset_ns: 100, clock_ok: true },
-        pacing: { enabled: true },
-        audio: {},
+        pacing: { enabled: true }, audio: {},
       },
       {
-        ndi_name: "SP-background",
-        playlist_id: 2,
-        state: "Playing",
-        connections: 3,
-        lock_state: "LOCKED",
-        lock_reason: "locked",
+        ndi_name: "SP-background", playlist_id: 2, state: "Playing", connections: 3,
+        lock_state: "LOCKED", lock_reason: "locked",
         clock: { is_locked: true, mode: "LOCK", offset_ns: 120, clock_ok: true },
-        pacing: { enabled: true },
-        audio: {},
+        pacing: { enabled: true }, audio: {},
       },
     ],
   });
   expect(resp.ok()).toBeTruthy();
 
-  await expect(global).toHaveText("● LOCKED", { timeout: 3500 });
+  await expect(global).toContainText("LOCKED", { timeout: 4000 });
+  await expect(global).toContainText("2/2");
   await expect(global).toHaveClass(/lock-locked/);
+
+  // Both live locked outputs also carry a per-card badge.
+  await expect(
+    page.locator(".playlist-card", { hasText: "Worship" }).locator(".lock-badge"),
+  ).toBeVisible();
+});
+
+test("pacing disabled everywhere hides every genlock badge (#164)", async ({
+  page,
+  request,
+}) => {
+  // Production reality: genlock_pacing OFF on every output. The owner must see
+  // ZERO badges — no per-card '● UNLOCKED — pacing disabled', no header summary.
+  const set = await request.post("/__mock/ndi-health", {
+    data: GENLOCK_ALL_DISABLED_FIXTURE,
+  });
+  expect(set.ok()).toBeTruthy();
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
+    timeout: 10000,
+  });
+
+  // No badge anywhere on the page (header summary + every card). Retries while
+  // the 1 s poll settles; the first fetch already returns the disabled fixture,
+  // so the count is 0 the whole time.
+  await expect(page.locator(".lock-badge")).toHaveCount(0, { timeout: 6000 });
 });
 
 // ── #152: per-song SK translation gender toggle ───────────────────────────────
@@ -273,4 +356,74 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
   ]);
   expect(JSON.parse(femaleReq.postData() || "{}").gender).toBe("f");
   await expect(toggle).toHaveText("♀");
+});
+
+// ── #163: subtitles block must not resize the card ────────────────────────────
+
+test("karaoke panel keeps the card height stable across lyrics on/off (#163)", async ({
+  page,
+  request,
+}) => {
+  // The owner's report: "okno stále skáče hore dole" — the subtitles block under
+  // the player/preview appears only when there is a lyric line, so the card (and
+  // everything below it) jumps whenever lyrics pause. The panel must ALWAYS be in
+  // the DOM with reserved height; only the text inside it swaps.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
+    timeout: 10000,
+  });
+
+  const card = page.locator(".playlist-card", {
+    has: page.getByRole("heading", { name: "Worship" }),
+  });
+  // Wait for the WS-driven now-playing block to arrive (playlist 1 is marked
+  // Playing by the mock). This also proves the WebSocket is connected, so the
+  // /__mock/lyrics-update broadcast below actually reaches a client.
+  await expect(card.locator(".np-song")).toBeVisible({ timeout: 10000 });
+
+  const panel = card.locator(".karaoke-panel");
+
+  // 1) A lyric line WITH text.
+  const withText = await request.post("/__mock/lyrics-update", {
+    data: {
+      playlist_id: 1,
+      line_en: "Amazing grace how sweet",
+      line_sk: "Úžasná milosť aká sladká",
+      prev_line_en: "was blind but now I see",
+      next_line_en: "that saved a wretch like me",
+      active_word_index: 2,
+      word_count: 4,
+    },
+  });
+  expect(withText.ok()).toBeTruthy();
+
+  await expect(panel).toBeVisible({ timeout: 5000 });
+  await expect(panel.locator(".karaoke-current")).toContainText("Amazing");
+
+  const cardBox1 = await card.boundingBox();
+  const panelBox1 = await panel.boundingBox();
+  expect(cardBox1?.height ?? 0).toBeGreaterThan(0);
+  expect(panelBox1?.height ?? 0).toBeGreaterThan(0);
+
+  // 2) A pause between lines — nothing to show. The panel must stay in the DOM
+  // at the SAME height; only its text clears.
+  const noText = await request.post("/__mock/lyrics-update", {
+    data: { playlist_id: 1 },
+  });
+  expect(noText.ok()).toBeTruthy();
+
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".karaoke-current")).not.toContainText("Amazing");
+
+  const cardBox2 = await card.boundingBox();
+  const panelBox2 = await panel.boundingBox();
+
+  // Equal within 1px: the block reserves its space whether or not there is a
+  // lyric line, so nothing below it jumps.
+  expect(
+    Math.abs((panelBox1?.height ?? 0) - (panelBox2?.height ?? 0)),
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs((cardBox1?.height ?? 0) - (cardBox2?.height ?? 0)),
+  ).toBeLessThanOrEqual(1);
 });

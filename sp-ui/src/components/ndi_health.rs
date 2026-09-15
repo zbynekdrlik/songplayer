@@ -12,10 +12,37 @@
 //! every per-card [`LockBadge`] reads that same store signal.
 
 use leptos::prelude::*;
-use sp_core::genlock::lock_state::{LockState, OutputLock, summarize};
+use sp_core::genlock::lock_state::LockState;
 
 use crate::api::NdiOutputHealth;
 use crate::store::DashboardStore;
+
+/// #164: a per-card lock badge is shown only when pacing is enabled AND the
+/// output is on the wall (Playing or Paused). While `genlock_pacing` is OFF —
+/// the production default (#147) — no badge is shown at all, so the dashboard
+/// is not littered with '● UNLOCKED — pacing disabled' on every card.
+pub fn should_show_lock_badge(o: &NdiOutputHealth) -> bool {
+    o.pacing.enabled && matches!(o.state.as_str(), "Playing" | "Paused")
+}
+
+/// Rank an output's effective lock state for "which is worst" (UNLOCKED worst).
+fn severity(state: LockState) -> u8 {
+    match state {
+        LockState::Locked => 0,
+        LockState::Degraded => 1,
+        LockState::Unlocked => 2,
+    }
+}
+
+/// An output's effective lock state: a LOCKED output whose clock is not ok is
+/// demoted to UNLOCKED (mirrors `sp_core::genlock::lock_state::summarize`).
+fn effective_state(o: &NdiOutputHealth) -> LockState {
+    if o.lock_state == LockState::Locked && !o.clock.clock_ok {
+        LockState::Unlocked
+    } else {
+        o.lock_state
+    }
+}
 
 /// Full CSS class list for a badge in `state` (`lock-badge lock-locked` …).
 fn badge_class(state: LockState) -> String {
@@ -65,39 +92,65 @@ fn badge_title(o: &NdiOutputHealth) -> String {
     )
 }
 
-/// Class + text for the header's global summary badge from the per-output
-/// health, via `sp_core`'s [`summarize`].
-fn global_badge(health: &[NdiOutputHealth]) -> (String, String) {
-    let outputs: Vec<OutputLock> = health
+/// #164: the dashboard header's whole-box genlock summary — `Some((class,
+/// text))`, or `None` when NO output has pacing enabled (the production
+/// default), so the header shows nothing at all rather than a spurious
+/// '● UNLOCKED — pacing disabled'.
+///
+/// Computed over the pacing-ENABLED outputs; the summary reflects the LIVE
+/// (Playing) ones. Keeps the LOCKED / DEGRADED / UNLOCKED vocabulary and adds
+/// an `n/m` locked count plus the worst output's reason when there is a fault.
+fn global_summary(health: &[NdiOutputHealth]) -> Option<(String, String)> {
+    let enabled: Vec<&NdiOutputHealth> = health.iter().filter(|o| o.pacing.enabled).collect();
+    if enabled.is_empty() {
+        return None;
+    }
+
+    let live: Vec<&NdiOutputHealth> = enabled.iter().copied().filter(|o| o.is_live()).collect();
+    let m = live.len();
+    if m == 0 {
+        // Pacing enabled but nothing on the wall — the state comes from the
+        // clock only (LOCKED iff every output's clock is ok, else UNLOCKED),
+        // matching `sp_core::genlock::lock_state::summarize` and the post-deploy
+        // consistency oracle.
+        let clock_ok = enabled.iter().all(|o| o.clock.clock_ok);
+        let state = if clock_ok {
+            LockState::Locked
+        } else {
+            LockState::Unlocked
+        };
+        let text = if clock_ok {
+            "● LOCKED (no live output)".to_string()
+        } else {
+            "● UNLOCKED (no live output)".to_string()
+        };
+        return Some((badge_class(state), text));
+    }
+
+    let worst_state = live
         .iter()
-        .map(|o| OutputLock {
-            name: o.ndi_name.clone(),
-            state: o.lock_state,
-            live: o.is_live(),
-            clock_ok: o.clock.clock_ok,
-        })
-        .collect();
-    let summary = summarize(&outputs);
-    let class = badge_class(summary.state);
-    let text = match summary.state {
-        LockState::Locked => {
-            if summary.live_count == 0 {
-                "● LOCKED (no live output)".to_string()
-            } else {
-                "● LOCKED".to_string()
-            }
-        }
-        LockState::Degraded => match &summary.worst {
-            Some(w) => format!("● DEGRADED — {w}"),
-            None => "● DEGRADED".to_string(),
-        },
-        LockState::Unlocked => match &summary.worst {
-            Some(w) => format!("● UNLOCKED — {w}"),
-            None if summary.live_count == 0 => "● UNLOCKED (no live output)".to_string(),
-            None => "● UNLOCKED".to_string(),
-        },
+        .copied()
+        .map(effective_state)
+        .max_by_key(|s| severity(*s))
+        .expect("m > 0 guarantees a live output");
+    let worst = live
+        .iter()
+        .copied()
+        .find(|&o| effective_state(o) == worst_state)
+        .expect("worst_state was derived from a live output");
+    let locked = live
+        .iter()
+        .copied()
+        .filter(|&o| effective_state(o) == LockState::Locked)
+        .count();
+
+    let class = badge_class(worst_state);
+    let text = match worst_state {
+        LockState::Locked => format!("● LOCKED {locked}/{m}"),
+        LockState::Degraded => format!("● DEGRADED {locked}/{m} — {}", worst.lock_reason),
+        LockState::Unlocked => format!("● UNLOCKED {locked}/{m} — {}", worst.lock_reason),
     };
-    (class, text)
+    Some((class, text))
 }
 
 /// One output's lock badge, coloured + tooltipped. Rendered next to a playlist
@@ -149,8 +202,10 @@ pub fn GlobalLockBadge() -> impl IntoView {
         <div class="genlock-status">
             {move || {
                 let health = store.ndi_health.get();
-                let (class, text) = global_badge(&health);
-                view! { <span class={class}>{text}</span> }
+                // #164: `None` while pacing is disabled everywhere → the header
+                // renders no badge at all.
+                global_summary(&health)
+                    .map(|(class, text)| view! { <span class={class}>{text}</span> })
             }}
         </div>
     }

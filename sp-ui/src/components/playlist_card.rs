@@ -84,11 +84,15 @@ pub fn PlaylistCard(playlist: Playlist) -> impl IntoView {
                 {
                     let ndi_name = ndi_name.clone();
                     move || {
+                        // #164: show the badge only on live pacing-enabled
+                        // outputs — no '● UNLOCKED — pacing disabled' noise on
+                        // every card while pacing is off.
                         store
                             .ndi_health
                             .get()
                             .into_iter()
                             .find(|o| o.ndi_name == ndi_name)
+                            .filter(ndi_health::should_show_lock_badge)
                             .map(|o| view! { <ndi_health::LockBadge output=o /> })
                     }
                 }
