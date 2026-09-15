@@ -101,12 +101,15 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
         {
             Ok(inner) => inner,
             Err(abort) => {
-                // Delete the aborted step's OWN partial output; the isolated
+                // Delete the aborted step's OWN scratch files (the partial
+                // output JSON + the input text JSON `align` wrote); the isolated
                 // vocal WAV (a completed intermediate) stays. Surface the abort
                 // as a downcastable error so `run_reference_stage` maps it to
                 // WallAborted, never a real mtl failure.
                 let out_json = self.work_dir.join(format!("{video_id}_mtl_out.json"));
+                let text_json = self.work_dir.join(format!("{video_id}_mtl_text.json"));
                 let _ = tokio::fs::remove_file(&out_json).await;
+                let _ = tokio::fs::remove_file(&text_json).await;
                 Err(anyhow::Error::new(abort))
             }
         }

@@ -88,6 +88,11 @@ where
     W: FnMut() -> Fut,
     Fut: std::future::Future<Output = WallActivity>,
 {
+    // Gate off → the watcher can never abort, so skip the 1 s ticker + wall
+    // reads entirely and just run the step to completion.
+    if !gate_enabled {
+        return Ok(fut.await);
+    }
     tokio::pin!(fut);
     let mut policy = AbortPolicy::default();
     let mut ticker = tokio::time::interval(ABORT_POLL_INTERVAL);
