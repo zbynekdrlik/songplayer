@@ -139,9 +139,13 @@ failure — calm instrumental passages are legitimate.
     - **`low-priority` (DEFAULT)** — every heavy stage (vocal isolation, dereverb,
       mtl, stem separation) ALWAYS RUNS. While the wall is in use (`Playing` on
       program via `NdiHealthRegistry`, or OBS streaming/recording via `ObsState`)
-      it runs **CPU-only** (`HeavyStepPlan::apply` sets `CUDA_VISIBLE_DEVICES="-1"`
-      → the script's torch builds every model on CPU, byte-identical to the
-      OOM→CPU fallback) **+ IDLE_PRIORITY_CLASS + thread cap
+      it runs **CPU-only** (the script gets `--force-cpu` from
+      `HeavyStepPlan::script_cpu_args`, which forces in-process CPU inference via
+      `_force_cpu()` — the GPU is left untouched but CUDA stays initialized. It is
+      NOT hidden via `CUDA_VISIBLE_DEVICES="-1"`: that crashed the box —
+      torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode
+      DLL unloads, and a later stray call kills the process
+      `nvdxgdmal64.dll_unloaded` 0xc0000005, win-resolume 2026-09-15) **+ IDLE_PRIORITY_CLASS + thread cap
       `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** — the GPU is never touched,
       so no fps drop / TDR. When the wall is idle it runs **GPU + BELOW_NORMAL**
       (fast). The mid-job abort watcher (#161) is armed ONLY for a GPU job; a GPU

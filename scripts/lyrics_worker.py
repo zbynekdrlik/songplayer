@@ -126,17 +126,28 @@ def _gpu_mem_fraction():
     return min(0.95, max(0.2, frac))
 
 
-def gpu_polite():
+def gpu_polite(force_cpu=False):
     """GPU discipline for the shared win-resolume event PC (#154): BELOW_NORMAL
     WDDM scheduling priority + a per-process VRAM cap so vocal isolation leaves
     GPU headroom for the live MF decoder and OBS/Resolume. Model parameters are
     untouched — separation quality is unchanged; only scheduling priority and
-    the VRAM ceiling move. Best-effort — never raises."""
-    _set_wddm_gpu_priority()
+    the VRAM ceiling move. Best-effort — never raises.
+
+    #162: with `force_cpu` the VRAM cap is SKIPPED — the GPU is left completely
+    untouched (inference is forced onto CPU in-process by `_force_cpu()`, which
+    keeps CUDA initialized so the NVIDIA driver never unloads and crashes)."""
+    # WDDM priority ONLY when CUDA is visible: on a CPU-only run (#162,
+    # CUDA_VISIBLE_DEVICES=-1) nothing keeps the NVIDIA user-mode driver
+    # loaded after D3DKMTSetProcessSchedulingPriorityClass returns, the DLL
+    # unloads and a later call into it crashes the process
+    # (nvdxgdmal64.dll_unloaded, 0xc0000005 — win-resolume 2026-09-15).
     try:
         import torch
 
         if torch.cuda.is_available():
+            _set_wddm_gpu_priority()
+            if force_cpu:
+                return  # #162: forcing CPU — leave GPU memory untouched
             frac = _gpu_mem_fraction()
             torch.cuda.set_per_process_memory_fraction(frac)
             print(
@@ -205,7 +216,9 @@ def cmd_preprocess_vocals(args):
     import torch
     from audio_separator.separator import Separator
 
-    gpu_polite()
+    if args.force_cpu:
+        print("lyrics_worker: forced CPU inference (--force-cpu)", file=sys.stderr)
+    gpu_polite(force_cpu=args.force_cpu)
 
     stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
 
@@ -242,9 +255,11 @@ def cmd_preprocess_vocals(args):
 
     try:
         try:
-            dry_path = _isolate(force_cpu=False)
+            dry_path = _isolate(force_cpu=args.force_cpu)
         except Exception as e:
-            if not _is_cuda_oom(e):
+            # #162: the CUDA-OOM→CPU retry is for the GPU path only. A forced-CPU
+            # run has no GPU to fall back from, so a failure there is a real error.
+            if args.force_cpu or not _is_cuda_oom(e):
                 raise
             print(
                 "gpu_polite: CUDA OOM during vocal isolation — retrying on CPU "
@@ -433,6 +448,9 @@ def main():
     p_pre.add_argument("--audio", required=True)
     p_pre.add_argument("--output", required=True)
     p_pre.add_argument("--models-dir", required=True)
+    # #162: force in-process CPU inference from the start (leaves the GPU
+    # untouched for the live wall) instead of only as the CUDA-OOM fallback.
+    p_pre.add_argument("--force-cpu", action="store_true")
 
     p_ac = subparsers.add_parser("align-chunks")
     p_ac.add_argument("--audio", required=True)

@@ -162,10 +162,12 @@ async fn run_once(
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
 
-    // #162: stamp the priority-regime plan (CPU path hides the GPU + caps
-    // threads; Windows priority-class creation flags). The caller already
-    // forces `--no-cuda` for a CPU plan via `build_args`; hiding the GPU too is
-    // belt-and-suspenders. Replaces the old inline BELOW_NORMAL.
+    // #162: stamp the priority-regime plan (caps CPU threads; Windows
+    // priority-class creation flags). The caller forces `--no-cuda` for a CPU
+    // plan via `build_args` — mtl's OWN CPU switch. `apply` no longer sets any
+    // CUDA env (`CUDA_VISIBLE_DEVICES="-1"` crashed the NVIDIA driver — see
+    // `HeavyStepPlan::apply`), and mtl does NOT take `--force-cpu` (that flag is
+    // for the audio-separator scripts). Replaces the old inline BELOW_NORMAL.
     plan.apply(&mut cmd);
     cmd.kill_on_drop(true);
 

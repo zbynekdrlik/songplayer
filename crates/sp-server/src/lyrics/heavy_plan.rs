@@ -69,8 +69,10 @@ pub struct HeavyStepPlan {
 }
 
 impl HeavyStepPlan {
-    /// cpu-idle: GPU untouched (`CUDA_VISIBLE_DEVICES="-1"`), `IDLE_PRIORITY_CLASS`,
-    /// thread cap = half the logical cores. Cannot disturb the live wall.
+    /// cpu-idle: GPU untouched (the script runs `--force-cpu`, forcing CPU
+    /// in-process — see [`apply`](Self::apply) for why we no longer hide the GPU
+    /// via `CUDA_VISIBLE_DEVICES`), `IDLE_PRIORITY_CLASS`, thread cap = half the
+    /// logical cores. Cannot disturb the live wall.
     pub(crate) fn cpu_idle() -> Self {
         Self {
             device: Device::Cpu,
@@ -107,6 +109,20 @@ impl HeavyStepPlan {
         matches!(self.device, Device::Gpu)
     }
 
+    /// CPU-force CLI args this plan appends to the heavy Python subprocess's
+    /// argv: a CPU plan → `["--force-cpu"]` (the script forces CPU in-process
+    /// via `_force_cpu()`, keeping CUDA initialized so the NVIDIA driver never
+    /// unloads and crashes — see [`apply`](Self::apply)); a GPU plan → `[]`.
+    /// This replaces the removed `CUDA_VISIBLE_DEVICES="-1"` env write. mtl's
+    /// `run.py` keeps its own `--no-cuda` flag; this is for the audio-separator
+    /// scripts (`preprocess-vocals` / `separate`).
+    pub fn script_cpu_args(&self) -> &'static [&'static str] {
+        match self.device {
+            Device::Cpu => &["--force-cpu"],
+            Device::Gpu => &[],
+        }
+    }
+
     /// Short label for the per-step INFO log: `cpu-idle` | `gpu`.
     pub(crate) fn label(&self) -> &'static str {
         match self.device {
@@ -141,33 +157,27 @@ impl HeavyStepPlan {
     }
 
     /// Stamp this plan onto a subprocess `Command`:
-    /// - CPU path → `CUDA_VISIBLE_DEVICES="-1"` so the child's torch reports no
-    ///   CUDA device and builds every model on CPU — byte-identical to the
-    ///   existing in-process OOM→CPU fallback (`_force_cpu` in the scripts),
-    ///   only slower. (mtl's `run.py` additionally takes `--no-cuda`, which the
-    ///   caller passes for a CPU plan.)
-    ///
-    ///   The value is `"-1"`, NOT `""`. Windows DROPS an empty-valued variable
-    ///   when building a child's environment block, so `""` reached the child as
-    ///   `<unset>` and torch fell back to the GPU — probed on win-resolume with
-    ///   the lyrics venv (torch 2.6.0+cu124): `""` → child sees `<unset>`,
-    ///   `torch.cuda.is_available()=True, device_count=1` (BUG — cpu-idle still
-    ///   ran on the GPU, and audio-separator's RoFormer load then died with
-    ///   "Invalid device id"); `"-1"` → `is_available()=False, device_count=0`;
-    ///   unset → `True/1`. CUDA treats any invalid ordinal (`-1`) as "no
-    ///   devices" on Linux too, so `"-1"` is correct cross-platform.
     /// - cap CPU threads via `OMP|MKL|TORCH_NUM_THREADS` when `threads` is set.
     /// - on Windows, set the priority-class creation flags (replacing the old
     ///   inline `BELOW_NORMAL` at every heavy spawn).
     ///
+    /// **CPU is forced via the script argv (`--force-cpu`, see
+    /// [`script_cpu_args`](Self::script_cpu_args)), NOT via
+    /// `CUDA_VISIBLE_DEVICES`.** Hiding the GPU with `CUDA_VISIBLE_DEVICES="-1"`
+    /// CRASHES the box: torch + onnxruntime probe the CUDA driver, find no
+    /// devices, the NVIDIA user-mode DLL unloads, and a later stray call into it
+    /// kills the process — `0xc0000005` in `nvdxgdmal64.dll_unloaded`,
+    /// nondeterministically (after chunk 1/23 or immediately), every isolation /
+    /// separation (probed on win-resolume 2026-09-15). The scripts' in-process
+    /// `_force_cpu()` (monkeypatch `torch.cuda.is_available`/`device_count` while
+    /// CUDA stays initialized) forces CPU WITHOUT unloading the driver — 6/23
+    /// chunks in 3 min, GPU untouched, wall fps nominal. So `apply` sets NO CUDA
+    /// env at all; the CPU plan carries `--force-cpu` in argv instead (mtl keeps
+    /// `--no-cuda`).
+    ///
     /// The `#[cfg(windows)]` creation-flags branch is integration-only; the env
     /// branch is unit-tested via `cmd.as_std().get_envs()`.
     pub(crate) fn apply(&self, cmd: &mut Command) {
-        if matches!(self.device, Device::Cpu) {
-            // "-1", not "" — Windows drops empty-valued env from the child block
-            // (see the doc comment above); "-1" reaches the child and disables CUDA.
-            cmd.env("CUDA_VISIBLE_DEVICES", "-1");
-        }
         if let Some(n) = self.threads {
             let n = n.to_string();
             cmd.env("OMP_NUM_THREADS", &n);

@@ -74,9 +74,13 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   keep running during playback at a priority that cannot disturb the wall —
   *stopping is not the solution* (the idle-only gate starved the queue because
   SongPlayer/CG-OBS always play something). `HeavyStepPlan::for_activity(mode,
-  activity)` decides per step: **low-priority + wall in use → CPU-only** (`apply`
-  sets `CUDA_VISIBLE_DEVICES="-1"` so the script's torch builds every model on CPU,
-  byte-identical to the OOM→CPU fallback) **+ IDLE_PRIORITY_CLASS + thread cap
+  activity)` decides per step: **low-priority + wall in use → CPU-only** (the
+  script gets `--force-cpu` from `HeavyStepPlan::script_cpu_args`, forcing CPU
+  in-process via `_force_cpu()` — the GPU is left untouched but CUDA stays
+  initialized. NOT hidden via `CUDA_VISIBLE_DEVICES="-1"`: that CRASHED the box —
+  torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode DLL
+  unloads and a later stray call kills the process, `nvdxgdmal64.dll_unloaded`
+  0xc0000005, every isolation/separation, win-resolume 2026-09-15) **+ IDLE_PRIORITY_CLASS + thread cap
   `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** → the GPU is never touched, so
   no fps drop / TDR; **low-priority + wall idle → GPU + BELOW_NORMAL** (fast);
   **idle-only → GPU** (it defers instead of running on a busy wall).
