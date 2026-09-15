@@ -19,6 +19,12 @@ const RESOLUTION_TTL: Duration = Duration::from_secs(300); // 5 minutes
 /// clip map may get between the light `/product` liveness probes (#157).
 const FULL_REFRESH_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
+/// Minimum spacing between full `/composition` refresh ATTEMPTS (success or
+/// failure). When `/product` answers but `/composition` keeps failing (Arena's
+/// REST saturating), this stops the 14 MB fetch from being retried on every
+/// ~10 s liveness tick — the retry storm the #157 review caught (#157).
+const FULL_REFRESH_RETRY: Duration = Duration::from_secs(60);
+
 /// Why a full `/composition` refresh is being performed. Drives the INFO
 /// transition log and is the return type of the pure [`FullRefreshReason::decide`]
 /// poll policy (#157). The steady state runs ONLY the light `/product` probe,
@@ -51,37 +57,53 @@ impl FullRefreshReason {
     }
 
     /// Pure poll policy: decide whether — and why — a full `/composition`
-    /// refresh should run on this tick. `now` and `last_full_ok` are
-    /// monotonic `Instant`s so tests can construct synthetic forward-only
-    /// clocks (the `is_expired_at` Windows-underflow-safe pattern).
+    /// refresh should run on this tick. `now`, `last_full_ok` and
+    /// `last_full_attempt` are monotonic `Instant`s so tests can construct
+    /// synthetic forward-only clocks (the `is_expired_at` Windows-underflow-safe
+    /// pattern).
     ///
-    /// Precedence: a forced command wins, then a just-closed breaker, then
-    /// the never-refreshed startup case, then TTL expiry. Returns `None` in
-    /// the steady state (fresh cache, live REST) — only the light `/product`
-    /// probe runs then.
+    /// Precedence: a forced command wins immediately (bypasses the retry
+    /// window), then a just-closed breaker, then the never-refreshed startup
+    /// case, then TTL expiry. Returns `None` in the steady state (fresh cache,
+    /// live REST). The three non-forced reasons additionally back off: a full
+    /// refresh is never re-ATTEMPTED (success OR failure) within `retry_after`
+    /// of the last attempt — the guard against a per-tick 14 MB retry storm
+    /// when `/product` answers but `/composition` keeps failing (#157 review).
     fn decide(
         now: Instant,
         last_full_ok: Option<Instant>,
+        last_full_attempt: Option<Instant>,
         ttl: Duration,
+        retry_after: Duration,
         forced: bool,
         breaker_just_closed: bool,
     ) -> Option<FullRefreshReason> {
         if forced {
             return Some(FullRefreshReason::Command);
         }
-        if breaker_just_closed {
-            return Some(FullRefreshReason::BreakerClosed);
-        }
-        match last_full_ok {
-            None => Some(FullRefreshReason::Startup),
-            Some(last) => {
-                if now.duration_since(last) >= ttl {
-                    Some(FullRefreshReason::Ttl)
-                } else {
-                    None
+        let reason = if breaker_just_closed {
+            FullRefreshReason::BreakerClosed
+        } else {
+            match last_full_ok {
+                None => FullRefreshReason::Startup,
+                Some(last) => {
+                    if now.duration_since(last) >= ttl {
+                        FullRefreshReason::Ttl
+                    } else {
+                        return None;
+                    }
                 }
             }
+        };
+        // Retry backoff: suppress a demand-driven refresh that was ATTEMPTED
+        // too recently, so a failing /composition is retried at most once per
+        // window instead of on every liveness tick.
+        if let Some(attempt) = last_full_attempt {
+            if now.duration_since(attempt) < retry_after {
+                return None;
+            }
         }
+        Some(reason)
     }
 }
 
@@ -189,6 +211,10 @@ pub struct HostDriver {
     /// used for the TTL decision. Separate from `last_full_refresh_ts` (which
     /// is a display timestamp) so TTL math stays on a monotonic clock (#157).
     last_full_refresh_ok_at: Option<Instant>,
+    /// Monotonic instant of the last full-refresh ATTEMPT (success OR failure),
+    /// used for the retry-backoff decision so a failing `/composition` is not
+    /// re-fetched on every liveness tick (#157 review).
+    last_full_attempt_at: Option<Instant>,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -213,6 +239,7 @@ impl HostDriver {
             product_latency_ms: None,
             last_full_refresh_ts: None,
             last_full_refresh_ok_at: None,
+            last_full_attempt_at: None,
             recovery_tx: None,
             health_tx: None,
         }
@@ -246,7 +273,8 @@ impl HostDriver {
         mut shutdown: broadcast::Receiver<()>,
     ) {
         // Startup: one full clip-mapping refresh (like the legacy behavior).
-        self.run_full_refresh(FullRefreshReason::Startup).await;
+        self.run_full_refresh(FullRefreshReason::Startup, Instant::now())
+            .await;
 
         // Jittered liveness cadence. `sleep_until` a stable per-cycle deadline
         // (recomputed only when the probe actually fires) so command traffic
@@ -283,17 +311,23 @@ impl HostDriver {
         if let Some(reason) = FullRefreshReason::decide(
             now,
             self.last_full_refresh_ok_at,
+            self.last_full_attempt_at,
             FULL_REFRESH_TTL,
+            FULL_REFRESH_RETRY,
             false,
             breaker_just_closed,
         ) {
-            self.run_full_refresh(reason).await;
+            self.run_full_refresh(reason, now).await;
         }
     }
 
-    /// Log the mode transition and run a full `/composition` refresh.
-    #[cfg_attr(test, mutants::skip)] // thin wrapper: the refresh call is covered by wiremock request-count tests; the info!/warn! lines are log-only
-    async fn run_full_refresh(&mut self, reason: FullRefreshReason) {
+    /// Record the attempt, log the mode transition, and run a full
+    /// `/composition` refresh. `now` stamps `last_full_attempt_at` (the retry-
+    /// backoff clock) so it stays on the same monotonic clock as the `decide`
+    /// call that scheduled this refresh.
+    #[cfg_attr(test, mutants::skip)] // the refresh call + attempt-stamp are covered by the retry/steady/ttl wiremock request-count tests; the info!/warn! lines are log-only
+    async fn run_full_refresh(&mut self, reason: FullRefreshReason, now: Instant) {
+        self.last_full_attempt_at = Some(now);
         info!(
             host = %self.host,
             reason = reason.as_str(),
@@ -460,15 +494,19 @@ impl HostDriver {
                 }
             }
             ResolumeCommand::RefreshMapping => {
-                // A command forces a full refresh regardless of TTL/liveness.
+                // A command forces a full refresh regardless of TTL/liveness/
+                // retry window.
+                let now = Instant::now();
                 if let Some(reason) = FullRefreshReason::decide(
-                    Instant::now(),
+                    now,
                     self.last_full_refresh_ok_at,
+                    self.last_full_attempt_at,
                     FULL_REFRESH_TTL,
+                    FULL_REFRESH_RETRY,
                     true,
                     false,
                 ) {
-                    self.run_full_refresh(reason).await;
+                    self.run_full_refresh(reason, now).await;
                 }
             }
             ResolumeCommand::Shutdown => {
