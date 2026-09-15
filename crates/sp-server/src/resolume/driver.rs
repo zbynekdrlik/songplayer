@@ -25,8 +25,10 @@ const FULL_REFRESH_TTL: Duration = Duration::from_secs(300); // 5 minutes
 /// so a full refresh always has a specific, logged reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FullRefreshReason {
-    /// The driver's first refresh at startup — or the first success after a
-    /// startup where Arena's REST was still dead (`last_full_ok` still `None`).
+    /// The driver's first refresh at startup, or a later first-success while
+    /// `last_full_ok` is still `None` (a startup where Arena's REST was dead
+    /// but the breaker never opened — once it opens, recovery logs
+    /// `BreakerClosed` instead, which `decide` checks first).
     Startup,
     /// An operator/engine `ResolumeCommand::RefreshMapping` forced it.
     Command,
