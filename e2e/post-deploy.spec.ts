@@ -563,17 +563,21 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
-   * Issue #150 — LIVE-LOCKED genlock indicator consistency.
+   * Issue #150 + #164 — genlock indicator consistency with pacing gating.
    *
-   * The dashboard's global genlock badge and the per-card lock badges must
-   * AGREE with whatever `GET /api/v1/ndi/health` reports at that moment —
-   * a consistency check, NOT a hard-coded LOCKED. With `genlock_pacing` OFF
-   * the honest value is `UNLOCKED — pacing disabled` until #149 lane 2
-   * flips the default, so this test recomputes the expected summary from
-   * the live health and asserts the badge matches it. No scene switching,
-   * no sleep loops (a single settle so the 1 s poll lands, per file style).
+   * The dashboard's genlock badges must AGREE with whatever
+   * `GET /api/v1/ndi/health` reports — a consistency check, NOT a hard-coded
+   * state. #164 changed the rendering rule: while `genlock_pacing` is OFF
+   * (`pacing.enabled == false`) — the production default today — NO badge is
+   * shown at all (per-card or header summary), because '● UNLOCKED — pacing
+   * disabled' on every card reads as many errors for one disabled feature.
+   * When pacing IS enabled the per-card badge shows only on live (Playing/
+   * Paused) outputs and the header shows one summary. This test recomputes the
+   * expectation from the live health and asserts the badges match, for either
+   * regime. No scene switching, no sleep loops (a single settle so the 1 s poll
+   * lands, per file style).
    */
-  test("genlock badges agree with /api/v1/ndi/health (#150)", async ({
+  test("genlock badges agree with /api/v1/ndi/health (#150/#164)", async ({
     page,
     request,
   }) => {
@@ -582,12 +586,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       timeout: 30_000,
     });
 
-    // The global summary badge must exist.
-    const global = page.locator(".genlock-status .lock-badge");
-    await expect(global).toBeVisible({ timeout: 15_000 });
-
-    // Let the 1 s poll land so the badge reflects a fresh snapshot, then
-    // read the health and the badge close together.
+    // Let the 1 s poll land so the badges reflect a fresh snapshot, then read
+    // the health and the badges close together.
     await page.waitForTimeout(1_500);
 
     const resp = await request.get("/api/v1/ndi/health");
@@ -596,22 +596,39 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       ndi_name: string;
       state: string;
       lock_state: string;
+      lock_reason?: string;
       clock?: { clock_ok?: boolean };
+      pacing?: { enabled?: boolean };
     }>;
     expect(Array.isArray(health)).toBe(true);
 
-    // Recompute the summary exactly as
-    // sp_core::genlock::lock_state::summarize: a LOCKED output whose clock
-    // is not ok is demoted to UNLOCKED; LOCKED iff every LIVE
-    // (state==="Playing") output is LOCKED and clock ok; else the worst
-    // live state (UNLOCKED > DEGRADED > LOCKED); no live output → clock-only.
+    const enabled = health.filter((o) => o.pacing?.enabled === true);
+
+    if (enabled.length === 0) {
+      // Pacing disabled everywhere (prod default): the owner must see ZERO
+      // genlock badges — no header summary, no per-card badge (#164).
+      await expect(page.locator(".lock-badge")).toHaveCount(0, {
+        timeout: 10_000,
+      });
+      return;
+    }
+
+    // Pacing enabled on at least one output: the header summary is over the
+    // pacing-enabled outputs. Recompute the summarized state as
+    // sp_core::genlock::lock_state::summarize does (a LOCKED output whose clock
+    // is not ok is demoted to UNLOCKED; LOCKED iff every LIVE (state==="Playing")
+    // output is LOCKED and clock ok; else the worst live state
+    // UNLOCKED > DEGRADED > LOCKED; no live output → clock-only).
+    const global = page.locator(".genlock-status .lock-badge");
+    await expect(global).toBeVisible({ timeout: 15_000 });
+
     const sev = (s: string) => (s === "UNLOCKED" ? 2 : s === "DEGRADED" ? 1 : 0);
     const eff = (o: { lock_state: string; clock?: { clock_ok?: boolean } }) =>
       o.lock_state === "LOCKED" && !o.clock?.clock_ok ? "UNLOCKED" : o.lock_state;
-    const live = health.filter((o) => o.state === "Playing");
+    const live = enabled.filter((o) => o.state === "Playing");
     let expectedState: string;
     if (live.length === 0) {
-      const clockOk = health.every((o) => !!o.clock?.clock_ok);
+      const clockOk = enabled.every((o) => !!o.clock?.clock_ok);
       expectedState = clockOk ? "LOCKED" : "UNLOCKED";
     } else {
       expectedState = live
@@ -622,19 +639,23 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const cls = (await global.getAttribute("class")) ?? "";
     expect(
       cls,
-      `global badge class "${cls}" must match the summarized state ${expectedState} for health ${JSON.stringify(health)}`,
+      `global badge class "${cls}" must match the summarized state ${expectedState} for enabled health ${JSON.stringify(enabled)}`,
     ).toContain(`lock-${expectedState.toLowerCase()}`);
 
-    // At least one per-card badge exists and its colour class agrees with
-    // that output's raw lock_state (the per-card badge shows the output's
-    // own state, not the summary).
+    // A per-card badge is shown only on a pacing-enabled Playing/Paused output;
+    // find one that also matches a playlist card and assert its colour agrees
+    // with the output's raw lock_state.
     const playlists = (await (
       await request.get("/api/v1/playlists")
     ).json()) as Array<{ name: string; ndi_output_name: string }>;
     const nameByNdi = new Map(
       playlists.map((p) => [p.ndi_output_name, p.name]),
     );
-    const matched = health.find((h) => nameByNdi.has(h.ndi_name));
+    const matched = enabled.find(
+      (h) =>
+        nameByNdi.has(h.ndi_name) &&
+        (h.state === "Playing" || h.state === "Paused"),
+    );
     if (matched) {
       const cardBadge = page
         .locator(".playlist-card", { hasText: nameByNdi.get(matched.ndi_name)! })
