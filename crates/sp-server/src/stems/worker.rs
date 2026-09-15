@@ -14,7 +14,8 @@ use tokio::sync::{RwLock, broadcast};
 use tracing::{error, info, warn};
 
 use crate::lyrics::aligner::isolation_timeout;
-use crate::lyrics::idle_gate::{GateLog, gate_setting_enabled, should_defer, wall_activity_from};
+use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
+use crate::lyrics::idle_gate::{GateLog, should_defer, wall_activity_from};
 use crate::lyrics::idle_gate_abort::run_with_wall_abort;
 
 /// #161: outcome of one stem-separation attempt run under the wall-abort
@@ -121,10 +122,13 @@ impl StemWorker {
             return;
         }
 
-        // #154 idle gate (reused): no heavy GPU separation while the wall is in
-        // use. Same `lyrics_gate_when_playing` setting as the lyrics worker.
-        let gate_enabled = gate_setting_enabled(
-            crate::db::models::get_setting(&self.pool, "lyrics_gate_when_playing")
+        // #162 priority regime (same `lyrics_processing_mode` switch as the
+        // lyrics worker). `idle-only` defers heavy separation while the wall is
+        // in use (with idle-settle hysteresis); `low-priority` (default) NEVER
+        // defers — it runs the separator at reduced priority instead (CPU-idle
+        // while the wall plays), so the stem queue drains continuously.
+        let mode = ProcessingMode::from_setting(
+            crate::db::models::get_setting(&self.pool, "lyrics_processing_mode")
                 .await
                 .ok()
                 .flatten()
@@ -132,33 +136,36 @@ impl StemWorker {
         );
         let activity =
             wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()).await;
-        // Idle-settle hysteresis (2026-09-14 incident): a single idle sample is
-        // not enough — resume only after the wall has read idle continuously for
-        // `WALL_IDLE_SETTLE`. Shared with the lyrics worker via `GateLog`.
-        let now = Instant::now();
-        let defer = match self.wall_gate_log.lock() {
-            Ok(mut g) => g.defer_settled(gate_enabled, activity, now),
-            Err(_) => should_defer(gate_enabled, activity),
-        };
-        if defer {
-            // When deferring only because the settle window has not elapsed (the
-            // wall is idle right now), say so instead of "wall in use".
-            let detail = if activity.in_use() {
-                activity.reason().unwrap_or("wall in use")
-            } else {
-                "wall just went idle — settling"
+        if mode == ProcessingMode::IdleOnly {
+            // Idle-settle hysteresis (2026-09-14 incident): a single idle sample
+            // is not enough — resume only after the wall has read idle
+            // continuously for `WALL_IDLE_SETTLE`. Shared with the lyrics worker
+            // via `GateLog`. Gate is definitionally ON in idle-only mode.
+            let now = Instant::now();
+            let defer = match self.wall_gate_log.lock() {
+                Ok(mut g) => g.defer_settled(true, activity, now),
+                Err(_) => should_defer(true, activity),
             };
+            if defer {
+                // When deferring only because the settle window has not elapsed
+                // (the wall is idle right now), say so instead of "wall in use".
+                let detail = if activity.in_use() {
+                    activity.reason().unwrap_or("wall in use")
+                } else {
+                    "wall just went idle — settling"
+                };
+                if let Ok(mut g) = self.wall_gate_log.lock()
+                    && let Some(line) = g.note(true, detail)
+                {
+                    info!("stem_worker: {line}");
+                }
+                return;
+            }
             if let Ok(mut g) = self.wall_gate_log.lock()
-                && let Some(line) = g.note(true, detail)
+                && let Some(line) = g.note(false, "")
             {
                 info!("stem_worker: {line}");
             }
-            return;
-        }
-        if let Ok(mut g) = self.wall_gate_log.lock()
-            && let Some(line) = g.note(false, "")
-        {
-            info!("stem_worker: {line}");
         }
 
         let job = match crate::db::models_stems::get_next_video_for_stems(&self.pool).await {
@@ -206,13 +213,26 @@ impl StemWorker {
             }
         };
 
-        // #161: separate under the mid-job abort watcher. If the wall goes busy
-        // while the GPU separator runs, kill the child (kill_on_drop) and
-        // re-queue with NO penalty. `separate_stems` is remote-free GPU work, so
-        // the whole call is watched (unlike the lyrics mtl case, which must
-        // exclude its trailing g35t HTTP verification).
-        let step = match run_with_wall_abort(
-            crate::stems::separator::separate_stems(
+        // #162: separate under the priority regime. In `low-priority` while the
+        // wall is in use the plan is CPU-idle — it is NEVER aborted (a CPU/IDLE
+        // job cannot disturb the wall). A GPU plan (wall idle, or idle-only) runs
+        // under the mid-job abort watcher: on a busy wall the child is killed
+        // (`kill_on_drop`); in `low-priority` we re-run IMMEDIATELY on CPU, in
+        // `idle-only` we re-queue with NO penalty (`StemStepResult::WallAborted`
+        // → `stem_status` stays NULL). `separate_stems` is remote-free.
+        let plan = HeavyStepPlan::for_activity(mode, activity);
+        info!(
+            video_id = job.video_id,
+            "stem worker: heavy step separation mode={} (wall {})",
+            plan.label(),
+            if activity.in_use() {
+                activity.reason().unwrap_or("wall in use")
+            } else {
+                "idle"
+            }
+        );
+        let step = if !plan.is_gpu() {
+            match crate::stems::separator::separate_stems(
                 &python,
                 &script_path,
                 &self.models_dir,
@@ -221,15 +241,61 @@ impl StemWorker {
                 &instrumental_out,
                 timeout,
                 gpu_mem.as_deref(),
-            ),
-            gate_enabled,
-            || wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()),
-        )
-        .await
-        {
-            Ok(Ok(())) => StemStepResult::Done,
-            Ok(Err(e)) => StemStepResult::Failed(e),
-            Err(abort) => StemStepResult::WallAborted(abort.detail),
+                &plan,
+            )
+            .await
+            {
+                Ok(()) => StemStepResult::Done,
+                Err(e) => StemStepResult::Failed(e),
+            }
+        } else {
+            match run_with_wall_abort(
+                crate::stems::separator::separate_stems(
+                    &python,
+                    &script_path,
+                    &self.models_dir,
+                    &audio_path,
+                    &vocals_out,
+                    &instrumental_out,
+                    timeout,
+                    gpu_mem.as_deref(),
+                    &plan,
+                ),
+                true,
+                || wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()),
+            )
+            .await
+            {
+                Ok(Ok(())) => StemStepResult::Done,
+                Ok(Err(e)) => StemStepResult::Failed(e),
+                Err(abort) => match mode {
+                    ProcessingMode::LowPriority => {
+                        info!(
+                            video_id = job.video_id,
+                            "stem worker: heavy step separation re-run mode=cpu-idle \
+                             after GPU abort ({})",
+                            abort.detail
+                        );
+                        match crate::stems::separator::separate_stems(
+                            &python,
+                            &script_path,
+                            &self.models_dir,
+                            &audio_path,
+                            &vocals_out,
+                            &instrumental_out,
+                            timeout,
+                            gpu_mem.as_deref(),
+                            &HeavyStepPlan::cpu_idle(),
+                        )
+                        .await
+                        {
+                            Ok(()) => StemStepResult::Done,
+                            Err(e) => StemStepResult::Failed(e),
+                        }
+                    }
+                    ProcessingMode::IdleOnly => StemStepResult::WallAborted(abort.detail),
+                },
+            }
         };
         self.record_stem_result(&job, &vocals_out, &instrumental_out, step)
             .await;

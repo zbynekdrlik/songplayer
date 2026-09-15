@@ -68,11 +68,6 @@ pub(crate) struct HeavyStepPlan {
     pub(crate) threads: Option<usize>,
 }
 
-// Windows process-creation flags (values from winbase.h).
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
-const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
-
 impl HeavyStepPlan {
     /// cpu-idle: GPU untouched (`CUDA_VISIBLE_DEVICES=""`), `IDLE_PRIORITY_CLASS`,
     /// thread cap = half the logical cores. Cannot disturb the live wall.
@@ -103,11 +98,7 @@ impl HeavyStepPlan {
     ///   (which only ever RUNS when idle, deferring otherwise) → **gpu**.
     pub(crate) fn for_activity(mode: ProcessingMode, activity: WallActivity) -> Self {
         match mode {
-            // RED stub (#162, TIER-0 pattern per rust-workspace.md): the
-            // low-priority busy branch ships the WRONG plan (gpu) so
-            // `low_priority_playing_is_cpu_idle` + the cpu spawn-env test FAIL
-            // until the GREEN fix returns `Self::cpu_idle()`.
-            ProcessingMode::LowPriority if activity.in_use() => Self::gpu_below_normal(),
+            ProcessingMode::LowPriority if activity.in_use() => Self::cpu_idle(),
             _ => Self::gpu_below_normal(),
         }
     }
@@ -126,8 +117,14 @@ impl HeavyStepPlan {
 
     /// Windows process-creation flags for this plan: `CREATE_NO_WINDOW` always
     /// (hide the console), OR'd with the priority class. Pure — unit-tested
-    /// off-Windows.
+    /// off-Windows. Only CALLED inside the `#[cfg(windows)]` branch of `apply`
+    /// (and by the pure tests), so it is dead code in the non-Windows lib build.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn creation_flags(&self) -> u32 {
+        // winbase.h values.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
         let prio = match self.priority {
             Priority::Idle => IDLE_PRIORITY_CLASS,
             Priority::BelowNormal => BELOW_NORMAL_PRIORITY_CLASS,
@@ -165,7 +162,10 @@ impl HeavyStepPlan {
     }
 }
 
-/// CPU-idle thread cap: half the logical cores, at least 1.
+/// CPU-idle thread cap: half the logical cores, at least 1. Reads the
+/// environment (`available_parallelism`) so it is integration-only; the pure
+/// rule it delegates to (`cpu_idle_threads_for`) is unit-tested.
+#[cfg_attr(test, mutants::skip)]
 fn cpu_idle_threads() -> usize {
     cpu_idle_threads_for(
         std::thread::available_parallelism()
@@ -177,6 +177,127 @@ fn cpu_idle_threads() -> usize {
 /// Pure half-cores rule (extracted so it is deterministic in tests).
 fn cpu_idle_threads_for(cores: usize) -> usize {
     (cores / 2).max(1)
+}
+
+// ---------------------------------------------------------------------------
+// Worker-side regime orchestration (thin I/O seam — reads the live setting +
+// wall handles, drives the isolation step under the chosen plan). Kept here so
+// worker.rs stays under the 1000-line CI cap (#162).
+// ---------------------------------------------------------------------------
+
+use crate::lyrics::idle_gate_abort::WallAbort;
+use std::path::PathBuf;
+
+impl crate::lyrics::worker::LyricsWorker {
+    /// The live `lyrics_processing_mode` operator setting (default low-priority),
+    /// read each tick so a dashboard flip takes effect within one worker poll.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn processing_mode(&self) -> ProcessingMode {
+        let raw = crate::db::models::get_setting(&self.pool, "lyrics_processing_mode")
+            .await
+            .ok()
+            .flatten();
+        ProcessingMode::from_setting(raw.as_deref())
+    }
+
+    /// Loop-level defer decision. Only `IdleOnly` mode defers on a busy wall
+    /// (the pre-#162 gate + idle-settle hysteresis); `LowPriority` NEVER defers
+    /// — it runs every heavy step at reduced priority instead. Returns the
+    /// activity snapshot for the log/badge either way.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn loop_should_defer(&self, mode: ProcessingMode) -> (bool, WallActivity) {
+        match mode {
+            ProcessingMode::IdleOnly => self.wall_gate_should_defer().await,
+            ProcessingMode::LowPriority => (false, self.wall_activity().await),
+        }
+    }
+
+    /// Human detail for the per-step regime log: the playing NDI output's name
+    /// when the wall is in use, else the generic reason or `idle`.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn wall_regime_detail(&self, activity: WallActivity) -> String {
+        if !activity.in_use() {
+            return "idle".to_string();
+        }
+        if activity.any_playing
+            && let Some(reg) = &self.ndi_health_registry
+            && let Some(name) = reg
+                .snapshots()
+                .iter()
+                .find(|s| {
+                    matches!(
+                        s.state,
+                        crate::playback::ndi_health::PlaybackStateLabel::Playing
+                    )
+                })
+                .map(|s| s.ndi_name.clone())
+        {
+            return format!("{name} Playing");
+        }
+        activity.reason().unwrap_or("wall in use").to_string()
+    }
+
+    /// The dashboard worker-state suffix for a heavy step under this mode +
+    /// activity. `LowPriority` while the wall is in use → ` (cpu, wall in use)`
+    /// (surfaced through the existing stage string); otherwise empty. The
+    /// idle-only "waiting — wall in use" badge is unchanged and lives on its own
+    /// deferral path (`enter_wall_wait`).
+    pub(crate) fn stage_regime_suffix(
+        mode: ProcessingMode,
+        activity: WallActivity,
+    ) -> &'static str {
+        if mode == ProcessingMode::LowPriority && activity.in_use() {
+            " (cpu, wall in use)"
+        } else {
+            ""
+        }
+    }
+
+    /// Run vocal isolation under the #162 priority regime.
+    ///
+    /// - `LowPriority` + wall idle → GPU with the abort watcher armed; if the
+    ///   wall goes busy mid-isolation the GPU child is killed and isolation
+    ///   re-runs IMMEDIATELY on CPU (no defer, no idle wait).
+    /// - `LowPriority` + wall in use → CPU-idle, abort watcher OFF (a CPU/IDLE
+    ///   job cannot disturb the wall, so it is never aborted).
+    /// - `IdleOnly` → GPU with the abort watcher armed; an abort surfaces as
+    ///   `WallAbort` so the caller defers the whole song (today's semantics).
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn isolate_with_regime(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        gpu_mem: Option<&str>,
+        mode: ProcessingMode,
+    ) -> Result<Option<PathBuf>, WallAbort> {
+        let activity = self.wall_activity().await;
+        let plan = HeavyStepPlan::for_activity(mode, activity);
+        let detail = self.wall_regime_detail(activity).await;
+        tracing::info!(
+            "lyrics_worker: heavy step isolation mode={} (wall {detail})",
+            plan.label()
+        );
+        match (mode, plan.is_gpu()) {
+            (ProcessingMode::LowPriority, true) => {
+                match self.isolate_vocals(row, gpu_mem, &plan, true).await {
+                    Ok(v) => Ok(v),
+                    Err(abort) => {
+                        let cpu = HeavyStepPlan::cpu_idle();
+                        tracing::info!(
+                            "lyrics_worker: heavy step isolation re-run mode=cpu-idle \
+                             after GPU abort ({})",
+                            abort.detail
+                        );
+                        // abort_enabled=false → runs to completion, never Err.
+                        self.isolate_vocals(row, gpu_mem, &cpu, false).await
+                    }
+                }
+            }
+            (ProcessingMode::LowPriority, false) => {
+                self.isolate_vocals(row, gpu_mem, &plan, false).await
+            }
+            (ProcessingMode::IdleOnly, _) => self.isolate_vocals(row, gpu_mem, &plan, true).await,
+        }
+    }
 }
 
 #[cfg(test)]

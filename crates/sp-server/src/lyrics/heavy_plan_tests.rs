@@ -126,6 +126,28 @@ fn cpu_idle_threads_is_half_cores_at_least_one() {
     assert_eq!(cpu_idle_threads_for(0), 1);
 }
 
+// ---- stage_regime_suffix (dashboard badge) -------------------------------
+
+#[test]
+fn stage_suffix_only_for_low_priority_while_in_use() {
+    use crate::lyrics::worker::LyricsWorker;
+    assert_eq!(
+        LyricsWorker::stage_regime_suffix(ProcessingMode::LowPriority, playing()),
+        " (cpu, wall in use)",
+        "low-priority + wall in use shows the cpu regime suffix"
+    );
+    assert_eq!(
+        LyricsWorker::stage_regime_suffix(ProcessingMode::LowPriority, idle()),
+        "",
+        "low-priority + idle → no suffix (GPU, fast)"
+    );
+    assert_eq!(
+        LyricsWorker::stage_regime_suffix(ProcessingMode::IdleOnly, playing()),
+        "",
+        "idle-only never shows the cpu suffix — it defers with the waiting badge"
+    );
+}
+
 // ---- apply() spawn-env (RED fails the cpu one) ---------------------------
 
 fn env_of(cmd: &tokio::process::Command, key: &str) -> Option<Option<std::ffi::OsString>> {
