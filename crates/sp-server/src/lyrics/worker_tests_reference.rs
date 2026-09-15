@@ -259,7 +259,7 @@ async fn run_mtl_reference_stage_skips_when_tooling_unavailable() {
             &UnreachableBackend,
         )
         .await;
-    assert!(result.is_none());
+    assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
@@ -281,7 +281,7 @@ async fn run_mtl_reference_stage_skips_when_no_vocals_wav() {
     let result = worker
         .run_mtl_reference_stage(1, "yt1", Some(&cand), None, &UnreachableBackend)
         .await;
-    assert!(result.is_none());
+    assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
@@ -308,7 +308,7 @@ async fn run_mtl_reference_stage_skips_when_no_candidate() {
             &UnreachableBackend,
         )
         .await;
-    assert!(result.is_none());
+    assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
@@ -336,7 +336,7 @@ async fn run_mtl_reference_stage_skips_when_candidate_too_short() {
             &UnreachableBackend,
         )
         .await;
-    assert!(result.is_none());
+    assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
@@ -489,7 +489,7 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
         )
         .await;
 
-    let track = result.expect("expected Some(track) on gate PASS");
+    let track = result.unwrap().expect("expected Some(track) on gate PASS");
     assert_eq!(
         track.source, "description+mtl@rev1/g35t-ok",
         "source must be <candidate.source>+mtl@rev1/g35t-ok"
@@ -661,7 +661,7 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
         )
         .await;
     assert!(
-        result.is_none(),
+        result.unwrap().is_none(),
         "gate FAIL must return None so the caller falls through unchanged"
     );
 

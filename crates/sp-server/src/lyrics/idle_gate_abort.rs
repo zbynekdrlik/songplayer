@@ -15,6 +15,7 @@
 //! re-runs to identical bytes on the next idle pick), so it is NOT a
 //! `LYRICS_PIPELINE_VERSION` bump.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use super::idle_gate::WallActivity;
@@ -25,7 +26,7 @@ use super::idle_gate::WallActivity;
 /// legitimate in-flight job. Deliberately NOT the 30 s `WALL_IDLE_SETTLE` — that
 /// guards RESUME (don't restart during a flicker); this guards RUN and must
 /// react in ~2 s or the wall keeps stuttering.
-pub(crate) const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;
+pub(crate) const ABORT_CONSECUTIVE_BUSY: u32 = 2;
 
 /// How often the abort watcher samples the wall while a heavy step runs.
 pub(crate) const ABORT_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -103,6 +104,96 @@ where
                     let detail = activity.reason().unwrap_or("wall in use").to_string();
                     return Err(WallAbort { detail });
                 }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Live-handle seam for the lyrics worker — reads its in-process wall handles to
+// drive the abort watcher, and surfaces the abort to the dashboard. I/O only;
+// the pure decision is `AbortPolicy` above. Kept here (not worker.rs) for the
+// 1000-line cap.
+// ---------------------------------------------------------------------------
+
+impl crate::lyrics::worker::LyricsWorker {
+    /// Run `fut` (a heavy GPU-subprocess future) under the #161 abort watcher,
+    /// sampling THIS worker's live wall handles each second. Thin wrapper over
+    /// [`run_with_wall_abort`] so the two lyrics call sites (isolation + mtl)
+    /// share one wiring.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn wall_abort<T>(
+        &self,
+        fut: impl std::future::Future<Output = T>,
+        gate_enabled: bool,
+    ) -> Result<T, WallAbort> {
+        run_with_wall_abort(fut, gate_enabled, || self.wall_activity()).await
+    }
+
+    /// Surface a mid-job wall-abort to the dashboard: log the once-per-transition
+    /// "waiting — wall in use" line and set the same song-less waiting badge the
+    /// pre-flight gate uses (`enter_wall_wait`), so a mid-song abort does not
+    /// flicker the dashboard between a song-named stage and the generic badge.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn enter_wall_abort(&self, detail: &str) {
+        self.note_wall_gate(true, detail);
+        self.enter_wall_wait(detail).await;
+    }
+
+    /// Vocal isolation (`aligner::preprocess_vocals`) under the #161 abort
+    /// watcher. `Ok(Some(wav))` on success, `Ok(None)` when isolation is not
+    /// applicable (no venv python / no audio file) or the subprocess failed
+    /// normally (best-effort, same as before #161), and `Err(WallAbort)` when
+    /// the wall went busy mid-run — in which case the partial WAV is deleted so
+    /// the next idle pick re-isolates from scratch to identical bytes. Extracted
+    /// from `process_song` (worker.rs 1000-line cap).
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn isolate_vocals(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        gpu_mem: Option<&str>,
+        gate_enabled: bool,
+    ) -> Result<Option<PathBuf>, WallAbort> {
+        let venv_python = self.venv_python.read().await.clone();
+        let (Some(python), Some(audio_path)) = (
+            venv_python.as_ref(),
+            row.audio_file_path.as_ref().map(PathBuf::from),
+        ) else {
+            return Ok(None);
+        };
+        if !audio_path.exists() {
+            return Ok(None);
+        }
+        let wav_path = self
+            .cache_dir
+            .join(format!("{}_vocals16k.wav", row.youtube_id));
+        let iso_fut = crate::lyrics::aligner::preprocess_vocals(
+            python,
+            &self.script_path,
+            &self.models_dir,
+            &audio_path,
+            &wav_path,
+            crate::lyrics::aligner::isolation_timeout(row.duration_ms),
+            gpu_mem,
+        );
+        match self.wall_abort(iso_fut, gate_enabled).await {
+            Ok(Ok(p)) => Ok(Some(p)),
+            Ok(Err(e)) => {
+                tracing::warn!("worker: vocal isolation failed for {}: {e}", row.youtube_id);
+                Ok(None)
+            }
+            Err(abort) => {
+                // #161: wall became busy mid-isolation. A genuine cache hit
+                // returns before the first 1 s poll, so this only ever deletes
+                // an INCOMPLETE WAV; delete it so the cache-hit guard (>1 MB)
+                // does not later reuse a truncated file.
+                let _ = tokio::fs::remove_file(&wav_path).await;
+                tracing::info!(
+                    "worker: aborted heavy step — wall became busy ({}) during vocal isolation of {}",
+                    abort.detail,
+                    row.youtube_id
+                );
+                Err(abort)
             }
         }
     }
