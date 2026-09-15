@@ -105,6 +105,26 @@ fn abort_armed_only_for_gpu_plan() {
     );
 }
 
+// ---- separation_timeout — the CPU ×4 scaling reaches the spawn seam -------
+
+#[test]
+fn separation_timeout_scales_only_the_cpu_plan() {
+    // A 10.5-min song → base clamps to 1280 s (isolation_timeout); the exact
+    // base is irrelevant here — assert the plan-scaling relative to it.
+    let dur = Some(640_000);
+    let base = isolation_timeout(dur);
+    assert_eq!(
+        separation_timeout(&HeavyStepPlan::gpu_below_normal(), dur),
+        base,
+        "a GPU separation keeps the base ceiling"
+    );
+    assert_eq!(
+        separation_timeout(&HeavyStepPlan::cpu_idle(), dur),
+        base * 4,
+        "a CPU separation gets ×4 the base so it is not killed mid-run"
+    );
+}
+
 // ---- stem_defer_fallback — the poisoned-lock path, all four cases ---------
 
 #[test]

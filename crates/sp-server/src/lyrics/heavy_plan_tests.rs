@@ -100,6 +100,41 @@ fn idle_only_is_always_gpu() {
     );
 }
 
+// ---- heavy_step_timeout (pure, CPU ×4 scaling) ---------------------------
+
+#[test]
+fn cpu_plan_timeout_is_four_times_base() {
+    // A CPU plan runs several times slower than the GPU the base was sized for,
+    // so it gets CPU_TIMEOUT_MULTIPLIER × the base (#162).
+    let base = std::time::Duration::from_secs(1280);
+    assert_eq!(
+        heavy_step_timeout(&HeavyStepPlan::cpu_idle(), base),
+        std::time::Duration::from_secs(1280 * 4),
+        "a cpu-idle plan scales the GPU-sized base by ×4"
+    );
+}
+
+#[test]
+fn gpu_plan_timeout_is_base() {
+    // The GPU plan keeps the base ceiling unchanged.
+    let base = std::time::Duration::from_secs(1280);
+    assert_eq!(
+        heavy_step_timeout(&HeavyStepPlan::gpu_below_normal(), base),
+        base,
+        "a GPU plan is unscaled — the base was sized for GPU speed"
+    );
+}
+
+#[test]
+fn cpu_plan_timeout_saturates() {
+    // ×4 of a near-max base saturates at Duration::MAX instead of overflowing.
+    assert_eq!(
+        heavy_step_timeout(&HeavyStepPlan::cpu_idle(), std::time::Duration::MAX),
+        std::time::Duration::MAX,
+        "the ×4 scale saturates rather than overflowing"
+    );
+}
+
 // ---- creation_flags (pure, Windows constants) ----------------------------
 
 #[test]

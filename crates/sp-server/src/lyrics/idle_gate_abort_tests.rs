@@ -144,3 +144,24 @@ async fn run_with_wall_abort_scripted_busy_idle_busy_does_not_abort() {
     assert_eq!(result, Ok(1));
     assert!(completed.load(Ordering::SeqCst));
 }
+
+// ---- isolation_step_timeout — the CPU ×4 scaling reaches the spawn seam ----
+
+#[test]
+fn isolation_step_timeout_scales_only_the_cpu_plan() {
+    use crate::lyrics::heavy_plan::HeavyStepPlan;
+    // 10.5-min song → base clamps to 1280 s (isolation_timeout); the exact base
+    // is irrelevant here — we assert the plan-scaling relative to it.
+    let dur = Some(640_000);
+    let base = crate::lyrics::aligner::isolation_timeout(dur);
+    assert_eq!(
+        isolation_step_timeout(&HeavyStepPlan::gpu_below_normal(), dur),
+        base,
+        "a GPU isolation keeps the base ceiling"
+    );
+    assert_eq!(
+        isolation_step_timeout(&HeavyStepPlan::cpu_idle(), dur),
+        base * 4,
+        "a CPU isolation gets ×4 the base so it is not killed mid-run"
+    );
+}
