@@ -422,6 +422,12 @@ body {
     padding: 12px;
     margin-top: 8px;
     text-align: center;
+    /* #163: reserve space for the four line slots (prev EN, current EN, SK,
+       next EN) so the block keeps a fixed height whether or not there is a
+       lyric line to show — the card below must never jump up and down. The
+       slots are always in the DOM (empty = non-breaking space), so this is a
+       collapse floor, not extra padding. */
+    min-height: 8rem;
 }
 .karaoke-line {
     margin: 4px 0;
