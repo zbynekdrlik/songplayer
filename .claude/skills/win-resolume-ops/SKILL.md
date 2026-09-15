@@ -170,9 +170,22 @@ When user reports "no lyrics on Resolume" / "no title" in the morning:
    `Get-Process Arena` before starting it yourself (`Start-Process
    'C:\Program Files\Resolume Arena*\Arena.exe'`). Never a second instance.
    OBS stays never-kill. Root cause of the hang: #157 (light polling).
-5. After Arena restart, SongPlayer clip mapping refreshes automatically every 10s —
+5. After Arena restart, SongPlayer clip mapping refreshes automatically —
    confirm `/api/v1/product` answers and the `no Resolume subtitle clips found`
    warnings stop before re-running E2E.
+
+**How SongPlayer polls Arena now (#157, v0.50.0-dev.2+):** the driver no longer
+pulls the ~14 MB `/composition` every 10 s (that saturated Arena's single-thread
+REST and caused the hang above). It probes the LIGHT `GET /api/v1/product` every
+~10 s (±2 s jitter) for liveness, and does the full `/composition` clip-map
+refresh only on start, on a `RefreshMapping` command, on a 5-min TTL, and once
+when the circuit breaker closes. Measure the effect on the box via
+`GET /api/v1/resolume/health`: each host snapshot now carries
+`product_latency_ms` (last `/product` round-trip — expect low ms when Arena is
+healthy, rising/`null` when its REST is saturating) and `last_full_refresh_ts`
+(when the heavy fetch last succeeded — should tick roughly every 5 min, not
+every 10 s). `consecutive_failures`/`circuit_breaker_open` now trip on the light
+probe, so a wedged REST is detected without adding load.
 
 When E2E CI cancels mid-step: default first hypothesis is Resolume Arena stuck.
 Diagnose with `Get-Process Arena | Format-List Responding` and
